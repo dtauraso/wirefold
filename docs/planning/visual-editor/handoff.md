@@ -110,10 +110,7 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ## Next options
 
-1. **Optional guardrail** — lint/test that fails if any file outside
-   `pump.ts` writes `lastFire` or `pulse`, pinning the substrate
-   boundary mechanically. Speculative; only if drift appears.
-2. **Start the next thing on user prompt** — no pre-committed
+1. **Start the next thing on user prompt** — no pre-committed
    direction.
 
 ## Parked follow-ups
