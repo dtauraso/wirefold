@@ -87,26 +87,21 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
    play button when run is terminal and buffer non-empty. No Go work.
    Pacing question (preserve wall-clock gaps vs fixed cadence per
    simStep) still open.
-2. **Button-driven rename UX** — replace the removed double-click
-   flow with a button-press affordance. The store-level rename op
-   already exists.
-3. **Optional guardrail** — add a lint/test that fails if any file
+2. **Optional guardrail** — add a lint/test that fails if any file
    outside `pump.ts` writes `lastFire` or `pulse`, pinning the
    substrate boundary mechanically. Speculative; only if friction
    appears.
-4. **Start the next thing on user prompt** — no pre-committed direction.
+3. **Start the next thing on user prompt** — no pre-committed direction.
 
 ## Parked follow-ups
 
 1. **Trace replay** (option 1 above) — paused mid-design before
    pacing decision.
-2. **Rename UX (button-driven)** — double-click path removed in
-   `e589858`; replacement not yet built. Sublabel editing still works
-   on double-click.
 
 Retired earlier this session: stale memory audit; topology-field-collapse
-step 4 (dissolved); `lastRecv`; double-click rename UI;
-`topology.view.json` regression hunt.
+step 4 (dissolved); `lastRecv`; double-click rename UI (no replacement
+queued — will get rebuilt later from the RF-only diagram view if
+needed); `topology.view.json` regression hunt.
 
 ## Working-tree state
 
