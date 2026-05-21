@@ -7,32 +7,24 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-21, post diagram + animation fixes session — round 2)
+## State at handoff (2026-05-21, post diagram + animation fixes session — round 3)
 
 **Active branch:** `task/diagram-animation-fixes`. Not yet merged to main.
 
 ### What landed this session (in order)
 
-- `eab08bc` — first pass at pre-RF palette (superseded).
-- `2e310a2` — per-kind pre-RF colors restored: ChainInhibitor orange,
-  ReadGate purple, InhibitRightGate pink, Input light-gray/green accent.
-- `996f1c0` — edge channel-name labels hidden; pulse value labels still show.
-- `6f1d898` — drag-stop snapshots all RF node positions (not just dragged).
-- `092e0d0` — `.react-flow__edges` elevated above nodes via CSS z-index.
-- `9478d92` — **200-LOC file-size budget removed** (CLAUDE.md, script, memory).
-- `f863fab` — snake/snake-v/below routes restored with lane drag handle.
-- `db917d7` — edge-lane plumbing + delegation lesson recorded in memory.
-- `ad73709` — guard against writing `"view": null` to topology.json.
-- `671d014` — restore view positions from 9e915f7.
-- `49385fb` — per-port side+slot positioning with drag-to-move.
-- `79cdf59` — spec-save preserves view; strict-delegate memory indexed.
-- `dbc292e` — ChainInhibitor height bumped to 90 (later reverted).
-- `49a7780` — apply `def.height` to GenericNode container.
-- `0ed5933` — ChainInhibitor height settled at 60.
-- `e0d1d47` — **ChainInhibitor enumerated outputs `ToNext0`/`ToNext1`**
-  (replaces single fanout `ToNext`). topology.json updated; `topologies/line.json` was NOT.
-- `96fa96b` — fix snake/snake-v axis swap in `pickShape`.
+- `d1fb5c5` — **InhibitRightGate: remove `ToPassed` output** — node is now a terminal sink.
+- `5656877` — regenerate `node-defs.ts`: drops sources/outputs for `inhibitRightGate`.
+- `7603268` — `topology.json`: drop stale `outputs` block on `inhibitRight0`.
+- `df5c8c2` — handoff: park spec→Go translation work on `task/pseudocode-spec`.
+
+Prior-session commits still on this branch (for history):
+
 - `8bbcc0c` — geometric arrow sizing: short final segment → small head.
+- `96fa96b` — fix snake/snake-v axis swap in `pickShape`.
+- `e0d1d47` — **ChainInhibitor enumerated outputs `ToNext0`/`ToNext1`** (replaces single `ToNext`). `topology.json` updated; `topologies/line.json` was NOT.
+- `0ed5933` — ChainInhibitor height settled at 60.
+- (earlier commits on branch: see prior handoff entries)
 
 ### Open bug — NEXT SESSION'S TASK
 
@@ -58,6 +50,12 @@ to match the actual struct fields. Cross-reference the working-tree
 `topology.json` at repo root (already correct) to confirm the i0→target
 and i1→target mappings before editing.
 
+There are 4 edges to fix (confirmed via grep):
+- `i0ToI1` → `ToNext0` (or `ToNext1`, verify vs `topology.json`)
+- `i0ToInhibitRight0` → matching ToNext port
+- `i1ToInhibitRight0` → matching ToNext port
+- `i1ToReadGate` → matching ToNext port
+
 After the fix: `go run .` should cascade all the way through the line and exit.
 
 ### Already-wired plumbing (don't re-grep!)
@@ -80,7 +78,7 @@ may not call Edit/Write/Bash for file writes; all writes go to subagents.
 
 ### Surviving kinds (4)
 
-Input, ReadGate, ChainInhibitor, InhibitRightGate.
+Input, ReadGate, ChainInhibitor, InhibitRightGate (now terminal sink — no outputs).
 
 ## Parked
 
