@@ -32,7 +32,7 @@ export function SubstrateEdge({
   const kind: EdgeKind = data?.kind ?? "any";
   const stroke = KIND_COLORS[kind] ?? "#888";
   const dash = dashForKind(kind);
-  const displayLabel = data?.valueLabel ?? data?.label;
+  const displayLabel = data?.valueLabel;
 
   // Pulse animation state: position along path (0–1) or null when idle.
   const [pulseT, setPulseT] = useState<number | null>(null);
