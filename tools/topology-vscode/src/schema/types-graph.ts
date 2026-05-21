@@ -2,6 +2,7 @@
 // LegendRow, Note, and the Spec wrapper.
 
 import type {
+  EdgeKind,
   Port,
   StateValue,
 } from "./types";

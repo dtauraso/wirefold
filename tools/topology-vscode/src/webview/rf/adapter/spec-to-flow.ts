@@ -160,7 +160,7 @@ export function specToFlow(
       targetHandle,
       type: "substrate",
       // label rendered via EdgeLabelRenderer (data.label), not RF's foreignObject.
-      style: { stroke: KIND_COLORS[e.kind] ?? "#888", strokeWidth: 1.5 },
+      style: { stroke: (KIND_COLORS as Record<string, string>)[e.kind] ?? "#888", strokeWidth: 1.5 },
       data: {
         kind: e.kind,
         sourceHandle: e.sourceHandle,

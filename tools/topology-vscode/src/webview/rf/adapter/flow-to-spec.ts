@@ -75,7 +75,7 @@ export function flowToSpec(
     // `kind` is excluded: it is required and already set above via fallback.
     for (const key of Object.keys(WIRE_PROPS)) {
       if (key === "kind") continue;
-      const v = d ? (d as Record<string, unknown>)[key] : undefined;
+      const v = d ? (d as unknown as Record<string, unknown>)[key] : undefined;
       if (v !== undefined) (edge as Record<string, unknown>)[key] = v;
     }
     if (d?.edgeData !== undefined) edge.data = d.edgeData;
