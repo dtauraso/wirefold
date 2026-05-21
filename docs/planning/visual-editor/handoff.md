@@ -82,6 +82,10 @@ may not call Edit/Write/Bash for file writes; all writes go to subagents.
 
 Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
+## Parked
+
+- **Spec → Go translation (branch `task/pseudocode-spec`):** pseudocode renderings of all 4 kinds plus `docs/pseudocode-spec.md` describing the proto-DSL conventions. Goal: spec text becomes the human-editable source of truth inside each node; a constrained DSL maps spec ↔ Go. Resume by reading `docs/pseudocode-spec.md` on that branch (open questions section lists what to pin next — types, named heterogeneous outputs, send semantics, params-vs-state initializers, terminating loops, trace omission).
+
 ## Architecture summary
 
 See MODEL.md for substrate model (inhibitor chain, edge nodes, partition nodes,
