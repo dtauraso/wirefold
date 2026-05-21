@@ -14,7 +14,7 @@ as keys without a central registry."
 | Add a kind | ~0 | Go struct + optional SPEC.md; TS auto-generates |
 | Edit firing rule | ~0 | `nodes/<Kind>/<Kind>.go` only |
 | Add a port | ~0 | Go struct only; gen-node-defs picks it up |
-| Add a wire prop | Low | Go loader tag only; `gen-node-defs` regenerates `wire-defs.ts`; adapters loop WIRE_PROPS automatically. Residual: `parse-nodes-edges.ts` still hand-names props (step 5 not yet done). |
+| Add a wire prop | ~0 (scalar) / Low (enum) | Go loader tag only; `gen-node-defs` regenerates `wire-defs.ts`; adapters and parser loop WIRE_PROPS automatically. Enum-typed props need one explicit case added to `parseEdge`. |
 | Rename a kind | Low | Generated kinds: rename Go package + SPEC.md; generators propagate |
 | Rename/remove a port | Low (post-collapse) | Edit SPEC.md `## Ports` for the kind; `gen-node-defs` regenerates the single source |
 

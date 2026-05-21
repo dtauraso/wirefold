@@ -88,8 +88,11 @@ by hand.
    `flow-to-spec.ts` iterate `WIRE_PROPS` to thread props, deleting the
    per-prop explicit chains. `kind` kept explicit (structurally required,
    drives `KIND_COLORS`).
-5. **Delete duplicated schema validator entries.** `parse-nodes-edges.ts`
-   `parseEdge` can loop over `WIRE_PROPS` for the optional `opt(...)` calls.
+5. **Delete duplicated schema validator entries.** ✅ `parse-nodes-edges.ts`
+   `parseEdge` now loops over `WIRE_PROPS` for scalar props (`label`,
+   `valueLabel`, `lane`, `concurrent`). `kind` (required enum) and
+   `arrowStyle` (optional enum) remain explicit — no `ARROW_STYLES` constant
+   exists and enum dispatch in the loop would add complexity for one prop.
 
 ## Verification
 
@@ -104,7 +107,11 @@ by hand.
 Substrate model changes; new wire props themselves; runtime semantics;
 `edgeData` blob (already handled by node-data-types pattern).
 
-## Next single concrete step
+## Status
 
-Step 5: replace the per-prop `opt(...)` call list in `parse-nodes-edges.ts`
-`parseEdge` with a loop over `WIRE_PROPS`.
+**Complete.** All 5 migration steps done. Final wire-prop tax: add a new
+scalar wire prop by editing one file — `nodes/Wiring/loader.go` (add the
+struct field with `wire:"prop,..."` tag); the generator rebuilds
+`wire-defs.ts`, and all TS consumers (types, adapters, parser) pick it up
+automatically. Enum-typed props (`kind`, `arrowStyle`) still require a
+one-time explicit case in `parseEdge`, but no other file changes.

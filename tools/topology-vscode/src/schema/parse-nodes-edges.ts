@@ -20,6 +20,7 @@ import {
   str,
 } from "./parse-primitives";
 import { parseNodeData } from "./node-data-types";
+import { WIRE_PROPS } from "./wire-defs";
 
 function parsePort(v: unknown, path: string): Port {
   const o = obj(v, path);
@@ -77,20 +78,33 @@ export function parseNode(v: unknown, path: string): Node {
 
 export function parseEdge(v: unknown, path: string): Edge {
   const o = obj(v, path);
-  return {
+  const edge: Record<string, unknown> = {
     id: str(o.id, `${path}.id`),
     source: str(o.source, `${path}.source`),
     sourceHandle: str(o.sourceHandle, `${path}.sourceHandle`),
     target: str(o.target, `${path}.target`),
     targetHandle: str(o.targetHandle, `${path}.targetHandle`),
+    // kind: required EdgeKind enum — kept explicit
     kind: oneOf(o.kind, EDGE_KINDS, `${path}.kind`),
-    label: opt(o.label, (x) => str(x, `${path}.label`)),
-    valueLabel: opt(o.valueLabel, (x) => str(x, `${path}.valueLabel`)),
-    lane: opt(o.lane, (x) => num(x, `${path}.lane`)),
+    // arrowStyle: optional ArrowStyle enum — kept explicit (no ARROW_STYLES constant)
     arrowStyle: opt(o.arrowStyle, (x) =>
       oneOf(x, ["filled", "open"] as const, `${path}.arrowStyle`),
     ),
-    concurrent: opt(o.concurrent, (x) => bool(x, `${path}.concurrent`)),
     data: o.data,
   };
+  // Loop over WIRE_PROPS for simple scalar types (string, number, boolean).
+  for (const [key, def] of Object.entries(WIRE_PROPS)) {
+    if (key === "kind" || key === "arrowStyle") continue; // handled explicitly above
+    const val = o[key];
+    if (def.required) {
+      if (def.tsType === "string") edge[key] = str(val, `${path}.${key}`);
+      else if (def.tsType === "number") edge[key] = num(val, `${path}.${key}`);
+      else if (def.tsType === "boolean") edge[key] = bool(val, `${path}.${key}`);
+    } else {
+      if (def.tsType === "string") edge[key] = opt(val, (x) => str(x, `${path}.${key}`));
+      else if (def.tsType === "number") edge[key] = opt(val, (x) => num(x, `${path}.${key}`));
+      else if (def.tsType === "boolean") edge[key] = opt(val, (x) => bool(x, `${path}.${key}`));
+    }
+  }
+  return edge as unknown as Edge;
 }
