@@ -219,7 +219,7 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "i1ToReadGate1",
-      "lane": -69.0549836800538,
+      "lane": 60.47251309614629,
       "data": {
         "slots": 1,
         "route": "below"
@@ -233,12 +233,49 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "bootstrapRgToReadGate1",
+      "lane": -0.7898018096109922,
       "data": {
         "slots": 1
       }
     }
   ],
   "view": {
-    "nodes": {}
+    "camera": {
+      "x": 83.85057257552869,
+      "y": -322.2169225578915,
+      "zoom": 1.1470637621457274
+    },
+    "folds": [],
+    "nodes": {
+      "in08": {
+        "x": 27.895407566498463,
+        "y": 271.3258531519133,
+        "sublabel": "Input"
+      },
+      "readGate1": {
+        "x": 240.3049175442133,
+        "y": 287.00258563944124,
+        "sublabel": "AND"
+      },
+      "i0": {
+        "x": 439.49482856788796,
+        "y": 297.01020890976224
+      },
+      "i1": {
+        "x": 647.4947921824005,
+        "y": 295.2995146047132,
+        "sublabel": "ChainInhibitor"
+      },
+      "inhibitRight0": {
+        "x": 588.6411113467818,
+        "y": 204.338317599545,
+        "sublabel": "INHIBIT(L=1,R=0)"
+      },
+      "bootstrap_rg": {
+        "x": 27.895407566498463,
+        "y": 370,
+        "sublabel": "Bootstrap"
+      }
+    }
   }
 }
