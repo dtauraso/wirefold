@@ -43,27 +43,29 @@ per-kind TS surface is narrow:
 The substrate boundary holds: TS = editor + viewer + readout; Go =
 execution; `pump.ts` is the one bridge.
 
-### Live regression observed (2026-05-21)
+### `topology.view.json` regression — resolved as operator-level (2026-05-21)
 
-`topology.view.json` reappeared at repo root and `topology.json`
-showed modifications during this session — exactly the regression
-documented in the prior handoff as "investigated and gone." It is
-**not gone**. The static save-path audit (`injectViewText` /
-`extractViewText` merge logic looks correct) misses the actual
-writer. Working tree at session end has:
-- modified `topology.json`
-- untracked `topology.view.json`
-Neither committed. Next session should reproduce and find the writer
-empirically — instrument the save path or watch the filesystem during
-a save round-trip. The static read of the source code is insufficient.
+The sidecar reappearance was **not a code regression**. The current
+build (`out/extension.js`) contains zero sidecar code; the regression
+was caused by VS Code running a **stale extension host** from before
+commit `9e915f7` (sidecar deletion). Reload Window (Cmd+R) drops the
+in-memory pre-9e915f7 extension; subsequent saves correctly write
+the `view` key inline into `topology.json` and the sidecar does not
+reappear. Verified empirically end of session.
 
-### Related symptom
+Lesson: when an editor-side regression looks impossible (no writer
+in source or build output), check whether VS Code is running a
+stale extension host. CLAUDE.md notes the reload requirement;
+worth doing first when state looks stuck.
 
-`topologies/line.json` loads with all nodes stacked at `{0,0}`. Root
-cause is the same family: that file has no `view` key, so
-`spec-to-flow.ts:107` falls through to the default position for every
-node. Either restore positions from git history, lay them out by hand
-and save, or fix the regression so saves don't strip the `view` key.
+### Known stacked-node state in `topologies/line.json`
+
+`topologies/line.json` has no `view` key (separate from the sidecar
+issue — predates this session). Loading it stacks every node at
+`{0,0}` because `spec-to-flow.ts:107` defaults to that when
+positions are absent. To fix: drag nodes into a layout and save;
+the editor will write the `view` key. Or restore from a prior
+commit that had positions.
 
 ### Surviving kinds (4)
 
@@ -108,15 +110,10 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ## Next options
 
-1. **Reproduce + fix the `topology.view.json` regression** — highest
-   priority because it's actively breaking saved layouts (stacked
-   nodes in `line.json`). Static audit didn't find the writer;
-   instrument the save path or use `fs.watch` to catch it
-   empirically.
-2. **Optional guardrail** — lint/test that fails if any file outside
+1. **Optional guardrail** — lint/test that fails if any file outside
    `pump.ts` writes `lastFire` or `pulse`, pinning the substrate
    boundary mechanically. Speculative; only if drift appears.
-3. **Start the next thing on user prompt** — no pre-committed
+2. **Start the next thing on user prompt** — no pre-committed
    direction.
 
 ## Parked follow-ups
@@ -125,9 +122,7 @@ None.
 
 ## Working-tree state
 
-- `topology.json` modified, `topology.view.json` untracked at repo
-  root — regression artifacts; do not commit. See "Live regression
-  observed" above.
+Clean (post-reload + sidecar cleanup).
 
 ## Dev-loop
 
