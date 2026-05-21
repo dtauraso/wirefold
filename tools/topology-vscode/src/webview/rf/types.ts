@@ -5,6 +5,7 @@
 import type { Port, StateValue } from "../../schema/types";
 import type { NodeSpec } from "../../schema/types-graph";
 import type { WireProps } from "../../schema/wire-defs";
+import { ANIMATION_FIELDS } from "./animation-fields";
 
 // Per-node data carried in RF Node<NodeData>.data.
 export interface NodeData {
@@ -30,7 +31,7 @@ export interface NodeData {
 
   // --- Runtime trace fields (Phase 4) ---
   /** Last fire event step for this node (used for visual highlight). */
-  lastFire?: number;
+  lastFire?: typeof ANIMATION_FIELDS["lastFire"]["type"];
   /** Last recv: {port, value, simStep}. */
   lastRecv?: { port: string; value: number; simStep: number };
 
@@ -60,7 +61,7 @@ export interface EdgeData extends WireProps {
 
   // --- Runtime trace fields (Phase 4) ---
   /** Set by pump on a "send" event: the value in flight on this edge. */
-  pulse?: { value: number; simStep: number };
+  pulse?: typeof ANIMATION_FIELDS["pulse"]["type"];
 }
 
 // Runtime trace fields added to NodeData (Phase 4).
