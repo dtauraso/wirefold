@@ -80,7 +80,9 @@ actually recurs.
 
 ## Parked follow-ups
 
-1. **Rename UX** — double-click-to-rename was unreliable post-Phase 3.
+1. **Rename UX (button-driven)** — double-click path removed in e589858;
+   replacement is a button-press flow, not yet built. Sublabel editing
+   still works on double-click.
 2. **`TransportControls` play button** — stubbed inert.
 
 Retired 2026-05-20: stale memory audit (1 file deleted, 1 index line
