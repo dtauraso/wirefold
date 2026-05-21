@@ -80,9 +80,10 @@ by hand.
    `loader.go`.
 2. **Extend generator.** ✅ Parse the new tags in `gen-node-defs/main.go`; emit
    `wire-defs.ts`.
-3. **Replace hand-written types.** Import `WIRE_PROPS` in `types-graph.ts`
-   and `rf/types.ts`; derive `Edge` and `EdgeData` fields from the
-   registry instead of manual declarations.
+3. **Replace hand-written types.** ✅ Extended generator to emit `WireProps`
+   type from registry; `Edge` in `types-graph.ts` is now `WireProps & {...}`
+   and `EdgeData` in `rf/types.ts` extends `WireProps`. Hand-written
+   per-field declarations deleted.
 4. **Replace adapter string-naming.** ✅ Made `spec-to-flow.ts` and
    `flow-to-spec.ts` iterate `WIRE_PROPS` to thread props, deleting the
    per-prop explicit chains. `kind` kept explicit (structurally required,
@@ -105,8 +106,5 @@ Substrate model changes; new wire props themselves; runtime semantics;
 
 ## Next single concrete step
 
-Step 3: delete the duplicated wire-prop field declarations in
-`src/schema/types-graph.ts` (`Edge` type) and `src/webview/rf/types.ts`
-(`EdgeData` interface), replacing them with derived types from `WIRE_PROPS`.
-Also check whether `parse-nodes-edges.ts` `parseEdge` can loop over
-`WIRE_PROPS` instead of naming each `opt(...)` call (step 5).
+Step 5: replace the per-prop `opt(...)` call list in `parse-nodes-edges.ts`
+`parseEdge` with a loop over `WIRE_PROPS`.

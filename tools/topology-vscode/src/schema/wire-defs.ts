@@ -15,3 +15,13 @@ export const WIRE_PROPS: Record<string, WirePropDef> = {
 };
 
 export type WirePropName = keyof typeof WIRE_PROPS;
+
+// Derived from WIRE_PROPS — do not hand-edit. Consumed by Edge and EdgeData.
+export type WireProps = {
+  label?: string;
+  valueLabel?: string;
+  lane?: number;
+  arrowStyle?: ArrowStyle;
+  concurrent?: boolean;
+  kind: EdgeKind;
+};

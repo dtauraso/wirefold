@@ -2,8 +2,9 @@
 // These mirror Spec.Node / Spec.Edge fields plus viewer-only and adapter fields.
 // Consumers still read from Zustand; this file is schema-only.
 
-import type { ArrowStyle, EdgeKind, Port, StateValue } from "../../schema/types";
+import type { Port, StateValue } from "../../schema/types";
 import type { NodeSpec } from "../../schema/types-graph";
+import type { WireProps } from "../../schema/wire-defs";
 
 // Per-node data carried in RF Node<NodeData>.data.
 export interface NodeData {
@@ -47,15 +48,9 @@ export interface NodeData {
 // the RF edge itself and are NOT duplicated here — except sourceHandle /
 // targetHandle are also stored in data for round-trip when endpoints are
 // rerouted through a fold placeholder.
-export interface EdgeData {
-  kind: EdgeKind;
-  label?: string;
-  valueLabel?: string;
-  lane?: number;
-  arrowStyle?: ArrowStyle;
+export interface EdgeData extends WireProps {
   /** Raw Spec.Edge.data — carried verbatim for round-trip. */
   edgeData?: unknown;
-  concurrent?: boolean;
   route?: string;
   value?: unknown;
   /** Original sourceHandle before any fold rerouting. */

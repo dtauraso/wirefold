@@ -2,11 +2,10 @@
 // LegendRow, Note, and the Spec wrapper.
 
 import type {
-  ArrowStyle,
-  EdgeKind,
   Port,
   StateValue,
 } from "./types";
+import type { WireProps } from "./wire-defs";
 
 // Inline AI-authored prose describing a node's logic. Math symbols
 // (≤ ≠ × → …) live inside `text` segments as Unicode. `outputRef`
@@ -38,22 +37,13 @@ export type Node = {
   initialSlots?: Record<string, StateValue>;
 };
 
-export type Edge = {
+export type Edge = WireProps & {
   id: string;
   source: string;
   sourceHandle: string;
   target: string;
   targetHandle: string;
-  kind: EdgeKind;
-  label?: string;
-  valueLabel?: string;
-  lane?: number;
-  arrowStyle?: ArrowStyle;
   data?: unknown;
-  // Concurrency-reveal override. `undefined` → auto-classify (forward
-  // reachability from gate node types). `true` forces self-pacing
-  // re-emission; `false` suppresses it even if auto-classify says yes.
-  concurrent?: boolean;
 };
 
 export type LegendRow = { kind: EdgeKind; name: string; desc: string };
