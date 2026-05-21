@@ -215,6 +215,9 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
   content: "✓ "; color: #0d47a1;
 }
 
+/* Render edges above nodes so wires crossing node boxes are visible */
+.react-flow__edges { z-index: 1; }
+
 /* Alignment guides shown while dragging a node whose center matches another
    node's center within ALIGN_TOL flow units. Positioned over the RF pane;
    the inline left/top is precomputed in screen coords. */
