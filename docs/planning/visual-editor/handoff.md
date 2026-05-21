@@ -9,27 +9,26 @@ handoff.md is exempt from the 100-LOC budget.
 
 ---
 
-## State at handoff (2026-05-20, post collapse-representations merge)
+## State at handoff (2026-05-20, post navigation-tax merge)
 
-**Active branch:** `task/navigation-tax-audit`.
-Branched from `main` at `041bb7b`. No task was in flight before this branch.
+**Active branch:** main at `62db7db`. No task in flight.
 
-### What landed (4-step collapse)
+### What landed (navigation-tax audit + identifier-scatter collapses)
 
-Planned in `docs/planning/visual-editor/collapse-representations.md`.
-
-- **Step 1** (`9237801`) — generate `kinds_generated.go` at repo root via
-  `go:generate` (generator at `tools/gen-kind-imports/`); `main.go` no longer
-  needs manual blank-import maintenance.
-- **Step 2** (`2af47b8`, `ebc5eb3`, `c94ea7e`) — `tools/gen-node-defs` Go program
-  walks `nodes/*/*.go` AST to derive port names and node-data types; replaces the
-  old `gen-node-defs.mjs` (deleted). Generates `node-defs.ts` and
-  `node-data-types.ts`. SPEC.md is now optional (view metadata / accent colors only).
-- **Step 3** (implicit) — hand-maintained layers dropped from 6 to 2:
-  Go struct (source of truth) + `topology.json` (instance data). Generated
-  artifacts: `kinds_generated.go`, `node-defs.ts`, `node-data-types.ts`.
-- **Step 4** (`9e915f7`) — `topology.view.json` merged into `topology.json#view`
-  and deleted. View metadata now lives under the `"view"` key of `topology.json`.
+- **Navigation-tax audit** — grepped every kind/port/wire-prop/field call site;
+  results in `docs/planning/visual-editor/navigation-tax.md`. Tax table highlights:
+  node kind, port, wire-prop scalar, topology meta field, and animation field
+  renames are all now ~0 to Low. Wire-prop enum and animation new-kind are Low.
+- **Wire-prop collapse** — complete (`docs/planning/visual-editor/wire-prop-collapse.md`).
+- **Animation-field collapse** — complete (`docs/planning/visual-editor/animation-field-collapse.md`).
+- **Topology-field collapse** — complete except step 4 deferred:
+  deriving `Spec` TS type from `TOPOLOGY_META_FIELDS` blocked on circular import
+  between `meta-field-defs.ts` and `types-graph.ts`. Documented in
+  `docs/planning/visual-editor/topology-field-collapse.md`.
+- **Generator improvements** — `tools/gen-node-defs` uses `strings.Cut` over
+  index slicing; edge-kind inline-literal cleanup landed.
+- **Surfaces audited, found no real tax:** phase vocabulary (typed, not stringly);
+  SPEC.md section parser (parameterized in `tools/gen-node-defs`).
 
 ### Surviving kinds (4)
 
@@ -37,7 +36,6 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ### Tests
 
-Per-kind firing-rule unit tests at `nodes/<Kind>Node/firing_rule_test.go`.
 `go test ./...` green.
 
 
@@ -70,10 +68,14 @@ Per-kind firing-rule unit tests at `nodes/<Kind>Node/firing_rule_test.go`.
 
 ## Next options
 
-1. **Run the navigation-tax audit** — see
-   [navigation-tax.md](navigation-tax.md). Grep every kind/port string
-   call site and land the output table in that doc. No fixes until the
-   table exists.
+1. **Investigate topology.view.json regression if it recurs** — during
+   verification a regression appeared where `topology.json` lost its `view` key
+   and a stale `topology.view.json` reappeared. Source unknown. If it recurs,
+   find the writer before doing anything else.
+2. **Tackle a parked follow-up with accumulated friction** — rename UX,
+   inert TransportControls play button, or lastRecv visualization are the
+   most likely candidates. Pick whichever the user surfaces first.
+3. **Start the next thing on user prompt** — no pre-committed direction.
 
 ## Parked follow-ups
 
@@ -82,8 +84,9 @@ Per-kind firing-rule unit tests at `nodes/<Kind>Node/firing_rule_test.go`.
 3. **`lastRecv` visualization** — pump writes it; no kind renders it.
 4. **Stale memory entries** — several `feedback_*`/`project_*` files
    reference substrate-r concepts pre-dating the RF migration.
-5. **`spec-to-flow`/`flow-to-spec` adapters** — may be near-identity
-   functions worth collapsing post-RF migration.
+5. **Topology-field-collapse step 4** — derive `Spec` TS type from
+   `TOPOLOGY_META_FIELDS`; blocked on circular import. Pick up only when
+   explicit-field form causes real friction.
 
 ## Working-tree state
 
