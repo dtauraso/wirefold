@@ -65,13 +65,13 @@
           "name": "ToNext0",
           "kind": "chain",
           "side": "right",
-          "slot": 0
+          "slot": 1
         },
         {
           "name": "ToNext1",
           "kind": "inhibit-in",
-          "side": "right",
-          "slot": 2
+          "side": "top",
+          "slot": 1
         }
       ]
     },
@@ -102,7 +102,7 @@
           "name": "ToNext1",
           "kind": "chain",
           "side": "bottom",
-          "slot": 2
+          "slot": 1
         }
       ]
     },
@@ -121,12 +121,6 @@
           "kind": "inhibit-in",
           "side": "bottom",
           "slot": 2
-        }
-      ],
-      "outputs": [
-        {
-          "name": "ToPassed",
-          "kind": "and-out"
         }
       ]
     },
@@ -219,7 +213,7 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "i1ToReadGate1",
-      "lane": 60.47251309614629,
+      "lane": -71.5246564284947,
       "data": {
         "slots": 1,
         "route": "below"
@@ -253,27 +247,27 @@
         "sublabel": "Input"
       },
       "readGate1": {
-        "x": 240.3049175442133,
-        "y": 287.00258563944124,
+        "x": 244.47798426279974,
+        "y": 290.3410390143104,
         "sublabel": "AND"
       },
       "i0": {
-        "x": 407.18001115301024,
-        "y": 265.81389716671526
+        "x": 391.90044853148015,
+        "y": 279.74554002351715
       },
       "i1": {
-        "x": 631.1902441966623,
-        "y": 298.30298397050706,
+        "x": 563.7166554352829,
+        "y": 279.9414904087267,
         "sublabel": "ChainInhibitor"
       },
       "inhibitRight0": {
-        "x": 588.6411113467818,
-        "y": 204.338317599545,
+        "x": 461.02730524313336,
+        "y": 212.0562020385164,
         "sublabel": "INHIBIT(L=1,R=0)"
       },
       "bootstrap_rg": {
-        "x": 27.895407566498463,
-        "y": 370,
+        "x": 28.29222154788691,
+        "y": 374.95295514201257,
         "sublabel": "Bootstrap"
       }
     }
