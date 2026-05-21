@@ -6,7 +6,6 @@ import {
 import { specToFlow } from "./adapter";
 import { RunButton } from "./panels/RunButton";
 import { SaveLifecycle } from "../SaveLifecycle";
-import { TimelinePanel } from "./panels/TimelinePanel";
 import { viewerState } from "./viewer-state";
 import { getFolds } from "./folds-state";
 import { isLegacyCamera } from "../state/viewer/types";
@@ -142,7 +141,6 @@ export default function App() {
         <SaveLifecycle />
         <Inner />
         <RunButton />
-        <TimelinePanel />
       </ReactFlowProvider>
     </RunStatusCtx.Provider>
     </DimmedCtx.Provider>
