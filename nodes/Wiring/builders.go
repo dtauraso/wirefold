@@ -81,9 +81,9 @@ func (pb *PortBindings) OutSlice(name string) []chan<- int {
 }
 
 var (
-	tChanIntRecv = reflect.TypeOf((<-chan int)(nil))
-	tChanIntSend = reflect.TypeOf((chan<- int)(nil))
-	tSliceSend   = reflect.TypeOf(([]chan<- int)(nil))
+	tChanIntRecv = reflect.TypeFor[<-chan int]()
+	tChanIntSend = reflect.TypeFor[chan<- int]()
+	tSliceSend   = reflect.TypeFor[[]chan<- int]()
 )
 
 // reflectPorts walks the exported fields of the struct pointed to by sample
@@ -192,7 +192,6 @@ var Registry map[string]NodeBuilder
 func init() {
 	Registry = make(map[string]NodeBuilder, len(kindRegistry))
 	for kind, e := range kindRegistry {
-		e := e // capture
 		sample := e.newNode()
 		ports := reflectPorts(sample)
 		Registry[kind] = NodeBuilder{
