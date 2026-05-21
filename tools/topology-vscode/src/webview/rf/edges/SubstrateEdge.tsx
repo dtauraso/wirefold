@@ -39,14 +39,14 @@ export function pickShape(
   const dy = ty - sy;
   if (sourceHorizontal) {
     const exitsAway = (sp === "right" && dx < 0) || (sp === "left" && dx > 0);
-    if (exitsAway) return "snake-v";
+    if (exitsAway) return "snake";
     if (Math.abs(dy) < COLLINEAR_TOLERANCE) return "line";
-    return "snake-v";
+    return "snake";
   }
   const exitsAway = (sp === "bottom" && dy < 0) || (sp === "top" && dy > 0);
-  if (exitsAway) return "snake";
+  if (exitsAway) return "snake-v";
   if (Math.abs(dx) < COLLINEAR_TOLERANCE) return "line";
-  return "snake";
+  return "snake-v";
 }
 
 // ── Path helpers ────────────────────────────────────────────────────
