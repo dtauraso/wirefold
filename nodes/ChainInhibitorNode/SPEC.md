@@ -2,10 +2,10 @@
 
 ## Ports
 
-| Name | Direction | Element type | Cardinality | TSX handle | Side |
-|------|-----------|--------------|-------------|------------|------|
-| FromPrevChainInhibitorNode | in | int | single | FromPrevChainInhibitorNode | left |
-| ToNext | out | int | fan-out | ToNext | right |
+| Name | Direction | Element type | Cardinality | TSX handle | Side | EdgeKind |
+|------|-----------|--------------|-------------|------------|------|----------|
+| FromPrevChainInhibitorNode | in | int | single | FromPrevChainInhibitorNode | left | chain |
+| ToNext | out | int | fan-out | ToNext | right | chain |
 
 ## Non-channel fields
 
@@ -34,6 +34,12 @@ HeldValue is the previously-held value. All ToNext receivers get the old value. 
 | minWidth | 90 |
 | displays | held |
 | defaultLabel | chainInhibitor |
+| role | inhibitor |
+| shape | rect |
+| fill | #fff3e0 |
+| stroke | #e65100 |
+| width | 90 |
+| height | 60 |
 
 ## Runtime status
 

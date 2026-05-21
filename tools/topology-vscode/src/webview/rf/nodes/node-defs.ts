@@ -5,6 +5,7 @@ export type DisplayKind = "queue" | "repeat" | "held";
 export interface NodePort {
   id: string;
   accent?: string;
+  edgeKind?: string;
 }
 
 export interface NodeDef {
@@ -18,11 +19,29 @@ export interface NodeDef {
   targets?: NodePort[];
   sources?: NodePort[];
   displays?: DisplayKind[];
+  // NodeTypeDef-compatible fields for schema/adapter consumers.
+  role?: string;
+  shape?: string;
+  fill?: string;
+  stroke?: string;
+  width?: number;
+  height?: number;
+  inputs?: { name: string; kind: string }[];
+  outputs?: { name: string; kind: string }[];
 }
 
+// PascalCase Go kind names that have a substrate runtime.
+// Single source of truth — derived from Wiring.Register calls.
+export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
+  "ChainInhibitor",
+  "InhibitRightGate",
+  "Input",
+  "ReadGate",
+]);
+
 export const NODE_DEFS: Record<string, NodeDef> = {
-  chainInhibitor: { defaultLabel: "chainInhibitor", bg: "#fff3e0", border: "#e65100", text: "#bf360c", accent: "#e65100", minWidth: 90, targets: [{ id: "FromPrevChainInhibitorNode" }], sources: [{ id: "ToNext" }], displays: ["held"] },
-  inhibitRightGate: { defaultLabel: "inhibitRightGate", bg: "#fce4ec", border: "#880e4f", text: "#880e4f", accent: "#880e4f", minWidth: 110, sublabel: "L pass / R inhibit", targets: [{ id: "FromLeft" }, { id: "FromRight", accent: "#f48fb1" }], sources: [{ id: "ToPassed" }] },
-  input: { defaultLabel: "input", bg: "#1a1f2e", border: "#3fb950", text: "#c9d1d9", accent: "#3fb950", minWidth: 90, sources: [{ id: "ToReadGate" }], displays: ["queue", "repeat"] },
-  readGate: { defaultLabel: "readgate", bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", accent: "#7b1fa2", minWidth: 70, sublabel: "val / inhibitor", targets: [{ id: "FromInput" }, { id: "FromChainInhibitor" }], sources: [{ id: "ToChainInhibitor" }] },
+  chainInhibitor: { defaultLabel: "chainInhibitor", bg: "#fff3e0", border: "#e65100", text: "#bf360c", accent: "#e65100", minWidth: 90, targets: [{ id: "FromPrevChainInhibitorNode", edgeKind: "chain" }], sources: [{ id: "ToNext", edgeKind: "chain" }], role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain" }], displays: ["held"] },
+  inhibitRightGate: { defaultLabel: "inhibitRightGate", bg: "#fce4ec", border: "#880e4f", text: "#880e4f", accent: "#880e4f", minWidth: 110, sublabel: "L pass / R inhibit", targets: [{ id: "FromLeft", edgeKind: "inhibit-in" }, { id: "FromRight", accent: "#f48fb1", edgeKind: "inhibit-in" }], sources: [{ id: "ToPassed", edgeKind: "and-out" }], role: "inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 110, height: 36, inputs: [{ name: "FromLeft", kind: "inhibit-in" }, { name: "FromRight", kind: "inhibit-in" }], outputs: [{ name: "ToPassed", kind: "and-out" }] },
+  input: { defaultLabel: "input", bg: "#1a1f2e", border: "#3fb950", text: "#c9d1d9", accent: "#3fb950", minWidth: 90, sources: [{ id: "ToReadGate", edgeKind: "chain" }], role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, outputs: [{ name: "ToReadGate", kind: "chain" }], displays: ["queue", "repeat"] },
+  readGate: { defaultLabel: "readgate", bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", accent: "#7b1fa2", minWidth: 70, sublabel: "val / inhibitor", targets: [{ id: "FromInput", edgeKind: "chain" }, { id: "FromChainInhibitor", edgeKind: "chain" }], sources: [{ id: "ToChainInhibitor", edgeKind: "chain" }], role: "and-gate", shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40, inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }] },
 };

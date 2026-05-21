@@ -22,6 +22,7 @@ type port struct {
 	id        string // Go field name
 	direction string // "in" or "out"
 	accent    string // optional hex color from SPEC.md
+	edgeKind  string // optional edge kind from SPEC.md Ports table EdgeKind column
 }
 
 // dataField represents a wire:"data.*" tagged struct field.
@@ -41,6 +42,13 @@ type viewDef struct {
 	sublabel     string
 	displays     string
 	defaultLabel string
+	// NodeTypeDef-compatible fields (used by schema/node-types consumers).
+	role   string
+	shape  string
+	fill   string
+	stroke string
+	width  string
+	height string
 }
 
 // kindEntry is one node kind to emit.
@@ -92,7 +100,7 @@ func main() {
 		if err != nil {
 			fatalf("parse go kind name %s: %v", e.Name(), err)
 		}
-		view, accentOverrides, err := parseSpecMD(pkgDir)
+		view, accentOverrides, edgeKindOverrides, err := parseSpecMD(pkgDir)
 		if err != nil {
 			// SPEC.md missing or no View section — skip this kind.
 			continue
@@ -100,10 +108,13 @@ func main() {
 		if view.kind == "" {
 			continue
 		}
-		// Apply accent overrides from SPEC.md Ports table.
+		// Apply accent and edgeKind overrides from SPEC.md Ports table.
 		for i, p := range ports {
 			if a, ok := accentOverrides[p.id]; ok && a != "" {
 				ports[i].accent = a
+			}
+			if ek, ok := edgeKindOverrides[p.id]; ok && ek != "" {
+				ports[i].edgeKind = ek
 			}
 		}
 		kinds = append(kinds, kindEntry{kind: view.kind, goKind: goKind, view: view, ports: ports, dataFields: dataFields})
@@ -245,12 +256,13 @@ func chanDirection(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
-// parseSpecMD reads SPEC.md in pkgDir and returns the view definition and
-// a map of port-name → accent override from the Ports table.
-func parseSpecMD(pkgDir string) (viewDef, map[string]string, error) {
+// parseSpecMD reads SPEC.md in pkgDir and returns the view definition,
+// a map of port-name → accent override, and a map of port-name → edgeKind
+// from the Ports table.
+func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, error) {
 	data, err := os.ReadFile(filepath.Join(pkgDir, "SPEC.md"))
 	if err != nil {
-		return viewDef{}, nil, err
+		return viewDef{}, nil, nil, err
 	}
 	lines := strings.Split(string(data), "\n")
 
@@ -329,13 +341,13 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, error) {
 	// Parse View section.
 	viewLines := sectionLines("View")
 	if viewLines == nil {
-		return viewDef{}, nil, fmt.Errorf("no View section")
+		return viewDef{}, nil, nil, fmt.Errorf("no View section")
 	}
 	headers, rows := parseTable(viewLines)
 	fieldIdx := indexOf(headers, "Field")
 	valueIdx := indexOf(headers, "Value")
 	if fieldIdx == -1 || valueIdx == -1 {
-		return viewDef{}, nil, fmt.Errorf("View table missing Field/Value columns")
+		return viewDef{}, nil, nil, fmt.Errorf("View table missing Field/Value columns")
 	}
 	vmap := map[string]string{}
 	for _, row := range rows {
@@ -353,29 +365,41 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, error) {
 		sublabel:     vmap["sublabel"],
 		displays:     vmap["displays"],
 		defaultLabel: vmap["defaultLabel"],
+		role:         vmap["role"],
+		shape:        vmap["shape"],
+		fill:         vmap["fill"],
+		stroke:       vmap["stroke"],
+		width:        vmap["width"],
+		height:       vmap["height"],
 	}
 
-	// Parse Ports section for accent overrides.
+	// Parse Ports section for accent and edgeKind overrides.
 	accentOverrides := map[string]string{}
+	edgeKindOverrides := map[string]string{}
 	portsLines := sectionLines("Ports")
 	if portsLines != nil {
 		headers, rows := parseTable(portsLines)
 		nameIdx := indexOf(headers, "Name")
 		accentIdx := indexOf(headers, "Accent")
-		if nameIdx != -1 && accentIdx != -1 {
-			for _, row := range rows {
-				if nameIdx < len(row) && accentIdx < len(row) {
-					name := row[nameIdx]
-					accent := row[accentIdx]
-					if name != "" && accent != "" {
-						accentOverrides[name] = accent
-					}
-				}
+		edgeKindIdx := indexOf(headers, "EdgeKind")
+		for _, row := range rows {
+			if nameIdx >= len(row) {
+				continue
+			}
+			name := row[nameIdx]
+			if name == "" {
+				continue
+			}
+			if accentIdx != -1 && accentIdx < len(row) && row[accentIdx] != "" {
+				accentOverrides[name] = row[accentIdx]
+			}
+			if edgeKindIdx != -1 && edgeKindIdx < len(row) && row[edgeKindIdx] != "" {
+				edgeKindOverrides[name] = row[edgeKindIdx]
 			}
 		}
 	}
 
-	return view, accentOverrides, nil
+	return view, accentOverrides, edgeKindOverrides, nil
 }
 
 func isSep(s string) bool {
@@ -408,6 +432,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `export interface NodePort {`)
 	fmt.Fprintln(w, `  id: string;`)
 	fmt.Fprintln(w, `  accent?: string;`)
+	fmt.Fprintln(w, `  edgeKind?: string;`)
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `export interface NodeDef {`)
@@ -421,7 +446,25 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  targets?: NodePort[];`)
 	fmt.Fprintln(w, `  sources?: NodePort[];`)
 	fmt.Fprintln(w, `  displays?: DisplayKind[];`)
+	fmt.Fprintln(w, `  // NodeTypeDef-compatible fields for schema/adapter consumers.`)
+	fmt.Fprintln(w, `  role?: string;`)
+	fmt.Fprintln(w, `  shape?: string;`)
+	fmt.Fprintln(w, `  fill?: string;`)
+	fmt.Fprintln(w, `  stroke?: string;`)
+	fmt.Fprintln(w, `  width?: number;`)
+	fmt.Fprintln(w, `  height?: number;`)
+	fmt.Fprintln(w, `  inputs?: { name: string; kind: string }[];`)
+	fmt.Fprintln(w, `  outputs?: { name: string; kind: string }[];`)
 	fmt.Fprintln(w, `}`)
+	fmt.Fprintln(w)
+	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
+	fmt.Fprintln(w, `// PascalCase Go kind names that have a substrate runtime.`)
+	fmt.Fprintln(w, `// Single source of truth — derived from Wiring.Register calls.`)
+	fmt.Fprintf(w, "export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([\n")
+	for _, e := range kinds {
+		fmt.Fprintf(w, "  %q,\n", e.goKind)
+	}
+	fmt.Fprintln(w, `]);`)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `export const NODE_DEFS: Record<string, NodeDef> = {`)
 	for _, e := range kinds {
@@ -458,6 +501,31 @@ func buildDef(v viewDef, ports []port) string {
 	}
 	if len(sources) > 0 {
 		fields = append(fields, fmt.Sprintf(`sources: [%s]`, joinPorts(sources)))
+	}
+	if v.role != "" {
+		fields = append(fields, fmt.Sprintf(`role: "%s"`, v.role))
+	}
+	if v.shape != "" {
+		fields = append(fields, fmt.Sprintf(`shape: "%s"`, v.shape))
+	}
+	if v.fill != "" {
+		fields = append(fields, fmt.Sprintf(`fill: "%s"`, v.fill))
+	}
+	if v.stroke != "" {
+		fields = append(fields, fmt.Sprintf(`stroke: "%s"`, v.stroke))
+	}
+	if v.width != "" {
+		fields = append(fields, fmt.Sprintf(`width: %s`, v.width))
+	}
+	if v.height != "" {
+		fields = append(fields, fmt.Sprintf(`height: %s`, v.height))
+	}
+	// Emit typed inputs/outputs for schema/adapter consumers.
+	if len(targets) > 0 {
+		fields = append(fields, fmt.Sprintf(`inputs: [%s]`, joinPortsTyped(targets)))
+	}
+	if len(sources) > 0 {
+		fields = append(fields, fmt.Sprintf(`outputs: [%s]`, joinPortsTyped(sources)))
 	}
 	if v.displays != "" {
 		items := strings.Split(v.displays, ",")
@@ -742,11 +810,28 @@ func fatalf(format string, args ...any) {
 func joinPorts(ports []port) string {
 	var parts []string
 	for _, p := range ports {
-		if p.accent != "" {
+		if p.accent != "" && p.edgeKind != "" {
+			parts = append(parts, fmt.Sprintf(`{ id: "%s", accent: "%s", edgeKind: "%s" }`, p.id, p.accent, p.edgeKind))
+		} else if p.accent != "" {
 			parts = append(parts, fmt.Sprintf(`{ id: "%s", accent: "%s" }`, p.id, p.accent))
+		} else if p.edgeKind != "" {
+			parts = append(parts, fmt.Sprintf(`{ id: "%s", edgeKind: "%s" }`, p.id, p.edgeKind))
 		} else {
 			parts = append(parts, fmt.Sprintf(`{ id: "%s" }`, p.id))
 		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// joinPortsTyped emits {name, kind} pairs for NodeTypeDef-compatible consumers.
+func joinPortsTyped(ports []port) string {
+	var parts []string
+	for _, p := range ports {
+		ek := p.edgeKind
+		if ek == "" {
+			ek = "chain" // default
+		}
+		parts = append(parts, fmt.Sprintf(`{ name: "%s", kind: "%s" }`, p.id, ek))
 	}
 	return strings.Join(parts, ", ")
 }

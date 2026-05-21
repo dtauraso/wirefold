@@ -2,9 +2,9 @@
 
 ## Ports
 
-| Name | Direction | Element type | Cardinality | TSX handle | Side |
-|------|-----------|--------------|-------------|------------|------|
-| ToReadGate | out | int | single | ToReadGate | right |
+| Name | Direction | Element type | Cardinality | TSX handle | Side | EdgeKind |
+|------|-----------|--------------|-------------|------------|------|----------|
+| ToReadGate | out | int | single | ToReadGate | right | chain |
 
 ## Firing rule
 
@@ -22,6 +22,12 @@ On each Update call: iterate through `Init` slice by index. For each value, atte
 | minWidth | 90 |
 | displays | queue, repeat |
 | defaultLabel | input |
+| role | input |
+| shape | rect |
+| fill | #e0e0e0 |
+| stroke | #666 |
+| width | 80 |
+| height | 60 |
 
 ## Runtime status
 

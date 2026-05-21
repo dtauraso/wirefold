@@ -2,11 +2,11 @@
 
 ## Ports
 
-| Name | Direction | Element type | Cardinality | TSX handle | Side |
-|------|-----------|--------------|-------------|------------|------|
-| FromInput | in | int | single | FromInput | left |
-| FromChainInhibitor | in | int | single | FromChainInhibitor | left |
-| ToChainInhibitor | out | int | single | ToChainInhibitor | right |
+| Name | Direction | Element type | Cardinality | TSX handle | Side | EdgeKind |
+|------|-----------|--------------|-------------|------------|------|----------|
+| FromInput | in | int | single | FromInput | left | chain |
+| FromChainInhibitor | in | int | single | FromChainInhibitor | left | chain |
+| ToChainInhibitor | out | int | single | ToChainInhibitor | right | chain |
 
 ## Firing rule
 
@@ -29,6 +29,12 @@ The chain-inhibitor signal gates passage of the value; its own value is not used
 | minWidth | 70 |
 | sublabel | val / inhibitor |
 | defaultLabel | readgate |
+| role | and-gate |
+| shape | rect |
+| fill | #f3e5f5 |
+| stroke | #7b1fa2 |
+| width | 70 |
+| height | 40 |
 
 ## Runtime status
 

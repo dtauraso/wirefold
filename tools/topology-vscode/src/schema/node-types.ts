@@ -2,53 +2,43 @@
 // styling per node type. `kind` values must match SVG edge classes
 // from docs/svg-style-guide.md §5.
 //
-// Entries split into IMPLEMENTED (have a substrate runtime, animate)
-// and ASPIRATIONAL (palette-only, will drop but not fire). Membership
-// is executable, not prose — see RUNTIME_IMPLEMENTED_KINDS below.
-// Runtime allow-list lives in RNodeKind / toRNodeKind
-// (webview/substrate-r/spec.ts); this set mirrors it in PascalCase.
+// Generated kinds (Input, ReadGate, ChainInhibitor, InhibitRightGate)
+// are derived from NODE_DEFS in node-defs.ts — do not hand-edit port
+// lists or colors for those kinds here. Edit SPEC.md and re-run
+// `npm run gen:node-defs`.
+//
+// Non-generated kinds (Generic, DetectorLatch, PatternAnd) have no
+// substrate runtime; they remain static below.
 
 import type { NodeTypeDef } from "./types-graph";
+import { NODE_DEFS } from "../webview/rf/nodes/node-defs";
 
-// PascalCase mirror of RNodeKind (webview/substrate-r/spec.ts). A
-// kind in this set has a substrate runtime and will animate; a kind
-// in NODE_TYPES but NOT in this set is palette-only. Keep in sync
-// with spec.ts; toRNodeKind enforces the lowercase form at runtime.
-export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
-  "Input",
-  "ReadGate",
-  "ChainInhibitor",
-  "InhibitRightGate",
-]);
+// Re-export RUNTIME_IMPLEMENTED_KINDS from generated source.
+export { RUNTIME_IMPLEMENTED_KINDS } from "../webview/rf/nodes/node-defs";
+
+// Lift generated NodeDef entries into NodeTypeDef shape.
+// NODE_DEFS keys are camelCase (RF type names); NODE_TYPES keys are
+// PascalCase (spec kind names). The mapping is: capitalize first char.
+function defToTypeDef(rfKey: string): NodeTypeDef | undefined {
+  const d = NODE_DEFS[rfKey];
+  if (!d) return undefined;
+  return {
+    role: d.role ?? "generic",
+    inputs: (d.inputs ?? []) as NodeTypeDef["inputs"],
+    outputs: (d.outputs ?? []) as NodeTypeDef["outputs"],
+    shape: (d.shape ?? "rect") as NodeTypeDef["shape"],
+    fill: d.fill ?? d.bg,
+    stroke: d.stroke ?? d.border,
+    width: d.width ?? d.minWidth ?? 110,
+    height: d.height ?? 60,
+  };
+}
 
 export const NODE_TYPES: Record<string, NodeTypeDef> = {
-  Input: {
-    role: "input",
-    inputs: [],
-    outputs: [{ name: "ToReadGate", kind: "chain" }],
-    shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60,
-  },
-  ReadGate: {
-    role: "and-gate",
-    inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }],
-    outputs: [{ name: "ToChainInhibitor", kind: "chain" }],
-    shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40,
-  },
-  ChainInhibitor: {
-    role: "inhibitor",
-    inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }],
-    outputs: [
-      { name: "ToEdge", kind: "inhibit-in" },
-      { name: "ToNextChainInhibitorNode", kind: "chain" },
-    ],
-    shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60,
-  },
-  InhibitRightGate: {
-    role: "inhibit-right-gate",
-    inputs: [{ name: "FromLeft", kind: "inhibit-in" }, { name: "FromRight", kind: "inhibit-in" }],
-    outputs: [{ name: "ToPassed", kind: "and-out" }],
-    shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 110, height: 36,
-  },
+  Input: defToTypeDef("input")!,
+  ReadGate: defToTypeDef("readGate")!,
+  ChainInhibitor: defToTypeDef("chainInhibitor")!,
+  InhibitRightGate: defToTypeDef("inhibitRightGate")!,
   Generic: {
     role: "generic",
     inputs: [], outputs: [],

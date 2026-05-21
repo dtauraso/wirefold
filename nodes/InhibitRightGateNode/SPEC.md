@@ -2,11 +2,11 @@
 
 ## Ports
 
-| Name | Direction | Element type | Cardinality | TSX handle | Side | Accent |
-|------|-----------|--------------|-------------|------------|------|--------|
-| FromLeft | in | int | single | FromLeft | left | |
-| FromRight | in | int | single | FromRight | left | #f48fb1 |
-| ToPassed | out | int | single | ToPassed | right | |
+| Name | Direction | Element type | Cardinality | TSX handle | Side | Accent | EdgeKind |
+|------|-----------|--------------|-------------|------------|------|--------|----------|
+| FromLeft | in | int | single | FromLeft | left | | inhibit-in |
+| FromRight | in | int | single | FromRight | left | #f48fb1 | inhibit-in |
+| ToPassed | out | int | single | ToPassed | right | | and-out |
 
 ## Firing rule
 
@@ -30,6 +30,12 @@ Semantics: the left signal passes through only when the right (inhibitory) signa
 | minWidth | 110 |
 | sublabel | L pass / R inhibit |
 | defaultLabel | inhibitRightGate |
+| role | inhibit-right-gate |
+| shape | rect |
+| fill | #fce4ec |
+| stroke | #880e4f |
+| width | 110 |
+| height | 36 |
 
 ## Runtime status
 
