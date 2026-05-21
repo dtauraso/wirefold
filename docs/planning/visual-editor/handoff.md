@@ -83,11 +83,11 @@ actually recurs.
 1. **Rename UX** — double-click-to-rename was unreliable post-Phase 3.
 2. **`TransportControls` play button** — stubbed inert.
 3. **`lastRecv` visualization** — pump writes it; no kind renders it.
-4. **Stale memory entries** — several `feedback_*`/`project_*` files
-   reference substrate-r concepts pre-dating the RF migration.
-5. **Topology-field-collapse step 4** — derive `Spec` TS type from
-   `TOPOLOGY_META_FIELDS`; blocked on circular import. Pick up only when
-   explicit-field form causes real friction.
+
+Retired 2026-05-20: stale memory audit (1 file deleted, 1 index line
+refreshed); topology-field-collapse step 4 dissolved by deleting 4
+unused meta fields (`timing`, `cycleAnchor`, `runtime`, `legend`) in
+93e46ef — registry now has one entry (`notes`), nothing left to derive.
 
 ## Working-tree state
 
