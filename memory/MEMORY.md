@@ -48,3 +48,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_schema_parser_parity.md](feedback_schema_parser_parity.md) — When extending a spec type, update the schema parser's validator in the same commit, or saves produce unparseable JSON and the editor loads blank
 - [feedback_hook_block_means_stop.md](feedback_hook_block_means_stop.md) — When a PreToolUse hook returns exit 2, stop and report to the user; do not route around the block via python3, sed -i, shell redirect, or any other write path.
 - [project_edge_lane_plumbing.md](project_edge_lane_plumbing.md) — Edge `lane` + `setEdgeLane` + EdgeActionsCtx already wired end-to-end; don't re-grep schema/adapter/mutation when extending edges
+- [feedback_delegate_all_writing.md](feedback_delegate_all_writing.md) — STRICT: main session never writes; all Edit/Write/Bash-scripting goes to subagents. Any write is the trigger, not the inline-executor counter.

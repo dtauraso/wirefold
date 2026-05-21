@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
-import { injectViewText } from "../sidecar";
+import { extractViewText, injectViewText } from "../sidecar";
 import { parseWebviewToHost, type HostToWebviewMsg, type WebviewToHostMsg } from "../messages";
 import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
@@ -38,8 +38,10 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       return;
     case "save":
       try {
+        const viewText = extractViewText(document.getText());
+        const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
         ctx.setLastAppliedVersion(document.version + 1);
-        await applyEdit(document, msg.text);
+        await applyEdit(document, merged);
         await document.save();
         ctx.setLastAppliedVersion(document.version);
       } catch (err) {
