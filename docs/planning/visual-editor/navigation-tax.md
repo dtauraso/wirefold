@@ -60,10 +60,50 @@ Two candidates to investigate after the audit table exists:
    typed wire-prop registry both adapters import, or accept the adapter
    split and introduce a single typed schema module both sides reference.
 
+## Audit results
+
+Scoped to `tools/topology-vscode/src/webview/rf/` and `src/schema/`.  
+Generated files excluded: `node-defs.ts` (RF node visual defs), `node-data-types.ts` — noted but not listed.
+
+### Kind-name scatter (4 kinds × avg 1.25 call sites)
+
+| Kind | Sites |
+|---|---|
+| `"Input"` | `schema/node-types.ts:18`, `rf/app/_use-drag-drop.ts:39` |
+| `"ReadGate"` | `schema/node-types.ts:19` |
+| `"ChainInhibitor"` | `schema/node-types.ts:20` |
+| `"InhibitRightGate"` | `schema/node-types.ts:21` |
+
+Note: `node-types.ts` is the RUNTIME_IMPLEMENTED_KINDS set — it IS a central list, but it is a second copy of the kind names that also live in `node-defs.ts` (generated). The only scatter beyond that is `_use-drag-drop.ts:39` which branches on `"Input"` to set default node data.
+
+### Port-handle scatter (10 handles × avg 2 call sites)
+
+Each port handle appears in exactly 2 files: `schema/node-types.ts` (the schema port list) and `rf/nodes/node-defs.ts` (the RF handle IDs). No scatter beyond those two sources was found.
+
+| Handle | Sites |
+|---|---|
+| `ToReadGate` | `schema/node-types.ts:28`, `rf/nodes/node-defs.ts:26` |
+| `FromInput` | `schema/node-types.ts:33`, `rf/nodes/node-defs.ts:27` |
+| `FromChainInhibitor` | `schema/node-types.ts:33`, `rf/nodes/node-defs.ts:27` |
+| `ToChainInhibitor` | `schema/node-types.ts:34`, `rf/nodes/node-defs.ts:27` |
+| `FromPrevChainInhibitorNode` | `schema/node-types.ts:39`, `rf/nodes/node-defs.ts:24` |
+| `ToNextChainInhibitorNode` | `schema/node-types.ts:42`, `rf/nodes/node-defs.ts:24` |
+| `ToEdge` | `schema/node-types.ts:41` |
+| `FromLeft` | `schema/node-types.ts:48`, `rf/nodes/node-defs.ts:25` |
+| `FromRight` | `schema/node-types.ts:48`, `rf/nodes/node-defs.ts:25` |
+| `ToPassed` | `schema/node-types.ts:49`, `rf/nodes/node-defs.ts:25` |
+
+### Summary
+
+- The pre-audit doc predicted scatter in `_on-connect.ts`, `pump.ts`, `PortRim.tsx`, `_constants.ts` — none found. The codebase is cleaner than feared.
+- Real duplication: `schema/node-types.ts` and `rf/nodes/node-defs.ts` are two separate string lists for the same port handles. A rename touches both.
+- The `"Input"` kind branch in `_use-drag-drop.ts:39` is the only behavior-gating use of a bare kind string; it's the highest-tax single site.
+
 ## Next single concrete step
 
-Run the audit grep above. Land its output in this doc as `## Audit output`.
-No fixes until that table exists.
+Audit is landed. Pick the first hot spot to fix:
+- **Port registry** (`node-types.ts` ↔ `node-defs.ts` duplication) — highest rename tax; all 10 port handles live in 2 files; a single generated or imported source eliminates the gap.
+- **Kind branch** (`_use-drag-drop.ts:39`) — one site, low urgency, but the only behavior-gating bare-string comparison in the tree.
 
 ## Out of scope
 
