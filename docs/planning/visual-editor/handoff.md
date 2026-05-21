@@ -98,11 +98,6 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 1. **Trace replay** (option 1 above) — paused mid-design before
    pacing decision.
 
-Retired earlier this session: stale memory audit; topology-field-collapse
-step 4 (dissolved); `lastRecv`; double-click rename UI (no replacement
-queued — will get rebuilt later from the RF-only diagram view if
-needed); `topology.view.json` regression hunt.
-
 ## Working-tree state
 
 Clean.
