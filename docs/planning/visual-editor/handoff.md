@@ -11,7 +11,7 @@ handoff.md is exempt from the 100-LOC budget.
 
 ## State at handoff (2026-05-21, post tidy + replay-abandoned session)
 
-**Active branch:** main at `e4e5f99`. No task in flight.
+**Active branch:** main at `77a1009`. No task in flight.
 
 ### What landed this session
 
@@ -119,7 +119,9 @@ None.
 
 ## Working-tree state
 
-Clean (post-reload + sidecar cleanup).
+`topology.json` (repo root) modified from drag-test that verified
+the post-reload save path. Not committed; restore or keep at user
+discretion. Otherwise clean.
 
 ## Dev-loop
 
