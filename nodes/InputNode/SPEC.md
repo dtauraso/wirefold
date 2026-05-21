@@ -34,6 +34,12 @@ On each Update call: iterate through `Init` slice by index. For each value, atte
 - Loader-registered: yes
 - TSX render: present
 
+## Default data
+
+```json
+{ "init": [0, 1] }
+```
+
 ## Open questions
 
 - TSX handle id and Go struct field are now both `ToReadGate` (reconciled per post-fix-5 convention).

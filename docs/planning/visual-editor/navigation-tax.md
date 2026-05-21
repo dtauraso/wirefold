@@ -15,7 +15,7 @@ as keys without a central registry."
 | Edit firing rule | ~0 | `nodes/<Kind>/<Kind>.go` only |
 | Add a port | ~0 | Go struct only; gen-node-defs picks it up |
 | Add a wire prop | Medium | `spec.ts`, `spec-to-flow.ts`, `flow-to-spec.ts`, `SubstrateEdge.tsx`, schema parser, Go loader (~5–6 files) |
-| Rename a kind | Low | Generated kinds: rename Go package + SPEC.md; generators propagate. `"Input"` is the one exception — also touch `_use-drag-drop.ts:39` |
+| Rename a kind | Low | Generated kinds: rename Go package + SPEC.md; generators propagate |
 | Rename/remove a port | Low (post-collapse) | Edit SPEC.md `## Ports` for the kind; `gen-node-defs` regenerates the single source |
 
 ## Audit results
@@ -67,7 +67,7 @@ Collapsed `schema/node-types.ts` and `rf/nodes/node-defs.ts` into one generated 
 
 ## Remaining
 
-- `_use-drag-drop.ts:39` — `"Input"` kind branch setting `{ init: [0, 1] }` default data. One site, low urgency.
+(none)
 
 ## Out of scope
 

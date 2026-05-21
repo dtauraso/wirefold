@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { NODE_TYPES } from "../../../schema";
+import { NODE_DEFS } from "../nodes/node-defs";
 import { IDENT_RE } from "../../state/ops/rename";
 import { scheduleSave, scheduleViewSave } from "../../save";
 import { rfGetNodes, rfSetNodes } from "../rf-imperative";
@@ -36,7 +37,9 @@ export function useDragDrop(ctx: AppCtx) {
     const def = NODE_TYPES[type];
     const width = def?.width ?? 110;
     const height = def?.height ?? 60;
-    const nodeData = type === "Input" ? { init: [0, 1] } : undefined;
+    const rfType = specKindToRfType(type);
+    const nodeDef = NODE_DEFS[rfType];
+    const nodeData = nodeDef?.defaultData ?? undefined;
     rfSetNodes((ns) => [
       ...ns,
       {

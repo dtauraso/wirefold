@@ -53,11 +53,12 @@ type viewDef struct {
 
 // kindEntry is one node kind to emit.
 type kindEntry struct {
-	kind       string // RF/view kind name (camelCase, from SPEC.md)
-	goKind     string // Go/topology kind name (PascalCase, from Wiring.Register)
-	view       viewDef
-	ports      []port
-	dataFields []dataField
+	kind        string // RF/view kind name (camelCase, from SPEC.md)
+	goKind      string // Go/topology kind name (PascalCase, from Wiring.Register)
+	view        viewDef
+	ports       []port
+	dataFields  []dataField
+	defaultData string // raw JSON from SPEC.md ## Default data, or ""
 }
 
 func main() {
@@ -117,7 +118,8 @@ func main() {
 				ports[i].edgeKind = ek
 			}
 		}
-		kinds = append(kinds, kindEntry{kind: view.kind, goKind: goKind, view: view, ports: ports, dataFields: dataFields})
+		defaultData := parseDefaultData(pkgDir)
+		kinds = append(kinds, kindEntry{kind: view.kind, goKind: goKind, view: view, ports: ports, dataFields: dataFields, defaultData: defaultData})
 	}
 
 	// Sort alphabetically by RF kind name (matching original generator behaviour).
@@ -402,6 +404,39 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 	return view, accentOverrides, edgeKindOverrides, nil
 }
 
+// parseDefaultData reads nodes/<Kind>/SPEC.md and returns the JSON string from
+// the first fenced code block inside ## Default data, or "" if absent.
+func parseDefaultData(pkgDir string) string {
+	data, err := os.ReadFile(filepath.Join(pkgDir, "SPEC.md"))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	inSection := false
+	inFence := false
+	var jsonLines []string
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "## Default data" {
+			inSection = true
+			continue
+		}
+		if inSection && strings.HasPrefix(l, "## ") {
+			break
+		}
+		if inSection && !inFence && strings.TrimSpace(l) == "```json" {
+			inFence = true
+			continue
+		}
+		if inSection && inFence {
+			if strings.TrimSpace(l) == "```" {
+				break
+			}
+			jsonLines = append(jsonLines, l)
+		}
+	}
+	return strings.TrimSpace(strings.Join(jsonLines, "\n"))
+}
+
 func isSep(s string) bool {
 	for _, c := range s {
 		if c != '-' && c != ':' && c != ' ' {
@@ -455,6 +490,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  height?: number;`)
 	fmt.Fprintln(w, `  inputs?: { name: string; kind: string }[];`)
 	fmt.Fprintln(w, `  outputs?: { name: string; kind: string }[];`)
+	fmt.Fprintln(w, `  defaultData?: Record<string, unknown>;`)
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
@@ -468,7 +504,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `export const NODE_DEFS: Record<string, NodeDef> = {`)
 	for _, e := range kinds {
-		fmt.Fprintf(w, "  %s: %s,\n", e.kind, buildDef(e.view, e.ports))
+		fmt.Fprintf(w, "  %s: %s,\n", e.kind, buildDef(e.view, e.ports, e.defaultData))
 	}
 	fmt.Fprint(w, `};`, "\n")
 
@@ -476,7 +512,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }
 
-func buildDef(v viewDef, ports []port) string {
+func buildDef(v viewDef, ports []port, defaultData string) string {
 	targets := filterPorts(ports, "in")
 	sources := filterPorts(ports, "out")
 
@@ -534,6 +570,9 @@ func buildDef(v viewDef, ports []port) string {
 			quoted = append(quoted, fmt.Sprintf(`"%s"`, strings.TrimSpace(item)))
 		}
 		fields = append(fields, fmt.Sprintf(`displays: [%s]`, strings.Join(quoted, ", ")))
+	}
+	if defaultData != "" {
+		fields = append(fields, fmt.Sprintf(`defaultData: %s`, defaultData))
 	}
 	return "{ " + strings.Join(fields, ", ") + " }"
 }
