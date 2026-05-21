@@ -85,7 +85,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
 
   const inputs: Port[] = data.inputs ?? []; const outputs: Port[] = data.outputs ?? [];
   const hasPortData = inputs.length > 0 || outputs.length > 0;
-  const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
+  const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, minHeight: def.height ?? 40, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
   return (
     <div ref={nodeElRef} style={container}>
       {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown) : renderDefHandles(def)}
