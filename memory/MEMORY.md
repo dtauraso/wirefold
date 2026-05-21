@@ -8,7 +8,6 @@ These rarely change; skim once per session and apply throughout.
 - [feedback_workflow_post_v0.md](feedback_workflow_post_v0.md) — Post-v0 workflow: commit freely on task branches, ≥$5 cost-marker rule, friction-driven, audit registry, no AI-system lock-in
 - [feedback_branch_cleanup.md](feedback_branch_cleanup.md) — Delete task branches locally and on remote once merged into main, without re-asking
 - [feedback_memory_location.md](feedback_memory_location.md) — Save memory files only to repo `memory/`; skip the local Claude memory dir for this project
-- [feedback_file_size_budget.md](feedback_file_size_budget.md) — Refactor any source file ≥ 200 LOC; target ≤ 100 LOC. Run `npm run check:loc` from `tools/topology-vscode/`.
 - [feedback_open_files.md](feedback_open_files.md) — Always open files in VS Code (`code <path>`), not Safari or other apps
 - [feedback_bash_cwd_persistence.md](feedback_bash_cwd_persistence.md) — Bash cwd persists across calls; use absolute paths for destructive ops
 - [feedback_git_status_uall.md](feedback_git_status_uall.md) — Never use `git status -uall`; recurses into large untracked trees and can hang/OOM
