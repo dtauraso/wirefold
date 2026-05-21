@@ -50,14 +50,19 @@ parallel spread lines in `flow-to-spec.ts:88–92`.
 
 ## Migration steps
 
-1. **Add `meta-field-defs.ts`** — define `TOPOLOGY_META_FIELDS` with
-   parser refs for all five fields. No behavior change yet.
-2. **Wire `parse-spec.ts`** — replace inline `opt(o.timing, ...)` etc.
-   with a loop over `TOPOLOGY_META_FIELDS`. Remove per-field branches.
-3. **Wire `flow-to-spec.ts`** — replace four spread lines (88–92) with
-   a loop over `TOPOLOGY_META_FIELDS` where `passThrough === true`.
-4. **Prune `save.ts` comment** — update to reference the registry.
-5. **`npm run check:loc`** — confirm no file exceeds 100 LOC after splits.
+1. **Add `meta-field-defs.ts`** ✓ — define `TOPOLOGY_META_FIELDS` with
+   parser refs for all five fields. No behavior change yet. (529e6fc)
+2. **Wire `parse-spec.ts`** ✓ — replace inline `opt(o.timing, ...)` etc.
+   with a loop over `TOPOLOGY_META_FIELDS`. Remove per-field branches. (512dd83)
+3. **Wire `flow-to-spec.ts`** ✓ — replace four spread lines (88–92) with
+   a loop over `TOPOLOGY_META_FIELDS` where `passThrough === true`. (15a48f5)
+4. **Derive `Spec` TS type** — deferred: `meta-field-defs.ts` imports
+   `Spec` from `types-graph.ts`, and `types-graph.ts` cannot re-import
+   from `meta-field-defs.ts` without a circular dep (through
+   `SeedEvent`/`LegendRow`/`Note`). Resolving requires moving those
+   leaf types to a separate file; deferred until the cost of the
+   explicit-field form is felt.
+5. **`npm run check:loc`** ✓ — no file exceeds 100 LOC.
 
 ## Verification
 

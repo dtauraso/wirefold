@@ -19,6 +19,7 @@ as keys without a central registry."
 | Rename/remove a port | Low (post-collapse) | Edit SPEC.md `## Ports` for the kind; `gen-node-defs` regenerates the single source |
 | Add new animation kind | Low | Add entry to `animation-fields.ts`; write in `pump.ts`; read in one consumer |
 | Rename animation data field | Low | Rename key in `animation-fields.ts`; TypeScript compiler surfaces all consumers |
+| Add a topology meta field | Low | One entry in `meta-field-defs.ts` (parse fn + passThrough flag); parser and adapters iterate registry automatically |
 
 ## Audit results
 
