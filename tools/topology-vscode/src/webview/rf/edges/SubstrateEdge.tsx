@@ -15,8 +15,13 @@ import type { EdgeKind } from "../../../schema/types";
 import type { EdgeData } from "../types";
 import { ANIMATION_FIELDS } from "../animation-fields";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
+import { markerEndUrl } from "../MarkerDefs";
 
 const PULSE_DURATION_MS = 600;
+
+// Marker head lengths (refX of the filled markers in MarkerDefs).
+const MD_HEAD_PX = 8;
+const SM_HEAD_PX = 5;
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -104,6 +109,33 @@ function belowD(sx: number, sy: number, tx: number, ty: number, lane: number): s
     `Q ${tx},${corridorY} ${tx},${corridorY - r} ` +
     `L ${tx},${ty}`
   );
+}
+
+// Length of the final segment of the edge — the leg the arrow sits on.
+// Marker-shrink decisions use this, not total path length: a long dogleg
+// route can still terminate in a tiny entry leg where a full-size arrow
+// visually dominates. For the bezier "line" route there is no distinct
+// final segment, so fall back to the chord length.
+function finalSegmentLength(
+  route: EdgeRoute,
+  sx: number, sy: number,
+  tx: number, ty: number,
+  lane: number,
+): number {
+  if (route === "snake") {
+    const midX = (sx + tx) / 2 + lane;
+    return Math.abs(tx - midX);
+  }
+  if (route === "snake-v") {
+    const midY = (sy + ty) / 2 + lane;
+    return Math.abs(ty - midY);
+  }
+  if (route === "below") {
+    const corridorY = Math.max(sy, ty) + 80 + lane;
+    return corridorY - ty;
+  }
+  const dx = tx - sx, dy = ty - sy;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 function controlOffset(distance: number): number {
@@ -234,7 +266,6 @@ export function SubstrateEdge({
   sourceX, sourceY, targetX, targetY,
   sourcePosition, targetPosition,
   data,
-  markerEnd,
 }: EdgeProps<EdgeData>) {
   const kind: EdgeKind = data?.kind ?? "any";
   const stroke = KIND_COLORS[kind] ?? "#888";
@@ -246,6 +277,11 @@ export function SubstrateEdge({
     sourceX, sourceY, sourcePosition as SideName,
     targetX, targetY, targetPosition as SideName,
   );
+
+  const legLen = finalSegmentLength(route, sourceX, sourceY, targetX, targetY, lane);
+  const markerSize: "sm" | "md" = legLen < MD_HEAD_PX ? "sm" : "md";
+  const arrowStyle = data?.arrowStyle ?? "filled";
+  const computedMarkerEnd = legLen < SM_HEAD_PX ? undefined : markerEndUrl(kind, arrowStyle, markerSize);
 
   const edgePath = buildEdgePathD(
     route,
@@ -308,7 +344,7 @@ export function SubstrateEdge({
       <BaseEdge
         id={id}
         path={edgePath}
-        markerEnd={markerEnd}
+        markerEnd={computedMarkerEnd}
         style={{ stroke, strokeDasharray: dash, strokeWidth: 1.5 }}
       />
       <LaneDragHandle
