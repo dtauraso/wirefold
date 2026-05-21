@@ -8,6 +8,7 @@
 import type { Edge as RFEdge, Node as RFNode } from "reactflow";
 import type { Spec, Node as SpecNode, Edge as SpecEdge, Note } from "../../../schema";
 import type { NodeData, EdgeData } from "../types";
+import { WIRE_PROPS } from "../../../schema/wire-defs";
 
 export function flowToSpec(
   rfNodes: RFNode[],
@@ -70,12 +71,14 @@ export function flowToSpec(
       targetHandle,
       kind: d?.kind ?? "signal",
     };
-    if (d?.label !== undefined) edge.label = d.label;
-    if (d?.valueLabel !== undefined) edge.valueLabel = d.valueLabel;
-    if (d?.lane !== undefined) edge.lane = d.lane;
-    if (d?.arrowStyle !== undefined) edge.arrowStyle = d.arrowStyle;
+    // Copy optional wire props from EdgeData → SpecEdge by iterating WIRE_PROPS.
+    // `kind` is excluded: it is required and already set above via fallback.
+    for (const key of Object.keys(WIRE_PROPS)) {
+      if (key === "kind") continue;
+      const v = d ? (d as Record<string, unknown>)[key] : undefined;
+      if (v !== undefined) (edge as Record<string, unknown>)[key] = v;
+    }
     if (d?.edgeData !== undefined) edge.data = d.edgeData;
-    if (d?.concurrent !== undefined) edge.concurrent = d.concurrent;
     edges.push(edge);
   }
 

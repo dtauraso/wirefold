@@ -76,16 +76,17 @@ by hand.
 
 ## Migration
 
-1. **Add Go source.** Add `wire:"prop,..."` tags to `specEdge` fields in
+1. **Add Go source.** ✅ Add `wire:"prop,..."` tags to `specEdge` fields in
    `loader.go`.
-2. **Extend generator.** Parse the new tags in `gen-node-defs/main.go`; emit
+2. **Extend generator.** ✅ Parse the new tags in `gen-node-defs/main.go`; emit
    `wire-defs.ts`.
 3. **Replace hand-written types.** Import `WIRE_PROPS` in `types-graph.ts`
    and `rf/types.ts`; derive `Edge` and `EdgeData` fields from the
    registry instead of manual declarations.
-4. **Replace adapter string-naming.** Make `spec-to-flow.ts` and
+4. **Replace adapter string-naming.** ✅ Made `spec-to-flow.ts` and
    `flow-to-spec.ts` iterate `WIRE_PROPS` to thread props, deleting the
-   per-prop `if (d?.label ...)` chains.
+   per-prop explicit chains. `kind` kept explicit (structurally required,
+   drives `KIND_COLORS`).
 5. **Delete duplicated schema validator entries.** `parse-nodes-edges.ts`
    `parseEdge` can loop over `WIRE_PROPS` for the optional `opt(...)` calls.
 
@@ -104,7 +105,8 @@ Substrate model changes; new wire props themselves; runtime semantics;
 
 ## Next single concrete step
 
-Add `wire:"prop,optional,tsType:string"` tags to the `Label` and
-`ValueLabel` fields of `specEdge` in `nodes/Wiring/loader.go` and update
-`gen-node-defs/main.go` to parse them and emit a stub `wire-defs.ts` with
-just those two props.
+Step 3: delete the duplicated wire-prop field declarations in
+`src/schema/types-graph.ts` (`Edge` type) and `src/webview/rf/types.ts`
+(`EdgeData` interface), replacing them with derived types from `WIRE_PROPS`.
+Also check whether `parse-nodes-edges.ts` `parseEdge` can loop over
+`WIRE_PROPS` instead of naming each `opt(...)` call (step 5).

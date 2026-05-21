@@ -3,6 +3,16 @@ import { KIND_COLORS, NODE_TYPES, type Node as SpecNode, type Spec } from "../..
 import type { Fold, ViewerState } from "../../state/viewer/types";
 import { COLLAPSED_FOLD_W, COLLAPSED_FOLD_H, expandedBounds } from "./_bounds";
 import type { NodeData, EdgeData } from "../types";
+import { WIRE_PROPS } from "../../../schema/wire-defs";
+
+/** Iterate WIRE_PROPS registry; skip `kind` (handled explicitly at call sites). */
+function pickWireProps(e: Record<string, unknown>): Partial<EdgeData> {
+  const out: Partial<EdgeData> = {};
+  for (const key of Object.keys(WIRE_PROPS)) {
+    if (key !== "kind" && e[key] !== undefined) (out as Record<string, unknown>)[key] = e[key];
+  }
+  return out;
+}
 
 /** Converts a spec kind (PascalCase) to the RF node type name (camelCase). */
 export function specKindToRfType(kind: string): string {
@@ -149,25 +159,16 @@ export function specToFlow(
       sourceHandle,
       targetHandle,
       type: "substrate",
-      // `label` is rendered in data only (SubstrateEdge reads data.label via
-      // EdgeLabelRenderer); not via RF's default foreignObject label.
+      // label rendered via EdgeLabelRenderer (data.label), not RF's foreignObject.
       style: { stroke: KIND_COLORS[e.kind] ?? "#888", strokeWidth: 1.5 },
       data: {
         kind: e.kind,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
         route: ev?.route ?? (e.data as Record<string, unknown> | undefined)?.route as string | undefined,
-        lane: e.lane,
-        arrowStyle: e.arrowStyle,
-        valueLabel: e.valueLabel,
-        label: e.label,
+        ...pickWireProps(e as unknown as Record<string, unknown>),
         value: (e.data as Record<string, unknown> | undefined)?.value,
-        // Simulator-relevant edge data. Carried verbatim so flow-to-spec
-        // can put them back; without this round-trip every save through
-        // the editor would silently strip backpressure /
-        // delay configuration from the spec.
-        edgeData: e.data,
-        concurrent: e.concurrent,
+        edgeData: e.data, // verbatim: flow-to-spec round-trips backpressure/delay config
       },
     });
   }
