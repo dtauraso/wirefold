@@ -51,22 +51,22 @@ Revisit if the Go substrate ever needs to declare animation events directly.
 ## Migration steps
 
 1. **Add registry module.** Create `animation-fields.ts` with `ANIMATION_FIELDS`
-   and `AnimationFieldName`. No other files change; CI stays green.
+   and `AnimationFieldName`. No other files change; CI stays green. ✅ (7e2f243)
 
 2. **Update pump.ts writes.** Replace bare-string keys with `ANIMATION_FIELDS`
-   key references. TypeScript enforces key validity at compile time.
+   key references. TypeScript enforces key validity at compile time. ✅ (9375373)
 
 3. **Update view consumers.** `SubstrateEdge.tsx`, `use-fire-flash.ts`,
    `GenericNode.tsx` — read via registry-typed accessors. Field names come from
-   the registry; no bare strings.
+   the registry; no bare strings. ✅ (b84a0c8)
 
 4. **Derive types from registry.** Replace hand-written `EdgeData.pulse` and
    `NodeData.lastFire` field declarations with types derived from `ANIMATION_FIELDS`
-   so the shape stays in sync automatically.
+   so the shape stays in sync automatically. ✅ (0aa05a6)
 
 5. **Document the recipe.** Add a comment block to `animation-fields.ts`:
    "To add a new animation: (1) add an entry here, (2) write it in pump.ts,
-   (3) read it in one consumer." One place to look, three-step recipe.
+   (3) read it in one consumer." One place to look, three-step recipe. ✅ (this commit)
 
 ## Verification
 

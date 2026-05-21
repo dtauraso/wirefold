@@ -17,6 +17,8 @@ as keys without a central registry."
 | Add a wire prop | ~0 (scalar) / Low (enum) | Go loader tag only; `gen-node-defs` regenerates `wire-defs.ts`; adapters and parser loop WIRE_PROPS automatically. Enum-typed props need one explicit case added to `parseEdge`. |
 | Rename a kind | Low | Generated kinds: rename Go package + SPEC.md; generators propagate |
 | Rename/remove a port | Low (post-collapse) | Edit SPEC.md `## Ports` for the kind; `gen-node-defs` regenerates the single source |
+| Add new animation kind | Low | Add entry to `animation-fields.ts`; write in `pump.ts`; read in one consumer |
+| Rename animation data field | Low | Rename key in `animation-fields.ts`; TypeScript compiler surfaces all consumers |
 
 ## Audit results
 
