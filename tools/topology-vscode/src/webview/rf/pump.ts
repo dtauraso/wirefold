@@ -12,13 +12,6 @@ export function handleTraceEvent(event: TraceEvent): void {
   const { step, kind, node, port, value } = event;
   switch (kind) {
     case "recv":
-      rfSetNodes((nodes) =>
-        nodes.map((n) =>
-          n.id === node
-            ? { ...n, data: { ...n.data, lastRecv: { port: port ?? "", value: value ?? 0, simStep: step } } }
-            : n,
-        ),
-      );
       return;
     case "fire":
       rfSetNodes((nodes) =>

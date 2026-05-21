@@ -32,9 +32,6 @@ export interface NodeData {
   // --- Runtime trace fields (Phase 4) ---
   /** Last fire event step for this node (used for visual highlight). */
   lastFire?: typeof ANIMATION_FIELDS["lastFire"]["type"];
-  /** Last recv: {port, value, simStep}. */
-  lastRecv?: { port: string; value: number; simStep: number };
-
   // --- Adapter convenience fields ---
   label: string;
   fill: string;
