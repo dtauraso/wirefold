@@ -204,11 +204,3 @@ func init() {
 	}
 }
 
-// kindPorts returns the port specs for a kind, or an error if unknown.
-func kindPorts(kind string) ([]PortSpec, error) {
-	b, ok := Registry[kind]
-	if !ok {
-		return nil, fmt.Errorf("unknown node kind %q", kind)
-	}
-	return b.Ports, nil
-}

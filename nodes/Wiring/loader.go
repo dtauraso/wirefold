@@ -17,6 +17,7 @@ package Wiring
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 
 	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
@@ -62,13 +63,9 @@ type topoSpec struct {
 func nodeInitSlots(n specNode) map[string]int {
 	m := map[string]int{}
 	if n.Data != nil {
-		for k, v := range n.Data.InitialSlots {
-			m[k] = v
-		}
+		maps.Copy(m, n.Data.InitialSlots)
 	}
-	for k, v := range n.InitialSlots {
-		m[k] = v
-	}
+	maps.Copy(m, n.InitialSlots)
 	return m
 }
 
