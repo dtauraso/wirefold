@@ -6,6 +6,7 @@
 import type { TraceEvent } from "../../messages";
 import { rfSetNodes, rfSetEdges, rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
+import { ANIMATION_FIELDS } from "./animation-fields";
 
 export function handleTraceEvent(event: TraceEvent): void {
   const { step, kind, node, port, value } = event;
@@ -23,7 +24,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       rfSetNodes((nodes) =>
         nodes.map((n) =>
           n.id === node
-            ? { ...n, data: { ...n.data, lastFire: step } }
+            ? { ...n, data: { ...n.data, [ANIMATION_FIELDS.lastFire.name]: step } }
             : n,
         ),
       );
@@ -41,7 +42,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       rfSetEdges((es) =>
         es.map((e) =>
           e.id === edgeId
-            ? { ...e, data: { ...e.data, pulse: { value: value ?? 0, simStep: step } } }
+            ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: { value: value ?? 0, simStep: step } } }
             : e,
         ),
       );
