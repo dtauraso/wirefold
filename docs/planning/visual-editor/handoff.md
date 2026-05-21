@@ -68,14 +68,15 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ## Next options
 
-1. **Investigate topology.view.json regression if it recurs** — during
-   verification a regression appeared where `topology.json` lost its `view` key
-   and a stale `topology.view.json` reappeared. Source unknown. If it recurs,
-   find the writer before doing anything else.
-2. **Tackle a parked follow-up with accumulated friction** — rename UX,
+1. **Tackle a parked follow-up with accumulated friction** — rename UX,
    inert TransportControls play button, or lastRecv visualization are the
    most likely candidates. Pick whichever the user surfaces first.
-3. **Start the next thing on user prompt** — no pre-committed direction.
+2. **Start the next thing on user prompt** — no pre-committed direction.
+
+Investigated 2026-05-20: no current writer of `topology.view.json` exists
+(sidecar code removed in 9e915f7; save path merges `view` into
+`topology.json` via `injectViewText`). Revisit only if the regression
+actually recurs.
 
 ## Parked follow-ups
 
