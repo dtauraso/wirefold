@@ -5,7 +5,8 @@
 | Name | Direction | Element type | Cardinality | TSX handle | Side | EdgeKind |
 |------|-----------|--------------|-------------|------------|------|----------|
 | FromPrevChainInhibitorNode | in | int | single | FromPrevChainInhibitorNode | left | chain |
-| ToNext | out | int | fan-out | ToNext | right | chain |
+| ToNext0 | out | int | single | ToNext0 | right | chain |
+| ToNext1 | out | int | single | ToNext1 | right | chain |
 
 ## Non-channel fields
 
@@ -17,10 +18,10 @@
 
 Block until a value arrives on FromPrevChainInhibitorNode. On each arrival:
 
-1. Emit HeldValue on every channel in ToNext (fan-out).
+1. Emit HeldValue on ToNext0 and ToNext1 (if wired).
 2. Update HeldValue = incoming value.
 
-HeldValue is the previously-held value. All ToNext receivers get the old value. Destinations include downstream ChainInhibitor nodes, edge-gate inputs, and the ReadGate pacing port — all wired as entries in the ToNext fanout slice.
+HeldValue is the previously-held value. Both ToNext0 and ToNext1 receivers get the old value. Destinations include downstream ChainInhibitor nodes, edge-gate inputs, and the ReadGate pacing port.
 
 ## View
 

@@ -12,7 +12,8 @@ type ChainInhibitorNode struct {
 	Name       string
 	HeldValue  int          `wire:"data.initialSlots.held"`
 	FromPrevChainInhibitorNode <-chan int
-	ToNext                     []chan<- int
+	ToNext0                    chan<- int
+	ToNext1                    chan<- int
 }
 
 func NewChainInhibitorNode(id int, fromPrev <-chan int) ChainInhibitorNode {
@@ -33,9 +34,13 @@ func (in *ChainInhibitorNode) Update(s *S.SafeWorker) {
 			s.Trace.Recv(in.Name, "FromPrevChainInhibitorNode", value)
 			fmt.Printf("%s: received %d (old=%d)\n", in.Name, value, in.HeldValue)
 			s.Trace.Fire(in.Name)
-			for _, ch := range in.ToNext {
-				S.Send(ch, in.HeldValue)
-				s.Trace.Send(in.Name, "ToNext", in.HeldValue)
+			if in.ToNext0 != nil {
+				S.Send(in.ToNext0, in.HeldValue)
+				s.Trace.Send(in.Name, "ToNext0", in.HeldValue)
+			}
+			if in.ToNext1 != nil {
+				S.Send(in.ToNext1, in.HeldValue)
+				s.Trace.Send(in.Name, "ToNext1", in.HeldValue)
 			}
 			in.HeldValue = value
 		default:

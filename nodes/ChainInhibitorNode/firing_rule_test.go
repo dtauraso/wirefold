@@ -36,7 +36,8 @@ func TestFireOnReceive(t *testing.T) {
 		Name:                       "ci",
 		HeldValue:                  99,
 		FromPrevChainInhibitorNode: fromPrev,
-		ToNext:                     []chan<- int{out0, out1},
+		ToNext0:                    out0,
+		ToNext1:                    out1,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

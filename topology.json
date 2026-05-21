@@ -62,14 +62,14 @@
       ],
       "outputs": [
         {
-          "name": "ToNext",
-          "kind": "inhibit-in",
-          "side": "top",
-          "slot": 1
+          "name": "ToNext0",
+          "kind": "chain",
+          "side": "right",
+          "slot": 0
         },
         {
-          "name": "ToNext",
-          "kind": "chain",
+          "name": "ToNext1",
+          "kind": "inhibit-in",
           "side": "right",
           "slot": 2
         }
@@ -93,13 +93,13 @@
       ],
       "outputs": [
         {
-          "name": "ToNext",
+          "name": "ToNext0",
           "kind": "inhibit-in",
           "side": "top",
-          "slot": 1
+          "slot": 0
         },
         {
-          "name": "ToNext",
+          "name": "ToNext1",
           "kind": "chain",
           "side": "bottom",
           "slot": 2
@@ -177,7 +177,7 @@
     {
       "id": "i0ToI1",
       "source": "i0",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext0",
       "target": "i1",
       "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
@@ -189,7 +189,7 @@
     {
       "id": "i0ToInhibitRight0",
       "source": "i0",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext1",
       "target": "inhibitRight0",
       "targetHandle": "FromLeft",
       "kind": "inhibit-in",
@@ -202,7 +202,7 @@
     {
       "id": "i1ToInhibitRight0",
       "source": "i1",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext0",
       "target": "inhibitRight0",
       "targetHandle": "FromRight",
       "kind": "inhibit-in",
@@ -214,7 +214,7 @@
     {
       "id": "i1ToReadGate1",
       "source": "i1",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext1",
       "target": "readGate1",
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
@@ -240,6 +240,12 @@
     }
   ],
   "view": {
+    "camera": {
+      "x": 83.85057257552869,
+      "y": -322.2169225578915,
+      "zoom": 1.1470637621457274
+    },
+    "folds": [],
     "nodes": {
       "in08": {
         "x": 27.895407566498463,
@@ -252,8 +258,8 @@
         "sublabel": "AND"
       },
       "i0": {
-        "x": 439.49482856788796,
-        "y": 297.01020890976224
+        "x": 407.18001115301024,
+        "y": 265.81389716671526
       },
       "i1": {
         "x": 631.1902441966623,
@@ -270,12 +276,6 @@
         "y": 370,
         "sublabel": "Bootstrap"
       }
-    },
-    "camera": {
-      "x": 83.85057257552869,
-      "y": -322.2169225578915,
-      "zoom": 1.1470637621457274
-    },
-    "folds": []
+    }
   }
 }
