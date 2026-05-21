@@ -2,13 +2,14 @@
 // Mirrors spec-to-flow.ts field-by-field. Position/sublabel/foldId/dimmed/state
 // are viewer-only and are NOT written into the spec. edgeData and nodeData are
 // carried verbatim so simulator-relevant fields survive the round-trip.
-// currentSpec provides passthrough for top-level fields (timing, cycleAnchor,
-// legend, runtime) that the adapter never carries.
+// currentSpec provides passthrough for top-level metadata fields via TOPOLOGY_META_FIELDS
+// (passThrough: true entries). notes is rebuilt from RF note nodes instead.
 
 import type { Edge as RFEdge, Node as RFNode } from "reactflow";
 import type { Spec, Node as SpecNode, Edge as SpecEdge, Note } from "../../../schema";
 import type { NodeData, EdgeData } from "../types";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
+import { TOPOLOGY_META_FIELDS } from "../../../schema/meta-field-defs";
 
 export function flowToSpec(
   rfNodes: RFNode[],
@@ -82,13 +83,22 @@ export function flowToSpec(
     edges.push(edge);
   }
 
-  return {
+  const result: Spec = {
     nodes,
     edges,
-    ...(notes.length > 0 ? { notes } : currentSpec.notes && currentSpec.notes.length > 0 ? { notes: currentSpec.notes } : {}),
-    ...(currentSpec.timing !== undefined ? { timing: currentSpec.timing } : {}),
-    ...(currentSpec.cycleAnchor !== undefined ? { cycleAnchor: currentSpec.cycleAnchor } : {}),
-    ...(currentSpec.legend !== undefined ? { legend: currentSpec.legend } : {}),
-    ...(currentSpec.runtime !== undefined ? { runtime: currentSpec.runtime } : {}),
+    ...(notes.length > 0
+      ? { notes }
+      : currentSpec.notes && currentSpec.notes.length > 0
+        ? { notes: currentSpec.notes }
+        : {}),
   };
+
+  // Spread passThrough metadata fields from currentSpec verbatim.
+  for (const key of Object.keys(TOPOLOGY_META_FIELDS) as (keyof typeof TOPOLOGY_META_FIELDS)[]) {
+    if (!TOPOLOGY_META_FIELDS[key].passThrough) continue;
+    const v = (currentSpec as Record<string, unknown>)[key];
+    if (v !== undefined) (result as Record<string, unknown>)[key] = v;
+  }
+
+  return result;
 }
