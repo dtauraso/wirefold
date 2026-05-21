@@ -22,13 +22,13 @@ export function GenericNode({ type, data }: NodeProps<GenericNodeData>) {
   const targets = def.targets ?? [];
   const sources = def.sources ?? [];
   const container: CSSProperties = {
-    background: "#ffffff",
-    border: "1px solid #888",
+    background: def.bg,
+    border: `1px solid ${def.border}`,
     borderRadius: 4,
     padding: "4px 8px",
     minWidth: def.minWidth ?? 70,
     fontSize: 11,
-    color: "#1a1a1a",
+    color: def.text,
     boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined,
   };
   return (
