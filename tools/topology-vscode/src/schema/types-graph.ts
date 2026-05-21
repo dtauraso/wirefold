@@ -1,5 +1,4 @@
-// Graph + spec types: Node, Edge, NodeSpec, SeedEvent, NodeTypeDef,
-// LegendRow, Note, and the Spec wrapper.
+// Graph + spec types: Node, Edge, NodeSpec, NodeTypeDef, Note, and the Spec wrapper.
 
 import type {
   EdgeKind,
@@ -47,36 +46,12 @@ export type Edge = WireProps & {
   data?: unknown;
 };
 
-export type LegendRow = { kind: EdgeKind; name: string; desc: string };
 export type Note = { x: number; y: number; width?: number; height?: number; text: string };
-
-export type SeedEvent = {
-  nodeId: string;
-  outPort: string;
-  value: StateValue;
-  // Optional ignition tick. Defaults to 0.
-  atTick?: number;
-};
 
 export type Spec = {
   nodes: Node[];
   edges: Edge[];
-  timing?: {
-    duration?: string;
-    // Initial events that ignite the simulation. Phase 5.5 replaced
-    // the SVG-era `steps[]` master script with this. Legacy `steps`
-    // fields in older topology.json files are silently dropped at
-    // parse time.
-    seed?: SeedEvent[];
-  };
-  // Cycle counter source. If set, increments each time the named
-  // node fires. If unset, falls back to (ii-a) quiescent-input.
-  cycleAnchor?: string;
-  legend?: LegendRow[];
   notes?: Note[];
-  // Substrate selector. Default (undefined) = callback substrate.
-  // "ticked" opts into the Phase 1 ticked substrate (Shape A only for now).
-  runtime?: "ticked";
 };
 
 export type NodeTypeDef = {

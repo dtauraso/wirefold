@@ -7,9 +7,8 @@ import { flowToSpec } from "./rf/adapter/flow-to-spec";
 
 const status = document.getElementById("status")!;
 
-// Top-level spec metadata (timing, cycleAnchor, legend, runtime) that
-// flowToSpec passes through verbatim. Updated on each load so saves
-// preserve fields that aren't carried in RF node/edge data.
+// Top-level spec metadata that flowToSpec passes through verbatim.
+// Updated on each load so saves preserve fields that aren't carried in RF node/edge data.
 let _specMeta: Spec = { nodes: [], edges: [] };
 export function setSpecMeta(s: Spec) { _specMeta = s; };
 
