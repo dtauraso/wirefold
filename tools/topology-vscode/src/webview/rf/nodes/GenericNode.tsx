@@ -22,22 +22,21 @@ export function GenericNode({ type, data }: NodeProps<GenericNodeData>) {
   const targets = def.targets ?? [];
   const sources = def.sources ?? [];
   const container: CSSProperties = {
-    background: def.bg,
-    border: `1px solid ${def.border}`,
+    background: "#ffffff",
+    border: "1px solid #888",
     borderRadius: 4,
-    padding: "6px 10px",
+    padding: "4px 8px",
     minWidth: def.minWidth ?? 70,
-    fontFamily: "monospace",
     fontSize: 11,
-    color: def.text,
-    boxShadow: flashing ? `0 0 8px 2px ${def.border}` : undefined,
+    color: "#1a1a1a",
+    boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined,
   };
   return (
     <div style={container}>
       {targets.map((p, i) => (
         <Handle key={p.id} type="target" position={Position.Left} id={p.id} style={handleStyle(p.accent ?? def.accent, i, targets.length)} />
       ))}
-      <div style={{ fontWeight: 700, color: def.accent, textAlign: "center" }}>{data.label ?? def.defaultLabel}</div>
+      <div style={{ fontWeight: 500, textAlign: "center" }}>{data.label ?? def.defaultLabel}</div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
       {def.displays?.map((d) => renderDisplay(d, data))}
       {sources.map((p, i) => (
@@ -53,20 +52,20 @@ function handleStyle(bg: string, i: number, n: number): CSSProperties {
   return s;
 }
 
-const SUBLABEL: CSSProperties = { fontSize: 9, color: "#8b949e", textAlign: "center" };
+const SUBLABEL: CSSProperties = { fontSize: 9, color: "#666", textAlign: "center" };
 
 function renderDisplay(kind: DisplayKind, data: GenericNodeData): ReactNode {
   if (kind === "queue") {
     const q = data.initialQueue ?? [];
     const s = q.length > 0 ? q.map((v) => JSON.stringify(v)).join(", ") : "—";
-    return <div key="queue" style={{ fontSize: 10, color: "#8b949e", wordBreak: "break-all", maxWidth: 160 }} title="init queue">[{s}]</div>;
+    return <div key="queue" style={{ fontSize: 10, color: "#444", fontFamily: "monospace", wordBreak: "break-all", maxWidth: 160, textAlign: "center" }} title="init queue">[{s}]</div>;
   }
   if (kind === "repeat") {
-    return data.repeat ? <div key="repeat" style={{ fontSize: 9, color: "#58a6ff", marginTop: 2 }}>↺ repeat</div> : null;
+    return data.repeat ? <div key="repeat" style={{ fontSize: 9, color: "#666", marginTop: 2, textAlign: "center" }}>↺ repeat</div> : null;
   }
   if (kind === "held") {
     const h = data.nodeData?.held;
-    return h !== undefined ? <div key="held" style={{ fontSize: 9, color: "#8b949e", textAlign: "center", marginTop: 2 }}>held={JSON.stringify(h)}</div> : null;
+    return h !== undefined ? <div key="held" style={{ fontSize: 9, color: "#444", fontFamily: "monospace", textAlign: "center", marginTop: 2 }}>held={JSON.stringify(h)}</div> : null;
   }
   return null;
 }
