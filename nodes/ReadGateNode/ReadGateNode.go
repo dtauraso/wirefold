@@ -32,6 +32,7 @@ func (g *ReadGateNode) Update(s *S.SafeWorker) {
 				g.Value = v
 				g.HasValue = true
 				s.Trace.Recv(g.Name, "FromInput", v)
+				s.Trace.Slot(g.Name, "FromInput", "filled", v, true)
 			default:
 			}
 		}
@@ -41,6 +42,7 @@ func (g *ReadGateNode) Update(s *S.SafeWorker) {
 			case v := <-g.FromChainInhibitor:
 				g.HasChainInhibitor = true
 				s.Trace.Recv(g.Name, "FromChainInhibitor", v)
+				s.Trace.Slot(g.Name, "FromChainInhibitor", "filled", v, true)
 			default:
 			}
 		}
@@ -52,6 +54,8 @@ func (g *ReadGateNode) Update(s *S.SafeWorker) {
 			s.Trace.Send(g.Name, "ToChainInhibitor", g.Value)
 			g.HasValue = false
 			g.HasChainInhibitor = false
+			s.Trace.Slot(g.Name, "FromInput", "empty", 0, false)
+			s.Trace.Slot(g.Name, "FromChainInhibitor", "empty", 0, false)
 		}
 	}
 }

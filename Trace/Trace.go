@@ -31,17 +31,18 @@ const (
 	KindRecv = "recv"
 	KindFire = "fire"
 	KindSend = "send"
+	KindSlot = "slot"
 )
 
 type Event struct {
-	Step  int    `json:"step"`
-	Kind  string `json:"kind"`
-	Node  string `json:"node"`
-	Port  string `json:"port,omitempty"`  // recv: input port; send: output port
-	Edge  string `json:"edge,omitempty"`  // canonical send only; set by Resolve
-	Value int    `json:"value,omitempty"` // recv/send only; fire omits
-	// hasValue tracked but currently unused; reserved for distinguishing
-	// "value 0" from "no value" if a future event kind needs it.
+	Step      int    `json:"step"`
+	Kind      string `json:"kind"`
+	Node      string `json:"node"`
+	Port      string `json:"port,omitempty"`      // recv: input port; send: output port; slot: input port
+	Edge      string `json:"edge,omitempty"`      // canonical send only; set by Resolve
+	SlotPhase string `json:"slotPhase,omitempty"` // slot only: "filled" | "empty"
+	Value     int    `json:"value,omitempty"`     // recv/send/slot(filled) only; fire and slot(empty) omit
+	// hasValue distinguishes "value 0" from "no value" for slot and send/recv events.
 	hasValue bool
 }
 
@@ -119,6 +120,16 @@ func (t *Trace) Send(node, port string, value int) {
 		return
 	}
 	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true}
+}
+
+// Slot emits a slot event recording that an input port has filled or emptied.
+// When phase="filled", value is the held value. When phase="empty", hasValue
+// should be false and value is ignored (omitted from JSON output).
+func (t *Trace) Slot(nodeId, port, phase string, value int, hasValue bool) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindSlot, Node: nodeId, Port: port, SlotPhase: phase, Value: value, hasValue: hasValue}
 }
 
 // Close stops the drain goroutine. Call after every node's Update
@@ -227,9 +238,29 @@ func marshalEvent(e Event) ([]byte, error) {
 		Kind string `json:"kind"`
 		Node string `json:"node"`
 	}
+	type slotFilled struct {
+		Step   int    `json:"step"`
+		Kind   string `json:"kind"`
+		NodeId string `json:"nodeId"`
+		Port   string `json:"port"`
+		Phase  string `json:"phase"`
+		Value  int    `json:"value"`
+	}
+	type slotEmpty struct {
+		Step   int    `json:"step"`
+		Kind   string `json:"kind"`
+		NodeId string `json:"nodeId"`
+		Port   string `json:"port"`
+		Phase  string `json:"phase"`
+	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
+	case KindSlot:
+		if e.hasValue {
+			return json.Marshal(slotFilled{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase, Value: e.Value})
+		}
+		return json.Marshal(slotEmpty{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

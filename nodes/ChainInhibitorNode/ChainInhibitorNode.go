@@ -43,6 +43,7 @@ func (in *ChainInhibitorNode) Update(s *S.SafeWorker) {
 				s.Trace.Send(in.Name, "ToNext1", in.HeldValue)
 			}
 			in.HeldValue = value
+			s.Trace.Slot(in.Name, "FromPrevChainInhibitorNode", "filled", in.HeldValue, true)
 		default:
 		}
 	}
