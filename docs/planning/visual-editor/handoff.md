@@ -77,26 +77,15 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ## Next options
 
-1. **Trace replay (the `TransportControls` play button)** —
-   conceptually-grounded design from this session: TS nodes are inert
-   visual projections, so replay is just re-feeding buffered Go trace
-   events through the same pump on a TS-side clock. Build sketch:
-   (a) buffer events as pump receives them; (b) scheduler module walks
-   buffer at a clock; (c) wipe `lastFire`/`pulse` on every node/edge
-   for loop reset (no initial-state snapshot needed); (d) enable the
-   play button when run is terminal and buffer non-empty. No Go work.
-   Pacing question (preserve wall-clock gaps vs fixed cadence per
-   simStep) still open.
-2. **Optional guardrail** — add a lint/test that fails if any file
+1. **Optional guardrail** — add a lint/test that fails if any file
    outside `pump.ts` writes `lastFire` or `pulse`, pinning the
    substrate boundary mechanically. Speculative; only if friction
    appears.
-3. **Start the next thing on user prompt** — no pre-committed direction.
+2. **Start the next thing on user prompt** — no pre-committed direction.
 
 ## Parked follow-ups
 
-1. **Trace replay** (option 1 above) — paused mid-design before
-   pacing decision.
+None.
 
 ## Working-tree state
 
