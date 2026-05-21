@@ -11,8 +11,8 @@ handoff.md is exempt from the 100-LOC budget.
 
 ## State at handoff (2026-05-20, post collapse-representations merge)
 
-**Active branch:** `main` at `041bb7b`. No task in flight.
-`task/collapse-representations` merged ff and deleted (local + remote).
+**Active branch:** `task/navigation-tax-audit`.
+Branched from `main` at `041bb7b`. No task was in flight before this branch.
 
 ### What landed (4-step collapse)
 
@@ -68,9 +68,12 @@ Per-kind firing-rule unit tests at `nodes/<Kind>Node/firing_rule_test.go`.
   registered struct to build the port manifest. Non-channel fields populated
   via `wire:` struct tags.
 
-## Next options (priority order — pick on friction)
+## Next options
 
-No task is in flight. Pick the next option on friction.
+1. **Run the navigation-tax audit** — see
+   [navigation-tax.md](navigation-tax.md). Grep every kind/port string
+   call site and land the output table in that doc. No fixes until the
+   table exists.
 
 ## Parked follow-ups
 
