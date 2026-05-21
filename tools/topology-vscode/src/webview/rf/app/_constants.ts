@@ -1,4 +1,3 @@
-import type { EdgeKind } from "../../../schema";
 import { FoldNode } from "../FoldNode";
 import { NoteNode } from "../NoteNode";
 import { GenericNode } from "../nodes/GenericNode";
@@ -24,7 +23,5 @@ export const FIT_VIEW_PADDING = 0.2;
 export const FIT_VIEW_PADDING_WIDE = 0.4;
 export const FIT_VIEW_MAX_ZOOM = 1.2;
 
-export const EDGE_KIND_OPTIONS: EdgeKind[] = [
-  "chain", "signal", "release", "streak",
-  "pointer", "and-out", "edge-connection", "inhibit-in", "any",
-];
+// Re-export canonical list so call sites don't maintain a duplicate.
+export { EDGE_KINDS as EDGE_KIND_OPTIONS } from "../../../schema";

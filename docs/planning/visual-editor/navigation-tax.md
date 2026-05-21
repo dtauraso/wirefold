@@ -20,6 +20,7 @@ as keys without a central registry."
 | Add new animation kind | Low | Add entry to `animation-fields.ts`; write in `pump.ts`; read in one consumer |
 | Rename animation data field | Low | Rename key in `animation-fields.ts`; TypeScript compiler surfaces all consumers |
 | Add a topology meta field | Low | One entry in `meta-field-defs.ts` (parse fn + passThrough flag); parser and adapters iterate registry automatically |
+| Rename an edge kind | Low (2–3 files) | Was Medium (inline literals scattered across 6 files). Now: rename in `schema/types.ts` (`EdgeKind` union + `EDGE_KINDS` array); `schema/colors.ts` picks it up via `Record<EdgeKind,...>`; `node-types.ts` port defs and `_constants.ts` both consume typed references, so tsc flags any missed sites. |
 
 ## Audit results
 
@@ -67,6 +68,14 @@ Collapsed `schema/node-types.ts` and `rf/nodes/node-defs.ts` into one generated 
 - Extended `tools/gen-node-defs` to emit those fields plus `RUNTIME_IMPLEMENTED_KINDS` into `node-defs.ts`.
 - `node-types.ts` now imports generated entries from `node-defs.ts`; only static non-generated kinds (Generic, DetectorLatch, PatternAnd) remain hand-written there.
 - Port handle names for generated kinds now have a single source: SPEC.md.
+
+## Fix applied (edge-kind scatter, 2026-05-20)
+
+`EDGE_KIND_OPTIONS` in `_constants.ts` was a duplicate of `EDGE_KINDS` in `schema/types.ts`.
+Replaced it with a re-export: `export { EDGE_KINDS as EDGE_KIND_OPTIONS } from "../../../schema"`.
+`EdgeContextMenu.tsx` continues to import via `_constants` unchanged.
+Files touched: 1 (`_constants.ts`). Post-change, an edge-kind rename requires editing `schema/types.ts`
+(union + array) and `schema/colors.ts` (Record key) — 2 files, with tsc catching any missed call sites.
 
 ## Remaining
 
