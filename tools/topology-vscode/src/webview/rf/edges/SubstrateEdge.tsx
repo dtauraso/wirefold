@@ -9,6 +9,7 @@ import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "reac
 import { KIND_COLORS } from "../../../schema";
 import type { EdgeKind } from "../../../schema/types";
 import type { EdgeData } from "../types";
+import { ANIMATION_FIELDS } from "../animation-fields";
 
 const PULSE_DURATION_MS = 600;
 
@@ -40,7 +41,7 @@ export function SubstrateEdge({
   const lastPulseStep = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    const pulse = data?.pulse;
+    const pulse = data?.[ANIMATION_FIELDS.pulse.name];
     if (!pulse) return;
     if (pulse.simStep === lastPulseStep.current) return;
     console.log(`[edge] pulse start id=${id} step=${pulse.simStep} value=${pulse.value}`);
@@ -60,7 +61,7 @@ export function SubstrateEdge({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [data?.pulse]);
+  }, [data?.[ANIMATION_FIELDS.pulse.name]]);
 
   // Compute circle position along the SVG path.
   let circleX: number | undefined;

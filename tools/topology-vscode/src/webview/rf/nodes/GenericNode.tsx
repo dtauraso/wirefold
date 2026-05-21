@@ -4,7 +4,7 @@
 
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { CSSProperties, ReactNode } from "react";
-import { useFireFlash } from "./use-fire-flash";
+import { useFireFlash, LAST_FIRE_FIELD } from "./use-fire-flash";
 import { NODE_DEFS, type DisplayKind, type NodeDef } from "./node-defs";
 
 interface GenericNodeData {
@@ -17,7 +17,7 @@ interface GenericNodeData {
 
 export function GenericNode({ type, data }: NodeProps<GenericNodeData>) {
   const def = NODE_DEFS[type];
-  const flashing = useFireFlash(data.lastFire);
+  const flashing = useFireFlash(data[LAST_FIRE_FIELD]);
   if (!def) return <div style={{ padding: 4, color: "#c62828", fontFamily: "monospace" }}>unknown kind: {type}</div>;
   const targets = def.targets ?? [];
   const sources = def.sources ?? [];

@@ -3,6 +3,10 @@
 // No substrate logic — pure visual affordance driven by data.
 
 import { useEffect, useRef, useState } from "react";
+import { ANIMATION_FIELDS } from "../animation-fields";
+
+/** The field name for the lastFire animation field (from registry). */
+export const LAST_FIRE_FIELD = ANIMATION_FIELDS.lastFire.name;
 
 const FLASH_MS = 400;
 
