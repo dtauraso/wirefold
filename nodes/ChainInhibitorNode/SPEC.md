@@ -39,7 +39,7 @@ HeldValue is the previously-held value. All ToNext receivers get the old value. 
 | fill | #fff3e0 |
 | stroke | #e65100 |
 | width | 90 |
-| height | 60 |
+| height | 90 |
 
 ## Runtime status
 
