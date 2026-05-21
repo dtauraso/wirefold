@@ -8,6 +8,8 @@ import { Handle, Position, type NodeProps, useStore, useReactFlow } from "reactf
 import { shallow } from "zustand/shallow";
 import type { CSSProperties, ReactNode, PointerEvent } from "react";
 import { useRef, useState, useCallback } from "react";
+import React from "react";
+import type { SlotMap } from "../../../messages";
 import { useFireFlash, LAST_FIRE_FIELD } from "./use-fire-flash";
 import { NODE_DEFS, type DisplayKind, type NodeDef } from "./node-defs";
 import type { NodeData } from "../types";
@@ -18,6 +20,25 @@ import { type Side, type ActiveDrag, SLOT_PCT, computeSnapPoints, nearestSnap, r
 
 const SIDE_POS: Record<Side, Position> = { left: Position.Left, right: Position.Right, top: Position.Top, bottom: Position.Bottom };
 const SUBLABEL: CSSProperties = { fontSize: 9, color: "#666", textAlign: "center" };
+
+function badgeStyle(side: Side, pct: number): CSSProperties {
+  const iv = side === "left" || side === "right";
+  const offset = side === "left" ? { left: 12 } : side === "right" ? { right: 12 } : {};
+  return {
+    position: "absolute",
+    ...(iv ? { top: `${pct}%`, transform: "translateY(-50%)" } : { left: `${pct}%`, transform: "translateX(-50%)" }),
+    ...offset,
+    background: "#1a237e",
+    color: "#fff",
+    fontFamily: "monospace",
+    fontSize: 9,
+    padding: "1px 3px",
+    borderRadius: 3,
+    pointerEvents: "none",
+    zIndex: 10,
+    whiteSpace: "nowrap",
+  } as CSSProperties;
+}
 
 function portStyle(side: Side, pct: number, color: string): CSSProperties {
   const iv = side === "left" || side === "right";
@@ -88,7 +109,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
   const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, minHeight: def.height ?? 40, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
   return (
     <div ref={nodeElRef} style={container}>
-      {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown) : renderDefHandles(def)}
+      {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown, (data as NodeData & { slots?: SlotMap }).slots) : renderDefHandles(def)}
       {renderSnapDots(drag)}
       <div style={{ fontWeight: 500, textAlign: "center" }}>{data.label ?? def.defaultLabel}</div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
@@ -100,6 +121,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
 function renderPortHandles(
   inputs: Port[], outputs: Port[], def: NodeDef, drag: ActiveDrag | null,
   onPointerDown: (e: PointerEvent<HTMLDivElement>, name: string, side: Side, slot: 0|1|2) => void,
+  slots?: SlotMap,
 ) {
   const buckets: Record<Side, { port: Port; isInput: boolean }[]> = { left: [], right: [], top: [], bottom: [] };
   for (const p of inputs)  buckets[(p.side as Side) ?? "left"].push({ port: p, isInput: true });
@@ -112,7 +134,18 @@ function renderPortHandles(
       const curSide = (p.side as Side|undefined) ?? (isInput ? "left" : "right");
       const curSlot: 0|1|2 = p.slot ?? pctToSlot(pct);
       const color = (KIND_COLORS as Record<string, string>)[p.kind] ?? def.accent ?? "#888";
-      return <Handle key={`${side}-${p.name}`} id={p.name} type={isInput ? "target" : "source"} position={SIDE_POS[side]} style={{ ...portStyle(side, pct, color), opacity: drag?.portName === p.name ? 0.4 : 1 }} onPointerDown={(e) => onPointerDown(e, p.name, curSide, curSlot)} />;
+      const slotEntry = slots?.[p.name];
+      const showBadge = isInput && slotEntry?.phase === "filled";
+      return (
+        <React.Fragment key={`${side}-${p.name}`}>
+          <Handle id={p.name} type={isInput ? "target" : "source"} position={SIDE_POS[side]} style={{ ...portStyle(side, pct, color), opacity: drag?.portName === p.name ? 0.4 : 1 }} onPointerDown={(e) => onPointerDown(e, p.name, curSide, curSlot)} />
+          {showBadge && (
+            <div style={badgeStyle(side, pct)}>
+              {slotEntry.value}
+            </div>
+          )}
+        </React.Fragment>
+      );
     });
   });
 }
