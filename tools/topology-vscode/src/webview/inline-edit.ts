@@ -1,20 +1,10 @@
-// Single source of truth for in-place contenteditable editors on rendered
-// node labels. rename.ts and sublabel.ts duplicated Range/Selection setup,
-// keydown commit/cancel, blur commit, and the active-element guard; both
-// now call `beginInlineEdit` with their commit policy.
-//
-// The trigger remains imperative (double-click handler in app.tsx hands us
-// the existing label element to edit in place); we don't replace the label
-// with a floating React input because rendering inside a react-flow node's
-// inner DOM avoids a positioning round-trip and keeps the edited label
-// visually identical to the rendered one.
+// In-place contenteditable editor for node sublabels.
+// Uses the existing label element directly so the edited text is visually
+// identical to the rendered label without a positioning round-trip.
 
-import { scheduleSave, scheduleViewSave } from "./save";
-import { applyRename } from "./state/ops/rename";
-import { rfSetNodes, rfSetEdges, rfGetNodes, rfGetEdges } from "./rf/rf-imperative";
-import { flowToSpec } from "./rf/adapter/flow-to-spec";
+import { scheduleViewSave } from "./save";
+import { rfSetNodes, rfGetNodes } from "./rf/rf-imperative";
 import { pushSnapshot } from "./rf/history";
-import { viewerState } from "./rf/viewer-state";
 
 type RerenderFn = () => void;
 
@@ -79,40 +69,6 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
     else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
   });
   el.addEventListener("blur", () => finish(true), { once: true });
-}
-
-export function beginRenameNodeId(oldId: string, labelEl: HTMLElement | null) {
-  beginInlineEdit(labelEl, {
-    initial: oldId,
-    activeClass: "rename-active",
-    onCommit: (next) => {
-      if (!next || next === oldId) return ""; // silent cancel — no alert
-      // Validate against a throwaway clone so a rejected rename leaves both
-      // surfaces (and both undo stacks) untouched.
-      const probeSpec = flowToSpec(rfGetNodes(), rfGetEdges(), { nodes: [], edges: [] });
-      const probeErr = applyRename(
-        structuredClone(probeSpec),
-        structuredClone(viewerState),
-        oldId,
-        next,
-      );
-      if (probeErr) return `rename rejected: ${probeErr}`;
-      // Snapshot BEFORE rename so undo restores the pre-rename state.
-      pushSnapshot();
-      // RF mutation: update node id and edge endpoints in RF state.
-      rfSetNodes((ns) => ns.map((n) => n.id === oldId ? { ...n, id: next, data: { ...n.data, label: next } } : n));
-      rfSetEdges((es) => es.map((e) => {
-        if (e.source !== oldId && e.target !== oldId) return e;
-        return {
-          ...e,
-          ...(e.source === oldId ? { source: next } : {}),
-          ...(e.target === oldId ? { target: next } : {}),
-        };
-      }));
-      scheduleSave();
-      return null;
-    },
-  });
 }
 
 export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {

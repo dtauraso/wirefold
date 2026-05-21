@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { Node as RFNode } from "reactflow";
 import { createFold } from "../../state/ops/fold";
-import { beginEditSublabel, beginRenameNodeId } from "../../inline-edit";
+import { beginEditSublabel } from "../../inline-edit";
 import { flushViewSave } from "../../save";
 import { mutateViewer, viewerState } from "../viewer-state";
 import { rfGetNodes } from "../rf-imperative";
@@ -25,24 +25,11 @@ export function useNodeContextHandlers(ctx: AppCtx) {
       }
       return;
     }
-    // Anchor the input over the node wrapper, not whichever inner element
-    // happened to receive the click (label / state-text divs are smaller
-    // than the node and would offset the input).
     const t = ev.target as HTMLElement | null;
     const sublabelEl = t?.closest<HTMLElement>(".node-sublabel");
     if (sublabelEl) {
       beginEditSublabel(node.id, sublabelEl);
-      return;
     }
-    const wrapper =
-      t?.closest<HTMLElement>(".react-flow__node") ??
-      (ev.currentTarget as HTMLElement);
-    // Prefer the label element so the input sits exactly where the id
-    // text is drawn — content can be vertically offset when a node also
-    // renders state-text lines. Fall back to the wrapper itself if the
-    // node component doesn't carry a .node-label child (RF-native nodes).
-    const label = wrapper.querySelector<HTMLElement>(".node-label") ?? wrapper;
-    beginRenameNodeId(node.id, label);
   }, [ctx]);
 
   const foldCurrentSelection = useCallback(() => {
