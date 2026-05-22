@@ -16,7 +16,7 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 type PacedWire struct {
 	mu        sync.Mutex
 	cond      *sync.Cond
-	slot      interface{}
+	slot      any
 	hasSend   bool // slot holds an undelivered value
 	delivered bool // visual has signaled delivery-complete
 }
@@ -30,7 +30,7 @@ func NewPacedWire() *PacedWire {
 
 // Send places value into the slot, then blocks until NotifyDelivered is called.
 // Returns ErrCanceled if ctx is done before either gate opens.
-func (pw *PacedWire) Send(ctx context.Context, value interface{}) error {
+func (pw *PacedWire) Send(ctx context.Context, value any) error {
 	// Wait for slot to be empty.
 	if err := pw.waitCond(ctx, func() bool { return !pw.hasSend }); err != nil {
 		return err
@@ -49,7 +49,7 @@ func (pw *PacedWire) Send(ctx context.Context, value interface{}) error {
 
 // Recv blocks until a value is available, then takes it and re-opens the send
 // gate. Returns the value and ErrCanceled if ctx is done.
-func (pw *PacedWire) Recv(ctx context.Context) (interface{}, error) {
+func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 	if err := pw.waitCond(ctx, func() bool { return pw.hasSend }); err != nil {
 		return nil, err
 	}
