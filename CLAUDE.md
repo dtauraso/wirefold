@@ -44,15 +44,6 @@ Active node kinds live under
 a static React Flow custom node — render only. The per-kind role is
 documented on the component itself rather than duplicated here.
 
-## SVG output
-
-If the task involves generating or modifying any SVG, read
-[docs/svg-style-guide.md](docs/svg-style-guide.md) before writing.
-It contains the binding conventions (semantic grouping, class-based
-styling, metadata block, renderer exceptions) and the house-style
-vocabulary. Do not write SVGs without reading it first. If the task
-does not touch SVGs, skip it.
-
 ## Memory
 
 Project memory lives in `memory/` at the repo root, one file per
@@ -63,7 +54,7 @@ memory (auto-memory naming convention: `project_*`, `feedback_*`,
 
 - **Trigger threshold:** any source file ≥ **200 LOC** must be refactored.
 - **Refactor target:** split until every resulting file is ≤ **100 LOC**.
-- Applies to TypeScript (`.ts`, `.tsx`) **and** [audits.md](docs/planning/visual-editor/audits.md) (CLAUDE.md-directed read that grows over time). Same rule applies to any files split off from it. Go, other Markdown, JSON, fixtures, and generated files are exempt. `session-log.md` and `handoff.md` are exempt: a fresh AI session must read handoff.md end-to-end, and splitting it into siblings (the prior approach) forced sequential reads of 3-4 files, which audit 19 found costs more than reading one slightly-larger doc. Keep handoff.md under ~200 LOC as a soft target via editorial pruning, not by splitting.
+- Applies to TypeScript (`.ts`, `.tsx`). Go, other Markdown, JSON, fixtures, and generated files are exempt. `session-log.md` and `handoff.md` are exempt: a fresh AI session must read handoff.md end-to-end, and splitting it into siblings (the prior approach) forced sequential reads of 3-4 files, which audit 19 found costs more than reading one slightly-larger doc. Keep handoff.md under ~200 LOC as a soft target via editorial pruning, not by splitting.
 - **Substance carve-out:** the Go substrate (`nodes/`, `Wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) is exempt from the TS LOC budget — Go files follow Go conventions. On the TS side, there is no blanket carve-out; all `.ts`/`.tsx` files are subject to the 200-LOC trigger.
 - The rule is **always active**, including mid-design and mid-debug. If you finish an unrelated change and notice the file is now over 200, refactor in a follow-up commit before moving on.
 - Run `npm run check:loc` (in `tools/topology-vscode/`) to list offenders. The script is the source of truth — keep this rule and the script in sync.
@@ -74,10 +65,10 @@ Bash output goes straight into the AI's context. Wide-fan commands
 return hundreds of irrelevant matches from `node_modules/`, planning
 docs, and the auto-memory dir, costing tokens and time.
 
-- **`grep`**: always scope. For code, use `--include="*.ts" --include="*.tsx"`. For repo-wide searches, exclude noise: `--exclude-dir={node_modules,out,.git,handoff-archive,memory,docs/planning/visual-editor/audits}`.
+- **`grep`**: always scope. For code, use `--include="*.ts" --include="*.tsx"`. For repo-wide searches, exclude noise: `--exclude-dir={node_modules,out,.git,handoff-archive,memory}`.
 - **`find`**: never run `find .` unguarded — `tools/topology-vscode/node_modules/` has multi-MB files. Use `-not -path "*/node_modules/*" -not -path "*/out/*" -not -path "*/.git/*"` or just scope to a specific subtree.
 - **`ls`**: prefer a specific subdir over wide listings; pipe to `head` if you only need a sample.
-- Planning docs (`docs/planning/visual-editor/`, `memory/`, `audits/`) contain domain vocabulary — grep them only when the question is about *planning state*, not when looking for code.
+- Planning docs (`docs/planning/visual-editor/`, `memory/`) contain domain vocabulary — grep them only when the question is about *planning state*, not when looking for code.
 
 ## Workflow
 
@@ -89,6 +80,25 @@ docs, and the auto-memory dir, costing tokens and time.
 - **Branch hygiene:** task-named branches (`task/<short-kebab-description>`) that merge to `main` quickly. Avoid long-lived feature branches like the v0 `visual-editor` pattern.
 - Channel names encode which two nodes are connected — preserve this convention.
 - **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the substrate that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise substrate was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
+
+## Planning docs are branch-local
+
+Planning docs (anything under `docs/planning/` except `handoff.md`, `session-log.md`,
+and `continuation-prompt-template.md`) are authored on the
+task branch where the work happens and do not ride the merge to main. Each new planning
+doc starts with frontmatter naming its originating branch:
+
+```
+---
+branch: task/<short-name>
+---
+```
+
+Before merging a task branch, run `tools/strip-branch-local-docs.sh task/<branch>` to
+remove all docs tagged with that branch. The script is the source of truth — no judgment
+per file required at merge time.
+
+This rule is forward-only. Existing untagged docs stay until individually judged.
 
 ## Session handoff
 
@@ -103,7 +113,7 @@ be a fresh model with no transcript.
 
 ## Posture (post-v0)
 
-Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Audit kinds (CI-backed, human-driven, AI-driven) live in [audits.md](docs/planning/visual-editor/audits.md) — read it before proposing audit-style work. Working mode: user drives the editor and narrates; assistant logs and makes changes.
+Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.
 
 ## Model routing
 

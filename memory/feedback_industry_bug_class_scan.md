@@ -77,7 +77,6 @@ These compose. Run them at the start of meaningful work, not as a ritual on ever
 ### Concurrency / channels / goroutines
 
 - **Check:** writer-without-reader deadlocks? channel overwrite without backpressure? unbounded fan-out?
-- **Fix:** check the wirefold latch+ack pattern in `../docs/latch-backpressure.md`.
 - **Niche aliases:** "lost wakeup" (kernel sync), "fast producer / slow consumer" (queueing), "unbounded buffer" (streaming systems), "head-of-line blocking" (network).
 
 ### Caching / memoization

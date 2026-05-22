@@ -24,13 +24,6 @@ State at handoff:
 branch and why, e.g. substrate choice, pattern adopted. Omit if the
 branch is a straightforward continuation.}}
 
-Contract registry status (docs/planning/visual-editor/contracts.md):
-  C1 {{✅ | ⏳}} {{one-line status}}
-  C2 {{✅ | ⏳}} {{one-line status}}
-  C3 {{✅ | ⏳}} {{one-line status}}
-  C4 {{✅ | ⏳}} {{one-line status}}
-  C5 {{✅ | ⏳}} {{one-line status}}
-
 Open branches (pushed, unmerged):
   {{branch}} — {{one-line state}}.
   {{branch}} — {{one-line state}}.
