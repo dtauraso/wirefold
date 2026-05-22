@@ -17,7 +17,7 @@ import { ANIMATION_FIELDS } from "../animation-fields";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { markerEndUrl } from "../MarkerDefs";
 
-const PULSE_DURATION_MS = 1800;
+const PULSE_SPEED_PX_PER_MS = 0.08;
 
 // Marker head lengths (refX of the filled markers in MarkerDefs).
 const MD_HEAD_PX = 8;
@@ -306,10 +306,12 @@ export function SubstrateEdge({
     postLog("phase4.edge", { layer: "edge", id, step: pulse.simStep, value: pulse.value });
     pulseValueRef.current = pulse.value;
 
+    const pathLength = pathRef.current?.getTotalLength() ?? null;
+    const duration = pathLength !== null ? pathLength / PULSE_SPEED_PX_PER_MS : 1000;
     const start = performance.now();
     let raf: number;
     const tick = (now: number) => {
-      const t = Math.min((now - start) / PULSE_DURATION_MS, 1);
+      const t = Math.min((now - start) / duration, 1);
       setPulseT(t);
       if (t < 1) {
         raf = requestAnimationFrame(tick);
