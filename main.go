@@ -63,7 +63,7 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 func main() {
 	tracePath := flag.String("trace", "", "if set, write a raw JSONL trace to this path on shutdown")
 	dur := flag.Duration("duration", 100*time.Millisecond, "how long to run before cancelling")
-	topologyPath := flag.String("topology", "topologies/line.json", "path to topology JSON spec")
+	topologyPath := flag.String("topology", "topology.json", "path to topology JSON spec")
 	flag.Parse()
 	RunTest(*dur, *tracePath, *topologyPath)
 }

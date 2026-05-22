@@ -43,7 +43,7 @@ type NodeData struct {
 type specEdge struct {
 	Label        string `json:"label"        wire:"prop,optional,tsType:string"`
 	ValueLabel   string `json:"valueLabel"   wire:"prop,optional,tsType:string"`
-	Lane         int    `json:"lane"         wire:"prop,optional,tsType:number"`
+	Lane         float64 `json:"lane"         wire:"prop,optional,tsType:number"`
 	ArrowStyle   string `json:"arrowStyle"   wire:"prop,optional,tsType:ArrowStyle"`
 	Concurrent   *bool  `json:"concurrent"   wire:"prop,optional,tsType:boolean"`
 	Kind         string `json:"kind"         wire:"prop,required,tsType:EdgeKind"`

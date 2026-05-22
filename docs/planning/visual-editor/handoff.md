@@ -22,41 +22,9 @@ Prior-session commits still on this branch (for history):
 
 - `8bbcc0c` — geometric arrow sizing: short final segment → small head.
 - `96fa96b` — fix snake/snake-v axis swap in `pickShape`.
-- `e0d1d47` — **ChainInhibitor enumerated outputs `ToNext0`/`ToNext1`** (replaces single `ToNext`). `topology.json` updated; `topologies/line.json` was NOT.
+- `e0d1d47` — **ChainInhibitor enumerated outputs `ToNext0`/`ToNext1`** (replaces single `ToNext`). `topology.json` updated.
 - `0ed5933` — ChainInhibitor height settled at 60.
 - (earlier commits on branch: see prior handoff entries)
-
-### Open bug — NEXT SESSION'S TASK
-
-**`topologies/line.json` still uses `sourceHandle: "ToNext"`.**
-
-The ChainInhibitor struct (commit `e0d1d47`) replaced the single `ToNext chan<- int`
-with `ToNext0 chan<- int` and `ToNext1 chan<- int`. The Go loader binds channels by
-field name; the old handle name `"ToNext"` finds nothing, channels stay nil,
-nil-guards in the firing rule skip sends silently, and the cascade dies after
-`i0` receives the seed.
-
-Symptom — `go run .` prints only:
-```
-readGate: value=0 → 0
-i0: received 0 (old=0)
-[ok]
-```
-then hangs.
-
-Fix: open `topologies/line.json`, find every ChainInhibitor edge with
-`"sourceHandle": "ToNext"`, and rename each to `"ToNext0"` or `"ToNext1"`
-to match the actual struct fields. Cross-reference the working-tree
-`topology.json` at repo root (already correct) to confirm the i0→target
-and i1→target mappings before editing.
-
-There are 4 edges to fix (confirmed via grep):
-- `i0ToI1` → `ToNext0` (or `ToNext1`, verify vs `topology.json`)
-- `i0ToInhibitRight0` → matching ToNext port
-- `i1ToInhibitRight0` → matching ToNext port
-- `i1ToReadGate` → matching ToNext port
-
-After the fix: `go run .` should cascade all the way through the line and exit.
 
 ### Already-wired plumbing (don't re-grep!)
 
@@ -111,7 +79,7 @@ AND-gate tree, lateral inhibition, slot-in-node backpressure, round-close steppi
 
 - TS: `npm run build` from `tools/topology-vscode/` (tsc alone doesn't refresh
   `out/webview.js`). Reload Window after extension-host changes.
-- Go: `go build ./...` from repo root. `go run .` runs `topologies/line.json`.
+- Go: `go build ./...` from repo root. `go run .` runs `topology.json` (repo root).
 
 ## Working-tree state
 

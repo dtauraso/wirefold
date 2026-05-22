@@ -11,7 +11,7 @@
       },
       "outputs": [
         {
-          "name": "ToOut",
+          "name": "ToReadGate",
           "kind": "chain",
           "side": "right",
           "slot": 1
@@ -135,7 +135,7 @@
       },
       "outputs": [
         {
-          "name": "ToOut",
+          "name": "ToReadGate",
           "kind": "chain",
           "side": "right",
           "slot": 1
@@ -147,7 +147,7 @@
     {
       "id": "in08ToReadGate1",
       "source": "in08",
-      "sourceHandle": "ToOut",
+      "sourceHandle": "ToReadGate",
       "target": "readGate1",
       "targetHandle": "FromInput",
       "kind": "chain",
@@ -222,7 +222,7 @@
     {
       "id": "bootstrapRgToReadGate1",
       "source": "bootstrap_rg",
-      "sourceHandle": "ToOut",
+      "sourceHandle": "ToReadGate",
       "target": "readGate1",
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
