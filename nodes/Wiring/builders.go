@@ -8,7 +8,12 @@
 //   - all other field types are ignored
 //
 // Non-channel fields can be populated from data.* JSON values via struct tags:
-//   - wire:"data.<key>"               reads NodeData.<Key> (e.g. data.init → Init []int)
+//   - wire:"data.<key>"               reads NodeData.<Key> where <Key> is <key>
+//                                     with its first letter uppercased. Any
+//                                     exported field on NodeData is reachable
+//                                     this way (e.g. data.init → NodeData.Init).
+//                                     Slice fields are copied, not aliased.
+//                                     Mismatched or absent fields are silently skipped.
 //   - wire:"data.initialSlots.<key>"  reads NodeData.InitialSlots[key] (int)
 
 package Wiring
@@ -16,6 +21,7 @@ package Wiring
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -168,11 +174,23 @@ func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr 
 			}
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
 			key := tag[len(dataPrefix):]
-			switch key {
-			case "init":
-				if data.Init != nil {
-					fv.Set(reflect.ValueOf(append([]int(nil), data.Init...)))
+			if len(key) == 0 {
+				continue
+			}
+			exportedKey := strings.ToUpper(key[:1]) + key[1:]
+			src := reflect.ValueOf(data).Elem().FieldByName(exportedKey)
+			if !src.IsValid() || src.Type() != fv.Type() {
+				continue
+			}
+			if src.Kind() == reflect.Slice {
+				if src.IsNil() {
+					continue
 				}
+				cp := reflect.MakeSlice(src.Type(), src.Len(), src.Len())
+				reflect.Copy(cp, src)
+				fv.Set(cp)
+			} else {
+				fv.Set(src)
 			}
 		}
 	}
