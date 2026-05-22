@@ -1,15 +1,5 @@
 # InputNode
 
-## Ports
-
-| Name | Direction | Element type | Cardinality | TSX handle | Side | EdgeKind |
-|------|-----------|--------------|-------------|------------|------|----------|
-| ToReadGate | out | int | single | ToReadGate | right | chain |
-
-## Firing rule
-
-On each Update call: iterate through `Init` slice by index. For each value, attempt a non-blocking send on ToReadGate. On success, advance the index. Exits when all values have been sent or context is cancelled.
-
 ## View
 
 | Field | Value |

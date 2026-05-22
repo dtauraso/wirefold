@@ -76,33 +76,6 @@ hard to reintroduce (per `memory/feedback_code_self_defends.md`).
 `go test ./...` green. `npm run build` green at last verified commit
 on main.
 
-## Architecture summary
-
-- **Editor (TS / React Flow):** `GenericNode.tsx` reads `node-defs.ts`
-  (generated from Go AST) and renders all kinds. `SubstrateEdge` for
-  wires. TS is inert w.r.t. simulation — no firing rules, slot-phase,
-  or backpressure logic.
-- **Runtime (Go):** `go generate ./...` writes `kinds_generated.go`.
-  Each kind's `init()` calls `Wiring.Register`. `Wiring.LoadTopology`
-  parses `topology.json` (including `"view"` key) and uses reflection
-  to build the port manifest. Non-channel fields populated via `wire:`
-  struct tags.
-- **Trace pipeline:** Go emits JSONL trace events (`fire` / `send`)
-  on stdout. Extension host reads lines, forwards as `trace-event`
-  postMessage. Webview routes to `pump.ts`, which writes `lastFire`
-  (nodes) or `pulse` (edges). `GenericNode` flashes; `SubstrateEdge`
-  animates pulse along the path.
-
-## Adding a kind (2 files)
-
-1. `nodes/<Kind>/<Kind>.go` — struct + firing rule + `init() {
-   Wiring.Register("Kind", func() any { return &Struct{} }) }`.
-   Struct tags: `wire:"data.<key>"` or
-   `wire:"data.initialSlots.<key>"`. `go generate ./...` picks up
-   automatically.
-2. `nodes/<Kind>/SPEC.md` — optional; only for non-default view
-   metadata (accent color, display name override).
-
 ## Surviving kinds (4)
 
 Input, ReadGate, ChainInhibitor, InhibitRightGate.

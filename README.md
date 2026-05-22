@@ -10,24 +10,6 @@ Two things in one repo:
 
 2. **A visual topology editor** (vscode webview, React Flow) where the diagram is the spec; a runtime loader reads `topology.json` directly at startup — no codegen step required.
 
-## Repo layout
-
-| Path | What it is |
-|------|------------|
-| `*Node/` (top-level Go packages) | Runtime primitives: inhibitors, latches, edge/XOR detectors, gates, partitions, distributors |
-| `nodes/Wiring/` | Topology assembly — how nodes connect at runtime |
-| `nodes/Wiring/loader.go` | Runtime topology loader (`topology.json` → live wiring, replaces codegen) |
-| `tools/topology-vscode/` | The visual editor (vscode webview, React Flow + Zustand) |
-| `topology.json` | The spec (canonical source of truth) |
-| `topology.view.json` | Viewer state sidecar (camera, folds, bookmarks — never affects the runtime loader) |
-| `diagrams/` | Reference SVGs hand-authored to a house style guide |
-| `docs/` | Design docs, planning, style guides |
-| `memory/` | Long-running project context for AI-assisted work |
-
-## Status
-
-The dataflow runtime is working. The editor is mid-build — the React Flow rendering substrate, codegen integration, spec/viewer split, saved views, and animated playback timeline are shipped. Phases for richer port-drag editing, fold geometry, trace replay, and visual parity with the reference SVGs are in flight. See [docs/planning/visual-editor-plan.md](docs/planning/visual-editor-plan.md) for the full plan and cap estimates.
-
 ## Running it
 
 ```bash
