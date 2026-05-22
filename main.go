@@ -18,12 +18,12 @@ import (
 // cancelling. If tracePath is non-empty, a Trace recorder is attached
 // and its raw event stream is dumped as JSON-lines to the path on
 // shutdown. Raw form keys send events by (node, port); the canonical
-// edge-keyed form requires a spec-aware Resolve step (out of scope for
+// edge-keyed form requires a spec-aware Resolve pass (out of scope for
 // the runtime entrypoint).
 func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	// Always stream trace events to stdout as JSONL in real time.
-	// Lines starting with {"step": are trace events; all other stdout
-	// output is build/log noise the extension routes to OutputChannel.
+	// Trace event lines are routed by the extension to the webview;
+	// all other stdout output is build/log noise sent to OutputChannel.
 	tr := T.NewWithSink(0, os.Stdout)
 
 	nodes, err := W.LoadTopology(topologyPath, tr)

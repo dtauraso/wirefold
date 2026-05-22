@@ -156,32 +156,11 @@ render-only: it animates trace events received from Go.
 ## Banned vocabulary (in substrate context)
 
 If you find yourself writing or reasoning with these words while
-working on the substrate, you have drifted:
+working on the substrate, you have drifted.
 
-- duration, ms, milliseconds, seconds — **except** the one allowed
-  duration: a wire's `in-flight` traversal time derived from geometry.
-- speed, px/ms, pixel rate — **except** the single global pulse speed
-  constant used to derive `in-flight` traversal time.
-- schedule, scheduler, deadline, timeout, setTimeout, setInterval
-- wall-clock, Date.now, performance.now (for substrate scheduling;
-  the renderer may still use `performance.now` for animation)
-- tick, round, step, round-close, tick-close, simultaneity layer,
-  lap, cohort, cohort index — any framing that treats activity as a
-  global sequence of rounds or counts edges across nodes. There is
-  no global round in this substrate; coordination is local via slot
-  phases.
-- "wire parks the value permanently" — the wire is transient; parked
-  state lives on the destination node's slot. (Exception: the
-  deferred-deliver safety net holds the value in-flight past animation
-  end only until the destination slot empties — delivery completes on
-  the next RAF step that finds the slot empty, then the wire returns
-  to `empty`. This is bounded transient deferral, not parking.)
-- `loaded(v)`, `taken(v)`, wire `ack`, wire `take` — replaced by slot
-  phases (`filled(v)`, `consumed`) on the destination node
-- inbox queue, edge queue, slot ledger, buffered values
-- central walker, setup pass, separate budget counter
+Banned-vocabulary check: `bash tools/check-substrate-vocabulary.sh` — substrate code must pass.
 
-These belong to the renderer, to legacy code being retired, or to
+These tokens belong to the renderer, to legacy code being retired, or to
 prior substrate models that have been superseded. None of them
 describe the current substrate.
 
