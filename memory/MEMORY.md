@@ -31,7 +31,7 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_tight_delegate_prompts.md](feedback_tight_delegate_prompts.md) — Agent prompts: ~15 lines (goal, paths, edits, verify, constraints); skip prose framing
 - [feedback_uniform_pulse_speed.md](feedback_uniform_pulse_speed.md) — Reject per-wire `speed` props; pulse speed is uniform across all wires.
 - [feedback_verify_subagent_commits.md](feedback_verify_subagent_commits.md) — Subagents have picked up unstaged working-tree edits and pushed them; spot-check `git log` deltas before pushing to main.
-- [feedback_edge_seed_required_for_rings.md](feedback_edge_seed_required_for_rings.md) — Ring topologies need `data.initialSlots: { <inputPort>: <value> }` on the receiving node to break startup deadlock; the Go loader pre-sends it before goroutines start.
+- [feedback_edge_seed_required_for_rings.md](feedback_edge_seed_required_for_rings.md) — Ring topologies need `data.edgeSeeds: { <inputPort>: <value> }` on the receiving node to break startup deadlock; the Go loader pre-sends it before goroutines start.
 - [feedback_audit_invariant_call_sites_first.md](feedback_audit_invariant_call_sites_first.md) — On a primitive-level throw, grep every call site of the violated op first; narrow investigations only after that audit is clean.
 - [feedback_discriminated_union_grep.md](feedback_discriminated_union_grep.md) — When adding a new pipeline variant, grep every existing variant name to find hidden allowlists/gates
 - [feedback_schema_parser_parity.md](feedback_schema_parser_parity.md) — When extending a spec type, update the schema parser's validator in the same commit, or saves produce unparseable JSON and the editor loads blank
