@@ -16,6 +16,7 @@ import {
   obj,
   oneOf,
   opt,
+  numMap,
   stateMap,
   str,
 } from "./parse-primitives";
@@ -72,8 +73,8 @@ export function parseNode(v: unknown, path: string): Node {
     data: parseNodeData(str(o.type, `${path}.type`), o.data, path),
     inputs: opt(o.inputs, (x) => parsePorts(x, `${path}.inputs`)),
     outputs: opt(o.outputs, (x) => parsePorts(x, `${path}.outputs`)),
-    state: opt(o.state, (x) => stateMap(x, `${path}.state`)),
-    edgeSeeds: opt(o.edgeSeeds, (x) => stateMap(x, `${path}.edgeSeeds`)),
+    state: opt(o.state, (x) => numMap(x, `${path}.state`)),
+    edgeSeeds: opt(o.edgeSeeds, (x) => numMap(x, `${path}.edgeSeeds`)),
   };
 }
 
