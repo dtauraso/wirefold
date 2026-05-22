@@ -90,6 +90,25 @@ docs, and the auto-memory dir, costing tokens and time.
 - Channel names encode which two nodes are connected — preserve this convention.
 - **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the substrate that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise substrate was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
 
+## Planning docs are branch-local
+
+Planning docs (anything under `docs/planning/` except `handoff.md`, `session-log.md`,
+`audits.md`, `contracts.md`, and `continuation-prompt-template.md`) are authored on the
+task branch where the work happens and do not ride the merge to main. Each new planning
+doc starts with frontmatter naming its originating branch:
+
+```
+---
+branch: task/<short-name>
+---
+```
+
+Before merging a task branch, run `tools/strip-branch-local-docs.sh task/<branch>` to
+remove all docs tagged with that branch. The script is the source of truth — no judgment
+per file required at merge time.
+
+This rule is forward-only. Existing untagged docs stay until individually judged.
+
 ## Session handoff
 
 Live state of the active task branch lives at
