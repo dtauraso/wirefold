@@ -130,7 +130,8 @@ export function specToFlow(
         // {init: [...]}, future node types may use it for other handler
         // config. flow-to-spec puts it back.
         nodeData: n.data,
-        initialSlots: n.initialSlots,
+        initState: n.state,
+        edgeSeeds: n.edgeSeeds,
         index: n.index,
         foldId: foldOf.get(n.id),
         dimmed: dimmed?.has(n.id) ?? false,

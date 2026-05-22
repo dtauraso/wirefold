@@ -21,7 +21,7 @@ func recv(t *testing.T, ch <-chan int) int {
 	}
 }
 
-// On receive, emit HeldValue to every ToNext entry, then store the new value.
+// On receive, emit Held to every ToNext entry, then store the new value.
 func TestFireOnReceive(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
@@ -31,7 +31,7 @@ func TestFireOnReceive(t *testing.T) {
 
 	node := &ChainInhibitorNode{
 		Fire:                       func() { tr.Fire("ci") },
-		HeldValue:                  99,
+		Held:                       99,
 		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),
 		ToNext: Wiring.OutMulti{
 			Wiring.NewOut(out0, "ci", "ToNext", tr),
@@ -56,7 +56,7 @@ func TestFireOnReceive(t *testing.T) {
 	if got1 != 99 {
 		t.Errorf("ToNext[1]: expected 99, got %d", got1)
 	}
-	if node.HeldValue != 7 {
-		t.Errorf("HeldValue after fire: expected 7, got %d", node.HeldValue)
+	if node.Held != 7 {
+		t.Errorf("Held after fire: expected 7, got %d", node.Held)
 	}
 }

@@ -8,7 +8,7 @@ import (
 
 type ChainInhibitorNode struct {
 	Fire                       func()
-	HeldValue                  int `wire:"data.initialSlots.held"`
+	Held                       int `wire:"data.state"`
 	FromPrevChainInhibitorNode *Wiring.In
 	ToNext                     Wiring.OutMulti
 }
@@ -24,9 +24,9 @@ func (in *ChainInhibitorNode) Update(ctx context.Context) {
 		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
 			in.Fire()
 			for _, out := range in.ToNext {
-				out.TrySend(in.HeldValue)
+				out.TrySend(in.Held)
 			}
-			in.HeldValue = value
+			in.Held = value
 		}
 	}
 }

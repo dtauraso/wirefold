@@ -4,7 +4,7 @@
 import { ParseError } from "./parse-primitives";
 
 export interface ChainInhibitorData {
-  initialSlots: {
+  state: {
     held: number;
   };
 }
@@ -21,7 +21,7 @@ export function parseNodeData(kind: string, data: unknown, path: string): unknow
     case "ChainInhibitor": {
       if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
       const d = data as Record<string, unknown>;
-    { const p = d["initialSlots"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.initialSlots: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.initialSlots.held: expected number"); }
+    { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.state.held: expected number"); }
       return data;
     }
     case "Input": {

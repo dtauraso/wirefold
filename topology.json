@@ -48,7 +48,7 @@
       "id": "i0",
       "type": "ChainInhibitor",
       "data": {
-        "initialSlots": {
+        "state": {
           "held": 0
         }
       },
@@ -79,7 +79,7 @@
       "id": "i1",
       "type": "ChainInhibitor",
       "data": {
-        "initialSlots": {
+        "state": {
           "held": 0
         }
       },

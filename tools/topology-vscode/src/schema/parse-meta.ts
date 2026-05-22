@@ -61,15 +61,15 @@ export function validatePorts(s: Spec): void {
     }
   }
   for (const n of s.nodes) {
-    if (!n.initialSlots) continue;
+    if (!n.edgeSeeds) continue;
     const def = NODE_TYPES[n.type];
     const inputs = n.inputs ?? def?.inputs;
     if (!inputs) continue;
     const inputNames = new Set(inputs.map((p) => p.name));
-    for (const key of Object.keys(n.initialSlots)) {
+    for (const key of Object.keys(n.edgeSeeds)) {
       if (!inputNames.has(key)) {
         issues.push(
-          `node ${n.id} (${n.type}): initialSlots key "${key}" does not match any declared input port`,
+          `node ${n.id} (${n.type}): edgeSeeds key "${key}" does not match any declared input port`,
         );
       }
     }

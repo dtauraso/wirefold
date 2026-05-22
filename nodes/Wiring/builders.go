@@ -8,13 +8,14 @@
 //   - all other field types are ignored
 //
 // Non-channel fields can be populated from data.* JSON values via struct tags:
-//   - wire:"data.<key>"               reads NodeData.<Key> where <Key> is <key>
-//                                     with its first letter uppercased. Any
-//                                     exported field on NodeData is reachable
-//                                     this way (e.g. data.init → NodeData.Init).
-//                                     Slice fields are copied, not aliased.
-//                                     Mismatched or absent fields are silently skipped.
-//   - wire:"data.initialSlots.<key>"  reads NodeData.InitialSlots[key] (int)
+//   - wire:"data.<key>"  reads NodeData.<Key> where <Key> is <key> with its
+//                        first letter uppercased. Any exported field on NodeData
+//                        is reachable this way (e.g. data.init → NodeData.Init).
+//                        Slice fields are copied, not aliased.
+//                        Mismatched or absent fields are silently skipped.
+//   - wire:"data.state"  reads NodeData.State[lowerFirst(fieldName)] (int).
+//                        The map key is the struct field name with its first
+//                        letter lowercased (e.g. field Held → key "held").
 
 package Wiring
 
@@ -151,10 +152,11 @@ func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr 
 		}
 	}
 
-	// Tag-driven data population: wire:"data.<key>" or wire:"data.initialSlots.<key>".
+	// Tag-driven data population: wire:"data.<key>" or wire:"data.state".
 	t := reflect.TypeOf(nodePtr).Elem()
 	for i := 0; i < t.NumField(); i++ {
-		tag := t.Field(i).Tag.Get("wire")
+		f := t.Field(i)
+		tag := f.Tag.Get("wire")
 		if tag == "" {
 			continue
 		}
@@ -166,10 +168,11 @@ func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr 
 			continue
 		}
 		const dataPrefix = "data."
-		const initSlotsPrefix = "data.initialSlots."
-		if len(tag) > len(initSlotsPrefix) && tag[:len(initSlotsPrefix)] == initSlotsPrefix {
-			key := tag[len(initSlotsPrefix):]
-			if val, ok := data.InitialSlots[key]; ok {
+		const stateTag = "data.state"
+		if tag == stateTag {
+			// key is field name with first letter lowercased
+			key := strings.ToLower(f.Name[:1]) + f.Name[1:]
+			if val, ok := data.State[key]; ok {
 				fv.Set(reflect.ValueOf(val))
 			}
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
