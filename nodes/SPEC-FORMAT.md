@@ -9,13 +9,6 @@ This document defines what goes in a SPEC and what each section means.
 ```markdown
 # <Kind>
 
-## Ports
-
-| Name | Direction | Element type | Cardinality | TSX handle | Side | Accent |
-|------|-----------|--------------|-------------|------------|------|--------|
-| FromA | in | int | single | FromA | left | |
-| ToOut | out | int | single | ToOut | right | |
-
 ## Loader-managed channels
 
 (Optional. Channels the loader creates internally — not wirable.)
@@ -63,16 +56,6 @@ state is updated.
 ```
 
 ## Column semantics
-
-### Ports table
-
-- **Name** — the Go struct field name. Authoritative.
-- **Direction** — `in` (recv-side, `<-chan`), `out` (send-side, `chan<-`).
-- **Element type** — what travels through the channel. Usually `int`. For meta-wires that carry channels (e.g., a transfer of a partition-end channel from one inhibitor to the next), write `chan int` — the wire is a `chan<- chan<- int` whose elements are channels carrying ints.
-- **Cardinality** — `single` (one `chan<- int` field), or `fan-out` (a `[]chan<- int` field that accepts multiple outgoing edges, all receiving the same value). `fan-in` is not supported on the substrate side; fan-in is modeled by separate input ports.
-- **TSX handle** — the handle id used on the React Flow node. Same as Name unless legacy code uses a different id. New kinds: always equal to Name.
-- **Side** — `top` | `right` | `bottom` | `left`. Where on the rendered node the handle sits.
-- **Accent** — optional hex color. When present, overrides the kind-level accent for this single handle. Leave blank to inherit.
 
 ### Loader-managed channels
 
@@ -126,19 +109,6 @@ The `## View` section is required for any kind that has a TSX render. It drives 
 - `defaultLabel` — optional default label string (falls back to `kind` if omitted).
 
 SPEC.md files without a `## View` section are skipped by the generator (treated as not-yet-migrated).
-
-### Port accent overrides
-
-To specify a per-port accent color that overrides the kind-level accent for a single handle, add an optional `Accent` column to the Ports table:
-
-```markdown
-| Name | Direction | Element type | Cardinality | TSX handle | Side | Accent |
-|------|-----------|--------------|-------------|------------|------|--------|
-| FromRelease | in | int | single | FromRelease | left | #80cbc4 |
-| ToNext | out | int | single | ToNext | right | |
-```
-
-The `Accent` column is optional at the table level; individual rows may leave the cell empty to inherit the kind accent.
 
 ## Banned content
 

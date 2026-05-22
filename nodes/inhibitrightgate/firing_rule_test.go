@@ -1,4 +1,4 @@
-package InhibitRightGateNode
+package inhibitrightgate
 
 import (
 	"context"
@@ -6,41 +6,26 @@ import (
 	"testing"
 	"time"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
+	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-func newWorker(ctx context.Context) *S.SafeWorker {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	return &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-}
-
-func recv(t *testing.T, ch <-chan int) int {
-	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for output")
-		return 0
-	}
-}
-
 func run(left, right int) (int, error) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromLeft := make(chan int, 1)
 	fromRight := make(chan int, 1)
 	toPassed := make(chan int, 1)
-	node := &InhibitRightGateNode{
-		Name:      "irg",
-		FromLeft:  fromLeft,
-		FromRight: fromRight,
-		ToPassed:  toPassed,
+	node := &Node{
+		Fire:      func() { tr.Fire("irg") },
+		FromLeft:  Wiring.NewIn(fromLeft, "irg", "FromLeft", tr),
+		FromRight: Wiring.NewIn(fromRight, "irg", "FromRight", tr),
+		ToPassed:  Wiring.NewOut(toPassed, "irg", "ToPassed", tr),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
-	sw := &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-	go node.Update(sw)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 	fromLeft <- left
 	fromRight <- right
 	select {

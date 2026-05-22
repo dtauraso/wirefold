@@ -54,7 +54,8 @@ export function flowToSpec(
     if (d.nodeData !== undefined) node.data = d.nodeData;
     if (d.inputs && d.inputs.length > 0) node.inputs = d.inputs;
     if (d.outputs && d.outputs.length > 0) node.outputs = d.outputs;
-    if (d.initialSlots !== undefined) node.initialSlots = d.initialSlots;
+    if (d.initState !== undefined) node.state = d.initState;
+    if (d.edgeSeeds !== undefined) node.edgeSeeds = d.edgeSeeds;
     nodes.push(node);
   }
 

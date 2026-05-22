@@ -52,6 +52,7 @@ export function performViewSave() {
   // disk. See task/view-load-race-guard.
   if (lastViewSyncedText === undefined) return;
   const text = serializeViewerState(viewerState);
+  if (text.trim() === "null") { return; }
   if (text === lastViewSyncedText) return;
   lastViewSyncedText = text;
   vscode.postMessage({ type: "view-save", text });

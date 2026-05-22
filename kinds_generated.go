@@ -3,8 +3,8 @@
 package main
 
 import (
-	_ "github.com/dtauraso/wirefold/nodes/ChainInhibitorNode"
-	_ "github.com/dtauraso/wirefold/nodes/InhibitRightGateNode"
-	_ "github.com/dtauraso/wirefold/nodes/InputNode"
-	_ "github.com/dtauraso/wirefold/nodes/ReadGateNode"
+	_ "github.com/dtauraso/wirefold/nodes/chaininhibitor"
+	_ "github.com/dtauraso/wirefold/nodes/inhibitrightgate"
+	_ "github.com/dtauraso/wirefold/nodes/input"
+	_ "github.com/dtauraso/wirefold/nodes/readgate"
 )

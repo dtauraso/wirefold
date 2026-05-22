@@ -9,30 +9,50 @@ export function RunButton() {
   const status = useRunStatusCtx();
   const mount = document.getElementById("run-mount");
   if (!mount) return null;
-  const running = status.state === "running";
-  const onRun = () => {
-    if (running) {
-      vscode.postMessage({ type: "run-cancel" });
+
+  const isRunning = status.state === "running";
+  const isPaused = status.state === "paused";
+  const isActive = isRunning || isPaused; // process is alive
+
+  const onPlayPause = () => {
+    if (isPaused) {
+      vscode.postMessage({ type: "resume" });
       return;
     }
-    // Commit any in-flight inline rename so the posted text reflects what
-    // the user sees on screen, then bundle the spec into the run message
-    // so the host writes topology.json synchronously before the runtime loader reads it.
+    if (isRunning) {
+      vscode.postMessage({ type: "pause" });
+      return;
+    }
+    // idle/stopped — start a new run
     flushActiveInlineEdit();
     const spec = flowToSpec(rfGetNodes(), rfGetEdges(), { nodes: [], edges: [] });
     const text = JSON.stringify(spec, null, 2) + "\n";
     vscode.postMessage({ type: "run", text });
   };
+
+  const onStop = () => {
+    vscode.postMessage({ type: "stop" });
+  };
+
   return createPortal(
     <>
       <button
         type="button"
         className="run-btn"
-        title={running ? "stop the running process" : "go run . in repo root"}
-        onClick={onRun}
+        title={isPaused ? "resume" : isRunning ? "pause" : "go run . in repo root"}
+        onClick={onPlayPause}
         disabled={false}
       >
-        {running ? "■ stop" : "▶ run"}
+        {isPaused ? "▶ resume" : isRunning ? "⏸ pause" : "▶ run"}
+      </button>
+      <button
+        type="button"
+        className="run-btn run-stop-btn"
+        title="stop the running process"
+        onClick={onStop}
+        disabled={!isActive}
+      >
+        ■ stop
       </button>
       <span className={statusClass(status)}>{statusText(status)}</span>
     </>,
@@ -42,6 +62,7 @@ export function RunButton() {
 
 function statusClass(s: ReturnType<typeof useRunStatusCtx>): string {
   if (s.state === "running") return "run-running";
+  if (s.state === "paused") return "run-running";
   if (s.state === "ok") return "run-ok";
   if (s.state === "cancelled") return "run-idle";
   if (s.state === "error") return "run-error";
@@ -50,6 +71,7 @@ function statusClass(s: ReturnType<typeof useRunStatusCtx>): string {
 
 function statusText(s: ReturnType<typeof useRunStatusCtx>): string {
   if (s.state === "running") return "running…";
+  if (s.state === "paused") return "paused";
   if (s.state === "ok") return "ok";
   if (s.state === "cancelled") return "cancelled";
   if (s.state === "error") return s.message;

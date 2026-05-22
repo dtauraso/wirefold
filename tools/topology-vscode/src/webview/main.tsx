@@ -40,7 +40,7 @@ window.addEventListener("message", (e) => {
   if (msg.type === "run-status") {
     setRunStatusImperative(msg.state === "error"
       ? { state: "error", message: msg.message ?? "" }
-      : { state: msg.state });
+      : { state: msg.state as "running" | "paused" | "ok" | "cancelled" });
   } else if (msg.type === "flush") {
     // Host requests immediate flush of any pending debounced saves (panel
     // becoming hidden / about to dispose).

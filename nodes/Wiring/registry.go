@@ -3,7 +3,7 @@
 
 package Wiring
 
-import S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+import T "github.com/dtauraso/wirefold/Trace"
 
 // kindEntry is one entry in the kind registry.
 type kindEntry struct {
@@ -26,8 +26,8 @@ func Register(kind string, newNode func() any) {
 	ports := reflectPorts(sample)
 	Registry[kind] = NodeBuilder{
 		Ports: ports,
-		Build: func(id int, name string, data *NodeData, pb PortBindings) (S.Node, error) {
-			return reflectBuild(id, name, data, pb, e)
+		Build: func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+			return reflectBuild(name, data, pb, e, tr)
 		},
 	}
 }

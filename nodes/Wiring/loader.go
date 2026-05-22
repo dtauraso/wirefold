@@ -6,10 +6,10 @@
 // Key behaviors (previously codegen, now runtime):
 //   - One chan int (buf 1) per edge; label is its identity.
 //   - Input nodes: input channel sized max(len(init),1), pre-loaded with init values.
-//   - ChainInhibitor: data.initialSlots["held"] → HeldValue.
+//   - ChainInhibitor: data.state["held"] → Held via wire:"data.state" tag.
 //   - Slice output ports (ToEdge): all outbound channels appended in spec order.
 //   - Output ports with no outbound edge: dead-end chan int (buf 1).
-//   - initialSlots entries mapped to input ports (not struct fields) prime the
+//   - data.edgeSeeds entries mapped to input ports (not struct fields) prime the
 //     inbound channel before the node goroutine starts.
 
 package Wiring
@@ -17,25 +17,24 @@ package Wiring
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // specNode mirrors the JSON node shape.
 type specNode struct {
-	ID           string         `json:"id"`
-	Type         string         `json:"type"`
-	Index        *int           `json:"index,omitempty"`
-	Data         *NodeData      `json:"data,omitempty"`
-	InitialSlots map[string]int `json:"initialSlots,omitempty"`
+	ID    string    `json:"id"`
+	Type  string    `json:"type"`
+	Index *int      `json:"index,omitempty"`
+	Data  *NodeData `json:"data,omitempty"`
 }
 
 // NodeData mirrors the JSON data block on a node.
 type NodeData struct {
-	Init         []int          `json:"init,omitempty"`
-	InitialSlots map[string]int `json:"initialSlots,omitempty"`
+	Init      []int          `json:"init,omitempty"`
+	State     map[string]int `json:"state,omitempty"`     // field-seeding: struct fields via wire:"data.state"
+	EdgeSeeds map[string]int `json:"edgeSeeds,omitempty"` // edge-seeding: pre-send into named input channels
 }
 
 // specEdge mirrors the JSON edge shape.
@@ -43,7 +42,7 @@ type NodeData struct {
 type specEdge struct {
 	Label        string `json:"label"        wire:"prop,optional,tsType:string"`
 	ValueLabel   string `json:"valueLabel"   wire:"prop,optional,tsType:string"`
-	Lane         int    `json:"lane"         wire:"prop,optional,tsType:number"`
+	MidpointOffset float64 `json:"midpointOffset" wire:"prop,optional,tsType:number"`
 	ArrowStyle   string `json:"arrowStyle"   wire:"prop,optional,tsType:ArrowStyle"`
 	Concurrent   *bool  `json:"concurrent"   wire:"prop,optional,tsType:boolean"`
 	Kind         string `json:"kind"         wire:"prop,required,tsType:EdgeKind"`
@@ -59,19 +58,17 @@ type topoSpec struct {
 	Edges []specEdge `json:"edges"`
 }
 
-// nodeInitSlots merges top-level and data.initialSlots; top-level wins.
-func nodeInitSlots(n specNode) map[string]int {
-	m := map[string]int{}
-	if n.Data != nil {
-		maps.Copy(m, n.Data.InitialSlots)
+// nodeEdgeSeeds returns the data.edgeSeeds map for a node (or empty if absent).
+func nodeEdgeSeeds(n specNode) map[string]int {
+	if n.Data != nil && n.Data.EdgeSeeds != nil {
+		return n.Data.EdgeSeeds
 	}
-	maps.Copy(m, n.InitialSlots)
-	return m
+	return map[string]int{}
 }
 
-// LoadTopology reads the JSON file at jsonPath and constructs a []S.Node
+// LoadTopology reads the JSON file at jsonPath and constructs a []Node
 // equivalent to the generated Wire() function.
-func LoadTopology(jsonPath string) ([]S.Node, error) {
+func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -82,6 +79,7 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 	}
 
 	// Validate all kinds up front.
+	// also caught by TS parser; defense-in-depth
 	for _, n := range spec.Nodes {
 		if _, ok := Registry[n.Type]; !ok {
 			return nil, fmt.Errorf("LoadTopology: node %q: unknown type %q", n.ID, n.Type)
@@ -91,15 +89,64 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 	// Allocate one chan int (buf 1) per edge; keyed by label.
 	edgeChan := map[string]chan int{}
 	for _, e := range spec.Edges {
+		// also caught by TS parser; defense-in-depth
 		if e.Label == "" {
 			return nil, fmt.Errorf("LoadTopology: edge %q→%q has empty label", e.Source, e.Target)
 		}
 		edgeChan[e.Label] = make(chan int, 1)
 	}
 
+	// Build id→type map and per-kind port lookup sets (needed for normalization and validation).
+	nodeType := map[string]string{}
+	for _, n := range spec.Nodes {
+		nodeType[n.ID] = n.Type
+	}
+	kindInPorts := map[string]map[string]bool{}
+	kindOutPorts := map[string]map[string]bool{}
+	kindOutMultiPorts := map[string]map[string]bool{}
+	for kind, bind := range Registry {
+		ins := map[string]bool{}
+		outs := map[string]bool{}
+		outMultis := map[string]bool{}
+		for _, p := range bind.Ports {
+			switch p.Dir {
+			case PortIn:
+				ins[p.Name] = true
+			case PortOut:
+				outs[p.Name] = true
+			case PortOutMulti:
+				outMultis[p.Name] = true
+				outs[p.Name] = true
+			}
+		}
+		kindInPorts[kind] = ins
+		kindOutPorts[kind] = outs
+		kindOutMultiPorts[kind] = outMultis
+	}
+
+	// outMultiBaseName strips a trailing digit suffix from a sourceHandle when
+	// the base name is an OutMulti port on the given kind.
+	// e.g. "ToNext0" → "ToNext" for a kind that has OutMulti port "ToNext".
+	// Returns the canonical port name and whether it resolved.
+	outMultiBaseName := func(handle, kind string) (string, bool) {
+		if len(handle) == 0 {
+			return handle, false
+		}
+		last := handle[len(handle)-1]
+		if last < '0' || last > '9' {
+			return handle, false
+		}
+		base := handle[:len(handle)-1]
+		if kindOutMultiPorts[kind][base] {
+			return base, true
+		}
+		return handle, false
+	}
+
 	// Build inbound and outbound edge maps.
 	// inbound:  target node id → port name → edge label
 	// outbound: source node id → port name → []edge label
+	// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
 	for _, e := range spec.Edges {
@@ -110,13 +157,46 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 			outbound[e.Source] = map[string][]string{}
 		}
 		inbound[e.Target][e.TargetHandle] = e.Label
-		outbound[e.Source][e.SourceHandle] = append(outbound[e.Source][e.SourceHandle], e.Label)
+		srcKey := e.SourceHandle
+		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source]); isMulti {
+			srcKey = base
+		}
+		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
 	}
 
-	// Prime channels for initialSlots entries that map to input ports.
+	// Validation 1: port handle names must match declared ports on the node kind.
+	for _, e := range spec.Edges {
+		srcKind := nodeType[e.Source]
+		srcHandle := e.SourceHandle
+		if base, isMulti := outMultiBaseName(srcHandle, srcKind); isMulti {
+			srcHandle = base
+		}
+		if !kindOutPorts[srcKind][srcHandle] {
+			return nil, fmt.Errorf("LoadTopology: edge %q: sourceHandle %q is not an output port on kind %q", e.Label, e.SourceHandle, srcKind)
+		}
+		tgtKind := nodeType[e.Target]
+		if !kindInPorts[tgtKind][e.TargetHandle] {
+			return nil, fmt.Errorf("LoadTopology: edge %q: targetHandle %q is not an input port on kind %q", e.Label, e.TargetHandle, tgtKind)
+		}
+	}
+
+	// Validation 2: required input ports must have an inbound edge.
 	for _, n := range spec.Nodes {
-		slots := nodeInitSlots(n)
-		if len(slots) == 0 {
+		bind := Registry[n.Type]
+		for _, port := range bind.Ports {
+			if !port.Required {
+				continue
+			}
+			if _, ok := inbound[n.ID][port.Name]; !ok {
+				return nil, fmt.Errorf("LoadTopology: node %q: required input port %q has no inbound edge", n.ID, port.Name)
+			}
+		}
+	}
+
+	// Prime channels for edgeSeeds entries that map to input ports.
+	for _, n := range spec.Nodes {
+		seeds := nodeEdgeSeeds(n)
+		if len(seeds) == 0 {
 			continue
 		}
 		bind := Registry[n.Type]
@@ -124,20 +204,20 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 			if port.Dir != PortIn {
 				continue
 			}
-			slotVal, hasSlot := slots[port.Name]
-			if !hasSlot {
+			seedVal, hasSeed := seeds[port.Name]
+			if !hasSeed {
 				continue
 			}
 			label, ok := inbound[n.ID][port.Name]
 			if !ok {
-				return nil, fmt.Errorf("LoadTopology: node %q initialSlots: port %q has no incoming edge", n.ID, port.Name)
+				return nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: port %q has no incoming edge", n.ID, port.Name)
 			}
-			edgeChan[label] <- slotVal
+			edgeChan[label] <- seedVal
 		}
 	}
 
 	// Build each node.
-	nodes := make([]S.Node, 0, len(spec.Nodes))
+	nodes := make([]Node, 0, len(spec.Nodes))
 	for _, n := range spec.Nodes {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
@@ -167,12 +247,7 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 			}
 		}
 
-		idx := 0
-		if n.Index != nil {
-			idx = *n.Index
-		}
-
-		nd, err := bind.Build(idx, n.ID, n.Data, pb)
+		nd, err := bind.Build(n.ID, n.Data, pb, tr)
 		if err != nil {
 			return nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

@@ -1,4 +1,4 @@
-package ReadGateNode
+package readgate
 
 import (
 	"context"
@@ -6,14 +6,9 @@ import (
 	"testing"
 	"time"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
+	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
-
-func newWorker(ctx context.Context) *S.SafeWorker {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	return &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-}
 
 func recv(t *testing.T, ch <-chan int) int {
 	t.Helper()
@@ -29,26 +24,29 @@ func recv(t *testing.T, ch <-chan int) int {
 // FiresWhenBothPresent: value from FromInput is forwarded on ToChainInhibitor
 // when FromChainInhibitor also arrives; inhibitor value is ignored.
 func TestFiresWhenBothPresent(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromInput := make(chan int, 1)
 	fromCI := make(chan int, 1)
 	toCI := make(chan int, 1)
 
-	node := &ReadGateNode{
-		Name:               "rg",
-		FromInput:          fromInput,
-		FromChainInhibitor: fromCI,
-		ToChainInhibitor:   toCI,
+	node := &Node{
+		Fire:               func() { tr.Fire("rg") },
+		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
+		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),
+		ToChainInhibitor:   Wiring.NewOut(toCI, "rg", "ToChainInhibitor", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := newWorker(ctx)
-	go node.Update(sw)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	fromInput <- 42
 	fromCI <- 1
 	got := recv(t, toCI)
 	cancel()
-	sw.Wg.Wait()
+	wg.Wait()
 
 	if got != 42 {
 		t.Fatalf("expected 42, got %d", got)
@@ -57,25 +55,28 @@ func TestFiresWhenBothPresent(t *testing.T) {
 
 // NoFireWithoutInhibitor: value alone must not emit.
 func TestNoFireWithoutInhibitor(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromInput := make(chan int, 1)
 	fromCI := make(chan int, 1)
 	toCI := make(chan int, 1)
 
-	node := &ReadGateNode{
-		Name:               "rg",
-		FromInput:          fromInput,
-		FromChainInhibitor: fromCI,
-		ToChainInhibitor:   toCI,
+	node := &Node{
+		Fire:               func() { tr.Fire("rg") },
+		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
+		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),
+		ToChainInhibitor:   Wiring.NewOut(toCI, "rg", "ToChainInhibitor", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := newWorker(ctx)
-	go node.Update(sw)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	fromInput <- 7
 	time.Sleep(20 * time.Millisecond)
 	cancel()
-	sw.Wg.Wait()
+	wg.Wait()
 
 	select {
 	case v := <-toCI:

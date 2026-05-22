@@ -34,8 +34,9 @@ type port struct {
 
 // dataField represents a wire:"data.*" tagged struct field.
 type dataField struct {
-	wireTag string // full tag value after wire:"data." prefix, e.g. "init" or "initialSlots.held"
-	goType  string // Go type string, e.g. "[]int", "int", "string"
+	wireTag   string // full tag value after wire:"data." prefix, e.g. "init" or "state"
+	goType    string // Go type string, e.g. "[]int", "int", "string"
+	fieldName string // Go struct field name (used for wire:"data.state" key derivation)
 }
 
 // viewDef holds the SPEC.md ## View section fields.
@@ -256,22 +257,28 @@ func parsePortsFromAST(pkgDir string) ([]port, error) {
 	return ports, nil
 }
 
-// chanDirection returns ("in", true) for <-chan T, ("out", true) for chan<- T,
-// and ("", false) for bidirectional chan T or non-channel types.
+// chanDirection returns ("in", true) for *Wiring.In, ("out", true) for *Wiring.Out
+// or Wiring.OutMulti, and ("", false) for anything else.
 func chanDirection(expr ast.Expr) (string, bool) {
-	switch t := expr.(type) {
-	case *ast.ChanType:
-		switch t.Dir {
-		case ast.RECV:
-			return "in", true
-		case ast.SEND:
+	// *Wiring.In or *Wiring.Out — pointer to selector
+	if star, ok := expr.(*ast.StarExpr); ok {
+		if sel, ok := star.X.(*ast.SelectorExpr); ok {
+			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" {
+				switch sel.Sel.Name {
+				case "In":
+					return "in", true
+				case "Out":
+					return "out", true
+				}
+			}
+		}
+		return "", false
+	}
+	// Wiring.OutMulti — bare selector (type alias, no pointer)
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" && sel.Sel.Name == "OutMulti" {
 			return "out", true
 		}
-		// ast.BOTH — bidirectional, not a wirable port.
-		return "", false
-	case *ast.ArrayType:
-		// Fan-out: []chan<- T
-		return chanDirection(t.Elt)
 	}
 	return "", false
 }
@@ -733,7 +740,11 @@ func parseDataFieldsFromAST(pkgDir string) ([]dataField, error) {
 					if !ok {
 						return nil, fmt.Errorf("field %v: cannot stringify type", field.Names)
 					}
-					fields = append(fields, dataField{wireTag: wireKey, goType: typeStr})
+					var fname string
+					if len(field.Names) > 0 {
+						fname = field.Names[0].Name
+					}
+					fields = append(fields, dataField{wireTag: wireKey, goType: typeStr, fieldName: fname})
 				}
 			}
 		}
@@ -742,7 +753,7 @@ func parseDataFieldsFromAST(pkgDir string) ([]dataField, error) {
 }
 
 // tsValidatorBody returns a TS snippet that validates one dataField path.
-// path is the dot-separated path after "data.", e.g. "init" or "initialSlots.held".
+// path is the dot-separated path after "data.", e.g. "init" or "state".
 func tsValidatorSnippets(fields []dataField) []string {
 	var lines []string
 	for _, f := range fields {
@@ -750,6 +761,12 @@ func tsValidatorSnippets(fields []dataField) []string {
 		if err != nil {
 			// This will fail at go build time if unsupported.
 			lines = append(lines, fmt.Sprintf(`    // ERROR: %v`, err))
+			continue
+		}
+		// wire:"data.state" — key is lowerFirst(fieldName), value is always int.
+		if f.wireTag == "state" {
+			key := strings.ToLower(f.fieldName[:1]) + f.fieldName[1:]
+			lines = append(lines, fmt.Sprintf(`    { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["%s"] !== "number") throw new ParseError(path+".data.state.%s: expected number"); }`, key, key))
 			continue
 		}
 		parts := strings.Split(f.wireTag, ".")
@@ -771,11 +788,6 @@ func tsValidatorSnippets(fields []dataField) []string {
 			case "Record<string, number>":
 				lines = append(lines, fmt.Sprintf(`    if (typeof d["%s"] !== "object" || d["%s"] === null || Array.isArray(d["%s"])) throw new ParseError(path+".data.%s: expected object");`, key, key, key, key))
 			}
-		case 2:
-			// e.g. initialSlots.held → d.initialSlots.held
-			parent := parts[0]
-			child := parts[1]
-			lines = append(lines, fmt.Sprintf(`    { const p = d["%s"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.%s: expected object"); if (typeof p["%s"] !== "number") throw new ParseError(path+".data.%s.%s: expected number"); }`, parent, parent, child, parent, child))
 		}
 	}
 	return lines
@@ -811,11 +823,20 @@ func writeNodeDataTypes(outPath string, kinds []kindEntry) error {
 		}
 		for _, key := range topOrder {
 			fields := topKeys[key]
-			if len(fields) == 1 && !strings.Contains(fields[0].wireTag, ".") {
+			if key == "state" {
+				// wire:"data.state" — each field maps to state[lowerFirst(fieldName)].
+				fmt.Fprintf(w, "  %s: {\n", key)
+				for _, f := range fields {
+					childKey := strings.ToLower(f.fieldName[:1]) + f.fieldName[1:]
+					tsType, _ := goTypeToTS(f.goType)
+					fmt.Fprintf(w, "    %s: %s;\n", childKey, tsType)
+				}
+				fmt.Fprintln(w, "  };")
+			} else if len(fields) == 1 && !strings.Contains(fields[0].wireTag, ".") {
 				tsType, _ := goTypeToTS(fields[0].goType)
 				fmt.Fprintf(w, "  %s: %s;\n", key, tsType)
 			} else {
-				// Nested object (e.g. initialSlots).
+				// Nested object (dot-separated path).
 				fmt.Fprintf(w, "  %s: {\n", key)
 				for _, f := range fields {
 					parts := strings.SplitN(f.wireTag, ".", 2)

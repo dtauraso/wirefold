@@ -2,22 +2,29 @@
 //
 // Adding a kind: register one entry in kindRegistry. The struct fields
 // determine the port manifest automatically:
-//   - <-chan int  → PortIn
-//   - chan<- int  → PortOut
-//   - []chan<- int → PortOutMulti
+//   - *Wiring.In       → PortIn
+//   - *Wiring.Out      → PortOut
+//   - Wiring.OutMulti  → PortOutMulti
 //   - all other field types are ignored
 //
 // Non-channel fields can be populated from data.* JSON values via struct tags:
-//   - wire:"data.<key>"               reads NodeData.<Key> (e.g. data.init → Init []int)
-//   - wire:"data.initialSlots.<key>"  reads NodeData.InitialSlots[key] (int)
+//   - wire:"data.<key>"  reads NodeData.<Key> where <Key> is <key> with its
+//                        first letter uppercased. Any exported field on NodeData
+//                        is reachable this way (e.g. data.init → NodeData.Init).
+//                        Slice fields are copied, not aliased.
+//                        Mismatched or absent fields are silently skipped.
+//   - wire:"data.state"  reads NodeData.State[lowerFirst(fieldName)] (int).
+//                        The map key is the struct field name with its first
+//                        letter lowercased (e.g. field Held → key "held").
 
 package Wiring
 
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // PortDir describes which direction a port flows.
@@ -31,8 +38,9 @@ const (
 
 // PortSpec describes one port on a node kind.
 type PortSpec struct {
-	Name string
-	Dir  PortDir
+	Name     string
+	Dir      PortDir
+	Required bool // true for PortIn ports; output ports are never required
 }
 
 // PortBindings holds resolved channels keyed by port name.
@@ -81,9 +89,10 @@ func (pb *PortBindings) OutSlice(name string) []chan<- int {
 }
 
 var (
-	tChanIntRecv = reflect.TypeFor[<-chan int]()
-	tChanIntSend = reflect.TypeFor[chan<- int]()
-	tSliceSend   = reflect.TypeFor[[]chan<- int]()
+	tInPtr    = reflect.TypeFor[*In]()
+	tOutPtr   = reflect.TypeFor[*Out]()
+	tOutMulti = reflect.TypeFor[OutMulti]()
+	tFireFunc = reflect.TypeFor[func()]()
 )
 
 // reflectPorts walks the exported fields of the struct pointed to by sample
@@ -95,11 +104,11 @@ func reflectPorts(sample any) []PortSpec {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		switch f.Type {
-		case tChanIntRecv:
-			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn})
-		case tChanIntSend:
+		case tInPtr:
+			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn, Required: true})
+		case tOutPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOut})
-		case tSliceSend:
+		case tOutMulti:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOutMulti})
 		}
 	}
@@ -107,20 +116,20 @@ func reflectPorts(sample any) []PortSpec {
 }
 
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
-// then returns it cast to S.Node.
-func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEntry) (S.Node, error) {
+// then returns it cast to Node.
+func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
-	// Set Id and Name if the struct has them.
-	if f := v.FieldByName("Id"); f.IsValid() && f.CanSet() {
-		f.SetInt(int64(id))
-	}
-	if f := v.FieldByName("Name"); f.IsValid() && f.CanSet() {
-		f.SetString(name)
+	// Inject Fire closure if the struct has a `Fire func()` field.
+	// The closure captures the node name so the node calls n.Fire()
+	// with no arguments and cannot mis-name itself in the trace.
+	if f := v.FieldByName("Fire"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
+		nodeName := name
+		f.Set(reflect.ValueOf(func() { tr.Fire(nodeName) }))
 	}
 
-	// Wire channel fields.
+	// Wire port fields with traced wrappers.
 	ports := reflectPorts(nodePtr)
 	for _, port := range ports {
 		f := v.FieldByName(port.Name)
@@ -130,20 +139,25 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 		switch port.Dir {
 		case PortIn:
 			ch := pb.In(port.Name)
-			f.Set(reflect.ValueOf(ch))
+			f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: port.Name, trace: tr}))
 		case PortOut:
 			ch := pb.Out(port.Name)
-			f.Set(reflect.ValueOf(ch))
+			f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: port.Name, trace: tr}))
 		case PortOutMulti:
-			sl := pb.OutSlice(port.Name)
-			f.Set(reflect.ValueOf(sl))
+			chs := pb.OutSlice(port.Name)
+			outs := make(OutMulti, len(chs))
+			for i, c := range chs {
+				outs[i] = &Out{ch: c, node: name, port: port.Name, trace: tr}
+			}
+			f.Set(reflect.ValueOf(outs))
 		}
 	}
 
-	// Tag-driven data population: wire:"data.<key>" or wire:"data.initialSlots.<key>".
+	// Tag-driven data population: wire:"data.<key>" or wire:"data.state".
 	t := reflect.TypeOf(nodePtr).Elem()
 	for i := 0; i < t.NumField(); i++ {
-		tag := t.Field(i).Tag.Get("wire")
+		f := t.Field(i)
+		tag := f.Tag.Get("wire")
 		if tag == "" {
 			continue
 		}
@@ -155,26 +169,44 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 			continue
 		}
 		const dataPrefix = "data."
-		const initSlotsPrefix = "data.initialSlots."
-		if len(tag) > len(initSlotsPrefix) && tag[:len(initSlotsPrefix)] == initSlotsPrefix {
-			key := tag[len(initSlotsPrefix):]
-			if val, ok := data.InitialSlots[key]; ok {
-				fv.Set(reflect.ValueOf(val))
+		const stateTag = "data.state"
+		if tag == stateTag {
+			// key is field name with first letter lowercased
+			key := strings.ToLower(f.Name[:1]) + f.Name[1:]
+			if data.State == nil {
+				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
 			}
+			val, ok := data.State[key]
+			if !ok {
+				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
+			}
+			fv.Set(reflect.ValueOf(val))
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
 			key := tag[len(dataPrefix):]
-			switch key {
-			case "init":
-				if data.Init != nil {
-					fv.Set(reflect.ValueOf(append([]int(nil), data.Init...)))
+			if len(key) == 0 {
+				continue
+			}
+			exportedKey := strings.ToUpper(key[:1]) + key[1:]
+			src := reflect.ValueOf(data).Elem().FieldByName(exportedKey)
+			if !src.IsValid() || src.Type() != fv.Type() {
+				continue
+			}
+			if src.Kind() == reflect.Slice {
+				if src.IsNil() {
+					continue
 				}
+				cp := reflect.MakeSlice(src.Type(), src.Len(), src.Len())
+				reflect.Copy(cp, src)
+				fv.Set(cp)
+			} else {
+				fv.Set(src)
 			}
 		}
 	}
 
-	node, ok := nodePtr.(S.Node)
+	node, ok := nodePtr.(Node)
 	if !ok {
-		return nil, fmt.Errorf("reflectBuild: %T does not implement S.Node", nodePtr)
+		return nil, fmt.Errorf("reflectBuild: %T does not implement Node", nodePtr)
 	}
 	return node, nil
 }
@@ -183,7 +215,7 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
 type NodeBuilder struct {
 	Ports []PortSpec
-	Build func(id int, name string, data *NodeData, pb PortBindings) (S.Node, error)
+	Build func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -196,8 +228,8 @@ func init() {
 		ports := reflectPorts(sample)
 		Registry[kind] = NodeBuilder{
 			Ports: ports,
-			Build: func(id int, name string, data *NodeData, pb PortBindings) (S.Node, error) {
-				return reflectBuild(id, name, data, pb, e)
+			Build: func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+				return reflectBuild(name, data, pb, e, tr)
 			},
 		}
 	}

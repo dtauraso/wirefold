@@ -27,11 +27,6 @@ network; the network itself is the diagram+Go runtime.
 
 ## What things are
 
-- **Node.** Owns its firing rule, its output references (each = a
-  pointer to a destination node + that destination's slot id), and a
-  map of input slots indexed by slot id. Slots are the node's own
-  state. A node's identity *is* its firing rule (e.g. ReadGate's
-  identity is AND-of-3-slots; XOR's is inequality).
 - **Slot.** A per-input cell on a destination node. Phase:
   `empty | filled(v) | consumed`. Phase is ordinal: filled happened,
   then consumed happened. No "during."
@@ -39,27 +34,6 @@ network; the network itself is the diagram+Go runtime.
   `empty | in-flight(v) | empty`. The wire carries a value from
   source to the destination's slot and then becomes `empty` again.
   The wire owns no parked state, no ack, no take.
-
-## Who does what
-
-- **Source node loads** by calling `dest.fill(slotId, v)` through its
-  output reference. The wire enters `in-flight(v)` and animates. On
-  animation completion the wire writes
-  `dest.slot[slotId] = filled(v)` and returns to `empty`.
-- **Source node observes readiness** by reading
-  `dest.slotPhase(slotId)` directly through its output reference. It
-  is free to load again when that returns `empty`. No wires involved
-  in this observation. Backpressure lives in the slot's empty/filled
-  state, observed by the source.
-- **Destination node consumes** its own slot by transitioning
-  `filled(v) → consumed → empty`. Consumption is local: the firing
-  rule reads the node's own slot map, decides to fire, transitions
-  its slots, and calls `fill` on its own outputs.
-- **Auto vs. manually-gated destinations.** An auto destination's
-  firing rule fires the moment its precondition holds (e.g. all
-  slots filled). A manually-gated destination's firing rule
-  additionally waits for a user click. The slot stays `filled(v)`
-  until the rule fires.
 
 ## Geometry and time
 
@@ -89,16 +63,6 @@ globally-aligned rounds is drift; re-derive from local rules over
 slots and wires.
 
 ## Firing rule and slot writes
-
-A wire's destination is `(node N, slot s_k)`, established at
-construction time. On arrival, the wire carries its bound slot id;
-the destination node sees the id and writes `slots[s_k] := filled(v)`
-and re-evaluates its rule over the slot map — see
-[diagrams/firing-rule-and-slot-ownership.svg](diagrams/firing-rule-and-slot-ownership.svg).
-One incoming wire per slot id — two wires cannot share a slot, so
-"right slot ↔ right wire" is deterministic by construction.
-Mis-wiring is caught at parseSpec, not at runtime. No subscription
-layer; slots are passive state.
 
 **Firing is precondition-gated, observed at RAF cadence.** A node
 fires only when its precondition holds — firing is not an arbitrary
@@ -156,32 +120,11 @@ render-only: it animates trace events received from Go.
 ## Banned vocabulary (in substrate context)
 
 If you find yourself writing or reasoning with these words while
-working on the substrate, you have drifted:
+working on the substrate, you have drifted.
 
-- duration, ms, milliseconds, seconds — **except** the one allowed
-  duration: a wire's `in-flight` traversal time derived from geometry.
-- speed, px/ms, pixel rate — **except** the single global pulse speed
-  constant used to derive `in-flight` traversal time.
-- schedule, scheduler, deadline, timeout, setTimeout, setInterval
-- wall-clock, Date.now, performance.now (for substrate scheduling;
-  the renderer may still use `performance.now` for animation)
-- tick, round, step, round-close, tick-close, simultaneity layer,
-  lap, cohort, cohort index — any framing that treats activity as a
-  global sequence of rounds or counts edges across nodes. There is
-  no global round in this substrate; coordination is local via slot
-  phases.
-- "wire parks the value permanently" — the wire is transient; parked
-  state lives on the destination node's slot. (Exception: the
-  deferred-deliver safety net holds the value in-flight past animation
-  end only until the destination slot empties — delivery completes on
-  the next RAF step that finds the slot empty, then the wire returns
-  to `empty`. This is bounded transient deferral, not parking.)
-- `loaded(v)`, `taken(v)`, wire `ack`, wire `take` — replaced by slot
-  phases (`filled(v)`, `consumed`) on the destination node
-- inbox queue, edge queue, slot ledger, buffered values
-- central walker, setup pass, separate budget counter
+Banned-vocabulary check: `bash tools/check-substrate-vocabulary.sh` — substrate code must pass.
 
-These belong to the renderer, to legacy code being retired, or to
+These tokens belong to the renderer, to legacy code being retired, or to
 prior substrate models that have been superseded. None of them
 describe the current substrate.
 

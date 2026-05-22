@@ -3,13 +3,31 @@
 // Each call to handleTraceEvent reads the current RF state, patches the
 // relevant node/edge data field, and writes it back via rfSetNodes/rfSetEdges.
 
-import type { TraceEvent } from "../../messages";
+import type { TraceEvent, SlotEvent, SlotMap } from "../../messages";
 import { rfSetNodes, rfSetEdges, rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
 import { ANIMATION_FIELDS } from "./animation-fields";
 
 export function handleTraceEvent(event: TraceEvent): void {
-  const { step, kind, node, port, value } = event;
+  const { step, kind } = event;
+  if (kind === "slot") {
+    const { nodeId, port, phase, value } = event as SlotEvent;
+    rfSetNodes((nodes) =>
+      nodes.map((n) => {
+        if (n.id !== nodeId) return n;
+        const prev: SlotMap = (n.data as { slots?: SlotMap }).slots ?? {};
+        const next: SlotMap = {
+          ...prev,
+          [port]: phase === "filled"
+            ? { phase: "filled", value: value ?? 0 }
+            : { phase: "empty" },
+        };
+        return { ...n, data: { ...n.data, slots: next } };
+      }),
+    );
+    return;
+  }
+  const { node, port, value } = event as Extract<TraceEvent, { kind: "recv" | "fire" | "send" }>;
   switch (kind) {
     case "recv":
       return;

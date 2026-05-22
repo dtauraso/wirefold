@@ -1,4 +1,4 @@
-package InputNode
+package input
 
 import (
 	"context"
@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
+	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 func recv(t *testing.T, ch <-chan int) int {
@@ -22,19 +23,20 @@ func recv(t *testing.T, ch <-chan int) int {
 
 // Emits each Init value in order on ToReadGate then exits.
 func TestEmitsInitValues(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	toRG := make(chan int, 3)
-	node := &InputNode{
-		Name:       "in",
+	node := &Node{
+		Fire:       func() { tr.Fire("in") },
 		Init:       []int{10, 20, 30},
-		ToReadGate: toRG,
+		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
-	sw := &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-	go node.Update(sw)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	// Update exits after all Init values are sent, so wg.Wait suffices.
 	done := make(chan struct{})
@@ -56,15 +58,20 @@ func TestEmitsInitValues(t *testing.T) {
 
 // Empty Init: Update returns without emitting anything.
 func TestEmptyInit(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	toRG := make(chan int, 1)
-	node := &InputNode{Name: "in", Init: nil, ToReadGate: toRG}
+	node := &Node{
+		Fire:       func() { tr.Fire("in") },
+		Init:       nil,
+		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
-	sw := &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-	go node.Update(sw)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()

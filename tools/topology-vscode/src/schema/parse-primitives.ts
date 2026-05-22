@@ -55,3 +55,13 @@ export const stateMap = (
   for (const k of Object.keys(o)) out[k] = stateValue(o[k], `${path}.${k}`);
   return out;
 };
+
+export const numMap = (
+  v: unknown,
+  path: string,
+): Record<string, number> => {
+  const o = obj(v, path);
+  const out: Record<string, number> = {};
+  for (const k of Object.keys(o)) out[k] = num(o[k], `${path}.${k}`);
+  return out;
+};

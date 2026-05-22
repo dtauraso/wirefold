@@ -19,7 +19,9 @@ export interface NodeData {
   nodeData?: unknown;
   inputs: Port[];
   outputs: Port[];
-  initialSlots?: Record<string, StateValue>;
+  /** Spec-side Go field seeds (data.state in JSON). Distinct from viewer state below. */
+  initState?: Record<string, number>;
+  edgeSeeds?: Record<string, number>;
 
   // --- Viewer-only fields (from NodeView / store) ---
   x?: number;

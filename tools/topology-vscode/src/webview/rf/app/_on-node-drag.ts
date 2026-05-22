@@ -58,11 +58,15 @@ export function useNodeDrag(
       scheduleViewSave();
       return;
     }
-    // Persist dragged position to viewerState so the view sidecar survives reload.
+    // Persist ALL node positions (not just dragged) so loads with a partial
+    // or empty view don't lose layout after the first drag.
     patchViewerState((v) => {
       if (!v.nodes) v.nodes = {};
-      const existing = v.nodes[node.id] ?? { x: 0, y: 0 };
-      v.nodes[node.id] = { ...existing, x: node.position.x, y: node.position.y };
+      for (const rfNode of ctx.rf.getNodes()) {
+        if (rfNode.type === "fold") continue;
+        const existing = v.nodes[rfNode.id];
+        v.nodes[rfNode.id] = { ...(existing ?? {}), x: rfNode.position.x, y: rfNode.position.y };
+      }
     });
     scheduleViewSave();
     scheduleSave();

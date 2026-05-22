@@ -32,9 +32,11 @@ export type Node = {
   // (e.g. ReadGate, an AND over N input slots).
   inputs?: Port[];
   outputs?: Port[];
-  // Per-instance initial slot values loaded before the first tick.
+  // Struct field values injected before the first tick (wire:"data.state").
+  state?: Record<string, number>;
+  // Channel pre-seeds: pre-sent into named input channels before goroutines start.
   // Keys must match declared input port names.
-  initialSlots?: Record<string, StateValue>;
+  edgeSeeds?: Record<string, number>;
 };
 
 export type Edge = WireProps & {

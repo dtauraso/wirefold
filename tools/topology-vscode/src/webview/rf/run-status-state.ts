@@ -5,7 +5,7 @@
 import type { RunStatus } from "../../messages";
 
 // Webview-local: idle is the pre-first-run default. The wire RunStatus has
-// no idle variant (the host only emits running/ok/error/cancelled).
+// no idle variant (the host only emits running/paused/ok/error/cancelled).
 export type RunStatusUI = RunStatus | { state: "idle" };
 
 type Setter = (next: RunStatusUI) => void;
