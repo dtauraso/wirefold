@@ -7,14 +7,15 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, post merge of task/diagram-animation-fixes + Fire-ordering fix)
+## State at handoff (2026-05-22, post-merge of task/code-self-defends-poc)
 
-**Active branch:** `task/code-self-defends-poc`
+**Active branch:** none — `task/code-self-defends-poc` merged to `main` and deleted.
 
-### What this branch contains
+### What just landed on main
 
-Substrate refactor that makes banned vocabulary structurally hard to reintroduce:
+Merge commit: `3228ebe`
 
+**Substrate refactor (code-self-defends):**
 - `SafeWorker` deleted. `Node` interface is `Update(ctx context.Context)` in `nodes/Wiring/node.go`.
 - Port fields are `*Wiring.In`, `*Wiring.Out`, `Wiring.OutMulti` (traced wrappers).
 - Each node struct has `Fire func()` — no `Trace *T.Trace`, no `Id int`, no `Name string`.
@@ -25,27 +26,24 @@ Substrate refactor that makes banned vocabulary structurally hard to reintroduce
 - `wire:"data.state"` tag on `ChainInhibitorNode`; reflection derives JSON key from field name.
 - `Fire()` called before `TrySend()` in input, readgate, inhibitrightgate — per `Trace.Fire` contract.
 
-### Merged: `task/diagram-animation-fixes`
-
-Animation features now on this branch:
-
-1. **Slot trace badges**: Go `Trace.Slot` → JSONL → extension host → webview `pump.ts` → `n.data.slots` → `GenericNode` badge render.
-2. **Play/pause toggle, stop button, auto-rerun loop** in the editor UI.
-3. **Uniform pulse speed** (px/ms), one-shot pulse, value labels on edges.
-4. **`midpointOffset`** (renamed from `lane`) — pixel offset for dogleg midpoint.
-5. **Run preserves view**: clicking Run no longer strips the `view` block from `topology.json`.
-6. **Single `topology.json`** at repo root: editor and runtime read the same file (topologies/line.json deleted).
-7. **Extension host forwards slot events** to webview.
-
-### OPEN BUG (from animation branch, carry forward)
-
-**Consecutive Runs decay.** First Run animates all edges. Second Run animates only a subset. Root cause: `SubstrateEdge.tsx` `lastPulseStep` ref is never cleared between Go runs; dedup guard suppresses animation when step numbers repeat.
-
-**Fix shape (Option A — start here):** Extension host sends `runStart` message to webview before spawning Go; `pump.ts` clears per-run state (`lastPulseStep`, `data.slots`, `data.pulse`).
+**Animation features (from task/diagram-animation-fixes, carried on this branch):**
+1. Slot trace badges: Go `Trace.Slot` → JSONL → extension host → webview `pump.ts` → `n.data.slots` → `GenericNode` badge render.
+2. Play/pause toggle, stop button, auto-rerun loop in the editor UI.
+3. Uniform pulse speed (px/ms), one-shot pulse, value labels on edges.
+4. `midpointOffset` (renamed from `lane`) — pixel offset for dogleg midpoint.
+5. Run preserves view: clicking Run no longer strips the `view` block from `topology.json`.
+6. Single `topology.json` at repo root: editor and runtime read the same file.
+7. Extension host forwards slot events to webview.
 
 ### Surviving node kinds (4)
 
 Input, ReadGate, ChainInhibitor, InhibitRightGate.
+
+### OPEN BUG — carry forward to next task branch
+
+**Consecutive Runs decay.** First Run animates all edges. Second Run animates only a subset. Root cause: `SubstrateEdge.tsx` `lastPulseStep` ref is never cleared between Go runs; dedup guard suppresses animation when step numbers repeat.
+
+**Fix shape (Option A — start here):** Extension host sends `runStart` message to webview before spawning Go; `pump.ts` clears per-run state (`lastPulseStep`, `data.slots`, `data.pulse`).
 
 ## Dev-loop
 
