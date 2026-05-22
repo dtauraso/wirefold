@@ -7,8 +7,6 @@ import (
 )
 
 type InputNode struct {
-	Id         int
-	Name       string
 	Fire       func()
 	Init       []int `wire:"data.init"`
 	ToReadGate *Wiring.Out

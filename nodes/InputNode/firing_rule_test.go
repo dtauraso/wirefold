@@ -27,7 +27,6 @@ func TestEmitsInitValues(t *testing.T) {
 	defer tr.Close()
 	toRG := make(chan int, 3)
 	node := &InputNode{
-		Name:       "in",
 		Fire:       func() { tr.Fire("in") },
 		Init:       []int{10, 20, 30},
 		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),
@@ -63,7 +62,6 @@ func TestEmptyInit(t *testing.T) {
 	defer tr.Close()
 	toRG := make(chan int, 1)
 	node := &InputNode{
-		Name:       "in",
 		Fire:       func() { tr.Fire("in") },
 		Init:       nil,
 		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),

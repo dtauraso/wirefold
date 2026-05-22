@@ -31,7 +31,6 @@ func TestFiresWhenBothPresent(t *testing.T) {
 	toCI := make(chan int, 1)
 
 	node := &ReadGateNode{
-		Name:               "rg",
 		Fire:               func() { tr.Fire("rg") },
 		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
 		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),
@@ -63,7 +62,6 @@ func TestNoFireWithoutInhibitor(t *testing.T) {
 	toCI := make(chan int, 1)
 
 	node := &ReadGateNode{
-		Name:               "rg",
 		Fire:               func() { tr.Fire("rg") },
 		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
 		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),

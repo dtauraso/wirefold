@@ -2,14 +2,11 @@ package ReadGateNode
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type ReadGateNode struct {
-	Id                int
-	Name              string
 	Fire              func()
 	Value             int
 	HasValue          bool
@@ -41,7 +38,6 @@ func (g *ReadGateNode) Update(ctx context.Context) {
 		}
 
 		if g.HasValue && g.HasChainInhibitor {
-			fmt.Printf("%s: value=%d → %d\n", g.Name, g.Value, g.Value)
 			if g.ToChainInhibitor.TrySend(g.Value) {
 				g.Fire()
 				g.HasValue = false

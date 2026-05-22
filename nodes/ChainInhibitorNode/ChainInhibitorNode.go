@@ -2,14 +2,11 @@ package ChainInhibitorNode
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type ChainInhibitorNode struct {
-	Id                         int
-	Name                       string
 	Fire                       func()
 	HeldValue                  int `wire:"data.initialSlots.held"`
 	FromPrevChainInhibitorNode *Wiring.In
@@ -25,7 +22,6 @@ func (in *ChainInhibitorNode) Update(ctx context.Context) {
 		}
 
 		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
-			fmt.Printf("%s: received %d (old=%d)\n", in.Name, value, in.HeldValue)
 			in.Fire()
 			for _, out := range in.ToNext {
 				out.TrySend(in.HeldValue)

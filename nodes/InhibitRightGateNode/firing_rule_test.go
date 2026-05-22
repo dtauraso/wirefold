@@ -17,7 +17,6 @@ func run(left, right int) (int, error) {
 	fromRight := make(chan int, 1)
 	toPassed := make(chan int, 1)
 	node := &InhibitRightGateNode{
-		Name:      "irg",
 		Fire:      func() { tr.Fire("irg") },
 		FromLeft:  Wiring.NewIn(fromLeft, "irg", "FromLeft", tr),
 		FromRight: Wiring.NewIn(fromRight, "irg", "FromRight", tr),

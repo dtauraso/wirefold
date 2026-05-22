@@ -109,17 +109,10 @@ func reflectPorts(sample any) []PortSpec {
 
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node.
-func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
+func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
-	// Set Id and Name if the struct has them.
-	if f := v.FieldByName("Id"); f.IsValid() && f.CanSet() {
-		f.SetInt(int64(id))
-	}
-	if f := v.FieldByName("Name"); f.IsValid() && f.CanSet() {
-		f.SetString(name)
-	}
 	// Inject Fire closure if the struct has a `Fire func()` field.
 	// The closure captures the node name so the node calls n.Fire()
 	// with no arguments and cannot mis-name itself in the trace.
@@ -195,7 +188,7 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
 type NodeBuilder struct {
 	Ports []PortSpec
-	Build func(id int, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
+	Build func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -208,8 +201,8 @@ func init() {
 		ports := reflectPorts(sample)
 		Registry[kind] = NodeBuilder{
 			Ports: ports,
-			Build: func(id int, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
-				return reflectBuild(id, name, data, pb, e, tr)
+			Build: func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+				return reflectBuild(name, data, pb, e, tr)
 			},
 		}
 	}

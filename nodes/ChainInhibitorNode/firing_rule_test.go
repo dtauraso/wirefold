@@ -30,7 +30,6 @@ func TestFireOnReceive(t *testing.T) {
 	out1 := make(chan int, 1)
 
 	node := &ChainInhibitorNode{
-		Name:                       "ci",
 		Fire:                       func() { tr.Fire("ci") },
 		HeldValue:                  99,
 		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),

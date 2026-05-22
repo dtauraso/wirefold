@@ -2,14 +2,11 @@ package InhibitRightGateNode
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type InhibitRightGateNode struct {
-	Id       int
-	Name     string
 	Fire     func()
 	Left     int
 	HasLeft  bool
@@ -47,7 +44,6 @@ func (g *InhibitRightGateNode) Update(ctx context.Context) {
 			if g.Left == 1 && g.Right == 0 {
 				result = 1
 			}
-			fmt.Printf("%s: left=%d right=%d → %d\n", g.Name, g.Left, g.Right, result)
 			if g.ToPassed.TrySend(result) {
 				g.Fire()
 				g.HasLeft = false

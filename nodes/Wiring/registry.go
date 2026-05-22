@@ -26,8 +26,8 @@ func Register(kind string, newNode func() any) {
 	ports := reflectPorts(sample)
 	Registry[kind] = NodeBuilder{
 		Ports: ports,
-		Build: func(id int, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
-			return reflectBuild(id, name, data, pb, e, tr)
+		Build: func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+			return reflectBuild(name, data, pb, e, tr)
 		},
 	}
 }

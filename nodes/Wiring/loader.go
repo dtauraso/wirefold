@@ -167,12 +167,7 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 			}
 		}
 
-		idx := 0
-		if n.Index != nil {
-			idx = *n.Index
-		}
-
-		nd, err := bind.Build(idx, n.ID, n.Data, pb, tr)
+		nd, err := bind.Build(n.ID, n.Data, pb, tr)
 		if err != nil {
 			return nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
