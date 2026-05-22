@@ -96,9 +96,57 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 		edgeChan[e.Label] = make(chan int, 1)
 	}
 
+	// Build id→type map and per-kind port lookup sets (needed for normalization and validation).
+	nodeType := map[string]string{}
+	for _, n := range spec.Nodes {
+		nodeType[n.ID] = n.Type
+	}
+	kindInPorts := map[string]map[string]bool{}
+	kindOutPorts := map[string]map[string]bool{}
+	kindOutMultiPorts := map[string]map[string]bool{}
+	for kind, bind := range Registry {
+		ins := map[string]bool{}
+		outs := map[string]bool{}
+		outMultis := map[string]bool{}
+		for _, p := range bind.Ports {
+			switch p.Dir {
+			case PortIn:
+				ins[p.Name] = true
+			case PortOut:
+				outs[p.Name] = true
+			case PortOutMulti:
+				outMultis[p.Name] = true
+				outs[p.Name] = true
+			}
+		}
+		kindInPorts[kind] = ins
+		kindOutPorts[kind] = outs
+		kindOutMultiPorts[kind] = outMultis
+	}
+
+	// outMultiBaseName strips a trailing digit suffix from a sourceHandle when
+	// the base name is an OutMulti port on the given kind.
+	// e.g. "ToNext0" → "ToNext" for a kind that has OutMulti port "ToNext".
+	// Returns the canonical port name and whether it resolved.
+	outMultiBaseName := func(handle, kind string) (string, bool) {
+		if len(handle) == 0 {
+			return handle, false
+		}
+		last := handle[len(handle)-1]
+		if last < '0' || last > '9' {
+			return handle, false
+		}
+		base := handle[:len(handle)-1]
+		if kindOutMultiPorts[kind][base] {
+			return base, true
+		}
+		return handle, false
+	}
+
 	// Build inbound and outbound edge maps.
 	// inbound:  target node id → port name → edge label
 	// outbound: source node id → port name → []edge label
+	// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
 	for _, e := range spec.Edges {
@@ -109,7 +157,40 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 			outbound[e.Source] = map[string][]string{}
 		}
 		inbound[e.Target][e.TargetHandle] = e.Label
-		outbound[e.Source][e.SourceHandle] = append(outbound[e.Source][e.SourceHandle], e.Label)
+		srcKey := e.SourceHandle
+		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source]); isMulti {
+			srcKey = base
+		}
+		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
+	}
+
+	// Validation 1: port handle names must match declared ports on the node kind.
+	for _, e := range spec.Edges {
+		srcKind := nodeType[e.Source]
+		srcHandle := e.SourceHandle
+		if base, isMulti := outMultiBaseName(srcHandle, srcKind); isMulti {
+			srcHandle = base
+		}
+		if !kindOutPorts[srcKind][srcHandle] {
+			return nil, fmt.Errorf("LoadTopology: edge %q: sourceHandle %q is not an output port on kind %q", e.Label, e.SourceHandle, srcKind)
+		}
+		tgtKind := nodeType[e.Target]
+		if !kindInPorts[tgtKind][e.TargetHandle] {
+			return nil, fmt.Errorf("LoadTopology: edge %q: targetHandle %q is not an input port on kind %q", e.Label, e.TargetHandle, tgtKind)
+		}
+	}
+
+	// Validation 2: required input ports must have an inbound edge.
+	for _, n := range spec.Nodes {
+		bind := Registry[n.Type]
+		for _, port := range bind.Ports {
+			if !port.Required {
+				continue
+			}
+			if _, ok := inbound[n.ID][port.Name]; !ok {
+				return nil, fmt.Errorf("LoadTopology: node %q: required input port %q has no inbound edge", n.ID, port.Name)
+			}
+		}
 	}
 
 	// Prime channels for edgeSeeds entries that map to input ports.

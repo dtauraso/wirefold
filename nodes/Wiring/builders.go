@@ -38,8 +38,9 @@ const (
 
 // PortSpec describes one port on a node kind.
 type PortSpec struct {
-	Name string
-	Dir  PortDir
+	Name     string
+	Dir      PortDir
+	Required bool // true for PortIn ports; output ports are never required
 }
 
 // PortBindings holds resolved channels keyed by port name.
@@ -104,7 +105,7 @@ func reflectPorts(sample any) []PortSpec {
 		f := t.Field(i)
 		switch f.Type {
 		case tInPtr:
-			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn})
+			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn, Required: true})
 		case tOutPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOut})
 		case tOutMulti:
@@ -172,9 +173,14 @@ func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr 
 		if tag == stateTag {
 			// key is field name with first letter lowercased
 			key := strings.ToLower(f.Name[:1]) + f.Name[1:]
-			if val, ok := data.State[key]; ok {
-				fv.Set(reflect.ValueOf(val))
+			if data.State == nil {
+				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
 			}
+			val, ok := data.State[key]
+			if !ok {
+				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
+			}
+			fv.Set(reflect.ValueOf(val))
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
 			key := tag[len(dataPrefix):]
 			if len(key) == 0 {
