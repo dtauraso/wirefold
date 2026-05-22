@@ -4,21 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type ChainInhibitorNode struct {
 	Id                         int
 	Name                       string
-	Trace                      *T.Trace
+	Fire                       func()
 	HeldValue                  int `wire:"data.initialSlots.held"`
-	FromPrevChainInhibitorNode <-chan int
-	ToNext                     []chan<- int
-}
-
-func NewChainInhibitorNode(id int, fromPrev <-chan int) ChainInhibitorNode {
-	return ChainInhibitorNode{Id: id, HeldValue: 0, FromPrevChainInhibitorNode: fromPrev}
+	FromPrevChainInhibitorNode *Wiring.In
+	ToNext                     Wiring.OutMulti
 }
 
 func (in *ChainInhibitorNode) Update(ctx context.Context) {
@@ -29,20 +24,13 @@ func (in *ChainInhibitorNode) Update(ctx context.Context) {
 		default:
 		}
 
-		select {
-		case value := <-in.FromPrevChainInhibitorNode:
-			in.Trace.Recv(in.Name, "FromPrevChainInhibitorNode", value)
+		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
 			fmt.Printf("%s: received %d (old=%d)\n", in.Name, value, in.HeldValue)
-			in.Trace.Fire(in.Name)
-			for _, ch := range in.ToNext {
-				select {
-				case ch <- in.HeldValue:
-				default:
-				}
-				in.Trace.Send(in.Name, "ToNext", in.HeldValue)
+			in.Fire()
+			for _, out := range in.ToNext {
+				out.TrySend(in.HeldValue)
 			}
 			in.HeldValue = value
-		default:
 		}
 	}
 }

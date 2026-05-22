@@ -5,6 +5,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	T "github.com/dtauraso/wirefold/Trace"
+	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 func recv(t *testing.T, ch <-chan int) int {
@@ -20,15 +23,21 @@ func recv(t *testing.T, ch <-chan int) int {
 
 // On receive, emit HeldValue to every ToNext entry, then store the new value.
 func TestFireOnReceive(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromPrev := make(chan int, 1)
 	out0 := make(chan int, 1)
 	out1 := make(chan int, 1)
 
 	node := &ChainInhibitorNode{
 		Name:                       "ci",
+		Fire:                       func() { tr.Fire("ci") },
 		HeldValue:                  99,
-		FromPrevChainInhibitorNode: fromPrev,
-		ToNext:                     []chan<- int{out0, out1},
+		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),
+		ToNext: Wiring.OutMulti{
+			Wiring.NewOut(out0, "ci", "ToNext", tr),
+			Wiring.NewOut(out1, "ci", "ToNext", tr),
+		},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

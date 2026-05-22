@@ -5,6 +5,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	T "github.com/dtauraso/wirefold/Trace"
+	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 func recv(t *testing.T, ch <-chan int) int {
@@ -21,15 +24,18 @@ func recv(t *testing.T, ch <-chan int) int {
 // FiresWhenBothPresent: value from FromInput is forwarded on ToChainInhibitor
 // when FromChainInhibitor also arrives; inhibitor value is ignored.
 func TestFiresWhenBothPresent(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromInput := make(chan int, 1)
 	fromCI := make(chan int, 1)
 	toCI := make(chan int, 1)
 
 	node := &ReadGateNode{
 		Name:               "rg",
-		FromInput:          fromInput,
-		FromChainInhibitor: fromCI,
-		ToChainInhibitor:   toCI,
+		Fire:               func() { tr.Fire("rg") },
+		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
+		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),
+		ToChainInhibitor:   Wiring.NewOut(toCI, "rg", "ToChainInhibitor", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -50,15 +56,18 @@ func TestFiresWhenBothPresent(t *testing.T) {
 
 // NoFireWithoutInhibitor: value alone must not emit.
 func TestNoFireWithoutInhibitor(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromInput := make(chan int, 1)
 	fromCI := make(chan int, 1)
 	toCI := make(chan int, 1)
 
 	node := &ReadGateNode{
 		Name:               "rg",
-		FromInput:          fromInput,
-		FromChainInhibitor: fromCI,
-		ToChainInhibitor:   toCI,
+		Fire:               func() { tr.Fire("rg") },
+		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
+		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),
+		ToChainInhibitor:   Wiring.NewOut(toCI, "rg", "ToChainInhibitor", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

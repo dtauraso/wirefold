@@ -5,28 +5,23 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	T "github.com/dtauraso/wirefold/Trace"
+	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-func recv(t *testing.T, ch <-chan int) int {
-	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for output")
-		return 0
-	}
-}
-
 func run(left, right int) (int, error) {
+	tr := T.New(0)
+	defer tr.Close()
 	fromLeft := make(chan int, 1)
 	fromRight := make(chan int, 1)
 	toPassed := make(chan int, 1)
 	node := &InhibitRightGateNode{
 		Name:      "irg",
-		FromLeft:  fromLeft,
-		FromRight: fromRight,
-		ToPassed:  toPassed,
+		Fire:      func() { tr.Fire("irg") },
+		FromLeft:  Wiring.NewIn(fromLeft, "irg", "FromLeft", tr),
+		FromRight: Wiring.NewIn(fromRight, "irg", "FromRight", tr),
+		ToPassed:  Wiring.NewOut(toPassed, "irg", "ToPassed", tr),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup

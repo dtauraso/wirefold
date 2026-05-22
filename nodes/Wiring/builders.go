@@ -2,9 +2,9 @@
 //
 // Adding a kind: register one entry in kindRegistry. The struct fields
 // determine the port manifest automatically:
-//   - <-chan int  → PortIn
-//   - chan<- int  → PortOut
-//   - []chan<- int → PortOutMulti
+//   - *Wiring.In       → PortIn
+//   - *Wiring.Out      → PortOut
+//   - Wiring.OutMulti  → PortOutMulti
 //   - all other field types are ignored
 //
 // Non-channel fields can be populated from data.* JSON values via struct tags:
@@ -81,9 +81,10 @@ func (pb *PortBindings) OutSlice(name string) []chan<- int {
 }
 
 var (
-	tChanIntRecv = reflect.TypeFor[<-chan int]()
-	tChanIntSend = reflect.TypeFor[chan<- int]()
-	tSliceSend   = reflect.TypeFor[[]chan<- int]()
+	tInPtr    = reflect.TypeFor[*In]()
+	tOutPtr   = reflect.TypeFor[*Out]()
+	tOutMulti = reflect.TypeFor[OutMulti]()
+	tFireFunc = reflect.TypeFor[func()]()
 )
 
 // reflectPorts walks the exported fields of the struct pointed to by sample
@@ -95,11 +96,11 @@ func reflectPorts(sample any) []PortSpec {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		switch f.Type {
-		case tChanIntRecv:
+		case tInPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn})
-		case tChanIntSend:
+		case tOutPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOut})
-		case tSliceSend:
+		case tOutMulti:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOutMulti})
 		}
 	}
@@ -119,12 +120,15 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 	if f := v.FieldByName("Name"); f.IsValid() && f.CanSet() {
 		f.SetString(name)
 	}
-	// Inject Trace if the struct has a *T.Trace field named Trace.
-	if f := v.FieldByName("Trace"); f.IsValid() && f.CanSet() && f.Type() == reflect.TypeOf(tr) {
-		f.Set(reflect.ValueOf(tr))
+	// Inject Fire closure if the struct has a `Fire func()` field.
+	// The closure captures the node name so the node calls n.Fire()
+	// with no arguments and cannot mis-name itself in the trace.
+	if f := v.FieldByName("Fire"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
+		nodeName := name
+		f.Set(reflect.ValueOf(func() { tr.Fire(nodeName) }))
 	}
 
-	// Wire channel fields.
+	// Wire port fields with traced wrappers.
 	ports := reflectPorts(nodePtr)
 	for _, port := range ports {
 		f := v.FieldByName(port.Name)
@@ -134,13 +138,17 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 		switch port.Dir {
 		case PortIn:
 			ch := pb.In(port.Name)
-			f.Set(reflect.ValueOf(ch))
+			f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: port.Name, trace: tr}))
 		case PortOut:
 			ch := pb.Out(port.Name)
-			f.Set(reflect.ValueOf(ch))
+			f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: port.Name, trace: tr}))
 		case PortOutMulti:
-			sl := pb.OutSlice(port.Name)
-			f.Set(reflect.ValueOf(sl))
+			chs := pb.OutSlice(port.Name)
+			outs := make(OutMulti, len(chs))
+			for i, c := range chs {
+				outs[i] = &Out{ch: c, node: name, port: port.Name, trace: tr}
+			}
+			f.Set(reflect.ValueOf(outs))
 		}
 	}
 

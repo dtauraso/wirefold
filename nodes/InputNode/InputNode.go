@@ -3,31 +3,25 @@ package InputNode
 import (
 	"context"
 
-	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type InputNode struct {
 	Id         int
 	Name       string
-	Trace      *T.Trace
+	Fire       func()
 	Init       []int `wire:"data.init"`
-	ToReadGate chan<- int
+	ToReadGate *Wiring.Out
 }
 
 func (n *InputNode) Update(ctx context.Context) {
 	for i := 0; i < len(n.Init); {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return
-		default:
 		}
-		select {
-		case n.ToReadGate <- n.Init[i]:
-			n.Trace.Fire(n.Name)
-			n.Trace.Send(n.Name, "ToReadGate", n.Init[i])
+		if n.ToReadGate.TrySend(n.Init[i]) {
+			n.Fire()
 			i++
-		default:
 		}
 	}
 }

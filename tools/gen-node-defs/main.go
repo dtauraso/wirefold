@@ -256,22 +256,28 @@ func parsePortsFromAST(pkgDir string) ([]port, error) {
 	return ports, nil
 }
 
-// chanDirection returns ("in", true) for <-chan T, ("out", true) for chan<- T,
-// and ("", false) for bidirectional chan T or non-channel types.
+// chanDirection returns ("in", true) for *Wiring.In, ("out", true) for *Wiring.Out
+// or Wiring.OutMulti, and ("", false) for anything else.
 func chanDirection(expr ast.Expr) (string, bool) {
-	switch t := expr.(type) {
-	case *ast.ChanType:
-		switch t.Dir {
-		case ast.RECV:
-			return "in", true
-		case ast.SEND:
+	// *Wiring.In or *Wiring.Out — pointer to selector
+	if star, ok := expr.(*ast.StarExpr); ok {
+		if sel, ok := star.X.(*ast.SelectorExpr); ok {
+			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" {
+				switch sel.Sel.Name {
+				case "In":
+					return "in", true
+				case "Out":
+					return "out", true
+				}
+			}
+		}
+		return "", false
+	}
+	// Wiring.OutMulti — bare selector (type alias, no pointer)
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" && sel.Sel.Name == "OutMulti" {
 			return "out", true
 		}
-		// ast.BOTH — bidirectional, not a wirable port.
-		return "", false
-	case *ast.ArrayType:
-		// Fan-out: []chan<- T
-		return chanDirection(t.Elt)
 	}
 	return "", false
 }
