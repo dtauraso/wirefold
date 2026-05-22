@@ -5,9 +5,9 @@
 | Field | Value |
 |-------|-------|
 | kind | input |
-| bg | #1a1f2e |
-| border | #3fb950 |
-| text | #c9d1d9 |
+| bg | #e0e0e0 |
+| border | #666 |
+| text | #1a1a1a |
 | accent | #3fb950 |
 | minWidth | 90 |
 | displays | queue, repeat |

@@ -4,6 +4,7 @@
 
 export type RunStatus =
   | { state: "running" }
+  | { state: "paused" }
   | { state: "ok" }
   | { state: "error"; message: string }
   | { state: "cancelled" };
@@ -14,19 +15,31 @@ export type WebviewToHostMsg =
   | { type: "view-save"; text: string }
   | { type: "run"; text?: string }
   | { type: "run-cancel" }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "stop" }
   | { type: "webview-log"; entry: string };
 
-// Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send"}.
+// Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
 // when the Go side has resolved it (currently omitted — raw form only).
-export type TraceEvent = {
+// slot carries nodeId/port/phase and optionally value (filled only).
+export type SlotPhase = "filled" | "empty";
+export type SlotEntry = { phase: "filled"; value: number } | { phase: "empty" };
+export type SlotMap = Record<string, SlotEntry>;
+
+export type SlotEvent = {
   step: number;
-  kind: "recv" | "fire" | "send";
-  node: string;
-  port?: string;
-  edge?: string;
+  kind: "slot";
+  nodeId: string;
+  port: string;
+  phase: SlotPhase;
   value?: number;
 };
+
+export type TraceEvent =
+  | { step: number; kind: "recv" | "fire" | "send"; node: string; port?: string; edge?: string; value?: number }
+  | SlotEvent;
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string }
@@ -37,7 +50,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "webview-log",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

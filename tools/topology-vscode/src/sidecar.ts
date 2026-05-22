@@ -24,6 +24,7 @@ export function injectViewText(docText: string, viewText: string): string {
     const raw = JSON.parse(docText);
     if (!raw || typeof raw !== "object") return docText;
     const view = JSON.parse(viewText);
+    if (view === null || typeof view !== "object") return docText;
     raw.view = view;
     return JSON.stringify(raw, null, 2) + "\n";
   } catch {

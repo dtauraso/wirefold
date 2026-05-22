@@ -58,7 +58,6 @@ memory (auto-memory naming convention: `project_*`, `feedback_*`,
 - **Substance carve-out:** the Go substrate (`nodes/`, `Wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) is exempt from the TS LOC budget — Go files follow Go conventions. On the TS side, there is no blanket carve-out; all `.ts`/`.tsx` files are subject to the 200-LOC trigger.
 - The rule is **always active**, including mid-design and mid-debug. If you finish an unrelated change and notice the file is now over 200, refactor in a follow-up commit before moving on.
 - Run `npm run check:loc` (in `tools/topology-vscode/`) to list offenders. The script is the source of truth — keep this rule and the script in sync.
-
 ## Bash hygiene (keep AI round-trips snappy)
 
 Bash output goes straight into the AI's context. Wide-fan commands
