@@ -17,7 +17,7 @@ import { ANIMATION_FIELDS } from "../animation-fields";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { markerEndUrl } from "../MarkerDefs";
 
-const PULSE_DURATION_MS = 600;
+const PULSE_DURATION_MS = 1800;
 
 // Marker head lengths (refX of the filled markers in MarkerDefs).
 const MD_HEAD_PX = 8;
@@ -292,18 +292,19 @@ export function SubstrateEdge({
 
   const mid = edgeMidpoint(route, sourceX, sourceY, targetX, targetY, midpointOffset);
 
+  const rf = useReactFlow();
+
   // Pulse animation state: position along path (0–1) or null when idle.
   const [pulseT, setPulseT] = useState<number | null>(null);
   const pathRef = useRef<SVGPathElement | null>(null);
-  const lastPulseStep = useRef<number | undefined>(undefined);
+  const pulseValueRef = useRef<unknown>(undefined);
 
   useEffect(() => {
     const pulse = data?.[ANIMATION_FIELDS.pulse.name];
     if (!pulse) return;
-    if (pulse.simStep === lastPulseStep.current) return;
     console.log(`[edge] pulse start id=${id} step=${pulse.simStep} value=${pulse.value}`);
     postLog("phase4.edge", { layer: "edge", id, step: pulse.simStep, value: pulse.value });
-    lastPulseStep.current = pulse.simStep;
+    pulseValueRef.current = pulse.value;
 
     const start = performance.now();
     let raf: number;
@@ -314,6 +315,7 @@ export function SubstrateEdge({
         raf = requestAnimationFrame(tick);
       } else {
         setPulseT(null);
+        rf.setEdges(edges => edges.map(e => e.id === id ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: undefined } } : e));
       }
     };
     raf = requestAnimationFrame(tick);
@@ -356,13 +358,24 @@ export function SubstrateEdge({
         stroke={stroke}
       />
       {circleX !== undefined && circleY !== undefined && (
-        <circle
-          cx={circleX}
-          cy={circleY}
-          r={4}
-          fill={stroke}
-          style={{ pointerEvents: "none" }}
-        />
+        <>
+          <circle
+            cx={circleX}
+            cy={circleY}
+            r={4}
+            fill={stroke}
+            style={{ pointerEvents: "none" }}
+          />
+          <text
+            x={circleX}
+            y={circleY - 10}
+            textAnchor="middle"
+            fontSize={10}
+            fontFamily="monospace"
+            fill={stroke}
+            style={{ pointerEvents: "none" }}
+          >{String(pulseValueRef.current ?? "")}</text>
+        </>
       )}
       {displayLabel && (
         <EdgeLabelRenderer>
