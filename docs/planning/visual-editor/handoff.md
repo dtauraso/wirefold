@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, post merge of task/diagram-animation-fixes)
+## State at handoff (2026-05-22, post merge of task/diagram-animation-fixes + Fire-ordering fix)
 
 **Active branch:** `task/code-self-defends-poc`
 
@@ -23,6 +23,7 @@ Substrate refactor that makes banned vocabulary structurally hard to reintroduce
 - TS schema parser validates unknown kinds and empty edge labels.
 - Substrate-vocabulary lint at `tools/check-substrate-vocabulary.sh`.
 - `wire:"data.state"` tag on `ChainInhibitorNode`; reflection derives JSON key from field name.
+- `Fire()` called before `TrySend()` in input, readgate, inhibitrightgate — per `Trace.Fire` contract.
 
 ### Merged: `task/diagram-animation-fixes`
 
