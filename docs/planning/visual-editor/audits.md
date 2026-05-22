@@ -1,12 +1,10 @@
 # Audit registry
 
-Index of audit categories. CI-backed audits live in [`audits/`](audits/). See [_how-to-use.md](audits/_how-to-use.md) for the meta-doc.
+Index of audit categories. CI-backed audits live in [`audits/`](audits/).
 
 ## CI-backed audits
 
 - [1. Visual regression — SVG / canvas baselines](audits/01-visual-regression-svg-canvas-baselines.md)
-- [2. Spec ↔ Go parity per node kind](audits/02-spec-go-parity-per-node-kind.md)
-- [3. Edit-to-Go latency](audits/03-edit-to-go-latency.md)
 
 ## AI-driven audits
 
@@ -57,4 +55,4 @@ Opus doing executor work (grep/read/edit) instead of delegating to haiku/sonnet.
 
 ## Adding new audit categories
 
-See [_adding-categories.md](audits/_adding-categories.md).
+To add a new category, append a new numbered section following the existing AI-driven audit pattern.

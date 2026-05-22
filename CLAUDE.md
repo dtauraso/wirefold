@@ -93,7 +93,7 @@ docs, and the auto-memory dir, costing tokens and time.
 ## Planning docs are branch-local
 
 Planning docs (anything under `docs/planning/` except `handoff.md`, `session-log.md`,
-`audits.md`, `contracts.md`, and `continuation-prompt-template.md`) are authored on the
+`audits.md`, and `continuation-prompt-template.md`) are authored on the
 task branch where the work happens and do not ride the merge to main. Each new planning
 doc starts with frontmatter naming its originating branch:
 
