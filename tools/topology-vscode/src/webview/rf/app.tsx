@@ -103,7 +103,7 @@ function Inner() {
   const ctxH = useNodeContextHandlers(ctx);
 
   const styled = decorate(nodes, edges, dimmed);
-  const edgeActions = useMemo(() => ({ setEdgeLane: edgeH.setEdgeLane, setPortPosition: edgeH.setPortPosition }), [edgeH.setEdgeLane, edgeH.setPortPosition]);
+  const edgeActions = useMemo(() => ({ setEdgeMidpointOffset: edgeH.setEdgeMidpointOffset, setPortPosition: edgeH.setPortPosition }), [edgeH.setEdgeMidpointOffset, edgeH.setPortPosition]);
 
   return (
     <EdgeActionsCtx.Provider value={edgeActions}>

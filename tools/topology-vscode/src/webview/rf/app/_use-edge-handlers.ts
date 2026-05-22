@@ -63,12 +63,12 @@ export function useEdgeHandlers(ctx: AppCtx) {
     setEdgeMenu(null);
   }, [ctx]);
 
-  const setEdgeLane = useCallback((edgeId: string, lane: number) => {
+  const setEdgeMidpointOffset = useCallback((edgeId: string, midpointOffset: number) => {
     if (!ctx.lastSpec.current) return;
     if (!rfGetEdges().some((e) => e.id === edgeId)) return;
     pushSnapshot();
     rfSetEdges((es) => es.map((e) =>
-      e.id !== edgeId ? e : { ...e, data: { ...e.data, lane } }
+      e.id !== edgeId ? e : { ...e, data: { ...e.data, midpointOffset } }
     ));
     scheduleSave();
   }, [ctx]);
@@ -104,6 +104,6 @@ export function useEdgeHandlers(ctx: AppCtx) {
 
   return {
     edgeMenu, isValidConnection, onConnect, onReconnectStart, onReconnect,
-    onReconnectEnd, onEdgeContextMenu, closeEdgeMenu, setEdgeKind, setEdgeLane, setPortPosition,
+    onReconnectEnd, onEdgeContextMenu, closeEdgeMenu, setEdgeKind, setEdgeMidpointOffset, setPortPosition,
   };
 }

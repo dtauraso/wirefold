@@ -4,7 +4,7 @@
 // No substrate logic — component renders whatever data says.
 //
 // Route selection: pickShape auto-picks snake/snake-v/below/line based on
-// handle sides + positions. A draggable midpoint shifts the dogleg via lane.
+// handle sides + positions. A draggable midpoint shifts the dogleg via midpointOffset.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
@@ -56,8 +56,8 @@ export function pickShape(
 
 // ── Path helpers ────────────────────────────────────────────────────
 
-function snakeD(sx: number, sy: number, tx: number, ty: number, lane: number): string {
-  const midX = (sx + tx) / 2 + lane;
+function snakeD(sx: number, sy: number, tx: number, ty: number, midpointOffset: number): string {
+  const midX = (sx + tx) / 2 + midpointOffset;
   const r = Math.min(15, Math.abs(midX - sx) / 2, Math.abs(tx - midX) / 2, Math.abs(ty - sy) / 2);
   if (!(r > 0.5)) {
     return `M ${sx},${sy} L ${midX},${sy} L ${midX},${ty} L ${tx},${ty}`;
@@ -75,8 +75,8 @@ function snakeD(sx: number, sy: number, tx: number, ty: number, lane: number): s
   );
 }
 
-function snakeVD(sx: number, sy: number, tx: number, ty: number, lane: number): string {
-  const midY = (sy + ty) / 2 + lane;
+function snakeVD(sx: number, sy: number, tx: number, ty: number, midpointOffset: number): string {
+  const midY = (sy + ty) / 2 + midpointOffset;
   const r = Math.min(15, Math.abs(midY - sy) / 2, Math.abs(ty - midY) / 2, Math.abs(tx - sx) / 2);
   if (!(r > 0.5)) {
     return `M ${sx},${sy} L ${sx},${midY} L ${tx},${midY} L ${tx},${ty}`;
@@ -94,8 +94,8 @@ function snakeVD(sx: number, sy: number, tx: number, ty: number, lane: number): 
   );
 }
 
-function belowD(sx: number, sy: number, tx: number, ty: number, lane: number): string {
-  const corridorY = Math.max(sy, ty) + 80 + lane;
+function belowD(sx: number, sy: number, tx: number, ty: number, midpointOffset: number): string {
+  const corridorY = Math.max(sy, ty) + 80 + midpointOffset;
   const r = Math.min(15, Math.abs(corridorY - sy) / 2, Math.abs(corridorY - ty) / 2, Math.abs(tx - sx) / 2);
   if (!(r > 0.5)) {
     return `M ${sx},${sy} L ${sx},${corridorY} L ${tx},${corridorY} L ${tx},${ty}`;
@@ -120,18 +120,18 @@ function finalSegmentLength(
   route: EdgeRoute,
   sx: number, sy: number,
   tx: number, ty: number,
-  lane: number,
+  midpointOffset: number,
 ): number {
   if (route === "snake") {
-    const midX = (sx + tx) / 2 + lane;
+    const midX = (sx + tx) / 2 + midpointOffset;
     return Math.abs(tx - midX);
   }
   if (route === "snake-v") {
-    const midY = (sy + ty) / 2 + lane;
+    const midY = (sy + ty) / 2 + midpointOffset;
     return Math.abs(ty - midY);
   }
   if (route === "below") {
-    const corridorY = Math.max(sy, ty) + 80 + lane;
+    const corridorY = Math.max(sy, ty) + 80 + midpointOffset;
     return corridorY - ty;
   }
   const dx = tx - sx, dy = ty - sy;
@@ -156,11 +156,11 @@ export function buildEdgePathD(
   route: EdgeRoute,
   sx: number, sy: number, sp: string,
   tx: number, ty: number, tp: string,
-  lane: number,
+  midpointOffset: number,
 ): string {
-  if (route === "snake")   return snakeD(sx, sy, tx, ty, lane);
-  if (route === "snake-v") return snakeVD(sx, sy, tx, ty, lane);
-  if (route === "below")   return belowD(sx, sy, tx, ty, lane);
+  if (route === "snake")   return snakeD(sx, sy, tx, ty, midpointOffset);
+  if (route === "snake-v") return snakeVD(sx, sy, tx, ty, midpointOffset);
+  if (route === "below")   return belowD(sx, sy, tx, ty, midpointOffset);
   const c1 = controlPoint(sp, sx, sy, tx, ty);
   const c2 = controlPoint(tp, tx, ty, sx, sy);
   return `M ${sx},${sy} C ${c1.x},${c1.y} ${c2.x},${c2.y} ${tx},${ty}`;
@@ -170,31 +170,31 @@ export function edgeMidpoint(
   route: EdgeRoute,
   sx: number, sy: number,
   tx: number, ty: number,
-  lane: number,
+  midpointOffset: number,
 ): { x: number; y: number } {
-  if (route === "snake")   return { x: (sx + tx) / 2 + lane, y: (sy + ty) / 2 };
-  if (route === "snake-v") return { x: (sx + tx) / 2, y: (sy + ty) / 2 + lane };
-  if (route === "below")   return { x: (sx + tx) / 2, y: Math.max(sy, ty) + 80 + lane };
+  if (route === "snake")   return { x: (sx + tx) / 2 + midpointOffset, y: (sy + ty) / 2 };
+  if (route === "snake-v") return { x: (sx + tx) / 2, y: (sy + ty) / 2 + midpointOffset };
+  if (route === "below")   return { x: (sx + tx) / 2, y: Math.max(sy, ty) + 80 + midpointOffset };
   return { x: (sx + tx) / 2, y: (sy + ty) / 2 };
 }
 
-// ── LaneDragHandle ──────────────────────────────────────────────────
+// ── MidpointDragHandle ──────────────────────────────────────────────
 
 const HOVER_CLEARANCE_PX = 16;
 
-interface LaneDragHandleProps {
+interface MidpointDragHandleProps {
   edgeId: string;
   route: EdgeRoute;
   pathD: string;
   mid: { x: number; y: number };
-  lane: number;
+  midpointOffset: number;
   stroke: string;
 }
 
-function LaneDragHandle({ edgeId, route, pathD, mid, lane, stroke }: LaneDragHandleProps) {
+function MidpointDragHandle({ edgeId, route, pathD, mid, midpointOffset, stroke }: MidpointDragHandleProps) {
   const actions = useEdgeActions();
   const rf = useReactFlow();
-  const dragRef = useRef<{ startScreenX: number; startScreenY: number; startLane: number } | null>(null);
+  const dragRef = useRef<{ startScreenX: number; startScreenY: number; startOffset: number } | null>(null);
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -202,7 +202,7 @@ function LaneDragHandle({ edgeId, route, pathD, mid, lane, stroke }: LaneDragHan
     if (!actions) return;
     ev.stopPropagation();
     ev.preventDefault();
-    dragRef.current = { startScreenX: ev.clientX, startScreenY: ev.clientY, startLane: lane };
+    dragRef.current = { startScreenX: ev.clientX, startScreenY: ev.clientY, startOffset: midpointOffset };
     setDragging(true);
 
     const onMove = (me: MouseEvent) => {
@@ -212,7 +212,7 @@ function LaneDragHandle({ edgeId, route, pathD, mid, lane, stroke }: LaneDragHan
       const delta = route === "snake"
         ? current.x - origin.x
         : current.y - origin.y;
-      actions.setEdgeLane(edgeId, dragRef.current.startLane + delta);
+      actions.setEdgeMidpointOffset(edgeId, dragRef.current.startOffset + delta);
     };
 
     const onUp = () => {
@@ -224,7 +224,7 @@ function LaneDragHandle({ edgeId, route, pathD, mid, lane, stroke }: LaneDragHan
 
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [actions, edgeId, lane, rf, route]);
+  }, [actions, edgeId, midpointOffset, rf, route]);
 
   if (!actions) return null;
   const visible = hovered || dragging;
@@ -271,14 +271,14 @@ export function SubstrateEdge({
   const stroke = KIND_COLORS[kind] ?? "#888";
   const dash = dashForKind(kind);
   const displayLabel = data?.valueLabel;
-  const lane = data?.lane ?? 0;
+  const midpointOffset = data?.midpointOffset ?? 0;
 
   const route = pickShape(
     sourceX, sourceY, sourcePosition as SideName,
     targetX, targetY, targetPosition as SideName,
   );
 
-  const legLen = finalSegmentLength(route, sourceX, sourceY, targetX, targetY, lane);
+  const legLen = finalSegmentLength(route, sourceX, sourceY, targetX, targetY, midpointOffset);
   const markerSize: "sm" | "md" = legLen < MD_HEAD_PX ? "sm" : "md";
   const arrowStyle = data?.arrowStyle ?? "filled";
   const computedMarkerEnd = legLen < SM_HEAD_PX ? undefined : markerEndUrl(kind, arrowStyle, markerSize);
@@ -287,10 +287,10 @@ export function SubstrateEdge({
     route,
     sourceX, sourceY, sourcePosition,
     targetX, targetY, targetPosition,
-    lane,
+    midpointOffset,
   );
 
-  const mid = edgeMidpoint(route, sourceX, sourceY, targetX, targetY, lane);
+  const mid = edgeMidpoint(route, sourceX, sourceY, targetX, targetY, midpointOffset);
 
   // Pulse animation state: position along path (0–1) or null when idle.
   const [pulseT, setPulseT] = useState<number | null>(null);
@@ -347,12 +347,12 @@ export function SubstrateEdge({
         markerEnd={computedMarkerEnd}
         style={{ stroke, strokeDasharray: dash, strokeWidth: 1.5 }}
       />
-      <LaneDragHandle
+      <MidpointDragHandle
         edgeId={id}
         route={route}
         pathD={edgePath}
         mid={mid}
-        lane={lane}
+        midpointOffset={midpointOffset}
         stroke={stroke}
       />
       {circleX !== undefined && circleY !== undefined && (

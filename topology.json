@@ -188,7 +188,7 @@
       "targetHandle": "FromLeft",
       "kind": "inhibit-in",
       "label": "i0ToInhibitRight0",
-      "lane": 0,
+      "midpointOffset": 0,
       "data": {
         "slots": 1
       }
@@ -213,7 +213,7 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "i1ToReadGate1",
-      "lane": -71.5246564284947,
+      "midpointOffset": -71.5246564284947,
       "data": {
         "slots": 1,
         "route": "below"
@@ -227,7 +227,7 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "bootstrapRgToReadGate1",
-      "lane": -0.7898018096109922,
+      "midpointOffset": -0.7898018096109922,
       "data": {
         "slots": 1
       }
