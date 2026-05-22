@@ -1,9 +1,10 @@
 // Phase 7 Chunk 3 — runtime trace recorder.
 //
-// One Trace value is shared across all nodes via SafeWorker.Trace.
+// One Trace value is shared across all nodes; each node holds it as
+// a *Trace field, injected at build time by Wiring.reflectBuild.
 // Nodes call Emit at three points: on a successful channel receive
 // (recv), before fanning out an emission (fire), and after each
-// successful S.Send (send). All events serialize through a single
+// successful send. All events serialize through a single
 // channel; a drain goroutine assigns the monotonic Step ordinal and
 // appends to the slice — the order events arrive at the channel is
 // the causal-enough story for replay (per trace-replay-plan.md).
@@ -45,8 +46,9 @@ type Event struct {
 	hasValue bool
 }
 
-// Trace is the shared recorder. Construct with New; pass to nodes via
-// SafeWorker.Trace. Call Close after all nodes have stopped to drain
+// Trace is the shared recorder. Construct with New; injected into
+// each node's Trace field by Wiring.reflectBuild. Call Close after
+// all nodes have stopped to drain
 // the channel and receive the final event slice via Events().
 type Trace struct {
 	ch     chan Event

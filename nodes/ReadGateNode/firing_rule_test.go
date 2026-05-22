@@ -5,15 +5,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
 )
-
-func newWorker(ctx context.Context) *S.SafeWorker {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	return &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-}
 
 func recv(t *testing.T, ch <-chan int) int {
 	t.Helper()
@@ -41,14 +33,15 @@ func TestFiresWhenBothPresent(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := newWorker(ctx)
-	go node.Update(sw)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	fromInput <- 42
 	fromCI <- 1
 	got := recv(t, toCI)
 	cancel()
-	sw.Wg.Wait()
+	wg.Wait()
 
 	if got != 42 {
 		t.Fatalf("expected 42, got %d", got)
@@ -69,13 +62,14 @@ func TestNoFireWithoutInhibitor(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := newWorker(ctx)
-	go node.Update(sw)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	fromInput <- 7
 	time.Sleep(20 * time.Millisecond)
 	cancel()
-	sw.Wg.Wait()
+	wg.Wait()
 
 	select {
 	case v := <-toCI:

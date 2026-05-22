@@ -1,15 +1,17 @@
 package InhibitRightGateNode
 
 import (
+	"context"
 	"fmt"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type InhibitRightGateNode struct {
 	Id       int
 	Name     string
+	Trace    *T.Trace
 	Left     int
 	HasLeft  bool
 	Right    int
@@ -19,11 +21,10 @@ type InhibitRightGateNode struct {
 	ToPassed  chan<- int
 }
 
-func (g *InhibitRightGateNode) Update(s *S.SafeWorker) {
-	defer s.Wg.Done()
+func (g *InhibitRightGateNode) Update(ctx context.Context) {
 	for {
 		select {
-		case <-s.Ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -33,7 +34,7 @@ func (g *InhibitRightGateNode) Update(s *S.SafeWorker) {
 			case v := <-g.FromLeft:
 				g.Left = v
 				g.HasLeft = true
-				s.Trace.Recv(g.Name, "FromLeft", v)
+				g.Trace.Recv(g.Name, "FromLeft", v)
 			default:
 			}
 		}
@@ -43,7 +44,7 @@ func (g *InhibitRightGateNode) Update(s *S.SafeWorker) {
 			case v := <-g.FromRight:
 				g.Right = v
 				g.HasRight = true
-				s.Trace.Recv(g.Name, "FromRight", v)
+				g.Trace.Recv(g.Name, "FromRight", v)
 			default:
 			}
 		}
@@ -54,9 +55,12 @@ func (g *InhibitRightGateNode) Update(s *S.SafeWorker) {
 				result = 1
 			}
 			fmt.Printf("%s: left=%d right=%d → %d\n", g.Name, g.Left, g.Right, result)
-			s.Trace.Fire(g.Name)
-			S.Send(g.ToPassed, result)
-			s.Trace.Send(g.Name, "ToPassed", result)
+			g.Trace.Fire(g.Name)
+			select {
+			case g.ToPassed <- result:
+			default:
+			}
+			g.Trace.Send(g.Name, "ToPassed", result)
 			g.HasLeft = false
 			g.HasRight = false
 		}

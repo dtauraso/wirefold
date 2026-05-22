@@ -20,7 +20,7 @@ import (
 	"maps"
 	"os"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // specNode mirrors the JSON node shape.
@@ -69,9 +69,9 @@ func nodeInitSlots(n specNode) map[string]int {
 	return m
 }
 
-// LoadTopology reads the JSON file at jsonPath and constructs a []S.Node
+// LoadTopology reads the JSON file at jsonPath and constructs a []Node
 // equivalent to the generated Wire() function.
-func LoadTopology(jsonPath string) ([]S.Node, error) {
+func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -137,7 +137,7 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 	}
 
 	// Build each node.
-	nodes := make([]S.Node, 0, len(spec.Nodes))
+	nodes := make([]Node, 0, len(spec.Nodes))
 	for _, n := range spec.Nodes {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
@@ -172,7 +172,7 @@ func LoadTopology(jsonPath string) ([]S.Node, error) {
 			idx = *n.Index
 		}
 
-		nd, err := bind.Build(idx, n.ID, n.Data, pb)
+		nd, err := bind.Build(idx, n.ID, n.Data, pb, tr)
 		if err != nil {
 			return nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

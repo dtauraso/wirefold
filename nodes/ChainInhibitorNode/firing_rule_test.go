@@ -5,15 +5,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
 )
-
-func newWorker(ctx context.Context) *S.SafeWorker {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	return &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-}
 
 func recv(t *testing.T, ch <-chan int) int {
 	t.Helper()
@@ -40,14 +32,15 @@ func TestFireOnReceive(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := newWorker(ctx)
-	go node.Update(sw)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	fromPrev <- 7
 	got0 := recv(t, out0)
 	got1 := recv(t, out1)
 	cancel()
-	sw.Wg.Wait()
+	wg.Wait()
 
 	if got0 != 99 {
 		t.Errorf("ToNext[0]: expected 99, got %d", got0)

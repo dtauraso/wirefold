@@ -5,8 +5,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
 )
 
 func recv(t *testing.T, ch <-chan int) int {
@@ -31,10 +29,9 @@ func TestEmitsInitValues(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
-	sw := &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-	go node.Update(sw)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	// Update exits after all Init values are sent, so wg.Wait suffices.
 	done := make(chan struct{})
@@ -61,10 +58,9 @@ func TestEmptyInit(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
-	sw := &S.SafeWorker{Ctx: ctx, Wg: wg, Trace: nil}
-	go node.Update(sw)
+	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()

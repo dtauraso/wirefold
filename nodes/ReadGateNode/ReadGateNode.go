@@ -1,27 +1,29 @@
 package ReadGateNode
 
 import (
+	"context"
 	"fmt"
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+
+	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 type ReadGateNode struct {
-	Id        int
-	Name      string
-	Value     int
-	HasValue  bool
+	Id                int
+	Name              string
+	Trace             *T.Trace
+	Value             int
+	HasValue          bool
 	HasChainInhibitor bool
-	FromInput <-chan int
-	FromChainInhibitor   <-chan int
+	FromInput          <-chan int
+	FromChainInhibitor <-chan int
 	ToChainInhibitor   chan<- int
 }
 
-func (g *ReadGateNode) Update(s *S.SafeWorker) {
-	defer s.Wg.Done()
+func (g *ReadGateNode) Update(ctx context.Context) {
 	for {
 		select {
-		case <-s.Ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -31,7 +33,7 @@ func (g *ReadGateNode) Update(s *S.SafeWorker) {
 			case v := <-g.FromInput:
 				g.Value = v
 				g.HasValue = true
-				s.Trace.Recv(g.Name, "FromInput", v)
+				g.Trace.Recv(g.Name, "FromInput", v)
 			default:
 			}
 		}
@@ -40,16 +42,19 @@ func (g *ReadGateNode) Update(s *S.SafeWorker) {
 			select {
 			case v := <-g.FromChainInhibitor:
 				g.HasChainInhibitor = true
-				s.Trace.Recv(g.Name, "FromChainInhibitor", v)
+				g.Trace.Recv(g.Name, "FromChainInhibitor", v)
 			default:
 			}
 		}
 
 		if g.HasValue && g.HasChainInhibitor {
 			fmt.Printf("%s: value=%d → %d\n", g.Name, g.Value, g.Value)
-			s.Trace.Fire(g.Name)
-			S.Send(g.ToChainInhibitor, g.Value)
-			s.Trace.Send(g.Name, "ToChainInhibitor", g.Value)
+			g.Trace.Fire(g.Name)
+			select {
+			case g.ToChainInhibitor <- g.Value:
+			default:
+			}
+			g.Trace.Send(g.Name, "ToChainInhibitor", g.Value)
 			g.HasValue = false
 			g.HasChainInhibitor = false
 		}

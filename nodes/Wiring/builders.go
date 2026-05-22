@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"reflect"
 
-	S "github.com/dtauraso/wirefold/nodes/SafeWorker"
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // PortDir describes which direction a port flows.
@@ -107,8 +107,8 @@ func reflectPorts(sample any) []PortSpec {
 }
 
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
-// then returns it cast to S.Node.
-func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEntry) (S.Node, error) {
+// then returns it cast to Node.
+func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
@@ -118,6 +118,10 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 	}
 	if f := v.FieldByName("Name"); f.IsValid() && f.CanSet() {
 		f.SetString(name)
+	}
+	// Inject Trace if the struct has a *T.Trace field named Trace.
+	if f := v.FieldByName("Trace"); f.IsValid() && f.CanSet() && f.Type() == reflect.TypeOf(tr) {
+		f.Set(reflect.ValueOf(tr))
 	}
 
 	// Wire channel fields.
@@ -172,9 +176,9 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 		}
 	}
 
-	node, ok := nodePtr.(S.Node)
+	node, ok := nodePtr.(Node)
 	if !ok {
-		return nil, fmt.Errorf("reflectBuild: %T does not implement S.Node", nodePtr)
+		return nil, fmt.Errorf("reflectBuild: %T does not implement Node", nodePtr)
 	}
 	return node, nil
 }
@@ -183,7 +187,7 @@ func reflectBuild(id int, name string, data *NodeData, pb PortBindings, e kindEn
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
 type NodeBuilder struct {
 	Ports []PortSpec
-	Build func(id int, name string, data *NodeData, pb PortBindings) (S.Node, error)
+	Build func(id int, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -196,8 +200,8 @@ func init() {
 		ports := reflectPorts(sample)
 		Registry[kind] = NodeBuilder{
 			Ports: ports,
-			Build: func(id int, name string, data *NodeData, pb PortBindings) (S.Node, error) {
-				return reflectBuild(id, name, data, pb, e)
+			Build: func(id int, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+				return reflectBuild(id, name, data, pb, e, tr)
 			},
 		}
 	}
