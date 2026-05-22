@@ -34,8 +34,9 @@ export function installHostMessageRouter(
     if (msg.type === "load") handlers.load(msg.text);
     else if (msg.type === "view-load") handlers.viewLoad(msg.text);
     else if (msg.type === "trace-event") {
-      console.log(`[webview-msg] trace-event step=${msg.event.step} kind=${msg.event.kind} node=${msg.event.node ?? msg.event.nodeId} port=${msg.event.port ?? "-"}`);
-      postLog("phase4.webview-msg", { layer: "webview-msg", step: msg.event.step, kind: msg.event.kind, node: msg.event.node ?? msg.event.nodeId, port: msg.event.port ?? null });
+      const evNode = 'node' in msg.event ? msg.event.node : msg.event.nodeId;
+      console.log(`[webview-msg] trace-event step=${msg.event.step} kind=${msg.event.kind} node=${evNode} port=${msg.event.port ?? "-"}`);
+      postLog("phase4.webview-msg", { layer: "webview-msg", step: msg.event.step, kind: msg.event.kind, node: evNode, port: msg.event.port ?? null });
       handlers.traceEvent?.(msg.event);
     }
   };

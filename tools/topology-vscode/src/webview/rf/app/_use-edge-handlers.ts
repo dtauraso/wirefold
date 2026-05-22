@@ -7,6 +7,7 @@ import { scheduleSave } from "../../save";
 import { rfGetEdges, rfSetEdges } from "../rf-imperative";
 import { pushSnapshot } from "../history";
 import type { AppCtx } from "./_ctx";
+import type { Port } from "../../../schema/types";
 import { onConnectImpl } from "./_on-connect";
 import { onReconnectImpl } from "./_on-reconnect";
 
@@ -80,12 +81,12 @@ export function useEdgeHandlers(ctx: AppCtx) {
       if (nd.id !== nodeId) return nd;
       const allPorts = [...(nd.data?.inputs ?? []), ...(nd.data?.outputs ?? [])];
       const dragged = allPorts.find((p) => p.name === portName); if (!dragged) return nd;
-      const isInput = (nd.data?.inputs ?? []).some((p) => p.name === portName);
+      const isInput = (nd.data?.inputs ?? []).some((p: Port) => p.name === portName);
       const oldSide: Side = (dragged.side as Side | undefined) ?? (isInput ? "left" : "right");
       const oldSlot: 0 | 1 | 2 = dragged.slot ?? 1;
       const occupant = allPorts.find((p) => {
         if (p.name === portName) return false;
-        const pIsInput = (nd.data?.inputs ?? []).some((x) => x.name === p.name);
+        const pIsInput = (nd.data?.inputs ?? []).some((x: Port) => x.name === p.name);
         return ((p.side as Side | undefined) ?? (pIsInput ? "left" : "right")) === side && (p.slot ?? 1) === slot;
       });
       const patch = (p: { name: string; side?: unknown; slot?: unknown }) => {

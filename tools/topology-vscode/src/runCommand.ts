@@ -100,7 +100,7 @@ export class BuildAndRunRunner {
       this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
       const ev = tryParseTraceEvent(line);
       if (ev && this.onTraceEvent) {
-        console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${ev.node} port=${ev.port ?? "-"}`);
+        console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${'node' in ev ? ev.node : ev.nodeId} port=${ev.port ?? "-"}`);
         if (this.probeFile) {
           try {
             fs.appendFileSync(this.probeFile, JSON.stringify({ ts: Date.now(), layer: "ext", ...ev }) + "\n", "utf8");

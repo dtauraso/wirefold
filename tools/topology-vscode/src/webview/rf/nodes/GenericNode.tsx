@@ -87,7 +87,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
         const all = [...(nd.data?.inputs ?? []), ...(nd.data?.outputs ?? [])];
         const occupant = all.find((p) => {
           if (p.name === portName) return false;
-          const inp = (nd.data?.inputs ?? []).some((x) => x.name === p.name);
+          const inp = (nd.data?.inputs ?? []).some((x: Port) => x.name === p.name);
           return ((p.side as Side|undefined) ?? (inp ? "left" : "right")) === n.side && (p.slot ?? 1) === n.slot;
         });
         const patch = (p: Port): Port => {
