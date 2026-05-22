@@ -44,15 +44,6 @@ Active node kinds live under
 a static React Flow custom node — render only. The per-kind role is
 documented on the component itself rather than duplicated here.
 
-## SVG output
-
-If the task involves generating or modifying any SVG, read
-[docs/svg-style-guide.md](docs/svg-style-guide.md) before writing.
-It contains the binding conventions (semantic grouping, class-based
-styling, metadata block, renderer exceptions) and the house-style
-vocabulary. Do not write SVGs without reading it first. If the task
-does not touch SVGs, skip it.
-
 ## Memory
 
 Project memory lives in `memory/` at the repo root, one file per
