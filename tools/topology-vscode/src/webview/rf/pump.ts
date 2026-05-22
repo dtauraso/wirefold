@@ -1,5 +1,6 @@
 // pump.ts — trace-event translator. Pure mapping: Go trace events → RF state.
 // No state machine, no phase tracking, no substrate logic.
+// pump.ts is render-only; substrate poll loops live in Go. See MODEL.md §Driver.
 // Each call to handleTraceEvent reads the current RF state, patches the
 // relevant node/edge data field, and writes it back via rfSetNodes/rfSetEdges.
 
