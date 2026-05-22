@@ -36,7 +36,6 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	wg.Add(len(nodes))
 
 	for _, node := range nodes {
-		node := node
 		go func() {
 			defer wg.Done()
 			node.Update(ctx)
