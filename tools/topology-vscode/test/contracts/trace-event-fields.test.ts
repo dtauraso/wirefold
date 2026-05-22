@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TraceEvent, SlotEvent } from "../../src/messages";
+import { TRACE_EVENT_KINDS } from "../../src/webview/rf/trace-kinds";
 
 const FIXTURE = join(__dirname, "../fixtures/trace-events.jsonl");
 
@@ -30,6 +31,20 @@ describe("trace-event-fields contract", () => {
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
     expect(kinds).toEqual(new Set(["recv", "fire", "send", "slot"]));
+  });
+
+  it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
+    const allowed = new Set<string>(TRACE_EVENT_KINDS);
+    for (const e of events) {
+      expect(allowed.has(e.kind), `unknown kind "${e.kind}" in fixture`).toBe(true);
+    }
+  });
+
+  it("TRACE_EVENT_KINDS covers all fixture kinds (no generated kind missing from fixture)", () => {
+    const fixtureKinds = new Set(events.map((e) => e.kind));
+    for (const k of TRACE_EVENT_KINDS) {
+      expect(fixtureKinds.has(k), `TRACE_EVENT_KINDS contains "${k}" but fixture has no such event`).toBe(true);
+    }
   });
 
   it("recv event has step, kind, node, port, value", () => {
