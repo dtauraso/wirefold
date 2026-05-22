@@ -56,7 +56,7 @@ Do not rely on `.class text { fill: ... }` descendant selectors — they are ign
 # Part 2 — Topology-chain-cascade.svg — House Style Compilation
 
 ## Context
-Reference compilation of the style conventions used in [diagrams/topology-chain-cascade.svg](../diagrams/topology-chain-cascade.svg). Captures nodes, edges, labels, spacing, path routing, and animation patterns so future diagrams in this repo can match the house style without re-deriving it from the file.
+Reference compilation of the style conventions used in [diagrams/topology-examples/topology-chain-cascade.svg](../diagrams/topology-examples/topology-chain-cascade.svg). Captures nodes, edges, labels, spacing, path routing, and animation patterns so future diagrams in this repo can match the house style without re-deriving it from the file.
 
 ---
 
@@ -211,6 +211,6 @@ All defined in `<defs>`, identical geometry (`M0,0 L8,3 L0,6`, 8×6, refX=8 refY
 ## 14. Verification
 
 This is a read-only compilation — no code changes. To verify:
-- Open [diagrams/topology-chain-cascade.svg](../diagrams/topology-chain-cascade.svg) in VS Code preview; confirm every class/color/shape in the tables above appears as described.
+- Open [diagrams/topology-examples/topology-chain-cascade.svg](../diagrams/topology-examples/topology-chain-cascade.svg) in VS Code preview; confirm every class/color/shape in the tables above appears as described.
 - Cross-check the `<metadata>` JSON's `nodes[]` and `edges[]` against the `<g>` ids in the body; each entry should correspond to exactly one rendered group.
 - Confirm timing fractions in `metadata.timing.steps` line up with `keyTimes` values in the `<animate>` elements.
