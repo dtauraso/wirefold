@@ -3,12 +3,11 @@
 // from docs/svg-style-guide.md §5.
 //
 // Generated kinds (Input, ReadGate, ChainInhibitor, InhibitRightGate)
-// are derived from NODE_DEFS in node-defs.ts — do not hand-edit port
-// lists or colors for those kinds here. Edit SPEC.md and re-run
-// `npm run gen:node-defs`.
+// are derived from NODE_DEFS in node-defs.ts. Do not hand-edit them
+// here — edit SPEC.md and re-run `npm run gen:node-defs`.
 //
-// Non-generated kinds (Generic, DetectorLatch, PatternAnd) have no
-// substrate runtime; they remain static below.
+// Generic is a hand-maintained test-only placeholder for fixtures
+// that need a node kind without a Go runtime.
 
 import type { NodeTypeDef } from "./types-graph";
 import { NODE_DEFS } from "../webview/rf/nodes/node-defs";
@@ -43,18 +42,5 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     role: "generic",
     inputs: [], outputs: [],
     shape: "rect", fill: "#ffffff", stroke: "#888", width: 110, height: 60,
-  },
-  DetectorLatch: {
-    role: "latch",
-    inputs: [{ name: "in", kind: "chain" }, { name: "release", kind: "release" }],
-    outputs: [{ name: "out", kind: "chain" }],
-    shape: "rect", fill: "#e0f7fa", stroke: "#00838f", width: 90, height: 50,
-    defaultProps: { delay: 1 },
-  },
-  PatternAnd: {
-    role: "pattern-and",
-    inputs: [{ name: "a", kind: "signal" }, { name: "b", kind: "signal" }],
-    outputs: [{ name: "out", kind: "and-out" }],
-    shape: "rect", fill: "#e8eaf6", stroke: "#283593", width: 70, height: 40,
   },
 };
