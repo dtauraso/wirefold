@@ -61,8 +61,10 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "run":
       try {
         if (msg.text !== undefined) {
+          const viewText = extractViewText(document.getText());
+          const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
           ctx.setLastAppliedVersion(document.version + 1);
-          await applyEdit(document, msg.text);
+          await applyEdit(document, merged);
           await document.save();
           ctx.setLastAppliedVersion(document.version);
         }
