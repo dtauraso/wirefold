@@ -6,10 +6,16 @@
 import { describe, it, expect } from "vitest";
 import { parseSpec } from "../src/schema";
 
-const okNode = { id: "n", type: "ChainInhibitor" };
+// Generic with explicit port overrides: no required inputs, so tests that omit
+// edges remain valid. Port names match okEdge handles.
+const okNode = {
+  id: "n", type: "Generic",
+  outputs: [{ name: "out", kind: "chain" }],
+  inputs: [{ name: "in", kind: "chain" }],
+};
 const okEdge = {
-  id: "e", label: "n→n", source: "n", sourceHandle: "ToNextChainInhibitorNode",
-  target: "n", targetHandle: "FromPrevChainInhibitorNode", kind: "chain",
+  id: "e", label: "n→n", source: "n", sourceHandle: "out",
+  target: "n", targetHandle: "in", kind: "chain",
 };
 
 describe("parseSpec rejects", () => {
