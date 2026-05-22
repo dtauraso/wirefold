@@ -1,0 +1,80 @@
+// Cross-language contract: Go Trace.Event JSON tags ↔ pump.ts field reads.
+//
+// Go emits JSONL trace events; pump.ts reads them by string key. A Go
+// json-tag rename passes `go build` / `go test` but silently breaks the
+// pump. This test pins the exact fields pump.ts reads so any rename is
+// caught at `npm test` time.
+//
+// Fixture: test/fixtures/trace-events.jsonl — one representative event
+// per `kind` variant, hand-curated to match Go Trace.marshalEvent output.
+// Regen when Go adds a new kind: add one line to the fixture and one
+// assertion here.
+
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { TraceEvent, SlotEvent } from "../../src/messages";
+
+const FIXTURE = join(__dirname, "../fixtures/trace-events.jsonl");
+
+function loadEvents(): TraceEvent[] {
+  return readFileSync(FIXTURE, "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l) as TraceEvent);
+}
+
+describe("trace-event-fields contract", () => {
+  const events = loadEvents();
+
+  it("fixture has one event for each kind variant", () => {
+    const kinds = new Set(events.map((e) => e.kind));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "slot"]));
+  });
+
+  it("recv event has step, kind, node, port, value", () => {
+    const e = events.find((ev) => ev.kind === "recv")!;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("recv");
+    expect(typeof e.node).toBe("string");
+    expect(typeof (e as Extract<TraceEvent, { kind: "recv" }> & { port?: string }).port).toBe("string");
+    expect(typeof (e as Extract<TraceEvent, { kind: "recv" }> & { value?: number }).value).toBe("number");
+  });
+
+  it("fire event has step, kind, node", () => {
+    const e = events.find((ev) => ev.kind === "fire")!;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("fire");
+    expect(typeof e.node).toBe("string");
+  });
+
+  it("send event has step, kind, node, port, value", () => {
+    const e = events.find((ev) => ev.kind === "send")!;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("send");
+    expect(typeof e.node).toBe("string");
+    const asObj = e as Record<string, unknown>;
+    expect(typeof asObj["port"]).toBe("string");
+    expect(typeof asObj["value"]).toBe("number");
+  });
+
+  it("slot(filled) event has step, kind, nodeId, port, phase, value", () => {
+    const e = events.find((ev) => ev.kind === "slot" && (ev as SlotEvent).phase === "filled") as SlotEvent;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("slot");
+    expect(typeof e.nodeId).toBe("string");
+    expect(typeof e.port).toBe("string");
+    expect(e.phase).toBe("filled");
+    expect(typeof e.value).toBe("number");
+  });
+
+  it("slot(empty) event has step, kind, nodeId, port, phase — no value", () => {
+    const e = events.find((ev) => ev.kind === "slot" && (ev as SlotEvent).phase === "empty") as SlotEvent;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("slot");
+    expect(typeof e.nodeId).toBe("string");
+    expect(typeof e.port).toBe("string");
+    expect(e.phase).toBe("empty");
+    expect(e.value).toBeUndefined();
+  });
+});
