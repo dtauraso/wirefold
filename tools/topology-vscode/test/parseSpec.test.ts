@@ -8,7 +8,7 @@ import { parseSpec } from "../src/schema";
 
 const okNode = { id: "n", type: "ChainInhibitor" };
 const okEdge = {
-  id: "e", source: "n", sourceHandle: "ToNextChainInhibitorNode",
+  id: "e", label: "n→n", source: "n", sourceHandle: "ToNextChainInhibitorNode",
   target: "n", targetHandle: "FromPrevChainInhibitorNode", kind: "chain",
 };
 

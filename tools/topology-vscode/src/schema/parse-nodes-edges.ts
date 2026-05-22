@@ -79,11 +79,18 @@ export function parseNode(v: unknown, path: string): Node {
 
 export function parseEdge(v: unknown, path: string): Edge {
   const o = obj(v, path);
+  const id = str(o.id, `${path}.id`);
+  const source = str(o.source, `${path}.source`);
+  const target = str(o.target, `${path}.target`);
+  const label = (o as Record<string, unknown>).label;
+  if (label === undefined || label === null || String(label).trim() === "") {
+    throw new Error(`${path}: edge "${id}" (${source}→${target}) has missing or empty label`);
+  }
   const edge: Record<string, unknown> = {
-    id: str(o.id, `${path}.id`),
-    source: str(o.source, `${path}.source`),
+    id,
+    source,
     sourceHandle: str(o.sourceHandle, `${path}.sourceHandle`),
-    target: str(o.target, `${path}.target`),
+    target,
     targetHandle: str(o.targetHandle, `${path}.targetHandle`),
     // kind: required EdgeKind enum — kept explicit
     kind: oneOf(o.kind, EDGE_KINDS, `${path}.kind`),

@@ -79,6 +79,7 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 	}
 
 	// Validate all kinds up front.
+	// also caught by TS parser; defense-in-depth
 	for _, n := range spec.Nodes {
 		if _, ok := Registry[n.Type]; !ok {
 			return nil, fmt.Errorf("LoadTopology: node %q: unknown type %q", n.ID, n.Type)
@@ -88,6 +89,7 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 	// Allocate one chan int (buf 1) per edge; keyed by label.
 	edgeChan := map[string]chan int{}
 	for _, e := range spec.Edges {
+		// also caught by TS parser; defense-in-depth
 		if e.Label == "" {
 			return nil, fmt.Errorf("LoadTopology: edge %q→%q has empty label", e.Source, e.Target)
 		}

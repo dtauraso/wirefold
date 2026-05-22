@@ -2,7 +2,7 @@
 // flags unknown source/target ids and unknown port names.
 
 import type { Note, Spec } from "./types-graph";
-import { NODE_TYPES } from "./node-types";
+import { NODE_TYPES, RUNTIME_IMPLEMENTED_KINDS } from "./node-types";
 import {
   num,
   obj,
@@ -25,6 +25,15 @@ export function parseNote(v: unknown, path: string): Note {
 export function validatePorts(s: Spec): void {
   const byId = new Map(s.nodes.map((n) => [n.id, n]));
   const issues: string[] = [];
+
+  // Unknown kind check: surface before port/edge validation.
+  const knownTypes = new Set([...RUNTIME_IMPLEMENTED_KINDS, ...Object.keys(NODE_TYPES)]);
+  for (const n of s.nodes) {
+    if (!knownTypes.has(n.type)) {
+      issues.push(`node "${n.id}": unknown type "${n.type}"`);
+    }
+  }
+  if (issues.length) throw new ParseError(issues.join("\n"));
   const wiredInputs = new Map<string, Set<string>>();
   for (const e of s.edges) {
     const src = byId.get(e.source);
