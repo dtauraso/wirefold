@@ -1134,8 +1134,7 @@ neither has caused observed pain yet.
 
 Reframed the industry-pattern review from *missing user features* to
 *hand-rolled code that duplicates library primitives*. Scanned
-`tools/topology-vscode/src/` and produced
-[industry-pattern-audit.md](archive/industry-pattern-audit.md): 19
+`tools/topology-vscode/src/` and produced an industry-pattern audit: 19
 "reimplemented" items (R1-R19) with canonical replacements + 7
 "missing" react-flow/ecosystem features (M1-M7). Out-of-scope items
 (Yjs, Storybook, telemetry, mobile, react-query) explicitly listed

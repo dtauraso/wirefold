@@ -29,23 +29,21 @@ you're working on.
 
 | Phase | Status | File | Cap est. | \$ extra-usage est. |
 |---|---|---|---|---|
-| 1 — pipeline foundations | ✅ done | [phase-1.md](visual-editor/phase-1.md) | ~2 | ~\$120 |
-| 2 — recall affordances | ✅ done | [phase-2.md](visual-editor/phase-2.md) | ≤2 | ≤\$120 |
-| 3 — structural editing | 🟡 ~½ remaining (3 Tier-3 follow-ups) | [phase-3.md](visual-editor/phase-3.md) | — | ~\$3 left |
-| 4 — fold/unfold | ✅ done; nested ⏳ | [phase-4.md](visual-editor/phase-4.md) | — | ~\$3 nested |
-| 4.5 — plugin hardening (audit) | ✅ 4.5.1–4.5.5 done; 4.5.6 opportunistic | [phase-4.5.md](visual-editor/phase-4.5.md) | — | ~\$13.47 actual |
-| 5 — comparison | ✅ done (incl. follow-ups) | [phase-5.md](visual-editor/phase-5.md) | — | ~\$8.05 actual |
-| 5.5 — animation model rewrite | ✅ done | [phase-5.5.md](visual-editor/phase-5.5.md) | — | \$21.26 actual |
-| 6 — node motion (state-derived) | ✅ done | [phase-6.md](visual-editor/phase-6.md) | — | \$5.04 actual |
-| 7 — trace replay | ✅ chunks 1–5 done; Phase 8 (per-node parity) chunks 1–11 also done | [phase-7.md](visual-editor/phase-7.md) | — | \$11.57 + \$8.69 actual |
-| 8 — polish (undo, snap, e2e) | ✅ chunks 1–3 done; Tier 4 nightly latency deferred | [phase-8.md](visual-editor/phase-8.md) | — | \$4.69 actual |
-| 9 — SVG diagram parity | ✅ done | [phase-9.md](visual-editor/phase-9.md) | — | \$4.93 actual |
+| 1 — pipeline foundations | ✅ done | phase-1 | ~2 | ~\$120 |
+| 2 — recall affordances | ✅ done | phase-2 | ≤2 | ≤\$120 |
+| 3 — structural editing | 🟡 ~½ remaining (3 Tier-3 follow-ups) | phase-3 | — | ~\$3 left |
+| 4 — fold/unfold | ✅ done; nested ⏳ | phase-4 | — | ~\$3 nested |
+| 4.5 — plugin hardening (audit) | ✅ 4.5.1–4.5.5 done; 4.5.6 opportunistic | phase-4.5 | — | ~\$13.47 actual |
+| 5 — comparison | ✅ done (incl. follow-ups) | phase-5 | — | ~\$8.05 actual |
+| 5.5 — animation model rewrite | ✅ done | phase-5.5 | — | \$21.26 actual |
+| 6 — node motion (state-derived) | ✅ done | phase-6 | — | \$5.04 actual |
+| 7 — trace replay | ✅ chunks 1–5 done; Phase 8 (per-node parity) chunks 1–11 also done | phase-7 | — | \$11.57 + \$8.69 actual |
+| 8 — polish (undo, snap, e2e) | ✅ chunks 1–3 done; Tier 4 nightly latency deferred | phase-8 | — | \$4.69 actual |
+| 9 — SVG diagram parity | ✅ done | phase-9 | — | \$4.93 actual |
 
-**Cap-hit column dropped.** Phase 5 came in at ~\$5.65 against a \$110 estimate (~5% of midpoint, ~18× overestimate). The cap-hit unit was calibrated against an older model and a less mature codebase; with Opus 4.7 + the existing harness/adapter/save infrastructure, mechanical phases run roughly an order of magnitude under the original budget. \$ figures above are the post-Phase-5 recalibration; cap-hit estimates are no longer load-bearing. See [risk-and-effort.md](visual-editor/risk-and-effort.md) for the methodology.
+**Cap-hit column dropped.** Phase 5 came in at ~\$5.65 against a \$110 estimate (~5% of midpoint, ~18× overestimate). The cap-hit unit was calibrated against an older model and a less mature codebase; with Opus 4.7 + the existing harness/adapter/save infrastructure, mechanical phases run roughly an order of magnitude under the original budget. \$ figures above are the post-Phase-5 recalibration; cap-hit estimates are no longer load-bearing.
 
 **\$ totals (remaining):** ~\$135 midpoint to ship Phases 3 → 9 (Phase 4.5 now done at \$13.47 actual), range ~\$90–\$265 depending on whether the refactor/exploratory phases (5.5, 6, 7) hit their risk-case multipliers. Mechanical phases (3-leftover, 4-nested, 8, 9) scaled at ~10% of original estimate; hardening (4.5) landed at ~12% (audit work has more codebase exploration than pure-function authoring); refactor (5.5, 6) and exploratory (7) at ~15–20% with wider risk bands since the Phase-5 efficiency factor may not generalize fully to less-scoped work.
-| Cross-cutting — testing strategy | — | [testing-strategy.md](visual-editor/testing-strategy.md) | — |
-| Cross-cutting — risk & effort | — | [risk-and-effort.md](visual-editor/risk-and-effort.md) | — |
 
 ## ▶ v0 closeout
 

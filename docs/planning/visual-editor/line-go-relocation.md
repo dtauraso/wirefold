@@ -80,4 +80,4 @@ in `Setup()`.
 
 - Any redesign of the nodes involved.
 - Multi-topology selection in `main.go`.
-- The broader kind-audit decisions on `ChainInhibitor` or `InhibitRightGate`.
+- Decisions on `ChainInhibitor` or `InhibitRightGate`.
