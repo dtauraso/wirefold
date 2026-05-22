@@ -27,6 +27,7 @@ pointer at the top of this file is the only entry point you need.
    The RF type name is derived from the spec kind automatically:
    `specKindToRfType` in `spec-to-flow.ts` lowercases the first character,
    so spec kind `MyKind` maps to RF type `myKind` with no extra registration.
+   (Precondition: spec kinds must be PascalCase; the first-char lowercase derivation assumes this.)
 3. The Go node package under `nodes/<Kind>/`.
 
 **Wire props:** `tools/topology-vscode/src/webview/rf/edges/SubstrateEdge.tsx`
