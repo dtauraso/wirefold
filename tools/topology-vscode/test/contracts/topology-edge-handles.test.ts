@@ -33,11 +33,15 @@ function specKindToDefKey(kind: string): string {
 }
 
 // Go OutMulti ports are referenced as "<portName><index>" in topology.json.
-// Normalize by stripping a trailing digit suffix and checking the base name.
-function handleMatchesPort(handle: string, portName: string): boolean {
+// If the port carries isMulti:true (from generated metadata), match by base name prefix.
+// Exact match is always accepted (covers non-multi ports).
+function handleMatchesPort(handle: string, portName: string, isMulti?: boolean): boolean {
   if (handle === portName) return true;
-  const stripped = handle.replace(/\d+$/, "");
-  return stripped === portName;
+  if (isMulti) {
+    // OutMulti: handle must start with portName followed by a digit
+    return handle.startsWith(portName) && /^\d+$/.test(handle.slice(portName.length));
+  }
+  return false;
 }
 
 describe("topology-edge-handles contract", () => {
@@ -52,8 +56,8 @@ describe("topology-edge-handles contract", () => {
       const key = specKindToDefKey(src.type);
       const def = NODE_DEFS[key as keyof typeof NODE_DEFS];
       if (!def) { failures.push(`edge ${edge.id}: kind "${src.type}" not in NODE_DEFS`); continue; }
-      const outputs = (def as { outputs?: { name: string }[] }).outputs ?? [];
-      if (!outputs.some((o) => handleMatchesPort(edge.sourceHandle, o.name))) {
+      const outputs = (def as { outputs?: { name: string; isMulti?: boolean }[] }).outputs ?? [];
+      if (!outputs.some((o) => handleMatchesPort(edge.sourceHandle, o.name, o.isMulti))) {
         failures.push(`edge ${edge.id}: node "${edge.source}" (${src.type}) has no output "${edge.sourceHandle}"`);
       }
     }
@@ -68,8 +72,8 @@ describe("topology-edge-handles contract", () => {
       const key = specKindToDefKey(tgt.type);
       const def = NODE_DEFS[key as keyof typeof NODE_DEFS];
       if (!def) { failures.push(`edge ${edge.id}: kind "${tgt.type}" not in NODE_DEFS`); continue; }
-      const inputs = (def as { inputs?: { name: string }[] }).inputs ?? [];
-      if (!inputs.some((i) => handleMatchesPort(edge.targetHandle, i.name))) {
+      const inputs = (def as { inputs?: { name: string; isMulti?: boolean }[] }).inputs ?? [];
+      if (!inputs.some((i) => handleMatchesPort(edge.targetHandle, i.name, i.isMulti))) {
         failures.push(`edge ${edge.id}: node "${edge.target}" (${tgt.type}) has no input "${edge.targetHandle}"`);
       }
     }
