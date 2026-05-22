@@ -2,9 +2,9 @@
 // styling per node type. `kind` values must match SVG edge classes
 // from docs/svg-style-guide.md §5.
 //
-// Generated kinds (Input, ReadGate, ChainInhibitor, InhibitRightGate)
-// are derived from NODE_DEFS in node-defs.ts. Do not hand-edit them
-// here — edit SPEC.md and re-run `npm run gen:node-defs`.
+// Both the PascalCase keys and values of NODE_TYPES are derived from
+// NODE_DEFS in node-defs.ts. Do not hand-edit kinds here — edit
+// SPEC.md and re-run `npm run gen:node-defs`.
 //
 // Generic is a hand-maintained test-only placeholder for fixtures
 // that need a node kind without a Go runtime.
@@ -34,13 +34,11 @@ function defToTypeDef(rfKey: string): NodeTypeDef | undefined {
 }
 
 export const NODE_TYPES: Record<string, NodeTypeDef> = {
-  Input: defToTypeDef("input")!,
-  ReadGate: defToTypeDef("readGate")!,
-  ChainInhibitor: defToTypeDef("chainInhibitor")!,
-  InhibitRightGate: defToTypeDef("inhibitRightGate")!,
-  Generic: {
-    role: "generic",
-    inputs: [], outputs: [],
-    shape: "rect", fill: "#ffffff", stroke: "#888", width: 110, height: 60,
-  },
+  ...Object.fromEntries(
+    Object.keys(NODE_DEFS).map((rf) => [
+      rf.charAt(0).toUpperCase() + rf.slice(1),
+      defToTypeDef(rf)!,
+    ]),
+  ),
+  Generic: { role: "generic", inputs: [], outputs: [], shape: "rect", fill: "#ffffff", stroke: "#888", width: 110, height: 60 },
 };
