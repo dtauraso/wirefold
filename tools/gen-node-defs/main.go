@@ -1196,12 +1196,12 @@ func joinPorts(ports []port) string {
 	var parts []string
 	for _, p := range ports {
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf(`{ id: "%s"`, p.id))
+		fmt.Fprintf(&sb, `{ id: "%s"`, p.id)
 		if p.accent != "" {
-			sb.WriteString(fmt.Sprintf(`, accent: "%s"`, p.accent))
+			fmt.Fprintf(&sb, `, accent: "%s"`, p.accent)
 		}
 		if p.edgeKind != "" {
-			sb.WriteString(fmt.Sprintf(`, edgeKind: "%s"`, p.edgeKind))
+			fmt.Fprintf(&sb, `, edgeKind: "%s"`, p.edgeKind)
 		}
 		if p.isMulti {
 			sb.WriteString(`, isMulti: true`)
