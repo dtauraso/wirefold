@@ -22,6 +22,9 @@ import {
 } from "./parse-primitives";
 import { parseNodeData } from "./node-data-types";
 import { WIRE_PROPS } from "./wire-defs";
+import { RUNTIME_IMPLEMENTED_KINDS } from "./node-types";
+
+const KNOWN_NODE_KINDS: ReadonlySet<string> = new Set([...RUNTIME_IMPLEMENTED_KINDS, "Generic"]);
 
 function parsePort(v: unknown, path: string): Port {
   const o = obj(v, path);
@@ -63,14 +66,21 @@ function parseNodeSpec(v: unknown, path: string): NodeSpec {
 
 export function parseNode(v: unknown, path: string): Node {
   const o = obj(v, path);
+  const nodeType = str(o.type, `${path}.type`);
+  if (!KNOWN_NODE_KINDS.has(nodeType)) {
+    throw new Error(
+      `${path}.type: unknown node kind "${nodeType}". ` +
+      `Known kinds: ${[...KNOWN_NODE_KINDS].sort().join(", ")}`,
+    );
+  }
   return {
     id: str(o.id, `${path}.id`),
-    type: str(o.type, `${path}.type`),
+    type: nodeType,
     index: opt(o.index, (x) => num(x, `${path}.index`)),
     props: opt(o.props, (x) => stateMap(x, `${path}.props`)),
     spec: opt(o.spec, (x) => parseNodeSpec(x, `${path}.spec`)),
     notes: opt(o.notes, (x) => str(x, `${path}.notes`)),
-    data: parseNodeData(str(o.type, `${path}.type`), o.data, path),
+    data: parseNodeData(nodeType, o.data, path),
     inputs: opt(o.inputs, (x) => parsePorts(x, `${path}.inputs`)),
     outputs: opt(o.outputs, (x) => parsePorts(x, `${path}.outputs`)),
     state: opt(o.state, (x) => numMap(x, `${path}.state`)),
