@@ -33,6 +33,9 @@ func fixtureLines(t *testing.T) []string {
 			lines = append(lines, l)
 		}
 	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
 	return lines
 }
 
