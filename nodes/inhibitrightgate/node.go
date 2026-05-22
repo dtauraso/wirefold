@@ -44,8 +44,8 @@ func (g *Node) Update(ctx context.Context) {
 			if g.Left == 1 && g.Right == 0 {
 				result = 1
 			}
+			g.Fire()
 			if g.ToPassed.TrySend(result) {
-				g.Fire()
 				g.HasLeft = false
 				g.HasRight = false
 			}

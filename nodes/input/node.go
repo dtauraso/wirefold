@@ -17,8 +17,8 @@ func (n *Node) Update(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		n.Fire()
 		if n.ToReadGate.TrySend(n.Init[i]) {
-			n.Fire()
 			i++
 		}
 	}
