@@ -1,4 +1,4 @@
-package InhibitRightGateNode
+package inhibitrightgate
 
 import (
 	"context"
@@ -16,7 +16,7 @@ func run(left, right int) (int, error) {
 	fromLeft := make(chan int, 1)
 	fromRight := make(chan int, 1)
 	toPassed := make(chan int, 1)
-	node := &InhibitRightGateNode{
+	node := &Node{
 		Fire:      func() { tr.Fire("irg") },
 		FromLeft:  Wiring.NewIn(fromLeft, "irg", "FromLeft", tr),
 		FromRight: Wiring.NewIn(fromRight, "irg", "FromRight", tr),

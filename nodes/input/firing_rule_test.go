@@ -1,4 +1,4 @@
-package InputNode
+package input
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func TestEmitsInitValues(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 	toRG := make(chan int, 3)
-	node := &InputNode{
+	node := &Node{
 		Fire:       func() { tr.Fire("in") },
 		Init:       []int{10, 20, 30},
 		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),
@@ -61,7 +61,7 @@ func TestEmptyInit(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 	toRG := make(chan int, 1)
-	node := &InputNode{
+	node := &Node{
 		Fire:       func() { tr.Fire("in") },
 		Init:       nil,
 		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),

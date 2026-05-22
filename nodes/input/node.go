@@ -1,4 +1,4 @@
-package InputNode
+package input
 
 import (
 	"context"
@@ -6,13 +6,13 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-type InputNode struct {
+type Node struct {
 	Fire       func()
 	Init       []int `wire:"data.init"`
 	ToReadGate *Wiring.Out
 }
 
-func (n *InputNode) Update(ctx context.Context) {
+func (n *Node) Update(ctx context.Context) {
 	for i := 0; i < len(n.Init); {
 		if ctx.Err() != nil {
 			return
@@ -25,5 +25,5 @@ func (n *InputNode) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("Input", func() any { return &InputNode{} })
+	Wiring.Register("Input", func() any { return &Node{} })
 }

@@ -1,4 +1,4 @@
-package ReadGateNode
+package readgate
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-type ReadGateNode struct {
+type Node struct {
 	Fire              func()
 	Value             int
 	HasValue          bool
@@ -16,7 +16,7 @@ type ReadGateNode struct {
 	ToChainInhibitor   *Wiring.Out
 }
 
-func (g *ReadGateNode) Update(ctx context.Context) {
+func (g *Node) Update(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -48,5 +48,5 @@ func (g *ReadGateNode) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("ReadGate", func() any { return &ReadGateNode{} })
+	Wiring.Register("ReadGate", func() any { return &Node{} })
 }

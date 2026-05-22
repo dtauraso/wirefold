@@ -1,4 +1,4 @@
-package ReadGateNode
+package readgate
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func TestFiresWhenBothPresent(t *testing.T) {
 	fromCI := make(chan int, 1)
 	toCI := make(chan int, 1)
 
-	node := &ReadGateNode{
+	node := &Node{
 		Fire:               func() { tr.Fire("rg") },
 		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
 		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),
@@ -61,7 +61,7 @@ func TestNoFireWithoutInhibitor(t *testing.T) {
 	fromCI := make(chan int, 1)
 	toCI := make(chan int, 1)
 
-	node := &ReadGateNode{
+	node := &Node{
 		Fire:               func() { tr.Fire("rg") },
 		FromInput:          Wiring.NewIn(fromInput, "rg", "FromInput", tr),
 		FromChainInhibitor: Wiring.NewIn(fromCI, "rg", "FromChainInhibitor", tr),

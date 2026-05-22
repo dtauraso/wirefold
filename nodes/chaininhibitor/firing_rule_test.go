@@ -1,4 +1,4 @@
-package ChainInhibitorNode
+package chaininhibitor
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func TestFireOnReceive(t *testing.T) {
 	out0 := make(chan int, 1)
 	out1 := make(chan int, 1)
 
-	node := &ChainInhibitorNode{
+	node := &Node{
 		Fire:                       func() { tr.Fire("ci") },
 		Held:                       99,
 		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),

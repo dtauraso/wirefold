@@ -1,4 +1,4 @@
-package ChainInhibitorNode
+package chaininhibitor
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-type ChainInhibitorNode struct {
+type Node struct {
 	Fire                       func()
 	Held                       int `wire:"data.state"`
 	FromPrevChainInhibitorNode *Wiring.In
 	ToNext                     Wiring.OutMulti
 }
 
-func (in *ChainInhibitorNode) Update(ctx context.Context) {
+func (in *Node) Update(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -32,5 +32,5 @@ func (in *ChainInhibitorNode) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("ChainInhibitor", func() any { return &ChainInhibitorNode{} })
+	Wiring.Register("ChainInhibitor", func() any { return &Node{} })
 }

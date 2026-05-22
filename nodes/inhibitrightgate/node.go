@@ -1,4 +1,4 @@
-package InhibitRightGateNode
+package inhibitrightgate
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-type InhibitRightGateNode struct {
+type Node struct {
 	Fire     func()
 	Left     int
 	HasLeft  bool
@@ -17,7 +17,7 @@ type InhibitRightGateNode struct {
 	ToPassed  *Wiring.Out
 }
 
-func (g *InhibitRightGateNode) Update(ctx context.Context) {
+func (g *Node) Update(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -54,5 +54,5 @@ func (g *InhibitRightGateNode) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("InhibitRightGate", func() any { return &InhibitRightGateNode{} })
+	Wiring.Register("InhibitRightGate", func() any { return &Node{} })
 }
