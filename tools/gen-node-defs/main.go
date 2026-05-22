@@ -30,6 +30,7 @@ type port struct {
 	direction string // "in" or "out"
 	accent    string // optional hex color from SPEC.md
 	edgeKind  string // optional edge kind from SPEC.md Ports table EdgeKind column
+	isMulti   bool   // true when the Go type is Wiring.OutMulti
 }
 
 // dataField represents a wire:"data.*" tagged struct field.
@@ -168,6 +169,7 @@ func main() {
 		fatalf("write %s: %v", traceKindsPath, err)
 	}
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d kinds)\n", traceKindsPath, len(traceKinds))
+
 }
 
 // findRepoRoot walks up from dir until it finds a directory containing "nodes/".
@@ -257,8 +259,13 @@ func parsePortsFromAST(pkgDir string) ([]port, error) {
 							}
 						}
 						// Get field name(s).
+						multi := dir == "outMulti"
+						outDir := dir
+						if multi {
+							outDir = "out"
+						}
 						for _, name := range field.Names {
-							ports = append(ports, port{id: name.Name, direction: dir})
+							ports = append(ports, port{id: name.Name, direction: outDir, isMulti: multi})
 						}
 					}
 				}
@@ -288,7 +295,7 @@ func chanDirection(expr ast.Expr) (string, bool) {
 	// Wiring.OutMulti — bare selector (type alias, no pointer)
 	if sel, ok := expr.(*ast.SelectorExpr); ok {
 		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" && sel.Sel.Name == "OutMulti" {
-			return "out", true
+			return "outMulti", true
 		}
 	}
 	return "", false
@@ -504,6 +511,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  id: string;`)
 	fmt.Fprintln(w, `  accent?: string;`)
 	fmt.Fprintln(w, `  edgeKind?: string;`)
+	fmt.Fprintln(w, `  isMulti?: boolean;`)
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `export interface NodeDef {`)
@@ -524,8 +532,8 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  stroke?: string;`)
 	fmt.Fprintln(w, `  width?: number;`)
 	fmt.Fprintln(w, `  height?: number;`)
-	fmt.Fprintln(w, `  inputs?: { name: string; kind: string }[];`)
-	fmt.Fprintln(w, `  outputs?: { name: string; kind: string }[];`)
+	fmt.Fprintln(w, `  inputs?: { name: string; kind: string; isMulti?: boolean }[];`)
+	fmt.Fprintln(w, `  outputs?: { name: string; kind: string; isMulti?: boolean }[];`)
 	fmt.Fprintln(w, `  defaultData?: Record<string, unknown>;`)
 	fmt.Fprintln(w, `  requiredInputs?: string[];`)
 	fmt.Fprintln(w, `}`)
@@ -1126,20 +1134,24 @@ func fatalf(format string, args ...any) {
 func joinPorts(ports []port) string {
 	var parts []string
 	for _, p := range ports {
-		if p.accent != "" && p.edgeKind != "" {
-			parts = append(parts, fmt.Sprintf(`{ id: "%s", accent: "%s", edgeKind: "%s" }`, p.id, p.accent, p.edgeKind))
-		} else if p.accent != "" {
-			parts = append(parts, fmt.Sprintf(`{ id: "%s", accent: "%s" }`, p.id, p.accent))
-		} else if p.edgeKind != "" {
-			parts = append(parts, fmt.Sprintf(`{ id: "%s", edgeKind: "%s" }`, p.id, p.edgeKind))
-		} else {
-			parts = append(parts, fmt.Sprintf(`{ id: "%s" }`, p.id))
+		var sb strings.Builder
+		fmt.Fprintf(&sb, `{ id: "%s"`, p.id)
+		if p.accent != "" {
+			fmt.Fprintf(&sb, `, accent: "%s"`, p.accent)
 		}
+		if p.edgeKind != "" {
+			fmt.Fprintf(&sb, `, edgeKind: "%s"`, p.edgeKind)
+		}
+		if p.isMulti {
+			sb.WriteString(`, isMulti: true`)
+		}
+		sb.WriteString(` }`)
+		parts = append(parts, sb.String())
 	}
 	return strings.Join(parts, ", ")
 }
 
-// joinPortsTyped emits {name, kind} pairs for NodeTypeDef-compatible consumers.
+// joinPortsTyped emits {name, kind, isMulti?} pairs for NodeTypeDef-compatible consumers.
 func joinPortsTyped(ports []port) string {
 	var parts []string
 	for _, p := range ports {
@@ -1147,7 +1159,11 @@ func joinPortsTyped(ports []port) string {
 		if ek == "" {
 			ek = "chain" // default
 		}
-		parts = append(parts, fmt.Sprintf(`{ name: "%s", kind: "%s" }`, p.id, ek))
+		if p.isMulti {
+			parts = append(parts, fmt.Sprintf(`{ name: "%s", kind: "%s", isMulti: true }`, p.id, ek))
+		} else {
+			parts = append(parts, fmt.Sprintf(`{ name: "%s", kind: "%s" }`, p.id, ek))
+		}
 	}
 	return strings.Join(parts, ", ")
 }
