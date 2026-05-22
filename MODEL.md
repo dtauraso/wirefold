@@ -94,7 +94,7 @@ A wire's destination is `(node N, slot s_k)`, established at
 construction time. On arrival, the wire carries its bound slot id;
 the destination node sees the id and writes `slots[s_k] := filled(v)`
 and re-evaluates its rule over the slot map — see
-[diagrams/model-revised-draft/07-q2-firing-rule-and-slot-ownership.svg](diagrams/model-revised-draft/07-q2-firing-rule-and-slot-ownership.svg).
+[diagrams/firing-rule-and-slot-ownership.svg](diagrams/firing-rule-and-slot-ownership.svg).
 One incoming wire per slot id — two wires cannot share a slot, so
 "right slot ↔ right wire" is deterministic by construction.
 Mis-wiring is caught at parseSpec, not at runtime. No subscription
