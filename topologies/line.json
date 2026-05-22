@@ -67,7 +67,7 @@
     {
       "id": "i0ToI1",
       "source": "i0",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext0",
       "target": "i1",
       "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
@@ -79,7 +79,7 @@
     {
       "id": "i0ToInhibitRight0",
       "source": "i0",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext1",
       "target": "inhibitRight0",
       "targetHandle": "FromLeft",
       "kind": "inhibit-in",
@@ -91,7 +91,7 @@
     {
       "id": "i1ToInhibitRight0",
       "source": "i1",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext0",
       "target": "inhibitRight0",
       "targetHandle": "FromRight",
       "kind": "inhibit-in",
@@ -103,7 +103,7 @@
     {
       "id": "i1ToReadGate",
       "source": "i1",
-      "sourceHandle": "ToNext",
+      "sourceHandle": "ToNext1",
       "target": "readGate",
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
