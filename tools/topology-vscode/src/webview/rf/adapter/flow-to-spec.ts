@@ -51,11 +51,17 @@ export function flowToSpec(
     if (d.props !== undefined) node.props = d.props;
     if (d.spec !== undefined) node.spec = d.spec;
     if (d.notes !== undefined) node.notes = d.notes;
-    if (d.nodeData !== undefined) node.data = d.nodeData;
+    // Pack state and edgeSeeds into data (Go reads them at data.state / data.edgeSeeds).
+    // Merge with any existing nodeData so other data fields (e.g. init) are preserved.
+    if (d.nodeData !== undefined || d.initState !== undefined || d.edgeSeeds !== undefined) {
+      const base = (d.nodeData ?? {}) as Record<string, unknown>;
+      const merged: Record<string, unknown> = { ...base };
+      if (d.initState !== undefined) merged["state"] = d.initState;
+      if (d.edgeSeeds !== undefined) merged["edgeSeeds"] = d.edgeSeeds;
+      node.data = merged;
+    }
     if (d.inputs && d.inputs.length > 0) node.inputs = d.inputs;
     if (d.outputs && d.outputs.length > 0) node.outputs = d.outputs;
-    if (d.initState !== undefined) node.state = d.initState;
-    if (d.edgeSeeds !== undefined) node.edgeSeeds = d.edgeSeeds;
     nodes.push(node);
   }
 
