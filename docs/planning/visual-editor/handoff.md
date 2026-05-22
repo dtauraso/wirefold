@@ -9,11 +9,11 @@ handoff.md is exempt from the 100-LOC budget.
 
 ---
 
-## State at handoff (2026-05-22, post planning-doc-triage)
+## State at handoff (2026-05-22, post planning-doc-triage merge)
 
-**Active branch:** `task/planning-doc-triage` — ready to merge to main.
+**Active branch:** `task/code-self-defends-poc` — just created from main, no work yet.
 
-### What landed this session (task/planning-doc-triage)
+### Just merged: `task/planning-doc-triage`
 
 Massive doc/memory triage:
 
@@ -25,36 +25,51 @@ Massive doc/memory triage:
 - Branch-local planning-doc rule added to CLAUDE.md: planning docs
   created on a task branch must be deleted before merging; only
   `handoff.md` and `audits.md` survive long-term.
-- `tools/strip-branch-local-docs.sh` added: helper script that finds
-  and removes docs matching the branch-local pattern before merge.
+- `tools/strip-branch-local-docs.sh` added: helper that finds and
+  removes branch-local docs before merge.
 - `memory/feedback_code_self_defends.md` recorded: code structure
   that makes the wrong shape impossible beats memory entries that warn
   against drift.
 
-### Next branch: `task/code-self-defends-poc`
+### This branch: `task/code-self-defends-poc`
 
-Proof-of-concept that makes substrate banned-vocabulary structurally
-hard to reintroduce.
+Proof-of-concept that makes substrate banned vocabulary structurally
+hard to reintroduce (per `memory/feedback_code_self_defends.md`).
 
-**Start with:** a CI lint that scans `nodes/`, `Wire.go`,
-`nodes/Wiring/` for the banned tokens listed in MODEL.md:
+**Concrete first step:** write a CI lint script, e.g.
+`tools/check-substrate-vocabulary.sh`:
 
-```
-tick, round, step, schedule, ack, latch, cohort, scheduler, deadline
-```
+- Scans `nodes/`, `Wire.go`, `nodes/Wiring/loader.go`,
+  `nodes/Wiring/builders.go`.
+- Fails (exit 1) on hits of MODEL.md banned tokens:
+  `tick`, `round`, `step`, `schedule`, `ack`, `latch`, `cohort`,
+  `scheduler`, `deadline`.
+- Case-sensitive matching where helpful (e.g. `Ack` but not
+  `background`).
+- Output: `file:line` of each hit and the matching token.
+- Wire into CI: check `.github/workflows/`, `package.json` scripts,
+  or `Makefile` to find where existing checks run.
 
-Lint fails on any match inside those paths. If the scan comes back
-clean, expand to the TS substrate boundary (`tools/topology-vscode/src/webview/rf/`
-excluding `pump.ts` — pump is the intentional bridge, not a drift
-site).
+**After lint passes (or Go cleanups done):**
 
-### Other open work (parked)
+- Expand to TS substrate boundary: `pump.ts`, `SubstrateEdge.tsx`
+  (scope carefully — banned vocab may appear there for legitimate UI
+  reasons).
+- Schema parser (`parseSpec`) — ensure no `Ack`/`Latch` types can be
+  declared.
 
-- **task/diagram-animation-fixes** — auto-rerun pulse decay after
-  simulation completes; branch exists, work in progress.
-- **task/visual-paced-substrate** — implementation plan written, not
-  started. Substrate cycles paced by the visual layer (per
-  `feedback_substrate_vs_coordinator_bias.md`).
+### Other open branches (parked)
+
+- **task/diagram-animation-fixes** — auto-rerun pulse decay bug
+  unresolved. Consecutive runs cause pulse restarts because each Go
+  run finishes in ~50 ms and new pulses arrive on edges before
+  previous animation completes. Has `slot-trace-sketch.html` tagged
+  branch-local.
+- **task/visual-paced-substrate** — design doc + impl plan written,
+  no code yet. Will make Go wire delivery animation-gated per
+  MODEL.md (currently Go delivers synchronously). Has
+  `visual-paced-substrate-design.html` +
+  `visual-paced-substrate-impl-plan.md` tagged branch-local.
 
 ### Tests
 
@@ -63,19 +78,17 @@ on main.
 
 ## Architecture summary
 
-- **Editor (TS / React Flow):** one `GenericNode.tsx` reads
-  `node-defs.ts` (generated from Go AST) and renders all kinds.
-  `SubstrateEdge` for wires. TS is **inert** with respect to
-  simulation — no firing rules, slot-phase, or backpressure logic.
-- **Runtime (Go):** `go generate ./...` writes `kinds_generated.go` at
-  repo root. Each kind's `init()` calls `Wiring.Register`.
-  `Wiring.LoadTopology` parses `topology.json` (including `"view"`
-  key) and uses reflection on each registered struct to build the
-  port manifest. Non-channel fields populated via `wire:` struct
-  tags.
-- **Trace pipeline:** Go emits JSONL trace events (`fire` / `send`;
-  `recv` is no-op in the pump) on stdout. Extension host
-  (`runCommand.ts`) reads lines, forwards as `trace-event`
+- **Editor (TS / React Flow):** `GenericNode.tsx` reads `node-defs.ts`
+  (generated from Go AST) and renders all kinds. `SubstrateEdge` for
+  wires. TS is inert w.r.t. simulation — no firing rules, slot-phase,
+  or backpressure logic.
+- **Runtime (Go):** `go generate ./...` writes `kinds_generated.go`.
+  Each kind's `init()` calls `Wiring.Register`. `Wiring.LoadTopology`
+  parses `topology.json` (including `"view"` key) and uses reflection
+  to build the port manifest. Non-channel fields populated via `wire:`
+  struct tags.
+- **Trace pipeline:** Go emits JSONL trace events (`fire` / `send`)
+  on stdout. Extension host reads lines, forwards as `trace-event`
   postMessage. Webview routes to `pump.ts`, which writes `lastFire`
   (nodes) or `pulse` (edges). `GenericNode` flashes; `SubstrateEdge`
   animates pulse along the path.
@@ -84,15 +97,11 @@ on main.
 
 1. `nodes/<Kind>/<Kind>.go` — struct + firing rule + `init() {
    Wiring.Register("Kind", func() any { return &Struct{} }) }`.
-   Non-channel fields read from `data.*` JSON use struct tags:
-   - `wire:"data.<key>"` — copies `NodeData.<Key>`
-   - `wire:"data.initialSlots.<key>"` — reads
-     `NodeData.InitialSlots[key]` (int)
-   `go generate ./...` picks it up automatically.
-2. `nodes/<Kind>/SPEC.md` — **optional**; only for non-default view
-   metadata (accent color, display name override). Port names and
-   data types are derived from the Go struct by
-   `tools/gen-node-defs`.
+   Struct tags: `wire:"data.<key>"` or
+   `wire:"data.initialSlots.<key>"`. `go generate ./...` picks up
+   automatically.
+2. `nodes/<Kind>/SPEC.md` — optional; only for non-default view
+   metadata (accent color, display name override).
 
 ## Surviving kinds (4)
 
@@ -100,11 +109,10 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ## Dev-loop
 
-After any TS edit: `npm run build` from `tools/topology-vscode/` (tsc
-alone doesn't refresh `out/webview.js`). After extension-host
+After any TS edit: `npm run build` from `tools/topology-vscode/`
+(tsc alone doesn't refresh `out/webview.js`). After extension-host
 changes: Reload Window in VS Code (Cmd+R). Go: `go build ./...` from
-repo root; `go run .` runs `topologies/line.json` (default
-`--topology`).
+repo root; `go run .` runs `topologies/line.json` by default.
 
 ## ALWAYS clause
 
