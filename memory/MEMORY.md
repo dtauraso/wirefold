@@ -39,4 +39,3 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [project_v0_cost_calibration.md](project_v0_cost_calibration.md) — Phase 5 v0 cost calibration; mechanical ~10%, hardening ~12%, refactor/exploratory ~15–20% of original estimate
 - [project_edge_midpoint_offset_plumbing.md](project_edge_midpoint_offset_plumbing.md) — Edge `midpointOffset` + `setEdgeMidpointOffset` + EdgeActionsCtx already wired end-to-end; don't re-grep schema/adapter/mutation when extending edges
 - [feedback_delegate_all_writing.md](feedback_delegate_all_writing.md) — STRICT: main session never writes; all Edit/Write/Bash-scripting goes to subagents. Any write is the trigger, not the inline-executor counter.
-- [feedback_no_history_in_docs.md](feedback_no_history_in_docs.md) — Planning docs describe forward plan only; status/commits/completion go to git log

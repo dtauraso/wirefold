@@ -122,6 +122,12 @@
           "side": "bottom",
           "slot": 2
         }
+      ],
+      "outputs": [
+        {
+          "name": "ToPassed",
+          "kind": "chain"
+        }
       ]
     },
     {
