@@ -46,26 +46,21 @@ is the authoritative copy; this is the portable copy.
   propose multi-phase recovery plans. Small fixes on `task/fix-*`
   branches that merge to main fast.
 
-## Audit registry replaces phase docs as the periodic concern
+## Audit work is friction-driven
 
-- See `../docs/planning/visual-editor/audits.md` for the full set:
-  security, code smells, code quality, complexity, architectural
-  tradeoffs, project-specific invariants (goroutine leaks,
+- Audit categories: security, code smells, code quality, complexity,
+  architectural tradeoffs, project-specific invariants (goroutine leaks,
   backpressure discipline, channel naming, spec/viewer hygiene),
   documentation drift, test quality, dependency freshness.
-- Most are AI-driven on demand; a few are CI-backed from prior
-  phases.
 - **How to apply:** when user says "audit for X", load the relevant
-  section of audits.md plus the code it points at; produce findings
-  but don't fix in the audit pass. New audit categories = new
-  section in audits.md.
+  code and produce findings; don't fix in the audit pass.
 
 ## No AI-system lock-in
 
 - Don't propose scheduled agents, Claude-Code skills/hooks/cron, or
   similar load-bearing infrastructure without explicit sign-off.
 - Repo should stay portable across AI systems: plain markdown
-  (CLAUDE.md, planning docs, this `memory/` directory, audits.md,
+  (CLAUDE.md, planning docs, this `memory/` directory,
   session-log.md) is enough for any model to be useful.
 - **Why:** user wants AI dependency limited to "paying server costs."
 - **How to apply:** audits, periodic checks, workflow extensions
