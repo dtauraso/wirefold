@@ -8,170 +8,127 @@
 
 ## Problem
 
-### Surface size
+Every subagent spawn re-reads CLAUDE.md, MEMORY.md, and any docs named
+in the prompt. The planning-doc surface in `docs/planning/visual-editor/`
+is the expensive part: live, scratch, archived, and superseded content
+are intermingled, so subagents either read everything or guess which files
+matter. The tax is per-spawn and compounds across haiku/sonnet subagents.
 
-The planning-doc surface in this repo is large and spans multiple locations:
-
-- `CLAUDE.md` — project instructions loaded on every agent spawn
-- `MODEL.md` — substrate model and banned vocabulary
-- `memory/MEMORY.md` — memory index (loaded by harness as system-reminder)
-- `memory/*.md` — individual memory files (40+ entries)
-- `docs/planning/visual-editor/` — active and archived planning docs
-- Root-level `*.md` — README, handoff schema docs, etc.
-
-Every subagent spawn pays a re-read cost proportional to this surface.
-The cost is not just tokens — it is latency and judgment load on a model
-that may be cheaper and less capable than the main session.
-
-### Distinguishing authoritative from stale is manual
-
-Agents cannot tell at a glance which docs are:
-
-- **Authoritative** — the current source of truth that must be applied
-- **Scratch** — active in-progress thinking that is not yet settled
-- **Archived** — superseded; kept for history but not prescriptive
-- **Index** — a map to other docs; read it to decide what else to read
-
-Without a signal, agents either read everything (expensive) or guess
-(error-prone). The current heuristic is directory path and filename
-conventions, which are inconsistently applied and not machine-readable.
-
-### Greps surface archive content alongside live content
-
-`grep` and `find` commands over `docs/planning/visual-editor/` return hits
-from the `archive/` subdirectory alongside live docs. Agents then spend
-reads judging whether a hit is live or historical. The CLAUDE.md bash-hygiene
-rule already calls out `handoff-archive` in the exclude list, but the pattern
-is not generalized and requires every caller to remember it.
-
-### Subagent cold-start compounds the problem
-
-Each spawned subagent (haiku for grep work, sonnet for mechanical edits)
-re-reads the memory index and any docs the main session told it to read.
-If those docs contain archived or scratch content mixed with authoritative
-content, the subagent re-derives staleness judgments from prose — exactly
-the judgment work that should have been done once and recorded structurally.
+`memory/` is already indexed and one-line-per-entry — that shape is right
+and is not the problem. The expensive surface is the planning-doc directories.
 
 ---
 
-## Proposed Approach
+## Goal
 
-The following is a sketch only. No implementation yet.
+**Shrink the planning-doc surface so subagent spawns read less.**
 
-### 1. Status tag on every planning doc
+End state:
+- Fewer files total under `docs/planning/visual-editor/`.
+- Each remaining file is unambiguously authoritative on exactly one topic.
+- `archive/` is fully separated from live content (the subdirectory already
+  exists; it just needs to be fully populated and consistently excluded).
+- Scratch notes are either folded into the active handoff or deleted — not
+  left as free-floating files.
 
-Tag each doc with one of four statuses:
+Annotation is a means to reach this end, not the end itself. Tagging
+40 files `archived` does not reduce read cost if they remain in the live
+directory and show up in greps. Moving them to `archive/` (already excluded
+by the CLAUDE.md bash-hygiene rule) does. The tag is a triage worksheet
+marker, not the deliverable.
 
-| Tag | Meaning |
-|-----|---------|
-| `authoritative` | Current source of truth; agents must apply it |
-| `scratch` | Active in-progress thinking; may be incomplete or contradictory |
-| `archived` | Superseded; kept for history; agents should not apply it |
-| `index` | Links to other docs; read it to decide what else to open |
-
-### 2. Tag lives in YAML frontmatter
-
-Place the tag at the very top of each file so it is visible without
-scrolling and parseable without prose judgment:
-
-```yaml
 ---
-status: authoritative   # authoritative | scratch | archived | index
+
+## Why Annotation Is Transitional, Not Terminal
+
+The prior approach proposed adding `status:` frontmatter as the primary
+output. That is the wrong shape:
+
+- A tagged-but-present file still appears in directory listings and greps
+  unless the grep caller excludes it by name.
+- Adding frontmatter to 40 files is a lot of commits for zero reduction
+  in file count.
+- The real cost driver is surface area (file count × file size), not
+  legibility of status.
+
+Annotation is useful as a **worklist step**: walk the files, mark each
+with a provisional disposition, then act on the dispositions (move, merge,
+delete). Once the surface is small, the tag can be dropped or kept as a
+discipline check — but it should not be the milestone.
+
 ---
-```
 
-Agents reading the first few lines of a file can determine whether to
-continue reading or skip. This is cheaper than reading the full file and
-deriving staleness from content.
+## Process
 
-### 3. Memory index and new index docs use inline status
+### Step 1 — Inventory
 
-`memory/MEMORY.md` already lists entries with one-line descriptions.
-Extend each entry to include the status inline:
+Walk every file under `docs/planning/` and root-level `*.md` (excluding
+`CLAUDE.md`, `MODEL.md`, `README.md` which are not planning docs).
 
-```
-- [feedback_foo.md](feedback_foo.md) `authoritative` — Description of the rule
-- [project_bar.md](project_bar.md) `archived` — Superseded by baz pattern
-```
+For each file, assign one of four dispositions:
 
-Agents reading the index can then skip archived entries without opening
-the files they reference. This eliminates the most common cold-start waste:
-reading a memory file only to discover it describes a pattern that was
-reverted.
+| Disposition | Action |
+|-------------|--------|
+| KEEP | Authoritative; stays in place |
+| MERGE | Scratch worth folding into a KEEP doc; source file then deleted |
+| MOVE | Historical; move to `archive/` subdirectory |
+| DELETE | Superseded or redundant; no content worth preserving |
 
-### 4. A short repo-root convention doc
+Surface any ambiguous cases (partially superseded, scope overlaps with
+another live doc) for user review before acting.
 
-Create one doc (e.g. `docs/planning/doc-status-convention.md`) that:
+### Step 2 — Apply in batched commits
 
-- Defines the four tags and their agent-facing semantics
-- States where frontmatter goes and what the exact YAML key is
-- Lists which directories are covered by the convention
-- Notes that `archived` docs should not be applied even if stumbled upon
+- MOVE targets: `git mv` to `archive/`; one commit per logical group.
+- MERGE targets: fold content into the authoritative destination, then
+  delete the source file.
+- DELETE targets: `git rm`.
+- KEEP targets: no change in this pass; they are the survivors.
 
-This doc is itself tagged `authoritative` and is short enough to load
-cheaply on spawn.
+### Step 3 — Verify exclusion
 
-### 5. Audit pass
+After moving files to `archive/`, confirm that the CLAUDE.md bash-hygiene
+rule and any agent-prompt grep commands exclude `archive/` correctly.
+The current rule lists `handoff-archive` explicitly; generalize to
+`--exclude-dir=archive` where needed.
 
-Walk every file under:
+### Step 4 (optional) — Add `status:` frontmatter to survivors
 
-- `docs/planning/`
-- `memory/`
-- Root-level `*.md`
-
-For each file, propose a tag assignment. Surface any ambiguous cases
-(docs that are partially superseded, docs whose scope overlaps an
-active doc) for user review before committing tags.
-
-The audit is the only step that touches existing files. Steps 1–4 are
-additive.
+If the survivor set is small enough that a human can review it, adding
+`status: authoritative` to each remaining file is a useful forcing function:
+declaring authority is harder than tagging, and the act of tagging surfaces
+any remaining ambiguity. Drop the tag convention once the surface is stable
+enough that the index speaks for itself.
 
 ---
 
 ## Open Questions
 
-1. **Archive subdirectory vs. in-place tag?**  
-   Some docs already live in `docs/planning/visual-editor/archive/`.
-   Should archived docs move into a consistent `archive/` subdirectory
-   at each level, or stay in place with the tag? Moving makes grep
-   exclusion easy (`--exclude-dir=archive`); staying in place avoids
-   git-blame disruption and broken links.
+1. **Is `archive/` excluded everywhere it needs to be?**  
+   CLAUDE.md bash-hygiene lists `handoff-archive` but not a general
+   `archive` pattern. Check every grep command in agent prompts and
+   session-log entries that touch `docs/planning/`.
 
-2. **Machine-readable (CI lint) or doc-only?**  
-   A CI script could reject PRs that add a doc without a `status:`
-   frontmatter key. This prevents tag drift but adds tooling overhead.
-   Alternative: lint is advisory only and runs as an audit (kind 1 in
-   the audit registry) rather than a gate.
+2. **Are there docs that look authoritative but are superseded?**  
+   Some docs may describe a design that was replaced by a later
+   session-log entry or a more recent planning doc. These are the
+   primary DELETE targets. Heuristic: if no handoff.md or MEMORY.md
+   entry references the file within the last N commits, it is a
+   deletion candidate.
 
-3. **Does CLAUDE.md need a pointer to the convention?**  
-   CLAUDE.md is loaded on every agent spawn. If the convention doc is
-   not referenced there, agents may not know to consult it when
-   encountering an untagged file. A single line — e.g. "Doc status
-   tags: see `docs/planning/doc-status-convention.md`" — would close
-   this gap without meaningfully expanding spawn cost.
-
-4. **Scope of the initial audit pass?**  
-   `docs/planning/visual-editor/` has both live docs and an `archive/`
-   subdirectory. The memory dir has 40+ files. Root-level `*.md` includes
-   `CLAUDE.md`, `MODEL.md`, and `README.md` which are not planning docs
-   but are part of the agent-facing surface. Decide whether the
-   convention applies to those or only to planning and memory files.
-
-5. **Tag assignment authority?**  
-   Should the initial tag assignments be proposed by an agent and
-   confirmed by the user, or should the user assign tags directly?
-   Agent proposal is faster but risks misclassifying docs the agent
-   has not fully read. User confirmation is the gate either way;
-   the question is whether the proposal step is worth the token cost.
+3. **MERGE vs. DELETE authority for scratch files.**  
+   Does every MERGE/DELETE decision need user sign-off per file, or
+   is a rule like "not referenced from handoff.md or MEMORY.md within
+   the last 5 commits → delete" workable as a default with opt-out?
+   The answer determines whether the triage pass is one agent session
+   or an interactive review.
 
 ---
 
 ## Non-Goals
 
-- This does not change how docs are written or what they contain.
-- This does not merge or delete any existing doc; that is a separate
-  decision per doc.
-- This does not change CLAUDE.md content beyond a possible one-line
-  pointer (open question 3 above).
-- This does not add new planning docs for features; scope is metadata
-  and navigation only.
+- This does not change how surviving docs are written or what they contain.
+- This does not touch `memory/` — the index is already the right shape.
+- This does not add new planning docs; scope is reduction only.
+- This does not change CLAUDE.md beyond possibly generalizing the
+  `--exclude-dir` pattern in the bash-hygiene section.
