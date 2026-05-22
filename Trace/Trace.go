@@ -35,6 +35,12 @@ const (
 	KindSlot = "slot"
 )
 
+// TraceEventKinds is the single source of truth for the closed kind
+// vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
+// pump.ts exhaustiveness checks are derived from that generated file.
+// Adding a kind here forces a tsc error in pump.ts until a branch is added.
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindSlot}
+
 type Event struct {
 	Step      int    `json:"step"`
 	Kind      string `json:"kind"`
