@@ -516,6 +516,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  inputs?: { name: string; kind: string }[];`)
 	fmt.Fprintln(w, `  outputs?: { name: string; kind: string }[];`)
 	fmt.Fprintln(w, `  defaultData?: Record<string, unknown>;`)
+	fmt.Fprintln(w, `  requiredInputs?: string[];`)
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
@@ -532,6 +533,22 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 		fmt.Fprintf(w, "  %s: %s,\n", e.kind, buildDef(e.view, e.ports, e.defaultData))
 	}
 	fmt.Fprint(w, `};`, "\n")
+	fmt.Fprintln(w)
+	// Emit REQUIRED_INPUTS keyed by PascalCase Go kind name.
+	fmt.Fprintln(w, `// Required input port names per Go kind. Derived from *Wiring.In fields.`)
+	fmt.Fprintln(w, `export const REQUIRED_INPUTS: Record<string, string[]> = {`)
+	for _, e := range kinds {
+		ins := filterPorts(e.ports, "in")
+		if len(ins) == 0 {
+			continue
+		}
+		var names []string
+		for _, p := range ins {
+			names = append(names, fmt.Sprintf(`"%s"`, p.id))
+		}
+		fmt.Fprintf(w, "  %-20s [%s],\n", `"`+e.goKind+`":`, strings.Join(names, ", "))
+	}
+	fmt.Fprintln(w, `};`)
 
 	w.Flush()
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
@@ -598,6 +615,13 @@ func buildDef(v viewDef, ports []port, defaultData string) string {
 	}
 	if defaultData != "" {
 		fields = append(fields, fmt.Sprintf(`defaultData: %s`, defaultData))
+	}
+	if len(targets) > 0 {
+		var reqNames []string
+		for _, p := range targets {
+			reqNames = append(reqNames, fmt.Sprintf(`"%s"`, p.id))
+		}
+		fields = append(fields, fmt.Sprintf(`requiredInputs: [%s]`, strings.Join(reqNames, ", ")))
 	}
 	return "{ " + strings.Join(fields, ", ") + " }"
 }

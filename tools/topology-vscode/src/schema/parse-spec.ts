@@ -8,6 +8,7 @@ import { arr, obj } from "./parse-primitives";
 import { parseEdge, parseNode } from "./parse-nodes-edges";
 import { validatePorts } from "./parse-meta";
 import { TOPOLOGY_META_FIELDS } from "./meta-field-defs";
+import { REQUIRED_INPUTS } from "../webview/rf/nodes/node-defs";
 
 export function parseSpec(input: unknown, view?: { edges?: Record<string, unknown> }): Spec {
   const o = obj(input, "spec");
@@ -25,6 +26,23 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
     if (value !== undefined) (spec as Record<string, unknown>)[key] = value;
   }
   validatePorts(spec);
+  // Validate required inputs: each node with required ports must have an inbound
+  // edge targeting that port, or an edgeSeeds entry for it (ring topologies).
+  const inboundPorts = new Set(spec.edges.map((e) => `${e.target}:${e.targetHandle}`));
+  for (const node of spec.nodes) {
+    const required = REQUIRED_INPUTS[node.type];
+    if (!required) continue;
+    for (const port of required) {
+      const hasEdge = inboundPorts.has(`${node.id}:${port}`);
+      const hasEdgeSeed = (node.edgeSeeds as Record<string, unknown> | undefined)?.[port] !== undefined;
+      if (!hasEdge && !hasEdgeSeed) {
+        throw new Error(
+          `parseSpec: node "${node.id}" (${node.type}) is missing required inbound edge for port "${port}". ` +
+          `Connect an edge to this port or add edgeSeeds["${port}"] for ring topologies.`,
+        );
+      }
+    }
+  }
   if (view?.edges) {
     const knownIds = new Set(spec.edges.map((e) => e.id));
     for (const key of Object.keys(view.edges)) {

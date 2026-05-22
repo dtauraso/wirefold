@@ -29,6 +29,7 @@ export interface NodeDef {
   inputs?: { name: string; kind: string }[];
   outputs?: { name: string; kind: string }[];
   defaultData?: Record<string, unknown>;
+  requiredInputs?: string[];
 }
 
 // PascalCase Go kind names that have a substrate runtime.
@@ -41,8 +42,15 @@ export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 export const NODE_DEFS: Record<string, NodeDef> = {
-  chainInhibitor: { defaultLabel: "chainInhibitor", bg: "#fff3e0", border: "#e65100", text: "#bf360c", accent: "#e65100", minWidth: 90, targets: [{ id: "FromPrevChainInhibitorNode" }], sources: [{ id: "ToNext" }], role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain" }], displays: ["held"] },
-  inhibitRightGate: { defaultLabel: "inhibitRightGate", bg: "#fce4ec", border: "#880e4f", text: "#880e4f", accent: "#880e4f", minWidth: 110, sublabel: "L pass / R inhibit", targets: [{ id: "FromLeft" }, { id: "FromRight" }], sources: [{ id: "ToPassed" }], role: "inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 110, height: 36, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
+  chainInhibitor: { defaultLabel: "chainInhibitor", bg: "#fff3e0", border: "#e65100", text: "#bf360c", accent: "#e65100", minWidth: 90, targets: [{ id: "FromPrevChainInhibitorNode" }], sources: [{ id: "ToNext" }], role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain" }], displays: ["held"], requiredInputs: ["FromPrevChainInhibitorNode"] },
+  inhibitRightGate: { defaultLabel: "inhibitRightGate", bg: "#fce4ec", border: "#880e4f", text: "#880e4f", accent: "#880e4f", minWidth: 110, sublabel: "L pass / R inhibit", targets: [{ id: "FromLeft" }, { id: "FromRight" }], sources: [{ id: "ToPassed" }], role: "inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 110, height: 36, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }], requiredInputs: ["FromLeft", "FromRight"] },
   input: { defaultLabel: "input", bg: "#e0e0e0", border: "#666", text: "#1a1a1a", accent: "#3fb950", minWidth: 90, sources: [{ id: "ToReadGate" }], role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, outputs: [{ name: "ToReadGate", kind: "chain" }], displays: ["queue", "repeat"], defaultData: { "init": [0, 1] } },
-  readGate: { defaultLabel: "readgate", bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", accent: "#7b1fa2", minWidth: 70, sublabel: "val / inhibitor", targets: [{ id: "FromInput" }, { id: "FromChainInhibitor" }], sources: [{ id: "ToChainInhibitor" }], role: "and-gate", shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40, inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }] },
+  readGate: { defaultLabel: "readgate", bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", accent: "#7b1fa2", minWidth: 70, sublabel: "val / inhibitor", targets: [{ id: "FromInput" }, { id: "FromChainInhibitor" }], sources: [{ id: "ToChainInhibitor" }], role: "and-gate", shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40, inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }], requiredInputs: ["FromInput", "FromChainInhibitor"] },
+};
+
+// Required input port names per Go kind. Derived from *Wiring.In fields.
+export const REQUIRED_INPUTS: Record<string, string[]> = {
+  "ChainInhibitor":    ["FromPrevChainInhibitorNode"],
+  "InhibitRightGate":  ["FromLeft", "FromRight"],
+  "ReadGate":          ["FromInput", "FromChainInhibitor"],
 };
