@@ -9,71 +9,57 @@ handoff.md is exempt from the 100-LOC budget.
 
 ---
 
-## State at handoff (2026-05-21, post tidy + replay-abandoned session)
+## State at handoff (2026-05-22, post planning-doc-triage)
 
-**Active branch:** main at `77a1009`. No task in flight.
+**Active branch:** `task/planning-doc-triage` — ready to merge to main.
 
-### What landed this session
+### What landed this session (task/planning-doc-triage)
 
-Six small refactor/cleanup commits, all on main:
+Massive doc/memory triage:
 
-- `bc2aeaf` — memory cleanup (deleted stale substrate-r RAF entry;
-  refreshed edge-seed index line).
-- `93e46ef` — dropped 4 unused topology meta fields (`timing`,
-  `cycleAnchor`, `runtime`, `legend`). Only `notes` survives.
-- `34eba3e` — removed write-only `lastRecv` field from pump and
-  `NodeData`.
-- `e589858` — removed double-click rename UI (no replacement queued).
-- `7ec3e34` — removed inert `TransportControls` play button +
-  `TimelinePanel` wrapper + its mount in `app.tsx`.
-- `e4e5f99` — handoff updated; parked list emptied.
+- `docs/` trimmed from ~90 files → 3 files (handoff.md,
+  continuation-prompt-template.md, audits.md). All planning-doc
+  archives, phase plans, and superseded audit notes removed.
+- `memory/` trimmed from ~41 entries → 26 entries. Banned-vocab
+  memory entries and stale substrate-r notes removed.
+- Branch-local planning-doc rule added to CLAUDE.md: planning docs
+  created on a task branch must be deleted before merging; only
+  `handoff.md` and `audits.md` survive long-term.
+- `tools/strip-branch-local-docs.sh` added: helper script that finds
+  and removes docs matching the branch-local pattern before merge.
+- `memory/feedback_code_self_defends.md` recorded: code structure
+  that makes the wrong shape impossible beats memory entries that warn
+  against drift.
 
-### Key conceptual finding
+### Next branch: `task/code-self-defends-poc`
 
-TS-execution-drift audit (branch `task/ts-nodes-inert`, since deleted)
-returned clean by direct inspection: simulation logic has **only ever
-lived in Go**. The deleted `<Kind>Node.tsx` files (commit `9feed85`)
-were visual-only; per-kind firing rules were never in TS. The current
-per-kind TS surface is narrow:
-- `schema/node-data-types.ts` — generated per-kind data validators
-  (mirror of Go `wire:` struct tags).
-- `node-defs.ts` — one hand-authored `defaultData: { init: [0,1] }`
-  for Input (editor convenience, not simulation).
+Proof-of-concept that makes substrate banned-vocabulary structurally
+hard to reintroduce.
 
-The substrate boundary holds: TS = editor + viewer + readout; Go =
-execution; `pump.ts` is the one bridge.
+**Start with:** a CI lint that scans `nodes/`, `Wire.go`,
+`nodes/Wiring/` for the banned tokens listed in MODEL.md:
 
-### `topology.view.json` regression — resolved as operator-level (2026-05-21)
+```
+tick, round, step, schedule, ack, latch, cohort, scheduler, deadline
+```
 
-The sidecar reappearance was **not a code regression**. The current
-build (`out/extension.js`) contains zero sidecar code; the regression
-was caused by VS Code running a **stale extension host** from before
-commit `9e915f7` (sidecar deletion). Reload Window (Cmd+R) drops the
-in-memory pre-9e915f7 extension; subsequent saves correctly write
-the `view` key inline into `topology.json` and the sidecar does not
-reappear. Verified empirically end of session.
+Lint fails on any match inside those paths. If the scan comes back
+clean, expand to the TS substrate boundary (`tools/topology-vscode/src/webview/rf/`
+excluding `pump.ts` — pump is the intentional bridge, not a drift
+site).
 
-Lesson: when an editor-side regression looks impossible (no writer
-in source or build output), check whether VS Code is running a
-stale extension host. CLAUDE.md notes the reload requirement;
-worth doing first when state looks stuck.
+### Other open work (parked)
 
-### Known stacked-node state in `topologies/line.json`
-
-`topologies/line.json` has no `view` key (separate from the sidecar
-issue — predates this session). Loading it stacks every node at
-`{0,0}` because `spec-to-flow.ts:107` defaults to that when
-positions are absent. To fix: drag nodes into a layout and save;
-the editor will write the `view` key. Or restore from a prior
-commit that had positions.
-
-### Surviving kinds (4)
-
-Input, ReadGate, ChainInhibitor, InhibitRightGate.
+- **task/diagram-animation-fixes** — auto-rerun pulse decay after
+  simulation completes; branch exists, work in progress.
+- **task/visual-paced-substrate** — implementation plan written, not
+  started. Substrate cycles paced by the visual layer (per
+  `feedback_substrate_vs_coordinator_bias.md`).
 
 ### Tests
 
-`go test ./...` green. `npm run build` green at `e4e5f99`.
+`go test ./...` green. `npm run build` green at last verified commit
+on main.
 
 ## Architecture summary
 
@@ -108,20 +94,9 @@ Input, ReadGate, ChainInhibitor, InhibitRightGate.
    data types are derived from the Go struct by
    `tools/gen-node-defs`.
 
-## Next options
+## Surviving kinds (4)
 
-1. **Start the next thing on user prompt** — no pre-committed
-   direction.
-
-## Parked follow-ups
-
-None.
-
-## Working-tree state
-
-`topology.json` (repo root) modified from drag-test that verified
-the post-reload save path. Not committed; restore or keep at user
-discretion. Otherwise clean.
+Input, ReadGate, ChainInhibitor, InhibitRightGate.
 
 ## Dev-loop
 
