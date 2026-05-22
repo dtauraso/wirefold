@@ -29,6 +29,9 @@ export class BuildAndRunRunner {
   // against natural exits, since a process that happened to die from SIGTERM
   // on its own would be misreported as "cancelled".
   private cancelled = false;
+  // looping: when true, respawn automatically on natural exit. Set by run();
+  // cleared by stop().
+  private looping = false;
   private channel: vscode.OutputChannel | undefined;
   // Partial line buffer for stdout — trace lines are newline-delimited.
   private stdoutBuf = "";
@@ -51,6 +54,7 @@ export class BuildAndRunRunner {
     this.channel.show(true);
     this.channel.appendLine("$ go run .");
     this.cancelled = false;
+    this.looping = true;
     this.post({ state: "running" });
     // detached: true makes the child the leader of a new process group, so
     // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
@@ -61,11 +65,16 @@ export class BuildAndRunRunner {
     this.proc.stderr?.on("data", (d: Buffer) => this.channel!.append(d.toString()));
     this.proc.on("close", (code) => {
       const cancelled = this.cancelled;
+      const looping = this.looping;
       this.proc = undefined;
       this.cancelled = false;
       if (cancelled) {
         this.channel!.appendLine("\n[cancelled]");
         this.post({ state: "cancelled" });
+      } else if (looping) {
+        // Natural exit while looping — respawn immediately.
+        this.channel!.appendLine(code === 0 ? "\n[ok — restarting]" : `\n[exit ${code} — restarting]`);
+        this.run();
       } else if (code === 0) {
         this.channel!.appendLine("\n[ok]");
         this.post({ state: "ok" });
@@ -116,6 +125,31 @@ export class BuildAndRunRunner {
       // clean up either way.
       this.proc.kill("SIGTERM");
     }
+  }
+
+  pause() {
+    if (!this.proc || this.proc.pid === undefined) return;
+    try {
+      process.kill(-this.proc.pid, "SIGSTOP");
+    } catch {
+      this.proc.kill("SIGSTOP");
+    }
+    this.post({ state: "paused" });
+  }
+
+  resume() {
+    if (!this.proc || this.proc.pid === undefined) return;
+    try {
+      process.kill(-this.proc.pid, "SIGCONT");
+    } catch {
+      this.proc.kill("SIGCONT");
+    }
+    this.post({ state: "running" });
+  }
+
+  stop() {
+    this.looping = false;
+    this.cancel();
   }
 
   dispose() {

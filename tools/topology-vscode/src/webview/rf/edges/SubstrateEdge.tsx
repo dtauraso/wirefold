@@ -16,6 +16,7 @@ import type { EdgeData } from "../types";
 import { ANIMATION_FIELDS } from "../animation-fields";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { markerEndUrl } from "../MarkerDefs";
+import { useRunStatusCtx } from "../run-status-ctx";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;
 
@@ -298,6 +299,11 @@ export function SubstrateEdge({
   const [pulseT, setPulseT] = useState<number | null>(null);
   const pathRef = useRef<SVGPathElement | null>(null);
   const pulseValueRef = useRef<unknown>(undefined);
+  const runStatus = useRunStatusCtx();
+  // Ref so the tick closure always reads the latest paused state without
+  // needing to re-create the RAF effect on every status change.
+  const pausedRef = useRef(false);
+  pausedRef.current = runStatus.state === "paused";
 
   useEffect(() => {
     const pulse = data?.[ANIMATION_FIELDS.pulse.name];
@@ -308,16 +314,30 @@ export function SubstrateEdge({
 
     const pathLength = pathRef.current?.getTotalLength() ?? null;
     const duration = pathLength !== null ? pathLength / PULSE_SPEED_PX_PER_MS : 1000;
-    const start = performance.now();
+    // elapsed tracks time actually spent running (excludes paused wall-time).
+    let elapsed = 0;
+    let lastFrameTime: number | null = null;
     let raf: number;
     const tick = (now: number) => {
-      const t = Math.min((now - start) / duration, 1);
-      setPulseT(t);
-      if (t < 1) {
-        raf = requestAnimationFrame(tick);
+      if (!pausedRef.current) {
+        // Accumulate only un-paused time.
+        if (lastFrameTime !== null) {
+          elapsed += now - lastFrameTime;
+        }
+        lastFrameTime = now;
+        const t = Math.min(elapsed / duration, 1);
+        setPulseT(t);
+        if (t < 1) {
+          raf = requestAnimationFrame(tick);
+        } else {
+          setPulseT(null);
+          rf.setEdges(edges => edges.map(e => e.id === id ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: undefined } } : e));
+        }
       } else {
-        setPulseT(null);
-        rf.setEdges(edges => edges.map(e => e.id === id ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: undefined } } : e));
+        // Paused: don't advance, but keep re-scheduling so we wake up when
+        // the process resumes (pausedRef.current becomes false).
+        lastFrameTime = null;
+        raf = requestAnimationFrame(tick);
       }
     };
     raf = requestAnimationFrame(tick);

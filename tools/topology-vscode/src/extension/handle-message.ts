@@ -78,6 +78,15 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "run-cancel":
       runner.cancel();
       return;
+    case "pause":
+      runner.pause();
+      return;
+    case "resume":
+      runner.resume();
+      return;
+    case "stop":
+      runner.stop();
+      return;
     case "webview-log":
       await appendWebviewLog(msg.entry, document.uri);
       return;

@@ -4,6 +4,7 @@
 
 export type RunStatus =
   | { state: "running" }
+  | { state: "paused" }
   | { state: "ok" }
   | { state: "error"; message: string }
   | { state: "cancelled" };
@@ -14,6 +15,9 @@ export type WebviewToHostMsg =
   | { type: "view-save"; text: string }
   | { type: "run"; text?: string }
   | { type: "run-cancel" }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "stop" }
   | { type: "webview-log"; entry: string };
 
 // Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
@@ -46,7 +50,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "webview-log",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
