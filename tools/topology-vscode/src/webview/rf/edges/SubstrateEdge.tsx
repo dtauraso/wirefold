@@ -17,7 +17,7 @@ import { ANIMATION_FIELDS } from "../animation-fields";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { markerEndUrl } from "../MarkerDefs";
 
-const PULSE_SPEED_PX_PER_MS = 0.8;
+const PULSE_SPEED_PX_PER_MS = 0.08;
 
 // Marker head lengths (refX of the filled markers in MarkerDefs).
 const MD_HEAD_PX = 8;
