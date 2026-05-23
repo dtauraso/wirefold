@@ -4,11 +4,15 @@
 // Full send→pulse→delivered→done lifecycle is documented in pump.ts (top-of-file
 // comment block). This file owns step 2 only: RAF loop driving pulse 0→1 and
 // posting "delivered" when complete.
+//
+// startTime is read from pulse-state (set at setPulse call time) so that a
+// remounted component resumes at the correct animation offset rather than
+// restarting from t=0.
 
 import { useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
-import { usePulseCtx } from "../pulse-state";
+import { claimDelivered, usePulseCtx } from "../pulse-state";
 import { useRunStatusCtx } from "../run-status";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;
@@ -40,32 +44,48 @@ export function usePulseAnimation(id: string) {
     postLog("phase4.edge", { layer: "edge", id, step: pulse.simStep, value: pulse.value });
     pulseValueRef.current = pulse.value;
 
-    const pathLength = pathRef.current?.getTotalLength() ?? null;
-    const duration = pathLength !== null ? pathLength / PULSE_SPEED_PX_PER_MS : 1000;
-    let elapsed = 0;
-    let lastFrameTime: number | null = null;
+    const { startTime } = pulse;
+
+    // Wait one frame for pathRef to be populated before computing pathLength.
     let raf: number;
-    const tick = (now: number) => {
-      if (!pausedRef.current) {
-        if (lastFrameTime !== null) elapsed += now - lastFrameTime;
-        lastFrameTime = now;
-        const t = Math.min(elapsed / duration, 1);
-        setPulseT(t);
-        if (t < 1) {
-          raf = requestAnimationFrame(tick);
-        } else {
-          // Pulse arrived at destination. Post "delivered" so Go's PacedWire unblocks
-          // Recv, then clear the pulse dot immediately. The held value is now shown
-          // inside the destination node component until Go signals Done.
+    raf = requestAnimationFrame(() => {
+      const pathLength = pathRef.current?.getTotalLength() ?? null;
+      const duration = pathLength !== null ? pathLength / PULSE_SPEED_PX_PER_MS : 1000;
+
+      // Compute t from the shared anchor so remounts resume at the right offset.
+      const tNow = Math.min((performance.now() - startTime) / duration, 1);
+      if (tNow >= 1) {
+        // Already finished by the time this component mounted.
+        if (claimDelivered(idRef.current, startTime)) {
           vscode.postMessage({ type: "delivered", edge: idRef.current });
-          setPulseT(null);
         }
-      } else {
-        lastFrameTime = null;
-        raf = requestAnimationFrame(tick);
+        setPulseT(null);
+        return;
       }
-    };
-    raf = requestAnimationFrame(tick);
+
+      setPulseT(tNow);
+
+      const tick = (now: number) => {
+        if (!pausedRef.current) {
+          const t = Math.min((now - startTime) / duration, 1);
+          setPulseT(t);
+          if (t < 1) {
+            raf = requestAnimationFrame(tick);
+          } else {
+            // Pulse arrived at destination. Post "delivered" so Go's PacedWire
+            // unblocks Recv, then clear the pulse dot immediately.
+            if (claimDelivered(idRef.current, startTime)) {
+              vscode.postMessage({ type: "delivered", edge: idRef.current });
+            }
+            setPulseT(null);
+          }
+        } else {
+          raf = requestAnimationFrame(tick);
+        }
+      };
+      raf = requestAnimationFrame(tick);
+    });
+
     return () => cancelAnimationFrame(raf);
   }, [pulse]);
 
