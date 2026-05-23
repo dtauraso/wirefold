@@ -101,8 +101,6 @@ The shell is parameterized by the Init literal values, the output field name (`T
 
 1. **Multiple output wires (resolved):** `FromGo` asserts the Input struct has exactly one `*Wiring.Out` field. More than one is a parse error. If a real second output is added later, the grammar will be extended deliberately (e.g. comma-separated target list) with a new round-trip test.
 
-2. **`Fire()` call.** `n.Fire()` is called before every TrySend. It is substrate ceremony (triggers the visual pulse indicator) and should stay invisible in pseudo. Confirm it is always present in the canonical shell and never varies; if so, hide it unconditionally.
-
 ## Round-trip mechanism
 - `tools/pseudo/` Go package, `go/ast` + `go/printer`.
 - `pseudo.FromGo(file) → Equation` — pattern-matches the Input canonical shell in the AST to extract (`InitValues`, `RepeatFlag`, `OutputField`).
