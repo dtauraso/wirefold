@@ -15,6 +15,7 @@
 package Wiring
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -66,9 +67,16 @@ func nodeEdgeSeeds(n specNode) map[string]int {
 	return map[string]int{}
 }
 
+// pacedEdges is the set of edge labels that should use a PacedWire bridge
+// instead of a direct channel. Stage 2: one edge converted as a proof of
+// integration. Stage 3 will grow this set or derive it from edge metadata.
+var pacedEdges = map[string]bool{
+	"in08ToReadGate1": true,
+}
+
 // LoadTopology reads the JSON file at jsonPath and constructs a []Node
 // equivalent to the generated Wire() function.
-func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -87,13 +95,25 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 	}
 
 	// Allocate one chan int (buf 1) per edge; keyed by label.
+	// For paced edges, edgeChan holds the *source* channel (sender side);
+	// pacedSink holds the *sink* channel (receiver side). The bridge
+	// goroutine sits between them, threading values through the PacedWire.
 	edgeChan := map[string]chan int{}
+	pacedSink := map[string]chan int{}
 	for _, e := range spec.Edges {
 		// also caught by TS parser; defense-in-depth
 		if e.Label == "" {
 			return nil, fmt.Errorf("LoadTopology: edge %q→%q has empty label", e.Source, e.Target)
 		}
-		edgeChan[e.Label] = make(chan int, 1)
+		if pacedEdges[e.Label] {
+			src := make(chan int, 1)
+			dst := make(chan int, 1)
+			NoVisualBridge(ctx, src, dst)
+			edgeChan[e.Label] = src
+			pacedSink[e.Label] = dst
+		} else {
+			edgeChan[e.Label] = make(chan int, 1)
+		}
 	}
 
 	// Build id→type map and per-kind port lookup sets (needed for normalization and validation).
@@ -212,7 +232,11 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 			if !ok {
 				return nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: port %q has no incoming edge", n.ID, port.Name)
 			}
-			edgeChan[label] <- seedVal
+			if sink, isPaced := pacedSink[label]; isPaced {
+					sink <- seedVal
+				} else {
+					edgeChan[label] <- seedVal
+				}
 		}
 	}
 
@@ -227,7 +251,11 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 			case PortIn:
 				label, ok := inbound[n.ID][port.Name]
 				if ok {
-					pb.SetSingle(port.Name, edgeChan[label])
+					if sink, isPaced := pacedSink[label]; isPaced {
+						pb.SetSingle(port.Name, sink)
+					} else {
+						pb.SetSingle(port.Name, edgeChan[label])
+					}
 				}
 				// If no inbound edge, pb.In() will allocate a dead-end channel.
 

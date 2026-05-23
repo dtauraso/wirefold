@@ -26,12 +26,12 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	// all other stdout output is build/log noise sent to OutputChannel.
 	tr := T.NewWithSink(0, os.Stdout)
 
-	nodes, err := W.LoadTopology(topologyPath, tr)
+	ctx, cancel := context.WithCancel(context.Background())
+	nodes, err := W.LoadTopology(ctx, topologyPath, tr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	wg := new(sync.WaitGroup)
 	wg.Add(len(nodes))
 
