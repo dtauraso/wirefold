@@ -76,17 +76,6 @@ func (pb *PortBindings) AppendMultiPaced(name string, pw *PacedWire) {
 	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
 }
 
-// isPaced reports whether the named port has a PacedWire binding.
-func (pb *PortBindings) isPaced(name string) bool {
-	_, ok := pb.singlePaced[name]
-	return ok
-}
-
-func (pb *PortBindings) isPacedMulti(name string) bool {
-	_, ok := pb.multiPaced[name]
-	return ok
-}
-
 func (pb *PortBindings) In(name string) <-chan int {
 	ch := pb.single[name]
 	if ch == nil {
