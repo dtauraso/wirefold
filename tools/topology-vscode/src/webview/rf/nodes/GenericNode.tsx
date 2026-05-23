@@ -7,7 +7,7 @@
 import { Handle, Position, type NodeProps, useStore, useReactFlow } from "reactflow";
 import { shallow } from "zustand/shallow";
 import type { CSSProperties, PointerEvent, ReactNode } from "react";
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback, createPortal } from "react";
 import { useFireFlash } from "./use-fire-flash";
 import { useHeldValuesCtx } from "../held-values";
 import { useLastFireCtx } from "../fire-flash-state";
@@ -19,6 +19,7 @@ import type { Port } from "../../../schema/types";
 import type { SlotMap } from "../../../messages";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { type Side, type ActiveDrag, SLOT_PCT, computeSnapPoints, nearestSnap, resolvePositions, pctToSlot } from "../port-snap";
+import { PseudoPanel } from "../panels/PseudoPanel";
 
 // ── Style helpers ────────────────────────────────────────────────────────────
 
@@ -156,6 +157,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
   const rf = useReactFlow();
   const nodeElRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<ActiveDrag | null>(null);
+  const [pseudoOpen, setPseudoOpen] = useState(false);
 
   const connected = useStore((s) => {
     const r: Record<string, boolean> = {};
@@ -207,14 +209,30 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
 
   const inputs: Port[] = data.inputs ?? []; const outputs: Port[] = data.outputs ?? [];
   const hasPortData = inputs.length > 0 || outputs.length > 0;
+  const isInput = data.kind === "Input";
   const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, minHeight: def.height ?? 40, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
   return (
     <div ref={nodeElRef} style={container}>
       {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown, slotsMap.get(nodeId), nodeId, heldValues) : renderDefHandles(def)}
       {renderSnapDots(drag)}
-      <div style={{ fontWeight: 500, textAlign: "center" }}>{data.label ?? def.defaultLabel}</div>
+      <div style={{ fontWeight: 500, textAlign: "center", position: "relative" }}>
+        {data.label ?? def.defaultLabel}
+        {isInput && (
+          <button
+            title="Edit pseudo"
+            onClick={(e) => { e.stopPropagation(); setPseudoOpen(true); }}
+            style={{ position: "absolute", right: -4, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", color: "#888", fontSize: 10, padding: "0 2px", lineHeight: 1 }}
+          >
+            ƒ
+          </button>
+        )}
+      </div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
       {def.displays?.map((d) => renderDisplay(d, data))}
+      {isInput && pseudoOpen && createPortal(
+        <PseudoPanel nodeId={nodeId} onClose={() => setPseudoOpen(false)} />,
+        document.body,
+      )}
     </div>
   );
 }
