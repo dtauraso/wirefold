@@ -99,7 +99,7 @@ The shell is parameterized by the Init literal values, the output field name (`T
 
 ## Open questions
 
-1. **Multiple output wires.** The current Input node has exactly one output (`ToReadGate`). If a future topology wires a second output, the pseudo form would need to name it. v0 assumes exactly one output; the question is whether to assert-error or silently ignore extras during `FromGo`.
+1. **Multiple output wires (resolved):** `FromGo` asserts the Input struct has exactly one `*Wiring.Out` field. More than one is a parse error. If a real second output is added later, the grammar will be extended deliberately (e.g. comma-separated target list) with a new round-trip test.
 
 2. **`Fire()` call.** `n.Fire()` is called before every TrySend. It is substrate ceremony (triggers the visual pulse indicator) and should stay invisible in pseudo. Confirm it is always present in the canonical shell and never varies; if so, hide it unconditionally.
 
