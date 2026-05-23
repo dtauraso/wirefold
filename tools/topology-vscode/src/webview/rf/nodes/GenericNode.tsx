@@ -8,7 +8,6 @@ import { Handle, Position, type NodeProps, useStore, useReactFlow } from "reactf
 import { shallow } from "zustand/shallow";
 import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import React, { useRef, useState, useCallback } from "react";
-import { createPortal } from "react-dom";
 import { useFireFlash } from "./use-fire-flash";
 import { useHeldValuesCtx } from "../held-values";
 import { useLastFireCtx } from "../fire-flash-state";
@@ -230,9 +229,8 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
       </div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
       {def.displays?.map((d) => renderDisplay(d, data))}
-      {isInput && pseudoOpen && createPortal(
-        <PseudoPanel nodeId={nodeId} onClose={() => setPseudoOpen(false)} />,
-        document.body,
+      {isInput && pseudoOpen && (
+        <PseudoPanel nodeId={nodeId} onClose={() => setPseudoOpen(false)} />
       )}
     </div>
   );

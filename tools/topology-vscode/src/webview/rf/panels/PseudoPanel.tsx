@@ -63,31 +63,20 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
 
   const handleCancel = () => onClose();
 
-  const overlay: React.CSSProperties = {
-    position: "fixed",
-    inset: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "rgba(0,0,0,0.45)",
-    zIndex: 9000,
-  };
-
   const panel: React.CSSProperties = {
     background: "#1e1e1e",
     border: "1px solid #444",
-    borderRadius: 6,
-    padding: "12px 16px",
-    minWidth: 340,
-    maxWidth: 520,
-    width: "90vw",
+    borderRadius: 4,
+    padding: "8px",
+    marginTop: 6,
+    width: "100%",
+    boxSizing: "border-box",
     display: "flex",
     flexDirection: "column",
-    gap: 8,
+    gap: 6,
     fontFamily: "monospace",
-    fontSize: 12,
+    fontSize: 11,
     color: "#ccc",
-    boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
   };
 
   const titleRow: React.CSSProperties = {
@@ -97,7 +86,7 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
     marginBottom: 4,
   };
 
-  const title: React.CSSProperties = { fontWeight: 600, fontSize: 13, color: "#ddd" };
+  const title: React.CSSProperties = { fontWeight: 600, fontSize: 11, color: "#ddd" };
 
   const errorBox: React.CSSProperties = {
     background: "#3b1212",
@@ -110,15 +99,15 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
 
   const textareaStyle: React.CSSProperties = {
     width: "100%",
-    minHeight: 60,
-    resize: "vertical",
+    height: 90,
+    resize: "none",
     background: "#252526",
     color: "#ccc",
     border: "1px solid #555",
     borderRadius: 3,
-    padding: "6px 8px",
+    padding: "4px 6px",
     fontFamily: "monospace",
-    fontSize: 12,
+    fontSize: 11,
     boxSizing: "border-box",
   };
 
@@ -150,34 +139,32 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
   const isBusy = phase.kind === "loading" || phase.kind === "saving";
 
   return (
-    <div style={overlay}>
-      <div style={panel}>
-        <div style={titleRow}>
-          <span style={title}>pseudo — Input</span>
-          <span style={{ fontSize: 10, color: "#888" }}>{nodeId}</span>
-        </div>
-        {phase.kind === "error" && (
-          <div style={errorBox}>{phase.message}</div>
-        )}
-        {phase.kind === "loading" ? (
-          <div style={{ color: "#888", padding: "8px 0" }}>loading…</div>
-        ) : (
-          <textarea
-            ref={textRef}
-            style={textareaStyle}
-            defaultValue={currentPseudo}
-            disabled={isBusy}
-            spellCheck={false}
-          />
-        )}
-        <div style={btnRow}>
-          <button style={btnCancel} onClick={handleCancel} disabled={phase.kind === "saving"}>
-            Cancel
-          </button>
-          <button style={btnSave} onClick={handleSave} disabled={isBusy}>
-            {phase.kind === "saving" ? "Saving…" : "Save"}
-          </button>
-        </div>
+    <div style={panel}>
+      <div style={titleRow}>
+        <span style={title}>pseudo — Input</span>
+        <span style={{ fontSize: 10, color: "#888" }}>{nodeId}</span>
+      </div>
+      {phase.kind === "error" && (
+        <div style={errorBox}>{phase.message}</div>
+      )}
+      {phase.kind === "loading" ? (
+        <div style={{ color: "#888", padding: "4px 0" }}>loading…</div>
+      ) : (
+        <textarea
+          ref={textRef}
+          style={textareaStyle}
+          defaultValue={currentPseudo}
+          disabled={isBusy}
+          spellCheck={false}
+        />
+      )}
+      <div style={btnRow}>
+        <button style={btnCancel} onClick={handleCancel} disabled={phase.kind === "saving"}>
+          Cancel
+        </button>
+        <button style={btnSave} onClick={handleSave} disabled={isBusy}>
+          {phase.kind === "saving" ? "Saving…" : "Save"}
+        </button>
       </div>
     </div>
   );
