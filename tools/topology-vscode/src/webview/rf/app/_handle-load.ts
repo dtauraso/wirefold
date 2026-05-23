@@ -37,6 +37,8 @@ export function handleLoad(ctx: AppCtx, text: string) {
     if (sel.size > 0) {
       flow.nodes = flow.nodes.map((n) => sel.has(n.id) ? { ...n, selected: true } : n);
     }
+    // Transient run state (pulse, lastFire, slots) lives in dedicated state stores
+    // outside RF nodes/edges, so it survives file round-trip rebuilds automatically.
     ctx.setNodes(flow.nodes);
     ctx.setEdges(flow.edges);
   } catch (err) {

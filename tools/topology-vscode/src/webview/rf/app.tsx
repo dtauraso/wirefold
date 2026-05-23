@@ -29,6 +29,12 @@ import type { RunStatusUI } from "./run-status";
 import { registerDimmedSetter, DimmedCtx, useDimmedCtx } from "./dimmed";
 import { registerHeldValuesSetter, HeldValuesCtx } from "./held-values";
 import type { HeldValues } from "./held-values";
+import { registerPulseSetter, PulseCtx } from "./pulse-state";
+import type { PulseMap } from "./pulse-state";
+import { registerLastFireSetter, LastFireCtx } from "./fire-flash-state";
+import type { LastFireMap } from "./fire-flash-state";
+import { registerSlotsSetter, SlotsCtx } from "./slots-state";
+import type { SlotsMap } from "./slots-state";
 import { useHotkeys } from "react-hotkeys-hook";
 
 function Inner() {
@@ -133,11 +139,20 @@ export default function App() {
   const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
   const [dimmed, setDimmed] = useState<Set<string> | null>(null);
   const [heldValues, setHeldValues] = useState<HeldValues>(new Map());
+  const [pulseMap, setPulseMap] = useState<PulseMap>(new Map());
+  const [lastFireMap, setLastFireMap] = useState<LastFireMap>(new Map());
+  const [slotsMap, setSlotsMap] = useState<SlotsMap>(new Map());
   useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
   useEffect(() => { registerDimmedSetter(setDimmed); }, []);
   useEffect(() => { registerHeldValuesSetter(setHeldValues); }, []);
+  useEffect(() => { registerPulseSetter(setPulseMap); }, []);
+  useEffect(() => { registerLastFireSetter(setLastFireMap); }, []);
+  useEffect(() => { registerSlotsSetter(setSlotsMap); }, []);
   return (
     <HeldValuesCtx.Provider value={heldValues}>
+    <PulseCtx.Provider value={pulseMap}>
+    <LastFireCtx.Provider value={lastFireMap}>
+    <SlotsCtx.Provider value={slotsMap}>
     <DimmedCtx.Provider value={dimmed}>
     <RunStatusCtx.Provider value={runStatus}>
       <ReactFlowProvider>
@@ -147,6 +162,9 @@ export default function App() {
       </ReactFlowProvider>
     </RunStatusCtx.Provider>
     </DimmedCtx.Provider>
+    </SlotsCtx.Provider>
+    </LastFireCtx.Provider>
+    </PulseCtx.Provider>
     </HeldValuesCtx.Provider>
   );
 }
