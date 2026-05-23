@@ -6,7 +6,7 @@
 //   double-click label → edit mode (contentEditable div, auto-focused)
 //   each input (debounced ~250 ms) → post pseudo-save
 //     pseudo-save-result → accept; update last-known-good
-//     pseudo-error       → keep edit mode; show inline red indicator
+//     pseudo-error       → keep edit mode; overlay (PseudoErrorOverlay) shows error
 //   blur → exit edit mode; if last attempt errored, revert to last-known-good
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
@@ -19,7 +19,7 @@ type Props = {
 
 type EditState =
   | { mode: "label" }
-  | { mode: "editing"; errorMsg: string | null };
+  | { mode: "editing" };
 
 export function PseudoPanel({ nodeId }: Props) {
   // Last-known-good text (from pseudo-render-result or last pseudo-save-result)
@@ -56,27 +56,16 @@ export function PseudoPanel({ nodeId }: Props) {
         // Accept: update last-known-good to whatever was just saved.
         setLkg(data.pseudo);
         lastSaveErrored.current = false;
-        setEditState((prev) =>
-          prev.mode === "editing" ? { mode: "editing", errorMsg: null } : prev
-        );
       } else if (
         data.type === "pseudo-save-result"
       ) {
         // save-result without pseudo field — treat as accepted, keep buffer
         lastSaveErrored.current = false;
-        setEditState((prev) =>
-          prev.mode === "editing" ? { mode: "editing", errorMsg: null } : prev
-        );
       } else if (
         data.type === "pseudo-error" &&
         typeof data.message === "string"
       ) {
         lastSaveErrored.current = true;
-        setEditState((prev) =>
-          prev.mode === "editing"
-            ? { mode: "editing", errorMsg: data.message! }
-            : prev
-        );
       }
     };
     window.addEventListener("message", handler);
@@ -115,7 +104,7 @@ export function PseudoPanel({ nodeId }: Props) {
   const handleDoubleClick = () => {
     bufRef.current = lkg ?? "";
     lastSaveErrored.current = false;
-    setEditState({ mode: "editing", errorMsg: null });
+    setEditState({ mode: "editing" });
   };
 
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
@@ -195,13 +184,6 @@ export function PseudoPanel({ nodeId }: Props) {
     cursor: "text",
   };
 
-  const errorStyle: React.CSSProperties = {
-    display: "inline-block",
-    marginLeft: 6,
-    fontSize: 10,
-    color: "#f66",
-  };
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const displayText =
@@ -210,12 +192,7 @@ export function PseudoPanel({ nodeId }: Props) {
   return (
     <div style={panel}>
       <div style={titleRow}>
-        <span style={titleStyle}>
-          pseudo — Input
-          {editState.mode === "editing" && editState.errorMsg && (
-            <span style={errorStyle}>✕ {editState.errorMsg}</span>
-          )}
-        </span>
+        <span style={titleStyle}>pseudo — Input</span>
         <span style={{ fontSize: 10, color: "#888" }}>{nodeId}</span>
       </div>
 
