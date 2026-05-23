@@ -11,6 +11,7 @@ import type { ReactFlowInstance, Node as RFNode, Edge as RFEdge } from "reactflo
 import { rfSetNodes, rfSetEdges } from "./rf-imperative";
 import { viewerState, setViewerState } from "./viewer-state";
 import type { ViewerState } from "../state/viewer/types";
+import { registerRf, stripTransient, overlayTransient } from "./transient-overlay";
 
 const HISTORY_LIMIT = 50;
 
@@ -26,26 +27,11 @@ let _rf: ReactFlowInstance | null = null;
 
 export function registerHistory(rf: ReactFlowInstance) {
   _rf = rf;
+  registerRf(rf);
 }
 
 function cloneSnapshot(s: Snapshot): Snapshot {
   return structuredClone(s);
-}
-
-/** Remove transient run-state fields so they never enter undo/redo snapshots. */
-function stripTransient(nodes: RFNode[], edges: RFEdge[]): { nodes: RFNode[]; edges: RFEdge[] } {
-  const strippedNodes = nodes.map((n) => {
-    const d = { ...n.data };
-    delete d.lastFire;
-    delete d.slots;
-    return { ...n, data: d };
-  });
-  const strippedEdges = edges.map((e) => {
-    const d = { ...e.data };
-    delete d.pulse;
-    return { ...e, data: d };
-  });
-  return { nodes: strippedNodes, edges: strippedEdges };
 }
 
 function currentSnapshot(): Snapshot {
@@ -60,30 +46,6 @@ export function pushSnapshot() {
   if (past.length > HISTORY_LIMIT) past.shift();
   // Any new action clears the redo stack.
   future = [];
-}
-
-/** Overlay live transient fields from the current RF state onto restored nodes/edges. */
-function overlayTransient(restoredNodes: RFNode[], restoredEdges: RFEdge[]): { nodes: RFNode[]; edges: RFEdge[] } {
-  const liveNodes = _rf!.getNodes();
-  const liveEdges = _rf!.getEdges();
-  const liveNodeMap = new Map(liveNodes.map((n) => [n.id, n.data]));
-  const liveEdgeMap = new Map(liveEdges.map((e) => [e.id, e.data]));
-  const nodes = restoredNodes.map((n) => {
-    const live = liveNodeMap.get(n.id);
-    if (!live) return n;
-    const overlay: Record<string, unknown> = {};
-    if (live.lastFire !== undefined) overlay.lastFire = live.lastFire;
-    if (live.slots !== undefined) overlay.slots = live.slots;
-    return { ...n, data: { ...n.data, ...overlay } };
-  });
-  const edges = restoredEdges.map((e) => {
-    const live = liveEdgeMap.get(e.id);
-    if (!live) return e;
-    const overlay: Record<string, unknown> = {};
-    if (live.pulse !== undefined) overlay.pulse = live.pulse;
-    return { ...e, data: { ...e.data, ...overlay } };
-  });
-  return { nodes, edges };
 }
 
 export function undo() {
