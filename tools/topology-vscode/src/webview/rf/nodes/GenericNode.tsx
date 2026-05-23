@@ -7,7 +7,8 @@
 import { Handle, Position, type NodeProps, useStore, useReactFlow } from "reactflow";
 import { shallow } from "zustand/shallow";
 import type { CSSProperties, PointerEvent, ReactNode } from "react";
-import React, { useRef, useState, useCallback, createPortal } from "react";
+import React, { useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useFireFlash } from "./use-fire-flash";
 import { useHeldValuesCtx } from "../held-values";
 import { useLastFireCtx } from "../fire-flash-state";
