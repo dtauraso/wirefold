@@ -19,7 +19,9 @@ export type WebviewToHostMsg =
   | { type: "resume" }
   | { type: "stop" }
   | { type: "webview-log"; entry: string }
-  | { type: "delivered"; edge: string };
+  | { type: "delivered"; edge: string }
+  | { type: "pseudo-render"; nodeId: string }
+  | { type: "pseudo-save"; nodeId: string; pseudo: string };
 
 // Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
@@ -49,14 +51,19 @@ export type HostToWebviewMsg =
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
   | { type: "flush" }
   | { type: "save-error"; message: string }
-  | { type: "trace-event"; event: TraceEvent };
+  | { type: "trace-event"; event: TraceEvent }
+  | { type: "pseudo-render-result"; nodeId: string; pseudo: string }
+  | { type: "pseudo-save-result"; nodeId: string }
+  | { type: "pseudo-error"; nodeId: string; message: string };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
   "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
+  "pseudo-render", "pseudo-save",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
   "load", "view-load", "run-status", "flush", "save-error", "trace-event",
+  "pseudo-render-result", "pseudo-save-result", "pseudo-error",
 ]);
 
 export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
@@ -78,6 +85,12 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "delivered":
       return typeof m.edge === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "pseudo-render":
+      return typeof m.nodeId === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "pseudo-save":
+      return typeof m.nodeId === "string" && typeof m.pseudo === "string"
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
     default:
       return m as unknown as WebviewToHostMsg;
   }
