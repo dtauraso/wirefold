@@ -7,26 +7,20 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 	W "github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// RunTest wires the topology and lets it run for `dur` before
-// cancelling. If tracePath is non-empty, a Trace recorder is attached
-// and its raw event stream is dumped as JSON-lines to the path on
-// shutdown. Raw form keys send events by (node, port); the canonical
-// edge-keyed form requires a spec-aware Resolve pass (out of scope for
-// the runtime entrypoint).
-func RunTest(dur time.Duration, tracePath string, topologyPath string) {
-	// Always stream trace events to stdout as JSONL in real time.
-	// Trace event lines are routed by the extension to the webview;
-	// all other stdout output is build/log noise sent to OutputChannel.
+// runTopology loads and runs the topology under ctx, blocking until ctx is
+// cancelled or all nodes exit. Shared by Run and RunTest.
+func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string) {
 	tr := T.NewWithSink(0, os.Stdout)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	nodes, reg, err := W.LoadTopology(ctx, topologyPath, tr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
@@ -34,23 +28,23 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	}
 
 	// Stage 3: read "delivered" JSON lines from stdin, unblocking PacedWires.
-	go W.RunStdinReader(ctx, os.Stdin, reg)
+	// When stdin reaches EOF (extension host disconnect), cancel the context.
+	go func() {
+		W.RunStdinReader(ctx, os.Stdin, reg)
+		cancel()
+	}()
 
 	wg := new(sync.WaitGroup)
 	wg.Add(len(nodes))
-
 	for _, node := range nodes {
 		go func() {
 			defer wg.Done()
 			node.Update(ctx)
 		}()
 	}
-	time.Sleep(dur)
-	cancel()
 	wg.Wait()
 
 	tr.Close()
-	// Optionally also write to a file for offline diffing/replay.
 	if tracePath != "" {
 		f, err := os.Create(tracePath)
 		if err != nil {
@@ -64,10 +58,30 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	}
 }
 
+// Run wires the topology and blocks until SIGTERM/SIGINT or stdin EOF.
+// This is the live-run path used by the extension host.
+func Run(tracePath string, topologyPath string) {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	runTopology(ctx, cancel, tracePath, topologyPath)
+}
+
+// RunTest wires the topology and lets it run for dur before cancelling.
+// Used by automated tests that need a self-terminating run.
+func RunTest(dur time.Duration, tracePath string, topologyPath string) {
+	ctx, cancel := context.WithTimeout(context.Background(), dur)
+	defer cancel()
+	runTopology(ctx, cancel, tracePath, topologyPath)
+}
+
 func main() {
 	tracePath := flag.String("trace", "", "if set, write a raw JSONL trace to this path on shutdown")
-	dur := flag.Duration("duration", 100*time.Millisecond, "how long to run before cancelling")
+	dur := flag.Duration("duration", 0, "if non-zero, run for this duration then exit (test mode)")
 	topologyPath := flag.String("topology", "topology.json", "path to topology JSON spec")
 	flag.Parse()
-	RunTest(*dur, *tracePath, *topologyPath)
+	if *dur > 0 {
+		RunTest(*dur, *tracePath, *topologyPath)
+	} else {
+		Run(*tracePath, *topologyPath)
+	}
 }
