@@ -148,19 +148,23 @@ func ParseReadGate(text string, prior ReadGateView) (ReadGateView, error) {
 	return v, nil
 }
 
-// ToReadGate regenerates the Update method body of nodes/readgate/node.go to
-// match the guard described by v. The package declaration, struct definition,
-// and init function are preserved unchanged; only the Update method body is
-// replaced.
+// ToReadGate regenerates nodes/readgate/node.go to match the guard described by v.
+// The struct shape follows the guard: 2-term guard keeps HasChainInhibitor and
+// FromChainInhibitor; 1-term guard omits them entirely (no dead ports).
 //
-// Returns the new Go source and the new output-neighbor name (so the caller can
-// re-point the topology edge).
-func ToReadGate(v ReadGateView) (newGoSrc []byte, newOutNeighbor string, err error) {
+// Returns the new Go source, the new output-neighbor name, and removedPorts: the
+// struct field names dropped vs. the full 2-term shape (["FromChainInhibitor"] for
+// a 1-term guard, empty for 2-term).
+func ToReadGate(v ReadGateView) (newGoSrc []byte, newOutNeighbor string, removedPorts []string, err error) {
+	hasSignal := v.signalTerm() != ""
+
+	// Compute removedPorts: fields present in the full 2-term shape but absent here.
+	if !hasSignal {
+		removedPorts = []string{"FromChainInhibitor"}
+	}
+
 	type templateData struct {
-		HasSignal   bool
-		ValueTerm   string
-		SignalTerm  string
-		OutNeighbor string
+		HasSignal bool
 	}
 
 	const updateTemplate = `
@@ -208,25 +212,16 @@ func (g *Node) Update(ctx context.Context) {
 `
 	tmpl, tmplErr := template.New("update").Parse(updateTemplate)
 	if tmplErr != nil {
-		return nil, "", fmt.Errorf("pseudo.ToReadGate: template parse: %w", tmplErr)
-	}
-
-	data := templateData{
-		HasSignal:   v.signalTerm() != "",
-		ValueTerm:   v.valueTerm(),
-		SignalTerm:  v.signalTerm(),
-		OutNeighbor: v.OutNeighbor,
+		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: template parse: %w", tmplErr)
 	}
 
 	var methodBuf bytes.Buffer
-	if tmplErr = tmpl.Execute(&methodBuf, data); tmplErr != nil {
-		return nil, "", fmt.Errorf("pseudo.ToReadGate: template execute: %w", tmplErr)
+	if tmplErr = tmpl.Execute(&methodBuf, templateData{HasSignal: hasSignal}); tmplErr != nil {
+		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: template execute: %w", tmplErr)
 	}
 
-	// Build a minimal synthetic source that we can gofmt; then extract just the
-	// method and splice it into the original. Easier: regenerate the full file
-	// from scratch using a known skeleton and the generated Update body.
-	const fileTemplate = `package readgate
+	// Regenerate the full file from scratch; struct shape follows guard terms.
+	const fileTemplateWithSignal = `package readgate
 
 import (
 	"context"
@@ -235,13 +230,34 @@ import (
 )
 
 type Node struct {
-	Fire              func()
-	Value             int
-	HasValue          bool
-	HasChainInhibitor bool
+	Fire               func()
+	Value              int
+	HasValue           bool
+	HasChainInhibitor  bool
 	FromInput          *Wiring.In
 	FromChainInhibitor *Wiring.In
 	ToChainInhibitor   *Wiring.Out
+}
+
+{{.UpdateMethod}}
+func init() {
+	Wiring.Register("ReadGate", func() any { return &Node{} })
+}
+`
+	const fileTemplateNoSignal = `package readgate
+
+import (
+	"context"
+
+	"github.com/dtauraso/wirefold/nodes/Wiring"
+)
+
+type Node struct {
+	Fire             func()
+	Value            int
+	HasValue         bool
+	FromInput        *Wiring.In
+	ToChainInhibitor *Wiring.Out
 }
 
 {{.UpdateMethod}}
@@ -253,22 +269,27 @@ func init() {
 		UpdateMethod string
 	}
 
-	fileTmpl, tmplErr := template.New("file").Parse(fileTemplate)
+	fileTemplateStr := fileTemplateWithSignal
+	if !hasSignal {
+		fileTemplateStr = fileTemplateNoSignal
+	}
+
+	fileTmpl, tmplErr := template.New("file").Parse(fileTemplateStr)
 	if tmplErr != nil {
-		return nil, "", fmt.Errorf("pseudo.ToReadGate: file template parse: %w", tmplErr)
+		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: file template parse: %w", tmplErr)
 	}
 
 	var fileBuf bytes.Buffer
 	if tmplErr = fileTmpl.Execute(&fileBuf, fileData{UpdateMethod: methodBuf.String()}); tmplErr != nil {
-		return nil, "", fmt.Errorf("pseudo.ToReadGate: file template execute: %w", tmplErr)
+		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: file template execute: %w", tmplErr)
 	}
 
 	formatted, fmtErr := format.Source(fileBuf.Bytes())
 	if fmtErr != nil {
-		return nil, "", fmt.Errorf("pseudo.ToReadGate: format source: %w\nsource:\n%s", fmtErr, fileBuf.String())
+		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: format source: %w\nsource:\n%s", fmtErr, fileBuf.String())
 	}
 
-	return formatted, v.OutNeighbor, nil
+	return formatted, v.OutNeighbor, removedPorts, nil
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

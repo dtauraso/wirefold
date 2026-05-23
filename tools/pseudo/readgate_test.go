@@ -93,12 +93,17 @@ func TestReadGate_GuardDrop(t *testing.T) {
 		t.Errorf("OutNeighbor: got %q want i0", v.OutNeighbor)
 	}
 
-	newSrc, newOut, err := ToReadGate(v)
+	newSrc, newOut, removedPorts, err := ToReadGate(v)
 	if err != nil {
 		t.Fatalf("ToReadGate: %v", err)
 	}
 	if newOut != "i0" {
 		t.Errorf("newOutNeighbor: got %q want i0", newOut)
+	}
+
+	// removedPorts must be ["FromChainInhibitor"] for a 1-term guard.
+	if len(removedPorts) != 1 || removedPorts[0] != "FromChainInhibitor" {
+		t.Errorf("removedPorts: got %v want [FromChainInhibitor]", removedPorts)
 	}
 
 	srcStr := string(newSrc)
@@ -108,6 +113,13 @@ func TestReadGate_GuardDrop(t *testing.T) {
 	}
 	if !strings.Contains(srcStr, "HasValue") {
 		t.Errorf("single-gate source must reference HasValue:\n%s", srcStr)
+	}
+	// Struct must not contain the removed port fields.
+	if strings.Contains(srcStr, "FromChainInhibitor") {
+		t.Errorf("single-gate source must not contain FromChainInhibitor field:\n%s", srcStr)
+	}
+	if strings.Contains(srcStr, "HasChainInhibitor") {
+		t.Errorf("single-gate source must not contain HasChainInhibitor field:\n%s", srcStr)
 	}
 }
 
@@ -141,12 +153,15 @@ func TestReadGate_MalformedInput(t *testing.T) {
 // Go source containing the expected guard tokens.
 func TestToReadGate_TwoTermCompiles(t *testing.T) {
 	v := ReadGateView{GuardTerms: []string{"value", "signal"}, OutNeighbor: "i0"}
-	src, outNeighbor, err := ToReadGate(v)
+	src, outNeighbor, removedPorts, err := ToReadGate(v)
 	if err != nil {
 		t.Fatalf("ToReadGate: %v", err)
 	}
 	if outNeighbor != "i0" {
 		t.Errorf("newOutNeighbor: got %q want i0", outNeighbor)
+	}
+	if len(removedPorts) != 0 {
+		t.Errorf("removedPorts: got %v want [] for 2-term guard", removedPorts)
 	}
 	srcStr := string(src)
 	for _, tok := range []string{"HasValue", "HasChainInhibitor", "ToChainInhibitor"} {
