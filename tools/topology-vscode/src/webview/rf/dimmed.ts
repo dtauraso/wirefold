@@ -1,5 +1,7 @@
-// Imperative bridge for dimmed — mirrors run-status-state.ts pattern.
+// Imperative bridge + context for dimmed.
 // main.tsx calls setDimmedImperative; App registers the React setter on mount.
+
+import { createContext, useContext } from "react";
 
 type Setter = (next: Set<string> | null) => void;
 
@@ -17,4 +19,10 @@ export function setDimmedImperative(next: Set<string> | null) {
 
 export function getDimmed(): Set<string> | null {
   return _current;
+}
+
+export const DimmedCtx = createContext<Set<string> | null>(null);
+
+export function useDimmedCtx(): Set<string> | null {
+  return useContext(DimmedCtx);
 }

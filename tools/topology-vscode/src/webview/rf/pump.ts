@@ -9,7 +9,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { rfSetNodes, rfSetEdges, rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
 import { ANIMATION_FIELDS } from "./animation-fields";
-import { setHeldValue } from "./held-values-state";
+import { setHeldValue } from "./held-values";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.

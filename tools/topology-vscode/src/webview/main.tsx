@@ -6,8 +6,8 @@ import { flushSave, flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
 import { rfGetNodes, rfGetEdges } from "./rf/rf-imperative";
 import { flowToSpec } from "./rf/adapter/flow-to-spec";
-import { setRunStatusImperative } from "./rf/run-status-state";
-import { setDimmedImperative } from "./rf/dimmed-state";
+import { setRunStatusImperative } from "./rf/run-status";
+import { setDimmedImperative } from "./rf/dimmed";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 

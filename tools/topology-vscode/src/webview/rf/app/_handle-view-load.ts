@@ -2,7 +2,7 @@ import { specToFlow } from "../adapter";
 import { markViewSynced, scheduleViewSave } from "../../save";
 import { setViewerState } from "../viewer-state";
 import { getFolds, setFolds } from "../folds-state";
-import { getDimmed } from "../dimmed-state";
+import { getDimmed } from "../dimmed";
 import { parseViewerState, serializeViewerState } from "../../state/viewer/types";
 import { resolveViewLoadViewport } from "./_resolve-view-load-viewport";
 import { reconcileSelection } from "./_reconcile-selection";

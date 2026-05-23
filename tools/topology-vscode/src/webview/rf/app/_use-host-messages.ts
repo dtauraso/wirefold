@@ -5,7 +5,7 @@ import { viewerState } from "../viewer-state";
 import { rfGetNodes, rfGetEdges } from "../rf-imperative";
 import { flowToSpec } from "../adapter/flow-to-spec";
 import { getFolds } from "../folds-state";
-import { getDimmed } from "../dimmed-state";
+import { getDimmed } from "../dimmed";
 import { specToFlow } from "../adapter";
 import type { AppCtx } from "./_ctx";
 import { handleLoad } from "./_handle-load";

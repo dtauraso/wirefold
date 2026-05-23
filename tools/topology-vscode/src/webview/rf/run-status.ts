@@ -1,7 +1,8 @@
-// Imperative bridge for runStatus — mirrors rf-imperative.ts pattern.
+// Imperative bridge + context for runStatus.
 // main.tsx calls setRunStatusImperative from the window message handler;
 // App registers the React setState via registerRunStatusSetter on mount.
 
+import { createContext, useContext } from "react";
 import type { RunStatus } from "../../messages";
 
 // Webview-local: idle is the pre-first-run default. The wire RunStatus has
@@ -24,4 +25,10 @@ export function setRunStatusImperative(next: RunStatusUI) {
 
 export function getRunStatus(): RunStatusUI {
   return _current;
+}
+
+export const RunStatusCtx = createContext<RunStatusUI>({ state: "idle" });
+
+export function useRunStatusCtx(): RunStatusUI {
+  return useContext(RunStatusCtx);
 }

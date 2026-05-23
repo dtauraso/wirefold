@@ -24,14 +24,11 @@ import type { AppCtx } from "./app/_ctx";
 import { EdgeActionsCtx } from "./app/_edge-actions-ctx";
 import { registerRFSetters, notifyRFState } from "./rf-imperative";
 import { registerHistory, undo as rfUndo, redo as rfRedo } from "./history";
-import { registerRunStatusSetter } from "./run-status-state";
-import { RunStatusCtx } from "./run-status-ctx";
-import type { RunStatusUI } from "./run-status-state";
-import { registerDimmedSetter } from "./dimmed-state";
-import { DimmedCtx, useDimmedCtx } from "./dimmed-ctx";
-import { registerHeldValuesSetter } from "./held-values-state";
-import type { HeldValues } from "./held-values-state";
-import { HeldValuesCtx } from "./held-values-ctx";
+import { registerRunStatusSetter, RunStatusCtx } from "./run-status";
+import type { RunStatusUI } from "./run-status";
+import { registerDimmedSetter, DimmedCtx, useDimmedCtx } from "./dimmed";
+import { registerHeldValuesSetter, HeldValuesCtx } from "./held-values";
+import type { HeldValues } from "./held-values";
 import { useHotkeys } from "react-hotkeys-hook";
 
 function Inner() {

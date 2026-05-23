@@ -11,7 +11,7 @@ import { useRef, useState, useCallback } from "react";
 import React from "react";
 import type { SlotMap } from "../../../messages";
 import { useFireFlash, LAST_FIRE_FIELD } from "./use-fire-flash";
-import { useHeldValuesCtx } from "../held-values-ctx";
+import { useHeldValuesCtx } from "../held-values";
 import { NODE_DEFS, type DisplayKind, type NodeDef } from "./node-defs";
 import type { NodeData } from "../types";
 import type { Port } from "../../../schema/types";

@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
 import { ANIMATION_FIELDS } from "../animation-fields";
-import { useRunStatusCtx } from "../run-status-ctx";
+import { useRunStatusCtx } from "../run-status";
 import type { EdgeData } from "../types";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;
