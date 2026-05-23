@@ -301,26 +301,6 @@ func detectReadGateGuard(f *ast.File) ([]string, error) {
 	return found, nil
 }
 
-// verifyReadGateGuard checks that the Update method body contains an
-// if-statement guarded by HasValue && HasChainInhibitor.
-func verifyReadGateGuard(f *ast.File) error {
-	found := false
-	ast.Inspect(f, func(n ast.Node) bool {
-		ifStmt, ok := n.(*ast.IfStmt)
-		if !ok {
-			return true
-		}
-		if isBinaryAnd(ifStmt.Cond, "HasValue", "HasChainInhibitor") {
-			found = true
-		}
-		return true
-	})
-	if !found {
-		return fmt.Errorf("Update method missing expected guard: HasValue && HasChainInhibitor")
-	}
-	return nil
-}
-
 // verifyToChainInhibitorSend checks that the Update method calls
 // ToChainInhibitor.TrySend somewhere.
 func verifyToChainInhibitorSend(f *ast.File) error {
