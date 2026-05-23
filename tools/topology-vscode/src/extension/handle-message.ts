@@ -290,6 +290,16 @@ function spawnGoRun(repoRoot: string, args: string[]): Promise<{ stdout: string;
   });
 }
 
+function findInputOutNeighbor(docText: string, nodeId: string): string | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(docText); } catch { return undefined; }
+  const edges = (parsed as { edges?: unknown[] }).edges;
+  if (!Array.isArray(edges)) return undefined;
+  const edge = edges.find((e: unknown) => (e as { source?: string }).source === nodeId);
+  if (!edge) return undefined;
+  return (edge as { target?: string }).target;
+}
+
 async function handlePseudoRender(
   nodeId: string,
   document: vscode.TextDocument,
@@ -305,10 +315,16 @@ async function handlePseudoRender(
     post({ type: "pseudo-error", nodeId, message: `node ${nodeId} not found in topology` });
     return;
   }
+  const outNeighbor = findInputOutNeighbor(document.getText(), nodeId);
+  if (!outNeighbor) {
+    post({ type: "pseudo-error", nodeId, message: `Input node ${nodeId} has no output edge` });
+    return;
+  }
   const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     "input", "render",
     "--go-file", goFile,
+    "--out-neighbor", outNeighbor,
     "--spec-json", JSON.stringify(specEntry),
   ]);
   if (code !== 0) {
@@ -337,10 +353,16 @@ async function handlePseudoSave(
     post({ type: "pseudo-error", nodeId, message: `node ${nodeId} not found in topology` });
     return;
   }
+  const outNeighbor = findInputOutNeighbor(document.getText(), nodeId);
+  if (!outNeighbor) {
+    post({ type: "pseudo-error", nodeId, message: `Input node ${nodeId} has no output edge` });
+    return;
+  }
   const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     "input", "save",
     "--go-file", goFile,
+    "--out-neighbor", outNeighbor,
     "--spec-json", JSON.stringify(specEntry),
     "--pseudo", pseudoText,
   ]);
