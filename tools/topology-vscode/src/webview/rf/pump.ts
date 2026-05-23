@@ -9,6 +9,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { rfSetNodes, rfSetEdges, rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
 import { ANIMATION_FIELDS } from "./animation-fields";
+import { setHeldValue, clearHeldValue } from "./held-values-state";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -62,6 +63,12 @@ export function handleTraceEvent(event: TraceEvent): void {
       console.log(`[pump] send step=${step} node=${node} port=${port} edgeId=${edgeId ?? "NO-MATCH"} edges=[${edges.map(e => `${e.source}:${e.sourceHandle}`).join(",")}]`);
       postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null, edgeId: edgeId ?? null });
       if (!edgeId) return; // no matching edge — topology mismatch, skip silently
+      // Eagerly record the held value at the destination port so the node can
+      // show it while the pulse animates and until Go signals Done.
+      const edge = edges.find((e) => e.id === edgeId);
+      if (edge?.target && edge.targetHandle) {
+        setHeldValue(edge.target, edge.targetHandle, value ?? 0);
+      }
       rfSetEdges((es) =>
         es.map((e) =>
           e.id === edgeId
@@ -80,6 +87,8 @@ export function handleTraceEvent(event: TraceEvent): void {
         (e) => e.target === node && e.targetHandle === port,
       )?.id;
       if (!edgeId) return; // no matching edge — topology mismatch, skip silently
+      // Clear the held value now that Go has consumed it.
+      clearHeldValue(node, port);
       rfSetEdges((es) =>
         es.map((e) =>
           e.id === edgeId
