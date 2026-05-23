@@ -99,7 +99,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       await handlePseudoRender(msg.nodeId, document, post);
       return;
     case "pseudo-save":
-      await handlePseudoSave(msg.nodeId, msg.pseudo, document, post);
+      await handlePseudoSave(msg.nodeId, msg.pseudo, document, runner, post);
       return;
   }
 }
@@ -165,6 +165,7 @@ async function handlePseudoSave(
   nodeId: string,
   pseudoText: string,
   document: vscode.TextDocument,
+  runner: BuildAndRunRunner,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
 ): Promise<void> {
   const repoRoot = workspaceRoot();
@@ -218,4 +219,11 @@ async function handlePseudoSave(
   await applyEdit(document, JSON.stringify(topologyParsed, null, 2));
   await document.save();
   post({ type: "pseudo-save-result", nodeId });
+
+  // If a substrate run is active, stop it and restart so the new
+  // topology.json + nodes/Input/node.go are picked up.
+  if (runner.isRunning()) {
+    await runner.stopAndAwait();
+    runner.run();
+  }
 }
