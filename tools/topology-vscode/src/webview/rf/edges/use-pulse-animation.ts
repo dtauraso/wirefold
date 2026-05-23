@@ -2,10 +2,10 @@
 // Returns {pulseT, pathRef, pulseValueRef}: pulseT is position 0–1 or null when idle.
 //
 // Lifecycle:
-//   1. "send" trace event → pump sets pulse data → effect fires → RAF animates 0→1.
-//   2. On RAF completion (t=1): post "delivered" so Go's PacedWire unblocks Recv.
-//      Pulse stays pinned at t=1 (held at destination handle).
-//   3. "done" trace event → pump clears pulse data → effect sees no pulse → setPulseT(null).
+//   1. "send" trace event → pump sets pulse data + held-values entry → RAF animates 0→1.
+//   2. On RAF completion (t=1): post "delivered" so Go's PacedWire unblocks Recv,
+//      then clear pulseT immediately. The held value is shown in the node component.
+//   3. "done" trace event → pump clears pulse data and held-values entry.
 
 import { useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
@@ -56,9 +56,11 @@ export function usePulseAnimation(id: string, data: EdgeData | undefined) {
         if (t < 1) {
           raf = requestAnimationFrame(tick);
         } else {
-          // Pulse arrived at destination. Stay pinned at t=1 until Go signals Done.
-          // Post "delivered" so Go's PacedWire unblocks Recv; do NOT clear pulse data.
+          // Pulse arrived at destination. Post "delivered" so Go's PacedWire unblocks
+          // Recv, then clear the pulse dot immediately. The held value is now shown
+          // inside the destination node component until Go signals Done.
           vscode.postMessage({ type: "delivered", edge: idRef.current });
+          setPulseT(null);
         }
       } else {
         lastFrameTime = null;
