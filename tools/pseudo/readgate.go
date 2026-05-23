@@ -74,12 +74,12 @@ func FromReadGate(goSrc []byte, outNeighbor string) (ReadGateView, error) {
 // Two-term form:
 //
 //	if value and signal
-//	   send value -> <OutNeighbor>
+//	   send value to <OutNeighbor>
 //
 // One-term form:
 //
 //	if value
-//	   send value -> <OutNeighbor>
+//	   send value to <OutNeighbor>
 func RenderReadGate(v ReadGateView) string {
 	var b strings.Builder
 	b.WriteString("if ")
@@ -89,7 +89,7 @@ func RenderReadGate(v ReadGateView) string {
 		b.WriteString(sig)
 	}
 	b.WriteString("\n")
-	b.WriteString("   send value -> ")
+	b.WriteString("   send value to ")
 	b.WriteString(v.OutNeighbor)
 	b.WriteString("\n")
 	return b.String()
@@ -113,10 +113,10 @@ func buildReadGateSuggestion(prior ReadGateView) string {
 		neighbor = "<node>"
 	}
 	if prior.signalTerm() != "" {
-		return fmt.Sprintf("Try: if %s and %s\n   send value -> %s",
+		return fmt.Sprintf("Try: if %s and %s\n   send value to %s",
 			prior.valueTerm(), prior.signalTerm(), neighbor)
 	}
-	return fmt.Sprintf("Try: if %s\n   send value -> %s",
+	return fmt.Sprintf("Try: if %s\n   send value to %s",
 		prior.valueTerm(), neighbor)
 }
 
@@ -124,7 +124,7 @@ func buildReadGateSuggestion(prior ReadGateView) string {
 //
 // Grammar (whitespace-insensitive across lines):
 //
-//	pseudo   := "if" ident ["and" ident] NEWLINE "send" "value" "->" ident
+//	pseudo   := "if" ident ["and" ident] NEWLINE "send" "value" "to" ident
 //
 // On malformed input returns *ParseReadGateError with a human message and Suggestion().
 func ParseReadGate(text string, prior ReadGateView) (ReadGateView, error) {
@@ -384,7 +384,7 @@ func isParseError(err error, pe **parseError) bool {
 
 // parseReadGatePseudo parses the ReadGate pseudo grammar:
 //
-//	"if" ident ["and" ident] NEWLINE "send" "value" "->" ident
+//	"if" ident ["and" ident] NEWLINE "send" "value" "to" ident
 func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 	if rawErr := p.consumeWord("if"); rawErr != nil {
 		tok := p.peekWord()
@@ -415,7 +415,7 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 		guardTerms = append(guardTerms, term2)
 	}
 
-	// "send" "value" "->" "edge" "to" ident
+	// "send" "value" "to" ident
 	if rawErr := p.consumeWord("send"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrBadStart, token: tok, wrapped: rawErr}
@@ -424,7 +424,7 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 	}
-	if rawErr := p.consumeToken("->"); rawErr != nil {
+	if rawErr := p.consumeWord("to"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 	}

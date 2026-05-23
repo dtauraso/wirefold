@@ -39,7 +39,7 @@ func TestRenderReadGate_RoundTrip(t *testing.T) {
 	}
 
 	got := RenderReadGate(v)
-	want := "if value and signal\n   send value -> i0\n"
+	want := "if value and signal\n   send value to i0\n"
 	if got != want {
 		t.Errorf("RenderReadGate output mismatch:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -80,7 +80,7 @@ func TestReadGate_ParseRenderIdentity(t *testing.T) {
 // a single-term guard, and ToReadGate emits an Update body gated only on HasValue.
 func TestReadGate_GuardDrop(t *testing.T) {
 	prior := ReadGateView{GuardTerms: []string{"value", "signal"}, OutNeighbor: "i0"}
-	text := "if value\n   send value -> i0"
+	text := "if value\n   send value to i0"
 
 	v, err := ParseReadGate(text, prior)
 	if err != nil {
