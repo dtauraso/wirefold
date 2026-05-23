@@ -107,6 +107,59 @@ render-only: it animates trace events received from Go.
   `save`, `view-safe`. Nothing about
   slot phases, animation internals, or controls crosses the bridge.
 
+## Slot phase lifecycle
+
+One `PacedWire` (`nodes/Wiring/paced_wire.go`) is allocated per destination
+input port. All senders converging on that port share the single wire; fan-in
+is correct by construction.
+
+**Three Go operations on `PacedWire`:**
+
+- **`Send`** (paced_wire.go:39) — blocks until slot is empty, writes value into
+  slot, then blocks again until `Done` is called. Send does not return on visual
+  delivery; it stays blocked for the full receiver lifetime.
+- **`Recv`** (paced_wire.go:78) — blocks until `NotifyDelivered` fires, then
+  returns the value. Slot is NOT cleared; sender stays blocked.
+- **`Done`** (paced_wire.go:114) — receiver signals it has finished with the
+  value. Clears the slot, broadcasts on the cond, unblocking the next `Send`.
+
+**`NotifyDelivered`** (paced_wire.go:129) is called by the TS layer (via the
+extension bridge → stdin reader) when the pulse animation completes. It closes
+`deliveryCh`, which unblocks `Recv`. This is the only cross-boundary signal in
+the lifecycle.
+
+**Four slot phases and their transition triggers:**
+
+```
+empty  ──Send fills──▶  filled(v)  ──NotifyDelivered──▶  (Recv unblocked, slot still filled)  ──Done──▶  empty
+```
+
+1. `empty` → `filled(v)`: `Send` claims the slot (paced_wire.go:57–64). Go emits
+   `{"kind":"slot","phase":"filled"}` (Trace/Trace.go:147).
+2. `filled(v)` → Recv unblocked: `NotifyDelivered` closes `deliveryCh`
+   (paced_wire.go:129–137); pump posts it from the `"done"` animation callback
+   (pump.ts handles `"done"` at line 81, clears pulse; the extension host sends
+   `notifyDelivered` to stdin).
+3. Recv returns value, slot still `filled(v)` — no phase change. Receiver uses
+   the value and calls `Done`.
+4. `filled(v)` → `empty`: `Done` clears slot and unblocks `Send`
+   (paced_wire.go:114–125). Go emits `{"kind":"slot","phase":"empty"}`.
+
+**Cross-boundary contract:**
+
+- Go blocks `Send` until the TS layer acknowledges animation completion via
+  `NotifyDelivered`. This is the backpressure mechanism: Go cannot overrun the
+  visual layer.
+- TS never sets slot state directly. It only sends `notifyDelivered` (unblocks
+  `Recv`) and renders the slot badges from `"slot"` trace events.
+- `pump.ts` `"slot"` branch (pump.ts:25–41) writes `slots[port]` into RF node
+  data. `GenericNode.tsx` (line 142) reads `slotEntry.phase === "filled"` to
+  render the slot badge; held-value badges (line 144–145) persist from `"send"`
+  events and are NOT cleared on `"done"`.
+
+**Drift rule:** slot-phase transition logic outside `paced_wire.go` (Go) or
+`pump.ts` (TS) is drift — move it to one of those two files.
+
 ## Banned vocabulary (in substrate context)
 
 If you find yourself writing or reasoning with these words while
