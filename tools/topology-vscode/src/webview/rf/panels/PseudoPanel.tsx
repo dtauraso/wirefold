@@ -59,7 +59,9 @@ export function PseudoPanel({ nodeId }: Props) {
       } else if (
         data.type === "pseudo-save-result"
       ) {
-        // save-result without pseudo field — treat as accepted, keep buffer
+        // save-result without pseudo field — accept; promote the current
+        // buffer to last-known-good so label mode shows the saved text.
+        setLkg(bufRef.current);
         lastSaveErrored.current = false;
       } else if (
         data.type === "pseudo-error" &&
@@ -110,8 +112,15 @@ export function PseudoPanel({ nodeId }: Props) {
   };
 
   const handleBlur = () => {
-    // Cancel any pending debounced save.
-    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Flush any pending debounced save before cancelling the timer so that
+    // edits typed less than 250 ms before blur are not silently dropped.
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+      if (!lastSaveErrored.current) {
+        vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: bufRef.current });
+      }
+    }
 
     if (lastSaveErrored.current) {
       // Fire one final save so the host surfaces the error in the status bar.
