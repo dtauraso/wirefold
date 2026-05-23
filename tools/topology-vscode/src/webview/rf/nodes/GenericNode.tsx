@@ -157,7 +157,6 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
   const rf = useReactFlow();
   const nodeElRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<ActiveDrag | null>(null);
-  const [pseudoOpen, setPseudoOpen] = useState(false);
 
   const connected = useStore((s) => {
     const r: Record<string, boolean> = {};
@@ -217,21 +216,10 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
       {renderSnapDots(drag)}
       <div style={{ fontWeight: 500, textAlign: "center", position: "relative" }}>
         {data.label ?? def.defaultLabel}
-        {isInput && (
-          <button
-            title="Edit pseudo"
-            onClick={(e) => { e.stopPropagation(); setPseudoOpen(true); }}
-            style={{ position: "absolute", right: -4, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", color: "#888", fontSize: 10, padding: "0 2px", lineHeight: 1 }}
-          >
-            ƒ
-          </button>
-        )}
       </div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
       {def.displays?.map((d) => renderDisplay(d, data))}
-      {isInput && pseudoOpen && (
-        <PseudoPanel nodeId={nodeId} onClose={() => setPseudoOpen(false)} />
-      )}
+      {isInput && <PseudoPanel nodeId={nodeId} />}
     </div>
   );
 }

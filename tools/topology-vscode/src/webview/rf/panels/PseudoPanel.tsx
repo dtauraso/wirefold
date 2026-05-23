@@ -14,14 +14,14 @@ import { vscode } from "../../vscode-api";
 
 type Props = {
   nodeId: string;
-  onClose: () => void;
+  onClose?: () => void;
 };
 
 type EditState =
   | { mode: "label" }
   | { mode: "editing"; errorMsg: string | null };
 
-export function PseudoPanel({ nodeId, onClose }: Props) {
+export function PseudoPanel({ nodeId }: Props) {
   // Last-known-good text (from pseudo-render-result or last pseudo-save-result)
   const [lkg, setLkg] = useState<string | null>(null);
   // Current buffer while editing
