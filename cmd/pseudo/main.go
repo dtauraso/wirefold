@@ -10,6 +10,14 @@
 //	  Calls FromInput → ParseInput(pseudo, prior) → ToInput.
 //	  Prints {"go": "<new source>", "spec": {...}} JSON to stdout and exits 0.
 //
+//	pseudo readgate render --go-file <path> --out-neighbor <id>
+//	  Reads go-file, calls pseudo.FromReadGate + pseudo.RenderReadGate,
+//	  prints the pseudo text to stdout and exits 0.
+//
+//	pseudo readgate save --go-file <path> --out-neighbor <id> --pseudo <text>
+//	  Calls FromReadGate → ParseReadGate(pseudo, prior) → ToReadGate.
+//	  Prints {"go": "<new source>", "outNeighbor": "<id>", "removedPorts": [...]} JSON to stdout and exits 0.
+//
 // On error: prints {"error":"..."} JSON to stderr and exits 2.
 package main
 
@@ -24,18 +32,89 @@ import (
 
 func main() {
 	if len(os.Args) < 3 {
-		fatal("usage: pseudo input render|save ...")
+		fatal("usage: pseudo <input|readgate> <render|save> ...")
 	}
-	if os.Args[1] != "input" {
-		fatal("unknown subcommand group %q; expected \"input\"", os.Args[1])
-	}
-	switch os.Args[2] {
-	case "render":
-		runRender(os.Args[3:])
-	case "save":
-		runSave(os.Args[3:])
+	switch os.Args[1] {
+	case "input":
+		switch os.Args[2] {
+		case "render":
+			runRender(os.Args[3:])
+		case "save":
+			runSave(os.Args[3:])
+		default:
+			fatal("unknown subcommand %q; expected \"render\" or \"save\"", os.Args[2])
+		}
+	case "readgate":
+		switch os.Args[2] {
+		case "render":
+			runReadGateRender(os.Args[3:])
+		case "save":
+			runReadGateSave(os.Args[3:])
+		default:
+			fatal("unknown subcommand %q; expected \"render\" or \"save\"", os.Args[2])
+		}
 	default:
-		fatal("unknown subcommand %q; expected \"render\" or \"save\"", os.Args[2])
+		fatal("unknown subcommand group %q; expected \"input\" or \"readgate\"", os.Args[1])
+	}
+}
+
+func runReadGateRender(args []string) {
+	flags, err := parseReadGateFlags(args, "go-file", "out-neighbor")
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	goSrc, err := os.ReadFile(flags["go-file"])
+	if err != nil {
+		fatal("reading go-file: %s", err)
+	}
+
+	view, err := pseudo.FromReadGate(goSrc, flags["out-neighbor"])
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	fmt.Print(pseudo.RenderReadGate(view))
+}
+
+func runReadGateSave(args []string) {
+	flags, err := parseReadGateFlags(args, "go-file", "out-neighbor", "pseudo")
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	goSrc, err := os.ReadFile(flags["go-file"])
+	if err != nil {
+		fatal("reading go-file: %s", err)
+	}
+
+	prior, err := pseudo.FromReadGate(goSrc, flags["out-neighbor"])
+	if err != nil {
+		fatal("FromReadGate: %s", err)
+	}
+
+	updated, err := pseudo.ParseReadGate(flags["pseudo"], prior)
+	if err != nil {
+		suggestion := ""
+		var pe *pseudo.ParseReadGateError
+		if errors.As(err, &pe) {
+			suggestion = pe.Suggestion()
+		}
+		fatalWithSuggestion("ParseReadGate: %s", err, suggestion)
+	}
+
+	newGoSrc, newOutNeighbor, removedPorts, err := pseudo.ToReadGate(updated)
+	if err != nil {
+		fatal("ToReadGate: %s", err)
+	}
+
+	out := map[string]any{
+		"go":           string(newGoSrc),
+		"outNeighbor":  newOutNeighbor,
+		"removedPorts": removedPorts,
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		fatal("encoding output: %s", err)
 	}
 }
 
@@ -46,6 +125,30 @@ func parseFlags(args []string, required ...string) (map[string]string, error) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--go-file", "--spec-json", "--pseudo":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", args[i])
+			}
+			flags[args[i][2:]] = args[i+1]
+			i++
+		default:
+			return nil, fmt.Errorf("unknown flag %q", args[i])
+		}
+	}
+	for _, r := range required {
+		if _, ok := flags[r]; !ok {
+			return nil, fmt.Errorf("missing required flag --%s", r)
+		}
+	}
+	return flags, nil
+}
+
+// parseReadGateFlags extracts named flag values for readgate subcommands.
+// Returns an error if a required flag is missing.
+func parseReadGateFlags(args []string, required ...string) (map[string]string, error) {
+	flags := map[string]string{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--go-file", "--out-neighbor", "--pseudo":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a value", args[i])
 			}
