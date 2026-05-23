@@ -93,9 +93,9 @@ func TestInputRoundTrip_SpecEditOnly(t *testing.T) {
 	}
 
 	// Mutate spec-origin tokens only: change values, ensure repeatedly is present.
-	// Original rendered: "repeatedly send each of [0, 1] -> readGate1"
-	// Mutate to: "repeatedly send each of [2, 3, 5] -> readGate1"
-	mutated := "repeatedly send each of [2, 3, 5] -> readGate1"
+	// Original rendered: "repeatedly each of [0, 1] -> readGate1"
+	// Mutate to: "repeatedly each of [2, 3, 5] -> readGate1"
+	mutated := "repeatedly each of [2, 3, 5] -> readGate1"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
@@ -136,7 +136,7 @@ func TestInputRoundTrip_NeighborEdit(t *testing.T) {
 	}
 
 	// Change out-neighbor from readGate1 → fanout1.
-	mutated := "repeatedly send each of [0, 1] -> fanout1"
+	mutated := "repeatedly each of [0, 1] -> fanout1"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
@@ -173,7 +173,7 @@ func TestInputRoundTrip_NeighborEdit(t *testing.T) {
 // human-readable error mentioning the offending token.
 func TestInputParse_RejectsExtraTrailingTokens(t *testing.T) {
 	prior := InputView{OutNeighbor: "readGate1"}
-	_, err := ParseInput("send each of [0, 1] -> readGate1 boom", prior)
+	_, err := ParseInput("each of [0, 1] -> readGate1 boom", prior)
 	if err == nil {
 		t.Fatal("expected error for trailing token, got nil")
 	}
@@ -209,7 +209,7 @@ func TestInputParse_SuggestionOnError(t *testing.T) {
 		t.Errorf("Error() does not mention offending token: %q", msg)
 	}
 	// Message should explain what's expected.
-	if !strings.Contains(msg, "send") {
+	if !strings.Contains(msg, "each") {
 		t.Errorf("Error() does not mention expected start keyword: %q", msg)
 	}
 	// Suggestion must mention the canonical form and prior OutNeighbor.
@@ -220,7 +220,7 @@ func TestInputParse_SuggestionOnError(t *testing.T) {
 	if !strings.Contains(sug, "readGate1") {
 		t.Errorf("Suggestion() does not mention OutNeighbor: %q", sug)
 	}
-	if !strings.Contains(sug, "send each of") {
+	if !strings.Contains(sug, "each of") {
 		t.Errorf("Suggestion() does not contain canonical form: %q", sug)
 	}
 	t.Logf("error: %s", msg)
