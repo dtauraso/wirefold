@@ -46,11 +46,29 @@ export function usePulseAnimation(id: string) {
 
     const { startTime } = pulse;
 
-    // Wait one frame for pathRef to be populated before computing pathLength.
+    // Poll until pathRef is attached and getTotalLength() > 0 (layout may not
+    // be complete on the first frame after remount, causing getTotalLength()
+    // to return 0 and collapsing duration to 0, which makes tNow = Infinity).
     let raf: number;
-    raf = requestAnimationFrame(() => {
-      const pathLength = pathRef.current?.getTotalLength() ?? null;
-      const duration = pathLength !== null ? pathLength / PULSE_SPEED_PX_PER_MS : 1000;
+    let pollFrames = 0;
+    const MAX_POLL_FRAMES = 60;
+
+    const waitForPath = () => {
+      const pl = pathRef.current?.getTotalLength() ?? 0;
+      if (pl <= 0) {
+        if (++pollFrames >= MAX_POLL_FRAMES) {
+          console.warn("[pulse] pathLength never became positive for edge " + id);
+          if (claimDelivered(idRef.current, startTime)) {
+            vscode.postMessage({ type: "delivered", edge: idRef.current });
+          }
+          setPulseT(null);
+          return;
+        }
+        raf = requestAnimationFrame(waitForPath);
+        return;
+      }
+
+      const duration = pl / PULSE_SPEED_PX_PER_MS;
 
       // Compute t from the shared anchor so remounts resume at the right offset.
       const tNow = Math.min((performance.now() - startTime) / duration, 1);
@@ -84,7 +102,9 @@ export function usePulseAnimation(id: string) {
         }
       };
       raf = requestAnimationFrame(tick);
-    });
+    };
+
+    raf = requestAnimationFrame(waitForPath);
 
     return () => cancelAnimationFrame(raf);
   }, [pulse]);
