@@ -31,6 +31,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry) {
 		for sc.Scan() {
 			lineCh <- sc.Text()
 		}
+		if err := sc.Err(); err != nil {
+			// Scan encountered an error reading from r; log and continue.
+			// The channel close will unblock the main select loop.
+		}
 		close(lineCh)
 	}()
 	for {
