@@ -39,12 +39,11 @@ func (g *Node) Update(ctx context.Context) {
 
 		if g.HasValue && g.HasChainInhibitor {
 			g.Fire()
-			if g.ToChainInhibitor.TrySend(g.Value) {
-				g.FromInput.Done()
-				g.FromChainInhibitor.Done()
-				g.HasValue = false
-				g.HasChainInhibitor = false
-			}
+			g.FromInput.Done()
+			g.FromChainInhibitor.Done()
+			g.HasValue = false
+			g.HasChainInhibitor = false
+			g.ToChainInhibitor.TrySend(g.Value)
 		}
 	}
 }
