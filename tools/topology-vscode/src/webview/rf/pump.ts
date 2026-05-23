@@ -3,13 +3,33 @@
 // pump.ts is render-only; substrate poll loops live in Go. See MODEL.md §Driver.
 // Each call to handleTraceEvent reads the current RF state, patches the
 // relevant node/edge data field, and writes it back via rfSetNodes/rfSetEdges.
+//
+// ── Send→pulse→delivered→done lifecycle ─────────────────────────────────────
+// Contract source: nodes/Wiring/paced_wire.go Send / NotifyDelivered / Done.
+//
+//  1. Go emits "send" (node, port, value)
+//     → pump.ts:55  finds the RF edge by source+sourceHandle
+//     → pump.ts:70  writes held value via held-values.ts:setHeldValue
+//                   (destination node shows badge while pulse travels)
+//     → pump.ts:74  writes pulse data { value, simStep } onto edge.data.pulse
+//                   (animation-fields.ts:9 names the field "pulse")
+//
+//  2. RAF loop in edges/use-pulse-animation.ts:50 animates pulse 0→1
+//     → on t=1: posts "delivered" message so Go's PacedWire unblocks Recv
+//     → clears pulseT (dot disappears); held-value badge stays visible
+//
+//  3. Go emits "done" (node, port)
+//     → pump.ts:84  finds the RF edge by target+targetHandle
+//     → pump.ts:93  clears edge.data.pulse (removes animation data)
+//     → held value is intentionally NOT cleared — badge is sticky
+// ────────────────────────────────────────────────────────────────────────────
 
 import type { TraceEvent, SlotEvent, SlotMap } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { rfSetNodes, rfSetEdges, rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
 import { ANIMATION_FIELDS } from "./animation-fields";
-import { setHeldValue } from "./held-values-state";
+import { setHeldValue } from "./held-values";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.

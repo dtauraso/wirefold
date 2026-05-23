@@ -10,7 +10,7 @@
 // that need a node kind without a Go runtime.
 
 import type { NodeTypeDef } from "./types-graph";
-import { NODE_DEFS } from "../webview/rf/nodes/node-defs";
+import { NODE_DEFS } from "../webview/rf/nodes/registry";
 
 // Re-export RUNTIME_IMPLEMENTED_KINDS from generated source.
 export { RUNTIME_IMPLEMENTED_KINDS } from "../webview/rf/nodes/node-defs";

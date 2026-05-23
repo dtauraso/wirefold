@@ -3,7 +3,7 @@ import { postLog } from "../../log/post";
 import { specToFlow } from "../adapter";
 import { viewerState, patchViewerState } from "../viewer-state";
 import { getFolds } from "../../rf/folds-state";
-import { getDimmed } from "../../rf/dimmed-state";
+import { getDimmed } from "../../rf/dimmed";
 import { scheduleViewSave, setSpecMeta } from "../../save";
 import { migrateLegacyFields } from "./_migrate-legacy-fields";
 import { reconcileSelection } from "./_reconcile-selection";

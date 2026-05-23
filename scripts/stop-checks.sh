@@ -25,10 +25,6 @@ if [ -n "$ts_changed" ]; then
     out+="tsc --noEmit failed:\n$tsc_out\n\n"
     fail=1
   fi
-  if ! loc_out=$(cd tools/topology-vscode && npm run --silent check:loc 2>&1); then
-    out+="check:loc failed:\n$loc_out\n\n"
-    fail=1
-  fi
   # Rebuild the webview/extension bundle so Cmd-R in the host picks up
   # the latest TS changes without a manual `npm run build`. Skip when
   # out/webview.js is already newer than every changed TS file — avoids

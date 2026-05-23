@@ -3,7 +3,7 @@ import { vscode } from "../../vscode-api";
 import { rfGetNodes, rfGetEdges } from "../rf-imperative";
 import { flowToSpec } from "../adapter/flow-to-spec";
 import { flushActiveInlineEdit } from "../../inline-edit";
-import { useRunStatusCtx } from "../run-status-ctx";
+import { useRunStatusCtx } from "../run-status";
 
 export function RunButton() {
   const status = useRunStatusCtx();

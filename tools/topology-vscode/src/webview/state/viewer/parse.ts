@@ -1,5 +1,4 @@
-// Parser helpers for parseViewerState. Kept separate to stay under the
-// 100-LOC file size target (viewerState.ts owns types + public API).
+// Parser helpers for parseViewerState (viewerState.ts owns types + public API).
 
 import type { StateValue } from "../../../schema";
 import type {

@@ -1,9 +1,11 @@
-// Imperative bridge for held values — mirrors dimmed-state.ts pattern.
+// Imperative bridge + context for held values.
 // pump.ts calls setHeldValue / clearHeldValue; App registers the React setter
 // on mount so the context re-renders when the map changes.
 //
 // Key: `${nodeId}:${port}` (destination node id + input port name).
 // Value: the value that is in-transit / held at the input port.
+
+import { createContext, useContext } from "react";
 
 export type HeldValues = ReadonlyMap<string, unknown>;
 
@@ -33,4 +35,10 @@ export function clearHeldValue(nodeId: string, port: string) {
 
 export function getHeldValues(): HeldValues {
   return _current;
+}
+
+export const HeldValuesCtx = createContext<HeldValues>(new Map());
+
+export function useHeldValuesCtx(): HeldValues {
+  return useContext(HeldValuesCtx);
 }

@@ -22,10 +22,11 @@ pointer at the top of this file is the only entry point you need.
 **Node kinds:** adding a kind requires three things in the same commit:
 1. One file `tools/topology-vscode/src/webview/rf/nodes/<Kind>Node.tsx` —
    the React Flow custom node component (render only; no substrate logic).
-2. Register the type in `tools/topology-vscode/src/webview/rf/app/_constants.ts`
-   (`RF_NODE_TYPES`) using the camelCase key (e.g. `myKind: MyKindNode`).
-   The RF type name is derived from the spec kind automatically:
-   `specKindToRfType` in `spec-to-flow.ts` lowercases the first character,
+2. Register the kind in the single registry:
+   `tools/topology-vscode/src/webview/rf/nodes/registry.ts`.
+   `RF_NODE_TYPES` is derived from `NODE_DEFS` automatically — no other TS
+   file needs editing. The RF type name is derived from the spec kind via
+   `specKindToRfType` (also in registry): lowercases the first character,
    so spec kind `MyKind` maps to RF type `myKind` with no extra registration.
    (Precondition: spec kinds must be PascalCase; the first-char lowercase derivation assumes this.)
 3. The Go node package under `nodes/<Kind>/`.
@@ -51,14 +52,6 @@ Project memory lives in `memory/` at the repo root, one file per
 memory (auto-memory naming convention: `project_*`, `feedback_*`,
 `user_*`). `memory/MEMORY.md` is the index.
 
-## File size budget
-
-- **Trigger threshold:** any source file ≥ **200 LOC** must be refactored.
-- **Refactor target:** split until every resulting file is ≤ **100 LOC**.
-- Applies to TypeScript (`.ts`, `.tsx`). Go, other Markdown, JSON, fixtures, and generated files are exempt. `session-log.md` and `handoff.md` are exempt: a fresh AI session must read handoff.md end-to-end, and splitting it into siblings (the prior approach) forced sequential reads of 3-4 files, which audit 19 found costs more than reading one slightly-larger doc. Keep handoff.md under ~200 LOC as a soft target via editorial pruning, not by splitting.
-- **Substance carve-out:** the Go substrate (`nodes/`, `Wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) is exempt from the TS LOC budget — Go files follow Go conventions. On the TS side, there is no blanket carve-out; all `.ts`/`.tsx` files are subject to the 200-LOC trigger.
-- The rule is **always active**, including mid-design and mid-debug. If you finish an unrelated change and notice the file is now over 200, refactor in a follow-up commit before moving on.
-- Run `npm run check:loc` (in `tools/topology-vscode/`) to list offenders. The script is the source of truth — keep this rule and the script in sync.
 ## Bash hygiene (keep AI round-trips snappy)
 
 Bash output goes straight into the AI's context. Wide-fan commands

@@ -1,17 +1,15 @@
 // use-pulse-animation.ts — RAF-driven pulse animation for SubstrateEdge.
 // Returns {pulseT, pathRef, pulseValueRef}: pulseT is position 0–1 or null when idle.
 //
-// Lifecycle:
-//   1. "send" trace event → pump sets pulse data + held-values entry → RAF animates 0→1.
-//   2. On RAF completion (t=1): post "delivered" so Go's PacedWire unblocks Recv,
-//      then clear pulseT immediately. The held value is shown in the node component.
-//   3. "done" trace event → pump clears pulse data and held-values entry.
+// Full send→pulse→delivered→done lifecycle is documented in pump.ts (top-of-file
+// comment block). This file owns step 2 only: RAF loop driving pulse 0→1 and
+// posting "delivered" when complete.
 
 import { useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
 import { ANIMATION_FIELDS } from "../animation-fields";
-import { useRunStatusCtx } from "../run-status-ctx";
+import { useRunStatusCtx } from "../run-status";
 import type { EdgeData } from "../types";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;

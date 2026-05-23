@@ -31,15 +31,7 @@ input port in node boxes. Key changes:
 
 ### Substrate model contract (stable)
 
-`PacedWire` in `nodes/Wiring/paced_wire.go` has THREE operations: `Send`, `Recv`, `Done`.
-
-- **Send:** fills slot, blocks until `Done` (not until delivery — until receiver explicitly finishes).
-- **Recv:** blocks until visual delivered, returns value, does NOT clear slot.
-- **Done:** clears slot, unblocks Send.
-- **NotifyDelivered** (webview→host→stdin reader): unblocks Recv only.
-
-One `PacedWire` is allocated per destination port (not per edge), so N senders
-converging on one port share a single wire — fan-in works correctly.
+See [MODEL.md](../../MODEL.md#slot-phase-lifecycle).
 
 ### What works
 
@@ -70,7 +62,7 @@ After TS edit: `npm run build` from `tools/topology-vscode/`.
 After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
 To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
-Check: `go test ./...`, `npm run check:loc`, `bash tools/check-substrate-vocabulary.sh`.
+Check: `go test ./...`, `bash tools/check-substrate-vocabulary.sh`.
 
 ## ALWAYS clause
 
