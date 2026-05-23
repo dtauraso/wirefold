@@ -1,16 +1,8 @@
-import { FoldNode } from "../FoldNode";
-import { NoteNode } from "../NoteNode";
-import { GenericNode } from "../nodes/GenericNode";
-import { NODE_DEFS } from "../nodes/node-defs";
 import { SubstrateEdge } from "../edges/SubstrateEdge";
+import { RF_NODE_TYPES } from "../nodes/registry";
 
+export { RF_NODE_TYPES };
 export const EDGE_TYPES = { substrate: SubstrateEdge };
-
-export const RF_NODE_TYPES = {
-  fold: FoldNode,
-  note: NoteNode,
-  ...Object.fromEntries(Object.keys(NODE_DEFS).map((k) => [k, GenericNode])),
-};
 
 // Alignment-guide tolerance is in flow units; 4 covers off-grid drag
 // noise without firing on every near-miss.

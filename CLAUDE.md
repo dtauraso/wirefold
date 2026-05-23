@@ -22,10 +22,11 @@ pointer at the top of this file is the only entry point you need.
 **Node kinds:** adding a kind requires three things in the same commit:
 1. One file `tools/topology-vscode/src/webview/rf/nodes/<Kind>Node.tsx` —
    the React Flow custom node component (render only; no substrate logic).
-2. Register the type in `tools/topology-vscode/src/webview/rf/app/_constants.ts`
-   (`RF_NODE_TYPES`) using the camelCase key (e.g. `myKind: MyKindNode`).
-   The RF type name is derived from the spec kind automatically:
-   `specKindToRfType` in `spec-to-flow.ts` lowercases the first character,
+2. Register the kind in the single registry:
+   `tools/topology-vscode/src/webview/rf/nodes/registry.ts`.
+   `RF_NODE_TYPES` is derived from `NODE_DEFS` automatically — no other TS
+   file needs editing. The RF type name is derived from the spec kind via
+   `specKindToRfType` (also in registry): lowercases the first character,
    so spec kind `MyKind` maps to RF type `myKind` with no extra registration.
    (Precondition: spec kinds must be PascalCase; the first-char lowercase derivation assumes this.)
 3. The Go node package under `nodes/<Kind>/`.

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { NODE_TYPES } from "../../../schema";
-import { NODE_DEFS } from "../nodes/node-defs";
+import { NODE_DEFS } from "../nodes/registry";
 import { IDENT_RE } from "../../state/ops/rename";
 import { scheduleSave, scheduleViewSave } from "../../save";
 import { rfGetNodes, rfSetNodes } from "../rf-imperative";

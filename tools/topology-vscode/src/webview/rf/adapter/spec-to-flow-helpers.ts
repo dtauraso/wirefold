@@ -1,5 +1,5 @@
-// Pure helpers for spec-to-flow conversion: wire-prop picking, kind→type
-// conversion, fold node building, and note node building.
+// Pure helpers for spec-to-flow conversion: wire-prop picking, fold node
+// building, and note node building.
 
 import type { Edge as RFEdge, Node as RFNode } from "reactflow";
 import { KIND_COLORS, type Node as SpecNode, type Spec } from "../../../schema";
@@ -8,6 +8,8 @@ import { COLLAPSED_FOLD_W, COLLAPSED_FOLD_H, expandedBounds } from "./_bounds";
 import type { NodeData, EdgeData } from "../types";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
 
+export { specKindToRfType } from "../nodes/registry";
+
 /** Iterate WIRE_PROPS registry; skip `kind` (handled explicitly at call sites). */
 export function pickWireProps(e: Record<string, unknown>): Partial<EdgeData> {
   const out: Partial<EdgeData> = {};
@@ -15,11 +17,6 @@ export function pickWireProps(e: Record<string, unknown>): Partial<EdgeData> {
     if (key !== "kind" && e[key] !== undefined) (out as Record<string, unknown>)[key] = e[key];
   }
   return out;
-}
-
-/** Converts a spec kind (PascalCase) to the RF node type name (camelCase). */
-export function specKindToRfType(kind: string): string {
-  return kind.charAt(0).toLowerCase() + kind.slice(1);
 }
 
 export function buildFoldNodes(
