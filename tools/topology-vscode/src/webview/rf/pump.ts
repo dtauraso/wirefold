@@ -9,7 +9,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { rfSetNodes, rfSetEdges, rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
 import { ANIMATION_FIELDS } from "./animation-fields";
-import { setHeldValue, clearHeldValue } from "./held-values-state";
+import { setHeldValue } from "./held-values-state";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -87,8 +87,8 @@ export function handleTraceEvent(event: TraceEvent): void {
         (e) => e.target === node && e.targetHandle === port,
       )?.id;
       if (!edgeId) return; // no matching edge — topology mismatch, skip silently
-      // Clear the held value now that Go has consumed it.
-      clearHeldValue(node, port);
+      // Held value is intentionally NOT cleared here — badges are sticky and
+      // show the last value received per input port until overwritten by a new send.
       rfSetEdges((es) =>
         es.map((e) =>
           e.id === edgeId

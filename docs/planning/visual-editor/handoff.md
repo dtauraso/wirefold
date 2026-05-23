@@ -24,6 +24,8 @@ Key commits on this branch:
 - `feat(webview): add held-values store for in-transit input port values` — `held-values-state.ts` (imperative bridge, `Map<"nodeId:port", value>`), `held-values-ctx.ts` (React context). pump.ts sets held value on "send" (from edge target/targetHandle) and clears on "done". app.tsx wires HeldValuesCtx.Provider.
 - `feat(webview): render held-value badge at input handle in GenericNode` — GenericNode calls `useHeldValuesCtx()` and renders a purple badge next to each input handle while a value is held (between send and done). Only shows when no slot-filled badge is already visible.
 
+- `fix(pump): badges sticky — stop clearing held value on "done"` — removed `clearHeldValue` call from `case "done"` in pump.ts; badges now show the most recent value per input port and are overwritten only by new send events.
+
 ### Substrate model contract (stable)
 
 `PacedWire` in `nodes/Wiring/paced_wire.go` has THREE operations: `Send`, `Recv`, `Done`.
