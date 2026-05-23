@@ -29,6 +29,13 @@ input port in node boxes. Key changes:
   value is held; hidden if a slot-filled badge is already shown.
 - pump.ts "done" routes to clear the pulse only (not the badge).
 
+**task/reading-trip-economy** — five navigation-tax hotspots addressed.
+- Removed the 200-LOC file size rule from CLAUDE.md and `check:loc` npm script.
+- Collapsed three state+ctx triads into single files: `held-values.ts`, `run-status.ts`, `dimmed.ts`.
+- Pinned slot-phase lifecycle contract in MODEL.md; handoff.md "Substrate model contract" now points there.
+- Added `tools/topology-vscode/src/webview/rf/nodes/registry.ts` as the single TS edit point for node kinds.
+- pump.ts now documents the send→pulse→delivered→done lifecycle with file:line cites.
+
 ### Substrate model contract (stable)
 
 See [MODEL.md](../../MODEL.md#slot-phase-lifecycle).
