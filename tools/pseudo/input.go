@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"strconv"
 	"strings"
+	"maps"
 	"unicode"
 )
 
@@ -254,9 +255,7 @@ func specRepeatBool(spec map[string]any) (bool, error) {
 
 func cloneSpec(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 
@@ -471,9 +470,6 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 }
 
 func excerpt(s string, pos int) string {
-	end := pos + 20
-	if end > len(s) {
-		end = len(s)
-	}
+	end := min(pos+20, len(s))
 	return s[pos:end]
 }
