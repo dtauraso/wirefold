@@ -13,12 +13,16 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 // visual signal. Send blocks until the slot is empty, places the value, then
 // blocks until the visual calls NotifyDelivered. Recv unblocks once a value
 // is placed, takes it, and re-opens the send gate.
+//
+// Delivery confirmation uses a per-send channel (deliveryCh) so that
+// NotifyDelivered targets exactly the in-flight send, not a shared flag
+// that can be reset by a racing second sender.
 type PacedWire struct {
-	mu        sync.Mutex
-	cond      *sync.Cond
-	slot      any
-	hasSend   bool // slot holds an undelivered value
-	delivered bool // visual has signaled delivery-complete
+	mu         sync.Mutex
+	cond       *sync.Cond
+	slot       any
+	hasSend    bool       // slot holds an undelivered value
+	deliveryCh chan struct{} // closed by NotifyDelivered to confirm delivery
 }
 
 // NewPacedWire creates an empty PacedWire.
@@ -29,32 +33,59 @@ func NewPacedWire() *PacedWire {
 }
 
 // Send places value into the slot, then blocks until NotifyDelivered is called.
-// Returns ErrCanceled if ctx is done before either gate opens.
+// Returns ErrCanceled if ctx is done before the delivery gate opens.
 func (pw *PacedWire) Send(ctx context.Context, value any) error {
-	// Wait for slot to be empty.
-	if err := pw.waitCond(ctx, func() bool { return !pw.hasSend }); err != nil {
-		return err
-	}
+	// Phase 1: wait for slot to be empty, then atomically claim it.
+	done := pw.watchCtx(ctx)
+	defer close(done)
 
 	pw.mu.Lock()
+	for pw.hasSend {
+		if ctx.Err() != nil {
+			pw.mu.Unlock()
+			return ErrCanceled
+		}
+		pw.cond.Wait()
+	}
+	if ctx.Err() != nil {
+		pw.mu.Unlock()
+		return ErrCanceled
+	}
+	// Atomically claim slot and allocate a fresh per-send delivery channel.
 	pw.slot = value
 	pw.hasSend = true
-	pw.delivered = false
+	myCh := make(chan struct{})
+	pw.deliveryCh = myCh
 	pw.cond.Broadcast()
 	pw.mu.Unlock()
 
-	// Wait for visual to signal delivery-complete.
-	return pw.waitCond(ctx, func() bool { return pw.delivered })
+	// Phase 2: wait for this send's delivery confirmation.
+	select {
+	case <-myCh:
+		return nil
+	case <-ctx.Done():
+		return ErrCanceled
+	}
 }
 
 // Recv blocks until a value is available, then takes it and re-opens the send
 // gate. Returns the value and ErrCanceled if ctx is done.
 func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
-	if err := pw.waitCond(ctx, func() bool { return pw.hasSend }); err != nil {
-		return nil, err
-	}
+	done := pw.watchCtx(ctx)
+	defer close(done)
 
 	pw.mu.Lock()
+	for !pw.hasSend {
+		if ctx.Err() != nil {
+			pw.mu.Unlock()
+			return nil, ErrCanceled
+		}
+		pw.cond.Wait()
+	}
+	if ctx.Err() != nil {
+		pw.mu.Unlock()
+		return nil, ErrCanceled
+	}
 	v := pw.slot
 	pw.slot = nil
 	pw.hasSend = false
@@ -68,13 +99,17 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 // unblocking the corresponding Send.
 func (pw *PacedWire) NotifyDelivered() {
 	pw.mu.Lock()
-	pw.delivered = true
-	pw.cond.Broadcast()
+	ch := pw.deliveryCh
+	pw.deliveryCh = nil
 	pw.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
 }
 
-// waitCond waits until ready() returns true (checked under mu), or ctx is done.
-func (pw *PacedWire) waitCond(ctx context.Context, ready func() bool) error {
+// watchCtx starts a goroutine that broadcasts on pw.cond when ctx is done.
+// The caller must close the returned channel when done to stop the goroutine.
+func (pw *PacedWire) watchCtx(ctx context.Context) chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -83,16 +118,5 @@ func (pw *PacedWire) waitCond(ctx context.Context, ready func() bool) error {
 		case <-done:
 		}
 	}()
-	pw.mu.Lock()
-	for !ready() {
-		if ctx.Err() != nil {
-			pw.mu.Unlock()
-			close(done)
-			return ErrCanceled
-		}
-		pw.cond.Wait()
-	}
-	pw.mu.Unlock()
-	close(done)
-	return nil
+	return done
 }

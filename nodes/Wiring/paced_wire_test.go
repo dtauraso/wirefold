@@ -7,17 +7,18 @@ import (
 	"time"
 )
 
-// instantStub auto-signals delivery after Recv, simulating a buffered-1 chan.
+// instantStub auto-signals delivery whenever a value is placed,
+// simulating a buffered-1 chan without a visual layer.
 func instantStub(pw *PacedWire) {
 	go func() {
 		for {
 			time.Sleep(time.Millisecond)
 			pw.mu.Lock()
-			if pw.hasSend && !pw.delivered {
-				pw.delivered = true
-				pw.cond.Broadcast()
-			}
+			hasSend := pw.hasSend
 			pw.mu.Unlock()
+			if hasSend {
+				pw.NotifyDelivered()
+			}
 		}
 	}()
 }

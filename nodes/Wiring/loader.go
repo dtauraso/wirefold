@@ -1,20 +1,23 @@
 // loader.go — runtime topology loader.
 //
-// LoadTopology reads topology.json, allocates channels, and returns []S.Node
-// in spec order. Behaviorally equivalent to the generated Wire() in Wiring.go.
+// LoadTopology reads topology.json, allocates one PacedWire per edge,
+// and returns []S.Node in spec order. Each edge is a *PacedWire; a stub
+// pacer goroutine per wire calls NotifyDelivered immediately after
+// NotifyVisualEntered, making delivery instantaneous until Stage 3
+// replaces the stub with a real webview round-trip.
 //
-// Key behaviors (previously codegen, now runtime):
-//   - One chan int (buf 1) per edge; label is its identity.
-//   - Input nodes: input channel sized max(len(init),1), pre-loaded with init values.
+// Key behaviors:
+//   - One *PacedWire per edge; label is its identity.
+//   - Input nodes: data.init values pre-seeded via pw.Send in a goroutine.
 //   - ChainInhibitor: data.state["held"] → Held via wire:"data.state" tag.
-//   - Slice output ports (ToEdge): all outbound channels appended in spec order.
+//   - Slice output ports (ToEdge): all outbound wires appended in spec order.
 //   - Output ports with no outbound edge: dead-end chan int (buf 1).
-//   - data.edgeSeeds entries mapped to input ports (not struct fields) prime the
-//     inbound channel before the node goroutine starts.
+//   - data.edgeSeeds entries prime the inbound wire before node goroutines start.
 
 package Wiring
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -34,22 +37,22 @@ type specNode struct {
 type NodeData struct {
 	Init      []int          `json:"init,omitempty"`
 	State     map[string]int `json:"state,omitempty"`     // field-seeding: struct fields via wire:"data.state"
-	EdgeSeeds map[string]int `json:"edgeSeeds,omitempty"` // edge-seeding: pre-send into named input channels
+	EdgeSeeds map[string]int `json:"edgeSeeds,omitempty"` // edge-seeding: pre-send into named input wires
 }
 
 // specEdge mirrors the JSON edge shape.
 // Fields tagged wire:"prop,..." are wire props emitted to wire-defs.ts by gen-node-defs.
 type specEdge struct {
-	Label        string `json:"label"        wire:"prop,optional,tsType:string"`
-	ValueLabel   string `json:"valueLabel"   wire:"prop,optional,tsType:string"`
+	Label          string  `json:"label"          wire:"prop,optional,tsType:string"`
+	ValueLabel     string  `json:"valueLabel"     wire:"prop,optional,tsType:string"`
 	MidpointOffset float64 `json:"midpointOffset" wire:"prop,optional,tsType:number"`
-	ArrowStyle   string `json:"arrowStyle"   wire:"prop,optional,tsType:ArrowStyle"`
-	Concurrent   *bool  `json:"concurrent"   wire:"prop,optional,tsType:boolean"`
-	Kind         string `json:"kind"         wire:"prop,required,tsType:EdgeKind"`
-	Source       string `json:"source"`
-	SourceHandle string `json:"sourceHandle"`
-	Target       string `json:"target"`
-	TargetHandle string `json:"targetHandle"`
+	ArrowStyle     string  `json:"arrowStyle"     wire:"prop,optional,tsType:ArrowStyle"`
+	Concurrent     *bool   `json:"concurrent"     wire:"prop,optional,tsType:boolean"`
+	Kind           string  `json:"kind"           wire:"prop,required,tsType:EdgeKind"`
+	Source         string  `json:"source"`
+	SourceHandle   string  `json:"sourceHandle"`
+	Target         string  `json:"target"`
+	TargetHandle   string  `json:"targetHandle"`
 }
 
 // topoSpec is the top-level JSON shape.
@@ -66,9 +69,29 @@ func nodeEdgeSeeds(n specNode) map[string]int {
 	return map[string]int{}
 }
 
+// stubPacer starts a goroutine that calls NotifyDelivered immediately after
+// each value is placed in pw (hasSend transitions true). This makes the wire
+// behave like a buffered channel until Stage 3 replaces it with a visual pacer.
+func stubPacer(ctx context.Context, pw *PacedWire) {
+	go func() {
+		for {
+			pw.mu.Lock()
+			for !pw.hasSend && ctx.Err() == nil {
+				pw.cond.Wait()
+			}
+			if ctx.Err() != nil {
+				pw.mu.Unlock()
+				return
+			}
+			pw.mu.Unlock()
+			pw.NotifyDelivered()
+		}
+	}()
+}
+
 // LoadTopology reads the JSON file at jsonPath and constructs a []Node
 // equivalent to the generated Wire() function.
-func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -86,14 +109,17 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 		}
 	}
 
-	// Allocate one chan int (buf 1) per edge; keyed by label.
-	edgeChan := map[string]chan int{}
+	// Allocate one *PacedWire per edge; keyed by label.
+	// Each wire gets a stub pacer goroutine (immediate NotifyDelivered).
+	edgeWire := map[string]*PacedWire{}
 	for _, e := range spec.Edges {
 		// also caught by TS parser; defense-in-depth
 		if e.Label == "" {
 			return nil, fmt.Errorf("LoadTopology: edge %q→%q has empty label", e.Source, e.Target)
 		}
-		edgeChan[e.Label] = make(chan int, 1)
+		pw := NewPacedWire()
+		stubPacer(ctx, pw)
+		edgeWire[e.Label] = pw
 	}
 
 	// Build id→type map and per-kind port lookup sets (needed for normalization and validation).
@@ -193,7 +219,9 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 		}
 	}
 
-	// Prime channels for edgeSeeds entries that map to input ports.
+	// Prime wires for edgeSeeds entries that map to input ports.
+	// The stub pacer will immediately NotifyDelivered, so Send completes
+	// before node goroutines start (goroutines start after this loop).
 	for _, n := range spec.Nodes {
 		seeds := nodeEdgeSeeds(n)
 		if len(seeds) == 0 {
@@ -212,7 +240,10 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 			if !ok {
 				return nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: port %q has no incoming edge", n.ID, port.Name)
 			}
-			edgeChan[label] <- seedVal
+			pw := edgeWire[label]
+			if err := pw.Send(ctx, seedVal); err != nil {
+				return nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: seed send on port %q canceled", n.ID, port.Name)
+			}
 		}
 	}
 
@@ -227,27 +258,27 @@ func LoadTopology(jsonPath string, tr *T.Trace) ([]Node, error) {
 			case PortIn:
 				label, ok := inbound[n.ID][port.Name]
 				if ok {
-					pb.SetSingle(port.Name, edgeChan[label])
+					pb.SetSinglePaced(port.Name, edgeWire[label])
 				}
-				// If no inbound edge, pb.In() will allocate a dead-end channel.
+				// If no inbound edge, reflectBuild falls back to dead-end chan.
 
 			case PortOut:
 				labels := outbound[n.ID][port.Name]
 				if len(labels) > 0 {
-					pb.SetSingle(port.Name, edgeChan[labels[0]])
+					pb.SetSinglePaced(port.Name, edgeWire[labels[0]])
 				}
-				// If no outbound edge, pb.Out() allocates a dead-end channel.
+				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
 			case PortOutMulti:
 				labels := outbound[n.ID][port.Name]
 				for _, lbl := range labels {
-					pb.AppendMulti(port.Name, edgeChan[lbl])
+					pb.AppendMultiPaced(port.Name, edgeWire[lbl])
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}
 		}
 
-		nd, err := bind.Build(n.ID, n.Data, pb, tr)
+		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr)
 		if err != nil {
 			return nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
