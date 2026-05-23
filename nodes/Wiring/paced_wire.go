@@ -68,12 +68,15 @@ func (pw *PacedWire) Send(ctx context.Context, value any) error {
 	}
 }
 
-// Recv blocks until a value is available, then takes it and re-opens the send
-// gate. Returns the value and ErrCanceled if ctx is done.
+// Recv blocks until a value is placed AND delivery is confirmed by
+// NotifyDelivered, then takes the value and re-opens the send gate.
+// Receiver and sender unblock at the same instant — when the visual completes.
+// Returns the value and ErrCanceled if ctx is done.
 func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 	done := pw.watchCtx(ctx)
 	defer close(done)
 
+	// Phase 1: wait for slot to be filled.
 	pw.mu.Lock()
 	for !pw.hasSend {
 		if ctx.Err() != nil {
@@ -86,6 +89,24 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 		pw.mu.Unlock()
 		return nil, ErrCanceled
 	}
+	// Capture the delivery channel before releasing the mutex so we
+	// hold a reference even after NotifyDelivered nils pw.deliveryCh.
+	// If deliveryCh is already nil, NotifyDelivered has already fired.
+	myCh := pw.deliveryCh
+	pw.mu.Unlock()
+
+	// Phase 2: wait for delivery confirmation (same signal as Send).
+	// A nil myCh means delivery already completed; proceed immediately.
+	if myCh != nil {
+		select {
+		case <-myCh:
+		case <-ctx.Done():
+			return nil, ErrCanceled
+		}
+	}
+
+	// Phase 3: take the value and clear the slot.
+	pw.mu.Lock()
 	v := pw.slot
 	pw.slot = nil
 	pw.hasSend = false

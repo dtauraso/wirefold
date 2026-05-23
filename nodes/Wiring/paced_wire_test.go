@@ -61,8 +61,12 @@ func TestBackPressureSecondSenderWaits(t *testing.T) {
 	}
 
 	// Recv first value and notify delivery — frees slot for second send.
-	pw.Recv(ctx)
+	// NotifyDelivered must fire before (or concurrently with) Recv since
+	// Recv now waits on the delivery gate.
+	recvDone := make(chan struct{})
+	go func() { pw.Recv(ctx); close(recvDone) }()
 	pw.NotifyDelivered()
+	<-recvDone
 
 	select {
 	case err := <-sent1:
@@ -129,21 +133,31 @@ func TestVisualPacingDeliveryGate(t *testing.T) {
 
 	sendDone := make(chan error, 1)
 	go func() { sendDone <- pw.Send(ctx, "ping") }()
+	time.Sleep(5 * time.Millisecond) // let Send place value
 
-	// Recv takes the value — but Send must still be blocking.
+	// Recv runs concurrently; it blocks until NotifyDelivered.
+	recvResult := make(chan struct{ v any; err error }, 1)
+	go func() {
+		v, err := pw.Recv(ctx)
+		recvResult <- struct{ v any; err error }{v, err}
+	}()
+
+	// Neither Send nor Recv should have returned yet.
 	time.Sleep(5 * time.Millisecond)
-	v, err := pw.Recv(ctx)
-	if err != nil || v != "ping" {
-		t.Fatalf("Recv: v=%v err=%v", v, err)
-	}
-
 	select {
 	case <-sendDone:
 		t.Fatal("Send returned before NotifyDelivered")
 	default:
 	}
+	select {
+	case <-recvResult:
+		t.Fatal("Recv returned before NotifyDelivered")
+	default:
+	}
 
+	// NotifyDelivered unblocks both simultaneously.
 	pw.NotifyDelivered()
+
 	select {
 	case err := <-sendDone:
 		if err != nil {
@@ -151,5 +165,46 @@ func TestVisualPacingDeliveryGate(t *testing.T) {
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Send did not unblock after NotifyDelivered")
+	}
+	select {
+	case r := <-recvResult:
+		if r.err != nil || r.v != "ping" {
+			t.Fatalf("Recv: v=%v err=%v", r.v, r.err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Recv did not unblock after NotifyDelivered")
+	}
+}
+
+func TestRecvBlocksUntilDelivered(t *testing.T) {
+	pw := NewPacedWire()
+	ctx := context.Background()
+
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- pw.Send(ctx, "hello") }()
+	time.Sleep(5 * time.Millisecond) // let Send place value
+
+	recvDone := make(chan any, 1)
+	go func() {
+		v, _ := pw.Recv(ctx)
+		recvDone <- v
+	}()
+
+	// Recv must not return before NotifyDelivered.
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-recvDone:
+		t.Fatal("Recv returned before NotifyDelivered was called")
+	default:
+	}
+
+	pw.NotifyDelivered()
+	select {
+	case v := <-recvDone:
+		if v != "hello" {
+			t.Fatalf("got %v, want hello", v)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Recv did not unblock after NotifyDelivered")
 	}
 }
