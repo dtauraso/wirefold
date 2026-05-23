@@ -93,6 +93,8 @@ export function handleTraceEvent(event: TraceEvent): void {
       const edgeId = edges.find(
         (e) => e.target === node && e.targetHandle === port,
       )?.id;
+      console.log(`[pump] done step=${step} node=${node} port=${port} edgeId=${edgeId ?? "NO-MATCH"}`);
+      postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null, edgeId: edgeId ?? null });
       if (!edgeId) return; // no matching edge — topology mismatch, skip silently
       // Held value is intentionally NOT cleared here — badges are sticky and
       // show the last value received per input port until overwritten by a new send.

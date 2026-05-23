@@ -44,6 +44,7 @@ export function claimDelivered(edgeId: string, startTime: number): boolean {
 }
 
 export function clearPulse(edgeId: string) {
+  console.log(`[pulse] clearPulse id=${edgeId} hadEntry=${_current.has(edgeId)}`);
   if (!_current.has(edgeId)) return;
   const next = new Map(_current);
   next.delete(edgeId);
