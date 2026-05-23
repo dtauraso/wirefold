@@ -1,12 +1,14 @@
 // loader.go — runtime topology loader.
 //
-// LoadTopology reads topology.json, allocates one PacedWire per edge,
-// and returns ([]Node, WireRegistry). WireRegistry is keyed by edge label
-// and is consumed by the stdin-reader goroutine (see RunStdinReader in
-// main.go) to dispatch "delivered" messages from the webview.
+// LoadTopology reads topology.json, allocates one PacedWire per destination
+// port (fan-in safe), and returns ([]Node, WireRegistry). WireRegistry is
+// keyed by edge label and is consumed by the stdin-reader goroutine (see
+// RunStdinReader in main.go) to dispatch "delivered" messages from the webview.
 //
 // Key behaviors:
-//   - One *PacedWire per edge; label is its identity.
+//   - One *PacedWire per (destNode, destPort); multiple edges sharing a
+//     destination port reuse the same wire (fan-in support).
+//   - WireRegistry maps edge label → wire for stdin_reader NotifyDelivered.
 //   - Input nodes: data.init values pre-seeded via pw.Send in a goroutine.
 //   - ChainInhibitor: data.state["held"] → Held via wire:"data.state" tag.
 //   - Slice output ports (ToEdge): all outbound wires appended in spec order.
@@ -70,6 +72,8 @@ func nodeEdgeSeeds(n specNode) map[string]int {
 
 // WireRegistry maps edge label → *PacedWire. The stdin-reader goroutine uses
 // this to call NotifyDelivered when the webview reports animation complete.
+// Each entry points to the wire owned by the destination port; multiple edges
+// sharing a destination port map to the same *PacedWire.
 type WireRegistry map[string]*PacedWire
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
@@ -92,15 +96,23 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		}
 	}
 
-	// Allocate one *PacedWire per edge; keyed by label.
-	// Stage 3: no stub pacer — delivery is gated on the webview's "delivered" message.
+	// Allocate one *PacedWire per destination port (fan-in safe).
+	// destWire: "destNode.destPort" → *PacedWire (owned by the destination).
+	// edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
+	destWire := map[string]*PacedWire{}
 	edgeWire := WireRegistry{}
 	for _, e := range spec.Edges {
 		// also caught by TS parser; defense-in-depth
 		if e.Label == "" {
 			return nil, nil, fmt.Errorf("LoadTopology: edge %q→%q has empty label", e.Source, e.Target)
 		}
-		edgeWire[e.Label] = NewPacedWire()
+		destKey := e.Target + "." + e.TargetHandle
+		pw, exists := destWire[destKey]
+		if !exists {
+			pw = NewPacedWire()
+			destWire[destKey] = pw
+		}
+		edgeWire[e.Label] = pw
 	}
 
 	// Build id→type map and per-kind port lookup sets (needed for normalization and validation).
@@ -151,7 +163,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 	}
 
 	// Build inbound and outbound edge maps.
-	// inbound:  target node id → port name → edge label
+	// inbound:  target node id → port name → destKey ("destNode.destPort")
 	// outbound: source node id → port name → []edge label
 	// outboundHandle: source node id → port name → []sourceHandle (indexed, same order as outbound)
 	// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
@@ -168,7 +180,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		if outboundHandle[e.Source] == nil {
 			outboundHandle[e.Source] = map[string][]string{}
 		}
-		inbound[e.Target][e.TargetHandle] = e.Label
+		inbound[e.Target][e.TargetHandle] = e.Target + "." + e.TargetHandle
 		srcKey := e.SourceHandle
 		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source]); isMulti {
 			srcKey = base
@@ -223,11 +235,11 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 			if !hasSeed {
 				continue
 			}
-			label, ok := inbound[n.ID][port.Name]
+			dk, ok := inbound[n.ID][port.Name]
 			if !ok {
 				return nil, nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: port %q has no incoming edge", n.ID, port.Name)
 			}
-			pw := edgeWire[label]
+			pw := destWire[dk]
 			if err := pw.Send(ctx, seedVal); err != nil {
 				return nil, nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: seed send on port %q canceled", n.ID, port.Name)
 			}
@@ -243,15 +255,17 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		for _, port := range bind.Ports {
 			switch port.Dir {
 			case PortIn:
-				label, ok := inbound[n.ID][port.Name]
+				dk, ok := inbound[n.ID][port.Name]
 				if ok {
-					pb.SetSinglePaced(port.Name, edgeWire[label])
+					pb.SetSinglePaced(port.Name, destWire[dk])
 				}
 				// If no inbound edge, reflectBuild falls back to dead-end chan.
 
 			case PortOut:
 				labels := outbound[n.ID][port.Name]
 				if len(labels) > 0 {
+					// Look up wire by destination of the first outbound edge.
+					// For fan-in, the destination port owns the wire.
 					pb.SetSinglePaced(port.Name, edgeWire[labels[0]])
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
