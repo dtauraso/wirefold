@@ -1,9 +1,13 @@
 // use-pulse-animation.ts — RAF-driven pulse animation for SubstrateEdge.
 // Returns {pulseT, pathRef, pulseValueRef}: pulseT is position 0–1 or null when idle.
-// On completion posts "delivered" to the extension host so Go's PacedWire unblocks.
+//
+// Lifecycle:
+//   1. "send" trace event → pump sets pulse data + held-values entry → RAF animates 0→1.
+//   2. On RAF completion (t=1): post "delivered" so Go's PacedWire unblocks Recv,
+//      then clear pulseT immediately. The held value is shown in the node component.
+//   3. "done" trace event → pump clears pulse data and held-values entry.
 
 import { useEffect, useRef, useState } from "react";
-import { useReactFlow } from "reactflow";
 import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
 import { ANIMATION_FIELDS } from "../animation-fields";
@@ -21,10 +25,18 @@ export function usePulseAnimation(id: string, data: EdgeData | undefined) {
   const runStatus = useRunStatusCtx();
   const pausedRef = useRef(false);
   pausedRef.current = runStatus.state === "paused";
-  const rf = useReactFlow();
 
+  const pulse = data?.[ANIMATION_FIELDS.pulse.name];
+
+  // Clear pulseT when pulse data is removed (Done event cleared it in pump).
   useEffect(() => {
-    const pulse = data?.[ANIMATION_FIELDS.pulse.name];
+    if (!pulse) {
+      setPulseT(null);
+    }
+  }, [pulse]);
+
+  // Drive RAF animation while pulse data is present.
+  useEffect(() => {
     if (!pulse) return;
     console.log(`[edge] pulse start id=${id} step=${pulse.simStep} value=${pulse.value}`);
     postLog("phase4.edge", { layer: "edge", id, step: pulse.simStep, value: pulse.value });
@@ -44,11 +56,11 @@ export function usePulseAnimation(id: string, data: EdgeData | undefined) {
         if (t < 1) {
           raf = requestAnimationFrame(tick);
         } else {
-          setPulseT(null);
-          rf.setEdges(edges => edges.map(e => e.id === idRef.current
-            ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: undefined } }
-            : e));
+          // Pulse arrived at destination. Post "delivered" so Go's PacedWire unblocks
+          // Recv, then clear the pulse dot immediately. The held value is now shown
+          // inside the destination node component until Go signals Done.
           vscode.postMessage({ type: "delivered", edge: idRef.current });
+          setPulseT(null);
         }
       } else {
         lastFrameTime = null;
@@ -57,7 +69,7 @@ export function usePulseAnimation(id: string, data: EdgeData | undefined) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [data?.[ANIMATION_FIELDS.pulse.name]]);
+  }, [pulse]);
 
   return { pulseT, pathRef, pulseValueRef };
 }

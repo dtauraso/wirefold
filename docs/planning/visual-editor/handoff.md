@@ -7,17 +7,24 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, main)
+## State at handoff (2026-05-22, task/held-values-visual)
 
-**Active branch:** `main` (post-merge of `task/i0-concurrent-fanout`).
+**Active branch:** `task/held-values-visual` (in flight, not merged).
 
-No task branch in flight. The visual-hold work (`task/held-values-visual`) is set aside.
+### What just landed (task/held-values-visual)
 
-### What just landed (task/i0-concurrent-fanout)
+Held-value visual redesign: instead of holding the pulse dot at the destination
+handle until Done, the pulse now clears immediately on RAF completion, and the
+held value is displayed as a badge inside the destination node component at the
+relevant input handle.
 
-Concurrent fan-out: `Fire` in the substrate now emits to all output channels
-concurrently rather than sequentially, so multi-output nodes don't serialize
-their downstream paths.
+Key commits on this branch:
+- `feat(trace): add KindDone event emitted from In.Done()` — adds `KindDone = "done"` to `Trace/Trace.go`, emits from `In.Done()` in `ports.go` carrying (node, port).
+- `revert(webview): clear pulse dot immediately on RAF completion` — use-pulse-animation.ts posts "delivered" and clears pulseT in the same RAF tick; no more pin at t=1.
+- `feat(webview): add held-values store for in-transit input port values` — `held-values-state.ts` (imperative bridge, `Map<"nodeId:port", value>`), `held-values-ctx.ts` (React context). pump.ts sets held value on "send" (from edge target/targetHandle) and clears on "done". app.tsx wires HeldValuesCtx.Provider.
+- `feat(webview): render held-value badge at input handle in GenericNode` — GenericNode calls `useHeldValuesCtx()` and renders a purple badge next to each input handle while a value is held (between send and done). Only shows when no slot-filled badge is already visible.
+
+- `fix(pump): badges sticky — stop clearing held value on "done"` — removed `clearHeldValue` call from `case "done"` in pump.ts; badges now show the most recent value per input port and are overwritten only by new send events.
 
 ### Substrate model contract (stable)
 
@@ -31,38 +38,37 @@ their downstream paths.
 One `PacedWire` is allocated per destination port (not per edge), so N senders
 converging on one port share a single wire — fan-in works correctly.
 
-### What works (on main)
+### Held-values design
+
+- **Store:** `held-values-state.ts` — module-level Map, imperative setter. Key = `${nodeId}:${port}` (destination).
+- **Context:** `held-values-ctx.ts` — `HeldValuesCtx` / `useHeldValuesCtx()`.
+- **Set:** pump.ts "send" case looks up the matching edge, reads `edge.target` + `edge.targetHandle`, calls `setHeldValue`.
+- **Clear:** pump.ts "done" case calls `clearHeldValue(node, port)`.
+- **Render:** GenericNode reads the context, shows purple badge (`#4a148c`) at the input handle position while `heldValues.has("nodeId:port")` is true, only if no slot-filled badge is already shown.
+
+### What works (on main + this branch)
 
 - Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
-- Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`
-  through a shared destination-port-owned wire.
-- Multi-output slice ports (`ToNext[]`) correctly propagate indexed handle names
-  (`ToNext0`/`ToNext1`) so edgeId resolution for animation is non-null.
-- Pulse animation renders concurrent in-flight instances (per-emit simTime anchoring).
-- Concurrent fan-out: all outputs fire in parallel (no head-of-line serialization).
-
-### Set aside (task/held-values-visual)
-
-Branch exists but is parked. Work: pulse should sit at destination handle from
-`Recv` until `Done` is called. Substrate enforces this; webview does not yet
-mirror it (pulses disappear immediately on delivery).
+- Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`.
+- Multi-output slice ports propagate indexed handle names correctly.
+- Pulse animation renders concurrent in-flight instances.
+- Concurrent fan-out: all outputs fire in parallel.
+- **[this branch]** Pulse clears immediately on delivery; held value badge shows in node until Go calls Done.
 
 ### Open / deferred
 
-- **Webview pacing (held-values-visual, set aside):** pulse-sits-at-destination-until-Done.
-- **Stage 4 cleanup (task/stage4-cleanup):** removed `edgeSeeds` path from
-  `loader.go` and debug `postLog("pulse.deliver")` from `use-pulse-animation.ts`.
-  Skipped items (not dead — still live):
-  - `clearRunState` — not found in codebase (already gone).
-  - `run-start` — not found in codebase (already gone).
-  - `pulseValueRef` — still used in `SubstrateEdge.tsx` lines 66 and 120; not dead.
-  - `use-fire-flash.prev` — `prev` ref is essential to change-detection in the hook's
-    `useEffect`; not dead.
+- **Merge task/held-values-visual → main** once verified in live editor.
+- Stage 4 cleanup skipped items (not dead — still live):
+  - `pulseValueRef` — still used in `SubstrateEdge.tsx` lines 66 and 120.
+  - `use-fire-flash.prev` — essential to change-detection in the hook.
 
 ### Key files
 
 - `tools/topology-vscode/src/webview/rf/edges/use-pulse-animation.ts` — pulse animation hook
 - `tools/topology-vscode/src/webview/rf/pump.ts` — event routing from host
+- `tools/topology-vscode/src/webview/rf/held-values-state.ts` — held-values imperative bridge
+- `tools/topology-vscode/src/webview/rf/held-values-ctx.ts` — held-values React context
+- `tools/topology-vscode/src/webview/rf/nodes/GenericNode.tsx` — held-value badge rendering
 - `nodes/Wiring/paced_wire.go` — substrate wire contract
 
 ## Dev-loop

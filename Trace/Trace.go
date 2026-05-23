@@ -33,13 +33,14 @@ const (
 	KindFire = "fire"
 	KindSend = "send"
 	KindSlot = "slot"
+	KindDone = "done"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindSlot}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindSlot, KindDone}
 
 type Event struct {
 	Step      int    `json:"step"`
@@ -128,6 +129,16 @@ func (t *Trace) Send(node, port string, value int) {
 		return
 	}
 	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true}
+}
+
+// Done emits a done event for `(node, port)` when the receiver has finished
+// using a value. The node and port identify the input port that was Done'd,
+// matching the edge by target node + targetHandle in the webview.
+func (t *Trace) Done(node, port string) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindDone, Node: node, Port: port}
 }
 
 // Slot emits a slot event recording that an input port has filled or emptied.

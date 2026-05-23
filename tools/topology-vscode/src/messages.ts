@@ -40,6 +40,7 @@ export type SlotEvent = {
 
 export type TraceEvent =
   | { step: number; kind: "recv" | "fire" | "send"; node: string; port?: string; edge?: string; value?: number }
+  | { step: number; kind: "done"; node: string; port: string }
   | SlotEvent;
 
 export type HostToWebviewMsg =

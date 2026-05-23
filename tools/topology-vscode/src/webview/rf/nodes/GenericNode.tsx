@@ -11,6 +11,7 @@ import { useRef, useState, useCallback } from "react";
 import React from "react";
 import type { SlotMap } from "../../../messages";
 import { useFireFlash, LAST_FIRE_FIELD } from "./use-fire-flash";
+import { useHeldValuesCtx } from "../held-values-ctx";
 import { NODE_DEFS, type DisplayKind, type NodeDef } from "./node-defs";
 import type { NodeData } from "../types";
 import type { Port } from "../../../schema/types";
@@ -51,6 +52,7 @@ function simpleStyle(bg: string, i: number, n: number): CSSProperties {
 export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
   const def = NODE_DEFS[type];
   const flashing = useFireFlash(data[LAST_FIRE_FIELD as keyof NodeData] as number | undefined);
+  const heldValues = useHeldValuesCtx();
   const actions = useEdgeActions();
   const rf = useReactFlow();
   const nodeElRef = useRef<HTMLDivElement | null>(null);
@@ -109,7 +111,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
   const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, minHeight: def.height ?? 40, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
   return (
     <div ref={nodeElRef} style={container}>
-      {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown, (data as NodeData & { slots?: SlotMap }).slots) : renderDefHandles(def)}
+      {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown, (data as NodeData & { slots?: SlotMap }).slots, nodeId, heldValues) : renderDefHandles(def)}
       {renderSnapDots(drag)}
       <div style={{ fontWeight: 500, textAlign: "center" }}>{data.label ?? def.defaultLabel}</div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
@@ -122,6 +124,8 @@ function renderPortHandles(
   inputs: Port[], outputs: Port[], def: NodeDef, drag: ActiveDrag | null,
   onPointerDown: (e: PointerEvent<HTMLDivElement>, name: string, side: Side, slot: 0|1|2) => void,
   slots?: SlotMap,
+  nodeId?: string,
+  heldValues?: ReadonlyMap<string, unknown>,
 ) {
   const buckets: Record<Side, { port: Port; isInput: boolean }[]> = { left: [], right: [], top: [], bottom: [] };
   for (const p of inputs)  buckets[(p.side as Side) ?? "left"].push({ port: p, isInput: true });
@@ -135,13 +139,21 @@ function renderPortHandles(
       const curSlot: 0|1|2 = p.slot ?? pctToSlot(pct);
       const color = (KIND_COLORS as Record<string, string>)[p.kind] ?? def.accent ?? "#888";
       const slotEntry = slots?.[p.name];
-      const showBadge = isInput && slotEntry?.phase === "filled";
+      const showSlotBadge = isInput && slotEntry?.phase === "filled";
+      const heldKey = nodeId ? `${nodeId}:${p.name}` : undefined;
+      const heldVal = heldKey ? heldValues?.get(heldKey) : undefined;
+      const showHeldBadge = isInput && heldVal !== undefined;
       return (
         <React.Fragment key={`${side}-${p.name}`}>
           <Handle id={p.name} type={isInput ? "target" : "source"} position={SIDE_POS[side]} style={{ ...portStyle(side, pct, color), opacity: drag?.portName === p.name ? 0.4 : 1 }} onPointerDown={(e) => onPointerDown(e, p.name, curSide, curSlot)} />
-          {showBadge && (
+          {showSlotBadge && (
             <div style={badgeStyle(side, pct)}>
               {slotEntry.value}
+            </div>
+          )}
+          {showHeldBadge && !showSlotBadge && (
+            <div style={{ ...badgeStyle(side, pct), background: "#4a148c", opacity: 0.85 }}>
+              {String(heldVal)}
             </div>
           )}
         </React.Fragment>

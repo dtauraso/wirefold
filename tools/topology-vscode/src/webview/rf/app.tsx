@@ -29,6 +29,9 @@ import { RunStatusCtx } from "./run-status-ctx";
 import type { RunStatusUI } from "./run-status-state";
 import { registerDimmedSetter } from "./dimmed-state";
 import { DimmedCtx, useDimmedCtx } from "./dimmed-ctx";
+import { registerHeldValuesSetter } from "./held-values-state";
+import type { HeldValues } from "./held-values-state";
+import { HeldValuesCtx } from "./held-values-ctx";
 import { useHotkeys } from "react-hotkeys-hook";
 
 function Inner() {
@@ -132,9 +135,12 @@ function Inner() {
 export default function App() {
   const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
   const [dimmed, setDimmed] = useState<Set<string> | null>(null);
+  const [heldValues, setHeldValues] = useState<HeldValues>(new Map());
   useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
   useEffect(() => { registerDimmedSetter(setDimmed); }, []);
+  useEffect(() => { registerHeldValuesSetter(setHeldValues); }, []);
   return (
+    <HeldValuesCtx.Provider value={heldValues}>
     <DimmedCtx.Provider value={dimmed}>
     <RunStatusCtx.Provider value={runStatus}>
       <ReactFlowProvider>
@@ -144,5 +150,6 @@ export default function App() {
       </ReactFlowProvider>
     </RunStatusCtx.Provider>
     </DimmedCtx.Provider>
+    </HeldValuesCtx.Provider>
   );
 }
