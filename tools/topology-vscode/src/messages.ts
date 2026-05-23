@@ -18,7 +18,8 @@ export type WebviewToHostMsg =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "stop" }
-  | { type: "webview-log"; entry: string };
+  | { type: "webview-log"; entry: string }
+  | { type: "delivered"; edge: string };
 
 // Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
@@ -50,7 +51,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
@@ -74,6 +75,8 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
         : undefined;
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "delivered":
+      return typeof m.edge === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     default:
       return m as unknown as WebviewToHostMsg;
   }

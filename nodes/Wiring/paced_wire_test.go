@@ -73,6 +73,8 @@ func TestBackPressureSecondSenderWaits(t *testing.T) {
 		t.Fatal("first Send did not unblock")
 	}
 
+	// Give the second sender time to place its value (claim the now-free slot).
+	time.Sleep(10 * time.Millisecond)
 	pw.NotifyDelivered() // unblock second send
 	select {
 	case err := <-sent2:

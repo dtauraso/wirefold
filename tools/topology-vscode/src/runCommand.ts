@@ -152,6 +152,12 @@ export class BuildAndRunRunner {
     this.cancel();
   }
 
+  /** Write a JSON line to the running process's stdin (no-op if not running). */
+  writeStdin(line: string): void {
+    if (!this.proc?.stdin) return;
+    this.proc.stdin.write(line + "\n");
+  }
+
   dispose() {
     this.cancel();
     this.channel?.dispose();

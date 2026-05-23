@@ -27,11 +27,15 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	tr := T.NewWithSink(0, os.Stdout)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	nodes, err := W.LoadTopology(ctx, topologyPath, tr)
+	nodes, reg, err := W.LoadTopology(ctx, topologyPath, tr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Stage 3: read "delivered" JSON lines from stdin, unblocking PacedWires.
+	go W.RunStdinReader(ctx, os.Stdin, reg)
+
 	wg := new(sync.WaitGroup)
 	wg.Add(len(nodes))
 
