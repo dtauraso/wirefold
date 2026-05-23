@@ -7,20 +7,21 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, task/pulses-as-instances)
+## State at handoff (2026-05-22, task/held-values-visual)
 
-**Active branch:** `task/pulses-as-instances` (not yet merged).
+**Active branch:** `task/held-values-visual` (branched from main post-merge of `task/pulses-as-instances`).
 
-Continuing on wirefold, branch `task/pulses-as-instances`.
+Continuing on wirefold, branch `task/held-values-visual`.
 
 ### What this branch is doing
 
-Rebuilding pulse animation as a visual-paced wire contract.
+Implement the visual hold: a pulse should sit at the destination handle from `Recv` until
+`Done` is called. The substrate (`PacedWire`) already enforces this contract — `Recv`
+unblocks on `NotifyDelivered`, and `Done` clears the slot. The webview animation does not
+yet mirror this: pulses currently disappear immediately on delivery rather than holding
+at the destination port until `Done`.
 
-Plan doc: `docs/planning/visual-editor/pulses-as-channel-plan.html` (open in browser).
-Stages doc: `docs/planning/visual-editor/pulses-as-channel-stages.md`.
-
-### Substrate model contract (current state)
+### Substrate model contract (stable from task/pulses-as-instances)
 
 `PacedWire` in `nodes/Wiring/paced_wire.go` has THREE operations: `Send`, `Recv`, `Done`.
 
@@ -29,34 +30,37 @@ Stages doc: `docs/planning/visual-editor/pulses-as-channel-stages.md`.
 - **Done:** clears slot, unblocks Send.
 - **NotifyDelivered** (webview→host→stdin reader): unblocks Recv only.
 
-All 4 node packages (`input`, `readgate`, `chaininhibitor`, `inhibitrightgate`) now call
-`<input>.Done()` right after Fire + before downstream TrySend (not deferred until
-downstream handshake), which was the fix that unblocked the ring deadlock.
-
 One `PacedWire` is allocated per destination port (not per edge), so N senders
 converging on one port share a single wire — fan-in works correctly.
 
-### What works
+### What works (landed on main)
 
-- Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully
-  (readGate→i0→i1→back to readGate; i0+i1→inhibitRight0).
+- Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
 - Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`
   through a shared destination-port-owned wire.
 - Multi-output slice ports (`ToNext[]`) correctly propagate indexed handle names
   (`ToNext0`/`ToNext1`) so edgeId resolution for animation is non-null.
+- Pulse animation renders concurrent in-flight instances (per-emit simTime anchoring).
 
-### Open / deferred
+### Open / deferred (carry into this branch)
 
-- `in08` has `init:[0,1]` with no `repeat:true`, so the ring stops after 2 input
-  pulses propagate. Not a bug — design question whether to add repeat.
-- **Webview pacing follow-up:** "pulse-sits-at-destination-until-Done" rendering
-  still pending (Recv-Done enforced substrate-side only; no visual hold at destination).
-- **Stages 4 cleanup:** `clearRunState`, `run-start`, `pulseValueRef`,
+- **Webview pacing (this branch):** pulse-sits-at-destination-until-Done rendering.
+  Substrate enforces it; webview needs to hold the pulse marker at the destination
+  handle from the moment of delivery until a `Done` event arrives.
+- **Stages 4 cleanup (deferred):** `clearRunState`, `run-start`, `pulseValueRef`,
   `use-fire-flash.prev` still pending removal (inert dead code).
 - Optional: remove debug `postLog("pulse.deliver", ...)` from
   `use-pulse-animation.ts:51` if no longer needed for diagnosis.
 - Legacy: `loader.go` still has unused `edgeSeeds` path (dead code; `topology.json`
   has no seeds).
+- Design question: `in08` has `init:[0,1]` with no `repeat:true`, so ring stops
+  after 2 pulses propagate. Not a bug, but consider repeat.
+
+### Key files for this branch
+
+- `tools/topology-vscode/src/webview/rf/edges/use-pulse-animation.ts` — pulse animation hook
+- `tools/topology-vscode/src/webview/rf/pump.ts` — event routing from host
+- `nodes/Wiring/paced_wire.go` — substrate wire contract
 
 ## Dev-loop
 
