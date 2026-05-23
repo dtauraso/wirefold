@@ -13,6 +13,15 @@ read this file first (no chat history needed) and proceed.
 
 ### Recently merged (in order)
 
+**task/undo-audit** (merge 09b61cf) — undo/redo coverage broadened and
+stabilized against in-flight pulses. Key changes:
+- history.ts deep-clones (structuredClone) snapshots + snapshots viewerState alongside RF nodes/edges.
+- Transient run-state moved into dedicated stores: `pulse-state.ts`, `fire-flash-state.ts`, `slots-state.ts` (outside snapshot scope; undo/redo cannot wipe them).
+- Pulse animation anchored at `pulse.startTime` in pulse-state, computed in pause-adjusted sim time (run-status.ts tracks `pauseAccumulatedMs + pauseStartedAt`; exports `getPauseAdjustedNow`).
+- Pulse animation waits for nonzero pathLength before computing duration; remounts no longer hit duration=0.
+- pump.ts send/done use `.filter()` instead of `.find()` — fan-in and fan-out both correctly set/clear pulses on every matching edge.
+- Held-value badge updates on pulse arrival (t=1 in animation), not on substrate send.
+
 **task/stage4-cleanup** — removed `edgeSeeds` loader path and `pulse.deliver`
 debug log. `pulseValueRef` and `use-fire-flash.prev` were confirmed live and
 kept. `clearRunState`/`run-start` were already gone before this branch.
@@ -45,9 +54,11 @@ See [MODEL.md](../../MODEL.md#slot-phase-lifecycle).
 - Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
 - Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`.
 - Multi-output slice ports propagate indexed handle names correctly.
-- Pulse animation renders concurrent in-flight instances.
+- Pulse animation renders concurrent in-flight instances, fully derived from shared pulse-state per-frame.
 - Concurrent fan-out: all outputs fire in parallel.
 - Held-value sticky badges show last value per input port; pulse clears on delivery.
+- Undo/redo is robust: pause → drag node → canvas click → undo → node stays put. Delete, edge kind change, port swap, multi-mutation undo trees all verified.
+- Pulse animation anchored in pause-adjusted sim time; pause-aware accounting in run-status.ts.
 
 ### Open / deferred
 
@@ -56,12 +67,15 @@ Nothing currently blocked. New work should be friction-driven — log friction i
 
 ### Key files
 
-- `tools/topology-vscode/src/webview/rf/edges/use-pulse-animation.ts` — pulse animation hook
-- `tools/topology-vscode/src/webview/rf/pump.ts` — event routing from host
+- `tools/topology-vscode/src/webview/rf/edges/use-pulse-animation.ts` — pulse animation hook (anchored at pulse-state)
+- `tools/topology-vscode/src/webview/rf/pump.ts` — event routing from host (send/done fan-in/out)
+- `tools/topology-vscode/src/webview/rf/pulse-state.ts` — pulse transient state (outside history snapshot)
+- `tools/topology-vscode/src/webview/rf/fire-flash-state.ts` — fire-flash transient state
+- `tools/topology-vscode/src/webview/rf/slots-state.ts` — slot phase transient state
+- `tools/topology-vscode/src/webview/rf/run-status.ts` — pause accounting (pauseAccumulatedMs, pauseStartedAt, getPauseAdjustedNow)
 - `tools/topology-vscode/src/webview/rf/held-values-state.ts` — held-values imperative bridge
-- `tools/topology-vscode/src/webview/rf/held-values-ctx.ts` — held-values React context
 - `tools/topology-vscode/src/webview/rf/nodes/GenericNode.tsx` — held-value badge rendering
-- `nodes/Wiring/paced_wire.go` — substrate wire contract
+- `nodes/Wiring/paced_wire.go` — substrate wire contract (see [MODEL.md](../../MODEL.md#slot-phase-lifecycle) slot-phase lifecycle)
 
 ## Dev-loop
 
