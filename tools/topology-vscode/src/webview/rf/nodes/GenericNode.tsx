@@ -19,6 +19,7 @@ import type { Port } from "../../../schema/types";
 import type { SlotMap } from "../../../messages";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { type Side, type ActiveDrag, SLOT_PCT, computeSnapPoints, nearestSnap, resolvePositions, pctToSlot } from "../port-snap";
+import { PseudoPanel } from "../panels/PseudoPanel";
 
 // ── Style helpers ────────────────────────────────────────────────────────────
 
@@ -207,14 +208,18 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
 
   const inputs: Port[] = data.inputs ?? []; const outputs: Port[] = data.outputs ?? [];
   const hasPortData = inputs.length > 0 || outputs.length > 0;
+  const isInput = data.type === "Input";
   const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, minHeight: def.height ?? 40, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
   return (
     <div ref={nodeElRef} style={container}>
       {hasPortData ? renderPortHandles(inputs, outputs, def, drag, handlePointerDown, slotsMap.get(nodeId), nodeId, heldValues) : renderDefHandles(def)}
       {renderSnapDots(drag)}
-      <div style={{ fontWeight: 500, textAlign: "center" }}>{data.label ?? def.defaultLabel}</div>
+      <div style={{ fontWeight: 500, textAlign: "center", position: "relative" }}>
+        {data.label ?? def.defaultLabel}
+      </div>
       {def.sublabel && <div style={SUBLABEL}>{def.sublabel}</div>}
       {def.displays?.map((d) => renderDisplay(d, data))}
+      {isInput && <PseudoPanel nodeId={nodeId} />}
     </div>
   );
 }

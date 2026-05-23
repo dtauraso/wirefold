@@ -10,7 +10,6 @@
 | text | #1a1a1a |
 | accent | #3fb950 |
 | minWidth | 90 |
-| displays | queue, repeat |
 | defaultLabel | input |
 | role | input |
 | shape | rect |

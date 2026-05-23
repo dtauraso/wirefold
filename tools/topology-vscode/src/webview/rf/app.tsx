@@ -36,6 +36,7 @@ import type { LastFireMap } from "./fire-flash-state";
 import { registerSlotsSetter, SlotsCtx } from "./slots-state";
 import type { SlotsMap } from "./slots-state";
 import { useHotkeys } from "react-hotkeys-hook";
+import { PseudoErrorOverlay } from "./panels/PseudoErrorOverlay";
 
 function Inner() {
   const [nodes, setNodes] = useState<RFNode[]>([]);
@@ -159,6 +160,7 @@ export default function App() {
         <SaveLifecycle />
         <Inner />
         <RunButton />
+        <PseudoErrorOverlay />
       </ReactFlowProvider>
     </RunStatusCtx.Provider>
     </DimmedCtx.Provider>

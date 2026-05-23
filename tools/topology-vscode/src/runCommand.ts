@@ -147,9 +147,23 @@ export class BuildAndRunRunner {
     this.post({ state: "running" });
   }
 
+  isRunning(): boolean {
+    return this.proc !== undefined;
+  }
+
   stop() {
     this.looping = false;
     this.cancel();
+  }
+
+  /** Stop the runner and resolve when the process has fully exited. Resolves
+   *  immediately if no process is active. */
+  stopAndAwait(): Promise<void> {
+    if (!this.proc) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.proc!.once("close", () => resolve());
+      this.stop();
+    });
   }
 
   /** Write a JSON line to the running process's stdin (no-op if not running). */
