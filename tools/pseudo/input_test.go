@@ -176,18 +176,26 @@ func TestInputRoundTrip_GoEditOnly(t *testing.T) {
 	}
 }
 
-// TestInputParse_RejectsExtraTrailingTokens: trailing tokens must cause error.
+// TestInputParse_RejectsExtraTrailingTokens: trailing tokens must cause a
+// human-readable error mentioning the offending token.
 func TestInputParse_RejectsExtraTrailingTokens(t *testing.T) {
 	prior := InputView{OutputField: "ToReadGate"}
 	_, err := ParseInput("send each of [0, 1] to ToReadGate boom", prior)
 	if err == nil {
 		t.Fatal("expected error for trailing token, got nil")
 	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Couldn't parse") {
+		t.Errorf("error message does not start with human-readable prefix: %q", msg)
+	}
+	if !strings.Contains(msg, "boom") {
+		t.Errorf("error message does not mention offending token %q: %q", "boom", msg)
+	}
 	t.Logf("got expected error: %v", err)
 }
 
 // TestInputParse_SuggestionOnError: a parse failure must return a *ParseInputError
-// whose Suggestion() includes the prior OutputField and the canonical form.
+// whose Error() is human-readable and whose Suggestion() includes the canonical form.
 func TestInputParse_SuggestionOnError(t *testing.T) {
 	prior := InputView{OutputField: "ToReadGate", InitValues: []int{0, 1}}
 	_, err := ParseInput("not valid pseudo text", prior)
@@ -198,6 +206,20 @@ func TestInputParse_SuggestionOnError(t *testing.T) {
 	if !errors.As(err, &pe) {
 		t.Fatalf("expected *ParseInputError, got %T: %v", err, err)
 	}
+	// Error message must be human-readable.
+	msg := pe.Error()
+	if !strings.Contains(msg, "Couldn't parse") {
+		t.Errorf("Error() does not use human-readable prefix: %q", msg)
+	}
+	// The offending token "not" should appear in the message.
+	if !strings.Contains(msg, `"not"`) {
+		t.Errorf("Error() does not mention offending token: %q", msg)
+	}
+	// Message should explain what's expected.
+	if !strings.Contains(msg, "send") {
+		t.Errorf("Error() does not mention expected start keyword: %q", msg)
+	}
+	// Suggestion must mention the canonical form and prior OutputField.
 	sug := pe.Suggestion()
 	if sug == "" {
 		t.Fatal("Suggestion() returned empty string")
@@ -208,6 +230,7 @@ func TestInputParse_SuggestionOnError(t *testing.T) {
 	if !strings.Contains(sug, "send each of") {
 		t.Errorf("Suggestion() does not contain canonical form: %q", sug)
 	}
+	t.Logf("error: %s", msg)
 	t.Logf("suggestion: %s", sug)
 }
 

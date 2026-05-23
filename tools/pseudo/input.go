@@ -5,14 +5,15 @@ package pseudo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
+	"maps"
 	"strconv"
 	"strings"
-	"maps"
 	"unicode"
 )
 
@@ -100,14 +101,15 @@ func RenderInput(v InputView) string {
 }
 
 // ParseInputError is the error type returned by ParseInput when the pseudo
-// text fails to parse. It carries the underlying parse error and a human-
-// readable fix suggestion.
+// text fails to parse. It carries a human-readable message, the underlying
+// parse error, and a canonical-form suggestion.
 type ParseInputError struct {
+	msg        string
 	cause      error
 	suggestion string
 }
 
-func (e *ParseInputError) Error() string      { return e.cause.Error() }
+func (e *ParseInputError) Error() string      { return e.msg }
 func (e *ParseInputError) Unwrap() error      { return e.cause }
 func (e *ParseInputError) Suggestion() string { return e.suggestion }
 
@@ -146,8 +148,19 @@ func ParseInput(text string, prior InputView) (InputView, error) {
 	p := &pseudoParser{input: text}
 	repeat, vals, ident, err := p.parseInputPseudo()
 	if err != nil {
-		wrapped := fmt.Errorf("pseudo.ParseInput: %w", err)
-		return InputView{}, &ParseInputError{cause: wrapped, suggestion: buildSuggestion(prior)}
+		var pe *parseError
+		if errors.As(err, &pe) {
+			return InputView{}, &ParseInputError{
+				msg:        pe.humanMessage(),
+				cause:      err,
+				suggestion: buildSuggestion(prior),
+			}
+		}
+		return InputView{}, &ParseInputError{
+			msg:        err.Error(),
+			cause:      err,
+			suggestion: buildSuggestion(prior),
+		}
 	}
 	return InputView{
 		OutputField: ident,
@@ -352,6 +365,47 @@ func renameOutputField(goSrc []byte, oldName, newName string) ([]byte, error) {
 
 // ─── pseudo parser ────────────────────────────────────────────────────────────
 
+// parseErrorKind describes which structural problem the parser encountered.
+type parseErrorKind int
+
+const (
+	parseErrBadStart      parseErrorKind = iota // first token is not "send" or "repeatedly"
+	parseErrBadInt                              // non-integer where int expected
+	parseErrUnclosedBrace                       // "[" without closing "]"
+	parseErrMissingIdent                        // "to" with no ident following
+	parseErrTrailing                            // extra tokens after valid parse
+	parseErrGeneric                             // fallback
+)
+
+// parseError is the structured error produced by the pseudo parser.
+// It carries the offending token (raw text) and a kind for message generation.
+type parseError struct {
+	kind    parseErrorKind
+	token   string // the offending excerpt
+	wrapped error  // original low-level error (optional)
+}
+
+func (e *parseError) Error() string       { return e.humanMessage() }
+func (e *parseError) Unwrap() error       { return e.wrapped }
+func (e *parseError) Is(target error) bool { _, ok := target.(*parseError); return ok }
+
+func (e *parseError) humanMessage() string {
+	switch e.kind {
+	case parseErrBadStart:
+		return fmt.Sprintf("Couldn't parse %q. Lines must start with \"send\" or \"repeatedly send\".", e.token)
+	case parseErrBadInt:
+		return fmt.Sprintf("Couldn't parse %q. Init values must be whole numbers.", e.token)
+	case parseErrUnclosedBrace:
+		return fmt.Sprintf("Couldn't parse %q. Init values must be enclosed in brackets like [0, 1].", e.token)
+	case parseErrMissingIdent:
+		return fmt.Sprintf("Couldn't parse %q. Missing output field name after \"to\".", e.token)
+	case parseErrTrailing:
+		return fmt.Sprintf("Couldn't parse %q. Unexpected text after the output field name.", e.token)
+	default:
+		return fmt.Sprintf("Couldn't parse %q.", e.token)
+	}
+}
+
 type pseudoParser struct {
 	input string
 	pos   int
@@ -446,16 +500,28 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 		repeat = true
 	}
 
-	if err = p.consumeWord("send"); err != nil {
+	if rawErr := p.consumeWord("send"); rawErr != nil {
+		// Use just the first word so the token is concise (e.g., "not" not "not valid...").
+		tok := p.peekWord()
+		if tok == "" {
+			tok = excerpt(p.input, p.pos)
+		}
+		err = &parseError{kind: parseErrBadStart, token: tok, wrapped: rawErr}
 		return
 	}
-	if err = p.consumeWord("each"); err != nil {
+	if rawErr := p.consumeWord("each"); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 		return
 	}
-	if err = p.consumeWord("of"); err != nil {
+	if rawErr := p.consumeWord("of"); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 		return
 	}
-	if err = p.consumeChar('['); err != nil {
+	if rawErr := p.consumeChar('['); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrUnclosedBrace, token: tok, wrapped: rawErr}
 		return
 	}
 
@@ -463,8 +529,9 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 	p.skipWS()
 	if p.pos < len(p.input) && p.input[p.pos] != ']' {
 		var n int
-		n, err = p.consumeInt()
-		if err != nil {
+		if rawErr := func() error { var e error; n, e = p.consumeInt(); return e }(); rawErr != nil {
+			tok := excerpt(p.input, p.pos)
+			err = &parseError{kind: parseErrBadInt, token: tok, wrapped: rawErr}
 			return
 		}
 		vals = append(vals, n)
@@ -474,29 +541,40 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 				break
 			}
 			p.pos++ // consume ','
-			n, err = p.consumeInt()
-			if err != nil {
+			if rawErr := func() error { var e error; n, e = p.consumeInt(); return e }(); rawErr != nil {
+				tok := excerpt(p.input, p.pos)
+				err = &parseError{kind: parseErrBadInt, token: tok, wrapped: rawErr}
 				return
 			}
 			vals = append(vals, n)
 		}
 	}
 
-	if err = p.consumeChar(']'); err != nil {
+	if rawErr := p.consumeChar(']'); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrUnclosedBrace, token: tok, wrapped: rawErr}
 		return
 	}
-	if err = p.consumeWord("to"); err != nil {
+	if rawErr := p.consumeWord("to"); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 		return
 	}
-	ident, err = p.consumeIdent()
-	if err != nil {
+	if rawIdent, rawErr := p.consumeIdent(); rawErr != nil {
+		_ = rawIdent
+		p.skipWS()
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
 		return
+	} else {
+		ident = rawIdent
 	}
 
 	// Must be at end (after optional whitespace).
 	p.skipWS()
 	if p.pos != len(p.input) {
-		err = fmt.Errorf("unexpected trailing content at position %d: %q", p.pos, excerpt(p.input, p.pos))
+		tok := excerpt(p.input, p.pos)
+		err = &parseError{kind: parseErrTrailing, token: tok, wrapped: fmt.Errorf("unexpected trailing content at position %d: %q", p.pos, tok)}
 		return
 	}
 	return

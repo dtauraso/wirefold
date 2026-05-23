@@ -54,7 +54,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent }
   | { type: "pseudo-render-result"; nodeId: string; pseudo: string }
   | { type: "pseudo-save-result"; nodeId: string }
-  | { type: "pseudo-error"; nodeId: string; message: string };
+  | { type: "pseudo-error"; nodeId: string; message: string; suggestion?: string };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
   "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
