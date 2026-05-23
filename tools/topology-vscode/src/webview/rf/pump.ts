@@ -7,7 +7,7 @@
 // Contract source: nodes/Wiring/paced_wire.go Send / NotifyDelivered / Done.
 //
 //  1. Go emits "send" (node, port, value)
-//     → pump.ts  finds the RF edge by source+sourceHandle
+//     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
 //     → held-values.ts:setHeldValue  (destination node shows badge while pulse travels)
 //     → pulse-state.ts:setPulse  writes { value, simStep } into PulseCtx
 //
@@ -16,7 +16,7 @@
 //     → clears pulseT (dot disappears); held-value badge stays visible
 //
 //  3. Go emits "done" (node, port)
-//     → pump.ts  finds the RF edge by target+targetHandle
+//     → pump.ts  filters ALL RF edges by target+targetHandle (fan-in)
 //     → pulse-state.ts:clearPulse  removes animation data from PulseCtx
 //     → held value is intentionally NOT cleared — badge is sticky
 // ────────────────────────────────────────────────────────────────────────────
@@ -66,39 +66,38 @@ export function handleTraceEvent(event: TraceEvent): void {
       return;
     }
     case "send": {
-      // Match the edge by source node id + sourceHandle (output port name).
+      // Match ALL edges by source node id + sourceHandle (fan-out).
       // RF edges store source/sourceHandle; trace send events carry node/port.
       const { node, port, value } = event as Extract<TraceEvent, { kind: "send" }>;
       const edges = rfGetEdges();
-      const edgeId = edges.find(
+      const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
-      )?.id;
-      console.log(`[pump] send step=${step} node=${node} port=${port} edgeId=${edgeId ?? "NO-MATCH"} edges=[${edges.map(e => `${e.source}:${e.sourceHandle}`).join(",")}]`);
-      postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null, edgeId: edgeId ?? null });
-      if (!edgeId) return; // no matching edge — topology mismatch, skip silently
-      // Eagerly record the held value at the destination port so the node can
-      // show it while the pulse animates and until Go signals Done.
-      const edge = edges.find((e) => e.id === edgeId);
-      if (edge?.target && edge.targetHandle) {
-        setHeldValue(edge.target, edge.targetHandle, value ?? 0);
+      );
+      for (const edge of matched) {
+        postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null, edgeId: edge.id });
+        // Eagerly record the held value at the destination port so the node can
+        // show it while the pulse animates and until Go signals Done.
+        if (edge.target && edge.targetHandle) {
+          setHeldValue(edge.target, edge.targetHandle, value ?? 0);
+        }
+        setPulse(edge.id, { value: value ?? 0, simStep: step });
       }
-      setPulse(edgeId, { value: value ?? 0, simStep: step });
       return;
     }
     case "done": {
-      // Match the edge by target node id + targetHandle (input port name).
+      // Match ALL edges by target node id + targetHandle (fan-in).
       // RF edges store target/targetHandle; trace done events carry node/port.
       const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
       const edges = rfGetEdges();
-      const edgeId = edges.find(
+      const matched = edges.filter(
         (e) => e.target === node && e.targetHandle === port,
-      )?.id;
-      console.log(`[pump] done step=${step} node=${node} port=${port} edgeId=${edgeId ?? "NO-MATCH"}`);
-      postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null, edgeId: edgeId ?? null });
-      if (!edgeId) return; // no matching edge — topology mismatch, skip silently
+      );
       // Held value is intentionally NOT cleared here — badges are sticky and
       // show the last value received per input port until overwritten by a new send.
-      clearPulse(edgeId);
+      for (const edge of matched) {
+        postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null, edgeId: edge.id });
+        clearPulse(edge.id);
+      }
       return;
     }
     default:
