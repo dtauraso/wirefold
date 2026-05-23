@@ -7,17 +7,19 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, main)
+## State at handoff (2026-05-22, task/held-values-visual)
 
-**Active branch:** `main` (post-merge of `task/i0-concurrent-fanout`).
+**Active branch:** `task/held-values-visual` (in flight, not merged).
 
-No task branch in flight. The visual-hold work (`task/held-values-visual`) is set aside.
+### What just landed (task/held-values-visual)
 
-### What just landed (task/i0-concurrent-fanout)
+Pulse-sits-at-destination-until-Done: the webview now holds the pulse dot at
+the destination handle (t=1) after animation completes, and only clears it when
+Go signals Done via a new "done" trace event.
 
-Concurrent fan-out: `Fire` in the substrate now emits to all output channels
-concurrently rather than sequentially, so multi-output nodes don't serialize
-their downstream paths.
+Key commits on this branch:
+- `feat(trace): add KindDone event emitted from In.Done()` — adds `KindDone = "done"` to `Trace/Trace.go`, emits from `In.Done()` in `ports.go` carrying (node, port).
+- `feat(webview): hold pulse at destination until Go signals Done` — pump.ts handles "done" by clearing pulse data; use-pulse-animation.ts pins pulseT=1 after RAF completes (posts "delivered"), then a separate effect clears it when pulse data is removed.
 
 ### Substrate model contract (stable)
 
@@ -31,7 +33,7 @@ their downstream paths.
 One `PacedWire` is allocated per destination port (not per edge), so N senders
 converging on one port share a single wire — fan-in works correctly.
 
-### What works (on main)
+### What works (on main + this branch)
 
 - Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
 - Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`
@@ -40,16 +42,11 @@ converging on one port share a single wire — fan-in works correctly.
   (`ToNext0`/`ToNext1`) so edgeId resolution for animation is non-null.
 - Pulse animation renders concurrent in-flight instances (per-emit simTime anchoring).
 - Concurrent fan-out: all outputs fire in parallel (no head-of-line serialization).
-
-### Set aside (task/held-values-visual)
-
-Branch exists but is parked. Work: pulse should sit at destination handle from
-`Recv` until `Done` is called. Substrate enforces this; webview does not yet
-mirror it (pulses disappear immediately on delivery).
+- **[this branch]** Pulse sits at destination handle until downstream node calls Done.
 
 ### Open / deferred
 
-- **Webview pacing (held-values-visual, set aside):** pulse-sits-at-destination-until-Done.
+- **Merge task/held-values-visual → main** once verified in live editor.
 - **Stage 4 cleanup (task/stage4-cleanup):** removed `edgeSeeds` path from
   `loader.go` and debug `postLog("pulse.deliver")` from `use-pulse-animation.ts`.
   Skipped items (not dead — still live):
