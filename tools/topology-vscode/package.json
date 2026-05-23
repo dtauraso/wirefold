@@ -31,7 +31,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check:loc": "node scripts/check-loc.mjs",
     "test:tier4": "PLAYWRIGHT_TIER4=1 playwright test --project=tier4-latency",
     "package": "vsce package"
   },

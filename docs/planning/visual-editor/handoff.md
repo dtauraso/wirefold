@@ -70,7 +70,7 @@ After TS edit: `npm run build` from `tools/topology-vscode/`.
 After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
 To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
-Check: `go test ./...`, `npm run check:loc`, `bash tools/check-substrate-vocabulary.sh`.
+Check: `go test ./...`, `bash tools/check-substrate-vocabulary.sh`.
 
 ## ALWAYS clause
 
