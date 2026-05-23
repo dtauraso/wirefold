@@ -46,6 +46,8 @@ func (g *Node) Update(ctx context.Context) {
 			}
 			g.Fire()
 			if g.ToPassed.TrySend(result) {
+				g.FromLeft.Done()
+				g.FromRight.Done()
 				g.HasLeft = false
 				g.HasRight = false
 			}

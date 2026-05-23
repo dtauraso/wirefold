@@ -10,19 +10,21 @@ import (
 var ErrCanceled = errors.New("paced wire: context canceled")
 
 // PacedWire is a single-slot wire whose delivery is paced by an external
-// visual signal. Send blocks until the slot is empty, places the value, then
-// blocks until the visual calls NotifyDelivered. Recv unblocks once a value
-// is placed, takes it, and re-opens the send gate.
+// visual signal. The slot stays occupied until the receiver calls Done,
+// keeping the sender blocked until the receiver has finished using the value.
 //
-// Delivery confirmation uses a per-send channel (deliveryCh) so that
-// NotifyDelivered targets exactly the in-flight send, not a shared flag
-// that can be reset by a racing second sender.
+// Lifecycle per value:
+//   Send: blocks until slot empty, fills slot, blocks until Done is called.
+//   Recv: blocks until NotifyDelivered fires, returns value (slot stays full).
+//   Done: receiver signals it is finished; clears slot, unblocks Send.
+//   NotifyDelivered: visual layer signals delivery-complete, unblocks Recv.
 type PacedWire struct {
 	mu         sync.Mutex
 	cond       *sync.Cond
 	slot       any
-	hasSend    bool       // slot holds an undelivered value
-	deliveryCh chan struct{} // closed by NotifyDelivered to confirm delivery
+	hasSend    bool        // slot holds a value (not yet Done'd)
+	deliveryCh chan struct{} // closed by NotifyDelivered
+	doneCh     chan struct{} // closed by Done
 }
 
 // NewPacedWire creates an empty PacedWire.
@@ -32,8 +34,8 @@ func NewPacedWire() *PacedWire {
 	return pw
 }
 
-// Send places value into the slot, then blocks until NotifyDelivered is called.
-// Returns ErrCanceled if ctx is done before the delivery gate opens.
+// Send places value into the slot, then blocks until Done is called by the
+// receiver. Returns ErrCanceled if ctx is done before Done fires.
 func (pw *PacedWire) Send(ctx context.Context, value any) error {
 	// Phase 1: wait for slot to be empty, then atomically claim it.
 	done := pw.watchCtx(ctx)
@@ -51,27 +53,28 @@ func (pw *PacedWire) Send(ctx context.Context, value any) error {
 		pw.mu.Unlock()
 		return ErrCanceled
 	}
-	// Atomically claim slot and allocate a fresh per-send delivery channel.
+	// Claim slot; allocate fresh per-send delivery and done channels.
 	pw.slot = value
 	pw.hasSend = true
 	myCh := make(chan struct{})
 	pw.deliveryCh = myCh
+	myDone := make(chan struct{})
+	pw.doneCh = myDone
 	pw.cond.Broadcast()
 	pw.mu.Unlock()
 
-	// Phase 2: wait for this send's delivery confirmation.
+	// Phase 2: wait for receiver to call Done (slot cleared by Done).
 	select {
-	case <-myCh:
+	case <-myDone:
 		return nil
 	case <-ctx.Done():
 		return ErrCanceled
 	}
 }
 
-// Recv blocks until a value is placed AND delivery is confirmed by
-// NotifyDelivered, then takes the value and re-opens the send gate.
-// Receiver and sender unblock at the same instant — when the visual completes.
-// Returns the value and ErrCanceled if ctx is done.
+// Recv blocks until NotifyDelivered fires, then returns the value.
+// The slot is NOT cleared; the sender stays blocked until Done is called.
+// Returns ErrCanceled if ctx is done.
 func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 	done := pw.watchCtx(ctx)
 	defer close(done)
@@ -89,14 +92,12 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 		pw.mu.Unlock()
 		return nil, ErrCanceled
 	}
-	// Capture the delivery channel before releasing the mutex so we
-	// hold a reference even after NotifyDelivered nils pw.deliveryCh.
-	// If deliveryCh is already nil, NotifyDelivered has already fired.
+	// Capture value and delivery channel before releasing the mutex.
+	v := pw.slot
 	myCh := pw.deliveryCh
 	pw.mu.Unlock()
 
-	// Phase 2: wait for delivery confirmation (same signal as Send).
-	// A nil myCh means delivery already completed; proceed immediately.
+	// Phase 2: wait for visual delivery confirmation.
 	if myCh != nil {
 		select {
 		case <-myCh:
@@ -105,19 +106,26 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 		}
 	}
 
-	// Phase 3: take the value and clear the slot.
+	return v, nil
+}
+
+// Done is called by the receiver when it has finished using the value.
+// Clears the slot and unblocks the corresponding Send.
+func (pw *PacedWire) Done() {
 	pw.mu.Lock()
-	v := pw.slot
+	ch := pw.doneCh
+	pw.doneCh = nil
 	pw.slot = nil
 	pw.hasSend = false
 	pw.cond.Broadcast()
 	pw.mu.Unlock()
-
-	return v, nil
+	if ch != nil {
+		close(ch)
+	}
 }
 
 // NotifyDelivered is called by the visual layer to signal delivery-complete,
-// unblocking the corresponding Send.
+// unblocking Recv.
 func (pw *PacedWire) NotifyDelivered() {
 	pw.mu.Lock()
 	ch := pw.deliveryCh

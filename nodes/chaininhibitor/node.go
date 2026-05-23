@@ -27,6 +27,7 @@ func (in *Node) Update(ctx context.Context) {
 				out.TrySend(in.Held)
 			}
 			in.Held = value
+			in.FromPrevChainInhibitorNode.Done()
 		}
 	}
 }

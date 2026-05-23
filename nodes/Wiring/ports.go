@@ -35,6 +35,14 @@ type In struct {
 	trace *T.Trace
 }
 
+// Done signals to the underlying PacedWire that the receiver is finished
+// using the value returned by the last TryRecv. No-op in chan mode.
+func (i *In) Done() {
+	if i != nil && i.pw != nil {
+		i.pw.Done()
+	}
+}
+
 // TryRecv in chan mode: non-blocking select. In paced mode: blocks until
 // a value is placed or ctx is cancelled.
 func (i *In) TryRecv() (int, bool) {

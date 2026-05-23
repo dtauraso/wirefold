@@ -1,7 +1,7 @@
 // stdin_reader_test.go — contract test for RunStdinReader.
 //
 // Verifies that a "delivered" JSON line on stdin calls NotifyDelivered on the
-// matching PacedWire, unblocking its Send.
+// matching PacedWire, unblocking Recv; Send unblocks after Done is called.
 
 package Wiring
 
@@ -33,8 +33,16 @@ func TestRunStdinReaderDelivered(t *testing.T) {
 	// Wait briefly to let the send goroutine block.
 	time.Sleep(10 * time.Millisecond)
 
-	// Write the delivered message — should unblock Send.
+	// Write the delivered message — unblocks Recv (visual delivery).
 	io.WriteString(w, `{"type":"delivered","edge":"e1"}`+"\n")
+	time.Sleep(10 * time.Millisecond)
+
+	// Recv the value, then call Done — Done unblocks Send.
+	v, err := pw.Recv(ctx)
+	if err != nil || v != 42 {
+		t.Fatalf("Recv: v=%v err=%v", v, err)
+	}
+	pw.Done()
 
 	select {
 	case err := <-sendErr:
