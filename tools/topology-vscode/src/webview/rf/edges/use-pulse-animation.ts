@@ -48,6 +48,7 @@ export function usePulseAnimation(id: string, data: EdgeData | undefined) {
           rf.setEdges(edges => edges.map(e => e.id === idRef.current
             ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: undefined } }
             : e));
+          console.log("[pulse-deliver]", idRef.current);
           vscode.postMessage({ type: "delivered", edge: idRef.current });
         }
       } else {
