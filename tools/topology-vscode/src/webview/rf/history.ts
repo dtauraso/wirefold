@@ -11,7 +11,6 @@ import type { ReactFlowInstance, Node as RFNode, Edge as RFEdge } from "reactflo
 import { rfSetNodes, rfSetEdges } from "./rf-imperative";
 import { viewerState, setViewerState } from "./viewer-state";
 import type { ViewerState } from "../state/viewer/types";
-import { registerRf, stripTransient, overlayTransient } from "./transient-overlay";
 
 const HISTORY_LIMIT = 50;
 
@@ -27,7 +26,6 @@ let _rf: ReactFlowInstance | null = null;
 
 export function registerHistory(rf: ReactFlowInstance) {
   _rf = rf;
-  registerRf(rf);
 }
 
 function cloneSnapshot(s: Snapshot): Snapshot {
@@ -41,8 +39,7 @@ function currentSnapshot(): Snapshot {
 export function pushSnapshot() {
   if (!_rf) return;
   const { nodes, edges } = _rf.toObject();
-  const stripped = stripTransient(nodes, edges);
-  past.push(cloneSnapshot({ nodes: stripped.nodes, edges: stripped.edges, viewerState }));
+  past.push(cloneSnapshot({ nodes: structuredClone(nodes), edges: structuredClone(edges), viewerState }));
   if (past.length > HISTORY_LIMIT) past.shift();
   // Any new action clears the redo stack.
   future = [];
@@ -51,25 +48,21 @@ export function pushSnapshot() {
 export function undo() {
   if (!_rf || past.length === 0) return;
   const curr = currentSnapshot();
-  const stripped = stripTransient(curr.nodes, curr.edges);
-  future.push(cloneSnapshot({ nodes: stripped.nodes, edges: stripped.edges, viewerState: curr.viewerState }));
+  future.push(curr);
   const prev = past.pop()!;
-  const { nodes, edges } = overlayTransient(prev.nodes, prev.edges);
   setViewerState(prev.viewerState);
-  rfSetNodes(() => nodes);
-  rfSetEdges(() => edges);
+  rfSetNodes(() => prev.nodes);
+  rfSetEdges(() => prev.edges);
 }
 
 export function redo() {
   if (!_rf || future.length === 0) return;
   const curr = currentSnapshot();
-  const stripped = stripTransient(curr.nodes, curr.edges);
-  past.push(cloneSnapshot({ nodes: stripped.nodes, edges: stripped.edges, viewerState: curr.viewerState }));
+  past.push(curr);
   const next = future.pop()!;
-  const { nodes, edges } = overlayTransient(next.nodes, next.edges);
   setViewerState(next.viewerState);
-  rfSetNodes(() => nodes);
-  rfSetEdges(() => edges);
+  rfSetNodes(() => next.nodes);
+  rfSetEdges(() => next.edges);
 }
 
 export function canUndo() { return past.length > 0; }

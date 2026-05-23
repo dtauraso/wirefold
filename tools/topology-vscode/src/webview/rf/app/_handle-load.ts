@@ -7,7 +7,6 @@ import { getDimmed } from "../../rf/dimmed";
 import { scheduleViewSave, setSpecMeta } from "../../save";
 import { migrateLegacyFields } from "./_migrate-legacy-fields";
 import { reconcileSelection } from "./_reconcile-selection";
-import { overlayTransient } from "../transient-overlay";
 import type { AppCtx } from "./_ctx";
 
 // Fresh "load" message: parse, install spec, kick the renderer, then
@@ -38,10 +37,10 @@ export function handleLoad(ctx: AppCtx, text: string) {
     if (sel.size > 0) {
       flow.nodes = flow.nodes.map((n) => sel.has(n.id) ? { ...n, selected: true } : n);
     }
-    // Preserve in-flight run state across file round-trip rebuilds.
-    const overlaid = overlayTransient(flow.nodes, flow.edges);
-    ctx.setNodes(overlaid.nodes);
-    ctx.setEdges(overlaid.edges);
+    // Transient run state (pulse, lastFire, slots) lives in dedicated state stores
+    // outside RF nodes/edges, so it survives file round-trip rebuilds automatically.
+    ctx.setNodes(flow.nodes);
+    ctx.setEdges(flow.edges);
   } catch (err) {
     console.error("invalid topology.json", err);
   }

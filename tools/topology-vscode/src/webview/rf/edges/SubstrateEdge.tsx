@@ -63,7 +63,7 @@ export function SubstrateEdge({
 
   const mid = edgeMidpoint(route, sourceX, sourceY, targetX, targetY, midpointOffset);
 
-  const { pulseT, pathRef, pulseValueRef } = usePulseAnimation(id, data);
+  const { pulseT, pathRef, pulseValueRef } = usePulseAnimation(id);
 
   // Compute pulse circle position along the SVG path.
   let circleX: number | undefined;

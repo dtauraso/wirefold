@@ -8,13 +8,12 @@
 import { useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
-import { ANIMATION_FIELDS } from "../animation-fields";
+import { usePulseCtx } from "../pulse-state";
 import { useRunStatusCtx } from "../run-status";
-import type { EdgeData } from "../types";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;
 
-export function usePulseAnimation(id: string, data: EdgeData | undefined) {
+export function usePulseAnimation(id: string) {
   const [pulseT, setPulseT] = useState<number | null>(null);
   const pathRef = useRef<SVGPathElement | null>(null);
   const pulseValueRef = useRef<unknown>(undefined);
@@ -24,7 +23,8 @@ export function usePulseAnimation(id: string, data: EdgeData | undefined) {
   const pausedRef = useRef(false);
   pausedRef.current = runStatus.state === "paused";
 
-  const pulse = data?.[ANIMATION_FIELDS.pulse.name];
+  const pulseMap = usePulseCtx();
+  const pulse = pulseMap.get(id);
 
   // Clear pulseT when pulse data is removed (Done event cleared it in pump).
   useEffect(() => {
