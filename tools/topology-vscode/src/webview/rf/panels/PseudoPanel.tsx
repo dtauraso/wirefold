@@ -1,14 +1,15 @@
-// PseudoPanel — floating panel for editing the algebraic pseudo view of an
-// Input node. Opened from the "ƒ" button on the node header; closed via
-// Save or Cancel.
+// PseudoPanel — inline label with double-click-to-edit for the algebraic
+// pseudo view of an Input node. Toggled open/closed by the "ƒ" button.
 //
 // Lifecycle:
-//   mount → post pseudo-render → wait for pseudo-render-result
-//   Save  → post pseudo-save  → wait for pseudo-save-result → onClose
-//   Cancel → onClose immediately
-//   Error (either phase) → show inline message above textarea
+//   mount → post pseudo-render → receive pseudo-render-result → show label
+//   double-click label → edit mode (contentEditable div, auto-focused)
+//   each input (debounced ~250 ms) → post pseudo-save
+//     pseudo-save-result → accept; update last-known-good
+//     pseudo-error       → keep edit mode; show inline red indicator
+//   blur → exit edit mode; if last attempt errored, revert to last-known-good
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { vscode } from "../../vscode-api";
 
 type Props = {
@@ -16,52 +17,128 @@ type Props = {
   onClose: () => void;
 };
 
-type Phase =
-  | { kind: "loading" }
-  | { kind: "ready"; pseudo: string }
-  | { kind: "saving"; pseudo: string }
-  | { kind: "error"; pseudo: string; message: string };
+type EditState =
+  | { mode: "label" }
+  | { mode: "editing"; errorMsg: string | null };
 
 export function PseudoPanel({ nodeId, onClose }: Props) {
-  const [phase, setPhase] = useState<Phase>({ kind: "loading" });
-  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  // Last-known-good text (from pseudo-render-result or last pseudo-save-result)
+  const [lkg, setLkg] = useState<string | null>(null);
+  // Current buffer while editing
+  const bufRef = useRef<string>("");
+  const [editState, setEditState] = useState<EditState>({ mode: "label" });
+  const editDivRef = useRef<HTMLDivElement | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether the last auto-save attempt errored
+  const lastSaveErrored = useRef(false);
 
   // Subscribe to host messages relevant to this nodeId.
   useEffect(() => {
     const handler = (e: MessageEvent<unknown>) => {
-      const data = e.data as { type?: string; nodeId?: string; pseudo?: string; message?: string } | null;
+      const data = e.data as {
+        type?: string;
+        nodeId?: string;
+        pseudo?: string;
+        message?: string;
+      } | null;
       if (!data || typeof data !== "object") return;
       if (data.nodeId !== nodeId) return;
-      if (data.type === "pseudo-render-result" && typeof data.pseudo === "string") {
-        setPhase({ kind: "ready", pseudo: data.pseudo });
-      } else if (data.type === "pseudo-save-result") {
-        onClose();
-      } else if (data.type === "pseudo-error" && typeof data.message === "string") {
-        setPhase((prev) => {
-          const pseudo = prev.kind === "loading" ? "" : (prev as { pseudo?: string }).pseudo ?? "";
-          return { kind: "error", pseudo, message: data.message! };
-        });
+
+      if (
+        data.type === "pseudo-render-result" &&
+        typeof data.pseudo === "string"
+      ) {
+        setLkg(data.pseudo);
+      } else if (
+        data.type === "pseudo-save-result" &&
+        typeof data.pseudo === "string"
+      ) {
+        // Accept: update last-known-good to whatever was just saved.
+        setLkg(data.pseudo);
+        lastSaveErrored.current = false;
+        setEditState((prev) =>
+          prev.mode === "editing" ? { mode: "editing", errorMsg: null } : prev
+        );
+      } else if (
+        data.type === "pseudo-save-result"
+      ) {
+        // save-result without pseudo field — treat as accepted, keep buffer
+        lastSaveErrored.current = false;
+        setEditState((prev) =>
+          prev.mode === "editing" ? { mode: "editing", errorMsg: null } : prev
+        );
+      } else if (
+        data.type === "pseudo-error" &&
+        typeof data.message === "string"
+      ) {
+        lastSaveErrored.current = true;
+        setEditState((prev) =>
+          prev.mode === "editing"
+            ? { mode: "editing", errorMsg: data.message! }
+            : prev
+        );
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [nodeId, onClose]);
+  }, [nodeId]);
 
   // Post pseudo-render on mount.
   useEffect(() => {
     vscode.postMessage({ type: "pseudo-render", nodeId });
   }, [nodeId]);
 
-  const currentPseudo =
-    phase.kind === "loading" ? "" : (phase as { pseudo?: string }).pseudo ?? "";
+  // Focus the editable div whenever edit mode activates.
+  useEffect(() => {
+    if (editState.mode === "editing" && editDivRef.current) {
+      const el = editDivRef.current;
+      el.focus();
+      // Select all
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }, [editState.mode]);
 
-  const handleSave = () => {
-    const text = textRef.current?.value ?? currentPseudo;
-    setPhase({ kind: "saving", pseudo: text });
-    vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: text });
+  const scheduleSave = useCallback(
+    (text: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: text });
+      }, 250);
+    },
+    [nodeId]
+  );
+
+  const handleDoubleClick = () => {
+    bufRef.current = lkg ?? "";
+    lastSaveErrored.current = false;
+    setEditState({ mode: "editing", errorMsg: null });
   };
 
-  const handleCancel = () => onClose();
+  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+    const text = (e.currentTarget.textContent ?? "").trim();
+    bufRef.current = text;
+    scheduleSave(text);
+  };
+
+  const handleBlur = () => {
+    // Cancel any pending debounced save.
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (lastSaveErrored.current) {
+      // Revert visible text to last-known-good.
+      if (editDivRef.current && lkg !== null) {
+        editDivRef.current.textContent = lkg;
+      }
+      bufRef.current = lkg ?? "";
+    }
+    setEditState({ mode: "label" });
+  };
+
+  // ── Styles ─────────────────────────────────────────────────────────────────
 
   const panel: React.CSSProperties = {
     background: "#1e1e1e",
@@ -73,7 +150,7 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
     boxSizing: "border-box",
     display: "flex",
     flexDirection: "column",
-    gap: 6,
+    gap: 4,
     fontFamily: "monospace",
     fontSize: 11,
     color: "#ccc",
@@ -83,89 +160,90 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: 2,
   };
 
-  const title: React.CSSProperties = { fontWeight: 600, fontSize: 11, color: "#ddd" };
-
-  const errorBox: React.CSSProperties = {
-    background: "#3b1212",
-    border: "1px solid #a33",
-    borderRadius: 3,
-    padding: "4px 8px",
-    color: "#f66",
+  const titleStyle: React.CSSProperties = {
+    fontWeight: 600,
     fontSize: 11,
+    color: "#ddd",
   };
 
-  const textareaStyle: React.CSSProperties = {
-    width: "100%",
-    height: 90,
-    resize: "none",
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    padding: "2px 0",
+    cursor: "text",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-all",
+    color: lkg === null ? "#666" : "#ccc",
+    fontStyle: lkg === null ? "italic" : "normal",
+    userSelect: "text",
+  };
+
+  const editDivStyle: React.CSSProperties = {
+    display: "block",
+    padding: "3px 5px",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-all",
+    outline: "1px solid #4d9de0",
+    borderRadius: 2,
     background: "#252526",
     color: "#ccc",
-    border: "1px solid #555",
-    borderRadius: 3,
-    padding: "4px 6px",
-    fontFamily: "monospace",
-    fontSize: 11,
-    boxSizing: "border-box",
+    minHeight: "1.4em",
+    cursor: "text",
   };
 
-  const btnRow: React.CSSProperties = {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 8,
-    marginTop: 4,
+  const errorStyle: React.CSSProperties = {
+    display: "inline-block",
+    marginLeft: 6,
+    fontSize: 10,
+    color: "#f66",
   };
 
-  const btnBase: React.CSSProperties = {
-    padding: "3px 12px",
-    borderRadius: 3,
-    border: "1px solid #666",
-    cursor: "pointer",
-    fontSize: 12,
-    fontFamily: "sans-serif",
-  };
+  // ── Render ─────────────────────────────────────────────────────────────────
 
-  const btnSave: React.CSSProperties = {
-    ...btnBase,
-    background: "#0e639c",
-    color: "#fff",
-    borderColor: "#0e639c",
-  };
-
-  const btnCancel: React.CSSProperties = { ...btnBase, background: "transparent", color: "#ccc" };
-
-  const isBusy = phase.kind === "loading" || phase.kind === "saving";
+  const displayText =
+    lkg === null ? "loading…" : lkg === "" ? "(empty)" : lkg;
 
   return (
     <div style={panel}>
       <div style={titleRow}>
-        <span style={title}>pseudo — Input</span>
+        <span style={titleStyle}>
+          pseudo — Input
+          {editState.mode === "editing" && editState.errorMsg && (
+            <span style={errorStyle}>✕ {editState.errorMsg}</span>
+          )}
+        </span>
         <span style={{ fontSize: 10, color: "#888" }}>{nodeId}</span>
       </div>
-      {phase.kind === "error" && (
-        <div style={errorBox}>{phase.message}</div>
-      )}
-      {phase.kind === "loading" ? (
-        <div style={{ color: "#888", padding: "4px 0" }}>loading…</div>
+
+      {editState.mode === "label" ? (
+        <span
+          style={labelStyle}
+          onDoubleClick={lkg !== null ? handleDoubleClick : undefined}
+          title={lkg !== null ? "Double-click to edit" : undefined}
+        >
+          {displayText}
+        </span>
       ) : (
-        <textarea
-          ref={textRef}
-          style={textareaStyle}
-          defaultValue={currentPseudo}
-          disabled={isBusy}
+        <div
+          ref={editDivRef}
+          style={editDivStyle}
+          contentEditable="plaintext-only"
+          suppressContentEditableWarning
           spellCheck={false}
-        />
+          onInput={handleInput}
+          onBlur={handleBlur}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              lastSaveErrored.current = true; // force revert on blur
+              editDivRef.current?.blur();
+            }
+          }}
+        >
+          {lkg ?? ""}
+        </div>
       )}
-      <div style={btnRow}>
-        <button style={btnCancel} onClick={handleCancel} disabled={phase.kind === "saving"}>
-          Cancel
-        </button>
-        <button style={btnSave} onClick={handleSave} disabled={isBusy}>
-          {phase.kind === "saving" ? "Saving…" : "Save"}
-        </button>
-      </div>
     </div>
   );
 }
