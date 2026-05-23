@@ -56,8 +56,6 @@ mirror it (pulses disappear immediately on delivery).
   `use-pulse-animation.ts:51` if no longer needed for diagnosis.
 - Legacy: `loader.go` still has unused `edgeSeeds` path (dead code; `topology.json`
   has no seeds).
-- Design question: `in08` has `init:[0,1]` with no `repeat:true`, so ring stops
-  after 2 pulses. Not a bug, but consider repeat.
 
 ### Key files
 
