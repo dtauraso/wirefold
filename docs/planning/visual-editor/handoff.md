@@ -7,24 +7,27 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, task/held-values-visual)
+## State at handoff (2026-05-22, main)
 
-**Active branch:** `task/held-values-visual` (in flight, not merged).
+**Active branch:** `main`. No task branch in flight.
 
-### What just landed (task/held-values-visual)
+### Recently merged (in order)
 
-Held-value visual redesign: instead of holding the pulse dot at the destination
-handle until Done, the pulse now clears immediately on RAF completion, and the
-held value is displayed as a badge inside the destination node component at the
-relevant input handle.
+**task/stage4-cleanup** — removed `edgeSeeds` loader path and `pulse.deliver`
+debug log. `pulseValueRef` and `use-fire-flash.prev` were confirmed live and
+kept. `clearRunState`/`run-start` were already gone before this branch.
 
-Key commits on this branch:
-- `feat(trace): add KindDone event emitted from In.Done()` — adds `KindDone = "done"` to `Trace/Trace.go`, emits from `In.Done()` in `ports.go` carrying (node, port).
-- `revert(webview): clear pulse dot immediately on RAF completion` — use-pulse-animation.ts posts "delivered" and clears pulseT in the same RAF tick; no more pin at t=1.
-- `feat(webview): add held-values store for in-transit input port values` — `held-values-state.ts` (imperative bridge, `Map<"nodeId:port", value>`), `held-values-ctx.ts` (React context). pump.ts sets held value on "send" (from edge target/targetHandle) and clears on "done". app.tsx wires HeldValuesCtx.Provider.
-- `feat(webview): render held-value badge at input handle in GenericNode` — GenericNode calls `useHeldValuesCtx()` and renders a purple badge next to each input handle while a value is held (between send and done). Only shows when no slot-filled badge is already visible.
-
-- `fix(pump): badges sticky — stop clearing held value on "done"` — removed `clearHeldValue` call from `case "done"` in pump.ts; badges now show the most recent value per input port and are overwritten only by new send events.
+**task/held-values-visual** — held-value sticky badges showing last value per
+input port in node boxes. Key changes:
+- Go emits `KindDone = "done"` from `In.Done()` in `ports.go` (carrying node, port).
+- `tryParseTraceEvent` in pump.ts accepts `"done"`.
+- Pulse animation clears immediately on RAF completion (no more pin at t=1).
+- `held-values-state.ts` + `held-values-ctx.ts`: module-level Map, keyed
+  `${nodeId}:${port}` (destination), set on "send", **not cleared on "done"**
+  (badges are sticky — overwritten only by next send).
+- GenericNode renders a purple badge (`#4a148c`) at the input handle while a
+  value is held; hidden if a slot-filled badge is already shown.
+- pump.ts "done" routes to clear the pulse only (not the badge).
 
 ### Substrate model contract (stable)
 
@@ -38,29 +41,19 @@ Key commits on this branch:
 One `PacedWire` is allocated per destination port (not per edge), so N senders
 converging on one port share a single wire — fan-in works correctly.
 
-### Held-values design
-
-- **Store:** `held-values-state.ts` — module-level Map, imperative setter. Key = `${nodeId}:${port}` (destination).
-- **Context:** `held-values-ctx.ts` — `HeldValuesCtx` / `useHeldValuesCtx()`.
-- **Set:** pump.ts "send" case looks up the matching edge, reads `edge.target` + `edge.targetHandle`, calls `setHeldValue`.
-- **Clear:** pump.ts "done" case calls `clearHeldValue(node, port)`.
-- **Render:** GenericNode reads the context, shows purple badge (`#4a148c`) at the input handle position while `heldValues.has("nodeId:port")` is true, only if no slot-filled badge is already shown.
-
-### What works (on main + this branch)
+### What works
 
 - Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
 - Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`.
 - Multi-output slice ports propagate indexed handle names correctly.
 - Pulse animation renders concurrent in-flight instances.
 - Concurrent fan-out: all outputs fire in parallel.
-- **[this branch]** Pulse clears immediately on delivery; held value badge shows in node until Go calls Done.
+- Held-value sticky badges show last value per input port; pulse clears on delivery.
 
 ### Open / deferred
 
-- **Merge task/held-values-visual → main** once verified in live editor.
-- Stage 4 cleanup skipped items (not dead — still live):
-  - `pulseValueRef` — still used in `SubstrateEdge.tsx` lines 66 and 120.
-  - `use-fire-flash.prev` — essential to change-detection in the hook.
+Nothing currently blocked. New work should be friction-driven — log friction in
+`session-log.md` as it surfaces in live editor use.
 
 ### Key files
 
