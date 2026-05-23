@@ -155,8 +155,12 @@ export function PseudoPanel({ nodeId }: Props) {
   };
 
   // Edit mode: same look as label, only a subtle dashed outline to signal focus.
+  // textAlign is intentionally left (not center) so click-to-place-caret works
+  // reliably in Chromium webviews — centered contentEditable breaks hit-testing.
   const editDivStyle: React.CSSProperties = {
-    display: "block",
+    display: "inline-block",
+    width: "100%",
+    boxSizing: "border-box",
     padding: "2px 0",
     whiteSpace: "pre-wrap",
     wordBreak: "break-all",
@@ -165,7 +169,7 @@ export function PseudoPanel({ nodeId }: Props) {
     color: "inherit",
     minHeight: "1.4em",
     cursor: "text",
-    textAlign: "center",
+    textAlign: "left",
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
