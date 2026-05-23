@@ -37,8 +37,10 @@ type In struct {
 
 // Done signals to the underlying PacedWire that the receiver is finished
 // using the value returned by the last TryRecv. No-op in chan mode.
+// Emits a "done" trace event so the webview can clear the held pulse.
 func (i *In) Done() {
 	if i != nil && i.pw != nil {
+		i.trace.Done(i.node, i.port)
 		i.pw.Done()
 	}
 }
