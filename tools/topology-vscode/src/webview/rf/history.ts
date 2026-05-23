@@ -25,10 +25,18 @@ export function registerHistory(rf: ReactFlowInstance) {
   _rf = rf;
 }
 
+function cloneSnapshot(s: Snapshot): Snapshot {
+  return structuredClone(s);
+}
+
+function currentSnapshot(): Snapshot {
+  return cloneSnapshot({ nodes: _rf!.getNodes(), edges: _rf!.getEdges() });
+}
+
 export function pushSnapshot() {
   if (!_rf) return;
   const { nodes, edges } = _rf.toObject();
-  past.push({ nodes, edges });
+  past.push(cloneSnapshot({ nodes, edges }));
   if (past.length > HISTORY_LIMIT) past.shift();
   // Any new action clears the redo stack.
   future = [];
@@ -36,20 +44,18 @@ export function pushSnapshot() {
 
 export function undo() {
   if (!_rf || past.length === 0) return;
-  const current = { nodes: _rf.getNodes(), edges: _rf.getEdges() };
+  future.push(currentSnapshot());
   const prev = past.pop()!;
-  future.push(current);
-  rfSetNodes(() => prev.nodes);
-  rfSetEdges(() => prev.edges);
+  rfSetNodes(() => cloneSnapshot(prev).nodes);
+  rfSetEdges(() => cloneSnapshot(prev).edges);
 }
 
 export function redo() {
   if (!_rf || future.length === 0) return;
-  const current = { nodes: _rf.getNodes(), edges: _rf.getEdges() };
+  past.push(currentSnapshot());
   const next = future.pop()!;
-  past.push(current);
-  rfSetNodes(() => next.nodes);
-  rfSetEdges(() => next.edges);
+  rfSetNodes(() => cloneSnapshot(next).nodes);
+  rfSetEdges(() => cloneSnapshot(next).edges);
 }
 
 export function canUndo() { return past.length > 0; }
