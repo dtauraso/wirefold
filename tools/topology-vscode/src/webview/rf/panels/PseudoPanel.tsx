@@ -78,9 +78,11 @@ export function PseudoPanel({ nodeId }: Props) {
   }, [nodeId]);
 
   // Focus the editable div whenever edit mode activates.
+  // Set textContent imperatively so React never touches the DOM during editing.
   useEffect(() => {
     if (editState.mode === "editing" && editDivRef.current) {
       const el = editDivRef.current;
+      el.textContent = lkg ?? "";
       el.focus();
       // Select all
       const range = document.createRange();
@@ -89,7 +91,7 @@ export function PseudoPanel({ nodeId }: Props) {
       sel?.removeAllRanges();
       sel?.addRange(range);
     }
-  }, [editState.mode]);
+  }, [editState.mode]); // intentionally omit lkg — only runs on mode transition
 
   const scheduleSave = useCallback(
     (text: string) => {
@@ -202,9 +204,7 @@ export function PseudoPanel({ nodeId }: Props) {
               editDivRef.current?.blur();
             }
           }}
-        >
-          {lkg ?? ""}
-        </div>
+        />
       )}
     </div>
   );
