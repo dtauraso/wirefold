@@ -9,6 +9,7 @@
 // than restarting from 0.
 
 import { createContext, useContext } from "react";
+import { getPauseAdjustedNow } from "./run-status";
 
 export interface PulseData {
   value: number;
@@ -31,7 +32,7 @@ export function registerPulseSetter(setter: Setter) {
 
 export function setPulse(edgeId: string, data: Omit<PulseData, "startTime">) {
   const next = new Map(_current);
-  next.set(edgeId, { ...data, startTime: performance.now() });
+  next.set(edgeId, { ...data, startTime: getPauseAdjustedNow() });
   _current = next;
   _setter?.(next);
 }

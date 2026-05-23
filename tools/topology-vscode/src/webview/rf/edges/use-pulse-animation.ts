@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
 import { claimDelivered, usePulseCtx } from "../pulse-state";
-import { useRunStatusCtx } from "../run-status";
+import { getPauseAdjustedNow, useRunStatusCtx } from "../run-status";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;
 
@@ -71,7 +71,7 @@ export function usePulseAnimation(id: string) {
       const duration = pl / PULSE_SPEED_PX_PER_MS;
 
       // Compute t from the shared anchor so remounts resume at the right offset.
-      const tNow = Math.min((performance.now() - startTime) / duration, 1);
+      const tNow = Math.min((getPauseAdjustedNow() - startTime) / duration, 1);
       if (tNow >= 1) {
         // Already finished by the time this component mounted.
         if (claimDelivered(idRef.current, startTime)) {
@@ -83,9 +83,9 @@ export function usePulseAnimation(id: string) {
 
       setPulseT(tNow);
 
-      const tick = (now: number) => {
+      const tick = (_now: number) => {
         if (!pausedRef.current) {
-          const t = Math.min((now - startTime) / duration, 1);
+          const t = Math.min((getPauseAdjustedNow() - startTime) / duration, 1);
           setPulseT(t);
           if (t < 1) {
             raf = requestAnimationFrame(tick);
