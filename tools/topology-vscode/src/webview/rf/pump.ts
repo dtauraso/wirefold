@@ -71,6 +71,24 @@ export function handleTraceEvent(event: TraceEvent): void {
       );
       return;
     }
+    case "done": {
+      // Match the edge by target node id + targetHandle (input port name).
+      // RF edges store target/targetHandle; trace done events carry node/port.
+      const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
+      const edges = rfGetEdges();
+      const edgeId = edges.find(
+        (e) => e.target === node && e.targetHandle === port,
+      )?.id;
+      if (!edgeId) return; // no matching edge — topology mismatch, skip silently
+      rfSetEdges((es) =>
+        es.map((e) =>
+          e.id === edgeId
+            ? { ...e, data: { ...e.data, [ANIMATION_FIELDS.pulse.name]: undefined } }
+            : e,
+        ),
+      );
+      return;
+    }
     default:
       assertNever(k);
   }
