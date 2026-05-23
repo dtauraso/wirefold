@@ -462,6 +462,17 @@ func (p *pseudoParser) consumeIdent() (string, error) {
 	return p.input[start:p.pos], nil
 }
 
+// consumeToken consumes an exact literal string (no word-boundary check).
+// Use for punctuation tokens like "->".
+func (p *pseudoParser) consumeToken(tok string) error {
+	p.skipWS()
+	if !strings.HasPrefix(p.input[p.pos:], tok) {
+		return fmt.Errorf("expected %q at position %d, got %q", tok, p.pos, excerpt(p.input, p.pos))
+	}
+	p.pos += len(tok)
+	return nil
+}
+
 func (p *pseudoParser) consumeChar(ch byte) error {
 	p.skipWS()
 	if p.pos >= len(p.input) || p.input[p.pos] != ch {
