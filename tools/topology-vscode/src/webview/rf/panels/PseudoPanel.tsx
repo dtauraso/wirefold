@@ -84,12 +84,6 @@ export function PseudoPanel({ nodeId }: Props) {
       const el = editDivRef.current;
       el.textContent = lkg ?? "";
       el.focus();
-      // Select all
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
     }
   }, [editState.mode]); // intentionally omit lkg — only runs on mode transition
 
