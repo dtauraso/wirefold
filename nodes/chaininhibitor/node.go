@@ -2,6 +2,7 @@ package chaininhibitor
 
 import (
 	"context"
+	"sync"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -24,9 +25,15 @@ func (in *Node) Update(ctx context.Context) {
 		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
 			in.Fire()
 			in.FromPrevChainInhibitorNode.Done()
+			var wg sync.WaitGroup
 			for _, out := range in.ToNext {
-				out.TrySend(in.Held)
+				wg.Add(1)
+				go func(o *Wiring.Out) {
+					defer wg.Done()
+					o.TrySend(in.Held)
+				}(out)
 			}
+			wg.Wait()
 			in.Held = value
 		}
 	}
