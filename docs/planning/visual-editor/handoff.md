@@ -30,48 +30,39 @@ Stages doc: `docs/planning/visual-editor/pulses-as-channel-stages.md`.
 - **NotifyDelivered** (webview→host→stdin reader): unblocks Recv only.
 
 All 4 node packages (`input`, `readgate`, `chaininhibitor`, `inhibitrightgate`) now call
-`<input>.Done()` after finishing a value (typically after Fire + downstream TrySend succeeds).
+`<input>.Done()` right after Fire + before downstream TrySend (not deferred until
+downstream handshake), which was the fix that unblocked the ring deadlock.
+
+One `PacedWire` is allocated per destination port (not per edge), so N senders
+converging on one port share a single wire — fan-in works correctly.
 
 ### What works
 
-ReadGate consumes one value per fire cycle. Visual pacing holds: `in0` blocks between
-sends until ReadGate fires. Pulses animate one-at-a-time on each wire.
+- Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully
+  (readGate→i0→i1→back to readGate; i0+i1→inhibitRight0).
+- Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`
+  through a shared destination-port-owned wire.
+- Multi-output slice ports (`ToNext[]`) correctly propagate indexed handle names
+  (`ToNext0`/`ToNext1`) so edgeId resolution for animation is non-null.
 
-### Open bug: in08 only sends 1 of its 2 init values [0, 1]
+### Open / deferred
 
-Probe logs (after one fresh Run) confirm:
-- `in08` emits send for value=0 only. No 2nd fire event, no 2nd send event.
-- ReadGate fires once, chain progresses one cycle (i0 fires and sends downstream), then stops.
-- No `runner-errors-last.json` produced.
-
-**Hypothesis:** `Input.Update`'s goroutine returns or blocks before its 2nd iteration.
-Either `ctx.Err()` is non-nil (something is canceling ctx — possibly stdin EOF via
-`RunStdinReader` returning), or Fire/TrySend on the 2nd iteration is blocking on the
-new Recv+Done semantics.
-
-**Next investigation:** check whether `RunStdinReader` is exiting (transient EOF or parse
-error triggers `cancel()`). Add stderr logging to `main.go` or `nodes/input/node.go` to
-confirm. `Input.Update` is at `nodes/input/node.go:15-25`; stdin reader pattern:
-`main.go:32-35`.
-
-### Deferred (not blocking)
-
-**Webview pacing follow-up:** today pulses animate mid-flight then disappear at delivery.
-The richer "pulse-sits-at-destination-until-Done" rendering is not yet implemented —
-Recv-Done is enforced substrate-side only. Add once the in08 bug is resolved.
-
-**Stages 4 cleanup:** `clearRunState`, `run-start`, `pulseValueRef`, `use-fire-flash.prev`
-haven't been deleted yet. They're inert but should be removed once substrate is fully working.
-
-### Outside-this-branch carry-forwards
-
-`topology.json` has uncommitted working-tree drift on main (untouched by this branch).
+- `in08` has `init:[0,1]` with no `repeat:true`, so the ring stops after 2 input
+  pulses propagate. Not a bug — design question whether to add repeat.
+- **Webview pacing follow-up:** "pulse-sits-at-destination-until-Done" rendering
+  still pending (Recv-Done enforced substrate-side only; no visual hold at destination).
+- **Stages 4 cleanup:** `clearRunState`, `run-start`, `pulseValueRef`,
+  `use-fire-flash.prev` still pending removal (inert dead code).
+- Optional: remove debug `postLog("pulse.deliver", ...)` from
+  `use-pulse-animation.ts:51` if no longer needed for diagnosis.
+- Legacy: `loader.go` still has unused `edgeSeeds` path (dead code; `topology.json`
+  has no seeds).
 
 ## Dev-loop
 
 After TS edit: `npm run build` from `tools/topology-vscode/`.
 After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
-To repro bug: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
+To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
 Check: `go test ./...`, `npm run check:loc`, `bash tools/check-substrate-vocabulary.sh`.
 
