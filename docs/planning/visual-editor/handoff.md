@@ -7,21 +7,19 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, task/held-values-visual)
+## State at handoff (2026-05-22, main)
 
-**Active branch:** `task/held-values-visual` (branched from main post-merge of `task/pulses-as-instances`).
+**Active branch:** `main` (post-merge of `task/i0-concurrent-fanout`).
 
-Continuing on wirefold, branch `task/held-values-visual`.
+No task branch in flight. The visual-hold work (`task/held-values-visual`) is set aside.
 
-### What this branch is doing
+### What just landed (task/i0-concurrent-fanout)
 
-Implement the visual hold: a pulse should sit at the destination handle from `Recv` until
-`Done` is called. The substrate (`PacedWire`) already enforces this contract — `Recv`
-unblocks on `NotifyDelivered`, and `Done` clears the slot. The webview animation does not
-yet mirror this: pulses currently disappear immediately on delivery rather than holding
-at the destination port until `Done`.
+Concurrent fan-out: `Fire` in the substrate now emits to all output channels
+concurrently rather than sequentially, so multi-output nodes don't serialize
+their downstream paths.
 
-### Substrate model contract (stable from task/pulses-as-instances)
+### Substrate model contract (stable)
 
 `PacedWire` in `nodes/Wiring/paced_wire.go` has THREE operations: `Send`, `Recv`, `Done`.
 
@@ -33,7 +31,7 @@ at the destination port until `Done`.
 One `PacedWire` is allocated per destination port (not per edge), so N senders
 converging on one port share a single wire — fan-in works correctly.
 
-### What works (landed on main)
+### What works (on main)
 
 - Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
 - Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`
@@ -41,12 +39,17 @@ converging on one port share a single wire — fan-in works correctly.
 - Multi-output slice ports (`ToNext[]`) correctly propagate indexed handle names
   (`ToNext0`/`ToNext1`) so edgeId resolution for animation is non-null.
 - Pulse animation renders concurrent in-flight instances (per-emit simTime anchoring).
+- Concurrent fan-out: all outputs fire in parallel (no head-of-line serialization).
 
-### Open / deferred (carry into this branch)
+### Set aside (task/held-values-visual)
 
-- **Webview pacing (this branch):** pulse-sits-at-destination-until-Done rendering.
-  Substrate enforces it; webview needs to hold the pulse marker at the destination
-  handle from the moment of delivery until a `Done` event arrives.
+Branch exists but is parked. Work: pulse should sit at destination handle from
+`Recv` until `Done` is called. Substrate enforces this; webview does not yet
+mirror it (pulses disappear immediately on delivery).
+
+### Open / deferred
+
+- **Webview pacing (held-values-visual, set aside):** pulse-sits-at-destination-until-Done.
 - **Stages 4 cleanup (deferred):** `clearRunState`, `run-start`, `pulseValueRef`,
   `use-fire-flash.prev` still pending removal (inert dead code).
 - Optional: remove debug `postLog("pulse.deliver", ...)` from
@@ -54,9 +57,9 @@ converging on one port share a single wire — fan-in works correctly.
 - Legacy: `loader.go` still has unused `edgeSeeds` path (dead code; `topology.json`
   has no seeds).
 - Design question: `in08` has `init:[0,1]` with no `repeat:true`, so ring stops
-  after 2 pulses propagate. Not a bug, but consider repeat.
+  after 2 pulses. Not a bug, but consider repeat.
 
-### Key files for this branch
+### Key files
 
 - `tools/topology-vscode/src/webview/rf/edges/use-pulse-animation.ts` — pulse animation hook
 - `tools/topology-vscode/src/webview/rf/pump.ts` — event routing from host
