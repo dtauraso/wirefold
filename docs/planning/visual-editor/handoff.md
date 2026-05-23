@@ -50,12 +50,14 @@ mirror it (pulses disappear immediately on delivery).
 ### Open / deferred
 
 - **Webview pacing (held-values-visual, set aside):** pulse-sits-at-destination-until-Done.
-- **Stages 4 cleanup (deferred):** `clearRunState`, `run-start`, `pulseValueRef`,
-  `use-fire-flash.prev` still pending removal (inert dead code).
-- Optional: remove debug `postLog("pulse.deliver", ...)` from
-  `use-pulse-animation.ts:51` if no longer needed for diagnosis.
-- Legacy: `loader.go` still has unused `edgeSeeds` path (dead code; `topology.json`
-  has no seeds).
+- **Stage 4 cleanup (task/stage4-cleanup):** removed `edgeSeeds` path from
+  `loader.go` and debug `postLog("pulse.deliver")` from `use-pulse-animation.ts`.
+  Skipped items (not dead — still live):
+  - `clearRunState` — not found in codebase (already gone).
+  - `run-start` — not found in codebase (already gone).
+  - `pulseValueRef` — still used in `SubstrateEdge.tsx` lines 66 and 120; not dead.
+  - `use-fire-flash.prev` — `prev` ref is essential to change-detection in the hook's
+    `useEffect`; not dead.
 
 ### Key files
 

@@ -13,7 +13,6 @@
 //   - ChainInhibitor: data.state["held"] → Held via wire:"data.state" tag.
 //   - Slice output ports (ToEdge): all outbound wires appended in spec order.
 //   - Output ports with no outbound edge: dead-end chan int (buf 1).
-//   - data.edgeSeeds entries prime the inbound wire before node goroutines start.
 
 package Wiring
 
@@ -38,8 +37,7 @@ type specNode struct {
 type NodeData struct {
 	Init      []int          `json:"init,omitempty"`
 	Repeat    bool           `json:"repeat,omitempty"`
-	State     map[string]int `json:"state,omitempty"`     // field-seeding: struct fields via wire:"data.state"
-	EdgeSeeds map[string]int `json:"edgeSeeds,omitempty"` // edge-seeding: pre-send into named input wires
+	State map[string]int `json:"state,omitempty"` // field-seeding: struct fields via wire:"data.state"
 }
 
 // specEdge mirrors the JSON edge shape.
@@ -61,14 +59,6 @@ type specEdge struct {
 type topoSpec struct {
 	Nodes []specNode `json:"nodes"`
 	Edges []specEdge `json:"edges"`
-}
-
-// nodeEdgeSeeds returns the data.edgeSeeds map for a node (or empty if absent).
-func nodeEdgeSeeds(n specNode) map[string]int {
-	if n.Data != nil && n.Data.EdgeSeeds != nil {
-		return n.Data.EdgeSeeds
-	}
-	return map[string]int{}
 }
 
 // WireRegistry maps edge label → *PacedWire. The stdin-reader goroutine uses
@@ -215,34 +205,6 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 			}
 			if _, ok := inbound[n.ID][port.Name]; !ok {
 				return nil, nil, fmt.Errorf("LoadTopology: node %q: required input port %q has no inbound edge", n.ID, port.Name)
-			}
-		}
-	}
-
-	// Prime wires for edgeSeeds entries that map to input ports.
-	// The stub pacer will immediately NotifyDelivered, so Send completes
-	// before node goroutines start (goroutines start after this loop).
-	for _, n := range spec.Nodes {
-		seeds := nodeEdgeSeeds(n)
-		if len(seeds) == 0 {
-			continue
-		}
-		bind := Registry[n.Type]
-		for _, port := range bind.Ports {
-			if port.Dir != PortIn {
-				continue
-			}
-			seedVal, hasSeed := seeds[port.Name]
-			if !hasSeed {
-				continue
-			}
-			dk, ok := inbound[n.ID][port.Name]
-			if !ok {
-				return nil, nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: port %q has no incoming edge", n.ID, port.Name)
-			}
-			pw := destWire[dk]
-			if err := pw.Send(ctx, seedVal); err != nil {
-				return nil, nil, fmt.Errorf("LoadTopology: node %q edgeSeeds: seed send on port %q canceled", n.ID, port.Name)
 			}
 		}
 	}
