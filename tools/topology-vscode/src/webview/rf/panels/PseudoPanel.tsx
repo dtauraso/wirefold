@@ -131,57 +131,41 @@ export function PseudoPanel({ nodeId }: Props) {
 
   // ── Styles ─────────────────────────────────────────────────────────────────
 
+  // Matches the node container's base text style (fontSize 11, inherited color)
+  // plus a top separator so it doesn't crowd the label above.
   const panel: React.CSSProperties = {
-    background: "#1e1e1e",
-    border: "1px solid #444",
-    borderRadius: 4,
-    padding: "8px",
-    marginTop: 6,
+    marginTop: 4,
     width: "100%",
     boxSizing: "border-box",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
     fontFamily: "monospace",
     fontSize: 11,
-    color: "#ccc",
   };
 
-  const titleRow: React.CSSProperties = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 2,
-  };
-
-  const titleStyle: React.CSSProperties = {
-    fontWeight: 600,
-    fontSize: 11,
-    color: "#ddd",
-  };
-
+  // Inherits font/color from node; italic+dim while loading.
   const labelStyle: React.CSSProperties = {
     display: "block",
     padding: "2px 0",
     cursor: "text",
     whiteSpace: "pre-wrap",
     wordBreak: "break-all",
-    color: lkg === null ? "#666" : "#ccc",
+    color: lkg === null ? "#666" : "inherit",
     fontStyle: lkg === null ? "italic" : "normal",
     userSelect: "text",
+    textAlign: "center",
   };
 
+  // Edit mode: same look as label, only a subtle dashed outline to signal focus.
   const editDivStyle: React.CSSProperties = {
     display: "block",
-    padding: "3px 5px",
+    padding: "2px 0",
     whiteSpace: "pre-wrap",
     wordBreak: "break-all",
-    outline: "1px solid #4d9de0",
-    borderRadius: 2,
-    background: "#252526",
-    color: "#ccc",
+    outline: "1px dashed #888",
+    outlineOffset: 2,
+    color: "inherit",
     minHeight: "1.4em",
     cursor: "text",
+    textAlign: "center",
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -191,11 +175,6 @@ export function PseudoPanel({ nodeId }: Props) {
 
   return (
     <div style={panel}>
-      <div style={titleRow}>
-        <span style={titleStyle}>pseudo — Input</span>
-        <span style={{ fontSize: 10, color: "#888" }}>{nodeId}</span>
-      </div>
-
       {editState.mode === "label" ? (
         <span
           style={labelStyle}
