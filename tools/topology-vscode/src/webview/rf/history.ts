@@ -9,12 +9,15 @@
 
 import type { ReactFlowInstance, Node as RFNode, Edge as RFEdge } from "reactflow";
 import { rfSetNodes, rfSetEdges } from "./rf-imperative";
+import { viewerState, setViewerState } from "./viewer-state";
+import type { ViewerState } from "../state/viewer/types";
 
 const HISTORY_LIMIT = 50;
 
 interface Snapshot {
   nodes: RFNode[];
   edges: RFEdge[];
+  viewerState: ViewerState;
 }
 
 let past: Snapshot[] = [];
@@ -30,13 +33,13 @@ function cloneSnapshot(s: Snapshot): Snapshot {
 }
 
 function currentSnapshot(): Snapshot {
-  return cloneSnapshot({ nodes: _rf!.getNodes(), edges: _rf!.getEdges() });
+  return cloneSnapshot({ nodes: _rf!.getNodes(), edges: _rf!.getEdges(), viewerState });
 }
 
 export function pushSnapshot() {
   if (!_rf) return;
   const { nodes, edges } = _rf.toObject();
-  past.push(cloneSnapshot({ nodes, edges }));
+  past.push(cloneSnapshot({ nodes, edges, viewerState }));
   if (past.length > HISTORY_LIMIT) past.shift();
   // Any new action clears the redo stack.
   future = [];
@@ -46,6 +49,7 @@ export function undo() {
   if (!_rf || past.length === 0) return;
   future.push(currentSnapshot());
   const prev = past.pop()!;
+  setViewerState(cloneSnapshot(prev).viewerState);
   rfSetNodes(() => cloneSnapshot(prev).nodes);
   rfSetEdges(() => cloneSnapshot(prev).edges);
 }
@@ -54,6 +58,7 @@ export function redo() {
   if (!_rf || future.length === 0) return;
   past.push(currentSnapshot());
   const next = future.pop()!;
+  setViewerState(cloneSnapshot(next).viewerState);
   rfSetNodes(() => cloneSnapshot(next).nodes);
   rfSetEdges(() => cloneSnapshot(next).edges);
 }
