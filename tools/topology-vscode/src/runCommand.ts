@@ -15,7 +15,7 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
     if (
       typeof obj === "object" && obj !== null &&
       typeof obj.step === "number" &&
-      (obj.kind === "recv" || obj.kind === "fire" || obj.kind === "send" || obj.kind === "slot")
+      (obj.kind === "recv" || obj.kind === "fire" || obj.kind === "send" || obj.kind === "slot" || obj.kind === "done")
     ) {
       return obj as TraceEvent;
     }
