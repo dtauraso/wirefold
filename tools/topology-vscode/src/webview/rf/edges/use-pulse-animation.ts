@@ -14,6 +14,7 @@ import { postLog } from "../../log/post";
 import { vscode } from "../../vscode-api";
 import { claimDelivered, usePulseCtx } from "../pulse-state";
 import { getPauseAdjustedNow, useRunStatusCtx } from "../run-status";
+import { setHeldValue } from "../held-values";
 
 const PULSE_SPEED_PX_PER_MS = 0.08;
 
@@ -75,6 +76,9 @@ export function usePulseAnimation(id: string) {
       if (tNow >= 1) {
         // Already finished by the time this component mounted.
         if (claimDelivered(idRef.current, startTime)) {
+          if (pulse.target && pulse.targetHandle) {
+            setHeldValue(pulse.target, pulse.targetHandle, pulse.value);
+          }
           vscode.postMessage({ type: "delivered", edge: idRef.current });
         }
         setPulseT(null);
@@ -90,9 +94,12 @@ export function usePulseAnimation(id: string) {
           if (t < 1) {
             raf = requestAnimationFrame(tick);
           } else {
-            // Pulse arrived at destination. Post "delivered" so Go's PacedWire
-            // unblocks Recv, then clear the pulse dot immediately.
+            // Pulse arrived at destination. Write held-value badge, post "delivered"
+            // so Go's PacedWire unblocks Recv, then clear the pulse dot immediately.
             if (claimDelivered(idRef.current, startTime)) {
+              if (pulse.target && pulse.targetHandle) {
+                setHeldValue(pulse.target, pulse.targetHandle, pulse.value);
+              }
               vscode.postMessage({ type: "delivered", edge: idRef.current });
             }
             setPulseT(null);

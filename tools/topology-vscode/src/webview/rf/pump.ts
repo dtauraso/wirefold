@@ -8,11 +8,12 @@
 //
 //  1. Go emits "send" (node, port, value)
 //     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
-//     → held-values.ts:setHeldValue  (destination node shows badge while pulse travels)
-//     → pulse-state.ts:setPulse  writes { value, simStep } into PulseCtx
+//     → pulse-state.ts:setPulse  writes { value, simStep, target, targetHandle } into PulseCtx
+//     (held-value badge is NOT written here; it fires at t=1 in use-pulse-animation)
 //
 //  2. RAF loop in edges/use-pulse-animation.ts animates pulse 0→1
-//     → on t=1: posts "delivered" message so Go's PacedWire unblocks Recv
+//     → on t=1: calls held-values.ts:setHeldValue (badge appears at pulse arrival)
+//     → posts "delivered" message so Go's PacedWire unblocks Recv
 //     → clears pulseT (dot disappears); held-value badge stays visible
 //
 //  3. Go emits "done" (node, port)
@@ -25,7 +26,6 @@ import type { TraceEvent, SlotEvent, SlotMap } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { rfGetEdges } from "./rf-imperative";
 import { postLog } from "../log/post";
-import { setHeldValue } from "./held-values";
 import { setPulse, clearPulse } from "./pulse-state";
 import { setLastFire } from "./fire-flash-state";
 import { setSlots } from "./slots-state";
@@ -75,12 +75,14 @@ export function handleTraceEvent(event: TraceEvent): void {
       );
       for (const edge of matched) {
         postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null, edgeId: edge.id });
-        // Eagerly record the held value at the destination port so the node can
-        // show it while the pulse animates and until Go signals Done.
-        if (edge.target && edge.targetHandle) {
-          setHeldValue(edge.target, edge.targetHandle, value ?? 0);
-        }
-        setPulse(edge.id, { value: value ?? 0, simStep: step });
+        // Pass target+targetHandle so use-pulse-animation can write the held-value
+        // badge at t=1 (pulse arrival) rather than eagerly at send time.
+        setPulse(edge.id, {
+          value: value ?? 0,
+          simStep: step,
+          target: edge.target ?? "",
+          targetHandle: edge.targetHandle ?? "",
+        });
       }
       return;
     }

@@ -3,7 +3,7 @@
 // on mount so the context re-renders when the map changes.
 //
 // Key: edge id.
-// Value: { value, simStep, startTime } describing the in-flight pulse.
+// Value: { value, simStep, target, targetHandle, startTime } describing the in-flight pulse.
 // startTime is performance.now() at the moment setPulse is called; it
 // lets remounted components resume animation at the correct t rather
 // than restarting from 0.
@@ -14,6 +14,8 @@ import { getPauseAdjustedNow } from "./run-status";
 export interface PulseData {
   value: number;
   simStep: number;
+  target: string;
+  targetHandle: string;
   startTime: number;
 }
 
@@ -31,6 +33,8 @@ export function registerPulseSetter(setter: Setter) {
 }
 
 export function setPulse(edgeId: string, data: Omit<PulseData, "startTime">) {
+  // data must include target + targetHandle so use-pulse-animation can write
+  // the held-value badge at t=1 (pulse arrival) rather than at send time.
   const next = new Map(_current);
   next.set(edgeId, { ...data, startTime: getPauseAdjustedNow() });
   _current = next;
