@@ -45,7 +45,7 @@ func TestInputRoundTrip_FullCycle(t *testing.T) {
 	goSrc := loadInputNodeGo(t)
 	spec := fixtureSpec()
 
-	view, err := FromInput(goSrc, spec)
+	view, err := FromInput(goSrc, spec, "readGate1")
 	if err != nil {
 		t.Fatalf("FromInput: %v", err)
 	}
@@ -87,15 +87,15 @@ func TestInputRoundTrip_SpecEditOnly(t *testing.T) {
 	goSrc := loadInputNodeGo(t)
 	spec := fixtureSpec()
 
-	view, err := FromInput(goSrc, spec)
+	view, err := FromInput(goSrc, spec, "readGate1")
 	if err != nil {
 		t.Fatalf("FromInput: %v", err)
 	}
 
 	// Mutate spec-origin tokens only: change values, ensure repeatedly is present.
-	// Original rendered: "repeatedly send each of [0, 1] to ToReadGate"
-	// Mutate to: "repeatedly send each of [2, 3, 5] to ToReadGate"
-	mutated := "repeatedly send each of [2, 3, 5] to ToReadGate"
+	// Original rendered: "repeatedly send each of [0, 1] -> readGate1"
+	// Mutate to: "repeatedly send each of [2, 3, 5] -> readGate1"
+	mutated := "repeatedly send each of [2, 3, 5] -> readGate1"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
@@ -124,27 +124,38 @@ func TestInputRoundTrip_SpecEditOnly(t *testing.T) {
 	}
 }
 
-// TestInputRoundTrip_GoEditOnly: mutate pseudo to rename the output field;
-// assert spec is deep-equal to fixture, Go has the field renamed in both places.
-func TestInputRoundTrip_GoEditOnly(t *testing.T) {
+// TestInputRoundTrip_NeighborEdit: mutate pseudo to change the out-neighbor id;
+// assert Go is byte-identical, spec unchanged, and OutNeighbor updated.
+func TestInputRoundTrip_NeighborEdit(t *testing.T) {
 	goSrc := loadInputNodeGo(t)
 	spec := fixtureSpec()
 
-	view, err := FromInput(goSrc, spec)
+	view, err := FromInput(goSrc, spec, "readGate1")
 	if err != nil {
 		t.Fatalf("FromInput: %v", err)
 	}
 
-	// Change output field name from ToReadGate → ToFanout.
-	mutated := "repeatedly send each of [0, 1] to ToFanout"
+	// Change out-neighbor from readGate1 → fanout1.
+	mutated := "repeatedly send each of [0, 1] -> fanout1"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
 	}
 
+	if view2.OutNeighbor != "fanout1" {
+		t.Errorf("OutNeighbor = %q; want fanout1", view2.OutNeighbor)
+	}
+
 	newGoSrc, newSpec, err := ToInput(view2)
 	if err != nil {
 		t.Fatalf("ToInput: %v", err)
+	}
+
+	// Go bytes must be byte-identical (neighbor edit does not touch Go source).
+	wantGo := gofmtBytes(t, goSrc)
+	gotGo := gofmtBytes(t, newGoSrc)
+	if string(wantGo) != string(gotGo) {
+		t.Errorf("Go source changed after neighbor-only edit.\nwant:\n%s\ngot:\n%s", wantGo, gotGo)
 	}
 
 	// Spec must equal the fixture (unchanged).
@@ -154,33 +165,15 @@ func TestInputRoundTrip_GoEditOnly(t *testing.T) {
 		"x":      "keep-me",
 	}
 	if !specEqual(newSpec, wantSpec) {
-		t.Errorf("spec not preserved after Go-only edit.\nwant: %v\ngot:  %v", wantSpec, newSpec)
-	}
-
-	// Go source must contain the new field name.
-	newGoStr := string(newGoSrc)
-	if !strings.Contains(newGoStr, "ToFanout") {
-		t.Errorf("renamed field ToFanout not found in new Go source:\n%s", newGoStr)
-	}
-	if strings.Contains(newGoStr, "ToReadGate") {
-		t.Errorf("old field name ToReadGate still present in new Go source:\n%s", newGoStr)
-	}
-
-	// Re-parse the new Go source with FromInput to verify it's structurally valid.
-	view3, err := FromInput(newGoSrc, spec)
-	if err != nil {
-		t.Fatalf("FromInput on renamed source: %v", err)
-	}
-	if view3.OutputField != "ToFanout" {
-		t.Errorf("after re-parse, OutputField = %q; want ToFanout", view3.OutputField)
+		t.Errorf("spec not preserved after neighbor edit.\nwant: %v\ngot:  %v", wantSpec, newSpec)
 	}
 }
 
 // TestInputParse_RejectsExtraTrailingTokens: trailing tokens must cause a
 // human-readable error mentioning the offending token.
 func TestInputParse_RejectsExtraTrailingTokens(t *testing.T) {
-	prior := InputView{OutputField: "ToReadGate"}
-	_, err := ParseInput("send each of [0, 1] to ToReadGate boom", prior)
+	prior := InputView{OutNeighbor: "readGate1"}
+	_, err := ParseInput("send each of [0, 1] -> readGate1 boom", prior)
 	if err == nil {
 		t.Fatal("expected error for trailing token, got nil")
 	}
@@ -197,7 +190,7 @@ func TestInputParse_RejectsExtraTrailingTokens(t *testing.T) {
 // TestInputParse_SuggestionOnError: a parse failure must return a *ParseInputError
 // whose Error() is human-readable and whose Suggestion() includes the canonical form.
 func TestInputParse_SuggestionOnError(t *testing.T) {
-	prior := InputView{OutputField: "ToReadGate", InitValues: []int{0, 1}}
+	prior := InputView{OutNeighbor: "readGate1", InitValues: []int{0, 1}}
 	_, err := ParseInput("not valid pseudo text", prior)
 	if err == nil {
 		t.Fatal("expected error for invalid pseudo text, got nil")
@@ -219,13 +212,13 @@ func TestInputParse_SuggestionOnError(t *testing.T) {
 	if !strings.Contains(msg, "send") {
 		t.Errorf("Error() does not mention expected start keyword: %q", msg)
 	}
-	// Suggestion must mention the canonical form and prior OutputField.
+	// Suggestion must mention the canonical form and prior OutNeighbor.
 	sug := pe.Suggestion()
 	if sug == "" {
 		t.Fatal("Suggestion() returned empty string")
 	}
-	if !strings.Contains(sug, "ToReadGate") {
-		t.Errorf("Suggestion() does not mention OutputField: %q", sug)
+	if !strings.Contains(sug, "readGate1") {
+		t.Errorf("Suggestion() does not mention OutNeighbor: %q", sug)
 	}
 	if !strings.Contains(sug, "send each of") {
 		t.Errorf("Suggestion() does not contain canonical form: %q", sug)
@@ -256,7 +249,7 @@ func init() {
 }
 `)
 	spec := map[string]any{"init": []any{}, "repeat": false}
-	_, err := FromInput(twoOutputs, spec)
+	_, err := FromInput(twoOutputs, spec, "")
 	if err == nil {
 		t.Fatal("expected error for multiple *Wiring.Out fields, got nil")
 	}

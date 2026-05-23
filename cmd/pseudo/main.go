@@ -124,7 +124,7 @@ func parseFlags(args []string, required ...string) (map[string]string, error) {
 	flags := map[string]string{}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--go-file", "--spec-json", "--pseudo":
+		case "--go-file", "--spec-json", "--pseudo", "--out-neighbor":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a value", args[i])
 			}
@@ -167,7 +167,7 @@ func parseReadGateFlags(args []string, required ...string) (map[string]string, e
 }
 
 func runRender(args []string) {
-	flags, err := parseFlags(args, "go-file", "spec-json")
+	flags, err := parseFlags(args, "go-file", "spec-json", "out-neighbor")
 	if err != nil {
 		fatal("%s", err)
 	}
@@ -182,7 +182,7 @@ func runRender(args []string) {
 		fatal("parsing spec-json: %s", err)
 	}
 
-	view, err := pseudo.FromInput(goSrc, specEntry)
+	view, err := pseudo.FromInput(goSrc, specEntry, flags["out-neighbor"])
 	if err != nil {
 		fatal("%s", err)
 	}
@@ -191,7 +191,7 @@ func runRender(args []string) {
 }
 
 func runSave(args []string) {
-	flags, err := parseFlags(args, "go-file", "spec-json", "pseudo")
+	flags, err := parseFlags(args, "go-file", "spec-json", "pseudo", "out-neighbor")
 	if err != nil {
 		fatal("%s", err)
 	}
@@ -206,7 +206,7 @@ func runSave(args []string) {
 		fatal("parsing spec-json: %s", err)
 	}
 
-	prior, err := pseudo.FromInput(goSrc, specEntry)
+	prior, err := pseudo.FromInput(goSrc, specEntry, flags["out-neighbor"])
 	if err != nil {
 		fatal("FromInput: %s", err)
 	}

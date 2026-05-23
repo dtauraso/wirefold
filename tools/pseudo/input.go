@@ -30,6 +30,7 @@ const (
 // writes back to the correct source.
 type InputView struct {
 	OutputField string // OriginGo  — *Wiring.Out struct field name
+	OutNeighbor string // topology  — downstream node id, supplied by caller
 	InitValues  []int  // OriginSpec — data.init
 	Repeat      bool   // OriginSpec — data.repeat
 
@@ -43,8 +44,9 @@ type InputView struct {
 //
 // goSrc must contain a package-level struct named Node in package input with
 // exactly one *Wiring.Out field. specEntry must contain "init" ([]numbers) and
-// "repeat" (bool).
-func FromInput(goSrc []byte, specEntry map[string]any) (InputView, error) {
+// "repeat" (bool). outNeighbor is resolved from topology by the caller and is
+// not derived from Go source.
+func FromInput(goSrc []byte, specEntry map[string]any, outNeighbor string) (InputView, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", goSrc, 0)
 	if err != nil {
@@ -71,6 +73,7 @@ func FromInput(goSrc []byte, specEntry map[string]any) (InputView, error) {
 
 	return InputView{
 		OutputField: outputField,
+		OutNeighbor: outNeighbor,
 		InitValues:  initValues,
 		Repeat:      repeat,
 		origGoSrc:   goSrc,
@@ -81,8 +84,8 @@ func FromInput(goSrc []byte, specEntry map[string]any) (InputView, error) {
 // RenderInput produces the human-readable pseudo text for an InputView.
 // Format examples:
 //
-//	send each of [0, 1] to ToReadGate
-//	repeatedly send each of [0, 1] to ToReadGate
+//	send each of [0, 1] -> readGate1
+//	repeatedly send each of [0, 1] -> readGate1
 func RenderInput(v InputView) string {
 	var b strings.Builder
 	if v.Repeat {
@@ -95,8 +98,8 @@ func RenderInput(v InputView) string {
 		}
 		b.WriteString(strconv.Itoa(n))
 	}
-	b.WriteString("] to ")
-	b.WriteString(v.OutputField)
+	b.WriteString("] -> ")
+	b.WriteString(v.OutNeighbor)
 	return b.String()
 }
 
@@ -114,12 +117,12 @@ func (e *ParseInputError) Unwrap() error      { return e.cause }
 func (e *ParseInputError) Suggestion() string { return e.suggestion }
 
 // buildSuggestion produces the canonical suggestion string for a failed
-// ParseInput call. It uses prior.OutputField when available; otherwise it
+// ParseInput call. It uses prior.OutNeighbor when available; otherwise it
 // falls back to a placeholder.
 func buildSuggestion(prior InputView) string {
-	field := prior.OutputField
-	if field == "" {
-		field = "<OutputField>"
+	neighbor := prior.OutNeighbor
+	if neighbor == "" {
+		neighbor = "<node>"
 	}
 	vals := prior.InitValues
 	parts := make([]string, len(vals))
@@ -127,7 +130,7 @@ func buildSuggestion(prior InputView) string {
 		parts[i] = strconv.Itoa(v)
 	}
 	list := strings.Join(parts, ", ")
-	return fmt.Sprintf("Try: [repeatedly] send each of [%s] to %s", list, field)
+	return fmt.Sprintf("Try: [repeatedly] send each of [%s] -> %s", list, neighbor)
 }
 
 // ParseInput parses a pseudo text produced (or edited) by the user back into
@@ -136,17 +139,18 @@ func buildSuggestion(prior InputView) string {
 //
 // Grammar (whitespace-insensitive):
 //
-//	pseudo   := ["repeatedly"] "send" "each" "of" "[" intList "]" "to" ident
+//	pseudo   := ["repeatedly"] "send" "each" "of" "[" intList "]" "->" ident
 //	intList  := int ("," int)* | ε
 //
-// The returned view inherits prior.origGoSrc and prior.origSpec so that
-// unchanged ceremony is preserved for byte-identical round-trips.
+// The returned view inherits prior.origGoSrc, prior.origSpec, and
+// prior.OutputField so that unchanged ceremony is preserved for byte-identical
+// round-trips. The parsed ident after "->" is stored in OutNeighbor.
 //
 // On parse failure the returned error is *ParseInputError, which exposes a
 // Suggestion() string with the canonical form.
 func ParseInput(text string, prior InputView) (InputView, error) {
 	p := &pseudoParser{input: text}
-	repeat, vals, ident, err := p.parseInputPseudo()
+	repeat, vals, outNeighbor, err := p.parseInputPseudo()
 	if err != nil {
 		var pe *parseError
 		if errors.As(err, &pe) {
@@ -163,7 +167,8 @@ func ParseInput(text string, prior InputView) (InputView, error) {
 		}
 	}
 	return InputView{
-		OutputField: ident,
+		OutputField: prior.OutputField,
+		OutNeighbor: outNeighbor,
 		InitValues:  vals,
 		Repeat:      repeat,
 		origGoSrc:   prior.origGoSrc,
@@ -398,7 +403,7 @@ func (e *parseError) humanMessage() string {
 	case parseErrUnclosedBrace:
 		return fmt.Sprintf("Couldn't parse %q. Init values must be enclosed in brackets like [0, 1].", e.token)
 	case parseErrMissingIdent:
-		return fmt.Sprintf("Couldn't parse %q. Missing output field name after \"to\".", e.token)
+		return fmt.Sprintf("Couldn't parse %q. Missing node id after \"->\".", e.token)
 	case parseErrTrailing:
 		return fmt.Sprintf("Couldn't parse %q. Unexpected text after the output field name.", e.token)
 	default:
@@ -566,7 +571,7 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 		err = &parseError{kind: parseErrUnclosedBrace, token: tok, wrapped: rawErr}
 		return
 	}
-	if rawErr := p.consumeWord("to"); rawErr != nil {
+	if rawErr := p.consumeToken("->"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		err = &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 		return
