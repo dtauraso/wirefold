@@ -186,10 +186,13 @@ export function PseudoPanel({ nodeId }: Props) {
       ) : (
         <div
           ref={editDivRef}
+          className="nodrag nopan"
           style={editDivStyle}
           contentEditable="plaintext-only"
           suppressContentEditableWarning
           spellCheck={false}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           onInput={handleInput}
           onBlur={handleBlur}
           onKeyDown={(e) => {
