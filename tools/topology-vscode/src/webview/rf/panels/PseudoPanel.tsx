@@ -12,8 +12,28 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { vscode } from "../../vscode-api";
 
+type Kind = "Input" | "ReadGate";
+
+const MSG = {
+  Input: {
+    render:       "pseudo-render",
+    save:         "pseudo-save",
+    renderResult: "pseudo-render-result",
+    saveResult:   "pseudo-save-result",
+    error:        "pseudo-error",
+  },
+  ReadGate: {
+    render:       "readgate-render",
+    save:         "readgate-save",
+    renderResult: "readgate-render-result",
+    saveResult:   "readgate-save-result",
+    error:        "readgate-error",
+  },
+} as const;
+
 type Props = {
   nodeId: string;
+  kind?: Kind;
   onClose?: () => void;
 };
 
@@ -21,8 +41,9 @@ type EditState =
   | { mode: "label" }
   | { mode: "editing" };
 
-export function PseudoPanel({ nodeId }: Props) {
-  // Last-known-good text (from pseudo-render-result or last pseudo-save-result)
+export function PseudoPanel({ nodeId, kind = "Input" }: Props) {
+  const msg = MSG[kind];
+  // Last-known-good text (from render-result or last save-result)
   const [lkg, setLkg] = useState<string | null>(null);
   // Current buffer while editing
   const bufRef = useRef<string>("");
@@ -45,26 +66,26 @@ export function PseudoPanel({ nodeId }: Props) {
       if (data.nodeId !== nodeId) return;
 
       if (
-        data.type === "pseudo-render-result" &&
+        data.type === msg.renderResult &&
         typeof data.pseudo === "string"
       ) {
         setLkg(data.pseudo);
       } else if (
-        data.type === "pseudo-save-result" &&
+        data.type === msg.saveResult &&
         typeof data.pseudo === "string"
       ) {
         // Accept: update last-known-good to whatever was just saved.
         setLkg(data.pseudo);
         lastSaveErrored.current = false;
       } else if (
-        data.type === "pseudo-save-result"
+        data.type === msg.saveResult
       ) {
         // save-result without pseudo field — accept; promote the current
         // buffer to last-known-good so label mode shows the saved text.
         setLkg(bufRef.current);
         lastSaveErrored.current = false;
       } else if (
-        data.type === "pseudo-error" &&
+        data.type === msg.error &&
         typeof data.message === "string"
       ) {
         lastSaveErrored.current = true;
@@ -72,12 +93,12 @@ export function PseudoPanel({ nodeId }: Props) {
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [nodeId]);
+  }, [nodeId, msg]);
 
-  // Post pseudo-render on mount.
+  // Post render on mount.
   useEffect(() => {
-    vscode.postMessage({ type: "pseudo-render", nodeId });
-  }, [nodeId]);
+    vscode.postMessage({ type: msg.render, nodeId });
+  }, [nodeId, msg]);
 
   // Focus the editable div whenever edit mode activates.
   // Set textContent imperatively so React never touches the DOM during editing.
@@ -93,10 +114,10 @@ export function PseudoPanel({ nodeId }: Props) {
     (text: string) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: text });
+        vscode.postMessage({ type: msg.save, nodeId, pseudo: text });
       }, 250);
     },
-    [nodeId]
+    [nodeId, msg]
   );
 
   const handleDoubleClick = () => {
@@ -118,13 +139,13 @@ export function PseudoPanel({ nodeId }: Props) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
       if (!lastSaveErrored.current) {
-        vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: bufRef.current });
+        vscode.postMessage({ type: msg.save, nodeId, pseudo: bufRef.current });
       }
     }
 
     if (lastSaveErrored.current) {
       // Fire one final save so the host surfaces the error in the status bar.
-      vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: bufRef.current });
+      vscode.postMessage({ type: msg.save, nodeId, pseudo: bufRef.current });
       // Revert visible text to last-known-good.
       if (editDivRef.current && lkg !== null) {
         editDivRef.current.textContent = lkg;
