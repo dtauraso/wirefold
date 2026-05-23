@@ -15,6 +15,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -109,7 +110,12 @@ func runSave(args []string) {
 
 	updated, err := pseudo.ParseInput(flags["pseudo"], prior)
 	if err != nil {
-		fatal("ParseInput: %s", err)
+		suggestion := ""
+		var pe *pseudo.ParseInputError
+		if errors.As(err, &pe) {
+			suggestion = pe.Suggestion()
+		}
+		fatalWithSuggestion("ParseInput: %s", err, suggestion)
 	}
 
 	newGoSrc, newSpec, err := pseudo.ToInput(updated)
@@ -127,8 +133,19 @@ func runSave(args []string) {
 }
 
 func fatal(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
+	exitWithError(fmt.Sprintf(format, args...), "")
+}
+
+func fatalWithSuggestion(format string, arg any, suggestion string) {
+	exitWithError(fmt.Sprintf(format, arg), suggestion)
+}
+
+func exitWithError(msg, suggestion string) {
 	enc := json.NewEncoder(os.Stderr)
-	_ = enc.Encode(map[string]string{"error": msg})
+	payload := map[string]string{"error": msg}
+	if suggestion != "" {
+		payload["suggestion"] = suggestion
+	}
+	_ = enc.Encode(payload)
 	os.Exit(2)
 }

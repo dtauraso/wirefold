@@ -129,6 +129,8 @@ export function PseudoPanel({ nodeId, onClose }: Props) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     if (lastSaveErrored.current) {
+      // Fire one final save so the host surfaces the error in the status bar.
+      vscode.postMessage({ type: "pseudo-save", nodeId, pseudo: bufRef.current });
       // Revert visible text to last-known-good.
       if (editDivRef.current && lkg !== null) {
         editDivRef.current.textContent = lkg;

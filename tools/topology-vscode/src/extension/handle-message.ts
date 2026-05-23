@@ -186,9 +186,17 @@ async function handlePseudoSave(
     "--pseudo", pseudoText,
   ]);
   if (code !== 0) {
-    let msg = stderr.trim();
-    try { msg = (JSON.parse(msg) as { error?: string }).error ?? msg; } catch { /* use raw */ }
+    const raw = stderr.trim();
+    let msg = raw;
+    let suggestion = "";
+    try {
+      const parsed = JSON.parse(raw) as { error?: string; suggestion?: string };
+      msg = parsed.error ?? raw;
+      suggestion = parsed.suggestion ?? "";
+    } catch { /* use raw */ }
     post({ type: "pseudo-error", nodeId, message: msg });
+    const statusText = suggestion ? `Pseudo: ${msg} — ${suggestion}` : `Pseudo: ${msg}`;
+    vscode.window.setStatusBarMessage(statusText, 10000);
     return;
   }
   let result: { go: string; spec: Record<string, unknown> };
@@ -219,6 +227,7 @@ async function handlePseudoSave(
   await applyEdit(document, JSON.stringify(topologyParsed, null, 2));
   await document.save();
   post({ type: "pseudo-save-result", nodeId });
+  vscode.window.setStatusBarMessage("", 0); // clear any stale parse-error message
 
   // If a substrate run is active, stop it and restart so the new
   // topology.json + nodes/Input/node.go are picked up.

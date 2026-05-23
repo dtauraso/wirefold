@@ -1,6 +1,7 @@
 package pseudo
 
 import (
+	"errors"
 	"go/format"
 	"os"
 	"reflect"
@@ -183,6 +184,31 @@ func TestInputParse_RejectsExtraTrailingTokens(t *testing.T) {
 		t.Fatal("expected error for trailing token, got nil")
 	}
 	t.Logf("got expected error: %v", err)
+}
+
+// TestInputParse_SuggestionOnError: a parse failure must return a *ParseInputError
+// whose Suggestion() includes the prior OutputField and the canonical form.
+func TestInputParse_SuggestionOnError(t *testing.T) {
+	prior := InputView{OutputField: "ToReadGate", InitValues: []int{0, 1}}
+	_, err := ParseInput("not valid pseudo text", prior)
+	if err == nil {
+		t.Fatal("expected error for invalid pseudo text, got nil")
+	}
+	var pe *ParseInputError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected *ParseInputError, got %T: %v", err, err)
+	}
+	sug := pe.Suggestion()
+	if sug == "" {
+		t.Fatal("Suggestion() returned empty string")
+	}
+	if !strings.Contains(sug, "ToReadGate") {
+		t.Errorf("Suggestion() does not mention OutputField: %q", sug)
+	}
+	if !strings.Contains(sug, "send each of") {
+		t.Errorf("Suggestion() does not contain canonical form: %q", sug)
+	}
+	t.Logf("suggestion: %s", sug)
 }
 
 // TestInputFromGo_RejectsMultipleOutputs: two *Wiring.Out fields → error.

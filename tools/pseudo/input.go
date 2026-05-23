@@ -99,6 +99,35 @@ func RenderInput(v InputView) string {
 	return b.String()
 }
 
+// ParseInputError is the error type returned by ParseInput when the pseudo
+// text fails to parse. It carries the underlying parse error and a human-
+// readable fix suggestion.
+type ParseInputError struct {
+	cause      error
+	suggestion string
+}
+
+func (e *ParseInputError) Error() string      { return e.cause.Error() }
+func (e *ParseInputError) Unwrap() error      { return e.cause }
+func (e *ParseInputError) Suggestion() string { return e.suggestion }
+
+// buildSuggestion produces the canonical suggestion string for a failed
+// ParseInput call. It uses prior.OutputField when available; otherwise it
+// falls back to a placeholder.
+func buildSuggestion(prior InputView) string {
+	field := prior.OutputField
+	if field == "" {
+		field = "<OutputField>"
+	}
+	vals := prior.InitValues
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = strconv.Itoa(v)
+	}
+	list := strings.Join(parts, ", ")
+	return fmt.Sprintf("Try: [repeatedly] send each of [%s] to %s", list, field)
+}
+
 // ParseInput parses a pseudo text produced (or edited) by the user back into
 // an InputView. It is strict: the entire input must match the grammar; extra
 // trailing tokens are an error.
@@ -110,11 +139,15 @@ func RenderInput(v InputView) string {
 //
 // The returned view inherits prior.origGoSrc and prior.origSpec so that
 // unchanged ceremony is preserved for byte-identical round-trips.
+//
+// On parse failure the returned error is *ParseInputError, which exposes a
+// Suggestion() string with the canonical form.
 func ParseInput(text string, prior InputView) (InputView, error) {
 	p := &pseudoParser{input: text}
 	repeat, vals, ident, err := p.parseInputPseudo()
 	if err != nil {
-		return InputView{}, fmt.Errorf("pseudo.ParseInput: %w", err)
+		wrapped := fmt.Errorf("pseudo.ParseInput: %w", err)
+		return InputView{}, &ParseInputError{cause: wrapped, suggestion: buildSuggestion(prior)}
 	}
 	return InputView{
 		OutputField: ident,
