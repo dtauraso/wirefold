@@ -153,9 +153,11 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 	// Build inbound and outbound edge maps.
 	// inbound:  target node id → port name → edge label
 	// outbound: source node id → port name → []edge label
+	// outboundHandle: source node id → port name → []sourceHandle (indexed, same order as outbound)
 	// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
+	outboundHandle := map[string]map[string][]string{}
 	for _, e := range spec.Edges {
 		if inbound[e.Target] == nil {
 			inbound[e.Target] = map[string]string{}
@@ -163,12 +165,16 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		if outbound[e.Source] == nil {
 			outbound[e.Source] = map[string][]string{}
 		}
+		if outboundHandle[e.Source] == nil {
+			outboundHandle[e.Source] = map[string][]string{}
+		}
 		inbound[e.Target][e.TargetHandle] = e.Label
 		srcKey := e.SourceHandle
 		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source]); isMulti {
 			srcKey = base
 		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
+		outboundHandle[e.Source][srcKey] = append(outboundHandle[e.Source][srcKey], e.SourceHandle)
 	}
 
 	// Validation 1: port handle names must match declared ports on the node kind.
@@ -252,8 +258,13 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 
 			case PortOutMulti:
 				labels := outbound[n.ID][port.Name]
-				for _, lbl := range labels {
-					pb.AppendMultiPaced(port.Name, edgeWire[lbl])
+				handles := outboundHandle[n.ID][port.Name]
+				for i, lbl := range labels {
+					handle := port.Name
+					if i < len(handles) {
+						handle = handles[i]
+					}
+					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl])
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}

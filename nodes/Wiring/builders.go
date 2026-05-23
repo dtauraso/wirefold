@@ -49,18 +49,20 @@ type PortSpec struct {
 // Paced variants (SetSinglePaced / AppendMultiPaced) take precedence over
 // chan variants when both are set; in practice the loader uses only one mode.
 type PortBindings struct {
-	single      map[string]chan int
-	multi       map[string][]chan int
-	singlePaced map[string]*PacedWire
-	multiPaced  map[string][]*PacedWire
+	single           map[string]chan int
+	multi            map[string][]chan int
+	singlePaced      map[string]*PacedWire
+	multiPaced       map[string][]*PacedWire
+	multiPacedHandle map[string][]string // per-element source handle for multiPaced
 }
 
 func newPortBindings() PortBindings {
 	return PortBindings{
-		single:      map[string]chan int{},
-		multi:       map[string][]chan int{},
-		singlePaced: map[string]*PacedWire{},
-		multiPaced:  map[string][]*PacedWire{},
+		single:           map[string]chan int{},
+		multi:            map[string][]chan int{},
+		singlePaced:      map[string]*PacedWire{},
+		multiPaced:       map[string][]*PacedWire{},
+		multiPacedHandle: map[string][]string{},
 	}
 }
 
@@ -74,6 +76,14 @@ func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 
 func (pb *PortBindings) AppendMultiPaced(name string, pw *PacedWire) {
 	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
+	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], name)
+}
+
+// AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
+// source handle (e.g. "ToNext0") so trace events carry the indexed name.
+func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire) {
+	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
+	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], handle)
 }
 
 func (pb *PortBindings) In(name string) <-chan int {
@@ -167,9 +177,14 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			}
 		case PortOutMulti:
 			if pws := pb.multiPaced[port.Name]; len(pws) > 0 {
+				handles := pb.multiPacedHandle[port.Name]
 				outs := make(OutMulti, len(pws))
 				for i, pw := range pws {
-					outs[i] = NewOutPaced(pw, ctx, name, port.Name, tr)
+					handle := port.Name
+					if i < len(handles) {
+						handle = handles[i]
+					}
+					outs[i] = NewOutPaced(pw, ctx, name, handle, tr)
 				}
 				f.Set(reflect.ValueOf(outs))
 			} else {
