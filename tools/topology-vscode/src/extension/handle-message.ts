@@ -90,5 +90,8 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "webview-log":
       await appendWebviewLog(msg.entry, document.uri);
       return;
+    case "delivered":
+      runner.writeStdin(JSON.stringify({ type: "delivered", edge: msg.edge }));
+      return;
   }
 }

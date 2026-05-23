@@ -20,6 +20,7 @@
 package Wiring
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -43,24 +44,46 @@ type PortSpec struct {
 	Required bool // true for PortIn ports; output ports are never required
 }
 
-// PortBindings holds resolved channels keyed by port name.
-// For PortOutMulti ports, use PortBindings.Multi(name).
+// PortBindings holds resolved channels or PacedWires keyed by port name.
+// For PortOutMulti ports, use AppendMulti / OutSlice.
+// Paced variants (SetSinglePaced / AppendMultiPaced) take precedence over
+// chan variants when both are set; in practice the loader uses only one mode.
 type PortBindings struct {
-	single map[string]chan int
-	multi  map[string][]chan int
+	single           map[string]chan int
+	multi            map[string][]chan int
+	singlePaced      map[string]*PacedWire
+	multiPaced       map[string][]*PacedWire
+	multiPacedHandle map[string][]string // per-element source handle for multiPaced
 }
 
 func newPortBindings() PortBindings {
 	return PortBindings{
-		single: map[string]chan int{},
-		multi:  map[string][]chan int{},
+		single:           map[string]chan int{},
+		multi:            map[string][]chan int{},
+		singlePaced:      map[string]*PacedWire{},
+		multiPaced:       map[string][]*PacedWire{},
+		multiPacedHandle: map[string][]string{},
 	}
 }
 
 func (pb *PortBindings) SetSingle(name string, ch chan int) { pb.single[name] = ch }
 
+func (pb *PortBindings) SetSinglePaced(name string, pw *PacedWire) { pb.singlePaced[name] = pw }
+
 func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 	pb.multi[name] = append(pb.multi[name], ch)
+}
+
+func (pb *PortBindings) AppendMultiPaced(name string, pw *PacedWire) {
+	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
+	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], name)
+}
+
+// AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
+// source handle (e.g. "ToNext0") so trace events carry the indexed name.
+func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire) {
+	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
+	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], handle)
 }
 
 func (pb *PortBindings) In(name string) <-chan int {
@@ -116,8 +139,9 @@ func reflectPorts(sample any) []PortSpec {
 }
 
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
-// then returns it cast to Node.
-func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
+// then returns it cast to Node. ctx is required when pb contains PacedWire
+// bindings (paced mode); it is passed into the In/Out wrappers.
+func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
@@ -138,18 +162,39 @@ func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr 
 		}
 		switch port.Dir {
 		case PortIn:
-			ch := pb.In(port.Name)
-			f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: port.Name, trace: tr}))
-		case PortOut:
-			ch := pb.Out(port.Name)
-			f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: port.Name, trace: tr}))
-		case PortOutMulti:
-			chs := pb.OutSlice(port.Name)
-			outs := make(OutMulti, len(chs))
-			for i, c := range chs {
-				outs[i] = &Out{ch: c, node: name, port: port.Name, trace: tr}
+			if pw := pb.singlePaced[port.Name]; pw != nil {
+				f.Set(reflect.ValueOf(NewInPaced(pw, ctx, name, port.Name, tr)))
+			} else {
+				ch := pb.In(port.Name)
+				f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: port.Name, trace: tr}))
 			}
-			f.Set(reflect.ValueOf(outs))
+		case PortOut:
+			if pw := pb.singlePaced[port.Name]; pw != nil {
+				f.Set(reflect.ValueOf(NewOutPaced(pw, ctx, name, port.Name, tr)))
+			} else {
+				ch := pb.Out(port.Name)
+				f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: port.Name, trace: tr}))
+			}
+		case PortOutMulti:
+			if pws := pb.multiPaced[port.Name]; len(pws) > 0 {
+				handles := pb.multiPacedHandle[port.Name]
+				outs := make(OutMulti, len(pws))
+				for i, pw := range pws {
+					handle := port.Name
+					if i < len(handles) {
+						handle = handles[i]
+					}
+					outs[i] = NewOutPaced(pw, ctx, name, handle, tr)
+				}
+				f.Set(reflect.ValueOf(outs))
+			} else {
+				chs := pb.OutSlice(port.Name)
+				outs := make(OutMulti, len(chs))
+				for i, c := range chs {
+					outs[i] = &Out{ch: c, node: name, port: port.Name, trace: tr}
+				}
+				f.Set(reflect.ValueOf(outs))
+			}
 		}
 	}
 
@@ -215,7 +260,7 @@ func reflectBuild(name string, data *NodeData, pb PortBindings, e kindEntry, tr 
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
 type NodeBuilder struct {
 	Ports []PortSpec
-	Build func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
+	Build func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -228,8 +273,8 @@ func init() {
 		ports := reflectPorts(sample)
 		Registry[kind] = NodeBuilder{
 			Ports: ports,
-			Build: func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
-				return reflectBuild(name, data, pb, e, tr)
+			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+				return reflectBuild(ctx, name, data, pb, e, tr)
 			},
 		}
 	}

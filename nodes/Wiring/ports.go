@@ -5,25 +5,60 @@
 // so a node cannot forget to trace, nor can it mis-type a port name
 // string — the port name lives in the wrapper and is set by
 // reflectBuild from the struct field name.
+//
+// Two backing modes:
+//   - chan mode (NewIn / NewOut): used by node unit tests. Non-blocking
+//     select on the raw channel — original TryRecv/TrySend semantics.
+//   - PacedWire mode (NewInPaced / NewOutPaced): used by the loader.
+//     TrySend blocks until the paced wire delivers the value (always
+//     returns true); TryRecv blocks until a value arrives. Ctx cancel
+//     causes both to return the zero-value / false.
 
 package Wiring
 
 import (
+	"context"
+
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// In is a typed input port. Wraps a <-chan int with auto recv trace.
+// In is a typed input port.
 type In struct {
-	ch    <-chan int
+	// chan mode
+	ch <-chan int
+	// paced mode
+	pw  *PacedWire
+	ctx context.Context
+	// shared
 	node  string
 	port  string
 	trace *T.Trace
 }
 
-// TryRecv attempts a non-blocking receive. On success emits a recv
-// trace event and returns (value, true). Otherwise returns (0, false).
+// Done signals to the underlying PacedWire that the receiver is finished
+// using the value returned by the last TryRecv. No-op in chan mode.
+func (i *In) Done() {
+	if i != nil && i.pw != nil {
+		i.pw.Done()
+	}
+}
+
+// TryRecv in chan mode: non-blocking select. In paced mode: blocks until
+// a value is placed or ctx is cancelled.
 func (i *In) TryRecv() (int, bool) {
-	if i == nil || i.ch == nil {
+	if i == nil {
+		return 0, false
+	}
+	if i.pw != nil {
+		v, err := i.pw.Recv(i.ctx)
+		if err != nil {
+			return 0, false
+		}
+		n, _ := v.(int)
+		i.trace.Recv(i.node, i.port, n)
+		return n, true
+	}
+	if i.ch == nil {
 		return 0, false
 	}
 	select {
@@ -35,18 +70,37 @@ func (i *In) TryRecv() (int, bool) {
 	}
 }
 
-// Out is a typed output port. Wraps a chan<- int with auto send trace.
+// Out is a typed output port.
 type Out struct {
-	ch    chan<- int
+	// chan mode
+	ch chan<- int
+	// paced mode
+	pw  *PacedWire
+	ctx context.Context
+	// shared
 	node  string
 	port  string
 	trace *T.Trace
 }
 
-// TrySend attempts a non-blocking send. On success emits a send trace
-// event and returns true.
+// TrySend in chan mode: non-blocking select. In paced mode: blocks until
+// the wire delivers the value or ctx is cancelled.
 func (o *Out) TrySend(v int) bool {
-	if o == nil || o.ch == nil {
+	if o == nil {
+		return false
+	}
+	if o.pw != nil {
+		// Emit the trace send event BEFORE blocking on delivery so the
+		// webview sees it, animates, posts "delivered", and unblocks Send.
+		// Emitting after Send returns causes a deadlock: the webview never
+		// receives the event, never posts delivered, and Send never returns.
+		o.trace.Send(o.node, o.port, v)
+		if err := o.pw.Send(o.ctx, v); err != nil {
+			return false
+		}
+		return true
+	}
+	if o.ch == nil {
 		return false
 	}
 	select {
@@ -62,11 +116,20 @@ func (o *Out) TrySend(v int) bool {
 type OutMulti []*Out
 
 // NewIn / NewOut are exported for tests that construct nodes directly
-// without going through reflectBuild.
+// without going through reflectBuild. Uses chan mode.
 func NewIn(ch <-chan int, node, port string, tr *T.Trace) *In {
 	return &In{ch: ch, node: node, port: port, trace: tr}
 }
 
 func NewOut(ch chan<- int, node, port string, tr *T.Trace) *Out {
 	return &Out{ch: ch, node: node, port: port, trace: tr}
+}
+
+// NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode.
+func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace) *In {
+	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
+}
+
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace) *Out {
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }

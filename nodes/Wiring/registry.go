@@ -3,7 +3,11 @@
 
 package Wiring
 
-import T "github.com/dtauraso/wirefold/Trace"
+import (
+	"context"
+
+	T "github.com/dtauraso/wirefold/Trace"
+)
 
 // kindEntry is one entry in the kind registry.
 type kindEntry struct {
@@ -26,8 +30,8 @@ func Register(kind string, newNode func() any) {
 	ports := reflectPorts(sample)
 	Registry[kind] = NodeBuilder{
 		Ports: ports,
-		Build: func(name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
-			return reflectBuild(name, data, pb, e, tr)
+		Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
+			return reflectBuild(ctx, name, data, pb, e, tr)
 		},
 	}
 }

@@ -7,55 +7,66 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-22, post-merge of task/go-ts-leverage)
+## State at handoff (2026-05-22, task/held-values-visual)
 
-**Active branch:** `task/required-input-parser-check` (just created from main; no commits yet beyond the merge).
+**Active branch:** `task/held-values-visual` (branched from main post-merge of `task/pulses-as-instances`).
 
-### What just landed on main
+Continuing on wirefold, branch `task/held-values-visual`.
 
-Merge commit: `task/go-ts-leverage` → main
+### What this branch is doing
 
-**Doc fixes:**
-- `canAccept` removed from MODEL.md (was stale vocabulary).
-- `pump.ts` clarified as render-only in MODEL.md.
-- PascalCase precondition added to CLAUDE.md substrate primitive landing rule.
+Implement the visual hold: a pulse should sit at the destination handle from `Recv` until
+`Done` is called. The substrate (`PacedWire`) already enforces this contract — `Recv`
+unblocks on `NotifyDelivered`, and `Done` clears the slot. The webview animation does not
+yet mirror this: pulses currently disappear immediately on delivery rather than holding
+at the destination port until `Done`.
 
-**Kind registry derivation:**
-- `NODE_TYPES` keys in `node-types.ts` are now derived from `RUNTIME_IMPLEMENTED_KINDS` rather than maintained as a separate parallel list.
+### Substrate model contract (stable from task/pulses-as-instances)
 
-**Parser guards (commit `b6ff9b3`):**
-- TS parser rejects unknown `node.type` values at parse time with a clear error.
-- Empty edge label check was already present; kind check is new.
+`PacedWire` in `nodes/Wiring/paced_wire.go` has THREE operations: `Send`, `Recv`, `Done`.
 
-### Surviving node kinds (4)
+- **Send:** fills slot, blocks until `Done` (not until delivery — until receiver explicitly finishes).
+- **Recv:** blocks until visual delivered, returns value, does NOT clear slot.
+- **Done:** clears slot, unblocks Send.
+- **NotifyDelivered** (webview→host→stdin reader): unblocks Recv only.
 
-Input, ReadGate, ChainInhibitor, InhibitRightGate.
+One `PacedWire` is allocated per destination port (not per edge), so N senders
+converging on one port share a single wire — fan-in works correctly.
 
-### Next task: `task/required-input-parser-check`
+### What works (landed on main)
 
-Deferred half of audit Finding #2. Goal: generator emits per-kind `requiredInputs`; TS parser rejects topologies missing inbound edges for required inputs. ~40–60 LOC.
+- Substrate ring is healthy. `in08` emits both [0,1] values; chain cycles fully.
+- Fan-in works: `bootstrap_rg` and `i1` both feed `readGate.FromChainInhibitor`
+  through a shared destination-port-owned wire.
+- Multi-output slice ports (`ToNext[]`) correctly propagate indexed handle names
+  (`ToNext0`/`ToNext1`) so edgeId resolution for animation is non-null.
+- Pulse animation renders concurrent in-flight instances (per-emit simTime anchoring).
 
-**Decide first:** what counts as "required"? Options:
-- All `*Wiring.In` fields on a kind are required (matches Go loader behavior).
-- `edgeSeeds` on a node satisfies the requirement for its port (ring topologies use this to break startup deadlock — see `feedback_edge_seed_required_for_rings.md`).
+### Open / deferred (carry into this branch)
 
-Resolve semantics before writing any code; the answer shapes both the generator output and the parser check.
+- **Webview pacing (this branch):** pulse-sits-at-destination-until-Done rendering.
+  Substrate enforces it; webview needs to hold the pulse marker at the destination
+  handle from the moment of delivery until a `Done` event arrives.
+- **Stages 4 cleanup (deferred):** `clearRunState`, `run-start`, `pulseValueRef`,
+  `use-fire-flash.prev` still pending removal (inert dead code).
+- Optional: remove debug `postLog("pulse.deliver", ...)` from
+  `use-pulse-animation.ts:51` if no longer needed for diagnosis.
+- Legacy: `loader.go` still has unused `edgeSeeds` path (dead code; `topology.json`
+  has no seeds).
+- Design question: `in08` has `init:[0,1]` with no `repeat:true`, so ring stops
+  after 2 pulses propagate. Not a bug, but consider repeat.
 
-### OPEN BUG — carry forward to next task branch
+### Key files for this branch
 
-**Consecutive Runs decay.** First Run animates all edges. Second Run animates only a subset. Root cause: `SubstrateEdge.tsx` `lastPulseStep` ref is never cleared between Go runs; dedup guard suppresses animation when step numbers repeat.
-
-**Fix shape (Option A — start here):** Extension host sends `runStart` message to webview before spawning Go; `pump.ts` clears per-run state (`lastPulseStep`, `data.slots`, `data.pulse`).
-
-## Audit skill — `/audit-grep-load`
-
-Saved at `.claude/skills/audit-grep-load/SKILL.md` (commit `f650cc9`). Runs a four-category audit for verifying-grep hotspots: string/key duplication across files, doc claims about code that could drift, runtime-only validations that could move to a parser, files claiming to be generated that aren't. Surfaces ranked findings; user picks; AI fixes. Invoke after any substantial refactor or periodically to surface code-self-defends opportunities without the user having to drive discovery.
+- `tools/topology-vscode/src/webview/rf/edges/use-pulse-animation.ts` — pulse animation hook
+- `tools/topology-vscode/src/webview/rf/pump.ts` — event routing from host
+- `nodes/Wiring/paced_wire.go` — substrate wire contract
 
 ## Dev-loop
 
-After any TS edit: `npm run build` from `tools/topology-vscode/` (tsc alone doesn't refresh `out/webview.js`). After extension-host changes: Reload Window in VS Code.
-
-Go: `go build ./...` from repo root. `go run .` loads `topology.json` at repo root.
+After TS edit: `npm run build` from `tools/topology-vscode/`.
+After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
+To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
 Check: `go test ./...`, `npm run check:loc`, `bash tools/check-substrate-vocabulary.sh`.
 

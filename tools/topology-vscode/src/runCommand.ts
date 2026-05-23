@@ -60,7 +60,7 @@ export class BuildAndRunRunner {
     // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
     // SIGTERM hits the `go` driver but leaves the compiled binary orphaned
     // on macOS.
-    this.proc = cp.spawn("go", ["run", "."], { cwd: folder.uri.fsPath, detached: true });
+    this.proc = cp.spawn("go", ["run", "."], { cwd: folder.uri.fsPath, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
     this.proc.stderr?.on("data", (d: Buffer) => this.channel!.append(d.toString()));
     this.proc.on("close", (code) => {
@@ -150,6 +150,12 @@ export class BuildAndRunRunner {
   stop() {
     this.looping = false;
     this.cancel();
+  }
+
+  /** Write a JSON line to the running process's stdin (no-op if not running). */
+  writeStdin(line: string): void {
+    if (!this.proc?.stdin) return;
+    this.proc.stdin.write(line + "\n");
   }
 
   dispose() {

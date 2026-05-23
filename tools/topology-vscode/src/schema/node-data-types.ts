@@ -11,6 +11,7 @@ export interface ChainInhibitorData {
 
 export interface InputData {
   init: number[];
+  repeat: boolean;
 }
 
 // parseNodeData validates node.data for known kinds. Unknown kinds pass through.
@@ -28,6 +29,7 @@ export function parseNodeData(kind: string, data: unknown, path: string): unknow
       if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
       const d = data as Record<string, unknown>;
     if (!Array.isArray(d["init"]) || !(d["init"] as unknown[]).every((x) => typeof x === "number")) throw new ParseError(path+".data.init: expected number[]");
+    if (typeof d["repeat"] !== "boolean") throw new ParseError(path+".data.repeat: expected boolean");
       return data;
     }
     default:

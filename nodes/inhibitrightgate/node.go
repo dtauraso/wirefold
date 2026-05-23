@@ -45,10 +45,11 @@ func (g *Node) Update(ctx context.Context) {
 				result = 1
 			}
 			g.Fire()
-			if g.ToPassed.TrySend(result) {
-				g.HasLeft = false
-				g.HasRight = false
-			}
+			g.FromLeft.Done()
+			g.FromRight.Done()
+			g.HasLeft = false
+			g.HasRight = false
+			g.ToPassed.TrySend(result)
 		}
 	}
 }

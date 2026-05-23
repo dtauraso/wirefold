@@ -23,6 +23,7 @@ func (in *Node) Update(ctx context.Context) {
 
 		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
 			in.Fire()
+			in.FromPrevChainInhibitorNode.Done()
 			for _, out := range in.ToNext {
 				out.TrySend(in.Held)
 			}
