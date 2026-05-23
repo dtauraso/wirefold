@@ -85,12 +85,9 @@ func FromInput(goSrc []byte, specEntry map[string]any, outNeighbor string) (Inpu
 // Format examples:
 //
 //	each of [0, 1] -> readGate1
-//	repeatedly each of [0, 1] -> readGate1
+//	each of [0, 1] -> readGate1 repeatedly
 func RenderInput(v InputView) string {
 	var b strings.Builder
-	if v.Repeat {
-		b.WriteString("repeatedly ")
-	}
 	b.WriteString("each of [")
 	for i, n := range v.InitValues {
 		if i > 0 {
@@ -100,6 +97,9 @@ func RenderInput(v InputView) string {
 	}
 	b.WriteString("] -> ")
 	b.WriteString(v.OutNeighbor)
+	if v.Repeat {
+		b.WriteString(" repeatedly")
+	}
 	return b.String()
 }
 
@@ -130,7 +130,7 @@ func buildSuggestion(prior InputView) string {
 		parts[i] = strconv.Itoa(v)
 	}
 	list := strings.Join(parts, ", ")
-	return fmt.Sprintf("Try: [repeatedly] each of [%s] -> %s", list, neighbor)
+	return fmt.Sprintf("Try: each of [%s] -> %s [repeatedly]", list, neighbor)
 }
 
 // ParseInput parses a pseudo text produced (or edited) by the user back into
@@ -139,7 +139,7 @@ func buildSuggestion(prior InputView) string {
 //
 // Grammar (whitespace-insensitive):
 //
-//	pseudo   := ["repeatedly"] "each" "of" "[" intList "]" "->" ident
+//	pseudo   := "each" "of" "[" intList "]" "->" ident ["repeatedly"]
 //	intList  := int ("," int)* | ε
 //
 // The returned view inherits prior.origGoSrc, prior.origSpec, and
@@ -374,7 +374,7 @@ func renameOutputField(goSrc []byte, oldName, newName string) ([]byte, error) {
 type parseErrorKind int
 
 const (
-	parseErrBadStart      parseErrorKind = iota // first token is not "each" or "repeatedly"
+	parseErrBadStart      parseErrorKind = iota // first token is not "each"
 	parseErrBadInt                              // non-integer where int expected
 	parseErrUnclosedBrace                       // "[" without closing "]"
 	parseErrMissingIdent                        // "to" with no ident following
@@ -397,7 +397,7 @@ func (e *parseError) Is(target error) bool { _, ok := target.(*parseError); retu
 func (e *parseError) humanMessage() string {
 	switch e.kind {
 	case parseErrBadStart:
-		return fmt.Sprintf("Couldn't parse %q. Lines must start with \"each\" or \"repeatedly each\".", e.token)
+		return fmt.Sprintf("Couldn't parse %q. Lines must start with \"each\".", e.token)
 	case parseErrBadInt:
 		return fmt.Sprintf("Couldn't parse %q. Init values must be whole numbers.", e.token)
 	case parseErrUnclosedBrace:
@@ -510,12 +510,6 @@ func (p *pseudoParser) consumeInt() (int, error) {
 }
 
 func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string, err error) {
-	// Optional "repeatedly"
-	if p.peekWord() == "repeatedly" {
-		_ = p.consumeWord("repeatedly")
-		repeat = true
-	}
-
 	if rawErr := p.consumeWord("each"); rawErr != nil {
 		// Use just the first word so the token is concise (e.g., "not" not "not valid...").
 		tok := p.peekWord()
@@ -579,6 +573,12 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 		return
 	} else {
 		ident = rawIdent
+	}
+
+	// Optional trailing "repeatedly".
+	if p.peekWord() == "repeatedly" {
+		_ = p.consumeWord("repeatedly")
+		repeat = true
 	}
 
 	// Must be at end (after optional whitespace).

@@ -93,9 +93,9 @@ func TestInputRoundTrip_SpecEditOnly(t *testing.T) {
 	}
 
 	// Mutate spec-origin tokens only: change values, ensure repeatedly is present.
-	// Original rendered: "repeatedly each of [0, 1] -> readGate1"
-	// Mutate to: "repeatedly each of [2, 3, 5] -> readGate1"
-	mutated := "repeatedly each of [2, 3, 5] -> readGate1"
+	// Original rendered: "each of [0, 1] -> readGate1 repeatedly"
+	// Mutate to: "each of [2, 3, 5] -> readGate1 repeatedly"
+	mutated := "each of [2, 3, 5] -> readGate1 repeatedly"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
@@ -136,7 +136,7 @@ func TestInputRoundTrip_NeighborEdit(t *testing.T) {
 	}
 
 	// Change out-neighbor from readGate1 → fanout1.
-	mutated := "repeatedly each of [0, 1] -> fanout1"
+	mutated := "each of [0, 1] -> fanout1 repeatedly"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
