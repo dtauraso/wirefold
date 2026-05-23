@@ -37,6 +37,7 @@ type specNode struct {
 // NodeData mirrors the JSON data block on a node.
 type NodeData struct {
 	Init      []int          `json:"init,omitempty"`
+	Repeat    bool           `json:"repeat,omitempty"`
 	State     map[string]int `json:"state,omitempty"`     // field-seeding: struct fields via wire:"data.state"
 	EdgeSeeds map[string]int `json:"edgeSeeds,omitempty"` // edge-seeding: pre-send into named input wires
 }

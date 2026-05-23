@@ -9,17 +9,24 @@ import (
 type Node struct {
 	Fire       func()
 	Init       []int `wire:"data.init"`
+	Repeat     bool  `wire:"data.repeat"`
 	ToReadGate *Wiring.Out
 }
 
 func (n *Node) Update(ctx context.Context) {
-	for i := 0; i < len(n.Init); {
+	for i := 0; n.Repeat || i < len(n.Init); {
 		if ctx.Err() != nil {
 			return
 		}
+		if len(n.Init) == 0 {
+			return
+		}
 		n.Fire()
-		if n.ToReadGate.TrySend(n.Init[i]) {
+		if n.ToReadGate.TrySend(n.Init[i%len(n.Init)]) {
 			i++
+			if !n.Repeat && i >= len(n.Init) {
+				return
+			}
 		}
 	}
 }
