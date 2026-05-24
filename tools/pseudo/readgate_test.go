@@ -39,7 +39,7 @@ func TestRenderReadGate_RoundTrip(t *testing.T) {
 	}
 
 	got := RenderReadGate(v)
-	want := "if value and signal\n   value -> i0\n"
+	want := "if input value and signal\n   input value -> i0\n"
 	if got != want {
 		t.Errorf("RenderReadGate output mismatch:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -76,18 +76,18 @@ func TestReadGate_ParseRenderIdentity(t *testing.T) {
 	}
 }
 
-// TestReadGate_GuardDrop: parse "if value\n   value -> i0" produces
+// TestReadGate_GuardDrop: parse "if input value\n   input value -> i0" produces
 // a single-term guard, and ToReadGate emits an Update body gated only on HasValue.
 func TestReadGate_GuardDrop(t *testing.T) {
-	prior := ReadGateView{GuardTerms: []string{"value", "signal"}, OutNeighbor: "i0"}
-	text := "if value\n   value -> i0"
+	prior := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
+	text := "if input value\n   input value -> i0"
 
 	v, err := ParseReadGate(text, prior)
 	if err != nil {
 		t.Fatalf("ParseReadGate: %v", err)
 	}
-	if len(v.GuardTerms) != 1 || v.GuardTerms[0] != "value" {
-		t.Errorf("GuardTerms: got %v want [value]", v.GuardTerms)
+	if len(v.GuardTerms) != 1 || v.GuardTerms[0] != "input value" {
+		t.Errorf("GuardTerms: got %v want [input value]", v.GuardTerms)
 	}
 	if v.OutNeighbor != "i0" {
 		t.Errorf("OutNeighbor: got %q want i0", v.OutNeighbor)
@@ -126,7 +126,7 @@ func TestReadGate_GuardDrop(t *testing.T) {
 // TestReadGate_MalformedInput: a garbage string must produce *ParseReadGateError
 // with non-empty Suggestion().
 func TestReadGate_MalformedInput(t *testing.T) {
-	prior := ReadGateView{GuardTerms: []string{"value", "signal"}, OutNeighbor: "i0"}
+	prior := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
 	_, err := ParseReadGate("not valid pseudo", prior)
 	if err == nil {
 		t.Fatal("expected error for malformed input, got nil")
@@ -152,7 +152,7 @@ func TestReadGate_MalformedInput(t *testing.T) {
 // TestToReadGate_TwoTermCompiles: ToReadGate with two guard terms produces valid
 // Go source containing the expected guard tokens.
 func TestToReadGate_TwoTermCompiles(t *testing.T) {
-	v := ReadGateView{GuardTerms: []string{"value", "signal"}, OutNeighbor: "i0"}
+	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
 	src, outNeighbor, removedPorts, err := ToReadGate(v)
 	if err != nil {
 		t.Fatalf("ToReadGate: %v", err)

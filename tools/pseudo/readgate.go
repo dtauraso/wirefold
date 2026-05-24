@@ -14,9 +14,9 @@ import (
 // ReadGateView is the parsed representation of a ReadGate node instance.
 //
 // GuardTerms holds the named inputs required before the gate fires. The
-// canonical two-term form is ["value", "signal"]; dropping the signal term
-// to ["value"] produces a value-only gate that fires without a chain-inhibitor.
-// The first term is always the data-bearing term ("value"); the optional second
+// canonical two-term form is ["input value", "signal"]; dropping the signal term
+// to ["input value"] produces a value-only gate that fires without a chain-inhibitor.
+// The first term is always the data-bearing term ("input value"); the optional second
 // is the chain-inhibitor/signal term.
 type ReadGateView struct {
 	GuardTerms  []string // 1 or 2 named guard terms; index 0 = value term
@@ -28,7 +28,7 @@ func (v ReadGateView) valueTerm() string {
 	if len(v.GuardTerms) > 0 {
 		return v.GuardTerms[0]
 	}
-	return "value"
+	return "input value"
 }
 
 // signalTerm returns the second guard term, or "" if not present.
@@ -73,13 +73,13 @@ func FromReadGate(goSrc []byte, outNeighbor string) (ReadGateView, error) {
 //
 // Two-term form:
 //
-//	if value and signal
-//	   value -> <OutNeighbor>
+//	if input value and signal
+//	   input value -> <OutNeighbor>
 //
 // One-term form:
 //
-//	if value
-//	   value -> <OutNeighbor>
+//	if input value
+//	   input value -> <OutNeighbor>
 func RenderReadGate(v ReadGateView) string {
 	var b strings.Builder
 	b.WriteString("if ")
@@ -89,7 +89,9 @@ func RenderReadGate(v ReadGateView) string {
 		b.WriteString(sig)
 	}
 	b.WriteString("\n")
-	b.WriteString("   value -> ")
+	b.WriteString("   ")
+	b.WriteString(v.valueTerm())
+	b.WriteString(" -> ")
 	b.WriteString(v.OutNeighbor)
 	b.WriteString("\n")
 	return b.String()
@@ -113,18 +115,18 @@ func buildReadGateSuggestion(prior ReadGateView) string {
 		neighbor = "<node>"
 	}
 	if prior.signalTerm() != "" {
-		return fmt.Sprintf("Try: if %s and %s\n   value -> %s",
-			prior.valueTerm(), prior.signalTerm(), neighbor)
+		return fmt.Sprintf("Try: if %s and %s\n   %s -> %s",
+			prior.valueTerm(), prior.signalTerm(), prior.valueTerm(), neighbor)
 	}
-	return fmt.Sprintf("Try: if %s\n   value -> %s",
-		prior.valueTerm(), neighbor)
+	return fmt.Sprintf("Try: if %s\n   %s -> %s",
+		prior.valueTerm(), prior.valueTerm(), neighbor)
 }
 
 // ParseReadGate parses edited pseudo text back into a ReadGateView.
 //
 // Grammar (whitespace-insensitive across lines):
 //
-//	pseudo   := "if" ident ["and" ident] NEWLINE "value" "->" ident
+//	pseudo   := "if" "input" "value" ["and" ident] NEWLINE "input" "value" "->" ident
 //
 // On malformed input returns *ParseReadGateError with a human message and Suggestion().
 func ParseReadGate(text string, prior ReadGateView) (ReadGateView, error) {
@@ -307,11 +309,11 @@ func detectReadGateGuard(f *ast.File) ([]string, error) {
 			return true
 		}
 		if isBinaryAnd(ifStmt.Cond, "HasValue", "HasChainInhibitor") {
-			found = []string{"value", "signal"}
+			found = []string{"input value", "signal"}
 			return false
 		}
 		if selectorOrIdent(ifStmt.Cond, "HasValue") {
-			found = []string{"value"}
+			found = []string{"input value"}
 			return false
 		}
 		return true
@@ -384,7 +386,7 @@ func isParseError(err error, pe **parseError) bool {
 
 // parseReadGatePseudo parses the ReadGate pseudo grammar:
 //
-//	"if" ident ["and" ident] NEWLINE "value" "->" ident
+//	"if" "input" "value" ["and" ident] NEWLINE "input" "value" "->" ident
 func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 	if rawErr := p.consumeWord("if"); rawErr != nil {
 		tok := p.peekWord()
@@ -394,12 +396,16 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 		return ReadGateView{}, &parseError{kind: parseErrBadStart, token: tok, wrapped: rawErr}
 	}
 
-	// First guard term (required)
-	term1, rawErr := p.consumeIdent()
-	if rawErr != nil {
+	// First guard term is the two-word phrase "input value" (required)
+	if rawErr := p.consumeWord("input"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
 	}
+	if rawErr := p.consumeWord("value"); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		return ReadGateView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
+	}
+	term1 := "input value"
 
 	// Optional "and <ident>"
 	var guardTerms []string
@@ -415,7 +421,11 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 		guardTerms = append(guardTerms, term2)
 	}
 
-	// "value" "->" ident
+	// "input" "value" "->" ident (send line)
+	if rawErr := p.consumeWord("input"); rawErr != nil {
+		tok := excerpt(p.input, p.pos)
+		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
+	}
 	if rawErr := p.consumeWord("value"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
