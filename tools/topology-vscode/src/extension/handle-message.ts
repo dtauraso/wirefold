@@ -4,6 +4,7 @@
 // function rather than a method.
 
 import * as cp from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
@@ -39,7 +40,48 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
     console.warn("topology editor: ignoring malformed webview message", raw);
     return;
   }
-  await dispatch(msg, ctx);
+  try {
+    await dispatch(msg, ctx);
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    console.error("topology editor: unhandled message handler error", error);
+
+    // Write probe file for post-mortem diagnosis.
+    const repoRoot = workspaceRoot();
+    if (repoRoot) {
+      try {
+        const probeDir = path.join(repoRoot, ".probe");
+        fs.mkdirSync(probeDir, { recursive: true });
+        const probeFile = path.join(probeDir, "handler-error-last.json");
+        const entry = JSON.stringify({
+          timestamp: new Date().toISOString(),
+          msgType: msg.type,
+          nodeId: (msg as { nodeId?: string }).nodeId ?? null,
+          message: error.message,
+          stack: error.stack ?? null,
+        });
+        fs.appendFileSync(probeFile, entry + "\n", "utf8");
+      } catch (probeErr) {
+        console.error("topology editor: could not write probe file", probeErr);
+      }
+    }
+
+    // Post an error overlay to the webview if this is a pseudo save/render.
+    const nodeId = (msg as { nodeId?: string }).nodeId;
+    if (typeof nodeId === "string" && (msg.type.endsWith("-save") || msg.type.endsWith("-render"))) {
+      try {
+        // Derive the pseudo prefix: strip trailing "-save" or "-render".
+        const suffix = msg.type.endsWith("-save") ? "-save" : "-render";
+        const prefix = msg.type.slice(0, -suffix.length) as import("../messages").PseudoPrefix;
+        if (prefix in PSEUDO_PREFIX_TO_KIND) {
+          const m = pseudoMsgTypes(prefix);
+          ctx.post({ type: m.error, nodeId, message: `handler error: ${error.message}` });
+        }
+      } catch (postErr) {
+        console.error("topology editor: could not post pseudo error to webview", postErr);
+      }
+    }
+  }
 }
 
 async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
