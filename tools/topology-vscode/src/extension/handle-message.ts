@@ -8,7 +8,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
 import { extractViewText, injectViewText } from "../sidecar";
-import { parseWebviewToHost, type HostToWebviewMsg, type WebviewToHostMsg } from "../messages";
+import { parseWebviewToHost, pseudoMsgTypes, type HostToWebviewMsg, type WebviewToHostMsg } from "../messages";
 import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
 import { toErrorMessage } from "../utils/error";
@@ -131,14 +131,15 @@ async function handleReadgateRender(
   document: vscode.TextDocument,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
 ): Promise<void> {
+  const m = pseudoMsgTypes("readgate");
   const repoRoot = workspaceRoot();
   if (!repoRoot) {
-    post({ type: "readgate-error", nodeId, message: "no workspace folder" });
+    post({ type: m.error, nodeId, message: "no workspace folder" });
     return;
   }
   const outNeighbor = findOutNeighbor(document.getText(), nodeId);
   if (!outNeighbor) {
-    post({ type: "readgate-error", nodeId, message: `node ${nodeId} has no ToChainInhibitor edge` });
+    post({ type: m.error, nodeId, message: `node ${nodeId} has no ToChainInhibitor edge` });
     return;
   }
   const goFile = path.join(repoRoot, "nodes", "readgate", "node.go");
@@ -150,10 +151,10 @@ async function handleReadgateRender(
   if (code !== 0) {
     let msg = stderr.trim();
     try { msg = (JSON.parse(msg) as { error?: string }).error ?? msg; } catch { /* use raw */ }
-    post({ type: "readgate-error", nodeId, message: msg });
+    post({ type: m.error, nodeId, message: msg });
     return;
   }
-  post({ type: "readgate-render-result", nodeId, pseudo: stdout.trimEnd() });
+  post({ type: m.renderResult, nodeId, pseudo: stdout.trimEnd() });
 }
 
 async function handleReadgateSave(
@@ -163,14 +164,15 @@ async function handleReadgateSave(
   runner: BuildAndRunRunner,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
 ): Promise<void> {
+  const m = pseudoMsgTypes("readgate");
   const repoRoot = workspaceRoot();
   if (!repoRoot) {
-    post({ type: "readgate-error", nodeId, message: "no workspace folder" });
+    post({ type: m.error, nodeId, message: "no workspace folder" });
     return;
   }
   const currentNeighbor = findOutNeighbor(document.getText(), nodeId);
   if (!currentNeighbor) {
-    post({ type: "readgate-error", nodeId, message: `node ${nodeId} has no ToChainInhibitor edge` });
+    post({ type: m.error, nodeId, message: `node ${nodeId} has no ToChainInhibitor edge` });
     return;
   }
   const goFile = path.join(repoRoot, "nodes", "readgate", "node.go");
@@ -189,21 +191,21 @@ async function handleReadgateSave(
       msg = parsed.error ?? raw;
       suggestion = parsed.suggestion ?? "";
     } catch { /* use raw */ }
-    post({ type: "readgate-error", nodeId, message: msg, suggestion });
+    post({ type: m.error, nodeId, message: msg, suggestion });
     return;
   }
   let result: { go: string; outNeighbor: string; removedPorts: string[] };
   try {
     result = JSON.parse(stdout) as typeof result;
   } catch (e) {
-    post({ type: "readgate-error", nodeId, message: `could not parse cmd/pseudo output: ${toErrorMessage(e)}` });
+    post({ type: m.error, nodeId, message: `could not parse cmd/pseudo output: ${toErrorMessage(e)}` });
     return;
   }
 
   // Build one WorkspaceEdit spanning node.go + topology.json so a single Cmd-Z reverts both.
   let topologyParsed: unknown;
   try { topologyParsed = JSON.parse(document.getText()); } catch (e) {
-    post({ type: "readgate-error", nodeId, message: `could not parse topology: ${toErrorMessage(e)}` });
+    post({ type: m.error, nodeId, message: `could not parse topology: ${toErrorMessage(e)}` });
     return;
   }
   const topo = topologyParsed as {
@@ -232,7 +234,7 @@ async function handleReadgateSave(
   try {
     goDoc = await vscode.workspace.openTextDocument(goUri);
   } catch (e) {
-    post({ type: "readgate-error", nodeId, message: `could not open node.go: ${toErrorMessage(e)}` });
+    post({ type: m.error, nodeId, message: `could not open node.go: ${toErrorMessage(e)}` });
     return;
   }
 
@@ -255,7 +257,7 @@ async function handleReadgateSave(
   await document.save();
   await goDoc.save();
 
-  post({ type: "readgate-save-result", nodeId });
+  post({ type: m.saveResult, nodeId });
 
   if (runner.isRunning()) {
     await runner.stopAndAwait();
@@ -305,19 +307,20 @@ async function handlePseudoRender(
   document: vscode.TextDocument,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
 ): Promise<void> {
+  const m = pseudoMsgTypes("pseudo");
   const repoRoot = workspaceRoot();
   if (!repoRoot) {
-    post({ type: "pseudo-error", nodeId, message: "no workspace folder" });
+    post({ type: m.error, nodeId, message: "no workspace folder" });
     return;
   }
   const specEntry = findNodeSpec(document.getText(), nodeId);
   if (!specEntry) {
-    post({ type: "pseudo-error", nodeId, message: `node ${nodeId} not found in topology` });
+    post({ type: m.error, nodeId, message: `node ${nodeId} not found in topology` });
     return;
   }
   const outNeighbor = findInputOutNeighbor(document.getText(), nodeId);
   if (!outNeighbor) {
-    post({ type: "pseudo-error", nodeId, message: `Input node ${nodeId} has no output edge` });
+    post({ type: m.error, nodeId, message: `Input node ${nodeId} has no output edge` });
     return;
   }
   const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
@@ -330,10 +333,10 @@ async function handlePseudoRender(
   if (code !== 0) {
     let msg = stderr.trim();
     try { msg = (JSON.parse(msg) as { error?: string }).error ?? msg; } catch { /* use raw */ }
-    post({ type: "pseudo-error", nodeId, message: msg });
+    post({ type: m.error, nodeId, message: msg });
     return;
   }
-  post({ type: "pseudo-render-result", nodeId, pseudo: stdout.trimEnd() });
+  post({ type: m.renderResult, nodeId, pseudo: stdout.trimEnd() });
 }
 
 async function handlePseudoSave(
@@ -343,19 +346,20 @@ async function handlePseudoSave(
   runner: BuildAndRunRunner,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
 ): Promise<void> {
+  const m = pseudoMsgTypes("pseudo");
   const repoRoot = workspaceRoot();
   if (!repoRoot) {
-    post({ type: "pseudo-error", nodeId, message: "no workspace folder" });
+    post({ type: m.error, nodeId, message: "no workspace folder" });
     return;
   }
   const specEntry = findNodeSpec(document.getText(), nodeId);
   if (!specEntry) {
-    post({ type: "pseudo-error", nodeId, message: `node ${nodeId} not found in topology` });
+    post({ type: m.error, nodeId, message: `node ${nodeId} not found in topology` });
     return;
   }
   const outNeighbor = findInputOutNeighbor(document.getText(), nodeId);
   if (!outNeighbor) {
-    post({ type: "pseudo-error", nodeId, message: `Input node ${nodeId} has no output edge` });
+    post({ type: m.error, nodeId, message: `Input node ${nodeId} has no output edge` });
     return;
   }
   const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
@@ -375,14 +379,14 @@ async function handlePseudoSave(
       msg = parsed.error ?? raw;
       suggestion = parsed.suggestion ?? "";
     } catch { /* use raw */ }
-    post({ type: "pseudo-error", nodeId, message: msg, suggestion });
+    post({ type: m.error, nodeId, message: msg, suggestion });
     return;
   }
   let result: { go: string; spec: Record<string, unknown> };
   try {
     result = JSON.parse(stdout) as typeof result;
   } catch (e) {
-    post({ type: "pseudo-error", nodeId, message: `could not parse cmd/pseudo output: ${toErrorMessage(e)}` });
+    post({ type: m.error, nodeId, message: `could not parse cmd/pseudo output: ${toErrorMessage(e)}` });
     return;
   }
 
@@ -393,7 +397,7 @@ async function handlePseudoSave(
   // Patch the node's data in topology.json and save.
   let topologyParsed: unknown;
   try { topologyParsed = JSON.parse(document.getText()); } catch (e) {
-    post({ type: "pseudo-error", nodeId, message: `could not parse topology: ${toErrorMessage(e)}` });
+    post({ type: m.error, nodeId, message: `could not parse topology: ${toErrorMessage(e)}` });
     return;
   }
   const topo = topologyParsed as { nodes?: { id: string; data?: Record<string, unknown> }[] };
@@ -405,7 +409,7 @@ async function handlePseudoSave(
   }
   await applyEdit(document, JSON.stringify(topologyParsed, null, 2));
   await document.save();
-  post({ type: "pseudo-save-result", nodeId });
+  post({ type: m.saveResult, nodeId });
 
   // If a substrate run is active, stop it and restart so the new
   // topology.json + nodes/Input/node.go are picked up.

@@ -9,6 +9,19 @@ export type RunStatus =
   | { state: "error"; message: string }
   | { state: "cancelled" };
 
+export const PSEUDO_KIND_PREFIX = { Input: "pseudo", ReadGate: "readgate" } as const;
+export type PseudoKind = keyof typeof PSEUDO_KIND_PREFIX;
+export type PseudoPrefix = (typeof PSEUDO_KIND_PREFIX)[PseudoKind];
+export function pseudoMsgTypes(prefix: PseudoPrefix) {
+  return {
+    render:       `${prefix}-render`,
+    save:         `${prefix}-save`,
+    renderResult: `${prefix}-render-result`,
+    saveResult:   `${prefix}-save-result`,
+    error:        `${prefix}-error`,
+  } as const;
+}
+
 export type WebviewToHostMsg =
   | { type: "ready" }
   | { type: "save"; text: string }
@@ -20,10 +33,8 @@ export type WebviewToHostMsg =
   | { type: "stop" }
   | { type: "webview-log"; entry: string }
   | { type: "delivered"; edge: string }
-  | { type: "pseudo-render"; nodeId: string }
-  | { type: "pseudo-save"; nodeId: string; pseudo: string }
-  | { type: "readgate-render"; nodeId: string }
-  | { type: "readgate-save"; nodeId: string; pseudo: string };
+  | { type: `${PseudoPrefix}-render`; nodeId: string }
+  | { type: `${PseudoPrefix}-save`; nodeId: string; pseudo: string };
 
 // Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
@@ -54,23 +65,20 @@ export type HostToWebviewMsg =
   | { type: "flush" }
   | { type: "save-error"; message: string }
   | { type: "trace-event"; event: TraceEvent }
-  | { type: "pseudo-render-result"; nodeId: string; pseudo: string }
-  | { type: "pseudo-save-result"; nodeId: string }
-  | { type: "pseudo-error"; nodeId: string; message: string; suggestion?: string }
-  | { type: "readgate-render-result"; nodeId: string; pseudo: string }
-  | { type: "readgate-save-result"; nodeId: string }
-  | { type: "readgate-error"; nodeId: string; message: string; suggestion?: string };
+  | { type: `${PseudoPrefix}-render-result`; nodeId: string; pseudo: string }
+  | { type: `${PseudoPrefix}-save-result`; nodeId: string }
+  | { type: `${PseudoPrefix}-error`; nodeId: string; message: string; suggestion?: string };
+
+const _pseudoPrefixes = Object.values(PSEUDO_KIND_PREFIX) as PseudoPrefix[];
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
   "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
-  "pseudo-render", "pseudo-save",
-  "readgate-render", "readgate-save",
+  ..._pseudoPrefixes.flatMap((p) => [`${p}-render`, `${p}-save`] as const),
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
   "load", "view-load", "run-status", "flush", "save-error", "trace-event",
-  "pseudo-render-result", "pseudo-save-result", "pseudo-error",
-  "readgate-render-result", "readgate-save-result", "readgate-error",
+  ..._pseudoPrefixes.flatMap((p) => [`${p}-render-result`, `${p}-save-result`, `${p}-error`] as const),
 ]);
 
 export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
@@ -92,20 +100,20 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "delivered":
       return typeof m.edge === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "pseudo-render":
-      return typeof m.nodeId === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "pseudo-save":
-      return typeof m.nodeId === "string" && typeof m.pseudo === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
-    case "readgate-render":
-      return typeof m.nodeId === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "readgate-save":
-      return typeof m.nodeId === "string" && typeof m.pseudo === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
-    default:
+    default: {
+      // Handle pseudo render/save types derived from PSEUDO_KIND_PREFIX
+      const renderTypes = new Set(_pseudoPrefixes.map((p) => `${p}-render`));
+      const saveTypes   = new Set(_pseudoPrefixes.map((p) => `${p}-save`));
+      if (renderTypes.has(t)) {
+        return typeof m.nodeId === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+      }
+      if (saveTypes.has(t)) {
+        return typeof m.nodeId === "string" && typeof m.pseudo === "string"
+          ? (m as unknown as WebviewToHostMsg)
+          : undefined;
+      }
       return m as unknown as WebviewToHostMsg;
+    }
   }
 }
 

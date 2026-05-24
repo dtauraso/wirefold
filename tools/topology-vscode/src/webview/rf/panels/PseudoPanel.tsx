@@ -11,25 +11,9 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { vscode } from "../../vscode-api";
+import { PSEUDO_KIND_PREFIX, pseudoMsgTypes, type PseudoKind } from "../../../messages";
 
-export type Kind = "Input" | "ReadGate";
-
-const MSG = {
-  Input: {
-    render:       "pseudo-render",
-    save:         "pseudo-save",
-    renderResult: "pseudo-render-result",
-    saveResult:   "pseudo-save-result",
-    error:        "pseudo-error",
-  },
-  ReadGate: {
-    render:       "readgate-render",
-    save:         "readgate-save",
-    renderResult: "readgate-render-result",
-    saveResult:   "readgate-save-result",
-    error:        "readgate-error",
-  },
-} as const;
+export type Kind = PseudoKind;
 
 type Props = {
   nodeId: string;
@@ -42,7 +26,7 @@ type EditState =
   | { mode: "editing" };
 
 export function PseudoPanel({ nodeId, kind = "Input" }: Props) {
-  const msg = MSG[kind];
+  const msg = pseudoMsgTypes(PSEUDO_KIND_PREFIX[kind]);
   // Last-known-good text (from render-result or last save-result)
   const [lkg, setLkg] = useState<string | null>(null);
   // Current buffer while editing
