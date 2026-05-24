@@ -7,70 +7,90 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-23, task/pseudo-projection-input)
+## State at handoff (2026-05-23, task/pseudo-projection-readgate)
 
-**Active branch:** `task/pseudo-projection-input`. Pseudo-projection v0
-for Input node is end-to-end functional; not yet merged to main.
+**Active branch:** `task/pseudo-projection-readgate`. ReadGate pseudo-projection
+v0 is functionally complete end-to-end; NOT yet merged to main. Built by
+mirroring the Input pseudo pattern.
 
-### What landed on this branch
+### What landed this session
 
-**Design doc** `docs/planning/visual-editor/pseudo-projection.md` —
-algebraic per-instance projection, no AI, deterministic round-trip,
-Input-only v0. (Branch-local; stripped before merge.)
+**`tools/pseudo/readgate.go`** — `FromReadGate` / `RenderReadGate` /
+`ParseReadGate` / `ToReadGate` + `ParseReadGateError` with `Suggestion()`.
+`ToReadGate` signature: `(newGoSrc []byte, newOutNeighbor string, removedPorts []string, err error)`.
+Dropping a guard term regenerates `node.go` WITHOUT that port (no dead ports)
+and reports it in `removedPorts`. Tests in `readgate_test.go` green.
 
-**`tools/pseudo/` Go package** — `FromInput` / `RenderInput` /
-`ParseInput` / `ToInput` + `ParseInputError` with human-readable
-messages + `Suggestion()`. Five round-trip tests passing.
+**`cmd/pseudo/main.go`** — `readgate render|save` subcommands (require
+`--go-file`, `--out-neighbor`; save also `--pseudo`). Save stdout JSON:
+`{go, outNeighbor, removedPorts}`.
 
-**`cmd/pseudo/` CLI** — `input render` and `input save` subcommands;
-stderr JSON `{error, suggestion}` on parse failure (exit 2); stdout
-JSON `{go, spec}` on save success.
+**`tools/topology-vscode/src/extension/handle-message.ts`** —
+`readgate-render` / `readgate-save` handlers. Save applies `node.go` rewrite
++ topology mutations (re-point ToChainInhibitor output edge to new neighbor;
+prune edges feeding `removedPorts`) as ONE `vscode.WorkspaceEdit` → single
+Cmd-Z undoes everything. Resolves out-neighbor via `findOutNeighbor`
+(`source === nodeId && sourceHandle === "ToChainInhibitor"`).
 
-**Extension host bridge** (`tools/topology-vscode/src/extension/handle-message.ts`)
-— `pseudo-render` and `pseudo-save` handlers; shells out to
-`go run ./cmd/pseudo`; reads `nodes/Input/node.go` via workspace fs;
-patches the node's `data` field in topology document via `applyEdit` +
-`document.save()`; auto stop+run if substrate is active.
+**`src/messages.ts`** — `readgate-render` / `readgate-save` + result/error
+message types.
 
-**Webview UI:**
-- `PseudoPanel.tsx` — inline pseudo on Input nodes (no ƒ toggle);
-  double-click label → contentEditable edit mode; autosave on debounced
-  parse (250 ms); blur flushes pending edits; styled to match node text.
-- `PseudoErrorOverlay.tsx` — lower-left canvas overlay surfaces parse
-  errors + fix suggestion, auto-dismiss 10 s.
-- `GenericNode.tsx` — renders `PseudoPanel` when `data.type === "Input"`;
-  uses `nodrag nopan` + stopPropagation so caret placement works.
-- Removed init-list / repeat displays from Input node defs (pseudo line
-  covers them).
+**Webview:** `PseudoPanel.tsx` gained a `kind: "Input" | "ReadGate"` prop
+selecting which message types it sends/receives. `GenericNode.tsx` renders
+the panel for both Input and ReadGate nodes. PseudoPanel text now word-wraps
+at word boundaries (`whiteSpace: pre-wrap` + `wordBreak: keep-all` +
+`overflowWrap: normal`), no mid-word splits.
 
-### What works
+**Input pseudo also changed this session** (`input.go` + `cmd/pseudo` +
+`handle-message.ts`): Input now names its downstream neighbor node id as the
+target (was generic "OutputField"). `FromInput` signature gained `outNeighbor`
+param; input render/save now REQUIRE `--out-neighbor` and the extension
+resolves it via `findInputOutNeighbor` (first edge with `source === nodeId`).
+Text evolved to: `↺ ([0, 1] -> readGate1)` with repeat, `[0, 1] -> readGate1`
+without — dropped "send"/"each of", repeat shown as leading `↺` with the
+body parenthesized.
 
-Full edit loop verified by user: double-click pseudo → type → debounce
-parse → topology.json + node.go written → substrate auto-restart →
-animation reflects new behavior. Parse errors appear in lower-left
-overlay with human wording. Caret placement, blur flush, and round-trip
-on disk all verified.
+### Current rendered text
+
+- **ReadGate:** `if input value and signal` / (3-space indent) `input value -> i0`
+- **Input:** `↺ ([0, 1] -> readGate1)` (repeat) or `[0, 1] -> readGate1`
+
+### ReadGate editable surface
+
+1. Drop `signal` from guard → fires on value alone; removes `FromChainInhibitor`
+   port + prunes its wires.
+2. Change target node after `->` → re-points output edge.
+
+Both save as one undoable `WorkspaceEdit`. The literal vocabulary
+(`input value` / `signal` / `if` / `->`) is fixed, not renamable.
+
+### Status
+
+Go tests + `tsc --noEmit` + `npm run build` all green. The edit-in-canvas
+loop has **NOT** been verified live in VS Code this session (UI/integration).
 
 ### Open / next
 
-1. **Merge to main** — run `tools/strip-branch-local-docs.sh task/pseudo-projection-input`
-   to remove the branch-local design doc, then merge with explicit user
-   sign-off.
-2. **ReadGate pseudo projection** — follow-up branch using the same
-   pattern; smaller scope.
-3. **InhibitRightGate pseudo projection** — same pattern.
-4. **ChainInhibitor pseudo projection** — primitive still unresolved
-   ("keep prev send current"); needs spec before starting.
+1. **Live-verify in VS Code** — reload window, double-click a ReadGate pseudo,
+   edit guard (drop signal) and target, confirm save writes `node.go` + prunes
+   wires + re-points edge, and one Cmd-Z reverts all; same for Input.
+2. **Merge to main** — run `tools/strip-branch-local-docs.sh task/pseudo-projection-readgate`
+   (check for any branch-local docs first), merge with explicit user sign-off,
+   delete branch local+remote.
+3. **InhibitRightGate pseudo projection** — same pattern, has L/R params.
+4. **ChainInhibitor pseudo projection** — still blocked on unresolved
+   "keep prev send current" spec.
 
 ### Key files
 
-- `tools/pseudo/input.go` — Go pseudo package (FromInput/RenderInput/ParseInput/ToInput)
-- `cmd/pseudo/main.go` — CLI entry point
-- `tools/topology-vscode/src/webview/rf/panels/PseudoPanel.tsx` — inline editor UI
-- `tools/topology-vscode/src/webview/rf/panels/PseudoErrorOverlay.tsx` — error overlay
-- `tools/topology-vscode/src/extension/handle-message.ts` — pseudo-render / pseudo-save handlers
-- `nodes/Input/node.go` — Input node Go source (written by `pseudo-save`)
-- `docs/planning/visual-editor/pseudo-projection.md` — design doc (branch-local; strip before merge)
+- `tools/pseudo/readgate.go` — Go pseudo package (FromReadGate/RenderReadGate/ParseReadGate/ToReadGate)
+- `tools/pseudo/input.go` — Input pseudo package (updated this session)
+- `cmd/pseudo/main.go` — CLI entry point (readgate + input subcommands)
+- `tools/topology-vscode/src/extension/handle-message.ts` — readgate-render / readgate-save / input handlers
+- `tools/topology-vscode/src/webview/rf/panels/PseudoPanel.tsx` — inline editor UI (kind prop)
+- `tools/topology-vscode/src/webview/rf/nodes/GenericNode.tsx` — renders PseudoPanel for Input + ReadGate
+- `nodes/readgate/node.go` — ReadGate node Go source (written by readgate-save)
+- `nodes/Input/node.go` — Input node Go source (written by input-save)
 
 ### Substrate model contract (stable)
 
