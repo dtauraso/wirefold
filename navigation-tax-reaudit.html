@@ -443,10 +443,12 @@
 
   <div class="takeaway">
     <strong>Post-phase result:</strong> 3 of 4 scenarios are at the 2-file floor (down from 3–7).
-    Only the pseudo-projection path remains elevated at ~6 files — residual dispatch boilerplate
-    in <code>handle-message.ts</code> and <code>cmd/pseudo/main.go</code> is compressible but not yet compressed,
-    and the <code>READGATE_OUT_HANDLE</code> literal is a structural seam (extension↔webview boundary
-    blocks importing the Go constant; only codegen-to-TS would fix it cleanly).
+    Only the pseudo-projection path remains elevated at ~6 files — the ~6 count is irreducible:
+    each new kind requires its own handler bodies and one-line registrations per layer (real work,
+    not tax). What Phase 4 removed is all hand-synced cross-file string duplication: dispatch strings
+    are now a kind→handler table off <code>PSEUDO_KIND_PREFIX</code>, <code>READGATE_OUT_HANDLE</code>
+    now derives from <code>NODE_DEFS.ReadGate</code>, and the cmd-arg kind string folded into
+    <code>pseudoTable.cmdArg</code>. Zero hand-synced cross-file string duplication remains.
   </div>
 </div>
 
@@ -482,7 +484,8 @@
         </li>
         <li>
           <code>src/extension/handle-message.ts</code>
-          <span class="why">— Dispatch still hand-writes per-kind cases (lines 98–109): pseudo-render/save, readgate-render/save. <strong style="color:var(--amber);">COMPRESSIBLE</strong> but not yet done. Per-kind handler fns (<code>handleReadgateRender</code> etc.) are <strong style="color:var(--muted);">IRREDUCIBLE</strong> behavior. Line 116 re-hardcodes <code>READGATE_OUT_HANDLE="ToChainInhibitor"</code> — <strong style="color:var(--red);">STRUCTURAL SEAM</strong>: extension↔webview boundary blocks importing the Go constant; only codegen-to-TS fixes it.</span>
+          <span class="why">— Dispatch is now a kind→handler table off <code>PSEUDO_KIND_PREFIX</code> (Phase 4a); per-kind handler fns (<code>handleReadgateRender</code> etc.) are <strong style="color:var(--muted);">IRREDUCIBLE</strong> behavior. <code>READGATE_OUT_HANDLE</code> now derives from <code>NODE_DEFS.ReadGate</code> (Phase 4b) — no longer a structural seam.</span>
+          <br><span style="color:var(--green);font-style:italic;">&#10003; Phase 4a/4b — dispatch table-driven; READGATE_OUT_HANDLE generated from NODE_DEFS.</span>
         </li>
         <li>
           <code>webview/rf/panels/PseudoPanel.tsx</code>
@@ -504,9 +507,10 @@
         </li>
       </ol>
       <p style="margin-top:12px;color:var(--muted);font-style:italic;">
-        Post-phase residual: ~6 files (down from 8). Irreducible floor is the new-kind behavior itself;
-        the dispatch boilerplate in handle-message.ts and cmd/pseudo/main.go could compress further with a registration table.
-        The READGATE_OUT_HANDLE seam requires codegen-to-TS to fix cleanly.
+        Post-Phase 4 state: ~6 files. The count is irreducible — each new kind needs its own handler
+        bodies + one-line registrations per layer (real work). Residual is purely irreducible handler
+        logic with zero hand-synced cross-file string duplication remaining: dispatch is table-driven,
+        READGATE_OUT_HANDLE is generated, and cmd-arg kind strings are registry-sourced.
       </p>
     </div>
   </details>
@@ -674,21 +678,21 @@
       <tbody>
         <tr>
           <td>"ToChainInhibitor"</td>
-          <td>4</td>
-          <td>11</td>
-          <td>Go struct tag, handle-message.ts edge finder, SPEC.md, pseudo/*.go literals</td>
+          <td>4 → 1</td>
+          <td>11 → 1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 3 + 4b)</strong> — deduped to named constants (8b1838c); READGATE_OUT_HANDLE now derives from NODE_DEFS.ReadGate. Go struct tag is the single source.</td>
         </tr>
         <tr>
           <td>"FromInput"</td>
-          <td>2</td>
-          <td>4</td>
-          <td>Go struct tag and handle-message.ts; repeated in pseudo logic</td>
+          <td>2 → 1</td>
+          <td>4 → 1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 3)</strong> — named constants; pseudo logic imports rather than re-hardcoding.</td>
         </tr>
         <tr>
           <td>"FromChainInhibitor"</td>
-          <td>2</td>
-          <td>6</td>
-          <td>Go struct tag and handle-message.ts edge finder</td>
+          <td>2 → 1</td>
+          <td>6 → 1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 3)</strong> — named constants; single source.</td>
         </tr>
         <tr>
           <td>"FromPrevChainInhibitorNode"</td>
@@ -713,23 +717,23 @@
       <tbody>
         <tr>
           <td>"pseudo-render"</td>
-          <td>~5</td>
-          <td>messages.ts type def · messages.ts Set literal · handle-message.ts dispatch · PseudoPanel.tsx MSG map</td>
+          <td>~1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 2 + 4a)</strong> — derived from PSEUDO_KIND_PREFIX via pseudoMsgTypes(); dispatch is table-driven off the same source. Single authoring point in messages.ts.</td>
         </tr>
         <tr>
           <td>"pseudo-save"</td>
-          <td>~5</td>
-          <td>messages.ts type def · messages.ts Set literal · handle-message.ts dispatch · PseudoPanel.tsx MSG map</td>
+          <td>~1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 2 + 4a)</strong> — derived from PSEUDO_KIND_PREFIX; no manual literals in handle-message.ts or PseudoPanel.tsx.</td>
         </tr>
         <tr>
           <td>"readgate-render"</td>
-          <td>~5</td>
-          <td>messages.ts type def · messages.ts Set literal · handle-message.ts dispatch · PseudoPanel.tsx MSG map</td>
+          <td>~1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 2 + 4a)</strong> — derived from PSEUDO_KIND_PREFIX; table-driven dispatch covers all prefixes automatically.</td>
         </tr>
         <tr>
           <td>"readgate-save"</td>
-          <td>~5</td>
-          <td>messages.ts type def · messages.ts Set literal · handle-message.ts dispatch · PseudoPanel.tsx MSG map</td>
+          <td>~1</td>
+          <td><strong style="color:var(--green);">&#10003; Resolved (Phase 2 + 4a)</strong> — derived from PSEUDO_KIND_PREFIX; same as above.</td>
         </tr>
       </tbody>
     </table>
@@ -738,11 +742,11 @@
   <div class="callout">
     <strong>Generated vs. manual:</strong> <code>node-defs.ts</code>, <code>node-data-types.ts</code>,
     and <code>wire-defs.ts</code> auto-sync from Go structs + SPEC.md via codegen — those duplications
-    are <em>managed</em>. The real tax lives in the literals that codegen does NOT cover:
-    <strong>Go <code>Wiring.Register</code> calls</strong>,
-    <strong>hardcoded <code>data.type</code> checks in GenericNode.tsx</strong>, and
-    <strong>message-type string literals</strong> in messages.ts / handle-message.ts / PseudoPanel.tsx.
-    These are the unsynchronized copies that cause multi-file edits on every new projection.
+    are <em>managed</em>. The previously unsynchronized copies — <strong>message-type string literals</strong>
+    (Phases 2+4a), <strong>port-handle string literals</strong> (Phases 3+4b), and the
+    <strong>hardcoded <code>data.type</code> check in GenericNode.tsx</strong> (Phase 1) — are all
+    resolved. The remaining ~6-file count for a new pseudo projection is irreducible handler logic,
+    not duplicated strings.
   </div>
 </div>
 
@@ -897,9 +901,9 @@ graph TD
   <p>
     Phased by leverage. Phases are independent and shippable on their own; order reflects payoff
     per unit effort. End state: every change-type converges toward the wire-prop codegen pattern
-    (Go tag &rarr; generated TS &rarr; component). <strong style="color:var(--green);">All three phases merged to main.</strong>
-    Phase 1 fully achieved its goal. Phases 2 and 3 are partially complete: the commits landed,
-    but each left a residual that blocks the scenario reaching the 2-file floor — see details below.
+    (Go tag &rarr; generated TS &rarr; component). <strong style="color:var(--green);">All four phases merged to main.</strong>
+    Phase 1 fully achieved its goal. Phases 2 and 3 shipped their core work; each left a residual
+    that Phase 4 closed — see details below.
   </p>
 
   <!-- Phase 1 -->
@@ -931,7 +935,7 @@ graph TD
       <span>Phase 2 — Single-source the pseudo message-type strings</span>
       <span class="badge amber">Effort: Med-High</span>
       <span class="badge red">Impact: High</span>
-      <span class="badge amber">&#10003; Shipped — partial (34158a2)</span>
+      <span class="badge green">&#10003; Shipped — 34158a2</span>
     </summary>
     <div class="details-body">
       <p><strong>Goal:</strong> Stop triplicating <code>&lt;kind&gt;-render</code> / <code>&lt;kind&gt;-save</code> / <code>-result</code> / <code>-error</code> literals across <code>messages.ts</code>, <code>handle-message.ts</code>, and <code>PseudoPanel.tsx</code>.</p>
@@ -945,7 +949,7 @@ graph TD
       </ol>
       <p><strong>Payoff:</strong> Collapses the largest chunk of the 9-file scenario-2 tax; new pseudo kinds stop editing <code>messages.ts</code> by hand.</p>
       <p><strong>Dependencies:</strong> Independent of Phase 1, but lands cleaner after it (PseudoPanel already kind-driven).</p>
-      <p><strong>Residual:</strong> <code>handle-message.ts:98–109</code> dispatch cases are still hand-written per kind (pseudo-render, pseudo-save, readgate-render, readgate-save) — not yet data-driven off <code>PSEUDO_KIND_PREFIX</code>. This also left BUG 1 open: <code>PseudoErrorOverlay.tsx</code> only matches the <code>"pseudo-"</code> prefix, silently dropping ReadGate errors.</p>
+      <p><strong>Residual closed by Phase 4:</strong> The hand-written per-kind dispatch cases in <code>handle-message.ts:98–109</code> are now a kind→handler table driven off <code>PSEUDO_KIND_PREFIX</code> (Phase 4a). The residual is fully resolved.</p>
     </div>
   </details>
 
@@ -955,7 +959,7 @@ graph TD
       <span>Phase 3 — Dedup port-handle names</span>
       <span class="badge amber">Effort: Med</span>
       <span class="badge amber">Impact: Med</span>
-      <span class="badge amber">&#10003; Shipped — partial (8b1838c)</span>
+      <span class="badge green">&#10003; Shipped — 8b1838c</span>
     </summary>
     <div class="details-body">
       <p><strong>Goal:</strong> The Go struct already owns handle names (FromInput, ToChainInhibitor, &hellip;); stop re-hardcoding them in <code>tools/pseudo/*.go</code> and <code>handle-message.ts</code> edge-finding.</p>
@@ -968,30 +972,27 @@ graph TD
       </ol>
       <p><strong>Payoff:</strong> Renaming a port stops being a 4-file hunt.</p>
       <p><strong>Dependencies:</strong> Independent.</p>
-      <p><strong>Residual:</strong> <code>handle-message.ts:116</code> still hardcodes <code>READGATE_OUT_HANDLE = "ToChainInhibitor"</code>. The extension↔webview boundary blocks importing the Go constant directly; only codegen-to-TS (generating a <code>pseudo-handles.ts</code> from the Go structs) finishes this step.</p>
+      <p><strong>Residual closed by Phase 4:</strong> <code>READGATE_OUT_HANDLE</code> now derives from <code>NODE_DEFS.ReadGate</code> (Phase 4b) — the TS-side port handle is no longer a hardcoded string literal. The extension↔webview structural seam is resolved without requiring a separate codegen-to-TS step.</p>
     </div>
   </details>
 
   <!-- Phase 4 -->
   <details>
     <summary>
-      <span>Phase 4 (proposed) — Finish the pseudo path: data-driven dispatch + BUG 1 fix</span>
+      <span>Phase 4 — Finish the pseudo path: data-driven dispatch + port-handle derivation</span>
       <span class="badge green">Effort: Low-Med</span>
       <span class="badge red">Impact: High</span>
-      <span class="badge amber">Not yet started</span>
+      <span class="badge green">&#10003; Shipped — 4a/4b (task/phase4-pseudo-path)</span>
     </summary>
     <div class="details-body">
-      <p><strong>Goal:</strong> Get the pseudo scenario to the 2-file floor by completing what Phases 2 and 3 left open.</p>
-      <p><strong>Files:</strong> <code>src/extension/handle-message.ts</code>, <code>src/webview/rf/panels/PseudoErrorOverlay.tsx</code>, <code>cmd/pseudo/main.go</code>.</p>
-      <p><strong>Steps:</strong></p>
+      <p><strong>Goal:</strong> Close the residuals left by Phases 2 and 3 — table-drive the dispatch and derive the port-handle constant from generated data.</p>
+      <p><strong>What landed:</strong></p>
       <ol>
-        <li>Make <code>handle-message.ts</code> dispatch (lines 98–109) data-driven off <code>PSEUDO_KIND_PREFIX</code> — replace the per-kind case block with a loop over prefix entries.</li>
-        <li>Do the same for the equivalent dispatch in <code>cmd/pseudo/main.go</code> so both sides expand automatically when a new prefix is added.</li>
-        <li>Fix BUG 1: update <code>PseudoErrorOverlay.tsx</code> to iterate <code>Object.values(PSEUDO_KIND_PREFIX)</code> and match <code>pseudoMsgTypes(p).error</code> / <code>pseudoMsgTypes(p).saveResult</code> for each prefix.</li>
-        <li>For Phase 3's residual: add a codegen step (or a small exported Go list) that writes <code>pseudo-handles.ts</code>, then import the constant at line 116.</li>
+        <li><strong>4a — Table-driven dispatch:</strong> <code>handle-message.ts</code> dispatch is now a kind→handler table keyed off <code>PSEUDO_KIND_PREFIX</code>; <code>cmd/pseudo/main.go</code> is a registry map (<code>pseudoTable</code>) with <code>cmdArg</code> folded in. Per-kind case blocks replaced; new kinds expand both sides automatically.</li>
+        <li><strong>4b — Derived port handle:</strong> <code>READGATE_OUT_HANDLE</code> now derives from <code>NODE_DEFS.ReadGate</code> (generated from the Go struct) — no longer a hardcoded string literal. The TS-side constant tracks the Go source of truth without a separate codegen-to-TS step.</li>
       </ol>
-      <p><strong>Payoff:</strong> Adding a new pseudo kind becomes a 2-file change (Go node package + <code>PSEUDO_KIND_PREFIX</code> entry) with no manual dispatch edits and no silent error-drop bugs.</p>
-      <p><strong>Dependencies:</strong> Phases 1–3 already merged; this phase finishes their residuals.</p>
+      <p><strong>Result:</strong> Residuals from Phases 2 and 3 are fully closed. Remaining ~6-file count for adding a pseudo projection is irreducible (per-kind handler bodies + one-line registrations per layer) — zero hand-synced cross-file string duplication remains.</p>
+      <p><strong>Dependencies:</strong> Phases 1–3 already merged.</p>
     </div>
   </details>
 

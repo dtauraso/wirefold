@@ -8,7 +8,18 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
 import { extractViewText, injectViewText } from "../sidecar";
-import { parseWebviewToHost, pseudoMsgTypes, type HostToWebviewMsg, type WebviewToHostMsg } from "../messages";
+import {
+  parseWebviewToHost,
+  pseudoMsgTypes,
+  PSEUDO_KIND_PREFIX,
+  PSEUDO_PREFIX_TO_KIND,
+  ALL_PSEUDO_RENDER_TYPES,
+  ALL_PSEUDO_SAVE_TYPES,
+  type PseudoKind,
+  type HostToWebviewMsg,
+  type WebviewToHostMsg,
+} from "../messages";
+import { NODE_DEFS } from "../webview/rf/nodes/node-defs";
 import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
 import { toErrorMessage } from "../utils/error";
@@ -95,25 +106,34 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "delivered":
       runner.writeStdin(JSON.stringify({ type: "delivered", edge: msg.edge }));
       return;
-    case "pseudo-render":
-      await handlePseudoRender(msg.nodeId, document, post);
-      return;
-    case "pseudo-save":
-      await handlePseudoSave(msg.nodeId, msg.pseudo, document, runner, post);
-      return;
-    case "readgate-render":
-      await handleReadgateRender(msg.nodeId, document, post);
-      return;
-    case "readgate-save":
-      await handleReadgateSave(msg.nodeId, msg.pseudo, document, runner, post);
-      return;
+    default: {
+      // Data-driven pseudo dispatch: matches render/save types for all registered PseudoKinds.
+      type RenderFn = (cmdArg: string, nodeId: string, document: vscode.TextDocument, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
+      type SaveFn   = (cmdArg: string, nodeId: string, pseudo: string, document: vscode.TextDocument, runner: BuildAndRunRunner, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
+      const pseudoTable: Record<PseudoKind, { cmdArg: string; render: RenderFn; save: SaveFn }> = {
+        Input:    { cmdArg: "input",    render: handlePseudoRender,    save: handlePseudoSave },
+        ReadGate: { cmdArg: "readgate", render: handleReadgateRender,  save: handleReadgateSave },
+      };
+      if (ALL_PSEUDO_RENDER_TYPES.has(msg.type)) {
+        const prefix = msg.type.slice(0, -"-render".length) as import("../messages").PseudoPrefix;
+        const kind   = PSEUDO_PREFIX_TO_KIND[prefix];
+        await pseudoTable[kind].render(pseudoTable[kind].cmdArg, (msg as { nodeId: string }).nodeId, document, post);
+        return;
+      }
+      if (ALL_PSEUDO_SAVE_TYPES.has(msg.type)) {
+        const prefix = msg.type.slice(0, -"-save".length) as import("../messages").PseudoPrefix;
+        const kind   = PSEUDO_PREFIX_TO_KIND[prefix];
+        await pseudoTable[kind].save(pseudoTable[kind].cmdArg, (msg as { nodeId: string; pseudo: string }).nodeId, (msg as { pseudo: string }).pseudo, document, runner, post);
+        return;
+      }
+    }
   }
 }
 
 // ── ReadGate helpers ──────────────────────────────────────────────────────────
 
-// Mirrors nodes/readgate ToChainInhibitor output port; extension/webview boundary prevents importing the Go const.
-const READGATE_OUT_HANDLE = "ToChainInhibitor";
+// Derived from NODE_DEFS.ReadGate so the port name stays single-sourced in node-defs.ts.
+const READGATE_OUT_HANDLE = NODE_DEFS.ReadGate.outputs![0].name;
 
 function findOutNeighbor(docText: string, nodeId: string): string | undefined {
   let parsed: unknown;
@@ -130,6 +150,7 @@ function findOutNeighbor(docText: string, nodeId: string): string | undefined {
 }
 
 async function handleReadgateRender(
+  cmdArg: string,
   nodeId: string,
   document: vscode.TextDocument,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
@@ -147,7 +168,7 @@ async function handleReadgateRender(
   }
   const goFile = path.join(repoRoot, "nodes", "readgate", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
-    "readgate", "render",
+    cmdArg, "render",
     "--go-file", goFile,
     "--out-neighbor", outNeighbor,
   ]);
@@ -161,6 +182,7 @@ async function handleReadgateRender(
 }
 
 async function handleReadgateSave(
+  cmdArg: string,
   nodeId: string,
   pseudoText: string,
   document: vscode.TextDocument,
@@ -180,7 +202,7 @@ async function handleReadgateSave(
   }
   const goFile = path.join(repoRoot, "nodes", "readgate", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
-    "readgate", "save",
+    cmdArg, "save",
     "--go-file", goFile,
     "--out-neighbor", currentNeighbor,
     "--pseudo", pseudoText,
@@ -306,6 +328,7 @@ function findInputOutNeighbor(docText: string, nodeId: string): string | undefin
 }
 
 async function handlePseudoRender(
+  cmdArg: string,
   nodeId: string,
   document: vscode.TextDocument,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
@@ -328,7 +351,7 @@ async function handlePseudoRender(
   }
   const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
-    "input", "render",
+    cmdArg, "render",
     "--go-file", goFile,
     "--out-neighbor", outNeighbor,
     "--spec-json", JSON.stringify(specEntry),
@@ -343,6 +366,7 @@ async function handlePseudoRender(
 }
 
 async function handlePseudoSave(
+  cmdArg: string,
   nodeId: string,
   pseudoText: string,
   document: vscode.TextDocument,
@@ -367,7 +391,7 @@ async function handlePseudoSave(
   }
   const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
-    "input", "save",
+    cmdArg, "save",
     "--go-file", goFile,
     "--out-neighbor", outNeighbor,
     "--spec-json", JSON.stringify(specEntry),

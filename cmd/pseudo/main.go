@@ -30,31 +30,32 @@ import (
 	"github.com/dtauraso/wirefold/tools/pseudo"
 )
 
+type kindHandlers struct {
+	render func([]string)
+	save   func([]string)
+}
+
+var pseudoDispatch = map[string]kindHandlers{
+	"input":    {render: runRender, save: runSave},
+	"readgate": {render: runReadGateRender, save: runReadGateSave},
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		fatal("usage: pseudo <input|readgate> <render|save> ...")
 	}
-	switch os.Args[1] {
-	case "input":
-		switch os.Args[2] {
-		case "render":
-			runRender(os.Args[3:])
-		case "save":
-			runSave(os.Args[3:])
-		default:
-			fatal("unknown subcommand %q; expected \"render\" or \"save\"", os.Args[2])
-		}
-	case "readgate":
-		switch os.Args[2] {
-		case "render":
-			runReadGateRender(os.Args[3:])
-		case "save":
-			runReadGateSave(os.Args[3:])
-		default:
-			fatal("unknown subcommand %q; expected \"render\" or \"save\"", os.Args[2])
-		}
+	kind, op := os.Args[1], os.Args[2]
+	handlers, ok := pseudoDispatch[kind]
+	if !ok {
+		fatal("unknown subcommand group %q; expected \"input\" or \"readgate\"", kind)
+	}
+	switch op {
+	case "render":
+		handlers.render(os.Args[3:])
+	case "save":
+		handlers.save(os.Args[3:])
 	default:
-		fatal("unknown subcommand group %q; expected \"input\" or \"readgate\"", os.Args[1])
+		fatal("unknown subcommand %q; expected \"render\" or \"save\"", op)
 	}
 }
 
