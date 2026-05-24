@@ -1006,17 +1006,19 @@ graph TD
   <h2>Confirmed Bugs</h2>
   <p>Genuine correctness bugs found while auditing the post-phase codebase. These are not tax observations — they are silent failures.</p>
 
-  <div class="finding" style="border-color:var(--red);">
-    <div class="finding-num" style="color:var(--red);">1</div>
+  <div class="finding" style="border-color:var(--green);">
+    <div class="finding-num" style="color:var(--green);">1</div>
     <div>
       <div class="finding-title">
         <span style="display:inline-flex;gap:6px;margin-right:8px;vertical-align:middle;">
           <span class="badge red" style="font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;background:#3d1a19;color:var(--red);">Severity: High</span>
           <span class="badge amber" style="font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;background:#2d2004;color:var(--amber);">Fix: Easy</span>
+          <span class="badge green" style="font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;background:#0d2214;color:var(--green);">&#10003; Fixed — task/fix-pseudo-overlay-prefix</span>
         </span>
-        <code>PseudoErrorOverlay.tsx:16,21</code> — ReadGate errors and save-results silently dropped
+        <s><code>PseudoErrorOverlay.tsx:16,21</code> — ReadGate errors and save-results silently dropped</s>
       </div>
       <div class="finding-rec">
+        <s>
         <strong>Root cause:</strong> <code>PseudoErrorOverlay.tsx</code> hardcodes the literals
         <code>"pseudo-error"</code> (line 16) and <code>"pseudo-save-result"</code> (line 21) in its
         message handler. However, <code>messages.ts</code> defines two prefixes via
@@ -1037,6 +1039,9 @@ graph TD
         each, and check <code>msg.type === types.error</code> / <code>msg.type === types.saveResult</code>.
         This makes the overlay automatically cover any future pseudo prefix added to
         <code>PSEUDO_KIND_PREFIX</code>.
+        </s>
+        <br>
+        <span style="color:var(--green);font-style:italic;">&#10003; Resolution: the overlay now tests membership against <code>ALL_PSEUDO_ERROR_TYPES</code> / <code>ALL_PSEUDO_SAVE_RESULT_TYPES</code> (derived from <code>_pseudoPrefixes</code> in <code>messages.ts</code>), so all kinds incl. ReadGate are covered and future kinds are automatic.</span>
       </div>
     </div>
   </div>

@@ -71,6 +71,13 @@ export type HostToWebviewMsg =
 
 const _pseudoPrefixes = Object.values(PSEUDO_KIND_PREFIX) as PseudoPrefix[];
 
+export const ALL_PSEUDO_ERROR_TYPES: ReadonlySet<string> = new Set(
+  _pseudoPrefixes.map((p) => `${p}-error`)
+);
+export const ALL_PSEUDO_SAVE_RESULT_TYPES: ReadonlySet<string> = new Set(
+  _pseudoPrefixes.map((p) => `${p}-save-result`)
+);
+
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
   "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
   ..._pseudoPrefixes.flatMap((p) => [`${p}-render`, `${p}-save`] as const),
