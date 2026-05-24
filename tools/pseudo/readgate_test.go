@@ -258,3 +258,20 @@ func TestToReadGate_TwoTermCompiles(t *testing.T) {
 		t.Errorf("re-parsed GuardTerms length: got %d want 2", len(v2.GuardTerms))
 	}
 }
+
+// TestReadGate_PortNamesInGeneratedSource guards that the port-name constants
+// in the const block and the emit templates cannot silently diverge: the source
+// produced by ToReadGate for a 2-term view must contain all three port names.
+func TestReadGate_PortNamesInGeneratedSource(t *testing.T) {
+	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
+	src, _, _, err := ToReadGate(v)
+	if err != nil {
+		t.Fatalf("ToReadGate: %v", err)
+	}
+	srcStr := string(src)
+	for _, name := range []string{portFromInput, portFromChainInhibitor, portToChainInhibitor} {
+		if !strings.Contains(srcStr, name) {
+			t.Errorf("generated source must contain port name %q", name)
+		}
+	}
+}

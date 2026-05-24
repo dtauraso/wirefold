@@ -112,6 +112,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
 
 // ── ReadGate helpers ──────────────────────────────────────────────────────────
 
+// Mirrors nodes/readgate ToChainInhibitor output port; extension/webview boundary prevents importing the Go const.
+const READGATE_OUT_HANDLE = "ToChainInhibitor";
+
 function findOutNeighbor(docText: string, nodeId: string): string | undefined {
   let parsed: unknown;
   try { parsed = JSON.parse(docText); } catch { return undefined; }
@@ -120,7 +123,7 @@ function findOutNeighbor(docText: string, nodeId: string): string | undefined {
   const edge = edges.find(
     (e: unknown) =>
       (e as { source?: string }).source === nodeId &&
-      (e as { sourceHandle?: string }).sourceHandle === "ToChainInhibitor",
+      (e as { sourceHandle?: string }).sourceHandle === READGATE_OUT_HANDLE,
   );
   if (!edge) return undefined;
   return (edge as { target?: string }).target;
@@ -139,7 +142,7 @@ async function handleReadgateRender(
   }
   const outNeighbor = findOutNeighbor(document.getText(), nodeId);
   if (!outNeighbor) {
-    post({ type: m.error, nodeId, message: `node ${nodeId} has no ToChainInhibitor edge` });
+    post({ type: m.error, nodeId, message: `node ${nodeId} has no ${READGATE_OUT_HANDLE} edge` });
     return;
   }
   const goFile = path.join(repoRoot, "nodes", "readgate", "node.go");
@@ -172,7 +175,7 @@ async function handleReadgateSave(
   }
   const currentNeighbor = findOutNeighbor(document.getText(), nodeId);
   if (!currentNeighbor) {
-    post({ type: m.error, nodeId, message: `node ${nodeId} has no ToChainInhibitor edge` });
+    post({ type: m.error, nodeId, message: `node ${nodeId} has no ${READGATE_OUT_HANDLE} edge` });
     return;
   }
   const goFile = path.join(repoRoot, "nodes", "readgate", "node.go");
@@ -217,7 +220,7 @@ async function handleReadgateSave(
   // (b) re-point ToChainInhibitor output edge
   if (Array.isArray(topo.edges)) {
     for (const edge of topo.edges) {
-      if (edge.source === nodeId && edge.sourceHandle === "ToChainInhibitor") {
+      if (edge.source === nodeId && edge.sourceHandle === READGATE_OUT_HANDLE) {
         edge.target = result.outNeighbor;
       }
     }

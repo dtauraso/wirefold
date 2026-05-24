@@ -11,6 +11,13 @@ import (
 	"text/template"
 )
 
+// Source of truth for port-handle names in logic; the emit templates below must mirror these.
+const (
+	portFromInput          = "FromInput"
+	portFromChainInhibitor = "FromChainInhibitor"
+	portToChainInhibitor   = "ToChainInhibitor"
+)
+
 // ReadGateView is the parsed representation of a ReadGate node instance.
 //
 // GuardTerms holds the named inputs required before the gate fires. The
@@ -178,7 +185,7 @@ func ToReadGate(v ReadGateView) (newGoSrc []byte, newOutNeighbor string, removed
 
 	// Compute removedPorts: fields present in the full 2-term shape but absent here.
 	if !hasSignal {
-		removedPorts = []string{"FromChainInhibitor"}
+		removedPorts = []string{portFromChainInhibitor}
 	}
 
 	// Resolve the Go operator from Gate field.
@@ -368,7 +375,7 @@ func verifyToChainInhibitorSend(f *ast.File) error {
 		if !ok {
 			return true
 		}
-		if xSel.Sel.Name == "ToChainInhibitor" && sel.Sel.Name == "TrySend" {
+		if xSel.Sel.Name == portToChainInhibitor && sel.Sel.Name == "TrySend" {
 			found = true
 		}
 		return true
