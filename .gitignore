@@ -1,3 +1,7 @@
+# Stray cmd/pseudo build output at repo root (normal path is `go run ./cmd/pseudo`).
+# Anchored so it does not match the tools/pseudo or cmd/pseudo source dirs.
+/pseudo
+
 # Prerequisites
 *.d
 
