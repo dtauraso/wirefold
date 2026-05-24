@@ -109,7 +109,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     default: {
       // Data-driven pseudo dispatch: matches render/save types for all registered PseudoKinds.
       type RenderFn = (cmdArg: string, nodeId: string, document: vscode.TextDocument, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
-      type SaveFn   = (cmdArg: string, nodeId: string, pseudo: string, document: vscode.TextDocument, runner: BuildAndRunRunner, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
+      type SaveFn   = (cmdArg: string, nodeId: string, pseudo: string, document: vscode.TextDocument, runner: BuildAndRunRunner, post: (msg: HostToWebviewMsg) => Thenable<boolean>, setLastAppliedVersion: (v: number) => void) => Promise<void>;
       const pseudoTable: Record<PseudoKind, { cmdArg: string; render: RenderFn; save: SaveFn }> = {
         Input:    { cmdArg: "input",    render: handlePseudoRender,    save: handlePseudoSave },
         ReadGate: { cmdArg: "readgate", render: handleReadgateRender,  save: handleReadgateSave },
@@ -123,7 +123,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       if (ALL_PSEUDO_SAVE_TYPES.has(msg.type)) {
         const prefix = msg.type.slice(0, -"-save".length) as import("../messages").PseudoPrefix;
         const kind   = PSEUDO_PREFIX_TO_KIND[prefix];
-        await pseudoTable[kind].save(pseudoTable[kind].cmdArg, (msg as { nodeId: string; pseudo: string }).nodeId, (msg as { pseudo: string }).pseudo, document, runner, post);
+        await pseudoTable[kind].save(pseudoTable[kind].cmdArg, (msg as { nodeId: string; pseudo: string }).nodeId, (msg as { pseudo: string }).pseudo, document, runner, post, ctx.setLastAppliedVersion);
         return;
       }
     }
@@ -188,6 +188,7 @@ async function handleReadgateSave(
   document: vscode.TextDocument,
   runner: BuildAndRunRunner,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
+  setLastAppliedVersion: (v: number) => void,
 ): Promise<void> {
   const m = pseudoMsgTypes("readgate");
   const repoRoot = workspaceRoot();
@@ -276,11 +277,14 @@ async function handleReadgateSave(
     new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
     updatedTopoText,
   );
+  setLastAppliedVersion(document.version + 1);
   await vscode.workspace.applyEdit(edit);
 
-  // Save both documents.
-  await document.save();
+  // Save both documents (node.go first as defense-in-depth so disk is
+  // consistent before topology.json triggers any watchers).
   await goDoc.save();
+  await document.save();
+  setLastAppliedVersion(document.version);
 
   post({ type: m.saveResult, nodeId });
 
@@ -372,6 +376,7 @@ async function handlePseudoSave(
   document: vscode.TextDocument,
   runner: BuildAndRunRunner,
   post: (msg: HostToWebviewMsg) => Thenable<boolean>,
+  setLastAppliedVersion: (v: number) => void,
 ): Promise<void> {
   const m = pseudoMsgTypes("pseudo");
   const repoRoot = workspaceRoot();
@@ -434,8 +439,10 @@ async function handlePseudoSave(
       node.data = { ...(node.data ?? {}), ...result.spec };
     }
   }
+  setLastAppliedVersion(document.version + 1);
   await applyEdit(document, JSON.stringify(topologyParsed, null, 2));
   await document.save();
+  setLastAppliedVersion(document.version);
   post({ type: m.saveResult, nodeId });
 
   // If a substrate run is active, stop it and restart so the new
