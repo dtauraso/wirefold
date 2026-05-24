@@ -8,8 +8,6 @@ import { COLLAPSED_FOLD_W, COLLAPSED_FOLD_H, expandedBounds } from "./_bounds";
 import type { NodeData, EdgeData } from "../types";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
 
-export { specKindToRfType } from "../nodes/registry";
-
 /** Iterate WIRE_PROPS registry; skip `kind` (handled explicitly at call sites). */
 export function pickWireProps(e: Record<string, unknown>): Partial<EdgeData> {
   const out: Partial<EdgeData> = {};

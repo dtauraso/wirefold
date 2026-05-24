@@ -6,10 +6,7 @@ import {
   buildEdges,
   buildFoldNodes,
   buildNoteNodes,
-  specKindToRfType,
 } from "./spec-to-flow-helpers";
-
-export { specKindToRfType } from "./spec-to-flow-helpers";
 
 // Fold-aware spec→flow conversion. Folds are viewer-only state; they never
 // touch the spec (the runtime loader ignores topology.view.json). Edges that cross a
@@ -58,7 +55,7 @@ export function specToFlow(
     const nv = vs.nodes?.[n.id];
     return {
       id: n.id,
-      type: specKindToRfType(n.type),
+      type: n.type,
       position: { x: nv?.x ?? 0, y: nv?.y ?? 0 },
       selected: lastSelectionIds.includes(n.id),
       data: {

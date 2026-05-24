@@ -10,12 +10,8 @@ import { NODE_DEFS } from "./node-defs";
 
 export { NODE_DEFS } from "./node-defs";
 
-/** Converts a spec kind (PascalCase) to the RF node type name (camelCase). */
-export function specKindToRfType(kind: string): string {
-  return kind.charAt(0).toLowerCase() + kind.slice(1);
-}
-
 // RF_NODE_TYPES is derived from NODE_DEFS — no manual sync needed.
+// RF node type names are the spec kind strings verbatim (PascalCase).
 // Non-generic kinds (fold, note) are listed explicitly before the spread so
 // they take precedence if a spec kind ever collides with those names.
 export const RF_NODE_TYPES = {

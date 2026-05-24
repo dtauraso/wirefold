@@ -132,9 +132,9 @@ func main() {
 		kinds = append(kinds, kindEntry{kind: view.kind, goKind: goKind, view: view, ports: ports, dataFields: dataFields, defaultData: defaultData})
 	}
 
-	// Sort alphabetically by RF kind name (matching original generator behaviour).
+	// Sort alphabetically by Go kind name (PascalCase spec kind).
 	sort.Slice(kinds, func(i, j int) bool {
-		return kinds[i].kind < kinds[j].kind
+		return kinds[i].goKind < kinds[j].goKind
 	})
 
 	outPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "webview", "rf", "nodes", "node-defs.ts")
@@ -552,7 +552,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `export const NODE_DEFS: Record<string, NodeDef> = {`)
 	for _, e := range kinds {
-		fmt.Fprintf(w, "  %s: %s,\n", e.kind, buildDef(e.view, e.ports, e.defaultData))
+		fmt.Fprintf(w, "  %s: %s,\n", e.goKind, buildDef(e.view, e.ports, e.defaultData))
 	}
 	fmt.Fprint(w, `};`, "\n")
 	fmt.Fprintln(w)

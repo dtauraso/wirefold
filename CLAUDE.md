@@ -24,11 +24,10 @@ pointer at the top of this file is the only entry point you need.
    the React Flow custom node component (render only; no substrate logic).
 2. Register the kind in the single registry:
    `tools/topology-vscode/src/webview/rf/nodes/registry.ts`.
-   `RF_NODE_TYPES` is derived from `NODE_DEFS` automatically — no other TS
-   file needs editing. The RF type name is derived from the spec kind via
-   `specKindToRfType` (also in registry): lowercases the first character,
-   so spec kind `MyKind` maps to RF type `myKind` with no extra registration.
-   (Precondition: spec kinds must be PascalCase; the first-char lowercase derivation assumes this.)
+   `RF_NODE_TYPES` is derived from `NODE_DEFS` keys — the PascalCase spec
+   kinds emitted by codegen — verbatim. The RF node type name equals the
+   spec kind exactly (e.g. spec kind `MyKind` → RF type `MyKind`); no
+   conversion, no extra registration.
 3. The Go node package under `nodes/<Kind>/`.
 
 **Wire props:** `tools/topology-vscode/src/webview/rf/edges/SubstrateEdge.tsx`

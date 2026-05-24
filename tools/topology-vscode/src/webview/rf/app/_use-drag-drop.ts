@@ -7,7 +7,7 @@ import { rfGetNodes, rfSetNodes } from "../rf-imperative";
 import { pushSnapshot } from "../history";
 import { PALETTE_DATA_TYPE } from "../panels/NodePalette";
 import type { AppCtx } from "./_ctx";
-import { specKindToRfType } from "../adapter/spec-to-flow";
+
 
 export function useDragDrop(ctx: AppCtx) {
   const onDragOver = useCallback((ev: React.DragEvent) => {
@@ -37,14 +37,13 @@ export function useDragDrop(ctx: AppCtx) {
     const def = NODE_TYPES[type];
     const width = def?.width ?? 110;
     const height = def?.height ?? 60;
-    const rfType = specKindToRfType(type);
-    const nodeDef = NODE_DEFS[rfType];
+    const nodeDef = NODE_DEFS[type];
     const nodeData = nodeDef?.defaultData ?? undefined;
     rfSetNodes((ns) => [
       ...ns,
       {
         id,
-        type: specKindToRfType(type),
+        type: type,
         position: { x: pos.x, y: pos.y },
         data: {
           label: id,

@@ -16,10 +16,9 @@ import { NODE_DEFS } from "../webview/rf/nodes/registry";
 export { RUNTIME_IMPLEMENTED_KINDS } from "../webview/rf/nodes/node-defs";
 
 // Lift generated NodeDef entries into NodeTypeDef shape.
-// NODE_DEFS keys are camelCase (RF type names); NODE_TYPES keys are
-// PascalCase (spec kind names). The mapping is: capitalize first char.
-function defToTypeDef(rfKey: string): NodeTypeDef | undefined {
-  const d = NODE_DEFS[rfKey];
+// NODE_DEFS keys are PascalCase (spec kind names); NODE_TYPES keys match.
+function defToTypeDef(key: string): NodeTypeDef | undefined {
+  const d = NODE_DEFS[key];
   if (!d) return undefined;
   return {
     role: d.role ?? "generic",
@@ -35,10 +34,7 @@ function defToTypeDef(rfKey: string): NodeTypeDef | undefined {
 
 export const NODE_TYPES: Record<string, NodeTypeDef> = {
   ...Object.fromEntries(
-    Object.keys(NODE_DEFS).map((rf) => [
-      rf.charAt(0).toUpperCase() + rf.slice(1),
-      defToTypeDef(rf)!,
-    ]),
+    Object.keys(NODE_DEFS).map((k) => [k, defToTypeDef(k)!]),
   ),
   Generic: { role: "generic", inputs: [], outputs: [], shape: "rect", fill: "#ffffff", stroke: "#888", width: 110, height: 60 },
 };
