@@ -78,6 +78,19 @@ export const ALL_PSEUDO_SAVE_RESULT_TYPES: ReadonlySet<string> = new Set(
   _pseudoPrefixes.map((p) => `${p}-save-result`)
 );
 
+// Reverse map: prefix string → PseudoKind (e.g. "pseudo" → "Input", "readgate" → "ReadGate")
+export const PSEUDO_PREFIX_TO_KIND: Readonly<Record<PseudoPrefix, PseudoKind>> = Object.fromEntries(
+  (Object.entries(PSEUDO_KIND_PREFIX) as [PseudoKind, PseudoPrefix][]).map(([k, p]) => [p, k])
+) as Record<PseudoPrefix, PseudoKind>;
+
+// Render-type set and save-type set for data-driven dispatch.
+export const ALL_PSEUDO_RENDER_TYPES: ReadonlySet<string> = new Set(
+  _pseudoPrefixes.map((p) => `${p}-render`)
+);
+export const ALL_PSEUDO_SAVE_TYPES: ReadonlySet<string> = new Set(
+  _pseudoPrefixes.map((p) => `${p}-save`)
+);
+
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
   "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
   ..._pseudoPrefixes.flatMap((p) => [`${p}-render`, `${p}-save`] as const),

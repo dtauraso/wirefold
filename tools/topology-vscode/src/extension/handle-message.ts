@@ -8,7 +8,17 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
 import { extractViewText, injectViewText } from "../sidecar";
-import { parseWebviewToHost, pseudoMsgTypes, type HostToWebviewMsg, type WebviewToHostMsg } from "../messages";
+import {
+  parseWebviewToHost,
+  pseudoMsgTypes,
+  PSEUDO_KIND_PREFIX,
+  PSEUDO_PREFIX_TO_KIND,
+  ALL_PSEUDO_RENDER_TYPES,
+  ALL_PSEUDO_SAVE_TYPES,
+  type PseudoKind,
+  type HostToWebviewMsg,
+  type WebviewToHostMsg,
+} from "../messages";
 import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
 import { toErrorMessage } from "../utils/error";
@@ -95,18 +105,27 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "delivered":
       runner.writeStdin(JSON.stringify({ type: "delivered", edge: msg.edge }));
       return;
-    case "pseudo-render":
-      await handlePseudoRender(msg.nodeId, document, post);
-      return;
-    case "pseudo-save":
-      await handlePseudoSave(msg.nodeId, msg.pseudo, document, runner, post);
-      return;
-    case "readgate-render":
-      await handleReadgateRender(msg.nodeId, document, post);
-      return;
-    case "readgate-save":
-      await handleReadgateSave(msg.nodeId, msg.pseudo, document, runner, post);
-      return;
+    default: {
+      // Data-driven pseudo dispatch: matches render/save types for all registered PseudoKinds.
+      type RenderFn = (nodeId: string, document: vscode.TextDocument, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
+      type SaveFn   = (nodeId: string, pseudo: string, document: vscode.TextDocument, runner: BuildAndRunRunner, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
+      const pseudoTable: Record<PseudoKind, { render: RenderFn; save: SaveFn }> = {
+        Input:    { render: handlePseudoRender,    save: handlePseudoSave },
+        ReadGate: { render: handleReadgateRender,  save: handleReadgateSave },
+      };
+      if (ALL_PSEUDO_RENDER_TYPES.has(msg.type)) {
+        const prefix = msg.type.slice(0, -"-render".length) as import("../messages").PseudoPrefix;
+        const kind   = PSEUDO_PREFIX_TO_KIND[prefix];
+        await pseudoTable[kind].render((msg as { nodeId: string }).nodeId, document, post);
+        return;
+      }
+      if (ALL_PSEUDO_SAVE_TYPES.has(msg.type)) {
+        const prefix = msg.type.slice(0, -"-save".length) as import("../messages").PseudoPrefix;
+        const kind   = PSEUDO_PREFIX_TO_KIND[prefix];
+        await pseudoTable[kind].save((msg as { nodeId: string; pseudo: string }).nodeId, (msg as { pseudo: string }).pseudo, document, runner, post);
+        return;
+      }
+    }
   }
 }
 
