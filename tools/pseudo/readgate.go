@@ -197,6 +197,7 @@ func ToReadGate(v ReadGateView) (newGoSrc []byte, newOutNeighbor string, removed
 	type templateData struct {
 		HasSignal bool
 		GateOp    string
+		IsOr      bool
 	}
 
 	const updateTemplate = `
@@ -224,10 +225,21 @@ func (g *Node) Update(ctx context.Context) {
 
 		if g.HasValue {{.GateOp}} g.HasChainInhibitor {
 			g.Fire()
+{{- if .IsOr}}
+			if g.HasValue {
+				g.FromInput.Done()
+				g.HasValue = false
+			}
+			if g.HasChainInhibitor {
+				g.FromChainInhibitor.Done()
+				g.HasChainInhibitor = false
+			}
+{{- else}}
 			g.FromInput.Done()
 			g.FromChainInhibitor.Done()
 			g.HasValue = false
 			g.HasChainInhibitor = false
+{{- end}}
 			g.ToChainInhibitor.TrySend(g.Value)
 		}
 {{- else}}
@@ -248,7 +260,7 @@ func (g *Node) Update(ctx context.Context) {
 	}
 
 	var methodBuf bytes.Buffer
-	if tmplErr = tmpl.Execute(&methodBuf, templateData{HasSignal: hasSignal, GateOp: gateOp}); tmplErr != nil {
+	if tmplErr = tmpl.Execute(&methodBuf, templateData{HasSignal: hasSignal, GateOp: gateOp, IsOr: v.Gate == "or"}); tmplErr != nil {
 		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: template execute: %w", tmplErr)
 	}
 

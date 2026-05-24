@@ -259,6 +259,57 @@ func TestToReadGate_TwoTermCompiles(t *testing.T) {
 	}
 }
 
+// TestToReadGate_OrGate_GuardedDone: OR gate must guard each Done call by its flag.
+func TestToReadGate_OrGate_GuardedDone(t *testing.T) {
+	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "or", OutNeighbor: "i0"}
+	src, _, _, err := ToReadGate(v)
+	if err != nil {
+		t.Fatalf("ToReadGate: %v", err)
+	}
+	srcStr := string(src)
+
+	// Must use || operator.
+	if !strings.Contains(srcStr, "||") {
+		t.Errorf("or-gate source must contain ||")
+	}
+
+	// Must have guarded HasValue block.
+	if !strings.Contains(srcStr, "if g.HasValue {") {
+		t.Errorf("or-gate source must contain guarded 'if g.HasValue {'")
+	}
+	// Must have guarded HasChainInhibitor block.
+	if !strings.Contains(srcStr, "if g.HasChainInhibitor {") {
+		t.Errorf("or-gate source must contain guarded 'if g.HasChainInhibitor {'")
+	}
+
+	// Must NOT have bare unconditional consecutive Done calls (AND pattern).
+	// Check that "g.FromInput.Done()" is not immediately followed by "g.FromChainInhibitor.Done()"
+	// with only whitespace/newline in between (i.e., no guard between them).
+	if strings.Contains(srcStr, "g.FromInput.Done()\n\t\t\tg.FromChainInhibitor.Done()") {
+		t.Errorf("or-gate source must not call Done() on both inputs unconditionally back-to-back")
+	}
+}
+
+// TestToReadGate_AndGate_UnconditionalDone: AND gate must keep unconditional Done calls.
+func TestToReadGate_AndGate_UnconditionalDone(t *testing.T) {
+	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "and", OutNeighbor: "i0"}
+	src, _, _, err := ToReadGate(v)
+	if err != nil {
+		t.Fatalf("ToReadGate: %v", err)
+	}
+	srcStr := string(src)
+
+	// Must use && operator.
+	if !strings.Contains(srcStr, "&&") {
+		t.Errorf("and-gate source must contain &&")
+	}
+
+	// Must have unconditional back-to-back Done calls.
+	if !strings.Contains(srcStr, "g.FromInput.Done()\n\t\t\tg.FromChainInhibitor.Done()") {
+		t.Errorf("and-gate source must call Done() on both inputs unconditionally back-to-back")
+	}
+}
+
 // TestReadGate_PortNamesInGeneratedSource guards that the port-name constants
 // in the const block and the emit templates cannot silently diverge: the source
 // produced by ToReadGate for a 2-term view must contain all three port names.

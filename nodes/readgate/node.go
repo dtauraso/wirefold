@@ -7,10 +7,10 @@ import (
 )
 
 type Node struct {
-	Fire              func()
-	Value             int
-	HasValue          bool
-	HasChainInhibitor bool
+	Fire               func()
+	Value              int
+	HasValue           bool
+	HasChainInhibitor  bool
 	FromInput          *Wiring.In
 	FromChainInhibitor *Wiring.In
 	ToChainInhibitor   *Wiring.Out
