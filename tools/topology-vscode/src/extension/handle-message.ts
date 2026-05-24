@@ -262,7 +262,7 @@ async function handleReadgateSave(
     post({ type: m.error, nodeId, message: msg, suggestion });
     return;
   }
-  let result: { go: string; outNeighbor: string; removedPorts: string[] };
+  let result: { go: string; outNeighbor: string; removedPorts: string[] | null };
   try {
     result = JSON.parse(stdout) as typeof result;
   } catch (e) {
@@ -291,7 +291,7 @@ async function handleReadgateSave(
     }
     // (c) prune edges whose targetHandle is in removedPorts
     topo.edges = topo.edges.filter(
-      (e) => !(e.target === nodeId && result.removedPorts.includes(e.targetHandle ?? "")),
+      (e) => !(e.target === nodeId && (result.removedPorts ?? []).includes(e.targetHandle ?? "")),
     );
   }
   const updatedTopoText = JSON.stringify(topologyParsed, null, 2);
