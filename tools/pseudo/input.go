@@ -85,11 +85,11 @@ func FromInput(goSrc []byte, specEntry map[string]any, outNeighbor string) (Inpu
 // Format examples:
 //
 //	[0, 1] -> readGate1
-//	↺ [0, 1] -> readGate1
+//	↺ ([0, 1] -> readGate1)
 func RenderInput(v InputView) string {
 	var b strings.Builder
 	if v.Repeat {
-		b.WriteString("↺ ")
+		b.WriteString("↺ (")
 	}
 	b.WriteString("[")
 	for i, n := range v.InitValues {
@@ -100,6 +100,9 @@ func RenderInput(v InputView) string {
 	}
 	b.WriteString("] -> ")
 	b.WriteString(v.OutNeighbor)
+	if v.Repeat {
+		b.WriteString(")")
+	}
 	return b.String()
 }
 
@@ -130,7 +133,7 @@ func buildSuggestion(prior InputView) string {
 		parts[i] = strconv.Itoa(v)
 	}
 	list := strings.Join(parts, ", ")
-	return fmt.Sprintf("Try: [↺] [%s] -> %s", list, neighbor)
+	return fmt.Sprintf("Try: [↺ ([%s] -> %s)]", list, neighbor)
 }
 
 // ParseInput parses a pseudo text produced (or edited) by the user back into
@@ -139,8 +142,10 @@ func buildSuggestion(prior InputView) string {
 //
 // Grammar (whitespace-insensitive):
 //
-//	pseudo   := ["↺"] "[" intList "]" "->" ident
+//	pseudo   := ["↺" "(" ] "[" intList "]" "->" ident [ ")" ]
 //	intList  := int ("," int)* | ε
+//
+// The closing ")" is required when "↺" is present.
 //
 // The returned view inherits prior.origGoSrc, prior.origSpec, and
 // prior.OutputField so that unchanged ceremony is preserved for byte-identical
@@ -397,7 +402,7 @@ func (e *parseError) Is(target error) bool { _, ok := target.(*parseError); retu
 func (e *parseError) humanMessage() string {
 	switch e.kind {
 	case parseErrBadStart:
-		return fmt.Sprintf("Couldn't parse %q. Lines must start with \"[\" or \"↺\".", e.token)
+		return fmt.Sprintf("Couldn't parse %q. Lines must start with \"[\" or \"↺ ([...] -> <node>)\".", e.token)
 	case parseErrBadInt:
 		return fmt.Sprintf("Couldn't parse %q. Init values must be whole numbers.", e.token)
 	case parseErrUnclosedBrace:
@@ -510,11 +515,17 @@ func (p *pseudoParser) consumeInt() (int, error) {
 }
 
 func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string, err error) {
-	// Optional leading "↺" (U+21BA).
+	// Optional leading "↺" (U+21BA) followed by "(".
 	p.skipWS()
 	if strings.HasPrefix(p.input[p.pos:], "↺") {
 		p.pos += len("↺")
 		repeat = true
+		// Consume the required opening "(".
+		if rawErr := p.consumeChar('('); rawErr != nil {
+			tok := excerpt(p.input, p.pos)
+			err = &parseError{kind: parseErrBadStart, token: tok, wrapped: rawErr}
+			return
+		}
 	}
 
 	if rawErr := p.consumeChar('['); rawErr != nil {
@@ -570,6 +581,15 @@ func (p *pseudoParser) parseInputPseudo() (repeat bool, vals []int, ident string
 		return
 	} else {
 		ident = rawIdent
+	}
+
+	// Consume closing ")" when repeat is true.
+	if repeat {
+		if rawErr := p.consumeChar(')'); rawErr != nil {
+			tok := excerpt(p.input, p.pos)
+			err = &parseError{kind: parseErrTrailing, token: tok, wrapped: rawErr}
+			return
+		}
 	}
 
 	// Must be at end (after optional whitespace).

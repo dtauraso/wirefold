@@ -93,9 +93,9 @@ func TestInputRoundTrip_SpecEditOnly(t *testing.T) {
 	}
 
 	// Mutate spec-origin tokens only: change values, ensure ↺ is present.
-	// Original rendered: "↺ [0, 1] -> readGate1"
-	// Mutate to: "↺ [2, 3, 5] -> readGate1"
-	mutated := "↺ [2, 3, 5] -> readGate1"
+	// Original rendered: "↺ ([0, 1] -> readGate1)"
+	// Mutate to: "↺ ([2, 3, 5] -> readGate1)"
+	mutated := "↺ ([2, 3, 5] -> readGate1)"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
@@ -136,7 +136,7 @@ func TestInputRoundTrip_NeighborEdit(t *testing.T) {
 	}
 
 	// Change out-neighbor from readGate1 → fanout1.
-	mutated := "↺ [0, 1] -> fanout1"
+	mutated := "↺ ([0, 1] -> fanout1)"
 	view2, err := ParseInput(mutated, view)
 	if err != nil {
 		t.Fatalf("ParseInput: %v", err)
