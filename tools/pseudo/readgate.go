@@ -398,18 +398,6 @@ func binaryBoolOp(expr ast.Expr, left, right string) (string, bool) {
 	return "", false
 }
 
-// isBinaryAnd reports whether expr is (X.leftField && X.rightField) for any
-// receiver X, or bare (leftIdent && rightIdent).
-func isBinaryAnd(expr ast.Expr, left, right string) bool {
-	_, ok := binaryBoolOp(expr, left, right)
-	// Only true for &&, so check gate word.
-	if !ok {
-		return false
-	}
-	bin := expr.(*ast.BinaryExpr)
-	return bin.Op.String() == "&&"
-}
-
 // selectorOrIdent reports whether expr is either a bare identifier with name,
 // or a selector expression whose field name matches name (e.g. g.HasValue).
 func selectorOrIdent(expr ast.Expr, name string) bool {
