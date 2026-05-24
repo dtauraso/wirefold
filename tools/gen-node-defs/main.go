@@ -52,12 +52,13 @@ type viewDef struct {
 	displays     string
 	defaultLabel string
 	// NodeTypeDef-compatible fields (used by schema/node-types consumers).
-	role   string
-	shape  string
-	fill   string
-	stroke string
-	width  string
-	height string
+	role      string
+	shape     string
+	fill      string
+	stroke    string
+	width     string
+	height    string
+	hasPseudo string
 }
 
 // kindEntry is one node kind to emit.
@@ -416,6 +417,7 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 		stroke:       vmap["stroke"],
 		width:        vmap["width"],
 		height:       vmap["height"],
+		hasPseudo:    vmap["hasPseudo"],
 	}
 
 	// Parse Ports section for accent and edgeKind overrides.
@@ -536,6 +538,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  outputs?: { name: string; kind: string; isMulti?: boolean }[];`)
 	fmt.Fprintln(w, `  defaultData?: Record<string, unknown>;`)
 	fmt.Fprintln(w, `  requiredInputs?: string[];`)
+	fmt.Fprintln(w, `  hasPseudo?: boolean;`)
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
@@ -641,6 +644,9 @@ func buildDef(v viewDef, ports []port, defaultData string) string {
 			reqNames = append(reqNames, fmt.Sprintf(`"%s"`, p.id))
 		}
 		fields = append(fields, fmt.Sprintf(`requiredInputs: [%s]`, strings.Join(reqNames, ", ")))
+	}
+	if v.hasPseudo == "true" {
+		fields = append(fields, `hasPseudo: true`)
 	}
 	return "{ " + strings.Join(fields, ", ") + " }"
 }

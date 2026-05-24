@@ -18,6 +18,7 @@
 | stroke | #7b1fa2 |
 | width | 70 |
 | height | 40 |
+| hasPseudo | true |
 
 ## Runtime status
 

@@ -19,7 +19,7 @@ import type { Port } from "../../../schema/types";
 import type { SlotMap } from "../../../messages";
 import { useEdgeActions } from "../app/_edge-actions-ctx";
 import { type Side, type ActiveDrag, SLOT_PCT, computeSnapPoints, nearestSnap, resolvePositions, pctToSlot } from "../port-snap";
-import { PseudoPanel } from "../panels/PseudoPanel";
+import { PseudoPanel, type Kind as PseudoKind } from "../panels/PseudoPanel";
 
 // ── Style helpers ────────────────────────────────────────────────────────────
 
@@ -208,7 +208,7 @@ export function GenericNode({ id: nodeId, type, data }: NodeProps<NodeData>) {
 
   const inputs: Port[] = data.inputs ?? []; const outputs: Port[] = data.outputs ?? [];
   const hasPortData = inputs.length > 0 || outputs.length > 0;
-  const pseudoKind = data.type === "Input" ? "Input" : data.type === "ReadGate" ? "ReadGate" : null;
+  const pseudoKind = def.hasPseudo ? (data.type as PseudoKind) : null;
   const container: CSSProperties = { background: def.bg, border: `1px solid ${def.border}`, borderRadius: 4, padding: "4px 8px", minWidth: def.minWidth ?? 70, minHeight: def.height ?? 40, fontSize: 11, color: def.text, boxShadow: flashing ? `0 0 8px 2px ${def.accent}` : undefined };
   return (
     <div ref={nodeElRef} style={container}>

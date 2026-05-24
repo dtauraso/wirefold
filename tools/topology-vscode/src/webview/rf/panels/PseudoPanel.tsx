@@ -12,7 +12,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { vscode } from "../../vscode-api";
 
-type Kind = "Input" | "ReadGate";
+export type Kind = "Input" | "ReadGate";
 
 const MSG = {
   Input: {
