@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { parseHostToWebview } from "../../../messages";
+import { parseHostToWebview, ALL_PSEUDO_ERROR_TYPES, ALL_PSEUDO_SAVE_RESULT_TYPES } from "../../../messages";
+import type { HostToWebviewMsg } from "../../../messages";
+
+import type { PseudoPrefix } from "../../../messages";
+type PseudoErrorMsg = Extract<HostToWebviewMsg, { type: `${PseudoPrefix}-error` }>;
 
 type ErrorState = { message: string; suggestion: string } | null;
 
@@ -13,12 +17,13 @@ export function PseudoErrorOverlay() {
     function handler(e: MessageEvent) {
       const msg = parseHostToWebview(e.data);
       if (!msg) return;
-      if (msg.type === "pseudo-error") {
+      if (ALL_PSEUDO_ERROR_TYPES.has(msg.type)) {
         // Reset auto-dismiss timer on each new error.
         if (timerRef.current !== null) clearTimeout(timerRef.current);
-        setError({ message: msg.message, suggestion: msg.suggestion ?? "" });
+        const errMsg = msg as PseudoErrorMsg;
+        setError({ message: errMsg.message, suggestion: errMsg.suggestion ?? "" });
         timerRef.current = setTimeout(() => setError(null), AUTO_DISMISS_MS);
-      } else if (msg.type === "pseudo-save-result") {
+      } else if (ALL_PSEUDO_SAVE_RESULT_TYPES.has(msg.type)) {
         if (timerRef.current !== null) clearTimeout(timerRef.current);
         setError(null);
       }
