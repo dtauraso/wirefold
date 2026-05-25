@@ -9,13 +9,29 @@ read this file first (no chat history needed) and proceed.
 
 ## State at handoff (2026-05-24, main — no task in flight)
 
-**Active branch:** `main`. HEAD: `af16684`. Pushed to origin.
-**No task in flight.** `task/readgate-or-gate` was merged to main and the branch
-deleted. The redundant `task/boundary-audit` branch was also deleted.
+**Active branch:** `main`. HEAD: `7ffcbcf`. Pushed to origin.
+**No task in flight.** Repo is now MAIN-ONLY — every task branch deleted (local + remote).
 
 **Stray working-tree change:** `topology.json` has a 1-line uncommitted
 modification that predates the last session. Deliberately left untouched.
 Decide whether to keep or `git checkout topology.json` before starting new work.
+
+### Branch sweep (2026-05-24)
+
+**Merged to main then deleted:**
+- `task/readgate-or-gate` — ReadGate AND-only refactor + boundary audit + delegation consolidation.
+
+**Deleted as redundant (0 commits ahead of main):**
+- `task/boundary-audit`
+- `task/diagram-animation-fixes`
+- `task/spec-phase2-generic-renderer`
+
+**Force-deleted as DISCARDED unmerged work (gone everywhere, redo fresh if wanted):**
+- `task/pulses-as-events` — complete WAAPI/DOM-pulse + pause-resume rewrite; conflicted structurally with main's later pump rewrite — NOT merged, behavior no longer exists in repo.
+- `task/visual-paced-substrate` — design + plan docs only, discarded.
+- `task/pseudocode-spec` — pseudocode spec docs for Input/ReadGate/ChainInhibitor/InhibitRightGate, discarded.
+
+The `task/pulses-as-events` and `task/pseudocode-spec` design thinking is gone, not just unmerged — next session shouldn't go looking for those branches.
 
 ### What landed (task/readgate-or-gate → main, merged 2026-05-24)
 
