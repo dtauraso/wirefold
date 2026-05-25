@@ -45,10 +45,15 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
       return Promise.resolve();
     };
 
+    let restartTimer: ReturnType<typeof setTimeout> | undefined;
     const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document.uri.toString() !== document.uri.toString()) return;
       if (e.document.version <= lastAppliedVersion) return;
       send();
+      if (runner.isRunning()) {
+        if (restartTimer) clearTimeout(restartTimer);
+        restartTimer = setTimeout(() => { void (async () => { await runner.stopAndAwait(); runner.run(); })(); }, 300);
+      }
     });
     const viewStateSub = panel.onDidChangeViewState(() => {
       if (!panel.visible) post({ type: "flush" });
@@ -94,6 +99,7 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
     if (bundleWatcher) this.context.subscriptions.push(bundleWatcher);
 
     panel.onDidDispose(() => {
+      if (restartTimer) clearTimeout(restartTimer);
       docSub.dispose();
       bundleWatcher?.dispose();
       viewStateSub.dispose();
