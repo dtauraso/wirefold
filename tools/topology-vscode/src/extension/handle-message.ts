@@ -153,8 +153,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       type RenderFn = (cmdArg: string, nodeId: string, document: vscode.TextDocument, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;
       type SaveFn   = (cmdArg: string, nodeId: string, pseudo: string, document: vscode.TextDocument, runner: BuildAndRunRunner, post: (msg: HostToWebviewMsg) => Thenable<boolean>, setLastAppliedVersion: (v: number) => void) => Promise<void>;
       const pseudoTable: Record<PseudoKind, { cmdArg: string; render: RenderFn; save: SaveFn }> = {
-        Input:    { cmdArg: "input",    render: handlePseudoRender,    save: handlePseudoSave },
-        ReadGate: { cmdArg: "readgate", render: handleReadgateRender,  save: handleReadgateSave },
+        Input:          { cmdArg: "input",          render: handlePseudoRender,           save: handlePseudoSave },
+        ReadGate:       { cmdArg: "readgate",       render: handleReadgateRender,         save: handleReadgateSave },
+        ChainInhibitor: { cmdArg: "chaininhibitor", render: handleChainInhibitorRender,   save: handleChainInhibitorSave },
       };
       if (ALL_PSEUDO_RENDER_TYPES.has(msg.type)) {
         const prefix = msg.type.slice(0, -"-render".length) as import("../messages").PseudoPrefix;
@@ -334,6 +335,171 @@ async function handleReadgateSave(
   // Push the updated topology so the forward save re-syncs, mirroring what the
   // doc-change listener already posts on undo/redo. Plain guard/text edits leave
   // edges untouched and stay suppressed (no canvas flash on every keystroke).
+  const edgesChanged =
+    currentNeighbor !== result.outNeighbor ||
+    (result.removedPorts?.length ?? 0) > 0;
+  if (edgesChanged) {
+    post({ type: "load", text: updatedTopoText });
+  }
+
+  if (runner.isRunning()) {
+    await runner.stopAndAwait();
+    runner.run();
+  }
+}
+
+// ── ChainInhibitor helpers ────────────────────────────────────────────────────
+
+// Derived from NODE_DEFS.ChainInhibitor so the port name stays single-sourced in node-defs.ts.
+const CHAININHIBITOR_OUT_HANDLE = NODE_DEFS.ChainInhibitor.outputs![0].name;
+
+function findChainInhibitorOutNeighbor(docText: string, nodeId: string): string | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(docText); } catch { return undefined; }
+  const edges = (parsed as { edges?: unknown[] }).edges;
+  if (!Array.isArray(edges)) return undefined;
+  const edge = edges.find(
+    (e: unknown) =>
+      (e as { source?: string }).source === nodeId &&
+      (e as { sourceHandle?: string }).sourceHandle === CHAININHIBITOR_OUT_HANDLE,
+  );
+  if (!edge) return undefined;
+  return (edge as { target?: string }).target;
+}
+
+async function handleChainInhibitorRender(
+  cmdArg: string,
+  nodeId: string,
+  document: vscode.TextDocument,
+  post: (msg: HostToWebviewMsg) => Thenable<boolean>,
+): Promise<void> {
+  const m = pseudoMsgTypes("chaininhibitor");
+  const repoRoot = workspaceRoot();
+  if (!repoRoot) {
+    post({ type: m.error, nodeId, message: "no workspace folder" });
+    return;
+  }
+  const outNeighbor = findChainInhibitorOutNeighbor(document.getText(), nodeId);
+  if (!outNeighbor) {
+    post({ type: m.error, nodeId, message: `node ${nodeId} has no ${CHAININHIBITOR_OUT_HANDLE} edge` });
+    return;
+  }
+  const goFile = path.join(repoRoot, "nodes", "chaininhibitor", "node.go");
+  const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
+    cmdArg, "render",
+    "--go-file", goFile,
+    "--out-neighbor", outNeighbor,
+  ]);
+  if (code !== 0) {
+    let msg = stderr.trim();
+    try { msg = (JSON.parse(msg) as { error?: string }).error ?? msg; } catch { /* use raw */ }
+    post({ type: m.error, nodeId, message: msg });
+    return;
+  }
+  post({ type: m.renderResult, nodeId, pseudo: stdout.trimEnd() });
+}
+
+async function handleChainInhibitorSave(
+  cmdArg: string,
+  nodeId: string,
+  pseudoText: string,
+  document: vscode.TextDocument,
+  runner: BuildAndRunRunner,
+  post: (msg: HostToWebviewMsg) => Thenable<boolean>,
+  setLastAppliedVersion: (v: number) => void,
+): Promise<void> {
+  const m = pseudoMsgTypes("chaininhibitor");
+  const repoRoot = workspaceRoot();
+  if (!repoRoot) {
+    post({ type: m.error, nodeId, message: "no workspace folder" });
+    return;
+  }
+  const currentNeighbor = findChainInhibitorOutNeighbor(document.getText(), nodeId);
+  if (!currentNeighbor) {
+    post({ type: m.error, nodeId, message: `node ${nodeId} has no ${CHAININHIBITOR_OUT_HANDLE} edge` });
+    return;
+  }
+  const goFile = path.join(repoRoot, "nodes", "chaininhibitor", "node.go");
+  const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
+    cmdArg, "save",
+    "--go-file", goFile,
+    "--out-neighbor", currentNeighbor,
+    "--pseudo", pseudoText,
+  ]);
+  if (code !== 0) {
+    const raw = stderr.trim();
+    let msg = raw;
+    let suggestion = "";
+    try {
+      const parsed = JSON.parse(raw) as { error?: string; suggestion?: string };
+      msg = parsed.error ?? raw;
+      suggestion = parsed.suggestion ?? "";
+    } catch { /* use raw */ }
+    post({ type: m.error, nodeId, message: msg, suggestion });
+    return;
+  }
+  let result: { go: string; outNeighbor: string; removedPorts: string[] | null };
+  try {
+    result = JSON.parse(stdout) as typeof result;
+  } catch (e) {
+    post({ type: m.error, nodeId, message: `could not parse cmd/pseudo output: ${toErrorMessage(e)}` });
+    return;
+  }
+
+  // Build one WorkspaceEdit spanning node.go + topology.json so a single Cmd-Z reverts both.
+  let topologyParsed: unknown;
+  try { topologyParsed = JSON.parse(document.getText()); } catch (e) {
+    post({ type: m.error, nodeId, message: `could not parse topology: ${toErrorMessage(e)}` });
+    return;
+  }
+  const topo = topologyParsed as {
+    nodes?: { id: string; data?: Record<string, unknown> }[];
+    edges?: { id: string; source: string; sourceHandle?: string; target: string; targetHandle?: string }[];
+  };
+
+  // Re-point ToNext output edge if neighbor changed.
+  if (Array.isArray(topo.edges)) {
+    for (const edge of topo.edges) {
+      if (edge.source === nodeId && edge.sourceHandle === CHAININHIBITOR_OUT_HANDLE) {
+        edge.target = result.outNeighbor;
+      }
+    }
+    // Prune edges whose targetHandle is in removedPorts (always empty for ChainInhibitor).
+    topo.edges = topo.edges.filter(
+      (e) => !(e.target === nodeId && (result.removedPorts ?? []).includes(e.targetHandle ?? "")),
+    );
+  }
+  const updatedTopoText = JSON.stringify(topologyParsed, null, 2);
+
+  const goUri = vscode.Uri.file(goFile);
+  let goDoc: vscode.TextDocument;
+  try {
+    goDoc = await vscode.workspace.openTextDocument(goUri);
+  } catch (e) {
+    post({ type: m.error, nodeId, message: `could not open node.go: ${toErrorMessage(e)}` });
+    return;
+  }
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    goUri,
+    new vscode.Range(goDoc.positionAt(0), goDoc.positionAt(goDoc.getText().length)),
+    result.go,
+  );
+  edit.replace(
+    document.uri,
+    new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+    updatedTopoText,
+  );
+  setLastAppliedVersion(document.version + 1);
+  await vscode.workspace.applyEdit(edit);
+
+  await goDoc.save();
+  await document.save();
+  setLastAppliedVersion(document.version);
+
+  post({ type: m.saveResult, nodeId });
+
   const edgesChanged =
     currentNeighbor !== result.outNeighbor ||
     (result.removedPorts?.length ?? 0) > 0;

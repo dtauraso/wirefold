@@ -9,7 +9,7 @@ export type RunStatus =
   | { state: "error"; message: string }
   | { state: "cancelled" };
 
-export const PSEUDO_KIND_PREFIX = { Input: "pseudo", ReadGate: "readgate" } as const;
+export const PSEUDO_KIND_PREFIX = { Input: "pseudo", ReadGate: "readgate", ChainInhibitor: "chaininhibitor" } as const;
 export type PseudoKind = keyof typeof PSEUDO_KIND_PREFIX;
 export type PseudoPrefix = (typeof PSEUDO_KIND_PREFIX)[PseudoKind];
 export function pseudoMsgTypes(prefix: PseudoPrefix) {
