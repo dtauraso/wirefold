@@ -41,22 +41,61 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
 }
 
 // Returns a map of nodeId → reason string for every node that is missing a
-// required inbound edge. Empty map means all required inputs are satisfied.
+// required inbound edge or whose required inputs are fed only by dead nodes.
+// Uses a fixpoint: newly-dead nodes can kill downstream nodes transitively.
 export function requiredInputDiagnostics(spec: Spec): Map<string, string> {
+  // Build feeders map: (targetNodeId, targetHandle) → [sourceNodeId, ...]
+  const feeders = new Map<string, string[]>();
+  for (const edge of spec.edges) {
+    const key = `${edge.target}:${edge.targetHandle}`;
+    let arr = feeders.get(key);
+    if (!arr) { arr = []; feeders.set(key, arr); }
+    arr.push(edge.source);
+  }
+
+  // Collect only nodes that have required inputs
+  const requiredNodes = spec.nodes.filter((n) => !!REQUIRED_INPUTS[n.type]);
+
+  // Fixpoint: iterate until no new dead nodes are added
+  const dead = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of requiredNodes) {
+      if (dead.has(node.id)) continue;
+      const required = REQUIRED_INPUTS[node.type];
+      const seeds = node.edgeSeeds as Record<string, unknown> | undefined;
+      let isDead = false;
+      for (const port of required) {
+        if (seeds?.[port] !== undefined) continue; // satisfied by seed
+        const sources = feeders.get(`${node.id}:${port}`) ?? [];
+        const hasLiveFeeder = sources.some((s) => !dead.has(s));
+        if (sources.length === 0 || !hasLiveFeeder) { isDead = true; break; }
+      }
+      if (isDead) { dead.add(node.id); changed = true; }
+    }
+  }
+
+  // Build result map with per-port reason fragments
   const result = new Map<string, string>();
-  const inboundPorts = new Set(spec.edges.map((e) => `${e.target}:${e.targetHandle}`));
-  for (const node of spec.nodes) {
+  for (const node of requiredNodes) {
+    if (!dead.has(node.id)) continue;
     const required = REQUIRED_INPUTS[node.type];
-    if (!required) continue;
-    const missing: string[] = [];
+    const seeds = node.edgeSeeds as Record<string, unknown> | undefined;
+    const reasons: string[] = [];
     for (const port of required) {
-      const hasEdge = inboundPorts.has(`${node.id}:${port}`);
-      const hasEdgeSeed = (node.edgeSeeds as Record<string, unknown> | undefined)?.[port] !== undefined;
-      if (!hasEdge && !hasEdgeSeed) missing.push(port);
+      if (seeds?.[port] !== undefined) continue;
+      const sources = feeders.get(`${node.id}:${port}`) ?? [];
+      if (sources.length === 0) {
+        reasons.push(`missing required input "${port}"`);
+      } else {
+        const deadSources = sources.filter((s) => dead.has(s));
+        if (deadSources.length === sources.length) {
+          reasons.push(`required input "${port}" only fed by dead node(s): ${deadSources.join(", ")}`);
+        }
+      }
     }
-    if (missing.length > 0) {
-      result.set(node.id, missing.map((p) => `missing required input "${p}"`).join("; "));
-    }
+    if (reasons.length > 0) result.set(node.id, reasons.join("; "));
   }
   return result;
 }
