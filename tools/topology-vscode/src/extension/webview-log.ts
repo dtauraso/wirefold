@@ -1,33 +1,43 @@
 // Append-mode writer for webview log entries. One JSON line per call,
-// written to .probe/webview-log.jsonl in the document's workspace
-// folder. External readers tail this file to observe the webview
-// without DevTools.
+// routed to .probe/ts.jsonl (normal) or .probe/ts-errors.jsonl (error
+// labels: window-error, unhandled-rejection, render-error) in the
+// document's workspace folder. External readers tail these files to
+// observe the webview without DevTools.
 //
-// Appends serialize through a single promise chain — concurrent bursts
-// (boundary catch + window error firing for the same crash) would
-// otherwise race on the read-then-write under vscode.workspace.fs.
+// Appends serialize through a single promise chain per target file —
+// concurrent bursts (boundary catch + window error firing for the same
+// crash) would otherwise race on the read-then-write.
 
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
 
-const FILENAME = "webview-log.jsonl";
+const ERROR_LABELS = new Set(["window-error", "unhandled-rejection", "render-error"]);
 
-let pending: Promise<void> = Promise.resolve();
+let pendingTs: Promise<void> = Promise.resolve();
+let pendingTsErrors: Promise<void> = Promise.resolve();
 
 export async function appendWebviewLog(
   entry: string,
   documentUri: vscode.Uri,
 ): Promise<void> {
-  pending = pending.then(() => doAppend(entry, documentUri));
-  return pending;
+  let parsed: { label?: string } | undefined;
+  try { parsed = JSON.parse(entry); } catch { /* malformed — route to ts.jsonl */ }
+  const isError = parsed?.label !== undefined && ERROR_LABELS.has(parsed.label);
+  if (isError) {
+    pendingTsErrors = pendingTsErrors.then(() => doAppend(entry, documentUri, "ts-errors.jsonl"));
+    return pendingTsErrors;
+  } else {
+    pendingTs = pendingTs.then(() => doAppend(entry, documentUri, "ts.jsonl"));
+    return pendingTs;
+  }
 }
 
-async function doAppend(entry: string, documentUri: vscode.Uri): Promise<void> {
+async function doAppend(entry: string, documentUri: vscode.Uri, filename: string): Promise<void> {
   const folder = vscode.workspace.getWorkspaceFolder(documentUri);
   const baseDir = folder ? folder.uri.fsPath : path.dirname(documentUri.fsPath);
   const dir = path.join(baseDir, ".probe");
-  const file = path.join(dir, FILENAME);
+  const file = path.join(dir, filename);
   try {
     await fs.mkdir(dir, { recursive: true });
     await fs.appendFile(file, entry + "\n", "utf8");
