@@ -78,13 +78,8 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
 	}
-
-	// Validate all kinds up front.
-	// also caught by TS parser; defense-in-depth
-	for _, n := range spec.Nodes {
-		if _, ok := Registry[n.Type]; !ok {
-			return nil, nil, fmt.Errorf("LoadTopology: node %q: unknown type %q", n.ID, n.Type)
-		}
+	if err := validateSpec(&spec); err != nil {
+		return nil, nil, err
 	}
 
 	// Allocate one *PacedWire per destination port (fan-in safe).
@@ -93,10 +88,6 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 	destWire := map[string]*PacedWire{}
 	edgeWire := WireRegistry{}
 	for _, e := range spec.Edges {
-		// also caught by TS parser; defense-in-depth
-		if e.Label == "" {
-			return nil, nil, fmt.Errorf("LoadTopology: edge %q→%q has empty label", e.Source, e.Target)
-		}
 		destKey := e.Target + "." + e.TargetHandle
 		pw, exists := destWire[destKey]
 		if !exists {
@@ -106,31 +97,19 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		edgeWire[e.Label] = pw
 	}
 
-	// Build id→type map and per-kind port lookup sets (needed for normalization and validation).
+	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}
 	for _, n := range spec.Nodes {
 		nodeType[n.ID] = n.Type
 	}
-	kindInPorts := map[string]map[string]bool{}
-	kindOutPorts := map[string]map[string]bool{}
 	kindOutMultiPorts := map[string]map[string]bool{}
 	for kind, bind := range Registry {
-		ins := map[string]bool{}
-		outs := map[string]bool{}
 		outMultis := map[string]bool{}
 		for _, p := range bind.Ports {
-			switch p.Dir {
-			case PortIn:
-				ins[p.Name] = true
-			case PortOut:
-				outs[p.Name] = true
-			case PortOutMulti:
+			if p.Dir == PortOutMulti {
 				outMultis[p.Name] = true
-				outs[p.Name] = true
 			}
 		}
-		kindInPorts[kind] = ins
-		kindOutPorts[kind] = outs
 		kindOutMultiPorts[kind] = outMultis
 	}
 
@@ -178,35 +157,6 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
 		outboundHandle[e.Source][srcKey] = append(outboundHandle[e.Source][srcKey], e.SourceHandle)
-	}
-
-	// Validation 1: port handle names must match declared ports on the node kind.
-	for _, e := range spec.Edges {
-		srcKind := nodeType[e.Source]
-		srcHandle := e.SourceHandle
-		if base, isMulti := outMultiBaseName(srcHandle, srcKind); isMulti {
-			srcHandle = base
-		}
-		if !kindOutPorts[srcKind][srcHandle] {
-			return nil, nil, fmt.Errorf("LoadTopology: edge %q: sourceHandle %q is not an output port on kind %q", e.Label, e.SourceHandle, srcKind)
-		}
-		tgtKind := nodeType[e.Target]
-		if !kindInPorts[tgtKind][e.TargetHandle] {
-			return nil, nil, fmt.Errorf("LoadTopology: edge %q: targetHandle %q is not an input port on kind %q", e.Label, e.TargetHandle, tgtKind)
-		}
-	}
-
-	// Validation 2: required input ports must have an inbound edge.
-	for _, n := range spec.Nodes {
-		bind := Registry[n.Type]
-		for _, port := range bind.Ports {
-			if !port.Required {
-				continue
-			}
-			if _, ok := inbound[n.ID][port.Name]; !ok {
-				return nil, nil, fmt.Errorf("LoadTopology: node %q: required input port %q has no inbound edge", n.ID, port.Name)
-			}
-		}
 	}
 
 	// Build each node.
