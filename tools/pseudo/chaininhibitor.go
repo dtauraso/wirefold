@@ -11,22 +11,22 @@ import (
 
 // ChainInhibitorView is the parsed representation of a ChainInhibitor node instance.
 //
-// Semantics: on receiving input v, emit the previously-held value to ToNext,
-// then held = v (one-step delay / shift).
+// Semantics: on receiving input v, emit the previously-held value to all ToNext
+// outputs (broadcast), then held = v (one-step delay / shift).
 //
 // Grammar:
 //
-//	send held -> <OutNeighbor>
+//	send held -> <OutNeighbor>[, <OutNeighbor> ...]
 //	keep input
 type ChainInhibitorView struct {
-	OutNeighbor string // downstream node id, supplied by caller from topology
+	OutNeighbors []string // downstream node ids, supplied by caller from topology
 }
 
 // FromChainInhibitor parses the Go source of nodes/chaininhibitor/node.go to verify
 // its expected structure, then returns a ChainInhibitorView.
 //
-// outNeighbor is resolved from topology by the caller and is not derived from Go.
-func FromChainInhibitor(goSrc []byte, outNeighbor string) (ChainInhibitorView, error) {
+// outNeighbors is resolved from topology by the caller and is not derived from Go.
+func FromChainInhibitor(goSrc []byte, outNeighbors []string) (ChainInhibitorView, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", goSrc, 0)
 	if err != nil {
@@ -37,17 +37,17 @@ func FromChainInhibitor(goSrc []byte, outNeighbor string) (ChainInhibitorView, e
 		return ChainInhibitorView{}, fmt.Errorf("pseudo.FromChainInhibitor: %w", err)
 	}
 
-	return ChainInhibitorView{OutNeighbor: outNeighbor}, nil
+	return ChainInhibitorView{OutNeighbors: outNeighbors}, nil
 }
 
 // RenderChainInhibitor emits the human-readable pseudo text for a ChainInhibitorView.
 //
-//	send held -> <OutNeighbor>
+//	send held -> <OutNeighbor>[, <OutNeighbor> ...]
 //	keep input
 func RenderChainInhibitor(v ChainInhibitorView) string {
 	var b strings.Builder
 	b.WriteString("send held -> ")
-	b.WriteString(v.OutNeighbor)
+	b.WriteString(strings.Join(v.OutNeighbors, ", "))
 	b.WriteString("\n")
 	b.WriteString("keep input")
 	b.WriteString("\n")
@@ -67,11 +67,11 @@ func (e *ParseChainInhibitorError) Suggestion() string { return e.suggestion }
 
 // buildChainInhibitorSuggestion builds the canonical suggestion string from a prior view.
 func buildChainInhibitorSuggestion(prior ChainInhibitorView) string {
-	neighbor := prior.OutNeighbor
-	if neighbor == "" {
-		neighbor = "<node>"
+	neighbors := strings.Join(prior.OutNeighbors, ", ")
+	if neighbors == "" {
+		neighbors = "<node>"
 	}
-	return fmt.Sprintf("Try: send held -> %s\n   keep input", neighbor)
+	return fmt.Sprintf("Try: send held -> %s\n   keep input", neighbors)
 }
 
 // ParseChainInhibitor parses edited pseudo text back into a ChainInhibitorView.
@@ -104,9 +104,9 @@ func ParseChainInhibitor(text string, prior ChainInhibitorView) (ChainInhibitorV
 
 // ToChainInhibitor regenerates nodes/chaininhibitor/node.go to match v.
 //
-// Returns the new Go source and the new output-neighbor name.
+// Returns the new Go source and the new output-neighbor names (broadcast set).
 // removedPorts is always empty for ChainInhibitor (no optional ports).
-func ToChainInhibitor(v ChainInhibitorView) (newGoSrc []byte, newOutNeighbor string, removedPorts []string, err error) {
+func ToChainInhibitor(v ChainInhibitorView) (newGoSrc []byte, newOutNeighbors []string, removedPorts []string, err error) {
 	const fileTemplate = `package chaininhibitor
 
 import (
@@ -154,10 +154,10 @@ func init() {
 `
 	formatted, fmtErr := format.Source([]byte(fileTemplate))
 	if fmtErr != nil {
-		return nil, "", nil, fmt.Errorf("pseudo.ToChainInhibitor: format source: %w", fmtErr)
+		return nil, nil, nil, fmt.Errorf("pseudo.ToChainInhibitor: format source: %w", fmtErr)
 	}
 
-	return formatted, v.OutNeighbor, nil, nil
+	return formatted, v.OutNeighbors, nil, nil
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -216,10 +216,26 @@ func (p *pseudoParser) parseChainInhibitorPseudo() (ChainInhibitorView, error) {
 		tok := excerpt(p.input, p.pos)
 		return ChainInhibitorView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 	}
-	outNeighbor, rawErr := p.consumeIdent()
+	// Parse one or more comma-separated idents: n0[, n1[, n2 ...]]
+	first, rawErr := p.consumeIdent()
 	if rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
+	}
+	outNeighbors := []string{first}
+	for {
+		p.skipWS()
+		if p.pos >= len(p.input) || p.input[p.pos] != ',' {
+			break
+		}
+		p.pos++ // consume comma
+		p.skipWS()
+		next, rawErr2 := p.consumeIdent()
+		if rawErr2 != nil {
+			tok := excerpt(p.input, p.pos)
+			return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr2}
+		}
+		outNeighbors = append(outNeighbors, next)
 	}
 
 	// Line 2: "keep" "input"
@@ -239,6 +255,6 @@ func (p *pseudoParser) parseChainInhibitorPseudo() (ChainInhibitorView, error) {
 			wrapped: fmt.Errorf("unexpected trailing content at position %d: %q", p.pos, tok)}
 	}
 
-	return ChainInhibitorView{OutNeighbor: outNeighbor}, nil
+	return ChainInhibitorView{OutNeighbors: outNeighbors}, nil
 }
 

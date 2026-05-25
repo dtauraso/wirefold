@@ -18,13 +18,13 @@
 //	  Calls FromReadGate → ParseReadGate(pseudo, prior) → ToReadGate.
 //	  Prints {"go": "<new source>", "outNeighbor": "<id>", "removedPorts": [...]} JSON to stdout and exits 0.
 //
-//	pseudo chaininhibitor render --go-file <path> --out-neighbor <id>
+//	pseudo chaininhibitor render --go-file <path> --out-neighbors <id[,id...]>
 //	  Reads go-file, calls pseudo.FromChainInhibitor + pseudo.RenderChainInhibitor,
 //	  prints the pseudo text to stdout and exits 0.
 //
-//	pseudo chaininhibitor save --go-file <path> --out-neighbor <id> --pseudo <text>
+//	pseudo chaininhibitor save --go-file <path> --out-neighbors <id[,id...]> --pseudo <text>
 //	  Calls FromChainInhibitor → ParseChainInhibitor(pseudo, prior) → ToChainInhibitor.
-//	  Prints {"go": "<new source>", "outNeighbor": "<id>", "removedPorts": [...]} JSON to stdout and exits 0.
+//	  Prints {"go": "<new source>", "outNeighbors": ["<id>",...], "removedPorts": [...]} JSON to stdout and exits 0.
 //
 // On error: prints {"error":"..."} JSON to stderr and exits 2.
 package main
@@ -34,6 +34,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/dtauraso/wirefold/tools/pseudo"
 )
@@ -131,7 +132,7 @@ func runReadGateSave(args []string) {
 // ── ChainInhibitor subcommands ────────────────────────────────────────────────
 
 func runChainInhibitorRender(args []string) {
-	flags, err := parseReadGateFlags(args, "go-file", "out-neighbor")
+	flags, err := parseChainInhibitorFlags(args, "go-file", "out-neighbors")
 	if err != nil {
 		fatal("%s", err)
 	}
@@ -141,7 +142,8 @@ func runChainInhibitorRender(args []string) {
 		fatal("reading go-file: %s", err)
 	}
 
-	view, err := pseudo.FromChainInhibitor(goSrc, flags["out-neighbor"])
+	outNeighbors := splitNeighbors(flags["out-neighbors"])
+	view, err := pseudo.FromChainInhibitor(goSrc, outNeighbors)
 	if err != nil {
 		fatal("%s", err)
 	}
@@ -150,7 +152,7 @@ func runChainInhibitorRender(args []string) {
 }
 
 func runChainInhibitorSave(args []string) {
-	flags, err := parseReadGateFlags(args, "go-file", "out-neighbor", "pseudo")
+	flags, err := parseChainInhibitorFlags(args, "go-file", "out-neighbors", "pseudo")
 	if err != nil {
 		fatal("%s", err)
 	}
@@ -160,7 +162,8 @@ func runChainInhibitorSave(args []string) {
 		fatal("reading go-file: %s", err)
 	}
 
-	prior, err := pseudo.FromChainInhibitor(goSrc, flags["out-neighbor"])
+	outNeighbors := splitNeighbors(flags["out-neighbors"])
+	prior, err := pseudo.FromChainInhibitor(goSrc, outNeighbors)
 	if err != nil {
 		fatal("FromChainInhibitor: %s", err)
 	}
@@ -175,19 +178,32 @@ func runChainInhibitorSave(args []string) {
 		fatalWithSuggestion("ParseChainInhibitor: %s", err, suggestion)
 	}
 
-	newGoSrc, newOutNeighbor, removedPorts, err := pseudo.ToChainInhibitor(updated)
+	newGoSrc, newOutNeighbors, removedPorts, err := pseudo.ToChainInhibitor(updated)
 	if err != nil {
 		fatal("ToChainInhibitor: %s", err)
 	}
 
 	out := map[string]any{
-		"go":           string(newGoSrc),
-		"outNeighbor":  newOutNeighbor,
-		"removedPorts": removedPorts,
+		"go":            string(newGoSrc),
+		"outNeighbors":  newOutNeighbors,
+		"removedPorts":  removedPorts,
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fatal("encoding output: %s", err)
 	}
+}
+
+// splitNeighbors splits a comma-separated neighbor list, trimming whitespace.
+func splitNeighbors(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // parseFlags extracts named flag values from args.
@@ -221,6 +237,31 @@ func parseReadGateFlags(args []string, required ...string) (map[string]string, e
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--go-file", "--out-neighbor", "--pseudo":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a value", args[i])
+			}
+			flags[args[i][2:]] = args[i+1]
+			i++
+		default:
+			return nil, fmt.Errorf("unknown flag %q", args[i])
+		}
+	}
+	for _, r := range required {
+		if _, ok := flags[r]; !ok {
+			return nil, fmt.Errorf("missing required flag --%s", r)
+		}
+	}
+	return flags, nil
+}
+
+// parseChainInhibitorFlags extracts named flag values for chaininhibitor subcommands.
+// Uses --out-neighbors (plural, comma-separated) instead of --out-neighbor.
+// Returns an error if a required flag is missing.
+func parseChainInhibitorFlags(args []string, required ...string) (map[string]string, error) {
+	flags := map[string]string{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--go-file", "--out-neighbors", "--pseudo":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a value", args[i])
 			}

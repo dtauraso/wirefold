@@ -353,18 +353,28 @@ async function handleReadgateSave(
 // Derived from NODE_DEFS.ChainInhibitor so the port name stays single-sourced in node-defs.ts.
 const CHAININHIBITOR_OUT_HANDLE = NODE_DEFS.ChainInhibitor.outputs![0].name;
 
-function findChainInhibitorOutNeighbor(docText: string, nodeId: string): string | undefined {
+// findChainInhibitorOutNeighbors collects all downstream neighbor ids for a
+// ChainInhibitor node.  ChainInhibitor's output is OutMulti, so topology edges
+// carry suffixed sourceHandles ("ToNext0", "ToNext1", …).  We match any handle
+// whose base (numeric-suffix-stripped) equals CHAININHIBITOR_OUT_HANDLE.
+function findChainInhibitorOutNeighbors(docText: string, nodeId: string): string[] {
   let parsed: unknown;
-  try { parsed = JSON.parse(docText); } catch { return undefined; }
+  try { parsed = JSON.parse(docText); } catch { return []; }
   const edges = (parsed as { edges?: unknown[] }).edges;
-  if (!Array.isArray(edges)) return undefined;
-  const edge = edges.find(
-    (e: unknown) =>
-      (e as { source?: string }).source === nodeId &&
-      (e as { sourceHandle?: string }).sourceHandle === CHAININHIBITOR_OUT_HANDLE,
-  );
-  if (!edge) return undefined;
-  return (edge as { target?: string }).target;
+  if (!Array.isArray(edges)) return [];
+  const neighbors: string[] = [];
+  for (const e of edges) {
+    const src = (e as { source?: string }).source;
+    const handle = (e as { sourceHandle?: string }).sourceHandle ?? "";
+    const target = (e as { target?: string }).target;
+    if (src !== nodeId || typeof target !== "string") continue;
+    // Match exact handle or suffixed variant (ToNext, ToNext0, ToNext1, …).
+    const base = handle.replace(/\d+$/, "");
+    if (base === CHAININHIBITOR_OUT_HANDLE) {
+      neighbors.push(target);
+    }
+  }
+  return neighbors;
 }
 
 async function handleChainInhibitorRender(
@@ -379,8 +389,8 @@ async function handleChainInhibitorRender(
     post({ type: m.error, nodeId, message: "no workspace folder" });
     return;
   }
-  const outNeighbor = findChainInhibitorOutNeighbor(document.getText(), nodeId);
-  if (!outNeighbor) {
+  const outNeighbors = findChainInhibitorOutNeighbors(document.getText(), nodeId);
+  if (outNeighbors.length === 0) {
     post({ type: m.error, nodeId, message: `node ${nodeId} has no ${CHAININHIBITOR_OUT_HANDLE} edge` });
     return;
   }
@@ -388,7 +398,7 @@ async function handleChainInhibitorRender(
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     cmdArg, "render",
     "--go-file", goFile,
-    "--out-neighbor", outNeighbor,
+    "--out-neighbors", outNeighbors.join(","),
   ]);
   if (code !== 0) {
     let msg = stderr.trim();
@@ -414,8 +424,8 @@ async function handleChainInhibitorSave(
     post({ type: m.error, nodeId, message: "no workspace folder" });
     return;
   }
-  const currentNeighbor = findChainInhibitorOutNeighbor(document.getText(), nodeId);
-  if (!currentNeighbor) {
+  const currentNeighbors = findChainInhibitorOutNeighbors(document.getText(), nodeId);
+  if (currentNeighbors.length === 0) {
     post({ type: m.error, nodeId, message: `node ${nodeId} has no ${CHAININHIBITOR_OUT_HANDLE} edge` });
     return;
   }
@@ -423,7 +433,7 @@ async function handleChainInhibitorSave(
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     cmdArg, "save",
     "--go-file", goFile,
-    "--out-neighbor", currentNeighbor,
+    "--out-neighbors", currentNeighbors.join(","),
     "--pseudo", pseudoText,
   ]);
   if (code !== 0) {
@@ -438,7 +448,7 @@ async function handleChainInhibitorSave(
     post({ type: m.error, nodeId, message: msg, suggestion });
     return;
   }
-  let result: { go: string; outNeighbor: string; removedPorts: string[] | null };
+  let result: { go: string; outNeighbors: string[]; removedPorts: string[] | null };
   try {
     result = JSON.parse(stdout) as typeof result;
   } catch (e) {
@@ -457,13 +467,10 @@ async function handleChainInhibitorSave(
     edges?: { id: string; source: string; sourceHandle?: string; target: string; targetHandle?: string }[];
   };
 
-  // Re-point ToNext output edge if neighbor changed.
+  // Save semantics: regenerate node.go; leave topology edges intact (broadcast
+  // set is determined by topology, not by pseudo text — we do not re-point or
+  // drop ToNext* edges on save).
   if (Array.isArray(topo.edges)) {
-    for (const edge of topo.edges) {
-      if (edge.source === nodeId && edge.sourceHandle === CHAININHIBITOR_OUT_HANDLE) {
-        edge.target = result.outNeighbor;
-      }
-    }
     // Prune edges whose targetHandle is in removedPorts (always empty for ChainInhibitor).
     topo.edges = topo.edges.filter(
       (e) => !(e.target === nodeId && (result.removedPorts ?? []).includes(e.targetHandle ?? "")),
@@ -500,9 +507,9 @@ async function handleChainInhibitorSave(
 
   post({ type: m.saveResult, nodeId });
 
-  const edgesChanged =
-    currentNeighbor !== result.outNeighbor ||
-    (result.removedPorts?.length ?? 0) > 0;
+  // Topology edges are left intact on save; only trigger a reload if
+  // removedPorts pruned something (always empty for ChainInhibitor).
+  const edgesChanged = (result.removedPorts?.length ?? 0) > 0;
   if (edgesChanged) {
     post({ type: "load", text: updatedTopoText });
   }

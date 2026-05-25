@@ -32,7 +32,7 @@ func TestRenderChainInhibitor_RoundTrip(t *testing.T) {
 		t.Fatalf("read nodes/chaininhibitor/node.go: %v", err)
 	}
 
-	v, err := FromChainInhibitor(goSrc, "i0")
+	v, err := FromChainInhibitor(goSrc, []string{"i0"})
 	if err != nil {
 		t.Fatalf("FromChainInhibitor: %v", err)
 	}
@@ -44,11 +44,11 @@ func TestRenderChainInhibitor_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestChainInhibitor_ParseRenderIdentity: Render → Parse → identity (OutNeighbor unchanged).
+// TestChainInhibitor_ParseRenderIdentity: Render → Parse → identity (OutNeighbors unchanged).
 func TestChainInhibitor_ParseRenderIdentity(t *testing.T) {
 	goSrc := loadChainInhibitorNodeGo(t)
 
-	orig, err := FromChainInhibitor(goSrc, "i0")
+	orig, err := FromChainInhibitor(goSrc, []string{"i0"})
 	if err != nil {
 		t.Fatalf("FromChainInhibitor: %v", err)
 	}
@@ -61,15 +61,17 @@ func TestChainInhibitor_ParseRenderIdentity(t *testing.T) {
 		t.Fatalf("ParseChainInhibitor: %v", err)
 	}
 
-	if parsed.OutNeighbor != orig.OutNeighbor {
-		t.Errorf("OutNeighbor: got %q want %q", parsed.OutNeighbor, orig.OutNeighbor)
+	if len(parsed.OutNeighbors) != len(orig.OutNeighbors) {
+		t.Errorf("OutNeighbors length: got %d want %d", len(parsed.OutNeighbors), len(orig.OutNeighbors))
+	} else if parsed.OutNeighbors[0] != orig.OutNeighbors[0] {
+		t.Errorf("OutNeighbors[0]: got %q want %q", parsed.OutNeighbors[0], orig.OutNeighbors[0])
 	}
 }
 
 // TestChainInhibitor_MalformedInput: garbage must produce *ParseChainInhibitorError
 // with non-empty Suggestion().
 func TestChainInhibitor_MalformedInput(t *testing.T) {
-	prior := ChainInhibitorView{OutNeighbor: "i0"}
+	prior := ChainInhibitorView{OutNeighbors: []string{"i0"}}
 	_, err := ParseChainInhibitor("not valid pseudo", prior)
 	if err == nil {
 		t.Fatal("expected error for malformed input, got nil")
@@ -94,13 +96,13 @@ func TestChainInhibitor_MalformedInput(t *testing.T) {
 
 // TestToChainInhibitor_Compiles: ToChainInhibitor produces valid Go source.
 func TestToChainInhibitor_Compiles(t *testing.T) {
-	v := ChainInhibitorView{OutNeighbor: "i0"}
-	src, outNeighbor, removedPorts, err := ToChainInhibitor(v)
+	v := ChainInhibitorView{OutNeighbors: []string{"i0"}}
+	src, outNeighbors, removedPorts, err := ToChainInhibitor(v)
 	if err != nil {
 		t.Fatalf("ToChainInhibitor: %v", err)
 	}
-	if outNeighbor != "i0" {
-		t.Errorf("newOutNeighbor: got %q want i0", outNeighbor)
+	if len(outNeighbors) != 1 || outNeighbors[0] != "i0" {
+		t.Errorf("newOutNeighbors: got %v want [i0]", outNeighbors)
 	}
 	if len(removedPorts) != 0 {
 		t.Errorf("removedPorts: got %v want []", removedPorts)
@@ -112,25 +114,76 @@ func TestToChainInhibitor_Compiles(t *testing.T) {
 		}
 	}
 	// Confirm the generated source round-trips through FromChainInhibitor.
-	v2, err := FromChainInhibitor(src, "i0")
+	v2, err := FromChainInhibitor(src, []string{"i0"})
 	if err != nil {
 		t.Fatalf("FromChainInhibitor on ToChainInhibitor output: %v", err)
 	}
-	if v2.OutNeighbor != "i0" {
-		t.Errorf("re-parsed OutNeighbor: got %q want i0", v2.OutNeighbor)
+	if len(v2.OutNeighbors) != 1 || v2.OutNeighbors[0] != "i0" {
+		t.Errorf("re-parsed OutNeighbors: got %v want [i0]", v2.OutNeighbors)
 	}
 }
 
 // TestChainInhibitor_OutNeighborChange: parsing with a different neighbor name
 // reflects in the view.
 func TestChainInhibitor_OutNeighborChange(t *testing.T) {
-	prior := ChainInhibitorView{OutNeighbor: "i0"}
+	prior := ChainInhibitorView{OutNeighbors: []string{"i0"}}
 	text := "send held -> i1\nkeep input"
 	v, err := ParseChainInhibitor(text, prior)
 	if err != nil {
 		t.Fatalf("ParseChainInhibitor: %v", err)
 	}
-	if v.OutNeighbor != "i1" {
-		t.Errorf("OutNeighbor: got %q want i1", v.OutNeighbor)
+	if len(v.OutNeighbors) != 1 || v.OutNeighbors[0] != "i1" {
+		t.Errorf("OutNeighbors: got %v want [i1]", v.OutNeighbors)
+	}
+}
+
+// TestChainInhibitor_MultipleOutNeighbors: comma-separated neighbors parse and render correctly.
+func TestChainInhibitor_MultipleOutNeighbors(t *testing.T) {
+	goSrc := loadChainInhibitorNodeGo(t)
+
+	// FromChainInhibitor with multiple neighbors.
+	v, err := FromChainInhibitor(goSrc, []string{"a0", "b1", "c2"})
+	if err != nil {
+		t.Fatalf("FromChainInhibitor: %v", err)
+	}
+	if len(v.OutNeighbors) != 3 {
+		t.Fatalf("OutNeighbors length: got %d want 3", len(v.OutNeighbors))
+	}
+
+	rendered := RenderChainInhibitor(v)
+	want := "send held -> a0, b1, c2\nkeep input\n"
+	if rendered != want {
+		t.Errorf("RenderChainInhibitor: got %q want %q", rendered, want)
+	}
+
+	// Parse back — must recover all three neighbors.
+	parsed, err := ParseChainInhibitor(rendered, v)
+	if err != nil {
+		t.Fatalf("ParseChainInhibitor multi: %v", err)
+	}
+	if len(parsed.OutNeighbors) != 3 {
+		t.Fatalf("parsed OutNeighbors length: got %d want 3", len(parsed.OutNeighbors))
+	}
+	for i, want := range []string{"a0", "b1", "c2"} {
+		if parsed.OutNeighbors[i] != want {
+			t.Errorf("OutNeighbors[%d]: got %q want %q", i, parsed.OutNeighbors[i], want)
+		}
+	}
+}
+
+// TestChainInhibitor_SuggestionMultiNeighbor: suggestion contains all neighbor ids.
+func TestChainInhibitor_SuggestionMultiNeighbor(t *testing.T) {
+	prior := ChainInhibitorView{OutNeighbors: []string{"x0", "y1"}}
+	_, err := ParseChainInhibitor("not valid pseudo", prior)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var pe *ParseChainInhibitorError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected *ParseChainInhibitorError, got %T", err)
+	}
+	sug := pe.Suggestion()
+	if !strings.Contains(sug, "x0") || !strings.Contains(sug, "y1") {
+		t.Errorf("Suggestion() should mention all neighbors: %q", sug)
 	}
 }

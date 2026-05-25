@@ -73,6 +73,10 @@ export function PseudoPanel({ nodeId, kind = "Input" }: Props) {
         typeof data.message === "string"
       ) {
         lastSaveErrored.current = true;
+        // If we have never received a successful render (lkg still null),
+        // clear the "loading…" state so the error is visible rather than
+        // leaving the panel stuck.
+        setLkg((prev) => prev === null ? "" : prev);
       }
     };
     window.addEventListener("message", handler);
