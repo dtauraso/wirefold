@@ -55,6 +55,13 @@ if [ -n "$ts_changed" ]; then
   fi
 fi
 
+for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity; do
+  if ! chk_out=$(bash "tools/$chk.sh" 2>&1); then
+    out+="$chk failed:\n$chk_out\n\n"
+    fail=1
+  fi
+done
+
 if [ $fail -ne 0 ]; then
   python3 -c "
 import json, sys
