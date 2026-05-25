@@ -15,6 +15,15 @@ import (
 	"strings"
 )
 
+// exportedFieldName reconstructs the exported struct field name from a
+// data.state key (inverse of lowerFirst): "held" → "Held".
+func exportedFieldName(key string) string {
+	if key == "" {
+		return key
+	}
+	return strings.ToUpper(key[:1]) + key[1:]
+}
+
 // validateSpec checks the parsed topoSpec for shape errors that are
 // decidable without constructing any substrate objects.  It returns a
 // combined error listing every problem found, or nil if the spec is valid.
@@ -116,6 +125,23 @@ func validateSpec(spec *topoSpec) error {
 			}
 			if !inbound[n.ID][port.Name] {
 				errs = append(errs, fmt.Sprintf("node %q: required input port %q has no inbound edge", n.ID, port.Name))
+			}
+		}
+	}
+
+	// Check 5: required data.state keys must be present for each node kind.
+	for _, n := range spec.Nodes {
+		bind, ok := Registry[n.Type]
+		if !ok {
+			continue // already reported in Check 1
+		}
+		for _, key := range bind.StateKeys {
+			if n.Data == nil || n.Data.State == nil {
+				errs = append(errs, fmt.Sprintf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", n.ID, n.Type, exportedFieldName(key), key))
+				continue
+			}
+			if _, ok := n.Data.State[key]; !ok {
+				errs = append(errs, fmt.Sprintf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", n.ID, n.Type, exportedFieldName(key), key))
 			}
 		}
 	}

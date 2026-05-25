@@ -118,6 +118,29 @@ var (
 	tFireFunc = reflect.TypeFor[func()]()
 )
 
+// lowerFirst returns s with its first byte lowercased.
+// Used for wire:"data.state" key derivation (field Held → key "held").
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// reflectStateKeys returns the data.state map keys required by sample's
+// wire:"data.state" struct tags.
+func reflectStateKeys(sample any) []string {
+	t := reflect.TypeOf(sample).Elem()
+	var keys []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Tag.Get("wire") == "data.state" {
+			keys = append(keys, lowerFirst(f.Name))
+		}
+	}
+	return keys
+}
+
 // reflectPorts walks the exported fields of the struct pointed to by sample
 // and returns a PortSpec for each channel field that carries int.
 // Chan-of-chan fields and non-channel fields are silently skipped.
@@ -217,7 +240,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		const stateTag = "data.state"
 		if tag == stateTag {
 			// key is field name with first letter lowercased
-			key := strings.ToLower(f.Name[:1]) + f.Name[1:]
+			key := lowerFirst(f.Name)
 			if data.State == nil {
 				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
 			}
@@ -258,9 +281,12 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 
 // NodeBuilder is the public-facing type consumed by the loader.
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
+// StateKeys lists the data.state map keys required by this kind's
+// wire:"data.state" struct fields; used by validateSpec for parse-time checks.
 type NodeBuilder struct {
-	Ports []PortSpec
-	Build func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
+	Ports     []PortSpec
+	StateKeys []string // required keys in NodeData.State; nil means none required
+	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -271,8 +297,10 @@ func init() {
 	for kind, e := range kindRegistry {
 		sample := e.newNode()
 		ports := reflectPorts(sample)
+		stateKeys := reflectStateKeys(sample)
 		Registry[kind] = NodeBuilder{
-			Ports: ports,
+			Ports:     ports,
+			StateKeys: stateKeys,
 			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
 				return reflectBuild(ctx, name, data, pb, e, tr)
 			},
