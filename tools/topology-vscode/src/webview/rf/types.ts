@@ -30,6 +30,8 @@ export interface NodeData {
   foldId?: string;
   dimmed?: boolean;
   state?: Record<string, StateValue>;
+  /** Set when a required inbound edge is missing; causes the node to render with a red border. */
+  validationError?: string;
 
   // --- Runtime trace fields (Phase 4) ---
   /** Last fire event step for this node (used for visual highlight). */

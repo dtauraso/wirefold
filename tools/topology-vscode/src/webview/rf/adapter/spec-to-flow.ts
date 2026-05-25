@@ -20,6 +20,7 @@ export function specToFlow(
   vs: Pick<ViewerState, "nodes" | "edges"> = {},
   lastSelectionIds: string[] = [],
   dimmed: Set<string> | null = null,
+  invalid?: Map<string, string>,
 ): { nodes: RFNode<NodeData>[]; edges: RFEdge<EdgeData>[] } {
   // Map memberId → containing collapsed fold id. Nested folds are not
   // supported here; if a node appears in multiple collapsed folds, the first
@@ -88,6 +89,7 @@ export function specToFlow(
         index: n.index,
         foldId: foldOf.get(n.id),
         dimmed: dimmed?.has(n.id) ?? false,
+        validationError: invalid?.get(n.id),
       },
     };
   });

@@ -1,4 +1,4 @@
-import { parseSpec, type Spec } from "../../../schema";
+import { parseSpec, requiredInputDiagnostics, type Spec } from "../../../schema";
 import { postLog } from "../../log/post";
 import { specToFlow } from "../adapter";
 import { viewerState, patchViewerState } from "../viewer-state";
@@ -28,10 +28,11 @@ export function handleLoad(ctx: AppCtx, text: string) {
     });
     if (migrated) scheduleViewSave();
     const next: Spec = parseSpec(rawJson);
+    const invalid = requiredInputDiagnostics(next);
     setSpecMeta(next);
     ctx.lastSpec.current = next;
     postLog("load", { nodes: next.nodes.length, edges: next.edges.length });
-    const flow = specToFlow(next, getFolds(), viewerState, viewerState.lastSelectionIds ?? [], getDimmed());
+    const flow = specToFlow(next, getFolds(), viewerState, viewerState.lastSelectionIds ?? [], getDimmed(), invalid);
     const filtered = reconcileSelection(viewerState.lastSelectionIds, flow.nodes.map((n) => n.id));
     const sel = new Set(filtered);
     if (sel.size > 0) {

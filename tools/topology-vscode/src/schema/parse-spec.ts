@@ -26,23 +26,6 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
     if (value !== undefined) (spec as Record<string, unknown>)[key] = value;
   }
   validatePorts(spec);
-  // Validate required inputs: each node with required ports must have an inbound
-  // edge targeting that port, or an edgeSeeds entry for it (ring topologies).
-  const inboundPorts = new Set(spec.edges.map((e) => `${e.target}:${e.targetHandle}`));
-  for (const node of spec.nodes) {
-    const required = REQUIRED_INPUTS[node.type];
-    if (!required) continue;
-    for (const port of required) {
-      const hasEdge = inboundPorts.has(`${node.id}:${port}`);
-      const hasEdgeSeed = (node.edgeSeeds as Record<string, unknown> | undefined)?.[port] !== undefined;
-      if (!hasEdge && !hasEdgeSeed) {
-        throw new Error(
-          `parseSpec: node "${node.id}" (${node.type}) is missing required inbound edge for port "${port}". ` +
-          `Connect an edge to this port or add edgeSeeds["${port}"] for ring topologies.`,
-        );
-      }
-    }
-  }
   if (view?.edges) {
     const knownIds = new Set(spec.edges.map((e) => e.id));
     for (const key of Object.keys(view.edges)) {
@@ -55,4 +38,25 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
     }
   }
   return spec;
+}
+
+// Returns a map of nodeId → reason string for every node that is missing a
+// required inbound edge. Empty map means all required inputs are satisfied.
+export function requiredInputDiagnostics(spec: Spec): Map<string, string> {
+  const result = new Map<string, string>();
+  const inboundPorts = new Set(spec.edges.map((e) => `${e.target}:${e.targetHandle}`));
+  for (const node of spec.nodes) {
+    const required = REQUIRED_INPUTS[node.type];
+    if (!required) continue;
+    const missing: string[] = [];
+    for (const port of required) {
+      const hasEdge = inboundPorts.has(`${node.id}:${port}`);
+      const hasEdgeSeed = (node.edgeSeeds as Record<string, unknown> | undefined)?.[port] !== undefined;
+      if (!hasEdge && !hasEdgeSeed) missing.push(port);
+    }
+    if (missing.length > 0) {
+      result.set(node.id, missing.map((p) => `missing required input "${p}"`).join("; "));
+    }
+  }
+  return result;
 }
