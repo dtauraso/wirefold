@@ -9,26 +9,33 @@ read this file first (no chat history needed) and proceed.
 
 ## State at handoff (2026-05-25, task/readgate-input-label)
 
-**Active branch:** `task/readgate-input-label`. HEAD: `159e3c3`. Pushed to origin. NOT merged to main.
+**Active branch:** `task/readgate-input-label`. HEAD: `f369142`. Pushed to origin. In sync with origin. NOT merged to main.
 
-**Stray working-tree change:** `topology.json` has a 1-line uncommitted
-modification that predates the last session. Deliberately left untouched.
-Decide whether to keep or `git checkout topology.json` before starting new work.
+**Rebase note (2026-05-25):** This branch was rebased onto main today. The old
+in-branch merge commit (`159e3c3`) is gone — rebase superseded it. The stray
+`topology.json` working-tree change from prior sessions was discarded during the
+rebase. Working tree is clean.
 
 ### What's on this branch
 
-1. **ReadGate guard-term rename** (commit `ded1a35`): the canonical first guard term
-   changed from the two-word phrase `"input value"` to the single word `"input"` in
-   `tools/pseudo/readgate.go` — grammar, parser drops the `"value"` word on both guard
-   and send lines, `valueTerm()` return, and guard detector. All 9 affected sites in
-   `tools/pseudo/readgate_test.go` updated to match. `nodes/readgate/node.go` is
-   byte-identical to main (term is a pseudo-layer label only; generated Go embeds
-   identifiers, not the label). `go test ./tools/pseudo/...` and `go build ./...` green.
+1. **ReadGate guard-term rename** (commit `3050868`, formerly `ded1a35` pre-rebase):
+   the canonical first guard term changed from the two-word phrase `"input value"` to
+   the single word `"input"` in `tools/pseudo/readgate.go` — grammar, parser drops the
+   `"value"` word on both guard and send lines, `valueTerm()` return, and guard detector.
+   All 9 affected sites in `tools/pseudo/readgate_test.go` updated to match.
+   `nodes/readgate/node.go` is byte-identical to main (term is a pseudo-layer label only;
+   generated Go embeds identifiers, not the label). `go test ./tools/pseudo/...` and
+   `go build ./...` green.
 
-2. **Delegate-hook threshold change** (commit `db94f80`, merged in from main via `159e3c3`):
-   `scripts/force-delegate-hook.py` `THRESHOLD` lowered to `1` — the force-delegate
-   PreToolUse hook now blocks after the 1st inline read-only lookup (fires on the 2nd
-   qualifying call). This commit also lives on main.
+2. **Delegate-hook threshold change** (commit `db94f80`): `scripts/force-delegate-hook.py`
+   `THRESHOLD` lowered to `1`. This commit also lives on main (absorbed before the rebase).
+
+### What main absorbed (now under this branch via rebase)
+
+`task/logs-ai-readable` work: 4-file `.probe/` logging scheme —
+`go.jsonl`, `go-errors.jsonl`, `ts.jsonl`, `ts-errors.jsonl` — with a shared
+`ts_ms+src+step` envelope per line, plus `tools/probe-merge.sh` for interleaved
+inspection. See memory `project_probe_log_layout` for the full layout.
 
 ### Branch sweep (2026-05-24, historical one-liner)
 
@@ -36,7 +43,7 @@ Decide whether to keep or `git checkout topology.json` before starting new work.
 
 ### Open / next
 
-- Merge `task/readgate-input-label` to main (fast-forward-able after the threshold merge) and delete the branch, OR continue work on the branch.
+- Merge `task/readgate-input-label` to main (fast-forward-able) and delete the branch, OR continue work on the branch.
 - Next friction-driven work: log in session-log.md, open a fresh `task/<short-kebab>` branch.
 
 Deferred from prior sessions (still valid if friction surfaces):
