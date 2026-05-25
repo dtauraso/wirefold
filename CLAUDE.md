@@ -107,57 +107,28 @@ be a fresh model with no transcript.
 
 Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.
 
-## Model routing
+## Delegation
 
-Most of this repo's work doesn't need Opus. Default to cheaper models for
-executor-style work; reserve Opus for planning and judgment.
+**When to delegate (apply each prompt):** delegation is the default, not the exception.
 
-**Use `model: haiku`** for: file scans, log/grep work, reading session-log
-or memory to surface a fact, simple multi-file finds, running the
-deterministic audit scripts and reporting findings.
+- More than ~2 read-only lookups on a topic → spawn an `Explore` subagent with `model: "haiku"`.
+- A clear, scoped edit spec (rename, flag removal, mechanical refactor) → spawn a general-purpose subagent with `model: "sonnet"`.
+- A single targeted Read/grep with a known path → just do it inline; delegation overhead isn't worth it.
+- **Main session never writes.** Every `Edit`, `Write`, or scripting `Bash` call goes to a subagent. Main session outputs prose, decisions, and dispatch prompts only.
 
-**Use `model: sonnet`** for: mechanical edits with a clear spec, refactors
-inside a single file, writing tests against an existing pattern, doc
-updates, running CI-backed audits (1–3) when red and triaging output,
-follow-up fixes from audit findings.
+If the main session catches itself doing executor-style work, that's a miss — note it and route the next similar task to a subagent.
 
-**Reserve Opus (default)** for: planning a new task branch, the
-judgment-heavy audits (6 security, 9 complexity, 10 architecture, 19
-reading-trip economy), debugging non-obvious behavior, designing the
-spec/view split when adding fields.
+**Model routing:**
 
-Apply via `Agent({ model: "sonnet", ... })` or by spawning a subagent of
-the matching kind. If unsure, downshift first and escalate only if the
-cheaper model produces poor output — the cost asymmetry favors trying
-cheap first.
+| Work type | Model |
+|---|---|
+| File scans, log/grep, reading session-log or memory to surface a fact, simple multi-file finds, running deterministic audit scripts | `haiku` |
+| Mechanical edits with a clear spec, refactors inside a single file, writing tests against an existing pattern, doc updates, running CI-backed audits (1–3) when red and triaging output, follow-up fixes from audit findings | `sonnet` |
+| Planning a new task branch, judgment-heavy audits (6 security, 9 complexity, 10 architecture, 19 reading-trip economy), debugging non-obvious behavior, designing spec/view split when adding fields | Opus (default) |
 
-**Delegation check (apply each prompt):** if the task needs >2 read-only lookups or a mechanical edit pass, spawn a subagent (Explore w/ haiku for research, general-purpose w/ sonnet for mechanical edits). Main session is for judgment.
+Apply via `Agent({ model: "sonnet", ... })` or by spawning a subagent of the matching kind. If unsure, downshift first and escalate only if the cheaper model produces poor output — the cost asymmetry favors trying cheap first.
 
-**Delegation is the default, not the exception.** Before running a
-multi-step investigation, grep sweep, or mechanical edit pass from the
-main (Opus) session, ask: "can a haiku or sonnet subagent do this?" If
-yes, delegate. The main session should be doing judgment, planning,
-and synthesis — not driving `grep`, `Read`, or repetitive `Edit` calls
-that a cheaper model handles fine. Concretely:
-
-- More than ~2 read-only lookups on a topic → spawn an `Explore`
-  subagent with `model: "haiku"`.
-- A clear, scoped edit spec (rename, flag removal, mechanical
-  refactor) → spawn a general-purpose subagent with
-  `model: "sonnet"`.
-- A single targeted Read/grep with a known path → just do it inline;
-  delegation overhead isn't worth it.
-
-If the main session catches itself doing executor-style work, that's a
-miss — note it and route the next similar task to a subagent.
-
-**Keep delegate prompts tight (~15 lines).** Structure: one-line goal;
-files to read (paths only); bulleted concrete edits with `file:line`
-when known; one-line verify command; one-line constraints (branch, no
-merge, no amend, push or not). Skip rationale paragraphs,
-alternative-considerations, and "if ambiguous…" hedging — the agent
-will ask if blocked. Long prompts restate context the agent can derive
-from the files; that's wasted tokens.
+**Prompt style (~15 lines):** one-line goal; files to read (paths only); bulleted concrete edits with `file:line` when known; one-line verify command; one-line constraints (branch, no merge, no amend, push or not). Skip rationale paragraphs, alternative-considerations, and "if ambiguous…" hedging — the agent will ask if blocked.
 
 ## Language / runtime
 

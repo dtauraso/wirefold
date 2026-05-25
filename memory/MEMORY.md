@@ -28,7 +28,6 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_derive_model_from_visual_spec.md](feedback_derive_model_from_visual_spec.md) — David's visual/behavioral specs are sufficient; derive the implied model up front and refuse cheap patches that preserve a wrong model.
 - [feedback_enforce_required_inputs.md](feedback_enforce_required_inputs.md) — When a node's correctness depends on a wire being present, propose a model-enforced design: required port + parseSpec validation, not topology discipline.
 - [feedback_clear_button_armed_only_when_loaded.md](feedback_clear_button_armed_only_when_loaded.md) — Editor affordances clearing a slot must be disabled unless destination `slotPhase === "filled"`; don't lean on substrate-side deferral to fix UX.
-- [feedback_tight_delegate_prompts.md](feedback_tight_delegate_prompts.md) — Agent prompts: ~15 lines (goal, paths, edits, verify, constraints); skip prose framing
 - [feedback_uniform_pulse_speed.md](feedback_uniform_pulse_speed.md) — Reject per-wire `speed` props; pulse speed is uniform across all wires.
 - [feedback_verify_subagent_commits.md](feedback_verify_subagent_commits.md) — Subagents have picked up unstaged working-tree edits and pushed them; spot-check `git log` deltas before pushing to main.
 - [feedback_edge_seed_required_for_rings.md](feedback_edge_seed_required_for_rings.md) — Ring topologies need `data.edgeSeeds: { <inputPort>: <value> }` on the receiving node to break startup deadlock; the Go loader pre-sends it before goroutines start.
@@ -38,4 +37,3 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_hook_block_means_stop.md](feedback_hook_block_means_stop.md) — When a PreToolUse hook returns exit 2, stop and report to the user; do not route around the block via python3, sed -i, shell redirect, or any other write path.
 - [project_v0_cost_calibration.md](project_v0_cost_calibration.md) — Phase 5 v0 cost calibration; mechanical ~10%, hardening ~12%, refactor/exploratory ~15–20% of original estimate
 - [project_edge_midpoint_offset_plumbing.md](project_edge_midpoint_offset_plumbing.md) — Edge `midpointOffset` + `setEdgeMidpointOffset` + EdgeActionsCtx already wired end-to-end; don't re-grep schema/adapter/mutation when extending edges
-- [feedback_delegate_all_writing.md](feedback_delegate_all_writing.md) — STRICT: main session never writes; all Edit/Write/Bash-scripting goes to subagents. Any write is the trigger, not the inline-executor counter.

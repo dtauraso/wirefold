@@ -26,6 +26,4 @@ around. Each prior agent stayed inside the narrow frame it was given.
 grep first. For wirefold specifically: `wire.load`, `node.fill`,
 `node.consume` are the load-bearing primitive operations — any violation
 warrants an O(n) call-site audit before O(deep dive). Cost asymmetry
-strongly favors the grep. See also
-[[feedback-delegate-executor-work]] — the audit grep is exactly the kind
-of cheap mechanical task a haiku Explore subagent runs in seconds.
+strongly favors the grep.
