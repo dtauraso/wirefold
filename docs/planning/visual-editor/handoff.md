@@ -7,57 +7,61 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-23, main)
+## State at handoff (2026-05-24, task/readgate-or-gate)
 
-**Active branch:** none — working on `main`, clean tree. HEAD: `27f625b`.
+**Active branch:** `task/readgate-or-gate`. HEAD: `528c226`. Pushed to origin.
+**NOT merged to main** — contains unreviewed-for-main work (see Open/next).
 
-Local + origin/main in sync. Working tree: clean.
+**Stray working-tree change:** `topology.json` has a 1-line uncommitted
+modification that predates this session. It was deliberately left untouched
+and uncommitted. Decide whether to keep or `git checkout topology.json`.
 
 ### What landed this session
 
-**Removed `specKindToRfType` casing layer** — RF node type now equals the spec
-kind verbatim (PascalCase). Codegen emits PascalCase `NODE_DEFS` keys directly;
-the first-char lowercase derivation in the registry was eliminated. CLAUDE.md
-substrate-landing rule reconciled to reflect this (RF type = spec kind verbatim).
+**Boundary self-defense audit (two passes, via the `audit-grep-load` skill).**
+Converted hand-maintained cross-boundary invariants into free, deterministic
+checks so they no longer cost AI tokens to re-verify:
+- `tools/check-trace-kind-parity.sh` — pump.ts trace switch vs generated `TRACE_EVENT_KINDS`.
+- `tools/check-no-ts-timers.sh` — no setInterval/setTimeout/while in pump.ts (enforces MODEL.md "no firing logic in TS").
+- `tools/check-message-kind-parity.sh` — Go `"delivered"` discriminator (stdin_reader.go) ⊆ TS `WEBVIEW_TO_HOST_TYPES` (src/messages.ts).
+- `tools/check-slot-phase-boundary.sh` — slot-phase literals only in paced_wire.go / pump.ts.
+- All four wired into the Stop hook via `scripts/stop-checks.sh` (block-on-fail).
+- `nodes/Wiring/validate.go` — `validateSpec` runs at parse time (after JSON unmarshal, before substrate build); aggregates spec-shape errors that were previously runtime-only in loader.go: unknown kind, empty edge label, bad source/target handle, missing required input, missing `data.state` keys. Error wording preserved; builders.go runtime checks kept as backstop.
+- MODEL.md: rotting pump.ts line-number refs replaced with anchor comments (`PUMP_DONE_HANDLER`, `PUMP_SLOT_HANDLER`).
+- Verified-but-no-change: `REQUIRED_INPUTS` in node-defs.ts is already generated from Go `*Wiring.In` fields — not a drift trap.
 
-**BUG 1 fixed: `PseudoErrorOverlay` now covers all pseudo prefixes** — overlay
-was previously scoped to a hardcoded prefix subset, silently dropping ReadGate
-errors and save-results. Fixed to derive from `_pseudoPrefixes`, so all pseudo
-kinds are covered.
-
-**Phase 4 of pseudo-path compression (4a + 4b):**
-- (4a) `handle-message.ts` dispatch is now table-driven off `PSEUDO_KIND_PREFIX`;
-  `cmd/pseudo/main.go` is a registry map — no per-kind if-chains.
-- (4b) `READGATE_OUT_HANDLE` derives from generated `NODE_DEFS.ReadGate`; the
-  cmd-arg kind string is folded into `pseudoTable.cmdArg`.
-- All hand-synced cross-file string duplication in the pseudo path eliminated.
-  The pseudo path is at its irreducible floor: per-kind handler bodies + one-line
-  registrations; no string drift hotspots remain.
-
-**Navigation-tax re-audit:** built the audit, drove all findings to shipped,
-removed the audit HTML. Retained in git history only.
+**ReadGate is now AND-only (`528c226`).** Removed the entire OR-gate pathway from
+`tools/pseudo/readgate.go`: the `ReadGateView.Gate` field, `gateWord()` "or" branch,
+the `||` operator mapping and `IsOr` template branch in `ToReadGate`, and `||`
+recognition in the guard detector. `parseReadGatePseudo` now REJECTS `"or"` with an
+"AND-only" parse error; `"and"` still parses. Generated `nodes/readgate/node.go` is
+byte-identical to before (AND output unchanged). OR-specific tests removed; a
+parser-rejects-"or" test added. This reverses the earlier OR-gate work (`77cfdeb`,
+whose only code-review finding — stale `g.Value` on OR-fire — is now moot).
 
 ### Open / next
 
-No open items flagged. Pseudo path compression is complete. Next work should
-be friction-driven from real editor use (log to session-log.md and open a
-`task/<short-kebab>` branch).
+1. **Merge decision for `task/readgate-or-gate` → main.** Before merging: run
+   `tools/strip-branch-local-docs.sh task/readgate-or-gate`, then merge + delete branch
+   (needs user sign-off). The readgate AND-only change and the audit work have not been
+   reviewed *for main* beyond the inline code-review of `77cfdeb`.
+2. **Delete redundant `task/boundary-audit` branch.** It was fast-forward-merged into
+   `task/readgate-or-gate` and is now identical/redundant. Deletion needs user sign-off.
+3. **Stray `topology.json` 1-line change** — keep or discard (see above).
 
 Deferred from prior sessions (still valid if friction surfaces):
 1. **InhibitRightGate pseudo projection** — same pattern as Input/ReadGate, has L/R params.
 2. **ChainInhibitor pseudo projection** — blocked on unresolved "keep prev send current" spec.
-3. **Live-verify ReadGate edit loop in VS Code** — the full edit-in-canvas UX was
-   not verified live in the previous session; pick up if ReadGate friction surfaces.
+3. **Live-verify ReadGate edit loop in VS Code** — full edit-in-canvas UX not verified live.
 
 ### Key files
 
-- `cmd/pseudo/main.go` — registry-map CLI entry point
-- `tools/topology-vscode/src/extension/handle-message.ts` — table-driven dispatch
-- `tools/topology-vscode/src/webview/rf/nodes/registry.ts` — NODE_DEFS (PascalCase keys, no casing layer)
-- `tools/pseudo/readgate.go` — ReadGate pseudo package
-- `tools/pseudo/input.go` — Input pseudo package
+- `tools/pseudo/readgate.go` — ReadGate pseudo package (AND-only)
 - `nodes/readgate/node.go` — ReadGate Go source (written by readgate-save)
-- `nodes/Input/node.go` — Input Go source (written by input-save)
+- `nodes/Wiring/validate.go` — parse-time `validateSpec`
+- `scripts/stop-checks.sh` — Stop hook; runs the four guard scripts
+- `tools/check-trace-kind-parity.sh`, `tools/check-no-ts-timers.sh`, `tools/check-message-kind-parity.sh`, `tools/check-slot-phase-boundary.sh` — boundary guards
+- `tools/topology-vscode/src/webview/rf/nodes/registry.ts` — NODE_DEFS (PascalCase keys)
 
 ### Substrate model contract (stable)
 
@@ -70,7 +74,8 @@ After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
 After pseudo change: `go test ./tools/pseudo/...`.
 To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
-Check: `go test ./...`, `bash tools/check-substrate-vocabulary.sh`.
+Check: `go test ./...`, `bash tools/check-substrate-vocabulary.sh`, and the four
+boundary guards (run automatically by the Stop hook via `scripts/stop-checks.sh`).
 
 ## ALWAYS clause
 
