@@ -166,6 +166,8 @@ If you find yourself writing or reasoning with these words while
 working on the substrate, you have drifted.
 
 Banned-vocabulary check: `bash tools/check-substrate-vocabulary.sh` — substrate code must pass.
+Trace-kind parity check: `bash tools/check-trace-kind-parity.sh` — TRACE_EVENT_KINDS and pump.ts switch must match.
+No-TS-timers check: `bash tools/check-no-ts-timers.sh` — setInterval/setTimeout/while must not appear in pump.ts.
 
 These tokens belong to the renderer, to legacy code being retired, or to
 prior substrate models that have been superseded. None of them
