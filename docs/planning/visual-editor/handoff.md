@@ -7,33 +7,37 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-25, task/logs-ai-readable — NOT merged to main)
+## State at handoff (2026-05-25, task/readgate-input-label)
 
-**Active branch:** `task/logs-ai-readable` (branched from main). NOT merged.
-**Status:** 6 commits landed on branch; ready to merge or continue.
+**Active branch:** `task/readgate-input-label`. HEAD: `159e3c3`. Pushed to origin. NOT merged to main.
 
-### What landed (task/logs-ai-readable — 6 commits)
+**Stray working-tree change:** `topology.json` has a 1-line uncommitted
+modification that predates the last session. Deliberately left untouched.
+Decide whether to keep or `git checkout topology.json` before starting new work.
 
-1. **post.ts envelope** — Extension-side disk-write boundary adds `{ts_ms, src, step?}` envelope to every log line written to `.probe/`. `ts_ms` is Date.now() wall-clock (cross-process comparable on one machine); `step` is substrate event ordinal, present only on substrate-derived lines. Go's `marshalEvent`/canonical form is untouched — contract fixture `trace-events.jsonl` still pins it.
+### What's on this branch
 
-2. **webview-log split into ts/ts-errors** — `webview-log.jsonl` retired; webview+ext logs now go to `ts.jsonl` (src:"ts-webview"/"ts-ext") and window/unhandled/render errors to `ts-errors.jsonl`.
+1. **ReadGate guard-term rename** (commit `ded1a35`): the canonical first guard term
+   changed from the two-word phrase `"input value"` to the single word `"input"` in
+   `tools/pseudo/readgate.go` — grammar, parser drops the `"value"` word on both guard
+   and send lines, `valueTerm()` return, and guard detector. All 9 affected sites in
+   `tools/pseudo/readgate_test.go` updated to match. `nodes/readgate/node.go` is
+   byte-identical to main (term is a pseudo-layer label only; generated Go embeds
+   identifiers, not the label). `go test ./tools/pseudo/...` and `go build ./...` green.
 
-3. **runCommand relay to go.jsonl/go-errors** — Go stdout substrate trace relayed to `go.jsonl` (src:"go"); Go failures to `go-errors.jsonl`. Retired filename: `phase4-pump.jsonl` → `go.jsonl`.
+2. **Delegate-hook threshold change** (commit `db94f80`, merged in from main via `159e3c3`):
+   `scripts/force-delegate-hook.py` `THRESHOLD` lowered to `1` — the force-delegate
+   PreToolUse hook now blocks after the 1st inline read-only lookup (fires on the 2nd
+   qualifying call). This commit also lives on main.
 
-4. **console-diag mirror** — Webview console.log/warn/error mirrored into the ts.jsonl stream for unified AI-readable diagnosis.
+### Branch sweep (2026-05-24, historical one-liner)
 
-5. **probe-merge.sh** — `tools/probe-merge.sh`: no-arg merges all four files sorted by ts_ms; flags `--errors`, `--step N`, `--go`, `--ts` for filtered views.
-
-6. **Settings cleanup** — Deleted two stale allowlist entries from `.claude/settings.local.json` (the two `awk -F'"ts":'` ... `webview-log.jsonl` entries for `i1.out->readGate`, now obsolete since webview-log.jsonl is retired).
-
-**Go left untouched on purpose.** `marshalEvent` canonical form and contract fixture `trace-events.jsonl` unchanged; the envelope is extension-side only.
-
-**Test baseline:** 25 passed / 13 failed on BOTH main and this branch. Failures are pre-existing and unrelated (topology edge mismatches + trace-kind fixture gap). This change added zero new failures.
+`task/readgate-or-gate` merged to main (AND-only refactor + boundary audit + delegation consolidation); stale branches deleted.
 
 ### Open / next
 
-- **Merge to main + delete branch** (needs sign-off per workflow rules), OR continue adding diagnostics.
-- After merge: retire `task/logs-ai-readable` locally and on remote.
+- Merge `task/readgate-input-label` to main (fast-forward-able after the threshold merge) and delete the branch, OR continue work on the branch.
+- Next friction-driven work: log in session-log.md, open a fresh `task/<short-kebab>` branch.
 
 Deferred from prior sessions (still valid if friction surfaces):
 1. **InhibitRightGate pseudo projection** — same pattern as Input/ReadGate, has L/R params.
@@ -42,13 +46,12 @@ Deferred from prior sessions (still valid if friction surfaces):
 
 ### Key files
 
-- `tools/probe-merge.sh` — unified log viewer (all four .probe/ files)
-- `.probe/go.jsonl` — substrate trace (src:"go")
-- `.probe/go-errors.jsonl` — Go failures
-- `.probe/ts.jsonl` — webview+ext logs (src:"ts-webview"/"ts-ext")
-- `.probe/ts-errors.jsonl` — window/unhandled/render errors
-- `memory/project_probe_log_layout.md` — memory entry for log layout
+- `tools/pseudo/readgate.go` — ReadGate pseudo package (AND-only)
+- `nodes/readgate/node.go` — ReadGate Go source (written by readgate-save)
+- `nodes/Wiring/validate.go` — parse-time `validateSpec`
 - `scripts/stop-checks.sh` — Stop hook; runs all five guard scripts
+- `tools/check-trace-kind-parity.sh`, `tools/check-no-ts-timers.sh`, `tools/check-message-kind-parity.sh`, `tools/check-slot-phase-boundary.sh` — four boundary guards
+- `tools/check-substrate-vocabulary.sh` — banned-vocabulary guard (5th stop-hook check)
 - `tools/topology-vscode/src/webview/rf/nodes/registry.ts` — NODE_DEFS (PascalCase keys)
 
 ### Substrate model contract (stable)
