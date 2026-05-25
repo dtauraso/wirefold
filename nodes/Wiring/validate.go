@@ -105,29 +105,7 @@ func validateSpec(spec *topoSpec) error {
 		}
 	}
 
-	// Check 4: required input ports must have an inbound edge.
-	// Build inbound map first.
-	inbound := map[string]map[string]bool{}
-	for _, e := range spec.Edges {
-		if inbound[e.Target] == nil {
-			inbound[e.Target] = map[string]bool{}
-		}
-		inbound[e.Target][e.TargetHandle] = true
-	}
-	for _, n := range spec.Nodes {
-		bind, ok := Registry[n.Type]
-		if !ok {
-			continue // already reported in Check 1
-		}
-		for _, port := range bind.Ports {
-			if !port.Required {
-				continue
-			}
-			if !inbound[n.ID][port.Name] {
-				errs = append(errs, fmt.Sprintf("node %q: required input port %q has no inbound edge", n.ID, port.Name))
-			}
-		}
-	}
+	// (No required-inbound-edge check: a node with an unfed required port loads and stays inert by precondition-gating — the editor flags it visually instead.)
 
 	// Check 5: required data.state keys must be present for each node kind.
 	for _, n := range spec.Nodes {
