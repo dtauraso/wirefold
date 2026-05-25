@@ -7,70 +7,33 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-25, main — no task in flight)
+## State at handoff (2026-05-25, task/logs-ai-readable — NOT merged to main)
 
-**Active branch:** `main`. HEAD: `b85f977`. Pushed to origin.
-**No task in flight.** Repo is now MAIN-ONLY — every task branch deleted (local + remote).
+**Active branch:** `task/logs-ai-readable` (branched from main). NOT merged.
+**Status:** 6 commits landed on branch; ready to merge or continue.
 
-**Stray working-tree change:** `topology.json` has a 1-line uncommitted
-modification that predates the last session. Deliberately left untouched.
-Decide whether to keep or `git checkout topology.json` before starting new work.
+### What landed (task/logs-ai-readable — 6 commits)
 
-### Branch sweep (2026-05-24)
+1. **post.ts envelope** — Extension-side disk-write boundary adds `{ts_ms, src, step?}` envelope to every log line written to `.probe/`. `ts_ms` is Date.now() wall-clock (cross-process comparable on one machine); `step` is substrate event ordinal, present only on substrate-derived lines. Go's `marshalEvent`/canonical form is untouched — contract fixture `trace-events.jsonl` still pins it.
 
-**Merged to main then deleted:**
-- `task/readgate-or-gate` — ReadGate AND-only refactor + boundary audit + delegation consolidation.
+2. **webview-log split into ts/ts-errors** — `webview-log.jsonl` retired; webview+ext logs now go to `ts.jsonl` (src:"ts-webview"/"ts-ext") and window/unhandled/render errors to `ts-errors.jsonl`.
 
-**Deleted as redundant (0 commits ahead of main):**
-- `task/boundary-audit`
-- `task/diagram-animation-fixes`
-- `task/spec-phase2-generic-renderer`
+3. **runCommand relay to go.jsonl/go-errors** — Go stdout substrate trace relayed to `go.jsonl` (src:"go"); Go failures to `go-errors.jsonl`. Retired filename: `phase4-pump.jsonl` → `go.jsonl`.
 
-**Force-deleted as DISCARDED unmerged work (gone everywhere, redo fresh if wanted):**
-- `task/pulses-as-events` — complete WAAPI/DOM-pulse + pause-resume rewrite; conflicted structurally with main's later pump rewrite — NOT merged, behavior no longer exists in repo.
-- `task/visual-paced-substrate` — design + plan docs only, discarded.
-- `task/pseudocode-spec` — pseudocode spec docs for Input/ReadGate/ChainInhibitor/InhibitRightGate, discarded.
+4. **console-diag mirror** — Webview console.log/warn/error mirrored into the ts.jsonl stream for unified AI-readable diagnosis.
 
-The `task/pulses-as-events` and `task/pseudocode-spec` design thinking is gone, not just unmerged — next session shouldn't go looking for those branches.
+5. **probe-merge.sh** — `tools/probe-merge.sh`: no-arg merges all four files sorted by ts_ms; flags `--errors`, `--step N`, `--go`, `--ts` for filtered views.
 
-### What landed (task/readgate-or-gate → main, merged 2026-05-24)
+6. **Settings cleanup** — Deleted two stale allowlist entries from `.claude/settings.local.json` (the two `awk -F'"ts":'` ... `webview-log.jsonl` entries for `i1.out->readGate`, now obsolete since webview-log.jsonl is retired).
 
-**ReadGate is AND-only.** Removed the entire OR-gate pathway from
-`tools/pseudo/readgate.go`: the `ReadGateView.Gate` field, `gateWord()` "or" branch,
-the `||` operator mapping and `IsOr` template branch in `ToReadGate`, and `||`
-recognition in the guard detector. `parseReadGatePseudo` now REJECTS `"or"` with an
-"AND-only" parse error; `"and"` still parses. Generated `nodes/readgate/node.go` is
-byte-identical to before (AND output unchanged). OR-specific tests removed; a
-parser-rejects-"or" test added.
+**Go left untouched on purpose.** `marshalEvent` canonical form and contract fixture `trace-events.jsonl` unchanged; the envelope is extension-side only.
 
-**Boundary self-defense audit.** Converted hand-maintained cross-boundary invariants
-into free, deterministic checks (no AI tokens needed to re-verify):
-- `tools/check-trace-kind-parity.sh` — pump.ts trace switch vs generated `TRACE_EVENT_KINDS`.
-- `tools/check-no-ts-timers.sh` — no setInterval/setTimeout/while in pump.ts (enforces MODEL.md "no firing logic in TS").
-- `tools/check-message-kind-parity.sh` — Go `"delivered"` discriminator (stdin_reader.go) ⊆ TS `WEBVIEW_TO_HOST_TYPES` (src/messages.ts).
-- `tools/check-slot-phase-boundary.sh` — slot-phase literals only in paced_wire.go / pump.ts.
-- All four wired into the Stop hook via `scripts/stop-checks.sh` (block-on-fail).
-
-### What landed (2026-05-25)
-
-**Vocab check wired into Stop hook.** `tools/check-substrate-vocabulary.sh` previously
-ran advisory-only (manual). Commit `b85f977` added it to the `for chk in ...` loop in
-`scripts/stop-checks.sh:58`, making it the 5th guard to block the Stop hook fail-closed.
-The four boundary guards + `check-substrate-vocabulary` now all run automatically on
-every Stop. Passes clean against current substrate.
-
-**Parse-time validation.** `nodes/Wiring/validate.go` — `validateSpec` runs at parse
-time (after JSON unmarshal, before substrate build); aggregates spec-shape errors
-previously runtime-only in loader.go: unknown kind, empty edge label, bad
-source/target handle, missing required input, missing `data.state` keys.
-
-**Delegation-guidance consolidation.** MODEL.md rotting pump.ts line-number refs
-replaced with anchor comments (`PUMP_DONE_HANDLER`, `PUMP_SLOT_HANDLER`).
+**Test baseline:** 25 passed / 13 failed on BOTH main and this branch. Failures are pre-existing and unrelated (topology edge mismatches + trace-kind fixture gap). This change added zero new failures.
 
 ### Open / next
 
-No active task. Next work should be friction-driven (log friction in session-log.md,
-open a fresh `task/<short-kebab>` branch).
+- **Merge to main + delete branch** (needs sign-off per workflow rules), OR continue adding diagnostics.
+- After merge: retire `task/logs-ai-readable` locally and on remote.
 
 Deferred from prior sessions (still valid if friction surfaces):
 1. **InhibitRightGate pseudo projection** — same pattern as Input/ReadGate, has L/R params.
@@ -79,12 +42,13 @@ Deferred from prior sessions (still valid if friction surfaces):
 
 ### Key files
 
-- `tools/pseudo/readgate.go` — ReadGate pseudo package (AND-only)
-- `nodes/readgate/node.go` — ReadGate Go source (written by readgate-save)
-- `nodes/Wiring/validate.go` — parse-time `validateSpec`
+- `tools/probe-merge.sh` — unified log viewer (all four .probe/ files)
+- `.probe/go.jsonl` — substrate trace (src:"go")
+- `.probe/go-errors.jsonl` — Go failures
+- `.probe/ts.jsonl` — webview+ext logs (src:"ts-webview"/"ts-ext")
+- `.probe/ts-errors.jsonl` — window/unhandled/render errors
+- `memory/project_probe_log_layout.md` — memory entry for log layout
 - `scripts/stop-checks.sh` — Stop hook; runs all five guard scripts
-- `tools/check-trace-kind-parity.sh`, `tools/check-no-ts-timers.sh`, `tools/check-message-kind-parity.sh`, `tools/check-slot-phase-boundary.sh` — four boundary guards
-- `tools/check-substrate-vocabulary.sh` — banned-vocabulary guard (5th stop-hook check)
 - `tools/topology-vscode/src/webview/rf/nodes/registry.ts` — NODE_DEFS (PascalCase keys)
 
 ### Substrate model contract (stable)

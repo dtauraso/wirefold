@@ -37,3 +37,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_hook_block_means_stop.md](feedback_hook_block_means_stop.md) — When a PreToolUse hook returns exit 2, stop and report to the user; do not route around the block via python3, sed -i, shell redirect, or any other write path.
 - [project_v0_cost_calibration.md](project_v0_cost_calibration.md) — Phase 5 v0 cost calibration; mechanical ~10%, hardening ~12%, refactor/exploratory ~15–20% of original estimate
 - [project_edge_midpoint_offset_plumbing.md](project_edge_midpoint_offset_plumbing.md) — Edge `midpointOffset` + `setEdgeMidpointOffset` + EdgeActionsCtx already wired end-to-end; don't re-grep schema/adapter/mutation when extending edges
+- [project_probe_log_layout.md](project_probe_log_layout.md) — Runtime logs are 4 .probe/ JSONL files (go/ts × log/errors) with ts_ms+src+step envelope; probe-merge.sh merges them
