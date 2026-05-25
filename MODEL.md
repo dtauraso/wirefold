@@ -138,7 +138,7 @@ empty  ──Send fills──▶  filled(v)  ──NotifyDelivered──▶  (Re
    `{"kind":"slot","phase":"filled"}` (Trace/Trace.go:147).
 2. `filled(v)` → Recv unblocked: `NotifyDelivered` closes `deliveryCh`
    (paced_wire.go:129–137); pump posts it from the `"done"` animation callback
-   (pump.ts handles `"done"` at line 81, clears pulse; the extension host sends
+   (pump.ts handles `"done"` — see `PUMP_DONE_HANDLER` in pump.ts — clears pulse; the extension host sends
    `notifyDelivered` to stdin).
 3. Recv returns value, slot still `filled(v)` — no phase change. Receiver uses
    the value and calls `Done`.
@@ -152,7 +152,7 @@ empty  ──Send fills──▶  filled(v)  ──NotifyDelivered──▶  (Re
   visual layer.
 - TS never sets slot state directly. It only sends `notifyDelivered` (unblocks
   `Recv`) and renders the slot badges from `"slot"` trace events.
-- `pump.ts` `"slot"` branch (pump.ts:25–41) writes `slots[port]` into RF node
+- `pump.ts` `"slot"` branch (see `PUMP_SLOT_HANDLER` in pump.ts) writes `slots[port]` into RF node
   data. `GenericNode.tsx` (line 142) reads `slotEntry.phase === "filled"` to
   render the slot badge; held-value badges (line 144–145) persist from `"send"`
   events and are NOT cleared on `"done"`.

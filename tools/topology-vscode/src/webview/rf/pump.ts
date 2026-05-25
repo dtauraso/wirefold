@@ -45,6 +45,7 @@ export function handleTraceEvent(event: TraceEvent): void {
   // Cast to the generated enum so tsc checks all branches are covered.
   const k = kind as TraceEventKind;
   switch (k) {
+    // PUMP_SLOT_HANDLER
     case "slot": {
       const { nodeId, port, phase, value } = event as SlotEvent;
       const prevSlots = (_currentSlots.get(nodeId) ?? {}) as SlotMap;
@@ -86,6 +87,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
+    // PUMP_DONE_HANDLER
     case "done": {
       // Match ALL edges by target node id + targetHandle (fan-in).
       // RF edges store target/targetHandle; trace done events carry node/port.
