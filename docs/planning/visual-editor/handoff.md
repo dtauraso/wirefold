@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-24, main — no task in flight)
+## State at handoff (2026-05-25, main — no task in flight)
 
-**Active branch:** `main`. HEAD: `7ffcbcf`. Pushed to origin.
+**Active branch:** `main`. HEAD: `b85f977`. Pushed to origin.
 **No task in flight.** Repo is now MAIN-ONLY — every task branch deleted (local + remote).
 
 **Stray working-tree change:** `topology.json` has a 1-line uncommitted
@@ -51,6 +51,14 @@ into free, deterministic checks (no AI tokens needed to re-verify):
 - `tools/check-slot-phase-boundary.sh` — slot-phase literals only in paced_wire.go / pump.ts.
 - All four wired into the Stop hook via `scripts/stop-checks.sh` (block-on-fail).
 
+### What landed (2026-05-25)
+
+**Vocab check wired into Stop hook.** `tools/check-substrate-vocabulary.sh` previously
+ran advisory-only (manual). Commit `b85f977` added it to the `for chk in ...` loop in
+`scripts/stop-checks.sh:58`, making it the 5th guard to block the Stop hook fail-closed.
+The four boundary guards + `check-substrate-vocabulary` now all run automatically on
+every Stop. Passes clean against current substrate.
+
 **Parse-time validation.** `nodes/Wiring/validate.go` — `validateSpec` runs at parse
 time (after JSON unmarshal, before substrate build); aggregates spec-shape errors
 previously runtime-only in loader.go: unknown kind, empty edge label, bad
@@ -74,8 +82,9 @@ Deferred from prior sessions (still valid if friction surfaces):
 - `tools/pseudo/readgate.go` — ReadGate pseudo package (AND-only)
 - `nodes/readgate/node.go` — ReadGate Go source (written by readgate-save)
 - `nodes/Wiring/validate.go` — parse-time `validateSpec`
-- `scripts/stop-checks.sh` — Stop hook; runs the four guard scripts
-- `tools/check-trace-kind-parity.sh`, `tools/check-no-ts-timers.sh`, `tools/check-message-kind-parity.sh`, `tools/check-slot-phase-boundary.sh` — boundary guards
+- `scripts/stop-checks.sh` — Stop hook; runs all five guard scripts
+- `tools/check-trace-kind-parity.sh`, `tools/check-no-ts-timers.sh`, `tools/check-message-kind-parity.sh`, `tools/check-slot-phase-boundary.sh` — four boundary guards
+- `tools/check-substrate-vocabulary.sh` — banned-vocabulary guard (5th stop-hook check)
 - `tools/topology-vscode/src/webview/rf/nodes/registry.ts` — NODE_DEFS (PascalCase keys)
 
 ### Substrate model contract (stable)
@@ -89,8 +98,8 @@ After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
 After pseudo change: `go test ./tools/pseudo/...`.
 To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
-Check: `go test ./...`, `bash tools/check-substrate-vocabulary.sh`, and the four
-boundary guards (run automatically by the Stop hook via `scripts/stop-checks.sh`).
+Check: `go test ./...`. All five guard scripts — the four boundary guards plus
+`check-substrate-vocabulary` — run automatically via the Stop hook (`scripts/stop-checks.sh`).
 
 ## ALWAYS clause
 
