@@ -41,6 +41,8 @@ export class BuildAndRunRunner {
   private stdoutBuf = "";
   private probeFile: string | undefined;
   private goErrorsFile: string | undefined;
+  private tsFile: string | undefined;
+  private tsErrorsFile: string | undefined;
 
   constructor(
     private readonly post: (s: RunStatus) => void,
@@ -55,6 +57,8 @@ export class BuildAndRunRunner {
     fs.mkdirSync(probeDir, { recursive: true });
     this.probeFile = path.join(probeDir, "go.jsonl");
     this.goErrorsFile = path.join(probeDir, "go-errors.jsonl");
+    this.tsFile = path.join(probeDir, "ts.jsonl");
+    this.tsErrorsFile = path.join(probeDir, "ts-errors.jsonl");
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);
@@ -125,6 +129,11 @@ export class BuildAndRunRunner {
       const ev = tryParseTraceEvent(line);
       if (ev && this.onTraceEvent) {
         console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${'node' in ev ? ev.node : ev.nodeId} port=${ev.port ?? "-"}`);
+        if (this.tsFile) {
+          try {
+            fs.appendFileSync(this.tsFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.trace-event", kind: ev.kind, node: 'node' in ev ? ev.node : (ev as { nodeId?: string }).nodeId, port: ev.port ?? null }) + "\n", "utf8");
+          } catch { /* swallow */ }
+        }
         if (this.probeFile) {
           try {
             fs.appendFileSync(this.probeFile, JSON.stringify({ ts_ms: Date.now(), src: "go", ...(typeof ev.step === "number" ? { step: ev.step } : {}), ...ev }) + "\n", "utf8");

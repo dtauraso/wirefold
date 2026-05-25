@@ -43,5 +43,11 @@ async function doAppend(entry: string, documentUri: vscode.Uri, filename: string
     await fs.appendFile(file, entry + "\n", "utf8");
   } catch (err) {
     console.warn("topology editor: webview-log append failed", err);
+    // Mirror to ts-errors.jsonl (best-effort; if dir creation failed this may also fail)
+    try {
+      const fsSync = await import("fs");
+      const errFile = path.join(dir, "ts-errors.jsonl");
+      fsSync.appendFileSync(errFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.webview-log-append-failed", message: String(err) }) + "\n", "utf8");
+    } catch { /* swallow */ }
   }
 }
