@@ -169,6 +169,7 @@ Banned-vocabulary check: `bash tools/check-substrate-vocabulary.sh` — substrat
 Trace-kind parity check: `bash tools/check-trace-kind-parity.sh` — TRACE_EVENT_KINDS and pump.ts switch must match.
 Message-kind parity check: `bash tools/check-message-kind-parity.sh` — Go stdin_reader.go discriminators must be present in TS WEBVIEW_TO_HOST_TYPES.
 No-TS-timers check: `bash tools/check-no-ts-timers.sh` — setInterval/setTimeout/while must not appear in pump.ts.
+Slot-phase boundary check: `bash tools/check-slot-phase-boundary.sh` — slot-phase transition logic must not appear outside pump.ts (TS) or paced_wire.go (Go).
 
 These tokens belong to the renderer, to legacy code being retired, or to
 prior substrate models that have been superseded. None of them
