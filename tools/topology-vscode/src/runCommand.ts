@@ -6,6 +6,10 @@ import type { RunStatus, TraceEvent } from "./messages";
 
 export type { RunStatus };
 
+// Go stdout relay: trace events are written to .probe/go.jsonl with a
+// shared envelope { ts_ms, src:"go", step?, ...ev }. Errors (stderr,
+// non-zero exit, spawn failure) are written to .probe/go-errors.jsonl.
+//
 // isTraceEvent: a stdout line is a trace event when it's valid JSON
 // and has both `step` (number) and `kind` ("recv"|"fire"|"send") fields.
 function tryParseTraceEvent(line: string): TraceEvent | undefined {
@@ -36,6 +40,7 @@ export class BuildAndRunRunner {
   // Partial line buffer for stdout — trace lines are newline-delimited.
   private stdoutBuf = "";
   private probeFile: string | undefined;
+  private goErrorsFile: string | undefined;
 
   constructor(
     private readonly post: (s: RunStatus) => void,
@@ -48,7 +53,8 @@ export class BuildAndRunRunner {
     if (!folder) return;
     const probeDir = path.join(folder.uri.fsPath, ".probe");
     fs.mkdirSync(probeDir, { recursive: true });
-    this.probeFile = path.join(probeDir, "phase4-pump.jsonl");
+    this.probeFile = path.join(probeDir, "go.jsonl");
+    this.goErrorsFile = path.join(probeDir, "go-errors.jsonl");
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);
@@ -62,7 +68,15 @@ export class BuildAndRunRunner {
     // on macOS.
     this.proc = cp.spawn("go", ["run", "."], { cwd: folder.uri.fsPath, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
-    this.proc.stderr?.on("data", (d: Buffer) => this.channel!.append(d.toString()));
+    this.proc.stderr?.on("data", (d: Buffer) => {
+      const msg = d.toString();
+      this.channel!.append(msg);
+      if (this.goErrorsFile) {
+        try {
+          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: msg }) + "\n", "utf8");
+        } catch { /* swallow */ }
+      }
+    });
     this.proc.on("close", (code) => {
       const cancelled = this.cancelled;
       const looping = this.looping;
@@ -81,6 +95,11 @@ export class BuildAndRunRunner {
       } else {
         const message = `exit code ${code}`;
         this.channel!.appendLine(`\n[${message}]`);
+        if (this.goErrorsFile) {
+          try {
+            fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message }) + "\n", "utf8");
+          } catch { /* swallow */ }
+        }
         this.post({ state: "error", message });
       }
     });
@@ -88,6 +107,11 @@ export class BuildAndRunRunner {
       this.proc = undefined;
       this.cancelled = false;
       this.channel!.appendLine(`\n[spawn error: ${err.message}]`);
+      if (this.goErrorsFile) {
+        try {
+          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: err.message }) + "\n", "utf8");
+        } catch { /* swallow */ }
+      }
       this.post({ state: "error", message: err.message });
     });
   }
@@ -103,7 +127,7 @@ export class BuildAndRunRunner {
         console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${'node' in ev ? ev.node : ev.nodeId} port=${ev.port ?? "-"}`);
         if (this.probeFile) {
           try {
-            fs.appendFileSync(this.probeFile, JSON.stringify({ ts: Date.now(), layer: "ext", ...ev }) + "\n", "utf8");
+            fs.appendFileSync(this.probeFile, JSON.stringify({ ts_ms: Date.now(), src: "go", ...(typeof ev.step === "number" ? { step: ev.step } : {}), ...ev }) + "\n", "utf8");
           } catch { /* swallow */ }
         }
         this.onTraceEvent(ev);
