@@ -18,6 +18,14 @@
 //	  Calls FromReadGate → ParseReadGate(pseudo, prior) → ToReadGate.
 //	  Prints {"go": "<new source>", "outNeighbor": "<id>", "removedPorts": [...]} JSON to stdout and exits 0.
 //
+//	pseudo chaininhibitor render --go-file <path> --out-neighbor <id>
+//	  Reads go-file, calls pseudo.FromChainInhibitor + pseudo.RenderChainInhibitor,
+//	  prints the pseudo text to stdout and exits 0.
+//
+//	pseudo chaininhibitor save --go-file <path> --out-neighbor <id> --pseudo <text>
+//	  Calls FromChainInhibitor → ParseChainInhibitor(pseudo, prior) → ToChainInhibitor.
+//	  Prints {"go": "<new source>", "outNeighbor": "<id>", "removedPorts": [...]} JSON to stdout and exits 0.
+//
 // On error: prints {"error":"..."} JSON to stderr and exits 2.
 package main
 
@@ -36,18 +44,19 @@ type kindHandlers struct {
 }
 
 var pseudoDispatch = map[string]kindHandlers{
-	"input":    {render: runRender, save: runSave},
-	"readgate": {render: runReadGateRender, save: runReadGateSave},
+	"input":           {render: runRender, save: runSave},
+	"readgate":        {render: runReadGateRender, save: runReadGateSave},
+	"chaininhibitor":  {render: runChainInhibitorRender, save: runChainInhibitorSave},
 }
 
 func main() {
 	if len(os.Args) < 3 {
-		fatal("usage: pseudo <input|readgate> <render|save> ...")
+		fatal("usage: pseudo <input|readgate|chaininhibitor> <render|save> ...")
 	}
 	kind, op := os.Args[1], os.Args[2]
 	handlers, ok := pseudoDispatch[kind]
 	if !ok {
-		fatal("unknown subcommand group %q; expected \"input\" or \"readgate\"", kind)
+		fatal("unknown subcommand group %q; expected \"input\", \"readgate\", or \"chaininhibitor\"", kind)
 	}
 	switch op {
 	case "render":
@@ -107,6 +116,68 @@ func runReadGateSave(args []string) {
 	newGoSrc, newOutNeighbor, removedPorts, err := pseudo.ToReadGate(updated)
 	if err != nil {
 		fatal("ToReadGate: %s", err)
+	}
+
+	out := map[string]any{
+		"go":           string(newGoSrc),
+		"outNeighbor":  newOutNeighbor,
+		"removedPorts": removedPorts,
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		fatal("encoding output: %s", err)
+	}
+}
+
+// ── ChainInhibitor subcommands ────────────────────────────────────────────────
+
+func runChainInhibitorRender(args []string) {
+	flags, err := parseReadGateFlags(args, "go-file", "out-neighbor")
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	goSrc, err := os.ReadFile(flags["go-file"])
+	if err != nil {
+		fatal("reading go-file: %s", err)
+	}
+
+	view, err := pseudo.FromChainInhibitor(goSrc, flags["out-neighbor"])
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	fmt.Print(pseudo.RenderChainInhibitor(view))
+}
+
+func runChainInhibitorSave(args []string) {
+	flags, err := parseReadGateFlags(args, "go-file", "out-neighbor", "pseudo")
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	goSrc, err := os.ReadFile(flags["go-file"])
+	if err != nil {
+		fatal("reading go-file: %s", err)
+	}
+
+	prior, err := pseudo.FromChainInhibitor(goSrc, flags["out-neighbor"])
+	if err != nil {
+		fatal("FromChainInhibitor: %s", err)
+	}
+
+	updated, err := pseudo.ParseChainInhibitor(flags["pseudo"], prior)
+	if err != nil {
+		suggestion := ""
+		var pe *pseudo.ParseChainInhibitorError
+		if errors.As(err, &pe) {
+			suggestion = pe.Suggestion()
+		}
+		fatalWithSuggestion("ParseChainInhibitor: %s", err, suggestion)
+	}
+
+	newGoSrc, newOutNeighbor, removedPorts, err := pseudo.ToChainInhibitor(updated)
+	if err != nil {
+		fatal("ToChainInhibitor: %s", err)
 	}
 
 	out := map[string]any{
