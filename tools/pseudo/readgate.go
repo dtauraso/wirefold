@@ -26,12 +26,9 @@ const (
 // The first term is always the data-bearing term ("input value"); the optional second
 // is the chain-inhibitor/signal term.
 //
-// Gate is the boolean operator connecting the two guard terms when both are
-// present. Valid values are "and" (maps to &&) and "or" (maps to ||).
-// Defaults to "and" for one-term guards and when unset.
+// ReadGate is AND-only: both guard terms must be present before the gate fires.
 type ReadGateView struct {
 	GuardTerms  []string // 1 or 2 named guard terms; index 0 = value term
-	Gate        string   // "and" or "or"; only meaningful when len(GuardTerms)==2
 	OutNeighbor string   // downstream node id, supplied by caller from topology
 }
 
@@ -51,11 +48,8 @@ func (v ReadGateView) signalTerm() string {
 	return ""
 }
 
-// gateWord returns the Gate field, defaulting to "and".
+// gateWord returns "and" — ReadGate is AND-only.
 func (v ReadGateView) gateWord() string {
-	if v.Gate == "or" {
-		return "or"
-	}
 	return "and"
 }
 
@@ -74,7 +68,7 @@ func FromReadGate(goSrc []byte, outNeighbor string) (ReadGateView, error) {
 		return ReadGateView{}, fmt.Errorf("pseudo.FromReadGate: parse go source: %w", err)
 	}
 
-	guardTerms, gateOp, err := detectReadGateGuard(f)
+	guardTerms, err := detectReadGateGuard(f)
 	if err != nil {
 		return ReadGateView{}, fmt.Errorf("pseudo.FromReadGate: %w", err)
 	}
@@ -85,7 +79,6 @@ func FromReadGate(goSrc []byte, outNeighbor string) (ReadGateView, error) {
 
 	return ReadGateView{
 		GuardTerms:  guardTerms,
-		Gate:        gateOp,
 		OutNeighbor: outNeighbor,
 	}, nil
 }
@@ -151,6 +144,8 @@ func buildReadGateSuggestion(prior ReadGateView) string {
 //
 //	pseudo   := "if" "input" "value" ["and" ident] NEWLINE "input" "value" "->" ident
 //
+// "or" is rejected — ReadGate is AND-only.
+//
 // On malformed input returns *ParseReadGateError with a human message and Suggestion().
 func ParseReadGate(text string, prior ReadGateView) (ReadGateView, error) {
 	p := &pseudoParser{input: strings.TrimSpace(text)}
@@ -188,16 +183,8 @@ func ToReadGate(v ReadGateView) (newGoSrc []byte, newOutNeighbor string, removed
 		removedPorts = []string{portFromChainInhibitor}
 	}
 
-	// Resolve the Go operator from Gate field.
-	gateOp := "&&"
-	if v.Gate == "or" {
-		gateOp = "||"
-	}
-
 	type templateData struct {
 		HasSignal bool
-		GateOp    string
-		IsOr      bool
 	}
 
 	const updateTemplate = `
@@ -223,23 +210,12 @@ func (g *Node) Update(ctx context.Context) {
 			}
 		}
 
-		if g.HasValue {{.GateOp}} g.HasChainInhibitor {
+		if g.HasValue && g.HasChainInhibitor {
 			g.Fire()
-{{- if .IsOr}}
-			if g.HasValue {
-				g.FromInput.Done()
-				g.HasValue = false
-			}
-			if g.HasChainInhibitor {
-				g.FromChainInhibitor.Done()
-				g.HasChainInhibitor = false
-			}
-{{- else}}
 			g.FromInput.Done()
 			g.FromChainInhibitor.Done()
 			g.HasValue = false
 			g.HasChainInhibitor = false
-{{- end}}
 			g.ToChainInhibitor.TrySend(g.Value)
 		}
 {{- else}}
@@ -260,7 +236,7 @@ func (g *Node) Update(ctx context.Context) {
 	}
 
 	var methodBuf bytes.Buffer
-	if tmplErr = tmpl.Execute(&methodBuf, templateData{HasSignal: hasSignal, GateOp: gateOp, IsOr: v.Gate == "or"}); tmplErr != nil {
+	if tmplErr = tmpl.Execute(&methodBuf, templateData{HasSignal: hasSignal}); tmplErr != nil {
 		return nil, "", nil, fmt.Errorf("pseudo.ToReadGate: template execute: %w", tmplErr)
 	}
 
@@ -339,35 +315,33 @@ func init() {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 // detectReadGateGuard inspects the AST for the firing-guard if-statement and
-// returns the guard terms and gate operator word. Accepts either:
+// returns the guard terms. Accepts either:
 //
-//	g.HasValue && g.HasChainInhibitor  → ["value", "signal"], "and"
-//	g.HasValue || g.HasChainInhibitor  → ["value", "signal"], "or"
-//	g.HasValue                         → ["value"], "and"
-func detectReadGateGuard(f *ast.File) ([]string, string, error) {
+//	g.HasValue && g.HasChainInhibitor  → ["value", "signal"]
+//	g.HasValue                         → ["value"]
+//
+// ReadGate is AND-only; a || guard is not matched (falls through to error).
+func detectReadGateGuard(f *ast.File) ([]string, error) {
 	var found []string
-	var gateOp string
 	ast.Inspect(f, func(n ast.Node) bool {
 		ifStmt, ok := n.(*ast.IfStmt)
 		if !ok {
 			return true
 		}
-		if op, ok2 := binaryBoolOp(ifStmt.Cond, "HasValue", "HasChainInhibitor"); ok2 {
+		if andBoolOp(ifStmt.Cond, "HasValue", "HasChainInhibitor") {
 			found = []string{"input value", "signal"}
-			gateOp = op
 			return false
 		}
 		if selectorOrIdent(ifStmt.Cond, "HasValue") {
 			found = []string{"input value"}
-			gateOp = "and"
 			return false
 		}
 		return true
 	})
 	if len(found) == 0 {
-		return nil, "", fmt.Errorf("Update method missing expected guard: HasValue (with or without HasChainInhibitor)")
+		return nil, fmt.Errorf("Update method missing expected AND guard: HasValue (with or without HasChainInhibitor)")
 	}
-	return found, gateOp, nil
+	return found, nil
 }
 
 // verifyToChainInhibitorSend checks that the Update method calls
@@ -398,23 +372,17 @@ func verifyToChainInhibitorSend(f *ast.File) error {
 	return nil
 }
 
-// binaryBoolOp reports whether expr is (X.left && X.right) or (X.left || X.right).
-// Returns the gate word ("and" or "or") and true when matched.
-func binaryBoolOp(expr ast.Expr, left, right string) (string, bool) {
+// andBoolOp reports whether expr is (X.left && X.right).
+// Returns true only for &&; || is not matched (ReadGate is AND-only).
+func andBoolOp(expr ast.Expr, left, right string) bool {
 	bin, ok := expr.(*ast.BinaryExpr)
 	if !ok {
-		return "", false
+		return false
 	}
 	if !selectorOrIdent(bin.X, left) || !selectorOrIdent(bin.Y, right) {
-		return "", false
+		return false
 	}
-	switch bin.Op.String() {
-	case "&&":
-		return "and", true
-	case "||":
-		return "or", true
-	}
-	return "", false
+	return bin.Op.String() == "&&"
 }
 
 // selectorOrIdent reports whether expr is either a bare identifier with name,
@@ -462,24 +430,25 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 	}
 	term1 := "input value"
 
-	// Optional ("and"|"or") <ident>
+	// Optional "and" <ident>; "or" is rejected — ReadGate is AND-only.
 	var guardTerms []string
 	guardTerms = append(guardTerms, term1)
-	var gateWord string
 
-	if pw := p.peekWord(); pw == "and" || pw == "or" {
-		gateWord = pw
-		_ = p.consumeWord(pw)
+	if pw := p.peekWord(); pw == "or" {
+		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: pw,
+			wrapped: fmt.Errorf("ReadGate is AND-only; \"or\" gate is not permitted")}
+	} else if pw == "and" {
+		_ = p.consumeWord("and")
 		term2, rawErr := p.consumeIdent()
 		if rawErr != nil {
 			tok := excerpt(p.input, p.pos)
 			return ReadGateView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
 		}
 		guardTerms = append(guardTerms, term2)
-	} else if pw := p.peekWord(); pw != "" && pw != "input" {
+	} else if pw != "" && pw != "input" {
 		// Some other word where gate keyword expected — reject.
 		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: pw,
-			wrapped: fmt.Errorf("expected gate keyword \"and\" or \"or\", got %q", pw)}
+			wrapped: fmt.Errorf("expected gate keyword \"and\", got %q", pw)}
 	}
 
 	// "input" "value" "->" ident (send line)
@@ -508,5 +477,5 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 			wrapped: fmt.Errorf("unexpected trailing content at position %d: %q", p.pos, tok)}
 	}
 
-	return ReadGateView{GuardTerms: guardTerms, Gate: gateWord, OutNeighbor: outNeighbor}, nil
+	return ReadGateView{GuardTerms: guardTerms, OutNeighbor: outNeighbor}, nil
 }

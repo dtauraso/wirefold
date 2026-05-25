@@ -149,82 +149,33 @@ func TestReadGate_MalformedInput(t *testing.T) {
 	t.Logf("suggestion: %s", sug)
 }
 
-// TestReadGate_OrGate_RoundTrip: a view with Gate="or" renders with "or",
-// parses back, ToReadGate emits ||, and FromReadGate re-detects it as "or".
-func TestReadGate_OrGate_RoundTrip(t *testing.T) {
-	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "or", OutNeighbor: "i0"}
-
-	rendered := RenderReadGate(v)
-	want := "if input value or signal\n   input value -> i0\n"
-	if rendered != want {
-		t.Errorf("RenderReadGate: got %q want %q", rendered, want)
-	}
-
-	parsed, err := ParseReadGate(rendered, v)
-	if err != nil {
-		t.Fatalf("ParseReadGate: %v", err)
-	}
-	if parsed.Gate != "or" {
-		t.Errorf("parsed Gate: got %q want \"or\"", parsed.Gate)
-	}
-	if len(parsed.GuardTerms) != 2 || parsed.GuardTerms[1] != "signal" {
-		t.Errorf("parsed GuardTerms: got %v", parsed.GuardTerms)
-	}
-
-	src, outNeighbor, removedPorts, err := ToReadGate(parsed)
-	if err != nil {
-		t.Fatalf("ToReadGate: %v", err)
-	}
-	if outNeighbor != "i0" {
-		t.Errorf("outNeighbor: got %q want i0", outNeighbor)
-	}
-	if len(removedPorts) != 0 {
-		t.Errorf("removedPorts: got %v want []", removedPorts)
-	}
-	srcStr := string(src)
-	if !strings.Contains(srcStr, "||") {
-		t.Errorf("or-gate source must contain ||:\n%s", srcStr)
-	}
-	if strings.Contains(srcStr, "&&") {
-		t.Errorf("or-gate source must not contain &&:\n%s", srcStr)
-	}
-
-	// Re-parse via FromReadGate; should detect Gate="or".
-	v2, err := FromReadGate(src, "i0")
-	if err != nil {
-		t.Fatalf("FromReadGate on or-gate source: %v", err)
-	}
-	if v2.Gate != "or" {
-		t.Errorf("FromReadGate Gate: got %q want \"or\"", v2.Gate)
-	}
-}
-
-// TestReadGate_OrGate_Parse: parsing "if input value or signal\n..." stores Gate="or".
-func TestReadGate_OrGate_Parse(t *testing.T) {
-	prior := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "or", OutNeighbor: "i0"}
+// TestReadGate_OrGate_Rejected: parsing "if input value or signal\n..." must return an error.
+func TestReadGate_OrGate_Rejected(t *testing.T) {
+	prior := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
 	text := "if input value or signal\n   input value -> i0"
-	parsed, err := ParseReadGate(text, prior)
-	if err != nil {
-		t.Fatalf("ParseReadGate: %v", err)
+	_, err := ParseReadGate(text, prior)
+	if err == nil {
+		t.Fatal("expected error for 'or' gate, got nil")
 	}
-	if parsed.Gate != "or" {
-		t.Errorf("Gate: got %q want \"or\"", parsed.Gate)
+	var pe *ParseReadGateError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected *ParseReadGateError, got %T: %v", err, err)
 	}
-	if parsed.OutNeighbor != "i0" {
-		t.Errorf("OutNeighbor: got %q want i0", parsed.OutNeighbor)
+	if pe.Error() == "" {
+		t.Error("Error() returned empty string")
 	}
 }
 
-// TestReadGate_AndGate_ExplicitDefault: parsing "if input value and signal\n..." stores Gate="and".
+// TestReadGate_AndGate_ExplicitDefault: parsing "if input value and signal\n..." succeeds.
 func TestReadGate_AndGate_ExplicitDefault(t *testing.T) {
-	prior := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "and", OutNeighbor: "i0"}
+	prior := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
 	text := "if input value and signal\n   input value -> i0"
 	parsed, err := ParseReadGate(text, prior)
 	if err != nil {
 		t.Fatalf("ParseReadGate: %v", err)
 	}
-	if parsed.Gate != "and" {
-		t.Errorf("Gate: got %q want \"and\"", parsed.Gate)
+	if len(parsed.GuardTerms) != 2 || parsed.GuardTerms[1] != "signal" {
+		t.Errorf("GuardTerms: got %v", parsed.GuardTerms)
 	}
 }
 
@@ -259,40 +210,9 @@ func TestToReadGate_TwoTermCompiles(t *testing.T) {
 	}
 }
 
-// TestToReadGate_OrGate_GuardedDone: OR gate must guard each Done call by its flag.
-func TestToReadGate_OrGate_GuardedDone(t *testing.T) {
-	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "or", OutNeighbor: "i0"}
-	src, _, _, err := ToReadGate(v)
-	if err != nil {
-		t.Fatalf("ToReadGate: %v", err)
-	}
-	srcStr := string(src)
-
-	// Must use || operator.
-	if !strings.Contains(srcStr, "||") {
-		t.Errorf("or-gate source must contain ||")
-	}
-
-	// Must have guarded HasValue block.
-	if !strings.Contains(srcStr, "if g.HasValue {") {
-		t.Errorf("or-gate source must contain guarded 'if g.HasValue {'")
-	}
-	// Must have guarded HasChainInhibitor block.
-	if !strings.Contains(srcStr, "if g.HasChainInhibitor {") {
-		t.Errorf("or-gate source must contain guarded 'if g.HasChainInhibitor {'")
-	}
-
-	// Must NOT have bare unconditional consecutive Done calls (AND pattern).
-	// Check that "g.FromInput.Done()" is not immediately followed by "g.FromChainInhibitor.Done()"
-	// with only whitespace/newline in between (i.e., no guard between them).
-	if strings.Contains(srcStr, "g.FromInput.Done()\n\t\t\tg.FromChainInhibitor.Done()") {
-		t.Errorf("or-gate source must not call Done() on both inputs unconditionally back-to-back")
-	}
-}
-
 // TestToReadGate_AndGate_UnconditionalDone: AND gate must keep unconditional Done calls.
 func TestToReadGate_AndGate_UnconditionalDone(t *testing.T) {
-	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, Gate: "and", OutNeighbor: "i0"}
+	v := ReadGateView{GuardTerms: []string{"input value", "signal"}, OutNeighbor: "i0"}
 	src, _, _, err := ToReadGate(v)
 	if err != nil {
 		t.Fatalf("ToReadGate: %v", err)
