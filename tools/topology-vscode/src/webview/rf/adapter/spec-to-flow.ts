@@ -1,5 +1,5 @@
 import type { Edge as RFEdge, Node as RFNode } from "reactflow";
-import { NODE_TYPES, type Node as SpecNode, type Spec } from "../../../schema";
+import { NODE_TYPES, type Node as SpecNode, type Spec, requiredInputDiagnostics } from "../../../schema";
 import type { Fold, ViewerState } from "../../state/viewer/types";
 import type { NodeData, EdgeData } from "../types";
 import {
@@ -20,8 +20,8 @@ export function specToFlow(
   vs: Pick<ViewerState, "nodes" | "edges"> = {},
   lastSelectionIds: string[] = [],
   dimmed: Set<string> | null = null,
-  invalid?: Map<string, string>,
 ): { nodes: RFNode<NodeData>[]; edges: RFEdge<EdgeData>[] } {
+  const invalid = requiredInputDiagnostics(spec);
   // Map memberId → containing collapsed fold id. Nested folds are not
   // supported here; if a node appears in multiple collapsed folds, the first
   // wins (the plan flags nested folds as needing manual coordination).
@@ -89,7 +89,7 @@ export function specToFlow(
         index: n.index,
         foldId: foldOf.get(n.id),
         dimmed: dimmed?.has(n.id) ?? false,
-        validationError: invalid?.get(n.id),
+        validationError: invalid.get(n.id),
       },
     };
   });
