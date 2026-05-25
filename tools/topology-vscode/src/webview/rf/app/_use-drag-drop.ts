@@ -39,6 +39,10 @@ export function useDragDrop(ctx: AppCtx) {
     const height = def?.height ?? 60;
     const nodeDef = NODE_DEFS[type];
     const nodeData = nodeDef?.defaultData ?? undefined;
+    const requiredInputs = nodeDef?.requiredInputs ?? [];
+    const validationError = requiredInputs.length > 0
+      ? requiredInputs.map((p) => `missing required input "${p}"`).join("; ")
+      : undefined;
     rfSetNodes((ns) => [
       ...ns,
       {
@@ -56,6 +60,7 @@ export function useDragDrop(ctx: AppCtx) {
           inputs: def?.inputs ?? [],
           outputs: def?.outputs ?? [],
           nodeData,
+          ...(validationError !== undefined ? { validationError } : {}),
         },
       },
     ]);
