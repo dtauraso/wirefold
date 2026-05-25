@@ -3,16 +3,15 @@
 
 Counts Read / Grep / Glob calls plus Bash calls whose command starts
 with a search verb (grep, rg, find, ls, cat, head, tail, awk, sed).
-Threshold is 2 -- the 3rd qualifying call returns permissionDecision
-"deny" with a message instructing the model to spawn an Agent
-subagent instead. The Task/Agent tool resets the counter.
+Threshold is 1 -- blocks on the 2nd qualifying call.
+The Task/Agent tool resets the counter.
 """
 import json
 import os
 import re
 import sys
 
-THRESHOLD = 2  # block on the (THRESHOLD+1)th call
+THRESHOLD = 1  # block on the (THRESHOLD+1)th call
 SEARCH_VERBS = re.compile(r"^\s*(grep|rg|find|ls|cat|head|tail|awk|sed)\b")
 
 def counter_path(session_id: str) -> str:
