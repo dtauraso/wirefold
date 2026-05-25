@@ -21,9 +21,9 @@ const (
 // ReadGateView is the parsed representation of a ReadGate node instance.
 //
 // GuardTerms holds the named inputs required before the gate fires. The
-// canonical two-term form is ["input value", "signal"]; dropping the signal term
-// to ["input value"] produces a value-only gate that fires without a chain-inhibitor.
-// The first term is always the data-bearing term ("input value"); the optional second
+// canonical two-term form is ["input", "signal"]; dropping the signal term
+// to ["input"] produces a value-only gate that fires without a chain-inhibitor.
+// The first term is always the data-bearing term ("input"); the optional second
 // is the chain-inhibitor/signal term.
 //
 // ReadGate is AND-only: both guard terms must be present before the gate fires.
@@ -37,7 +37,7 @@ func (v ReadGateView) valueTerm() string {
 	if len(v.GuardTerms) > 0 {
 		return v.GuardTerms[0]
 	}
-	return "input value"
+	return "input"
 }
 
 // signalTerm returns the second guard term, or "" if not present.
@@ -87,13 +87,13 @@ func FromReadGate(goSrc []byte, outNeighbor string) (ReadGateView, error) {
 //
 // Two-term form:
 //
-//	if input value and signal
-//	   input value -> <OutNeighbor>
+//	if input and signal
+//	   input -> <OutNeighbor>
 //
 // One-term form:
 //
-//	if input value
-//	   input value -> <OutNeighbor>
+//	if input
+//	   input -> <OutNeighbor>
 func RenderReadGate(v ReadGateView) string {
 	var b strings.Builder
 	b.WriteString("if ")
@@ -142,7 +142,7 @@ func buildReadGateSuggestion(prior ReadGateView) string {
 //
 // Grammar (whitespace-insensitive across lines):
 //
-//	pseudo   := "if" "input" "value" ["and" ident] NEWLINE "input" "value" "->" ident
+//	pseudo   := "if" "input" ["and" ident] NEWLINE "input" "->" ident
 //
 // "or" is rejected — ReadGate is AND-only.
 //
@@ -329,11 +329,11 @@ func detectReadGateGuard(f *ast.File) ([]string, error) {
 			return true
 		}
 		if andBoolOp(ifStmt.Cond, "HasValue", "HasChainInhibitor") {
-			found = []string{"input value", "signal"}
+			found = []string{"input", "signal"}
 			return false
 		}
 		if selectorOrIdent(ifStmt.Cond, "HasValue") {
-			found = []string{"input value"}
+			found = []string{"input"}
 			return false
 		}
 		return true
@@ -409,7 +409,7 @@ func isParseError(err error, pe **parseError) bool {
 
 // parseReadGatePseudo parses the ReadGate pseudo grammar:
 //
-//	"if" "input" "value" ["and" ident] NEWLINE "input" "value" "->" ident
+//	"if" "input" ["and" ident] NEWLINE "input" "->" ident
 func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 	if rawErr := p.consumeWord("if"); rawErr != nil {
 		tok := p.peekWord()
@@ -419,16 +419,12 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 		return ReadGateView{}, &parseError{kind: parseErrBadStart, token: tok, wrapped: rawErr}
 	}
 
-	// First guard term is the two-word phrase "input value" (required)
+	// First guard term is the word "input" (required)
 	if rawErr := p.consumeWord("input"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
 	}
-	if rawErr := p.consumeWord("value"); rawErr != nil {
-		tok := excerpt(p.input, p.pos)
-		return ReadGateView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
-	}
-	term1 := "input value"
+	term1 := "input"
 
 	// Optional "and" <ident>; "or" is rejected — ReadGate is AND-only.
 	var guardTerms []string
@@ -451,12 +447,8 @@ func (p *pseudoParser) parseReadGatePseudo() (ReadGateView, error) {
 			wrapped: fmt.Errorf("expected gate keyword \"and\", got %q", pw)}
 	}
 
-	// "input" "value" "->" ident (send line)
+	// "input" "->" ident (send line)
 	if rawErr := p.consumeWord("input"); rawErr != nil {
-		tok := excerpt(p.input, p.pos)
-		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
-	}
-	if rawErr := p.consumeWord("value"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ReadGateView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
 	}
