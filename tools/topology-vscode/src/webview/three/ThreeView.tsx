@@ -13,7 +13,8 @@ import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import { useThreeStore } from "./store";
 import type { NodeData, EdgeData } from "../rf/types";
-import { getPulseMap } from "../rf/pulse-state";
+import { getPulseMap, claimDelivered } from "../rf/pulse-state";
+import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../rf/run-status";
 import { pushSnapshot, undo, redo } from "../rf/history";
 import { patchViewerState } from "../rf/viewer-state";
@@ -271,6 +272,9 @@ function PulseBead({
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
       mesh.visible = false;
+      if (claimDelivered(edgeId, pulse.startTime)) {
+        vscode.postMessage({ type: "delivered", edge: edgeId });
+      }
       return;
     }
     const pt = curve.getPoint(t);
