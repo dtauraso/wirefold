@@ -292,6 +292,54 @@ sit closest to family 5. Correct location: degraded-device scaffolding, not the
 design. Families 1 and 3 fail the recoverable-by-device test; family 4 is the
 native target where the test is trivially satisfied.
 
+## Problem #2 (depth ambiguity) — resolved
+
+Depth is resolved by two layers: active motion (already present in the design)
+plus the standard 3D graph-viz rendering convention (adopted as MEDIUM — it
+sacrifices no control and passes the recoverable-by-device test trivially, unlike
+OrbitControls).
+
+### Active motion (primary — already in the design)
+
+- **^/v dolly:** under perspective, near nodes change size and sweep past faster
+  than far ones — the rate difference reveals relative depth.
+- **Rotation drag:** lateral parallax — different depths shift sideways at
+  different rates.
+
+Depth comes from **control**: the user probes it. Consequence: depth is
+**active, not passive** — a frozen frame needs a nudge to read depth.
+Acceptable, because derived layout already conveys structure.
+
+### The usual way (passive cues — adopted as pure medium, no control sacrifice)
+
+Decouple the node body from its label:
+
+- **Node BODY = a 3D primitive.** Sphere is the graph-viz default: orientation-
+  invariant, no billboard decision required, shades for depth, occludes
+  correctly. For wirefold's richer nodes (ports, kind, pseudo-text), use a
+  small 3D body (sphere or rounded solid) carrying kind and ports rather than a
+  bare dot.
+- **LABEL = a separate billboarded text** that always faces the camera, shown on
+  hover or for nearest/selected nodes (level-of-detail) to cut clutter.
+
+Key point: depth cue lives in the 3D body; legibility lives in the billboarded
+label. Not an either/or — both, decoupled. (This also pre-answers part of
+Problem #7.)
+
+### Depth cues, ordered by strength
+
+1. **Occlusion** — strongest, free from the depth buffer.
+2. **Motion parallax** — dolly + rotation.
+3. **Relative size** — perspective falloff, free.
+4. **Shading** — lighting across the 3D body.
+5. **Depth fog / desaturation** — optional, for dense graphs only.
+
+### Explicitly not used
+
+**Color-for-depth** and **shape-for-depth** are both rejected. Color and shape
+are reserved for DATA: kind, validation flag, port/wire kind, pulses. Mapping
+depth onto those channels would collide with semantics — a sacrifice, rejected.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
