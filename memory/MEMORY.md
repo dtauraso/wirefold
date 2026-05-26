@@ -39,3 +39,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [project_edge_midpoint_offset_plumbing.md](project_edge_midpoint_offset_plumbing.md) — Edge `midpointOffset` + `setEdgeMidpointOffset` + EdgeActionsCtx already wired end-to-end; don't re-grep schema/adapter/mutation when extending edges
 - [project_probe_log_layout.md](project_probe_log_layout.md) — Runtime logs are 4 .probe/ JSONL files (go/ts × log/errors) with ts_ms+src+step envelope; probe-merge.sh merges them
 - [project_interaction_control_is_substance.md](project_interaction_control_is_substance.md) — 3D-editor interaction control is substance (not medium); OrbitControls sacrifices control = wrong pattern-match; use the recoverable-by-device test
+- [feedback_subagent_discovery_mandate.md](feedback_subagent_discovery_mandate.md) — Give subagents a grep-first discovery mandate, not a curated reading list, or integration points get missed

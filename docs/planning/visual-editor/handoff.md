@@ -143,6 +143,16 @@ Security: `npm audit` 0 vulns, no unsafe sinks
 unchanged (script-src 'nonce-…', no unsafe-eval), publishers
 confirmed.
 
+### Known gaps (latent — not spec deferrals; must be fixed in the named slice)
+
+- **3D POSITION PERSISTENCE GAP (latent):** ThreeView has NO save path — it calls no
+  `patchViewerState`/`scheduleViewSave`. The `z` coordinate (and any 3D-side x/y change)
+  is loaded+rendered but never written back. Harmless today because the 3D view has no
+  node-move/z-authoring interaction yet (rotate/dolly/pick/wire only). MUST be fixed in
+  the same slice that adds 3D node manipulation, or 3D layout will be lost on reload.
+  Also: `rfCreateEdge` has a weaker `lastSpec` guard than `onConnectImpl` and no
+  grow-port support (`TODO(3d)`).
+
 ### Deliberately deferred (not built; record so next session doesn't think they're missed)
 
 The spec marks these deferred — they are NOT implementation gaps:
