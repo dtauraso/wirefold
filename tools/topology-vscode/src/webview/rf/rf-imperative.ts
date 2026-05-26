@@ -18,11 +18,20 @@ export function registerRFSetters(sn: SetNodes, se: SetEdges) {
   _setEdges = se;
 }
 
+type RFStateListener = (nodes: RFNode[], edges: RFEdge[]) => void;
+const _listeners = new Set<RFStateListener>();
+
+export function subscribeRFState(fn: RFStateListener): () => void {
+  _listeners.add(fn);
+  return () => _listeners.delete(fn);
+}
+
 // Called by Inner() after each nodes/edges state change to keep the
 // module-level snapshots current for rfGetNodes/rfGetEdges.
 export function notifyRFState(nodes: RFNode[], edges: RFEdge[]) {
   _nodes = nodes;
   _edges = edges;
+  for (const fn of _listeners) fn(nodes, edges);
 }
 
 export function rfSetNodes(updater: (ns: RFNode[]) => RFNode[]) {

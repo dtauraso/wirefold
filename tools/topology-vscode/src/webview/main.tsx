@@ -1,7 +1,9 @@
 import { createRoot } from "react-dom/client";
+import { useState } from "react";
 import "reactflow/dist/style.css";
 import "./webview.css";
 import App from "./rf/app";
+import { ThreeView } from "./rf/three/ThreeView";
 import { flushSave, flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
 import { rfGetNodes, rfGetEdges } from "./rf/rf-imperative";
@@ -26,11 +28,40 @@ import { CrashListeners } from "./log/CrashListeners";
     setDimmedImperative(members ? new Set(members) : null),
 };
 
+function Root() {
+  const [mode, setMode] = useState<"2d" | "3d">("2d");
+  return (
+    <>
+      {/* Toggle button — fixed top-right, always visible */}
+      <button
+        onClick={() => setMode((m) => (m === "2d" ? "3d" : "2d"))}
+        style={{
+          position: "fixed",
+          top: 8,
+          right: 8,
+          zIndex: 9999,
+          padding: "4px 10px",
+          fontSize: 12,
+          fontFamily: "monospace",
+          background: mode === "3d" ? "#2255cc" : "#333",
+          color: "#fff",
+          border: "1px solid #555",
+          borderRadius: 4,
+          cursor: "pointer",
+        }}
+      >
+        {mode === "2d" ? "3D view" : "2D view"}
+      </button>
+      {mode === "2d" ? <App /> : <ThreeView />}
+    </>
+  );
+}
+
 const app = document.getElementById("app")!;
 createRoot(app).render(
   <ErrorBoundary>
     <CrashListeners />
-    <App />
+    <Root />
   </ErrorBoundary>,
 );
 
