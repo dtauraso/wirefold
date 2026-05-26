@@ -22,7 +22,7 @@ The "Deferred Industry Patterns (14)" bucket was deleted in full. Each item was 
 
 The gap structure is now THREE causes (§3a / §3b / §3c):
 
-- **§3a Cutover Debt (15 total):** worked in RF editor, lost or half-wired in the R3F move. 10 restore-parity items (node/edge delete, multi-select, edge reconnect, node palette, sublabel inline edit, PseudoPanel, port drag, edge-kind context menu, edge midpoint drag, + 1 more); 5 half-wired (undo, view-save-on-settle, fit-view hotkey, folds-mesh, z-coord).
+- **§3a Cutover Debt (15 total):** worked in RF editor, lost or half-wired in the R3F move. 10 restore-parity items (node delete, edge delete, multi-select, edge reconnect, node palette, sublabel inline edit, PseudoPanel, port drag, edge-kind context menu, edge midpoint drag); 5 half-wired (undo, view-save-on-settle, fit-view hotkey, folds-mesh, z-coord).
 - **§3b Never-Specced (1):** Fold Go primitive — needs explicit yes/no decision (become a Go substrate node, or stay view-state forever).
 - **§3c Accepted for Build (3):** bend points/waypoints, multi-node alignment guides, undo coalescing at gesture level.
 
