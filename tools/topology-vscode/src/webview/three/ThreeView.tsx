@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
-import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge, rfSetNodes } from "../rf/rf-imperative";
+import { useThreeStore } from "./store";
 import type { NodeData, EdgeData } from "../rf/types";
 import { getPulseMap } from "../rf/pulse-state";
 import { getPauseAdjustedNow } from "../rf/run-status";
@@ -647,6 +647,7 @@ function useInteractionControls(
   connectPendingIdRef: React.MutableRefObject<string | null>,
   onConnectClick: (id: string | null) => void,
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
+  onMoveNode: (id: string, x: number, y: number) => void,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -854,11 +855,7 @@ function useInteractionControls(
               // → pos.x = worldX - w/2, pos.y = -worldY - h/2
               const newPosX = newCenterX - w / 2;
               const newPosY = -newCenterY - h / 2;
-              rfSetNodes((ns) => ns.map((n) =>
-                n.id === nd.nodeId
-                  ? { ...n, position: { x: newPosX, y: newPosY } }
-                  : n
-              ));
+              onMoveNode(nd.nodeId, newPosX, newPosY);
             }
           }
         } else {
@@ -886,7 +883,7 @@ function useInteractionControls(
           .addScaledVector(upDir, panDy * wpp);
       }
     },
-    [applyArcball, cameraRef, canvasSize, nodesRef, onPanPadActive, pickPivot, unprojectToPlane],
+    [applyArcball, cameraRef, canvasSize, nodesRef, onMoveNode, onPanPadActive, pickPivot, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -898,7 +895,9 @@ function useInteractionControls(
       // Node drag completed: persist position and suppress click/select.
       if (s.phase === "dragging" && nodeDragRef.current?.snapshotPushed) {
         const nd = nodeDragRef.current;
-        const node = nodesRef.current.find((n) => n.id === nd.nodeId);
+        // Read from store directly so we get the position applied by the last onPointerMove,
+        // which may not have re-rendered yet (nodesRef.current could be one frame stale).
+        const node = useThreeStore.getState().nodes.find((n) => n.id === nd.nodeId);
         if (node) {
           patchViewerState((v) => {
             if (!v.nodes) v.nodes = {};
@@ -1183,8 +1182,10 @@ function PanPad({
 // ---------------------------------------------------------------------------
 
 export function ThreeView() {
-  const [nodes, setNodes] = useState<RFNode<NodeData>[]>(() => rfGetNodes() as RFNode<NodeData>[]);
-  const [edges, setEdges] = useState<RFEdge<EdgeData>[]>(() => rfGetEdges() as RFEdge<EdgeData>[]);
+  const nodes = useThreeStore((s) => s.nodes);
+  const edges = useThreeStore((s) => s.edges);
+  const storeMoveNode = useThreeStore((s) => s.moveNode);
+  const storeCreateEdge = useThreeStore((s) => s.createEdge);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
@@ -1210,14 +1211,6 @@ export function ThreeView() {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
-
-  // RF state subscription
-  useEffect(() => {
-    return subscribeRFState((ns, es) => {
-      setNodes(ns as RFNode<NodeData>[]);
-      setEdges(es as RFEdge<EdgeData>[]);
-    });
-  }, []);
 
   // Observe container size
   useEffect(() => {
@@ -1258,11 +1251,11 @@ export function ThreeView() {
         setConnectPendingId(null);
       } else {
         // Create the edge — auto-pick first output/input ports
-        rfCreateEdge(pending, null, hitId, null);
+        storeCreateEdge(pending, null, hitId, null);
         setConnectPendingId(null);
       }
     }
-  }, []); // no deps — reads live value through connectPendingIdRef
+  }, [storeCreateEdge]); // storeCreateEdge is stable (zustand action)
 
   // Escape key cancels connect mode
   useEffect(() => {
@@ -1282,6 +1275,7 @@ export function ThreeView() {
     connectPendingIdRef,
     onConnectClick,
     nodesRef,
+    storeMoveNode,
   );
 
   // Hover tracking: lightweight raycast on pointer-move to update hoveredId.

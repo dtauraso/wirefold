@@ -15,6 +15,7 @@ import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./rf/panels/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
+import { useThreeStore } from "./three/store";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -86,7 +87,12 @@ window.addEventListener("message", (e) => {
     // becoming hidden / about to dispose).
     flushSave();
     flushViewSave();
+  } else if (msg.type === "load") {
+    // Feed the R3F store independently of the 2D RF handler.
+    useThreeStore.getState().loadSpec(msg.text);
+  } else if (msg.type === "view-load") {
+    // Feed the R3F store with viewer-state independently of the 2D RF handler.
+    useThreeStore.getState().loadView(msg.text);
   }
-  // view-load is fully handled inside App's message effect now that the
-  // panels read their state from the zustand store directly.
+  // load/view-load for 2D is fully handled inside App's message effect.
 });
