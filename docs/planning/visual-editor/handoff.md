@@ -200,6 +200,7 @@ has multiple outputs. Paused while 3D work is in flight.
 ### Key files
 
 - [3d-editor.md](3d-editor.md) — full 3D design (branch-local; does NOT ride the merge)
+- [rf-to-r3f-cutover.md](rf-to-r3f-cutover.md) — RF→R3F parity-gap audit + cutover checklist (branch-local)
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole 3D view (moved out of `rf/` by `b96d8be3`)
 - `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — subscribeRFState, rfCreateEdge
 - `tools/topology-vscode/src/webview/rf/pulse-state.ts` — pulse timing consumed by 3D
