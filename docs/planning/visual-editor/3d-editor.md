@@ -438,6 +438,14 @@ wherever the path optimizer picks. That is a layer-3 decision. The
 `sourceHandle`/`targetHandle` (layer 1) is not a geographical decision and
 requires no new disambiguation step.
 
+**Sole delta from React Flow:** the assignment target. In RF you drag from a
+specific port handle; in 3D you click the node. That one change — assign to node
+instead of drag from handle — is the only difference. The logical handle/channel
+model, the edge data (`sourceHandle`/`targetHandle`), and the timing/pulse-
+animation layer are all identical to what RF already has. The node-level
+assignment is precisely what hands the geographical exit/entry point to the path
+optimizer.
+
 ### Why the earlier framing was wrong
 
 Earlier framing tried to force the logical-port choice into the geographical
