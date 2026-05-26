@@ -455,6 +455,30 @@ longer a troika worker/blob path that could force a VS Code webview CSP
 relaxation. Hygiene going forward: pin the lockfile and run `npm audit` when any
 new dependency is added.
 
+### Security audit — run at implementation
+
+This is a planning branch — nothing to audit yet. When the R3F + three.js
+implementation code actually lands, run a security pass. The useful audit is
+**supply-chain + webview CSP**, NOT "is three.js vulnerable": three.js core is
+low-surface (no eval, no native code, no postinstall scripts, tiny dep tree).
+Its historical advisories are in model LOADERS for untrusted external files,
+which this project does not use — all geometry is generated from `topology.json`.
+
+**Checklist to run at implementation:**
+
+1. **`/security-review` skill** on the branch's pending changes once the R3F
+   code exists. (User-triggered — flag the moment it is worth running.)
+2. **`npm audit`** on the committed lockfile (known advisories across the
+   transitive tree).
+3. **Dependency provenance** — pinned lockfile, no postinstall scripts in the
+   tree (`npm ll` / `npm audit signatures`), confirm three + R3F come from
+   expected publishers (pmndrs / mrdoob).
+4. **Webview CSP review** — confirm VS Code webview keeps `script-src` locked
+   to the bundle, NO `unsafe-eval`, no new external origins. (Dropping
+   drei/troika is what keeps this strict.)
+5. **Loader discipline (ongoing code-review invariant, not one-time)** — never
+   enable a three.js loader that parses untrusted external files.
+
 ### Three layers, kept strictly separate
 
 1. **Logical connection (Go substrate).** Output channel of node A to input
