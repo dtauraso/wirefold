@@ -13,6 +13,8 @@ import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge } from "../rf-imperative";
 import type { NodeData, EdgeData } from "../types";
+import { getPulseMap } from "../pulse-state";
+import { getPauseAdjustedNow } from "../run-status";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants
@@ -160,7 +162,55 @@ function surfacePoint(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Ve
   return origin.clone().addScaledVector(dir, r);
 }
 
-function SingleEdgeTube({ src, tgt }: { src: RFNode<NodeData>; tgt: RFNode<NodeData> }) {
+// Speed constant matching the 2D pulse: PULSE_SPEED_PX_PER_MS = 0.08.
+// In 3D we treat world units as equivalent to 2D pixels (same coordinate space).
+const PULSE_SPEED_WU_PER_MS = 0.08;
+
+// PulseBead: a bright sphere that travels along `curve` at the current pulse t.
+// Driven by useFrame reading getPulseMap() imperatively (no React context needed).
+function PulseBead({
+  edgeId,
+  curve,
+  arcLength,
+}: {
+  edgeId: string;
+  curve: THREE.QuadraticBezierCurve3;
+  arcLength: number;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame(() => {
+    const pulse = getPulseMap().get(edgeId);
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    if (!pulse) {
+      mesh.visible = false;
+      return;
+    }
+    const duration = arcLength / PULSE_SPEED_WU_PER_MS;
+    const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
+    if (t >= 1) {
+      mesh.visible = false;
+      return;
+    }
+    const pt = curve.getPoint(t);
+    mesh.position.set(pt.x, pt.y, pt.z);
+    mesh.visible = true;
+  });
+
+  return (
+    <mesh ref={meshRef} visible={false}>
+      <sphereGeometry args={[4, 8, 8]} />
+      <meshStandardMaterial
+        color="#ffffff"
+        emissive={new THREE.Color(0xffffff)}
+        emissiveIntensity={2.5}
+      />
+    </mesh>
+  );
+}
+
+function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData> }) {
   const p0 = surfacePoint(src, tgt);
   const p2 = surfacePoint(tgt, src);
   // Control point: midpoint lifted along the cross product of the edge and Z axis,
@@ -172,11 +222,23 @@ function SingleEdgeTube({ src, tgt }: { src: RFNode<NodeData>; tgt: RFNode<NodeD
   const p1 = mid.clone().addScaledVector(lift, span * 0.25);
 
   const curve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
+  // Approximate arc length for pulse timing: sample the curve.
+  const arcLength = curve.getLength();
   const tubeGeo = new THREE.TubeGeometry(curve, 16, 1.5, 6, false);
+
   return (
-    <mesh geometry={tubeGeo}>
-      <meshStandardMaterial color="#888888" />
-    </mesh>
+    <>
+      {/* Always-lit base tube — emissive so it reads at any camera angle */}
+      <mesh geometry={tubeGeo}>
+        <meshStandardMaterial
+          color="#5599cc"
+          emissive={new THREE.Color(0x2255aa)}
+          emissiveIntensity={0.8}
+        />
+      </mesh>
+      {/* Pulse bead: stronger highlight traveling source → target */}
+      <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />
+    </>
   );
 }
 
@@ -193,7 +255,7 @@ function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} src={s} tgt={t} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} />;
       })}
     </>
   );
