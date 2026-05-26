@@ -166,7 +166,7 @@ export function PseudoPanel({ nodeId, kind = "Input" }: Props) {
     color: lkg === null ? "#666" : "inherit",
     fontStyle: lkg === null ? "italic" : "normal",
     userSelect: "text",
-    textAlign: "center",
+    textAlign: "left",
   };
 
   // Edit mode: same look as label, only a subtle dashed outline to signal focus.
