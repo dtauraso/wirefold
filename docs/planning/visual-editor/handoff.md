@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, editor-r3f — Phase 0 PASSED; pacing handshake RESTORED in R3F path)
+## State at handoff (2026-05-26, editor-r3f — rf-retirement COMPLETE (Phases 0-6), live-verified; branch ready for merge to main pending user sign-off)
 
-**Active branch:** `editor-r3f` (long-lived R3F source line; NOT merged to main).
+**Active branch:** `editor-r3f` (long-lived R3F source line; NOT yet merged to main).
 
 ### Why 3D
 
@@ -22,7 +22,8 @@ actual structure.
 
 ### Direction (locked)
 
-**ONE 3D view, ONE store.** R3F is THE editor. RF is being retired, not maintained as a peer or fallback. RF removal from `main` = the merge event, not an in-branch deletion debate. This branch carries only R3F things.
+**ONE 3D view, ONE store.** R3F is THE editor. RF is retired.
+RF removal from `main` = the merge event (this branch). This branch carries only R3F things.
 
 Drift guard still applies: interaction CONTROL is substance (no OrbitControls); rendering is medium (R3F yes). zustand is a medium choice (already a dep) — fine to adopt as the store.
 
@@ -52,45 +53,35 @@ This principle is also saved in
 [3d-editor.md](3d-editor.md) (branch-local — does **not** ride the
 merge).
 
-### Done this session (committed + pushed to editor-r3f, build green)
+### Done — rf-retirement complete (all 6 phases committed + pushed to editor-r3f, all live-verified by user via reload+Run)
 
-- **Wire-pulse animation WIRED (commit 3154816e):** main.tsx message handler gained a `trace-event` case calling `handleTraceEvent(msg.event)` (imported from ./rf/pump). This connects the existing producer (pump.ts → setPulse, keyed by edge.id) to the existing consumer (ThreeView PulseBead reading getPulseMap().get(edgeId)). Message shape `{type:"trace-event", event}` matches what extension.ts posts; edge.id keys line up. `npm run build` clean, out/webview.js refreshed. NOT yet live-verified — beads-animate-on-Run is UNCONFIRMED.
-- **rf-retirement plan written (commit 3c819011):** docs/planning/visual-editor/rf-retirement.md (branch-tagged). 6-phase plan to retire the rf/ folder. Key facts it records: R3F NEVER renders via reactflow at runtime — only couplings are one dead CSS import in main.tsx + RFNode/RFEdge type aliases in 7 files (all `import type`). Three-way bucket: (A) dead-now = rf-imperative.ts; (B) live-but-misfiled-under-rf = types.ts, viewer-state.ts, history.ts, dimmed.ts, folds-state.ts, run-status.ts, pulse-state.ts, pump.ts, trace-kinds.ts, adapter/*, panels/RunButton.tsx, nodes/node-defs.ts+registry.ts (relocatable, no runtime reactflow dep); (C) genuine reactflow coupling = the RFNode/RFEdge type sites only. DECISION LOCKED: keep pulses (pulse-state.ts + pump.ts + trace-kinds.ts are live R3F animation infra); fire-flash-state.ts/slots-state.ts/held-values.ts have NO R3F consumer and are deletable.
+- **Phase 0 — pacing handshake restored** (commits `3154816e` + delivered-sender fix): ThreeView PulseBead posts `{type:"delivered", edge: edgeId}` when `t >= 1`, guarded once-per-pulse via `claimDelivered(edgeId, startTime)` in `rf/pulse-state.ts`. Go's `PacedWire.NotifyDelivered()` unblocks; substrate advances at human pace. Pulses animate end-to-end through the chain with no freeze.
 
-### Resolved this session — blank diagram on reload
+- **Phase 1+2 — orphaned rf/ files deleted** (commit `d9e08700`): removed `rf-imperative.ts`, `fire-flash-state.ts`, `slots-state.ts`, `held-values.ts`. `pump.ts` slot/fire branches stubbed to no-ops (no R3F consumer).
 
-**FIXED. Verified: consistently framed across many reloads.**
+- **Phase 3+4 — live R3F infra relocated out of rf/** (commit `531c1575`): `types.ts` → `webview/`; state stores → `webview/state/`; pulse/pump/trace-kinds → `webview/three/`; adapters → `webview/state/adapter/`; `RunButton` → `webview/three/`; node-defs + registry → `webview/schema/`. 12 importers rewired. All 6 `import type ... from reactflow` sites removed; `RFNode`/`RFEdge` now locally defined in `webview/types.ts`. CLAUDE.md path refs updated.
 
-Root cause was NOT the order-dependent load/view-load message theory the doc previously led with. Data path was always healthy (store:load nodes:6 every reload).
+- **Fix — tsc/guard regressions after the move** (commit `a309d838`): `history.ts` `Snapshot` typed to `RFNode<NodeData>[]/RFEdge<EdgeData>[]`; `spec-to-flow.ts:105` cast for fold/note/member nodes; `check-trace-kind-parity.sh` paths updated to `webview/three/`.
 
-Actual cause: `CameraFitter` (ThreeView.tsx) fit the camera ONCE on `nodes.length 0→N`. When `view-load` relocated nodes AFTER that initial `load`-phase fit, the camera kept framing the old (pre-relocation) positions — content appeared off to the side or blank. The "rotated" look was oblique framing of wrong positions, not actual camera roll.
+- **Phase 5+6 — reactflow npm dep removed** (latest commit on editor-r3f): deleted CSS import in `main.tsx`; removed `reactflow` from `package.json`; pruned 604 lockfile lines including all `@reactflow/*` transitives. Zero `reactflow` importers remain in `src/`.
 
-Fix: added `loadEpoch` counter to the store (store.ts), bumped at the end of `loadSpec` and `loadView`; `CameraFitter` now re-fits keyed on `[loadEpoch]` instead of a one-shot ref. Both load phases trigger a fresh fit, so the final node positions are always framed correctly.
+### Next
 
-Diagnostic instrumentation retained: early-error window listeners + once-per-load lifecycle/store breadcrumbs write to `.probe/ts.jsonl` and `ts-errors.jsonl`. The per-frame `threeview:render` breadcrumb (~60fps) was removed this session.
+**The one remaining step is the `editor-r3f → main` merge.** This IS the "RF removal from main" event per the Direction section. Needs user sign-off before executing. Pre-merge checklist:
+
+1. Run `tools/strip-branch-local-docs.sh editor-r3f` to remove all branch-tagged planning docs (per CLAUDE.md) before the merge commit.
+2. Confirm topology.json disposition (see Working-tree state below).
+3. After merge: delete `editor-r3f` locally and on remote (per `feedback_branch_cleanup.md` memory).
+
+**Residual cosmetic cleanup (non-blocking, defer until friction):**
+
+- `RFNode`/`RFEdge` type names in `webview/types.ts` still carry the `RF` prefix — rename to `WFNode`/`WFEdge` or `Node`/`Edge` whenever it causes confusion.
+- `src/webview/rf/` still holds two live re-export/metadata files (`adapter.ts`, `animation-fields.ts`). The folder name is now a misnomer; these could be relocated to `webview/state/` and `webview/three/` respectively.
+- **ThreeView re-renders every frame when idle** (~60fps, no interaction): perf smell, root cause not investigated. Likely an unmemoized store selector or per-frame `setState`. Out of scope until it causes measurable jank.
 
 ### Working-tree state
 
-- topology.json shows as modified (M) — node-drag positions written to its embedded `view` key (~4 lines: readGate1, inhibitRight0 x/y). Confirm intended before any commit that would sweep it up.
-
-### Resolved this session — pacing handshake severed in R3F path → FIXED (2026-05-26)
-
-**FIXED. Verified live: animation now propagates through the chain with no freeze.**
-
-CONTRACT (MODEL.md round-close stepping, ~L126-140): a Go `PacedWire.Send` blocks until the pulse animation finishes on screen and TS posts `{type:"delivered", edge}` → extension `writeStdin` → Go `pw.NotifyDelivered()` → substrate advances. The visual layer PACES the substrate.
-
-Was case (A): ONE pulse then FREEZE — Go's delivered-gate IS armed in the live loader path and was starved because the SENDING half was lost in the RF→R3F cutover. Fix landed: `ThreeView.tsx` PulseBead now posts `{type:"delivered", edge: edgeId}` when animation completes (t>=1), guarded once-per-pulse via `claimDelivered(edgeId, startTime)` in `rf/pulse-state.ts`. Imports added: `claimDelivered` from `../rf/pulse-state`, `vscode` from `../vscode-api`.
-
-### Next concrete steps (in order)
-
-1. ~~**RUN to disambiguate.**~~ **DONE** — was case (A): one pulse then freeze; Go's delivered-gate was armed and starved.
-2. ~~**Re-wire the sender.**~~ **DONE** — PulseBead posts `{type:"delivered", edge}` on completion via `claimDelivered`; fix pushed to editor-r3f.
-3. ~~**Phase 0 verification.**~~ **PASSED** — wire-pulses-animate-on-Run confirmed AND pacing handshake restored. blank-on-reload = DONE (loadEpoch, verified).
-4. **Execute rf-retirement.md (Phase 0 gate cleared):** Phase 1+2 (deletions — needs sign-off) → Phase 3+4 (refactor — lands freely) → Phase 5+6 (reactflow dep removal — needs sign-off).
-
-### Known issues (non-blocking)
-
-- **ThreeView re-renders every frame when idle.** Observed via the now-removed per-frame `threeview:render` breadcrumb (~60fps identical nodes:6/edges:7 even with no interaction). Perf smell; root cause not yet investigated — likely an unmemoized store selector or a per-frame `setState` somewhere in the render tree. Out of scope for the camera fix; investigate when it causes measurable jank.
+- `topology.json` shows as modified (M) — node-drag positions written to its embedded `view` key (~4 lines: readGate1, inhibitRight0 x/y). Confirm intent before any commit or merge that would sweep it up.
 
 ### Separate deferred task (paused — NOT this branch)
 
@@ -108,13 +99,14 @@ has multiple outputs. Paused while 3D work is in flight.
 
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole (sole) 3D view: node drag, edge tubes, pointer state machine.
 - `tools/topology-vscode/src/webview/three/store.ts` — the single zustand source of truth (nodes/edges/selection, load/save actions).
-- `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar; posts { type: "ready" } to unblock host load sequence.
-- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/rf/pump.ts` — read from the store now. pump.ts is LIVE in the R3F path (handleTraceEvent wired via main.tsx trace-event case; pulse-state.ts is the R3F pulse read-store; ThreeView PulseBead is the pulse renderer). NOT yet live-verified.
-- `tools/topology-vscode/src/webview/rf/pulse-state.ts` — R3F pulse read-store (getPulseMap, setPulse); live R3F animation infra.
-- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — FULLY ORPHANED (zero importers); pending deletion sign-off.
-- `tools/topology-vscode/src/webview/rf/adapter/{spec-to-flow,flow-to-spec}.ts`, `tools/topology-vscode/src/webview/state/viewer/*` — pure adapters/state, shared and RF-free.
-- `docs/planning/visual-editor/rf-retirement.md` — 6-phase rf/ retirement plan (branch-tagged); Phase 0 verification must pass before Phase 1+2 deletions.
-- `docs/planning/visual-editor/rf-to-r3f-cutover.md` — note it is now partially superseded (toggle/staged-removal framing is gone; the cut happened).
+- `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar; posts `{ type: "ready" }` to unblock host load sequence.
+- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/three/pump.ts` — read from the store. pump.ts is live in the R3F path (handleTraceEvent wired via main.tsx trace-event case; pulse-state.ts is the R3F pulse read-store; ThreeView PulseBead is the pulse renderer).
+- `tools/topology-vscode/src/webview/three/pulse-state.ts` — R3F pulse read-store (getPulseMap, setPulse); live R3F animation infra.
+- `tools/topology-vscode/src/webview/types.ts` — local `RFNode`/`RFEdge` type aliases (no reactflow import).
+- `tools/topology-vscode/src/webview/state/adapter/{spec-to-flow,flow-to-spec}.ts` — pure adapters, RF-free.
+- `tools/topology-vscode/src/webview/rf/` — two residual re-export/metadata files (`adapter.ts`, `animation-fields.ts`); folder name is a misnomer post-retirement.
+- `tools/topology-vscode/src/webview/schema/` — node-defs.ts + registry.ts (relocated from rf/).
+- `docs/planning/visual-editor/rf-retirement.md` — 6-phase rf/ retirement plan (branch-tagged; strip before merge).
 
 Pseudo files below are for the **deferred** `task/inhibitright-pseudo` branch only, not this one:
 
