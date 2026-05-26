@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, task/editor-3d-r3f-canvas)
+## State at handoff (2026-05-26, task/editor-3d-r3f-canvas — post-audit)
 
 **Active branch:** `task/editor-3d-r3f-canvas`. Branched from
 `task/editor-3d-plan` (carries the branch-local `3d-editor.md` design
@@ -89,6 +89,51 @@ following commits:
   edge (uniform speed 0.08 wu/ms); motion→intensity fallback is
   automatic by viewing angle.
 
+### Post-implementation audit/fix pass (commits after v0)
+
+Two additional commits landed after the initial 8-commit implementation:
+
+- `391cb421` — **Cross-cutting audit + fix pass** of ThreeView.tsx (had been
+  assembled by 6 narrow-view agents; several HIGH-severity bugs). Fixed:
+  - **Pan & dolly used `cam.position.z` as distance-to-scene** — broke after any
+    rotation; now uses true camera-to-plane / distance-to-scene-center.
+  - **CameraFitter fired before node state arrived** — framed empty scene; now
+    waits for nodes.
+  - **Nearest-N throttle used a non-ref local** — now `useRef`.
+  - **TubeGeometry + THREE.Color reallocated every render** — now memoized.
+  - **Stale closure in connect-mode pointer-up** — now reads a ref.
+  - Shared helpers extracted: `nodeRadius()`, `ndcToPixel()`, `pixelToNDC()`,
+    `worldPerPixel()` (de-duped 3–4 copies each).
+  - LabelProjector throttled to ~30 fps; phantom-hover rAF cancel; dead code
+    removed.
+  - Known remaining TODOs (left intentionally): `scene.traverse` pick-by-position
+    fragility; roll-slider absolute-zero drift; CameraSettleDetector per-frame
+    string snapshot.
+
+- `b96d8be3` — **Moved ThreeView out of the React Flow dir.**
+  `src/webview/rf/three/ThreeView.tsx` → `src/webview/three/ThreeView.tsx`.
+  R3F is not React Flow. The file still imports the borrowed RF state bridge
+  (`rf-imperative`, `pulse-state`, types) — that bridge stays until RF is
+  actually removed.
+
+### Architecture decision: staged RF removal (IMPORTANT — record prominently)
+
+**RF→R3F is a STAGED REPLACEMENT, not a permanent toggle.**
+
+R3F at z=0 is an exact replica of RF and is designed to subsume it. Full React
+Flow removal is the **tracked next milestone** — but it is staged AFTER all of:
+
+1. Live-render verification (confirmed working in real VS Code editor use).
+2. R3F gets its **own load/save/state pipeline** (currently borrows RF's
+   `rf-imperative` bridge — that bridge must be replaced before RF is removed).
+3. Feature parity confirmed.
+
+Only then: delete the 2D/3D toggle, the React Flow node/edge components, and the
+`reactflow` dependency, and rename the `rf-*` exports.
+
+**Do NOT remove RF before R3F is proven in real use — RF is the fallback until
+then.**
+
 ### Verified
 
 `npm run build` clean; `go build ./...` + `go test ./...` pass;
@@ -118,14 +163,17 @@ The spec marks these deferred — they are NOT implementation gaps:
 
 ### Next concrete step
 
-1. **LIVE-RENDER check** — reload the VS Code window, click the
-   top-right "3D view" toggle, exercise rotate/dolly/pick/wire/labels/
-   badge/pulse. Building ≠ running; this is the first thing to confirm.
-2. Decide whether to build the deferred fold-node primitive and/or
-   merge to main. Before merging: run
-   `tools/strip-branch-local-docs.sh task/editor-3d-r3f-canvas` (and
-   strip the `task/editor-3d-plan` tag from `3d-editor.md`) to remove
-   branch-local planning docs.
+1. **LIVE-RENDER check** — reload the VS Code window, click the top-right
+   "3D view" toggle, exercise rotate/dolly/pick/wire/labels/badge/pulse.
+   **Exercise pan and dolly-after-rotation specifically** — that was just fixed
+   (pan & dolly used `cam.position.z`, broke after any rotation). Building ≠
+   running; this is the first thing to confirm.
+2. Once live-render is verified, work toward the **staged RF removal milestone**:
+   give R3F its own load/save/state pipeline (replace the borrowed `rf-imperative`
+   bridge), confirm feature parity, then delete the 2D/3D toggle + RF components +
+   `reactflow` dep. Do NOT remove RF before R3F is proven in real use.
+3. Deferred: fold-node primitive (#9), merge to main (run
+   `tools/strip-branch-local-docs.sh task/editor-3d-r3f-canvas` first).
 
 ### Separate deferred task (paused — NOT this branch)
 
@@ -142,7 +190,7 @@ has multiple outputs. Paused while 3D work is in flight.
 ### Key files
 
 - [3d-editor.md](3d-editor.md) — full 3D design (branch-local; does NOT ride the merge)
-- `tools/topology-vscode/src/webview/rf/three/ThreeView.tsx` — the whole 3D view
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole 3D view (moved out of `rf/` by `b96d8be3`)
 - `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — subscribeRFState, rfCreateEdge
 - `tools/topology-vscode/src/webview/rf/pulse-state.ts` — pulse timing consumed by 3D
 - [`memory/project_interaction_control_is_substance.md`](../../../memory/project_interaction_control_is_substance.md) — control-is-substance anti-drift principle (rides to main)
