@@ -11,10 +11,13 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
-import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge } from "../rf/rf-imperative";
+import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge, rfSetNodes } from "../rf/rf-imperative";
 import type { NodeData, EdgeData } from "../rf/types";
 import { getPulseMap } from "../rf/pulse-state";
 import { getPauseAdjustedNow } from "../rf/run-status";
+import { pushSnapshot } from "../rf/history";
+import { patchViewerState } from "../rf/viewer-state";
+import { scheduleSave, scheduleViewSave } from "../save";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants
@@ -652,6 +655,14 @@ function useInteractionControls(
     dwellTimer: null,
   });
 
+  // Node-drag state: set when pointer-down lands on a node.
+  const nodeDragRef = useRef<{
+    nodeId: string;
+    planePointAtStart: THREE.Vector3;
+    nodeCenterAtStart: THREE.Vector3;
+    snapshotPushed: boolean;
+  } | null>(null);
+
   // Pivot for the current drag (world space)
   const dragPivot = useRef(new THREE.Vector3());
   // Pan-pad origin for panning
@@ -725,6 +736,22 @@ function useInteractionControls(
     [cameraRef, canvasSize],
   );
 
+  /** Unproject a pointer position (client coords) to the z=0 world plane. */
+  const unprojectToPlane = useCallback(
+    (clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 | null => {
+      const cam = cameraRef.current;
+      if (!cam) return null;
+      const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+      const target = new THREE.Vector3();
+      const hit = raycaster.ray.intersectPlane(plane, target);
+      return hit ? target : null;
+    },
+    [cameraRef],
+  );
+
   // ------ pointer event handlers ------
 
   const onPointerDown = useCallback(
@@ -740,12 +767,29 @@ function useInteractionControls(
       // Clear any existing dwell timer.
       if (s.dwellTimer !== null) { clearTimeout(s.dwellTimer); s.dwellTimer = null; }
 
-      // Check if pointer is over empty space: start dwell timer.
+      // Clear previous node-drag state.
+      nodeDragRef.current = null;
+
+      // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
 
-      if (hitId === null) {
+      if (hitId !== null) {
+        // Node hit: record drag origin for node-drag phase.
+        // Unproject to z=0 to get the world-plane point under the pointer.
+        const planePoint = unprojectToPlane(e.clientX, e.clientY, rect);
+        const node = nodesRef.current.find((n) => n.id === hitId);
+        if (planePoint && node) {
+          nodeDragRef.current = {
+            nodeId: hitId,
+            planePointAtStart: planePoint.clone(),
+            nodeCenterAtStart: nodeWorldPos(node),
+            snapshotPushed: false,
+          };
+        }
+        // Do NOT start dwell timer when a node is hit.
+      } else {
         // Empty canvas: start dwell timer for pan pad.
         s.dwellTimer = setTimeout(() => {
           if (state.current.phase === "pending") {
@@ -760,7 +804,7 @@ function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, onPanPadActive, pickRequest],
+    [cameraRef, nodesRef, onPanPadActive, pickRequest, unprojectToPlane],
   );
 
   const onPointerMove = useCallback(
@@ -777,15 +821,52 @@ function useInteractionControls(
         if (s.dwellTimer !== null) { clearTimeout(s.dwellTimer); s.dwellTimer = null; }
         onPanPadActive(null);
         s.phase = "dragging";
-        // Determine pivot.
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        dragPivot.current = pickPivot(s.downX, s.downY, rect);
+
+        if (nodeDragRef.current) {
+          // Node drag: push snapshot at drag start (before any position change).
+          if (!nodeDragRef.current.snapshotPushed) {
+            pushSnapshot();
+            nodeDragRef.current.snapshotPushed = true;
+          }
+          // Do NOT compute arcball pivot — node drag suppresses arcball.
+        } else {
+          // Empty-space drag: compute arcball pivot.
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          dragPivot.current = pickPivot(s.downX, s.downY, rect);
+        }
       }
 
       if (s.phase === "dragging") {
-        const ddx = e.clientX - s.prevX;
-        const ddy = e.clientY - s.prevY;
-        applyArcball(ddx, ddy, dragPivot.current);
+        if (nodeDragRef.current) {
+          // Node drag: move node on the z=0 plane.
+          const nd = nodeDragRef.current;
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const planePoint = unprojectToPlane(e.clientX, e.clientY, rect);
+          if (planePoint) {
+            const node = nodesRef.current.find((n) => n.id === nd.nodeId);
+            if (node) {
+              const w = node.data?.width ?? 110;
+              const h = node.data?.height ?? 60;
+              // newCenter = planePoint + (nodeCenterAtStart - planePointAtStart)
+              const newCenterX = planePoint.x + (nd.nodeCenterAtStart.x - nd.planePointAtStart.x);
+              const newCenterY = planePoint.y + (nd.nodeCenterAtStart.y - nd.planePointAtStart.y);
+              // Invert nodeWorldPos: worldX = pos.x + w/2, worldY = -(pos.y + h/2)
+              // → pos.x = worldX - w/2, pos.y = -worldY - h/2
+              const newPosX = newCenterX - w / 2;
+              const newPosY = -newCenterY - h / 2;
+              rfSetNodes((ns) => ns.map((n) =>
+                n.id === nd.nodeId
+                  ? { ...n, position: { x: newPosX, y: newPosY } }
+                  : n
+              ));
+            }
+          }
+        } else {
+          // Arcball rotate (empty-space drag).
+          const ddx = e.clientX - s.prevX;
+          const ddy = e.clientY - s.prevY;
+          applyArcball(ddx, ddy, dragPivot.current);
+        }
         s.prevX = e.clientX;
         s.prevY = e.clientY;
       }
@@ -805,7 +886,7 @@ function useInteractionControls(
           .addScaledVector(upDir, panDy * wpp);
       }
     },
-    [applyArcball, cameraRef, canvasSize, onPanPadActive, pickPivot],
+    [applyArcball, cameraRef, canvasSize, nodesRef, onPanPadActive, pickPivot, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -813,6 +894,26 @@ function useInteractionControls(
       const s = state.current;
       if (s.dwellTimer !== null) { clearTimeout(s.dwellTimer); s.dwellTimer = null; }
       onPanPadActive(null);
+
+      // Node drag completed: persist position and suppress click/select.
+      if (s.phase === "dragging" && nodeDragRef.current?.snapshotPushed) {
+        const nd = nodeDragRef.current;
+        const node = nodesRef.current.find((n) => n.id === nd.nodeId);
+        if (node) {
+          patchViewerState((v) => {
+            if (!v.nodes) v.nodes = {};
+            const existing = v.nodes[node.id];
+            v.nodes[node.id] = { ...(existing ?? {}), x: node.position.x, y: node.position.y };
+          });
+          scheduleViewSave();
+          scheduleSave();
+        }
+        nodeDragRef.current = null;
+        s.phase = "idle";
+        return;
+      }
+
+      nodeDragRef.current = null;
 
       if (s.phase === "pending") {
         const elapsed = Date.now() - s.downTime;
@@ -836,7 +937,7 @@ function useInteractionControls(
 
       s.phase = "idle";
     },
-    [connectPendingIdRef, onConnectClick, onPanPadActive, onSelect, pickRequest],
+    [connectPendingIdRef, nodesRef, onConnectClick, onPanPadActive, onSelect, pickRequest],
   );
 
   const onWheel = useCallback(
