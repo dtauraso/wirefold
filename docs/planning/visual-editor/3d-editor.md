@@ -651,16 +651,16 @@ becomes a question.
 
 ### The primitive: the fold node
 
-A **FOLD NODE** is a node that contains a subgraph. It inherits the subgraph's
-**boundary-crossing wires** as its own ports:
+A **FOLD NODE** is a node that contains a subgraph. It has its **OWN DECLARED
+INTERFACE** (its own ports), mapped internally to its children — it does NOT
+inherit the subgraph's boundary-crossing wires. This makes the fold node a true
+encapsulation boundary: a black box with a stable contract that does NOT shift when
+the interior is rewired. Signals meant for child nodes stay internal; the fold
+node's interface is a separate, deliberate thing.
 
-- **General case:** any wire from outside the subgraph into the subgraph becomes a
-  fold-node input; any wire from inside the subgraph to outside becomes a fold-node
-  output. ALL boundary-crossing wires — however many, at whatever nodes inside —
-  become the fold node's interface.
-- **Linear-chain special case** (one in, one out): the inputs to the first child and
-  the outputs from the last child. This is only the clean-chain case, not the general
-  definition.
+(Superseded alternative: earlier the fold node was to inherit the subgraph's
+boundary-crossing wires directly — transparent, but coupling the fold's contract to
+interior wiring. Replaced by the own-interface model.)
 
 When **FOLDED**, only the fold node is active and animated; the interior is
 dormant and its pulses collapse into the single fold node's behavior. The outer
@@ -708,11 +708,28 @@ CLAUDE.md's landing rule, it requires three things in one commit:
 Because folding affects execution (interior nodes go dormant, the fold node
 stands in), this is NOT a pure view operation — it is a new substrate primitive.
 
-### Open (next)
+### Fold-node boundary behavior — resolved
 
-What a folded node presents at its boundary while its interior is dormant — and
-the run-vs-don't-run-interior detail (cheap either way because nodes are
-lightweight).
+**No behavior synthesis at the boundary.** A fold node does NOT compute the
+subgraph's behavior; there is no behavior synthesis.
+
+**Own-interface model** (chosen): the fold node has its own declared ports, mapped
+internally to its children. The fold's contract is stable and does not shift when
+the interior is rewired.
+
+**Producing outputs while folded** (interior dormant): the value is **FED
+directly to the fold node** — handed a value (edge-seed-style) that it presents
+at its own-interface output port. The fed value has a natural home on the fold
+node's own interface; it is NOT a hijack of a wire meant for a child. This is
+exactly why own-interface pairs better with feeding than the inherit model did.
+
+**Constraint (accepted, not a defect):** this is only well-defined for **SIMPLE
+subgraphs** (essentially pipe-like). Add branching, state, or complex internal
+coordination and folding breaks. Complexity is not foldable. This is the same
+lightweight-node discipline that makes folding cheap in the first place.
+
+**Substrate implication unchanged:** fold node is a new node kind (component +
+registry + Go package per CLAUDE.md landing rule); structural, affects execution.
 
 ## Problem #10 (input-device variance) — resolved
 
