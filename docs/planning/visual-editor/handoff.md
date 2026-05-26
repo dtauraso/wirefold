@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-25, task/editor-3d-plan)
+## State at handoff (2026-05-26, task/editor-3d-plan)
 
 **Active branch:** `task/editor-3d-plan`. Branched from main. This is a
 **planning/design branch** for making the visual editor 3D. Planning docs only
@@ -71,20 +71,44 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
   kind/ports; **LABEL** = a separate billboarded text (hover/nearest/selected
   LOD). Depth cues by strength: occlusion > motion parallax > relative size >
   shading > optional fog. Color and shape are reserved for DATA, never depth.
+- **Problem #3 (occlusion):** resolved. Full occlusion ALLOWED — nodes may go
+  0% visible; keeps occlusion as the strongest depth cue and nothing moves so
+  layout stays honest. Discovery of hidden nodes restored by a **COUNT BADGE**
+  on the visible front node: a "+N" label showing how many nodes are hidden
+  directly behind it; rotate (Problem #1 gestures) to reveal. Badges recomputed
+  after a gesture settles. Chose badge over edge-thickness (badge is
+  absolute/self-describing; edge width freed as a data channel) and over
+  halo/silhouette (less clutter). Open conventions (not blockers): does an
+  occluding edge count toward the badge; badge placement when the front node
+  itself is partly occluded; large-count formatting.
+- **Problem #4 (port picking):** resolved. Going 3D = "React Flow plus a Z axis."
+  The ONLY delta from RF is the assignment target: click the NODE (not drag from a
+  port handle); the wire takes the most efficient 3D path between nodes and the
+  path optimizer picks the visual exit/entry point. The LOGICAL port (which
+  input/output channel) is unchanged — still the existing RF
+  sourceHandle/targetHandle model. Three layers kept strictly separate: (1)
+  logical connection (Go substrate, no geometry), (2) human-speed
+  timing/pulse-animation layer (pump), (3) geographical rendered path. Optimizer
+  touches layer 3 only.
+- **Medium stack decided:** renderer = **react-three-fiber + three.js**, **NO
+  drei** (drei's OrbitControls already rejected on substance grounds per #1;
+  drei's troika text dropped — labels render as **HTML/DOM overlays**, which also
+  resolved the webview CSP risk). State = **Zustand** stays (RF's store was
+  Zustand; standalone, survives RF removal). Graph logic (connection rules, wire
+  semantics, 3D path optimizer) = ours (substance). Security: three.js core
+  low-surface; a "Security audit — run at implementation" checklist is recorded
+  in 3d-editor.md (run /security-review once R3F code lands, npm audit,
+  dependency provenance, strict webview CSP, loader discipline).
 
 ### Open problems (next session works these one at a time, recording each into 3d-editor.md)
 
-- **#3 occlusion** — nodes/edges hide behind each other; can't see/click what's
-  behind. (Natural next: it's your strongest depth cue but also hides the ports
-  needed for #4.)
-- **#4 port picking** — selecting a specific small, possibly-occluded port to
-  wire (click A, click B model already chosen; picking-under-occlusion is open).
 - **#5 layout-derivation coverage** — does the structure→coordinate function
   place real, irregular/mixed topologies, or fall back to manual 3D placement?
 - **#6 disorientation** — free rotation/dolly leaving the camera lost; no
   inherent "up"/home.
 - **#7 label/panel legibility** — pseudo panels + red validation flags rotating
-  edge-on/overlapping. (PARTLY addressed by #2's billboarded-label decision.)
+  edge-on/overlapping. (PARTLY addressed by #2's billboarded-label decision and
+  further helped by the medium-stack HTML/DOM overlay decision for labels.)
 - **#8 pulse-animation legibility** — pump-driven pulses on edges pointing into
   the screen foreshorten/occlude.
 - **#9 rendering scale** — many nodes + 3D edges + transparency + text
@@ -94,7 +118,11 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
 
 ### Next concrete step
 
-Take **Problem #3 (occlusion)**.
+Take **Problem #5 (layout-derivation coverage)** — does the
+structure→coordinate function place real, irregular/mixed topologies, or fall
+back to manual 3D placement? Core tension: fully-derived layout (honest,
+automatic, may produce garbage for irregular graphs) vs manual placement (always
+sensible but positions stop meaning anything, breaking the honesty axiom).
 
 ### Separate deferred task (paused — NOT this branch)
 
@@ -111,7 +139,7 @@ is in flight.
 
 - [3d-editor.md](3d-editor.md) — full 3D design (branch-local; does NOT ride the merge)
 - [`memory/project_interaction_control_is_substance.md`](../../../memory/project_interaction_control_is_substance.md) — control-is-substance anti-drift principle (rides to main)
-- `tools/topology-vscode/src/webview/rf/` — current 2D React Flow editor (node registry, `SubstrateEdge.tsx`, RF store) that 3D will replace with react-three-fiber + drei
+- `tools/topology-vscode/src/webview/rf/` — current 2D React Flow editor (node registry, `SubstrateEdge.tsx`, RF store) that 3D will replace with react-three-fiber + three.js (no drei) + Zustand
 - `pump.ts` — pump firing + pulse-animation logic; stays put (only the geometry pulses travel over changes)
 - `tools/topology-vscode/src/schema/parse-spec.ts` — node position model (gains `z`) + 3D port-anchor model when implementation begins
 
