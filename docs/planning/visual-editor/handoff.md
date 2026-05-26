@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, task/editor-3d-r3f-canvas — post-audit)
+## State at handoff (2026-05-26, task/editor-3d-r3f-canvas — live-render confirmed)
 
 **Active branch:** `task/editor-3d-r3f-canvas`. Branched from
 `task/editor-3d-plan` (carries the branch-local `3d-editor.md` design
@@ -89,9 +89,9 @@ following commits:
   edge (uniform speed 0.08 wu/ms); motion→intensity fallback is
   automatic by viewing angle.
 
-### Post-implementation audit/fix pass (commits after v0)
+### Post-implementation audit/fix pass + structural work
 
-Two additional commits landed after the initial 8-commit implementation:
+Additional commits after the initial 8-commit implementation:
 
 - `391cb421` — **Cross-cutting audit + fix pass** of ThreeView.tsx (had been
   assembled by 6 narrow-view agents; several HIGH-severity bugs). Fixed:
@@ -116,6 +116,15 @@ Two additional commits landed after the initial 8-commit implementation:
   (`rf-imperative`, `pulse-state`, types) — that bridge stays until RF is
   actually removed.
 
+- `4e8ecfc5` — Recorded latent z-persistence gap + `feedback_subagent_discovery_mandate` memory.
+
+- `c1ce79ed` — **Hoisted Run/pause/stop + save-status to shared Root in main.tsx.**
+  RunButton reads imperative getters, not RF hooks — confirmed decoupled. Both 2D
+  and 3D views now have functional run/pause/stop + save-status in the toolbar.
+
+- `3e46d93a` — RF→R3F parity-gap audit written to
+  `docs/planning/visual-editor/rf-to-r3f-cutover.md` (branch-local).
+
 ### Architecture decision: staged RF removal (IMPORTANT — record prominently)
 
 **RF→R3F is a STAGED REPLACEMENT, not a permanent toggle.**
@@ -123,7 +132,8 @@ Two additional commits landed after the initial 8-commit implementation:
 R3F at z=0 is an exact replica of RF and is designed to subsume it. Full React
 Flow removal is the **tracked next milestone** — but it is staged AFTER all of:
 
-1. Live-render verification (confirmed working in real VS Code editor use).
+1. Live-render verification (**CONFIRMED** — user verified render + content-pivoted
+   rotation about a chosen node works).
 2. R3F gets its **own load/save/state pipeline** (currently borrows RF's
    `rf-imperative` bridge — that bridge must be replaced before RF is removed).
 3. Feature parity confirmed.
@@ -134,6 +144,13 @@ Only then: delete the 2D/3D toggle, the React Flow node/edge components, and the
 **Do NOT remove RF before R3F is proven in real use — RF is the fallback until
 then.**
 
+### RF→R3F cutover checklist (key artifact)
+
+`docs/planning/visual-editor/rf-to-r3f-cutover.md` is the definitive cutover
+checklist. 3D currently covers ~6/37 authoring ops. All create/edit/delete/undo
+operations are MISSING. The state layer is ~60% RF-free already (`rf-imperative`
+is a clean module store; adapters/save/viewer-state are RF-free).
+
 ### Verified
 
 `npm run build` clean; `go build ./...` + `go test ./...` pass;
@@ -143,6 +160,9 @@ Security: `npm audit` 0 vulns, no unsafe sinks
 unchanged (script-src 'nonce-…', no unsafe-eval), publishers
 confirmed.
 
+Live-render: **CONFIRMED by user** — renders correctly; content-pivoted rotation
+about a chosen node works.
+
 ### Known gaps (latent — not spec deferrals; must be fixed in the named slice)
 
 - **3D POSITION PERSISTENCE GAP (latent):** ThreeView has NO save path — it calls no
@@ -150,8 +170,13 @@ confirmed.
   is loaded+rendered but never written back. Harmless today because the 3D view has no
   node-move/z-authoring interaction yet (rotate/dolly/pick/wire only). MUST be fixed in
   the same slice that adds 3D node manipulation, or 3D layout will be lost on reload.
-  Also: `rfCreateEdge` has a weaker `lastSpec` guard than `onConnectImpl` and no
-  grow-port support (`TODO(3d)`).
+- **rfCreateEdge weaker guard:** has a weaker `lastSpec` guard than `onConnectImpl`
+  and no grow-port support (`TODO(3d)`).
+- **3 in-code TODOs (intentional):** pick-by-position fragility (`scene.traverse`),
+  roll-slider zero drift, CameraSettleDetector per-frame string snapshot cost.
+- **Pan/dolly-after-rotation** — fixed in `391cb421`; should be re-checked live.
+- **User live-use bugs:** user has "plenty of bugs" from live use not yet
+  enumerated/triaged — collect that list next session.
 
 ### Deliberately deferred (not built; record so next session doesn't think they're missed)
 
@@ -173,17 +198,19 @@ The spec marks these deferred — they are NOT implementation gaps:
 
 ### Next concrete step
 
-1. **LIVE-RENDER check** — reload the VS Code window, click the top-right
-   "3D view" toggle, exercise rotate/dolly/pick/wire/labels/badge/pulse.
-   **Exercise pan and dolly-after-rotation specifically** — that was just fixed
-   (pan & dolly used `cam.position.z`, broke after any rotation). Building ≠
-   running; this is the first thing to confirm.
-2. Once live-render is verified, work toward the **staged RF removal milestone**:
-   give R3F its own load/save/state pipeline (replace the borrowed `rf-imperative`
-   bridge), confirm feature parity, then delete the 2D/3D toggle + RF components +
-   `reactflow` dep. Do NOT remove RF before R3F is proven in real use.
-3. Deferred: fold-node primitive (#9), merge to main (run
-   `tools/strip-branch-local-docs.sh task/editor-3d-r3f-canvas` first).
+**GATING primitive: node drag (move a node on the 3D plane).** The 3D view is
+currently a read-only viewport — no node-move capability. Nearly all other
+authoring ops in the cutover checklist depend on being able to place nodes.
+Build order = the 17-item checklist in `rf-to-r3f-cutover.md` §B, front-loaded
+by node drag.
+
+Before or alongside node drag:
+- **Collect the live-use bug list** — user has bugs from real editor use not yet
+  enumerated; triage first.
+- **Re-check pan/dolly-after-rotation live** — fixed in `391cb421` but not yet
+  confirmed in real use.
+- Fix the **3D position persistence gap** in the same slice as node drag (or
+  dragged positions will not survive reload).
 
 ### Separate deferred task (paused — NOT this branch)
 
@@ -202,8 +229,9 @@ has multiple outputs. Paused while 3D work is in flight.
 - [3d-editor.md](3d-editor.md) — full 3D design (branch-local; does NOT ride the merge)
 - [rf-to-r3f-cutover.md](rf-to-r3f-cutover.md) — RF→R3F parity-gap audit + cutover checklist (branch-local)
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole 3D view (moved out of `rf/` by `b96d8be3`)
-- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — subscribeRFState, rfCreateEdge
+- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — the RF-free survivor store: rfGetNodes/rfSetNodes/rfGetEdges/rfSetEdges/rfCreateEdge/subscribeRFState/pushSnapshot
 - `tools/topology-vscode/src/webview/rf/pulse-state.ts` — pulse timing consumed by 3D
+- `tools/topology-vscode/src/webview/main.tsx` — Root toggle + hoisted run/save (run/pause/stop + save-status work in both 2D and 3D)
 - [`memory/project_interaction_control_is_substance.md`](../../../memory/project_interaction_control_is_substance.md) — control-is-substance anti-drift principle (rides to main)
 - `tools/topology-vscode/src/webview/rf/` — 2D React Flow editor (node registry, `SubstrateEdge.tsx`, RF store) that coexists with the 3D view
 - `pump.ts` — pump firing + pulse-animation logic; stays put (only the geometry pulses travel over changes)
