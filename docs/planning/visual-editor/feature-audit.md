@@ -8,7 +8,7 @@ branch: task/feature-audit
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** ~26 features implemented and working; 10 cutover-debt items (worked in RF, lost or half-wired in R3F move); 14 deferred industry patterns (friction-gated, never built in any editor); 1 never-specced decision point.
+**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 5 half-wired); 1 never-specced decision point; 3 accepted-for-build items.
 
 ---
 
@@ -48,7 +48,7 @@ The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (
 
 ## 3. Gaps — Three Causes
 
-The gaps in this editor have three distinct causes: regression (worked in the RF editor, dropped in the R3F cutover), deferral (never built in any editor, parked until friction), and under-specification (planned only loosely, needs an explicit decision). The old single "planned-not-built" list conflated all three, inflating the apparent backlog. The three-cause split makes each item actionable on its own terms.
+The gaps in this editor have three distinct causes: regression (worked in the RF editor, dropped in the R3F cutover), under-specification (planned only loosely, needs an explicit decision), and accepted-for-build (friction surfaced, promoted to committed work). The old single "planned-not-built" list conflated these, inflating the apparent backlog. The three-cause split makes each item actionable on its own terms.
 
 ### 3a. Cutover Debt — Worked in the RF editor, lost in the R3F move (restore-parity, bounded)
 
@@ -79,32 +79,23 @@ The following were started in the R3F move but left inert — the infrastructure
 
 ---
 
-### 3b. Deferred Industry Patterns — Never built in any editor, friction-gated
-
-From the 2026-05-03 industry-pattern review in `session-log.md`. These were never part of any editor iteration; each is parked until real-world use creates friction. Tracked in `memory/project_industry_pattern_deferrals.md`.
-
-- MiniMap / overview panel (XS)
-- PNG / SVG export (XS)
-- Hover tooltips on nodes/edges (XS)
-- Connect-validation visual cue (XS) — port conflict only logs to console
-- Rounded corners on snake-route edges (S)
-- Node search / Cmd-K quick-jump (S)
-- Snap-to-other-nodes'-edges, currently center-only (S)
-- Keyboard nav: arrow-nudge, tab-cycle (S/M)
-- Copy / paste / duplicate Cmd-D (M)
-- Bend points / waypoints on orthogonal edges (M-L)
-- Multi-node alignment guides, single-node only today (S)
-- Undo coalescing at gesture level (S)
-- Auto-routing, obstacle-aware ELK/libavoid (L)
-- Auto-layout, dagre/ELK/force-directed (M-L)
-
----
-
-### 3c. Never-Specced — Planned only loosely, needs a decision
+### 3b. Never-Specced — Planned only loosely, needs a decision
 
 | Feature | Open question |
 |---|---|
 | Fold node Go primitive | No `nodes/fold/` package has ever existed; fold was always view-state only. Needs an explicit yes/no: does fold ever become a Go substrate node, or stay view-state forever? |
+
+---
+
+### 3c. Accepted for Build — friction surfaced, promoted to committed work
+
+Items promoted because real use justified building them. These are committed work, not parked patterns.
+
+| # | Feature | Size | Notes |
+|---|---|---|---|
+| 1 | Bend points / waypoints on orthogonal edges | M-L | Generalizes the cutover-debt "Edge midpoint drag" (§3a) from a single midpoint to arbitrary waypoints; per-edge persisted state threaded through schema + adapters. |
+| 2 | Multi-node alignment guides | S | Generalizes existing single-node drag guides/snap to a multi-selection's collective bounding box. Gated behind multi-select restore (§3a cutover debt). |
+| 3 | Undo coalescing at gesture level | S | One undo entry per drag gesture (snapshot on pointer-up, not per pointer-move). Same work as finishing the §3a half-wired undo for node drags. |
 
 ---
 

@@ -7,21 +7,26 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26 — On task/feature-audit; audit recut with cause-based buckets (e9ce70ef).)
+## State at handoff (2026-05-26 — audit recut: deferral bucket eliminated; items removed or promoted to accepted-for-build.)
 
 **Active branch:** `task/feature-audit`. Branched off main after editor-r3f was merged at ccbff474.
 
 Branch-local doc: `docs/planning/visual-editor/feature-audit.md` (frontmatter `branch: task/feature-audit`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated.
 
-### Last completed — recut feature-audit.md gap categorization
+### Last completed — second recut: deferral bucket eliminated
 
-The old inflated "planned-not-built (11)" + "partial/inert (5)" lists were replaced with three CAUSE-BASED buckets (commit e9ce70ef):
+The "Deferred Industry Patterns (14)" bucket was deleted in full. Each item was individually triaged:
 
-- **Cutover debt (10):** worked in RF editor, lost or half-wired in the R3F move. Bounded restore-parity list: node/edge delete, multi-select, edge reconnect, node palette, sublabel inline edit, PseudoPanel, port drag, edge-kind context menu, edge midpoint drag; plus 5 half-wired: undo, view-save-on-settle, fit-view hotkey, folds-mesh, z-coord.
-- **Deferred industry patterns (14):** never built in any editor, friction-gated, from the 2026-05-03 industry review; tracked in `memory/project_industry_pattern_deferrals.md`.
-- **Never-specced (1):** Fold Go primitive — needs explicit yes/no decision (become a Go substrate node, or stay view-state forever).
+- **11 removed outright** as not-worth-building. Includes auto-layout, which was removed on substrate grounds: node arrangement is dictated by topology+timing, so an aesthetic layout engine breaks the algorithm — it is not a deferred feature, it is a wrong feature.
+- **3 promoted into new §3c Accepted for Build:** bend points/waypoints, multi-node alignment guides, undo coalescing at gesture level.
 
-**New scorecard:** ~26 implemented; 10 cutover-debt; 14 deferred; 1 never-specced.
+The gap structure is now THREE causes (§3a / §3b / §3c):
+
+- **§3a Cutover Debt (15 total):** worked in RF editor, lost or half-wired in the R3F move. 10 restore-parity items (node/edge delete, multi-select, edge reconnect, node palette, sublabel inline edit, PseudoPanel, port drag, edge-kind context menu, edge midpoint drag, + 1 more); 5 half-wired (undo, view-save-on-settle, fit-view hotkey, folds-mesh, z-coord).
+- **§3b Never-Specced (1):** Fold Go primitive — needs explicit yes/no decision (become a Go substrate node, or stay view-state forever).
+- **§3c Accepted for Build (3):** bend points/waypoints, multi-node alignment guides, undo coalescing at gesture level.
+
+**New scorecard:** 26 implemented; 15 cutover-debt (10 restore-parity + 5 half-wired); 1 never-specced; 3 accepted-for-build.
 
 ### Open decisions / next
 
@@ -36,6 +41,8 @@ The old inflated "planned-not-built (11)" + "partial/inert (5)" lists were repla
 **(e) Interactive view-save gap:** `markViewSynced` is not called after camera moves or node drags, so positions are lost on reload without a manual Save. Small scope, clear contract.
 
 **(f) topology.json working-tree modification:** node-drag view positions are modified but uncommitted intentionally. Do NOT stage or discard.
+
+**(g) Latent substrate-contract question:** is pulse arrival anchored to logical simTime or to geometric edge length? If geometric, that is a contract violation — arrival order must be arrangement-invariant, independent of any layout feature. Read `pump.ts` / `pulse-state.ts` to determine which governs travel time before closing this question.
 
 ### Key files
 
