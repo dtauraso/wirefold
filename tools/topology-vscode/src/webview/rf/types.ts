@@ -26,6 +26,8 @@ export interface NodeData {
   // --- Viewer-only fields (from NodeView / store) ---
   x?: number;
   y?: number;
+  // 3D depth coordinate. Defaults to 0 when absent (exact 2D replica).
+  z?: number;
   sublabel?: string;
   foldId?: string;
   dimmed?: boolean;

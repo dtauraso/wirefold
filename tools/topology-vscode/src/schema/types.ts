@@ -27,6 +27,10 @@ export type Port = {
   side?: "left" | "right" | "top" | "bottom";
   // Snap slot along the side: 0=25%, 1=50%, 2=75%. Absent = auto-space.
   slot?: 0 | 1 | 2;
+  // 3D port-anchor: offset from node center in 3D space. When absent,
+  // derive from side+slot so existing 2D topology is unaffected.
+  // Additive/new — does not replace side/slot for the RF 2D editor.
+  anchor?: { x: number; y: number; z: number };
 };
 export type StateValue = string | number;
 export type ArrowStyle = "filled" | "open";

@@ -39,6 +39,8 @@ export type Fold = {
 export type NodeView = {
   x: number;
   y: number;
+  // 3D depth coordinate. Absent in legacy data — default to 0 on read.
+  z?: number;
   sublabel?: string;
   state?: Record<string, StateValue>;
 };

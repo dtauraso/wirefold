@@ -64,6 +64,7 @@ export function specToFlow(
         sublabel: nv?.sublabel,
         x: nv?.x,
         y: nv?.y,
+        z: nv?.z ?? 0,
         type: n.type,
         fill: def?.fill ?? "#ffffff",
         stroke: def?.stroke ?? "#888",
