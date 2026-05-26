@@ -99,14 +99,26 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
   low-surface; a "Security audit — run at implementation" checklist is recorded
   in 3d-editor.md (run /security-review once R3F code lands, npm audit,
   dependency provenance, strict webview CSP, loader discipline).
+- **Problem #8 (pulse-animation legibility):** resolved. Root cause: a pulse's
+  meaning comes from across-the-view motion; on an "end-on" edge (wire pointing
+  along the line of sight) the motion projects to near-zero on-screen travel
+  (reads as scaling, not motion), and the pulse is a one-shot transient so camera
+  rotation after the fact cannot recover it. Resolution: the **EDGE itself is
+  highlighted** (always-visible lit wire — endpoints/existence readable at any
+  angle), and the **PULSE is a STRONGER HIGHLIGHT** traveling along it. Legibility
+  falls back from MOTION to INTENSITY: on a broadside edge the brighter segment
+  travels; on an end-on edge the wire flashes brighter as the pulse passes — the
+  event registers regardless of angle. Accepted residue: on a pure end-on edge the
+  flash is stationary, so direction (A→B vs B→A) is not readable from the flash
+  alone; direction remains recoverable from the edge's known orientation, the
+  endpoint node's reaction a beat later, and a small camera nudge. End-on
+  direction-at-a-glance loss treated as ACCEPTABLE.
 
 ### Open problems (next session works these one at a time, recording each into 3d-editor.md)
 
 - **#5 layout-derivation coverage** — does the structure→coordinate function
   place real, irregular/mixed topologies, or fall back to manual 3D placement?
 - **#6 (disorientation) — RETIRED as a phantom:** the only real bearing is flow direction, which is invariant and self-displaying via the pump animation; "see the whole graph at once" was a 2D-flatness artifact wrongly imported as a required "home" state. No fix. Optional user-saved camera snapshots are the one honest convenience, deferred until friction.
-- **#8 pulse-animation legibility** — pump-driven pulses on edges pointing into
-  the screen foreshorten/occlude.
 - **#9 rendering scale** — many nodes + 3D edges + transparency + text
   performance.
 - **#10 input-device variance** — gesture bindings across

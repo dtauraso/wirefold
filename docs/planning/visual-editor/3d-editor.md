@@ -595,6 +595,47 @@ signal simultaneously.
 - No overlap problem.
 - No new 3D surface introduced.
 
+## Problem #8 (pulse-animation legibility) — resolved
+
+### Root cause
+
+A pulse delivers its meaning — that a transfer happened, its endpoints, direction,
+and timing — through **across-the-view (lateral) motion** of a traveling mark. On
+an "end-on" edge — a wire pointing along the viewer's line of sight (source node
+in front, target directly behind) — the pulse's motion is along the **depth axis**,
+toward or away from the viewer, which projects to almost no on-screen travel. It
+reads as scaling, not motion. The pulse is also a one-shot transient (per-emit
+anchored), so rotating the camera after the fact cannot recover a finished event.
+**Camera control cannot fix a timing problem.**
+
+### Resolution (the visual change)
+
+The **EDGE itself is highlighted** — an always-visible lit wire so that
+endpoints and existence read at any angle. The **PULSE is a STRONGER HIGHLIGHT**
+that travels along it.
+
+Legibility falls back from **MOTION** (which the geometry can destroy) to
+**INTENSITY** (which it cannot):
+
+- On a **broadside edge** you see the brighter segment travel — full motion cue.
+- On an **end-on edge** you still get an intensity surge — the wire flashes
+  brighter as the pulse passes. A flash at a point is still a flash, so the
+  **event registers regardless of edge angle.**
+
+### Accepted residue (known, minor, NOT a blocker)
+
+On a pure end-on edge the stronger highlight has nowhere to travel, so it reads
+as a **stationary flash** — you learn that the wire fired but not direction
+(A→B vs B→A) from the flash alone. Direction remains recoverable from static cues:
+
+- The edge's stored/known orientation (it is a directed wire).
+- The endpoint node's reaction a beat later.
+- A small camera nudge restores visible travel for any wire one needs to read
+  directionally.
+
+End-on is the degenerate case. This **direction-at-a-glance loss for end-on
+edges only** is treated as **ACCEPTABLE**.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
