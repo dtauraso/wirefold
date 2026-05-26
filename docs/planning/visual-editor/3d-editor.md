@@ -342,73 +342,50 @@ depth onto those channels would collide with semantics — a sacrifice, rejected
 
 ## Problem #3 (occlusion) — resolved
 
-Occlusion is the **strongest depth cue** (ranked #1 in Problem #2). That makes
-it both the sharpest threat — a fully hidden node is invisible — and the most
-valuable signal to preserve. The resolution keeps that value intact while
-closing the one gap a pure-motion recovery cannot close: a node you do not know
-exists.
+### Governing rule: full occlusion is allowed
 
-### What is NOT done
+**Full occlusion is ALLOWED.** A node may go 0% visible behind a nearer node.
+This keeps occlusion as the strongest depth cue (#1 in Problem #2) fully intact
+and — critically — nothing moves, so the layout never lies (honesty axiom
+preserved). This reverses and supersedes the earlier outline/silhouette rule.
 
-**Partial occlusion is left completely untouched.** A node peeking out from
-behind another is still partially visible; the occlusion depth cue is working
-exactly as designed. No transparency, no relocation, no shadow/fade machinery
-for partial cases — each would either falsify structure (honesty axiom) or
-spend the depth cue.
+Recovery of a hidden node uses the same camera gestures and buttons from
+Problem #1 (rotate, dolly, pan to move the viewpoint). No transparency, no
+relocation, no shadow/fade.
 
-**No wholesale defeat of occlusion.** Techniques that make occluders transparent
-or ghost-out foreground objects are rejected: they destroy the #1 depth cue to
-solve a problem that motion already solves for the cases where the hidden item
-is known.
+### Discovery signal: edge thickness proportional to occluded-node count
 
-### General recovery: camera gestures (Problem #1 answer applied)
+The one gap full-occlusion allows is **discovery loss** — a node the user has
+never seen because it is always behind another. That gap is closed by a signal
+carried on the **front node's edges**:
 
-For any hidden item the user knows about, the primary recovery is the controls
-from Problem #1 — rotate, dolly, pan. Changing the viewpoint reveals the hidden
-node without altering the structure. No special occlusion-handling mode; the
-existing gesture grammar is sufficient.
+- A visible node's edges thicken **in proportion to the number of nodes hidden
+  directly behind it** (from the current viewpoint).
+- A thick edge reads as "there are nodes back here — rotate to see them."
+  Thicker = more nodes occluded behind this one.
 
-### THE ONE ADDED RULE: no node may be 0% visible
+No transparency, no outline-through-walls, no structure alteration. The front
+node stays solid; its edges carry the count.
 
-The one gap motion cannot close is **total occlusion of a node the user has
-never seen**. A completely hidden node is an unknown unknown — there is no
-"look behind that node" impulse if you do not know something is back there.
+### Channel reservation
 
-**Rule:** when a node is fully occluded (0% of its body visible from the current
-viewpoint), a minimal **outline / silhouette** of that node is drawn on top of
-the occluder — through the depth buffer, in front of everything. This is the
-games and scientific-viz "silhouette-through-walls" / Interrante
-occluded-structure technique, scoped tightly to full occlusion only.
-
-The outline serves both halves of the problem:
-
-1. **Discovery signal.** It tells the user "something is back there" — kills
-   the unknown-unknown. The outline's shape encodes kind (same kind-geometry as
-   the node body) so it is informative, not just a dot.
-2. **Pickability.** The outline is **clickable**, keeping the hidden node
-   selectable without moving anything or making the occluder transparent.
+Edge thickness is now a **reserved channel for this depth/occlusion signal**.
+This is consistent with Problem #2 reserving color and shape for DATA (kind,
+validation flag, port/wire kind, pulses). Thickness is spent on occlusion-count,
+not data — the two do not collide.
 
 ### Timing: post-gesture, not per-frame
 
-The occlusion test and outline placement are computed **after a gesture settles**,
-not continuously during drag or rotate. No per-frame GPU cost, no mid-motion
-flicker. Once the camera comes to rest, the pass runs, and outlines appear or
-disappear as needed.
-
-### Empirical grounding
-
-Ware & Franck showed that motion parallax makes 3D node-link graphs readable
-(~3× error reduction) where passive render tricks did not — this resolution
-treats motion as the primary recovery and adds only the minimal outline marker.
+Occlusion counts (and therefore edge thicknesses) are recomputed **after a
+gesture settles**, not continuously during drag or rotate. No per-frame cost,
+no flicker mid-motion.
 
 ### Open conventions (not blockers)
 
-1. **Full-occlusion trigger.** The rule fires at 0% visible only — confirm
-   partial occlusion never triggers the outline.
-2. **Edge-on-node occlusion.** Does a wire/tube edge fully occluding a node
-   trigger the outline, or only node-on-node occlusion?
-3. **Outline click behavior.** Clicking the outline selects / targets the hidden
-   node directly (assumed).
+- **Edge-on-node occlusion.** Does an edge (rather than a node) occluding a
+  node count toward the behind-count?
+- **Thickness scale / cap.** Exact thickness progression and upper bound for
+  large behind-counts.
 
 ## Next concrete step
 
