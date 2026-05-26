@@ -26,16 +26,18 @@ Only rendering, interaction, layout, and the position schema change.
 **Drift signal:** if 3D math starts appearing in `pump.ts` or the Go substrate,
 stop — that is the wrong frame.
 
-## Coordinate model — derived, not authored
+## Coordinate model
 
 Today, node positions are hand-laid `x/y` in `topology.json`; ports carry a
 `side` (top/bottom/left/right) + `slot`.
 
-**Key decision:** in 3D, coordinates are **derived from connectivity**, not
-hand-placed. A ring of chain-inhibitors is a circle; stacked rings step along
-an axis; a lateral-inhibition lattice is a grid. Layout is a deterministic
-**structure → coordinate function** over the wiring graph — not force-directed
-guessing and not manual dragging. Position *means* something.
+**Starting point:** the existing `x,y` coordinates are kept as-is. The only
+addition is `z` (depth) per node. The 3D editor opens as an exact replica of
+the current 2D diagram with all nodes at `z = 0`. See Problem #5 for the full
+reasoning.
+
+**Longer term:** what drives depth (structural rank, ring membership, lattice
+layer, or manual z) is deferred until real friction appears in the 3D editor.
 
 Schema changes required:
 
@@ -43,8 +45,6 @@ Schema changes required:
   `topology.json`.
 - Replace the 2D port-anchor model (`side` + `slot`) with a 3D port-anchor
   model (a vector offset from the node center).
-
-This is the substance-adjacent piece that delivers the value.
 
 ## Interaction grammar
 
@@ -518,6 +518,48 @@ click — treating "which exit point did the cursor aim at?" as the mechanism fo
 port assignment. That conflated layer 1 with layer 3. The logical port is not a
 geographical decision; RF already handles it. There is no new port-picking UI to
 design.
+
+## Problem #5 (layout-derivation coverage) — resolved
+
+### Reframe: manual placement does not defeat the honesty axiom
+
+The earlier handoff framing implied that manual node placement was dishonest —
+i.e., that coordinates must be *derived* from connectivity for the editor to
+satisfy the representational-honesty motivation. That framing was wrong.
+
+**What the honesty axiom actually says.** The dishonesty 3D fixes is the
+**medium** forcing false edge crossings and false adjacencies in **2D
+projection** — a property of the projection, not of who places the nodes. The
+act of projection onto a plane is what manufactures misleading structure; a 3D
+renderer removes that projection entirely.
+
+**Manual placement is honest.** It just changes position's *meaning*: from
+"read-only encoding of structure" (derived layout) to "curatorial intent"
+(human grouping). The current 2D React Flow editor is already fully manual, and
+nobody calls it dishonest — because position never *claimed* to encode structure
+there. The claim was never about authorship; it was about the dimensionality of
+the space.
+
+### Consequence: Problem #5 shrinks to one new quantity
+
+Given the above, the existing `x,y` coordinates in `topology.json` are kept
+exactly as-is. The only new quantity that 3D adds is `z` (depth) per node.
+
+### Decision FOR NOW: z = 0 for every node
+
+The 3D editor starts as an **exact replica of the current 2D diagram**, with all
+nodes at `z = 0`. What drives depth — structural rank, ring membership, lattice
+layer, or manual z — is **deferred** until real friction appears in the 3D
+editor. This is consistent with the posture rule: justify changes from real-world
+editor use, not from anticipated need.
+
+**Open sub-question (deferred, not a blocker):** what structural property, if
+any, should later map to z. Candidates include inhibitor-chain depth, ring
+membership tier, and lattice layer, but none of these are resolved here.
+
+## Problem #6 (disorientation) — RETIRED as a phantom
+
+#6 (disorientation) — RETIRED as a phantom: the only real bearing is flow direction, which is invariant and self-displaying via the pump animation; "see the whole graph at once" was a 2D-flatness artifact wrongly imported as a required "home" state. No fix. Optional user-saved camera snapshots are the one honest convenience, deferred until friction.
 
 ## Next concrete step
 
