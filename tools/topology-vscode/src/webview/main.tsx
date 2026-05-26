@@ -35,16 +35,16 @@ import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
 import { flushSave, flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
-import { flowToSpec } from "./rf/adapter/flow-to-spec";
-import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./rf/run-status";
-import type { RunStatusUI } from "./rf/run-status";
-import { setDimmedImperative } from "./rf/dimmed";
+import { flowToSpec } from "./state/adapter/flow-to-spec";
+import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
+import type { RunStatusUI } from "./state/run-status";
+import { setDimmedImperative } from "./state/dimmed";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
-import { RunButton } from "./rf/panels/RunButton";
+import { RunButton } from "./three/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { useThreeStore } from "./three/store";
-import { handleTraceEvent } from "./rf/pump";
+import { handleTraceEvent } from "./three/pump";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage

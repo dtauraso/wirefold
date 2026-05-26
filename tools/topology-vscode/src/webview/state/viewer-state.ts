@@ -6,7 +6,7 @@
 // state/spec/mutators.ts now that the plain-module state files are gone.
 
 import { produce } from "immer";
-import { DEFAULT_VIEWER_STATE, type ViewerState } from "../state/viewer/types";
+import { DEFAULT_VIEWER_STATE, type ViewerState } from "./viewer/types";
 
 export let viewerState: ViewerState = { ...DEFAULT_VIEWER_STATE };
 

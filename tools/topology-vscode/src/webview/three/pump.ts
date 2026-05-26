@@ -21,7 +21,7 @@
 
 import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
-import { useThreeStore } from "../three/store";
+import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulse, clearPulse } from "./pulse-state";
 

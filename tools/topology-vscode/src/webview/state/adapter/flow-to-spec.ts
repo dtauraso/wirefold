@@ -5,9 +5,8 @@
 // currentSpec provides passthrough for top-level metadata fields via TOPOLOGY_META_FIELDS
 // (passThrough: true entries). notes is rebuilt from RF note nodes instead.
 
-import type { Edge as RFEdge, Node as RFNode } from "reactflow";
+import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
 import type { Spec, Node as SpecNode, Edge as SpecEdge, Note } from "../../../schema";
-import type { NodeData, EdgeData } from "../types";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
 import { TOPOLOGY_META_FIELDS } from "../../../schema/meta-field-defs";
 

@@ -9,7 +9,7 @@
 // than restarting from 0.
 
 import { createContext, useContext } from "react";
-import { getPauseAdjustedNow } from "./run-status";
+import { getPauseAdjustedNow } from "../state/run-status";
 
 export interface PulseData {
   value: number;

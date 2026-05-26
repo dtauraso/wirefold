@@ -1,9 +1,9 @@
-import { viewerState } from "./rf/viewer-state";
+import { viewerState } from "./state/viewer-state";
 import { serializeViewerState } from "./state/viewer/types";
 import type { Spec } from "../schema";
 import { vscode } from "./vscode-api";
 import { useThreeStore } from "./three/store";
-import { flowToSpec } from "./rf/adapter/flow-to-spec";
+import { flowToSpec } from "./state/adapter/flow-to-spec";
 
 const status = document.getElementById("status")!;
 

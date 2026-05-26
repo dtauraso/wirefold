@@ -8,10 +8,10 @@
 // (registerHistory() is retained as a no-op for callers that still invoke it;
 // the store is read/written directly so no instance handle is needed.)
 
-import type { Node as RFNode, Edge as RFEdge } from "reactflow";
+import type { RFNode, RFEdge } from "../types";
 import { useThreeStore } from "../three/store";
 import { viewerState, setViewerState } from "./viewer-state";
-import type { ViewerState } from "../state/viewer/types";
+import type { ViewerState } from "./viewer/types";
 
 const HISTORY_LIMIT = 50;
 

@@ -1,9 +1,9 @@
 import { createPortal } from "react-dom";
-import { vscode } from "../../vscode-api";
-import { useThreeStore } from "../../three/store";
-import { flowToSpec } from "../adapter/flow-to-spec";
-import { flushActiveInlineEdit } from "../../inline-edit";
-import { useRunStatusCtx } from "../run-status";
+import { vscode } from "../vscode-api";
+import { useThreeStore } from "./store";
+import { flowToSpec } from "../state/adapter/flow-to-spec";
+import { flushActiveInlineEdit } from "../inline-edit";
+import { useRunStatusCtx } from "../state/run-status";
 
 export function RunButton() {
   const status = useRunStatusCtx();

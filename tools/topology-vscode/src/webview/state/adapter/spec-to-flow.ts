@@ -1,7 +1,6 @@
-import type { Edge as RFEdge, Node as RFNode } from "reactflow";
+import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
 import { NODE_TYPES, type Node as SpecNode, type Spec, requiredInputDiagnostics } from "../../../schema";
-import type { Fold, ViewerState } from "../../state/viewer/types";
-import type { NodeData, EdgeData } from "../types";
+import type { Fold, ViewerState } from "../viewer/types";
 import {
   buildEdges,
   buildFoldNodes,

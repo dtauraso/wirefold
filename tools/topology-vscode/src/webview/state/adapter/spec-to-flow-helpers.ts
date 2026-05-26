@@ -1,11 +1,10 @@
 // Pure helpers for spec-to-flow conversion: wire-prop picking, fold node
 // building, and note node building.
 
-import type { Edge as RFEdge, Node as RFNode } from "reactflow";
+import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
 import { KIND_COLORS, type Node as SpecNode, type Spec } from "../../../schema";
-import type { Fold, ViewerState } from "../../state/viewer/types";
+import type { Fold, ViewerState } from "../viewer/types";
 import { COLLAPSED_FOLD_W, COLLAPSED_FOLD_H, expandedBounds } from "./_bounds";
-import type { NodeData, EdgeData } from "../types";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
 
 /** Iterate WIRE_PROPS registry; skip `kind` (handled explicitly at call sites). */

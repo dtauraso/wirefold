@@ -20,7 +20,7 @@ import {
   type HostToWebviewMsg,
   type WebviewToHostMsg,
 } from "../messages";
-import { NODE_DEFS } from "../webview/rf/nodes/node-defs";
+import { NODE_DEFS } from "../webview/schema/node-defs";
 import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
 import { toErrorMessage } from "../utils/error";

@@ -3,7 +3,7 @@
 ## Substrate model — read first
 
 Before changing anything in the **Go substrate** (`nodes/`, `nodes/Wiring/paced_wire.go`,
-`nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump** (`tools/topology-vscode/src/webview/rf/pump.ts`),
+`nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump** (`tools/topology-vscode/src/webview/three/pump.ts`),
 read [MODEL.md](MODEL.md). It pins the substrate model and the banned
 vocabulary that signals drift. If your reasoning uses banned
 vocabulary, you are in the wrong frame — stop and re-derive from the
@@ -23,7 +23,7 @@ pointer at the top of this file is the only entry point you need.
 1. One file `tools/topology-vscode/src/webview/rf/nodes/<Kind>Node.tsx` —
    the React Flow custom node component (render only; no substrate logic).
 2. Register the kind in the single registry:
-   `tools/topology-vscode/src/webview/rf/nodes/registry.ts`.
+   `tools/topology-vscode/src/webview/schema/registry.ts`.
    `RF_NODE_TYPES` is derived from `NODE_DEFS` keys — the PascalCase spec
    kinds emitted by codegen — verbatim. The RF node type name equals the
    spec kind exactly (e.g. spec kind `MyKind` → RF type `MyKind`); no
@@ -31,7 +31,7 @@ pointer at the top of this file is the only entry point you need.
 3. The Go node package under `nodes/<Kind>/`.
 
 **Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`)
-are part of `EdgeData` (`tools/topology-vscode/src/webview/rf/types.ts`) and flow from
+are part of `EdgeData` (`tools/topology-vscode/src/webview/types.ts`) and flow from
 the store into `SingleEdgeTube` via `GraphEdges` in
 `tools/topology-vscode/src/webview/three/ThreeView.tsx`. A new wire prop must be
 added to `WireProps` in `wire-defs.ts` and threaded through `SingleEdgeTube` in the
@@ -43,7 +43,8 @@ backpressure, or firing-rule logic, that is drift — those belong in Go.
 ## Node kinds
 
 Active node kinds live under
-`tools/topology-vscode/src/webview/rf/nodes/`. Each `<Kind>Node.tsx` is
+`tools/topology-vscode/src/webview/rf/nodes/` (R3F render components) with kind
+metadata in `tools/topology-vscode/src/webview/schema/`. Each `<Kind>Node.tsx` is
 a static React Flow custom node — render only. The per-kind role is
 documented on the component itself rather than duplicated here.
 

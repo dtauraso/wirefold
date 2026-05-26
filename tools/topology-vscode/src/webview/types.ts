@@ -1,11 +1,39 @@
-// Typed data payloads for React Flow nodes and edges produced by spec-to-flow.
+// Typed data payloads for nodes and edges produced by spec-to-flow.
 // These mirror Spec.Node / Spec.Edge fields plus viewer-only and adapter fields.
 // Consumers still read from Zustand; this file is schema-only.
 
-import type { Port, StateValue } from "../../schema/types";
-import type { NodeSpec } from "../../schema/types-graph";
-import type { WireProps } from "../../schema/wire-defs";
-import { ANIMATION_FIELDS } from "./animation-fields";
+import type { Port, StateValue } from "../schema/types";
+import type { NodeSpec } from "../schema/types-graph";
+import type { WireProps } from "../schema/wire-defs";
+import { ANIMATION_FIELDS } from "./rf/animation-fields";
+
+// ---------------------------------------------------------------------------
+// Own Node / Edge type shapes (Phase 3 rf-retirement).
+// These replace the `import type { Node as RFNode, Edge as RFEdge } from "reactflow"`
+// aliases throughout the codebase. Fields are the subset actually used.
+// ---------------------------------------------------------------------------
+
+export interface RFNode<T = unknown> {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  data: T;
+  selected?: boolean;
+  zIndex?: number;
+  draggable?: boolean;
+  selectable?: boolean;
+}
+
+export interface RFEdge<T = unknown> {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  type?: string;
+  style?: Record<string, string | number | undefined>;
+  data?: T;
+}
 
 // Per-node data carried in RF Node<NodeData>.data.
 export interface NodeData {
