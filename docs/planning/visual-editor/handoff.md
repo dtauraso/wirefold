@@ -113,25 +113,34 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
   alone; direction remains recoverable from the edge's known orientation, the
   endpoint node's reaction a beat later, and a small camera nudge. End-on
   direction-at-a-glance loss treated as ACCEPTABLE.
-- **Problem #9 (rendering scale → fold nodes):** resolved. The original framing
-  ("many nodes + 3D edges + transparency + text performance") was a PHANTOM, born
-  of flat-graph / fat-node thinking. Real shape: NOT a GPU/perf problem, NOT a
-  generic clutter problem — the ABSENCE of a composition primitive. The primitive:
-  a **FOLD NODE** that contains a subgraph and inherits its boundary-crossing wires
-  as its own ports. General case: ALL boundary-crossing wires (any wire from
-  outside into the subgraph → fold-node input; any wire from inside to outside →
-  fold-node output). Linear-chain is the special case (first-child inputs /
-  last-child outputs), not the definition. When folded, only the fold node is
-  active/animated; the interior is dormant. Execution is bounded to the visible
-  level — "only run the visible nodes" — so neither render load nor simulation load
-  reaches 50–100 at once. Comfortable zone ~15 active nodes per level; if more
-  needed, fold. This inversion is available because nodes are LIGHTWEIGHT (thin
-  nodes make attention-scoped on-demand execution cheap and correct; the pump means
-  human-speed observation IS the pacing). Industry runs the whole flat graph and
-  render-culls because its nodes are fat and its graphs must evaluate completely.
-  Substrate: fold node is a new node kind (structural, not view-only) — requires
-  FoldNode.tsx + registry entry + Go nodes/Fold/ in one commit per the landing
-  rule. Open: what a folded node presents at its boundary while interior is dormant.
+- **Problem #5 (layout-derivation coverage):** resolved. Manual placement is NOT
+  dishonest — the dishonesty 3D fixes is the 2D projection manufacturing false edge
+  crossings, not the authorship of coordinates. Existing `x,y` coordinates kept
+  as-is; only `z` is new. Decision for now: `z = 0` for every node. The 3D editor
+  opens as an exact replica of the 2D diagram. What drives depth (structural rank,
+  ring membership, lattice layer, manual z) is deferred until friction surfaces it.
+- **Problem #6 (disorientation):** RETIRED as a phantom. The only real bearing is
+  flow direction, which is invariant and self-displaying via the pump animation.
+  "See the whole graph at once" was a 2D-flatness artifact wrongly imported as a
+  required "home" state. No fix needed. Optional user-saved camera snapshots are the
+  one honest convenience; deferred until friction.
+- **Problem #7 (label/panel legibility):** resolved. Two carriers, strictly
+  separated: TEXT (node label + pseudo panel) rides the billboarded HTML/DOM overlay
+  from Problem #2 — never goes edge-on. VALIDATION FLAG is color + edge highlight
+  on the 3D node body (mirrored onto the sign post) — visible from any angle, no
+  billboarding required. No new 3D surface introduced.
+- **Problem #9 (rendering scale → fold nodes):** resolved including fold-node
+  boundary. The original framing ("many nodes + 3D edges + transparency + text
+  performance") was a PHANTOM. Real shape: absence of a composition primitive. The
+  primitive: a **FOLD NODE** with its OWN FULLY INDEPENDENT INTERFACE (NOT mapped
+  to children, NOT derived from subgraph's boundary-crossing wires). When folded,
+  only the fold node is active/animated; interior is dormant. Outputs while folded
+  come from a **FED value** (edge-seed-style) presented at the fold node's own
+  output port. Constraint: only well-defined for SIMPLE (pipe-like) subgraphs;
+  complexity is not foldable. Comfortable zone ~15 active nodes per level; fold if
+  more needed. Substrate: fold node is a new node kind (structural, affects
+  execution) — FoldNode.tsx + registry entry + Go nodes/Fold/ in one commit per the
+  landing rule.
 - **Problem #10 (input-device variance):** resolved. **Trackpad-first.** The
   editor ships first on a trackpad; Problem #1's gesture design stands as-is —
   drag = rotation, floating pan pad for X/Y, ^/v hold for Z, roll slider. Trackpad
@@ -145,16 +154,27 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
 
 ### Open problems
 
-All design problems #1–#10 are resolved. No open problems remain on this planning
-branch. Next work is implementation (see "Next concrete step" in 3d-editor.md).
+All design problems #1–#10 are resolved. No open design problems remain on this
+planning branch. The following minor conventions are deferred to implementation —
+settle them when friction surfaces, not before:
+
+- **Empty-space pivot (#1):** what a drag rotates about when no item was clicked
+  at mouse-down (scene center, fixed depth, or disable rotation).
+- **Badge placement + large-count format (#3):** where the badge anchors when the
+  front node is partly occluded; threshold and format for large behind-counts.
+- **Trackpad multitouch richer gestures (#10):** two-finger pan, pinch dolly,
+  two-finger rotate as upgrade over the floating pan-pad / ^/v buttons.
 
 ### Next concrete step
 
-Take **Problem #5 (layout-derivation coverage)** — does the
-structure→coordinate function place real, irregular/mixed topologies, or fall
-back to manual 3D placement? Core tension: fully-derived layout (honest,
-automatic, may produce garbage for irregular graphs) vs manual placement (always
-sensible but positions stop meaning anything, breaking the honesty axiom).
+The design pass is **complete**. Next is **implementation**.
+
+Smallest honest first slice: stand up the react-three-fiber canvas rendering
+existing nodes at their `x,y` with `z = 0` — the Problem #5 "exact 2D replica"
+starting point — before any 3D-specific behavior (no gesture work, no layout
+derivation, no pulse changes). Once R3F code lands, run the queued
+`/security-review` skill + supply-chain/CSP audit checklist recorded in
+`3d-editor.md`.
 
 ### Separate deferred task (paused — NOT this branch)
 
