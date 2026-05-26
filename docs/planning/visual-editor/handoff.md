@@ -7,34 +7,50 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26 — editor-r3f MERGED to main (ccbff474); NO task in flight. R3F is sole editor; reactflow retired.)
+## State at handoff (2026-05-26 — On task/feature-audit; feature audit doc landed (e3c9d7e0). main has R3F sole editor (merged ccbff474).)
 
-**Active branch:** `main`. No task branch in flight.
+**Active branch:** `task/feature-audit`. Branched off main after editor-r3f was merged at ccbff474.
 
-### Last completed — rf-retirement (editor-r3f → main, merged ccbff474)
+Branch-local doc: `docs/planning/visual-editor/feature-audit.md` (landed in commit e3c9d7e0, frontmatter `branch: task/feature-audit`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated.
 
-R3F retirement Phases 0–6 fully complete and merged:
+### Last completed — feature audit of the 3D R3F visual editor
 
-- **Phase 0 — pacing handshake restored:** ThreeView PulseBead posts `{type:"delivered", edgeId}` when `t >= 1`, guarded once-per-pulse via `claimDelivered`. Go's `PacedWire.NotifyDelivered()` unblocks; substrate advances at human pace.
-- **Phases 1+2 — orphaned rf/ files deleted:** removed `rf-imperative.ts`, `fire-flash-state.ts`, `slots-state.ts`, `held-values.ts`. `pump.ts` slot/fire branches stubbed to no-ops.
-- **Phases 3+4 — live R3F infra relocated out of rf/:** `types.ts` → `webview/`; state stores → `webview/state/`; pulse/pump/trace-kinds → `webview/three/`; adapters → `webview/state/adapter/`; `RunButton` → `webview/three/`; node-defs + registry → `webview/schema/`. All `reactflow` import sites removed; `RFNode`/`RFEdge` now locally defined in `webview/types.ts`.
-- **Fix — tsc/guard regressions after the move** (commit `a309d838`): `history.ts` `Snapshot` typed; `spec-to-flow.ts:105` cast for fold/note/member nodes; `check-trace-kind-parity.sh` paths updated.
-- **Phases 5+6 — reactflow npm dep removed:** deleted CSS import in `main.tsx`; removed `reactflow` from `package.json`; pruned 604 lockfile lines. Zero `reactflow` importers remain in `src/`.
-- **Pre-merge strip:** branch-local `rf-retirement.md` stripped in commit `ff806af8` before merge.
-- **Late catch (reinforces `feedback_verify_subagent_commits`):** required import-rewrite edits to `ThreeView.tsx` and `store.ts` were left uncommitted by a subagent, so HEAD briefly didn't compile; fixed in commit `730fcb18` before the merge.
+Produced a planned-vs-implemented feature audit covering the full surface of the editor as of the R3F sole-editor state on main.
 
-### Next / open work (non-blocking, defer until friction)
+**Scorecard:**
+- ~26 features implemented and working
+- 5 partial / wired-but-inert
+- 11 planned-not-built
+- 10 deferred-by-design
 
-- **(a) RF prefix rename:** `RFNode`/`RFEdge` type names in `webview/types.ts` still carry the `RF` prefix — rename to `WFNode`/`WFEdge` or `Node`/`Edge` whenever it causes confusion.
-- **(b) rf/ folder misnomer:** `src/webview/rf/` still holds two live files (`adapter.ts` re-export, `animation-fields.ts`). The folder name is a misnomer post-retirement; relocate to `webview/state/` and `webview/three/` respectively, then delete the folder.
-- **(c) ThreeView per-frame re-render perf smell:** ThreeView re-renders every frame when idle (~60fps, no interaction). Root cause uninvestigated — likely an unmemoized store selector or per-frame `setState`. Out of scope until it causes measurable jank.
-- **(d) topology.json working-tree modification:** node-drag view positions (readGate1, inhibitRight0 x/y) are modified but uncommitted intentionally. Do NOT stage or discard.
-- **(e) Separate paused branch:** `task/inhibitright-pseudo` exists on origin — **InhibitRightGate pseudo-text projection** (InhibitRightGate params L/R; semantic "L pass / R inhibit"). Paused while 3D work was in flight; still unstarted.
+**Key gaps found (planned, not built — mostly direct-manipulation editing affordances lost in the RF→R3F cutover):**
+multi-select, node delete, edge delete, edge reconnect, node palette / add-node, sublabel inline edit, PseudoPanel-in-3D, port drag, edge-kind context menu, edge midpoint drag, grow-handle, Fold node Go primitive.
+
+**Partial / inert:**
+- **Undo-redo:** snapshot stack implemented (`history.ts`) and pushSnapshot exists, but only the edge-create path calls it. Node drags do not push snapshots — undo does not cover drags.
+- **Interactive view-save:** `markViewSynced` is called on `loadView` (store.ts:76) but not after camera moves or node drags. Drag/camera positions do not persist across reloads without a manual Save.
+- **Fit-view:** fit-on-load only; no keyboard shortcut (f / Shift-F) for manual re-fit.
+- **Folds:** state module exists; no 3D mesh rendering.
+- **Z-coordinate:** schema supports it; always 0 in practice.
+
+**Verification correction (audit-correctness.md H1/H2 are now STALE):** those entries claim `setSpecMeta` and `markViewSynced` are "never called." Both claims no longer hold against current code — `setSpecMeta` IS called (store.ts:66) and `markViewSynced` IS called on loadView (store.ts:76). The audit-correctness.md doc should be annotated or removed before any merge.
+
+### Open decisions / next
+
+**(a) feature-audit.md fate:** decide whether to leave it branch-local (stripped on merge, audit is lost) or relocate it to `docs/planning/visual-editor/` with updated frontmatter so it survives the merge. The audit is reference material for future friction-driven work; relocation is likely worth it.
+
+**(b) Backlog from the 11 gaps:** these are the candidate list for friction-driven new work. Highest-friction candidates (basic editing affordances that users will hit immediately): **node/edge delete** and **multi-select**. Those were present in the RF editor and are conspicuously absent in the 3D editor. Pick one as the next task branch when friction justifies it.
+
+**(c) audit-correctness.md stale claims:** H1 and H2 are factually wrong against current code. Annotate with a correction note or drop the doc before merging the branch.
+
+**(d) Interactive view-save gap:** `markViewSynced` is not called after camera or node-drag interactions, so positions are lost on reload without an explicit Save. This is a real residual gap worth a focused fix (small scope, clear contract).
+
+**(e) topology.json working-tree modification:** node-drag view positions are modified but uncommitted intentionally. Do NOT stage or discard.
 
 ### Key files
 
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole (sole) 3D view: node drag, edge tubes, pointer state machine.
-- `tools/topology-vscode/src/webview/three/store.ts` — single zustand source of truth (nodes/edges/selection, load/save actions).
+- `tools/topology-vscode/src/webview/three/store.ts` — single zustand source of truth (nodes/edges/selection, load/save actions). `setSpecMeta` called at :66; `markViewSynced` called on loadView at :76.
 - `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar; posts `{ type: "ready" }` to unblock host load sequence.
 - `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/three/pump.ts` — read from the store.
 - `tools/topology-vscode/src/webview/three/pulse-state.ts` — R3F pulse read-store (getPulseMap, setPulse).
@@ -42,6 +58,7 @@ R3F retirement Phases 0–6 fully complete and merged:
 - `tools/topology-vscode/src/webview/state/adapter/{spec-to-flow,flow-to-spec}.ts` — pure adapters, RF-free.
 - `tools/topology-vscode/src/webview/rf/` — two residual re-export/metadata files (`adapter.ts`, `animation-fields.ts`); folder name is a misnomer post-retirement.
 - `tools/topology-vscode/src/webview/schema/` — node-defs.ts + registry.ts (relocated from rf/).
+- `docs/planning/visual-editor/feature-audit.md` — branch-local audit doc (frontmatter `branch: task/feature-audit`).
 
 ### Substrate model contract (stable)
 
