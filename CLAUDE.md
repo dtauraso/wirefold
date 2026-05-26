@@ -2,7 +2,7 @@
 
 ## Substrate model — read first
 
-Before changing anything in the **Go substrate** (`nodes/`, `Wire.go`,
+Before changing anything in the **Go substrate** (`nodes/`, `nodes/Wiring/paced_wire.go`,
 `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump** (`tools/topology-vscode/src/webview/rf/pump.ts`),
 read [MODEL.md](MODEL.md). It pins the substrate model and the banned
 vocabulary that signals drift. If your reasoning uses banned
@@ -30,10 +30,12 @@ pointer at the top of this file is the only entry point you need.
    conversion, no extra registration.
 3. The Go node package under `nodes/<Kind>/`.
 
-**Wire props:** `tools/topology-vscode/src/webview/rf/edges/SubstrateEdge.tsx`
-threads wire props from the RF store into the edge component. A new wire
-prop must be added there in the same commit it is used; otherwise the
-editor path is silently incomplete.
+**Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`)
+are part of `EdgeData` (`tools/topology-vscode/src/webview/rf/types.ts`) and flow from
+the store into `SingleEdgeTube` via `GraphEdges` in
+`tools/topology-vscode/src/webview/three/ThreeView.tsx`. A new wire prop must be
+added to `WireProps` in `wire-defs.ts` and threaded through `SingleEdgeTube` in the
+same commit it is used; otherwise the editor path is silently incomplete.
 
 **Drift rule:** if TS code outside `pump.ts` starts accumulating slot-phase,
 backpressure, or firing-rule logic, that is drift — those belong in Go.

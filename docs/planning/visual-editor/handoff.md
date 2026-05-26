@@ -105,12 +105,12 @@ Pseudo files below are for the **deferred** `task/inhibitright-pseudo` branch on
 - `tools/pseudo/chaininhibitor.go`, `tools/pseudo/readgate.go` — pseudo pattern references
 - `cmd/pseudo/main.go` — pseudo subcommand dispatch
 - `nodes/inhibitrightgate/{node.go,SPEC.md}` — target to regenerate / mark `hasPseudo:true`
-- `tools/topology-vscode/src/handle-message.ts` — handleChainInhibitor{Render,Save} + pseudoTable
-- `tools/topology-vscode/src/webview/rf/PseudoPanel.tsx` — double-click-to-edit panel
+- `tools/topology-vscode/src/extension/handle-message.ts` — handleChainInhibitor{Render,Save} + pseudoTable
+- `tools/topology-vscode/src/webview/rf/PseudoPanel.tsx` — double-click-to-edit panel (deleted in Slice 3; must be re-created for this task)
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../MODEL.md#slot-phase-lifecycle). Unchanged by the
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Unchanged by the
 3D move — going 3D is a medium change; the Go substrate,
 slot-phase/AND-gate/backpressure model, and `pump.ts` firing logic stay
 untouched.

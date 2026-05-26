@@ -15,4 +15,4 @@ Concretely: if `Edit` on a substrate-r file is blocked, do not:
 
 The hook is a discipline gate. Bypassing it defeats the point. The block message tells you what to do instead (derive the model rule, compare to current code, fix misalignment first).
 
-Canonical example: `.claude/hooks/substrate-r-model-derive.sh` guards `tools/topology-vscode/src/webview/substrate-r/`. It fires on `Edit|Write|MultiEdit` and on `Bash` commands that contain the substrate-r path plus a write verb. Both paths are intentional — a subagent previously bypassed the Edit guard by invoking `python3` from Bash.
+Canonical example: PreToolUse hooks guard substrate or other sensitive paths. They fire on `Edit|Write|MultiEdit` and on `Bash` commands that touch guarded paths with write verbs. Both paths are intentional — a subagent previously bypassed the Edit guard by invoking `python3` from Bash.
