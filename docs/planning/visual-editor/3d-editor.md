@@ -107,6 +107,100 @@ geometry it travels over changes.
 - **z-dolly trigger:** scroll wheel assumed — confirm the input is available in
   the chosen react-three-fiber setup.
 
+## Problem #1 (DOF mismatch) — resolved control scheme
+
+**The problem.** 3D navigation needs 6 degrees of freedom (translate X/Y/Z plus
+three rotations). A mouse gives 2 (drag) plus scroll wheel plus buttons. Without
+a principled mapping, multiple operations must share an input and disambiguation
+requires modes — hidden state that causes errors.
+
+**The resolution.** Reserve the pointer drag *entirely* for rotation. Give every
+other DOF its own dedicated on-screen widget. No two operations ever share an
+input: zero mode-collision, fully discoverable.
+
+### Rotation rule (the drag)
+
+Pivot = the clicked point at its depth `(x_picked, y_picked, z)`. Rotation is
+computed per successive pair of points in the drag: each segment defines a line,
+the rotation axis lies in the screen plane perpendicular to that segment, the
+slope sign gives direction, and magnitude is proportional to segment length.
+Increments compose as quaternion products.
+
+Consequences:
+
+- A straight drag = constant axis (one rotational DOF swept).
+- A curved drag = axis sweeps continuously (two rotational DOF mixed naturally).
+- Total rotation accumulates along the drag's **arc length** — a wiggly path
+  adds rotation even if the endpoints are nearby.
+- Two of the three rotational DOF are reachable from any drag. The one rotation a
+  drag *cannot* directly produce is spin about the line of sight (screen-plane
+  twist/roll); that gets its own dedicated control.
+
+### Control table
+
+| DOF | Control |
+|---|---|
+| Rotate (drag direction A) | pointer drag |
+| Rotate (drag direction B) | pointer drag |
+| Rotate (screen-plane spin / roll about line of sight) | scale / slider widget |
+| Translate X | pan pad |
+| Translate Y | pan pad |
+| Translate Z | ^/v button (hold to dolly) |
+
+### Open conventions (not blockers)
+
+- Which sign `^` is: dolly toward the scene or dolly away.
+- Empty-space pivot: what a drag rotates about when no item was clicked at
+  mouse-down. Options: disable rotation entirely; fall back to scene center;
+  fall back to a fixed depth.
+
+### How 3D interaction is usually solved (medium comparison)
+
+Per CLAUDE.md's medium-vs-substance rule, interaction is **medium** — the
+converged industry answer is the default unless a deviation is justified. The
+five families:
+
+1. **Orbit/pan/zoom** (Three.js `OrbitControls`, Google Earth, most web and CAD
+   viewers): orbit = left-drag (yaw + pitch, up vector locked, no roll);
+   pan = right-drag or Shift+drag; zoom = scroll wheel. This is the converged
+   default for a web 3D viewer.
+
+2. **Trackball / arcball**: drag → rotation via a virtual sphere; free tumble
+   including roll, no locked-up vector. Our drag rule is an arcball variant; the
+   distinctive part is pivoting about the *picked point* ("rotate about cursor"
+   in some CAD tools).
+
+3. **Modifier/button chords** (Blender MMB / Shift+MMB / Ctrl+MMB; Maya
+   Alt+L/M/R): same drag, meaning set by button or key held plus scroll wheel.
+   Fluid for experts; hidden and error-prone for anyone else.
+
+4. **Dedicated 6-DOF hardware** (3Dconnexion SpaceMouse): all 6 DOF
+   simultaneously via a puck. Not a software design choice.
+
+5. **Touch / on-screen controls**: one-finger orbit, two-finger pan, pinch
+   zoom, two-finger twist for roll; or on-screen joysticks, gizmos, ViewCube
+   (mobile, kiosk, games).
+
+**Where our scheme lands and the trade-off.** Rotation = family 2 (well-trodden;
+free tumble is the distinctive benefit over locked-up orbit). Pan-pad +
+z-buttons + roll-slider = NOT the desktop default; it is closer to family 5
+(touch/kiosk). The trade-off: widget-per-DOF is collision-free and fully
+discoverable but slower, less fluid, and consumes screen space; the default
+(drag + chords + wheel) is fast but hidden and mode-error-prone.
+
+Deviation is **justified for rotation**: topology needs genuine 3D orientation
+that locked-up orbit denies, and the collision-free discoverability matters for
+a tool where orientation errors silently scramble structural meaning. The
+widget-per-DOF choice for pan/z-translate is the more questionable deviation —
+scroll-to-zoom and shift-drag-pan are near-universal muscle memory.
+
+**Open question (record, do not resolve):** whether to keep arcball rotation but
+still use scroll wheel for z and shift-drag for pan — capturing the free-tumble
+benefit without reinventing the two most-muscle-memorized controls — vs. the
+all-widgets approach, which is only clearly justified when targeting touch,
+accessibility, or no-wheel hardware. Currently leaning all-widgets per David;
+revisit before the prototype.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
