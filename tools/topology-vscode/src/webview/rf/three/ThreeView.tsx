@@ -15,6 +15,18 @@ import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge } from "../rf-im
 import type { NodeData, EdgeData } from "../types";
 
 // ---------------------------------------------------------------------------
+// Label LOD constants
+// ---------------------------------------------------------------------------
+
+/** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
+const NEAREST_N = 8;
+
+/** Validation flag colors. */
+const FLAG_FILL = "#c62828";
+const FLAG_RING = "#ff5252";
+const FLAG_LABEL_BG = "rgba(198,40,40,0.85)";
+
+// ---------------------------------------------------------------------------
 // Gesture discrimination constants
 // ---------------------------------------------------------------------------
 
@@ -91,29 +103,44 @@ function GraphNode({
   node,
   selected,
   connectPending,
+  hovered,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
   connectPending: boolean;
+  hovered: boolean;
 }) {
   const pos = nodeWorldPos(node);
   const r = Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
-  const fillHex = node.data?.fill ?? "#ffffff";
-  const strokeHex = connectPending ? "#00ffaa"
+  const flagged = !!node.data?.validationError;
+
+  const fillHex = flagged ? FLAG_FILL : (node.data?.fill ?? "#ffffff");
+  const strokeHex = flagged ? FLAG_RING
+    : connectPending ? "#00ffaa"
     : selected ? "#ffcc00"
+    : hovered ? "#aaddff"
     : (node.data?.stroke ?? "#888888");
   const fillColor = new THREE.Color(fillHex);
   const strokeColor = new THREE.Color(strokeHex);
+  const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh>
         <sphereGeometry args={[r, 16, 16]} />
-        <meshStandardMaterial color={fillColor} />
+        <meshStandardMaterial
+          color={fillColor}
+          emissive={flagged ? new THREE.Color(FLAG_FILL) : new THREE.Color(0x000000)}
+          emissiveIntensity={flagged ? 0.4 : 0}
+        />
       </mesh>
       <mesh>
-        <torusGeometry args={[r, selected ? r * 0.14 : r * 0.08, 8, 32]} />
-        <meshStandardMaterial color={strokeColor} />
+        <torusGeometry args={[r, torusThick, 8, 32]} />
+        <meshStandardMaterial
+          color={strokeColor}
+          emissive={flagged ? new THREE.Color(FLAG_RING) : new THREE.Color(0x000000)}
+          emissiveIntensity={flagged ? 0.5 : 0}
+        />
       </mesh>
     </group>
   );
@@ -267,24 +294,62 @@ function RaycasterHelper({
 // Scene
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// NearestNTracker: computes nearest-N nodes to camera each frame (throttled).
+// Notifies via callback so the outer React tree can re-render label visibility.
+// ---------------------------------------------------------------------------
+
+function NearestNTracker({
+  nodes,
+  onNearestN,
+}: {
+  nodes: RFNode<NodeData>[];
+  onNearestN: (ids: Set<string>) => void;
+}) {
+  const { camera } = useThree();
+  const lastIds = useRef<string>("");
+  let frameCount = 0;
+
+  useFrame(() => {
+    frameCount++;
+    if (frameCount % 6 !== 0) return; // throttle: recompute ~10fps
+    const sorted = nodes
+      .map((n) => ({ id: n.id, dist: nodeWorldPos(n).distanceTo(camera.position) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, NEAREST_N)
+      .map((x) => x.id);
+    const key = sorted.join(",");
+    if (key !== lastIds.current) {
+      lastIds.current = key;
+      onNearestN(new Set(sorted));
+    }
+  });
+
+  return null;
+}
+
 function Scene({
   nodes,
   edges,
   selectedId,
+  hoveredId,
   connectPendingId,
   cameraRef,
   onPickRequest,
   onPositions,
+  onNearestN,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
+  hoveredId: string | null;
   connectPendingId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number) => string | null) | null
   >;
   onPositions: (positions: { id: string; px: number; py: number }[]) => void;
+  onNearestN: (ids: Set<string>) => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   return (
@@ -293,10 +358,17 @@ function Scene({
       <CameraRefBridge cameraRef={cameraRef} />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
+      <NearestNTracker nodes={nodes} onNearestN={onNearestN} />
       <ambientLight intensity={0.6} />
       <directionalLight position={[0, 0, 10]} intensity={0.8} />
       {nodes.map((n) => (
-        <GraphNode key={n.id} node={n} selected={n.id === selectedId} connectPending={n.id === connectPendingId} />
+        <GraphNode
+          key={n.id}
+          node={n}
+          selected={n.id === selectedId}
+          hovered={n.id === hoveredId}
+          connectPending={n.id === connectPendingId}
+        />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} />
     </>
@@ -768,6 +840,8 @@ export function ThreeView() {
   const [nodes, setNodes] = useState<RFNode<NodeData>[]>(() => rfGetNodes() as RFNode<NodeData>[]);
   const [edges, setEdges] = useState<RFEdge<EdgeData>[]>(() => rfGetEdges() as RFEdge<EdgeData>[]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
   // Connect mode: first click = pending source node id; second click = create edge.
@@ -848,6 +922,36 @@ export function ThreeView() {
     onConnectClick,
   );
 
+  // Hover tracking: lightweight raycast on pointer-move to update hoveredId.
+  const hoverRafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+  const onPointerMoveWithHover = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      onPointerMove(e); // original interaction handling
+      // Throttle hover raycasts via rAF.
+      if (hoverRafRef.current !== null) return;
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      hoverRafRef.current = requestAnimationFrame(() => {
+        hoverRafRef.current = null;
+        if (!pickRequest.current) return;
+        const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+        const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+        const hitId = pickRequest.current(ndcX, ndcY);
+        setHoveredId(hitId);
+      });
+    },
+    [onPointerMove, pickRequest],
+  );
+
+  const onPointerLeave = useCallback(() => {
+    setHoveredId(null);
+  }, []);
+
+  const onNearestN = useCallback((ids: Set<string>) => {
+    setNearestNIds(ids);
+  }, []);
+
   const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
 
   return (
@@ -856,8 +960,9 @@ export function ThreeView() {
       <div
         style={{ position: "absolute", inset: 0, touchAction: "none" }}
         onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
+        onPointerMove={onPointerMoveWithHover}
         onPointerUp={onPointerUp}
+        onPointerLeave={onPointerLeave}
         onWheel={onWheel}
       >
         <Canvas
@@ -870,18 +975,26 @@ export function ThreeView() {
             nodes={nodes}
             edges={edges}
             selectedId={selectedId}
+            hoveredId={hoveredId}
             connectPendingId={connectPendingId}
             cameraRef={cameraRef}
             onPickRequest={pickRequest}
             onPositions={onPositions}
+            onNearestN={onNearestN}
           />
         </Canvas>
       </div>
 
-      {/* Label overlay — real camera projection, updated every frame */}
+      {/* Label overlay — real camera projection, updated every frame.
+          LOD: show only hovered | selected | nearest-N nodes to avoid forest. */}
       {nodes.map((n) => {
         const pos = labelMap.get(n.id);
         if (!pos) return null;
+        const isHovered = n.id === hoveredId;
+        const isSelected = n.id === selectedId;
+        const isNearest = nearestNIds.has(n.id);
+        if (!isHovered && !isSelected && !isNearest) return null;
+        const flagged = !!n.data?.validationError;
         return (
           <div
             key={n.id}
@@ -892,8 +1005,12 @@ export function ThreeView() {
               transform: "translateX(-50%)",
               fontSize: 11,
               fontFamily: "monospace",
-              color: "#e0e0e0",
-              textShadow: "0 0 3px #000",
+              color: flagged ? "#fff" : "#e0e0e0",
+              background: flagged ? FLAG_LABEL_BG : "transparent",
+              border: flagged ? "1px solid #ff5252" : "none",
+              borderRadius: flagged ? 3 : 0,
+              padding: flagged ? "1px 4px" : 0,
+              textShadow: flagged ? "none" : "0 0 3px #000",
               pointerEvents: "none",
               whiteSpace: "nowrap",
               zIndex: 10,
