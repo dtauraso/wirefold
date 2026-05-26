@@ -353,39 +353,56 @@ Recovery of a hidden node uses the same camera gestures and buttons from
 Problem #1 (rotate, dolly, pan to move the viewpoint). No transparency, no
 relocation, no shadow/fade.
 
-### Discovery signal: edge thickness proportional to occluded-node count
+### Discovery signal: count badge on the front node
 
 The one gap full-occlusion allows is **discovery loss** — a node the user has
-never seen because it is always behind another. That gap is closed by a signal
-carried on the **front node's edges**:
+never seen because it is always behind another. That gap is closed by a **count
+badge** on the visible front node:
 
-- A visible node's edges thicken **in proportion to the number of nodes hidden
-  directly behind it** (from the current viewpoint).
-- A thick edge reads as "there are nodes back here — rotate to see them."
-  Thicker = more nodes occluded behind this one.
+- A small numeric badge (e.g. "+3") appears on the front node showing how many
+  nodes are hidden directly behind it from the current viewpoint.
+- The badge reads as "there are nodes back here — rotate to reveal them."
 
 No transparency, no outline-through-walls, no structure alteration. The front
-node stays solid; its edges carry the count.
+node stays solid; the badge carries the count.
 
-### Channel reservation
+### Why badge over edge thickness
 
-Edge thickness is now a **reserved channel for this depth/occlusion signal**.
-This is consistent with Problem #2 reserving color and shape for DATA (kind,
-validation flag, port/wire kind, pulses). Thickness is spent on occlusion-count,
-not data — the two do not collide.
+A badge is **absolute and self-describing** — "+3" reads at a glance without
+comparing it against neighboring edges. Edge thickness is only comparative: the
+user must infer the count by judging relative widths, and that channel collides
+with the conventional meaning of edge width (data weight, flow capacity). Keeping
+thickness free for data is consistent with Problem #2 reserving color and shape
+for DATA (kind, validation flag, port/wire kind, pulses) — the same principle
+applied to the edge-width channel.
+
+### Industry grounding
+
+Allowing full occlusion plus camera-motion recovery is the empirically supported
+mainstream (Ware & Franck). For signalling "how many nodes are hidden here,"
+large-graph tools — Gephi, Cytoscape, and most network UIs — use a count badge
+or "+N" aggregation marker; that is the conventional pick for this slot.
+
+The **HALO** technique (depth-halo / silhouette-through-walls; Interrante /
+Everts) was considered and not chosen. A HALO shows the hidden item's actual
+shape through the occluding surface, which conveys more detail — but it adds
+outline clutter and more visual weight than is needed when the only question is
+"is something back there, and how many?" A badge answers that question without
+drawing into the occluded region.
 
 ### Timing: post-gesture, not per-frame
 
-Occlusion counts (and therefore edge thicknesses) are recomputed **after a
-gesture settles**, not continuously during drag or rotate. No per-frame cost,
-no flicker mid-motion.
+Badge counts are recomputed **after a gesture settles**, not continuously during
+drag or rotate. No per-frame cost, no flicker mid-motion.
 
 ### Open conventions (not blockers)
 
 - **Edge-on-node occlusion.** Does an edge (rather than a node) occluding a
-  node count toward the behind-count?
-- **Thickness scale / cap.** Exact thickness progression and upper bound for
-  large behind-counts.
+  node count toward the badge number?
+- **Badge placement.** Where does the badge anchor when the front node itself is
+  partly occluded?
+- **Large-count format.** Threshold and display format for large behind-counts
+  (e.g. "+99+" cap).
 
 ## Next concrete step
 
