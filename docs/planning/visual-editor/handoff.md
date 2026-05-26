@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, editor-r3f — audit merged, blank-diagram fixed)
+## State at handoff (2026-05-26, editor-r3f — pulses wired, rf-retirement plan, blank-reload bug open)
 
-**Active branch:** `editor-r3f` (long-lived R3F source line; NOT merged to main). This session: fixed the blank-diagram regression, ran a four-stream code audit on task/full-code-audit, fixed the actionable findings, and fast-forward-merged the audit back into editor-r3f. task/full-code-audit remains on origin (not deleted).
+**Active branch:** `editor-r3f` (long-lived R3F source line; NOT merged to main).
 
 ### Why 3D
 
@@ -52,38 +52,29 @@ This principle is also saved in
 [3d-editor.md](3d-editor.md) (branch-local — does **not** ride the
 merge).
 
-### Fixed this session (all committed + pushed, build green)
+### Done this session (committed + pushed to editor-r3f, build green)
 
-- **Blank diagram:** the R3F cutover dropped the webview→host "ready" post that the old RF App owned. The host waits for "ready" before sending load/view-load (handle-message.ts case "ready"), so the store was never fed. main.tsx now posts { type: "ready" } after the message listener registers. (Plus a tsc fix: computeOcclusionCounts now takes {w,h}.)
-- **View-save + spec-metadata dead wiring (audit H1/H2):** markViewSynced and setSpecMeta were never called in the R3F path → view-saves permanently early-returned (drag positions dropped) and flowToSpec stripped passThrough/notes metadata on first save. Now called in store.loadView / store.loadSpec respectively.
-- **Undo/redo repointed to the store:** rf/history.ts no longer writes to the dead rf-imperative; pushSnapshot reads useThreeStore, undo/redo call a new store.restoreNodesEdges action; Cmd/Ctrl+Z + Cmd/Ctrl+Shift+Z wired into ThreeView's existing keydown handler. rf-imperative.ts is now FULLY ORPHANED (zero importers).
-- **createEdge silent rejections:** the three return-null guards (self-loop, unresolved handles, input-already-wired) now console.warn with reasons.
-- **Audit tooling/docs:** audit-spec-view-hygiene.mjs repointed from nonexistent cmd/topogen/main.go to nodes/Wiring/loader.go (now runs); stale doc refs fixed (Wire.go→paced_wire.go in MODEL.md/CLAUDE.md, SubstrateEdge.tsx→SingleEdgeTube, handoff path depths, 2 memory files, ARCHITECTURE.md).
+- **Wire-pulse animation WIRED (commit 3154816e):** main.tsx message handler gained a `trace-event` case calling `handleTraceEvent(msg.event)` (imported from ./rf/pump). This connects the existing producer (pump.ts → setPulse, keyed by edge.id) to the existing consumer (ThreeView PulseBead reading getPulseMap().get(edgeId)). Message shape `{type:"trace-event", event}` matches what extension.ts posts; edge.id keys line up. `npm run build` clean, out/webview.js refreshed. NOT yet live-verified — beads-animate-on-Run is UNCONFIRMED.
+- **rf-retirement plan written (commit 3c819011):** docs/planning/visual-editor/rf-retirement.md (branch-tagged). 6-phase plan to retire the rf/ folder. Key facts it records: R3F NEVER renders via reactflow at runtime — only couplings are one dead CSS import in main.tsx + RFNode/RFEdge type aliases in 7 files (all `import type`). Three-way bucket: (A) dead-now = rf-imperative.ts; (B) live-but-misfiled-under-rf = types.ts, viewer-state.ts, history.ts, dimmed.ts, folds-state.ts, run-status.ts, pulse-state.ts, pump.ts, trace-kinds.ts, adapter/*, panels/RunButton.tsx, nodes/node-defs.ts+registry.ts (relocatable, no runtime reactflow dep); (C) genuine reactflow coupling = the RFNode/RFEdge type sites only. DECISION LOCKED: keep pulses (pulse-state.ts + pump.ts + trace-kinds.ts are live R3F animation infra); fire-flash-state.ts/slots-state.ts/held-values.ts have NO R3F consumer and are deletable.
 
-### Audit verdict (docs/planning/visual-editor/audit-*.md — branch-tagged)
+### BLOCKING open bug — blank diagram on reload (intermittent)
 
-- **Substrate: CLEAN.** No MODEL.md violations; go build/test pass; all five guard scripts green; pump.ts is render-only with its slot-phase write at the canonical home. Only the substance was verified healthy — every real finding was in the TS editor layer or docs.
-- Three audit docs are on disk (substrate-integrity, correctness, hygiene). audit-r3f-residue.md was NOT written to disk (the residue findings live in the cutover-residue summary; regenerate if a standalone doc is wanted).
+- Symptom: on window reload the 3D diagram sometimes comes up blank.
+- CRITICAL clue captured this session: it came back WITHOUT a reload (user confirmed "I have not reloaded") — i.e. the view populated asynchronously after an initial empty window. So it is NOT a load-order race that re-running `load` fixes; it is an async-arrival / late-render window.
+- RULED OUT this session (do not re-investigate): viewer-state module duplication (single holder at rf/viewer-state.ts — store reads/writes the same instance); parseSpec throwing on the embedded top-level `view` key (parseSpec TOLERATES extra keys, loadSpec does not throw); module-load throw in the pump import chain (chain is clean, no top-level side effects); stale bundle (out/webview.js is fresh, contains the trace-event handler).
+- NOT yet captured: the actual webview DevTools console error/log ordering during a blank instance — probe bridge wrote ZERO .jsonl on the blank reload. This is the missing evidence.
+- Design smell noted (agent finding, not yet the confirmed cause): extension posts the FULL topology.json (incl. embedded `view` key) as the `load` message, and the `view` separately as `view-load` — two order-dependent messages. extension `send()` = document.getText() (unstripped); `sendView()` = extractViewText(). loadView() NO-OPS if `_lastSpec` not yet cached. The clean fix if confirmed: make store render order-independent (render when both spec+view present), or strip `view` from the load text and fold it into one render path.
+- Two unanswered diagnostic questions for next session to ask the user (or capture via console): (1) how long was it blank — sub-second startup latency vs several seconds; (2) did it return on its own or only after an interaction (resize/click/mouseover). Sub-second + self-return = benign startup latency (render-as-soon-as-spec-lands fix); interaction-triggered = scene not re-rendering until forced.
+- Process note for next session: 5 static-analysis subagents ran without catching a real error (cost-overrun pattern — speculating on an unverified diagnosis). NEXT STEP IS EVIDENCE, NOT MORE INFERENCE: open webview DevTools (Developer: Open Webview Developer Tools; switch to inner active-frame), reload until blank repros, capture the console error + log ordering, THEN fix.
 
-### Open items NOT yet done (need decision or sign-off)
+### Working-tree state
 
-- **Trace-event animations (residue #3 / DECISION NEEDED):** pump.ts / handleTraceEvent is never imported by the R3F path → run animations (fire flashes, pulse dots, held-value badges) are inert. This is feature-vs-cleanup: either WIRE handleTraceEvent into main.tsx's message handler AND build the ThreeView render layer for pulse/fire/held-value state (real feature work), OR DELETE pump.ts + its 4 state modules (fire-flash-state, slots-state, held-values, trace-kinds) as dead RF code. Not yet decided.
-- **Safe deletions pending sign-off (destructive):** rf-imperative.ts (now zero importers), rf/nodes/node-defs.ts + rf/nodes/registry.ts (zero importers — but CLAUDE.md's substrate landing rule still NAMES registry.ts as THE node-kind registry; deleting it means updating that rule to the R3F reality first). pump.ts cluster depends on the #3 decision.
-- **reactflow dep removal (sign-off + prep):** all 7 reactflow imports are TYPE-only (RFNode/RFEdge) + one dead CSS import in main.tsx. Removable once those type shapes are re-homed into our own types file and the CSS import dropped. Needs user sign-off (dependency removal).
-- **No transient-message UI surface:** createEdge rejections are console-only; run-status is reserved for sim state. A small editorMessage store field + auto-clear is the missing piece if UI feedback is wanted.
-- **LIVE VERIFICATION STILL PENDING:** reload and confirm — diagram renders (ready-handshake fix), drag persists across reload (H1 fix — the handoff's prior "confirmed persisting" predates today's fixes and is suspect), undo (Cmd+Z) reflects in R3F, connect A→B. Triage in one pass.
+- topology.json shows as modified (M) — node-drag positions written to its embedded `view` key (~4 lines: readGate1, inhibitRight0 x/y). Confirm intended before any commit that would sweep it up.
 
-### Deferred-until-friction (do NOT speculatively patch)
+### Next concrete steps (in order)
 
-- z still 0 for all nodes (z-derivation deferred). The 3 in-code low-sev items: pick-by-position scene.traverse fragility, roll-slider zero drift, CameraSettleDetector per-frame string snapshot. parseCamera is 2D-only (will need a 3D branch WHEN 3D camera persistence is built — not before).
-
-### Next concrete step: edge BEND/route (view-only midpoint handle)
-
-User-requested. Drag a midpoint handle to pull a 3D edge's bezier tube through space (route around occluders). VIEW-ONLY — no topology change. Design (record fully):
-
-- **Persist** to a NEW field on `EdgeView` in `src/webview/state/viewer/types.ts` + its parser `parse.ts` — e.g. `bend?: { x: number; y: number; z: number }`. **Do NOT use the substrate `midpointOffset` WireProp** (that's spec-level / topology; this is view-only and must stay in `topology.view.json`).
-- **Render:** `SingleEdgeTube` (`ThreeView.tsx` ~L295–327) currently auto-computes control point `_p1 = mid + lift*(span*0.25)` where `lift = (0,0,1)×edgeDir`. Add the stored bend: `_p1 = mid + autoLift + bend`. Render a small DRAGGABLE handle sphere at the curve midpoint, shown on hover/selected edge (edge hover/selection state does not exist yet — add minimal hover).
-- **Interaction:** mirror the just-added `nodeDragRef` pattern with `edgeHandleDragRef { edgeId, planePointAtStart, midAtStart, snapshotPushed }`. Handles must be pickable (extend the pickRequest raycast to recognize handle meshes via `userData`). **Drag on a CAMERA-FACING plane through the handle (NOT the z=0 plane node-drag uses)** so the curve can be pulled out-of-plane in true 3D. `newMid = planePoint + (midAtStart − planePointAtStart)`; `bend = newMid − autoMid`. Persist on pointer-up: `patchViewerState(v => v.edges[id].bend = …)` + `scheduleViewSave()`; `pushSnapshot()` at drag start. Reuse/generalize `unprojectToPlane` to accept an arbitrary plane.
+1. **Phase 0 verification (BLOCKING all rf cleanup):** (a) confirm wire-pulses animate on Run; (b) capture + fix the intermittent blank-on-reload bug per the evidence-first note above. Do NOT start rf deletions until Phase 0 passes — debugging a flaky load path gets harder once modules are moving.
+2. Then execute rf-retirement.md: Phase 1+2 (deletions — needs sign-off), Phase 3+4 (refactor — lands freely), Phase 5+6 (reactflow dep removal — needs sign-off).
 
 ### Separate deferred task (paused — NOT this branch)
 
@@ -102,9 +93,11 @@ has multiple outputs. Paused while 3D work is in flight.
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole (sole) 3D view: node drag, edge tubes, pointer state machine.
 - `tools/topology-vscode/src/webview/three/store.ts` — the single zustand source of truth (nodes/edges/selection, load/save actions).
 - `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar; posts { type: "ready" } to unblock host load sequence.
-- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/rf/pump.ts` — read from the store now. pump.ts is INERT in the R3F path (handleTraceEvent not wired; see open items).
+- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/rf/pump.ts` — read from the store now. pump.ts is LIVE in the R3F path (handleTraceEvent wired via main.tsx trace-event case; pulse-state.ts is the R3F pulse read-store; ThreeView PulseBead is the pulse renderer). NOT yet live-verified.
+- `tools/topology-vscode/src/webview/rf/pulse-state.ts` — R3F pulse read-store (getPulseMap, setPulse); live R3F animation infra.
 - `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — FULLY ORPHANED (zero importers); pending deletion sign-off.
 - `tools/topology-vscode/src/webview/rf/adapter/{spec-to-flow,flow-to-spec}.ts`, `tools/topology-vscode/src/webview/state/viewer/*` — pure adapters/state, shared and RF-free.
+- `docs/planning/visual-editor/rf-retirement.md` — 6-phase rf/ retirement plan (branch-tagged); Phase 0 verification must pass before Phase 1+2 deletions.
 - `docs/planning/visual-editor/rf-to-r3f-cutover.md` — note it is now partially superseded (toggle/staged-removal framing is gone; the cut happened).
 
 Pseudo files below are for the **deferred** `task/inhibitright-pseudo` branch only, not this one:
