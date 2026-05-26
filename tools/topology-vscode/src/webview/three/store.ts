@@ -63,7 +63,13 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const rawJson = JSON.parse(specText);
       const spec = parseSpec(rawJson);
       const flow = specToFlow(spec, getFolds(), viewerState, viewerState.lastSelectionIds ?? [], getDimmed());
-      set({ nodes: flow.nodes as RFNode<NodeData>[], edges: flow.edges as RFEdge<EdgeData>[], _lastSpec: spec });
+      const nodes = flow.nodes as RFNode<NodeData>[];
+      const edges = flow.edges as RFEdge<EdgeData>[];
+      set({ nodes, edges, _lastSpec: spec });
+      // Mirror into rf-imperative so performSave() (which reads rfGetNodes/rfGetEdges)
+      // sees the loaded state even though the 2D RF App is no longer mounted.
+      rfSetNodes(() => nodes);
+      rfSetEdges(() => edges);
     } catch (err) {
       console.error("[ThreeStore] loadSpec failed", err);
     }
