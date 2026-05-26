@@ -115,22 +115,42 @@ share inputs and disambiguation requires modes — hidden state that causes erro
 
 ### Governing axiom: never sacrifice control
 
-The cardinal rule: an interaction scheme must keep **all six DOF directly and
-fully controllable**. Sacrificing control to make an input device feel fast or
-smooth is the disqualifying flaw. Fluency is not worth control — being expert at
-a tool that took control from you is still a loss.
+This is **not** a second rule competing with CLAUDE.md's medium-vs-substance
+rule. Two rulebooks force adjudication, and adjudication is where drift toward
+the industry default slips in. The axiom is a **classification clause** of the
+one existing rule — it tells you which side of the line 3D interaction falls on.
 
-**Why the conventions fail this.** The dominant families — orbit/pan/zoom,
-modifier-chord schemes (OrbitControls, Blender, Maya, CAD) — sacrifice control:
-fixed pivot instead of a movable one, locked "up" vector with no roll, hidden
-modes, no visible model of state. The trade is made purely to make a 2D mouse
-feel fluent. That trade is backwards.
+**The medium-vs-substance rule, applied here:**
 
-**Evidence it was always a workaround, not a good design.** The 3Dconnexion
-SpaceMouse exists. The same professionals who mastered Blender and Maya bought a
-separate 6-DOF puck specifically to escape the chords — voting with money that
-the 2D-input scheme was tolerated, not good. "Pros got fast" means "pros adapted
-to bad software/input, and the ones who could afford it paid to get out."
+- **RENDERING / PLUMBING = medium.** Three.js + react-three-fiber as the render
+  substrate, quaternion math, bundler, file watcher — adopt the dominant choice,
+  no hesitation. R3F is the correct, non-weird medium pick. The axiom never
+  touches these.
+- **CONTROL OVER THE SYSTEM = substance.** Which DOF exist, that all stay
+  directly controllable, never sacrifice control — design from need, ignore
+  industry. Same category as "what a node is" or "how ticks work."
+
+**The trap, named explicitly.** `drei`'s `OrbitControls` is a substance decision
+(a control scheme) shipped inside a medium library (R3F/drei). That packaging is
+why it gets mistaken for medium and pattern-matched in. "Adopt R3F" (medium, yes)
+does **not** imply "adopt OrbitControls" (substance, no).
+
+**The single, competition-free decision procedure:**
+
+1. Is this rendering/plumbing, or control over the system?
+2. Rendering → industry default (R3F: yes).
+3. Control → substance → design from need → apply the recoverable-by-device test.
+
+**Recoverable-by-device test (operative drift-guard).** If a better input device
+does NOT restore a lost capability without changing the design, the loss is baked
+into the design — it is a wrong industry pattern-match → REJECT it. Click-tricks
+pass: a 6-DOF device restores simultaneity without any design change. OrbitControls
+fails: a SpaceMouse still leaves a fixed pivot and locked roll — the loss is in
+the design.
+
+There is now ONE rule. The medium-vs-substance rule, correctly applied, rejects
+OrbitControls on its own. The axiom isn't overriding it — it's marking where the
+line is.
 
 ### The design vs. the input fallbacks
 
@@ -236,9 +256,9 @@ touch, make the dwell device-adaptive: ~200 ms mouse, ~500 ms touch.
 
 ### Why the conventions sacrifice control (medium comparison)
 
-Per CLAUDE.md's medium-vs-substance rule, interaction is **medium** — the
-converged industry answer is the default unless a deviation is justified. The
-five families, examined through the axiom:
+Per the decision procedure above, interaction splits: rendering is medium (adopt
+R3F), control is substance (design from need). The five families, examined
+through that lens — specifically the recoverable-by-device test:
 
 1. **Orbit/pan/zoom** (Three.js `OrbitControls`, Google Earth, most web and CAD
    viewers): orbit = left-drag (yaw + pitch, up vector **locked**, no roll);
@@ -266,9 +286,11 @@ five families, examined through the axiom:
    on-screen-only widgets are the 2D-mouse fallback generalized.
 
 **Where our scheme lands.** Rotation = family 2 (arcball; free tumble is the
-benefit over locked orbit, and it does not sacrifice DOF). The pan-pad +
-z-buttons + roll-slider for the 2D-mouse fallback sit closest to family 5. That
-is the correct location: they are degraded-device scaffolding, not the design.
+benefit over locked orbit, and it does not sacrifice DOF — recoverable-by-device
+test passes). The pan-pad + z-buttons + roll-slider for the 2D-mouse fallback
+sit closest to family 5. Correct location: degraded-device scaffolding, not the
+design. Families 1 and 3 fail the recoverable-by-device test; family 4 is the
+native target where the test is trivially satisfied.
 
 ## Next concrete step
 
