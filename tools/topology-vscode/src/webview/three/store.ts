@@ -2,14 +2,13 @@
 // save.ts reads useThreeStore.getState().nodes/edges directly (no mirror).
 
 import { create } from "zustand";
-import type { Node as RFNode, Edge as RFEdge } from "reactflow";
-import type { NodeData, EdgeData } from "../rf/types";
+import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import { parseSpec, type Spec } from "../../schema";
-import { specToFlow } from "../rf/adapter/spec-to-flow";
-import { viewerState, setViewerState } from "../rf/viewer-state";
+import { specToFlow } from "../state/adapter/spec-to-flow";
+import { viewerState, setViewerState } from "../state/viewer-state";
 import { parseViewerState } from "../state/viewer/types";
-import { getFolds } from "../rf/folds-state";
-import { getDimmed } from "../rf/dimmed";
+import { getFolds } from "../state/folds-state";
+import { getDimmed } from "../state/dimmed";
 import { KIND_COLORS, NODE_TYPES, type EdgeKind } from "../../schema";
 import { scheduleSave, setSpecMeta, markViewSynced } from "../save";
 import { postLog } from "../log/post";

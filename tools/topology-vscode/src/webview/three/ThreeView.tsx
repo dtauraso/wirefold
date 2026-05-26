@@ -10,14 +10,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { Node as RFNode, Edge as RFEdge } from "reactflow";
+import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import { useThreeStore } from "./store";
-import type { NodeData, EdgeData } from "../rf/types";
-import { getPulseMap, claimDelivered } from "../rf/pulse-state";
+import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
-import { getPauseAdjustedNow } from "../rf/run-status";
-import { pushSnapshot, undo, redo } from "../rf/history";
-import { patchViewerState } from "../rf/viewer-state";
+import { getPauseAdjustedNow } from "../state/run-status";
+import { pushSnapshot, undo, redo } from "../state/history";
+import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 
 // ---------------------------------------------------------------------------
