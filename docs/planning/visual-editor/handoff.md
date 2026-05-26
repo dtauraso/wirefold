@@ -7,45 +7,35 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26 — On task/feature-audit; feature audit doc landed (e3c9d7e0). main has R3F sole editor (merged ccbff474).)
+## State at handoff (2026-05-26 — On task/feature-audit; audit recut with cause-based buckets (e9ce70ef).)
 
 **Active branch:** `task/feature-audit`. Branched off main after editor-r3f was merged at ccbff474.
 
-Branch-local doc: `docs/planning/visual-editor/feature-audit.md` (landed in commit e3c9d7e0, frontmatter `branch: task/feature-audit`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated.
+Branch-local doc: `docs/planning/visual-editor/feature-audit.md` (frontmatter `branch: task/feature-audit`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated.
 
-### Last completed — feature audit of the 3D R3F visual editor
+### Last completed — recut feature-audit.md gap categorization
 
-Produced a planned-vs-implemented feature audit covering the full surface of the editor as of the R3F sole-editor state on main.
+The old inflated "planned-not-built (11)" + "partial/inert (5)" lists were replaced with three CAUSE-BASED buckets (commit e9ce70ef):
 
-**Scorecard:**
-- ~26 features implemented and working
-- 5 partial / wired-but-inert
-- 11 planned-not-built
-- 10 deferred-by-design
+- **Cutover debt (10):** worked in RF editor, lost or half-wired in the R3F move. Bounded restore-parity list: node/edge delete, multi-select, edge reconnect, node palette, sublabel inline edit, PseudoPanel, port drag, edge-kind context menu, edge midpoint drag; plus 5 half-wired: undo, view-save-on-settle, fit-view hotkey, folds-mesh, z-coord.
+- **Deferred industry patterns (14):** never built in any editor, friction-gated, from the 2026-05-03 industry review; tracked in `memory/project_industry_pattern_deferrals.md`.
+- **Never-specced (1):** Fold Go primitive — needs explicit yes/no decision (become a Go substrate node, or stay view-state forever).
 
-**Key gaps found (planned, not built — mostly direct-manipulation editing affordances lost in the RF→R3F cutover):**
-multi-select, node delete, edge delete, edge reconnect, node palette / add-node, sublabel inline edit, PseudoPanel-in-3D, port drag, edge-kind context menu, edge midpoint drag, grow-handle, Fold node Go primitive.
-
-**Partial / inert:**
-- **Undo-redo:** snapshot stack implemented (`history.ts`) and pushSnapshot exists, but only the edge-create path calls it. Node drags do not push snapshots — undo does not cover drags.
-- **Interactive view-save:** `markViewSynced` is called on `loadView` (store.ts:76) but not after camera moves or node drags. Drag/camera positions do not persist across reloads without a manual Save.
-- **Fit-view:** fit-on-load only; no keyboard shortcut (f / Shift-F) for manual re-fit.
-- **Folds:** state module exists; no 3D mesh rendering.
-- **Z-coordinate:** schema supports it; always 0 in practice.
-
-**Verification correction (audit-correctness.md H1/H2 are now STALE):** those entries claim `setSpecMeta` and `markViewSynced` are "never called." Both claims no longer hold against current code — `setSpecMeta` IS called (store.ts:66) and `markViewSynced` IS called on loadView (store.ts:76). The audit-correctness.md doc should be annotated or removed before any merge.
+**New scorecard:** ~26 implemented; 10 cutover-debt; 14 deferred; 1 never-specced.
 
 ### Open decisions / next
 
-**(a) feature-audit.md fate:** decide whether to leave it branch-local (stripped on merge, audit is lost) or relocate it to `docs/planning/visual-editor/` with updated frontmatter so it survives the merge. The audit is reference material for future friction-driven work; relocation is likely worth it.
+**(a) feature-audit.md fate:** still branch-local (frontmatter `branch: task/feature-audit`), will be stripped by `tools/strip-branch-local-docs.sh` on merge. Decide relocate-to-survive vs let-it-strip. Relocation likely worth it now that it's a clean three-bucket reference.
 
-**(b) Backlog from the 11 gaps:** these are the candidate list for friction-driven new work. Highest-friction candidates (basic editing affordances that users will hit immediately): **node/edge delete** and **multi-select**. Those were present in the RF editor and are conspicuously absent in the 3D editor. Pick one as the next task branch when friction justifies it.
+**(b) Fold decision:** the only open never-specced item — resolving it zeroes that bucket. Needs explicit yes/no: become a Go substrate node, or stay view-state forever.
 
-**(c) audit-correctness.md stale claims:** H1 and H2 are factually wrong against current code. Annotate with a correction note or drop the doc before merging the branch.
+**(c) audit-correctness.md stale claims:** H1 and H2 claim `setSpecMeta` and `markViewSynced` are "never called" — both are factually wrong against current code (`setSpecMeta` IS called store.ts:66; `markViewSynced` IS called store.ts:76). Annotate with a correction note or drop before merge. Correction note is preserved in feature-audit.md §4.
 
-**(d) Interactive view-save gap:** `markViewSynced` is not called after camera or node-drag interactions, so positions are lost on reload without an explicit Save. This is a real residual gap worth a focused fix (small scope, clear contract).
+**(d) Highest-friction cutover-debt:** node/edge delete and multi-select — were present in the RF editor, conspicuously absent in 3D editor. Pick one as the next task branch when friction justifies it.
 
-**(e) topology.json working-tree modification:** node-drag view positions are modified but uncommitted intentionally. Do NOT stage or discard.
+**(e) Interactive view-save gap:** `markViewSynced` is not called after camera moves or node drags, so positions are lost on reload without a manual Save. Small scope, clear contract.
+
+**(f) topology.json working-tree modification:** node-drag view positions are modified but uncommitted intentionally. Do NOT stage or discard.
 
 ### Key files
 
