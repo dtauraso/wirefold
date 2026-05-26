@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, editor-r3f — pulses wired, rf-retirement plan, blank-reload bug open)
+## State at handoff (2026-05-26, editor-r3f — pacing handshake found SEVERED in R3F path; Phase 0 reframed)
 
 **Active branch:** `editor-r3f` (long-lived R3F source line; NOT merged to main).
 
@@ -73,10 +73,25 @@ Diagnostic instrumentation retained: early-error window listeners + once-per-loa
 
 - topology.json shows as modified (M) — node-drag positions written to its embedded `view` key (~4 lines: readGate1, inhibitRight0 x/y). Confirm intended before any commit that would sweep it up.
 
+### Discovered this session — pacing handshake severed in R3F path (static-confirmed, not yet run)
+
+The Go↔TS "human timing" coupling is half-broken. CONTRACT (MODEL.md round-close stepping, ~L126-140): a Go `PacedWire.Send` blocks until the pulse animation finishes on screen and TS posts `{type:"delivered", edge}` → extension `writeStdin` → Go `pw.NotifyDelivered()` → substrate advances. The visual layer is supposed to PACE the substrate.
+
+The RECEIVING half is fully intact (schema lists `{type:"delivered",edge}`; `handle-message.ts:148` forwards to stdin; `paced_wire.go` `Recv` blocks on `NotifyDelivered`). The SENDING half was LOST in the RF→R3F cutover:
+- `pulse-state.ts:45-48` — `claimDelivered()` exists but is NEVER imported/called.
+- `three/ThreeView.tsx:272-274` — PulseBead just hides the mesh at t>=1; NO postMessage.
+- `pump.ts:14-16` — lifecycle comment still points at deleted RF hook `edges/use-pulse-animation.ts` (the old sender).
+
+simStep originates in Go (`Trace.drain`, monotonic by event order); TS stores it (`pulse-state.ts`) but uses it only for logging — animation timing is geometry-driven (`ThreeView.tsx:270-271`).
+
 ### Next concrete steps (in order)
 
-1. **Phase 0 verification (BLOCKING all rf cleanup):** (a) confirm wire-pulses animate on Run — STILL UNVERIFIED, still the blocker before rf-retirement Phase 1+2 deletions; (b) blank-on-reload — DONE (fixed this session via loadEpoch; verified consistently framed). Do NOT start rf deletions until (a) passes.
-2. Then execute rf-retirement.md: Phase 1+2 (deletions — needs sign-off), Phase 3+4 (refactor — lands freely), Phase 5+6 (reactflow dep removal — needs sign-off).
+1. **RUN to disambiguate (do this FIRST — do not theorize, per `feedback_runtime_breadcrumbs_beat_static_analysis`).** clear `.probe/*.jsonl`, reload, Run once. Two possible symptoms:
+   - (A) ONE pulse then FREEZE → Go's delivered-gate is armed in the live loader path and is now starved → this is a blocker bug.
+   - (B) pulses animate fine, Go runs at CPU speed → delivered-gate not armed in live path → pacing contract is SILENTLY DEAD (cosmetically fine, substantively broken).
+2. **Re-wire the sender (known fix, both cases want it):** PulseBead completion (`ThreeView.tsx:272-274`, t>=1) → post `{type:"delivered", edge}` (or call `claimDelivered()` which should post it). This restores visual-layer pacing of the substrate.
+3. **Phase 0 verification (BLOCKING all rf cleanup):** wire-pulses-animate-on-Run confirmed AND pacing handshake restored. blank-on-reload = DONE (loadEpoch, verified). Do NOT start rf deletions until pulses animate AND pacing is restored.
+4. Then execute rf-retirement.md: Phase 1+2 (deletions — needs sign-off), Phase 3+4 (refactor — lands freely), Phase 5+6 (reactflow dep removal — needs sign-off).
 
 ### Known issues (non-blocking)
 
