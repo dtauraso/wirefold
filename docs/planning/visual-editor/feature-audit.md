@@ -8,7 +8,7 @@ branch: task/feature-audit
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** ~20 features implemented and working; 5 partial/wired-but-inert; 11 planned but not yet built; 10 explicitly deferred post-v0 (friction-driven).
+**Scorecard:** ~26 features implemented and working; 10 cutover-debt items (worked in RF, lost or half-wired in R3F move); 14 deferred industry patterns (friction-gated, never built in any editor); 1 never-specced decision point.
 
 ---
 
@@ -46,54 +46,69 @@ The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (
 
 ---
 
-## 3. Partial / Wired-but-Inert
+## 3. Gaps — Three Causes
 
-| Feature | What Works | What's Missing / Broken | Evidence |
-|---|---|---|---|
-| Undo/redo | `pushSnapshot()` is called after two-click edge create (`ThreeView.tsx:832`); `undo()`/`redo()` are bound to Cmd/Ctrl+Z/Shift+Z (`ThreeView.tsx:1267–1271`); `history.ts` has a real snapshot stack backed by the zustand store | `registerHistory()` is a documented no-op (kept for call-site compat, comment at `history.ts:8`); more critically, `pushSnapshot` is only called in the edge-create path — node drags, label edits, and other mutations do not push snapshots, so undo is incomplete | `tools/topology-vscode/src/webview/state/history.ts:27–29`; `ThreeView.tsx:18,832,1267–1271` |
-| View-save on settle (camera/drag persistence) | `markViewSynced` is exported from `save.ts:78` and imported in `store.ts:13`; it IS called inside `loadView` (`store.ts:76`) to sync the initial loaded view | Camera drags, pan, and roll do not call `markViewSynced` after settling — only the load path calls it. Post-drag view-saves are therefore not persisted across reloads. (Inventory claim "never called" is stale; it is called, but only on load, not on user-driven camera changes.) | `tools/topology-vscode/src/webview/three/store.ts:76`; `save.ts:48,78` |
-| Fit-view hotkey | Camera fits on load (loadEpoch effect) | No keyboard shortcut for manual re-fit; only automatic on load | `ThreeView.tsx:~1240` |
-| Folds (collapsed subgraph) | Fold state module exists; `getFolds()` is passed into `specToFlow`; fold toggle is present in the viewer-state schema | No 3D mesh for folded state; the fold concept is wired into the adapter but has no visual representation in ThreeView | `tools/topology-vscode/src/webview/state/folds.ts`; `store.ts:62` |
-| Z-coordinate (node depth) | `z` field exists in the node position schema and is parsed | Always rendered at z=0; no UI to set z; depth ignored in layout | `tools/topology-vscode/src/webview/schema/node-defs.ts`; specToFlow adapter |
+The gaps in this editor have three distinct causes: regression (worked in the RF editor, dropped in the R3F cutover), deferral (never built in any editor, parked until friction), and under-specification (planned only loosely, needs an explicit decision). The old single "planned-not-built" list conflated all three, inflating the apparent backlog. The three-cause split makes each item actionable on its own terms.
 
----
+### 3a. Cutover Debt — Worked in the RF editor, lost in the R3F move (restore-parity, bounded)
 
-## 4. Planned, Not Implemented
+Each item existed and worked in the old React Flow editor. The R3F cutover dropped or half-wired it. Proof-of-prior-existence cited per line.
 
-| Feature | Planned In | Notes |
+| Feature | Proof of prior existence |
+|---|---|
+| Multi-select (box/shift-click) | `AppView.tsx` `selectionMode={SelectionMode.Partial}`, `selectionOnDrag` |
+| Node delete | `_handle-delete.ts` `onNodesDelete`; `deleteKeyCode={["Delete","Backspace"]}` |
+| Edge delete | `_handle-delete.ts` `onEdgesDelete` |
+| Edge reconnect (drag endpoint) | `_on-reconnect.ts` `onReconnectImpl` |
+| Node palette / add-node UI | `panels/NodePalette.tsx` |
+| Sublabel inline edit | `inline-edit.ts` `beginEditSublabel` |
+| PseudoPanel | `panels/PseudoPanel.tsx` (was 2D-only; never had a 3D form) |
+| Port drag (wire from handle) | RF native handle drag-to-connect |
+| Edge-kind context menu | `app/EdgeContextMenu.tsx` |
+| Edge midpoint drag | `edges/MidpointDragHandle.tsx` |
+
+The following were started in the R3F move but left inert — the infrastructure landed without the completing wiring (marked **half-wired**):
+
+| Feature | Status | Evidence |
 |---|---|---|
-| Multi-select (box/shift-click) | `3d-editor.md`, `rf-to-r3f-cutover.md` | Single-select only; no box-select or shift-accumulate |
-| Node delete | `rf-to-r3f-cutover.md` (cutover checklist) | No delete key handler or UI affordance |
-| Edge delete | `rf-to-r3f-cutover.md` | No edge removal path in ThreeView or store |
-| Edge reconnect (drag endpoint) | `3d-editor.md` | Edge endpoints are fixed after creation |
-| Node palette / add-node UI | `3d-editor.md`, `rf-to-r3f-cutover.md` | No palette; graph can only be loaded from file |
-| Sublabel inline edit | `3d-editor.md` (InhibitRightGate sublabel field) | Sublabel rendered read-only; no click-to-edit |
-| PseudoPanel in 3D | `3d-editor.md` (hasPseudo nodes: ChainInhibitor, Input, ReadGate) | PseudoPanel rendered in RF path only; no 3D equivalent |
-| Port drag (wire from port handle) | `3d-editor.md` | Two-click edge-create only; no draggable port handles |
-| Edge-kind context menu | `3d-editor.md` | No right-click context menu on edges |
-| Edge midpoint drag | `project_edge_midpoint_offset_plumbing.md` memory; `rf-to-r3f-cutover.md` | `midpointOffset` schema and EdgeActionsCtx are wired; no drag affordance in ThreeView |
-| Fold node Go primitive | `3d-editor.md`; substrate plan | No `nodes/fold/` package; fold is view-state only |
+| Undo/redo | **half-wired** — snapshot stack exists (`history.ts`); `pushSnapshot` called only on edge-create; node drags don't push | `tools/topology-vscode/src/webview/state/history.ts:27–29`; `ThreeView.tsx:832,1267–1271` |
+| View-save on settle | **half-wired** — `markViewSynced` IS called in `store.ts:76` inside `loadView`; not called after camera/drag, so positions lost on reload | `tools/topology-vscode/src/webview/three/store.ts:76`; `save.ts:48,78` |
+| Fit-view hotkey | **half-wired** — fit-on-load only (`ThreeView.tsx:~1240`); no f/Shift-F for manual re-fit | `ThreeView.tsx:~1240` |
+| Folds (collapsed subgraph) | **half-wired** — view-state module exists (`folds.ts`); `getFolds()` wired into `specToFlow`; no 3D mesh render | `tools/topology-vscode/src/webview/state/folds.ts`; `store.ts:62` |
+| Z-coordinate (node depth) | **half-wired** — schema parses `z`; always 0 in practice; no UI to set depth | `tools/topology-vscode/src/webview/schema/node-defs.ts`; `specToFlow` adapter |
 
 ---
 
-## 5. Deferred by Design (Post-v0, Friction-Driven)
+### 3b. Deferred Industry Patterns — Never built in any editor, friction-gated
 
-Per `CLAUDE.md` posture: new work is friction-driven, not phase-driven. The following were noted in the cutover checklist or planning docs and explicitly parked until real-world use creates friction:
+From the 2026-05-03 industry-pattern review in `session-log.md`. These were never part of any editor iteration; each is parked until real-world use creates friction. Tracked in `memory/project_industry_pattern_deferrals.md`.
 
-- Minimap / overview panel
-- Rounded edge corners
-- Connect-validation visual cue (highlight valid drop targets)
-- Copy / paste nodes or subgraphs
-- Edge display labels (show channel name on wire)
-- Auto-routing (avoid node overlap)
-- Auto-layout (force-directed or hierarchical)
-- PNG / SVG export
-- Hover tooltips on nodes and edges
-- Properties inspector panel
+- MiniMap / overview panel (XS)
+- PNG / SVG export (XS)
+- Hover tooltips on nodes/edges (XS)
+- Connect-validation visual cue (XS) — port conflict only logs to console
+- Rounded corners on snake-route edges (S)
+- Node search / Cmd-K quick-jump (S)
+- Snap-to-other-nodes'-edges, currently center-only (S)
+- Keyboard nav: arrow-nudge, tab-cycle (S/M)
+- Copy / paste / duplicate Cmd-D (M)
+- Bend points / waypoints on orthogonal edges (M-L)
+- Multi-node alignment guides, single-node only today (S)
+- Undo coalescing at gesture level (S)
+- Auto-routing, obstacle-aware ELK/libavoid (L)
+- Auto-layout, dagre/ELK/force-directed (M-L)
 
 ---
 
-## 6. Known Correctness Flaws
+### 3c. Never-Specced — Planned only loosely, needs a decision
+
+| Feature | Open question |
+|---|---|
+| Fold node Go primitive | No `nodes/fold/` package has ever existed; fold was always view-state only. Needs an explicit yes/no: does fold ever become a Go substrate node, or stay view-state forever? |
+
+---
+
+## 4. Known Correctness Flaws
 
 Cross-referenced from `docs/planning/visual-editor/audit-correctness.md` (H1/H2/H3). STEP 1 verification updated H1 and H2 findings against current code:
 
@@ -107,7 +122,7 @@ See `audit-correctness.md` for full reproduction steps and original severity rat
 
 ---
 
-## 7. Code with No Plan Doc
+## 5. Code with No Plan Doc
 
 These features were built but do not appear in `3d-editor.md`, `rf-to-r3f-cutover.md`, or the session-log cutover checklist:
 
