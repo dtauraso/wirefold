@@ -1,11 +1,5 @@
-// R3F zustand store — slice 1: nodes/edges/selectedId for the 3D view.
-// This store is the single source of truth for ThreeView; it does NOT
-// depend on rf-imperative for its node/edge state.
-//
-// Save wiring (least-invasive): store mutations (createEdge, moveNode) also
-// mirror into rf-imperative via rfSetNodes/rfSetEdges so that the existing
-// performSave() in save.ts (which reads rfGetNodes/rfGetEdges) continues to
-// work without changes. This keeps save.ts untouched this slice.
+// R3F zustand store — single source of truth for node/edge state.
+// save.ts reads useThreeStore.getState().nodes/edges directly (no mirror).
 
 import { create } from "zustand";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
@@ -16,10 +10,8 @@ import { viewerState, setViewerState } from "../rf/viewer-state";
 import { parseViewerState } from "../state/viewer/types";
 import { getFolds } from "../rf/folds-state";
 import { getDimmed } from "../rf/dimmed";
-import { rfSetNodes, rfSetEdges } from "../rf/rf-imperative";
 import { KIND_COLORS, NODE_TYPES, type EdgeKind } from "../../schema";
 import { scheduleSave } from "../save";
-import { pushSnapshot } from "../rf/history";
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -66,10 +58,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const nodes = flow.nodes as RFNode<NodeData>[];
       const edges = flow.edges as RFEdge<EdgeData>[];
       set({ nodes, edges, _lastSpec: spec });
-      // Mirror into rf-imperative so performSave() (which reads rfGetNodes/rfGetEdges)
-      // sees the loaded state even though the 2D RF App is no longer mounted.
-      rfSetNodes(() => nodes);
-      rfSetEdges(() => edges);
     } catch (err) {
       console.error("[ThreeStore] loadSpec failed", err);
     }
@@ -157,11 +145,8 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       data: { kind, label, sourceHandle, targetHandle } as EdgeData,
     };
 
-    pushSnapshot();
     const nextEdges = [...edges, newEdge];
     set({ edges: nextEdges });
-    // Mirror into rf-imperative so performSave() sees the change.
-    rfSetEdges(() => nextEdges);
     scheduleSave();
     return id;
   },
@@ -171,8 +156,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       n.id === id ? { ...n, position: { x, y } } : n,
     );
     set({ nodes: nextNodes });
-    // Mirror into rf-imperative so performSave() sees the position change.
-    rfSetNodes(() => nextNodes);
   },
 
   saveSpec() {

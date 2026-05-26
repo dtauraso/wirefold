@@ -2,7 +2,7 @@ import { viewerState } from "./rf/viewer-state";
 import { serializeViewerState } from "./state/viewer/types";
 import type { Spec } from "../schema";
 import { vscode } from "./vscode-api";
-import { rfGetNodes, rfGetEdges } from "./rf/rf-imperative";
+import { useThreeStore } from "./three/store";
 import { flowToSpec } from "./rf/adapter/flow-to-spec";
 
 const status = document.getElementById("status")!;
@@ -34,8 +34,7 @@ export function setStatus(dirty: boolean) {
 // Pure send-now helpers — invoked by the debouncer in <SaveLifecycle />
 // after the trailing edge fires, or directly via flushSave/flushViewSave.
 export function performSave() {
-  const nodes = rfGetNodes();
-  const edges = rfGetEdges();
+  const { nodes, edges } = useThreeStore.getState();
   // Derive spec from RF state. If RF is not yet mounted (nodes/edges empty),
   // there is nothing to save — skip silently.
   if (nodes.length === 0 && edges.length === 0) return;

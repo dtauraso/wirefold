@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { vscode } from "../../vscode-api";
-import { rfGetNodes, rfGetEdges } from "../rf-imperative";
+import { useThreeStore } from "../../three/store";
 import { flowToSpec } from "../adapter/flow-to-spec";
 import { flushActiveInlineEdit } from "../../inline-edit";
 import { useRunStatusCtx } from "../run-status";
@@ -25,7 +25,8 @@ export function RunButton() {
     }
     // idle/stopped — start a new run
     flushActiveInlineEdit();
-    const spec = flowToSpec(rfGetNodes(), rfGetEdges(), { nodes: [], edges: [] });
+    const { nodes, edges } = useThreeStore.getState();
+    const spec = flowToSpec(nodes, edges, { nodes: [], edges: [] });
     const text = JSON.stringify(spec, null, 2) + "\n";
     vscode.postMessage({ type: "run", text });
   };

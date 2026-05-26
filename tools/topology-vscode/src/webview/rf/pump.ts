@@ -24,7 +24,7 @@
 
 import type { TraceEvent, SlotEvent, SlotMap } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
-import { rfGetEdges } from "./rf-imperative";
+import { useThreeStore } from "../three/store";
 import { postLog } from "../log/post";
 import { setPulse, clearPulse } from "./pulse-state";
 import { setLastFire } from "./fire-flash-state";
@@ -70,7 +70,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       // Match ALL edges by source node id + sourceHandle (fan-out).
       // RF edges store source/sourceHandle; trace send events carry node/port.
       const { node, port, value } = event as Extract<TraceEvent, { kind: "send" }>;
-      const edges = rfGetEdges();
+      const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
       );
@@ -92,7 +92,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       // Match ALL edges by target node id + targetHandle (fan-in).
       // RF edges store target/targetHandle; trace done events carry node/port.
       const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
-      const edges = rfGetEdges();
+      const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.target === node && e.targetHandle === port,
       );
