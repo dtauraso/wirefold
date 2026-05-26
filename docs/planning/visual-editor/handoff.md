@@ -7,11 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, task/editor-3d-r3f-canvas — live-render confirmed)
+## State at handoff (2026-05-26, editor-r3f — R3F cutover complete)
 
-**Active branch:** `task/editor-3d-r3f-canvas`. Branched from
-`task/editor-3d-plan` (carries the branch-local `3d-editor.md` design
-spec forward). NOT merged to main.
+**Active branch:** `editor-r3f` (renamed from `task/editor-3d-r3f-canvas`; old name deleted from origin). This is a **long-lived R3F source line** — a deliberate, conscious override of CLAUDE.md's "avoid long-lived feature branches" hygiene rule. R3F is a whole new editor, not a task. Inheritor branches track this line; RF leaves `main` only when this branch merges and supersedes it. NOT merged to main.
 
 ### Why 3D
 
@@ -21,6 +19,12 @@ geometry that the current 2D React Flow canvas flattens into
 misleading edge crossings and false adjacencies. The move is about
 **representational honesty**: make the rendered structure match the
 actual structure.
+
+### Direction (locked)
+
+**ONE 3D view, ONE store.** R3F is THE editor. RF is being retired, not maintained as a peer or fallback. RF removal from `main` = the merge event, not an in-branch deletion debate. This branch carries only R3F things.
+
+Drift guard still applies: interaction CONTROL is substance (no OrbitControls); rendering is medium (R3F yes). zustand is a medium choice (already a dep) — fine to adopt as the store.
 
 ### Governing principle (most important — drift guard)
 
@@ -48,169 +52,31 @@ This principle is also saved in
 [3d-editor.md](3d-editor.md) (branch-local — does **not** ride the
 merge).
 
-### Design pass: complete
+### Cutover completed this session (3 slices, build green each)
 
-The 3D design pass (#1–#10) is fully resolved and documented in
-[3d-editor.md](3d-editor.md). All problems resolved; the deferred
-minor conventions (#1 empty-space pivot, #3 badge placement/large-count
-format, #10 trackpad multitouch richer gestures) are not blockers.
+- **Slice 1:** new zustand store `src/webview/three/store.ts` (`useThreeStore`) holds nodes/edges/selection; `loadSpec`/`loadView` via the pure adapters (`specToFlow`/`parseViewerState`); ThreeView reads/writes it. `main.tsx` feeds it on load/view-load. Replaced ThreeView's `rf-imperative` borrow.
+- **Slice 2:** ThreeView is the ONLY mounted view — 2D/3D toggle + React Flow 2D App removed from `main.tsx`. Run/pause/stop + save-status toolbar still works (reads imperative getters).
+- **Slice 3:** store is the SOLE source of truth — repointed `save.ts` (`performSave`), `pump.ts`, `RunButton`, `inline-edit.ts`, and the `__wirefold_test` hook to `useThreeStore.getState()`; removed the transitional rf-imperative mirror. Deleted the dead 2D RF component tree: `rf/app.tsx`, all `rf/app/*` (26 files), RF node/edge components (`GenericNode`, `PortRim`, `port-rim-grow`, `SubstrateEdge`, `FoldNode`, `NoteNode`, `MarkerDefs`, etc.), panels (`NodePalette`, `PseudoPanel`, etc.) — each proven import-dead.
 
-### Implementation: complete (in-scope spec)
+### Remaining RF residue (not yet removed)
 
-The full in-scope spec has been implemented on this branch across the
-following commits:
+- `rf/rf-imperative.ts` KEPT — only `rf/history.ts` still uses it (undo/redo).
+- `reactflow` dependency still in `package.json`: live code has only TYPE-only imports (`RFNode`/`RFEdge` in `store.ts`, `rf/types.ts`, `rf/adapter/*`, `rf/history.ts`) + one CSS import `reactflow/dist/style.css` in `main.tsx`. No RF component or hook is instantiated anywhere. Removing the dep needs BOTH: (a) user sign-off [CLAUDE.md dependency-removal rule], and (b) re-homing the `RFNode`/`RFEdge` type shapes into our own types first.
 
-- `69184ea0` — deps: three + @react-three/fiber@9 + @types/three.
-- `d0efc0f9` — ThreeView R3F canvas (2D replica, z=0) + 2D/3D toggle
-  in main.tsx + subscribeRFState in rf-imperative.ts.
-- `d7451397` — schema: `z` coordinate + 3D port-anchor vector offset
-  (parse-spec/types/parse + spec-to-flow), validator parity confirmed;
-  positions live in topology.view.json.
-- `732aa4ff` — interaction grammar: perspective camera, hand-rolled
-  arcball drag-rotate (incremental quaternion), scroll-dolly,
-  click-pick, roll slider, floating pan-pad (200ms dwell), ^/v dolly
-  buttons; gesture-discrim consts (CLICK_MAX_MS=150, DWELL_MS=200,
-  MOVE_SLOP_PX=6); labels project through live camera. NO
-  drei/OrbitControls.
-- `b953153f` — #4 node-level wiring: click node A → click node B
-  creates a real persisted edge (rfCreateEdge → rfSetEdges →
-  scheduleSave, same path as 2D; first available source/target handle,
-  multi-port disambiguation TODO-deferred); edges render as 3D
-  TubeGeometry bezier paths with sphere-surface exit/entry.
-- `437e04e4` — #7 labels: LOD (hover ∪ selected ∪ nearest-8)
-  billboarded sign-post overlay; validation flag reuses
-  `data.validationError` as color+emissive on sphere/torus body,
-  mirrored onto the label div.
-- `1a5ff5a3` — #3 occlusion: "+N" count badge on front nodes,
-  recomputed on 250ms camera-settle (not per-frame); full occlusion
-  allowed, no transparency/halo.
-- `68819c80` — #8 pulse: always-lit emissive tubes; pulse bead travels
-  along the curve driven by the SAME pulse-state.ts timing as the 2D
-  edge (uniform speed 0.08 wu/ms); motion→intensity fallback is
-  automatic by viewing angle.
+### Known gaps / verification pending
 
-### Post-implementation audit/fix pass + structural work
+- **LIVE VERIFICATION PENDING for the whole cutover** — user to reload and check: load+render (R3F sole view), node drag + persist-across-reload (drag CONFIRMED working + persisting earlier this session), **connect A→B (the never-confirmed-live bug; store fix in place but not yet visually confirmed)**, run/pause/stop + save-status. Triage findings in one pass.
+- **Undo/redo wired-but-inert:** `rf/history.ts` restore path writes to `rf-imperative`, which nothing live reads anymore → undo won't reflect in R3F. Was already a missing 3D op (not a regression); must be repointed to the store in a follow-up slice.
+- **z still 0 for all nodes** — z-derivation deferred until friction. Node-position persistence now works through the store + node drag.
+- **3 in-code TODOs remain** (pick-by-position `scene.traverse` fragility, roll-slider zero drift, CameraSettleDetector per-frame string snapshot).
 
-Additional commits after the initial 8-commit implementation:
+### Next concrete step: edge BEND/route (view-only midpoint handle)
 
-- `391cb421` — **Cross-cutting audit + fix pass** of ThreeView.tsx (had been
-  assembled by 6 narrow-view agents; several HIGH-severity bugs). Fixed:
-  - **Pan & dolly used `cam.position.z` as distance-to-scene** — broke after any
-    rotation; now uses true camera-to-plane / distance-to-scene-center.
-  - **CameraFitter fired before node state arrived** — framed empty scene; now
-    waits for nodes.
-  - **Nearest-N throttle used a non-ref local** — now `useRef`.
-  - **TubeGeometry + THREE.Color reallocated every render** — now memoized.
-  - **Stale closure in connect-mode pointer-up** — now reads a ref.
-  - Shared helpers extracted: `nodeRadius()`, `ndcToPixel()`, `pixelToNDC()`,
-    `worldPerPixel()` (de-duped 3–4 copies each).
-  - LabelProjector throttled to ~30 fps; phantom-hover rAF cancel; dead code
-    removed.
-  - Known remaining TODOs (left intentionally): `scene.traverse` pick-by-position
-    fragility; roll-slider absolute-zero drift; CameraSettleDetector per-frame
-    string snapshot.
+User-requested. Drag a midpoint handle to pull a 3D edge's bezier tube through space (route around occluders). VIEW-ONLY — no topology change. Design (record fully):
 
-- `b96d8be3` — **Moved ThreeView out of the React Flow dir.**
-  `src/webview/rf/three/ThreeView.tsx` → `src/webview/three/ThreeView.tsx`.
-  R3F is not React Flow. The file still imports the borrowed RF state bridge
-  (`rf-imperative`, `pulse-state`, types) — that bridge stays until RF is
-  actually removed.
-
-- `4e8ecfc5` — Recorded latent z-persistence gap + `feedback_subagent_discovery_mandate` memory.
-
-- `c1ce79ed` — **Hoisted Run/pause/stop + save-status to shared Root in main.tsx.**
-  RunButton reads imperative getters, not RF hooks — confirmed decoupled. Both 2D
-  and 3D views now have functional run/pause/stop + save-status in the toolbar.
-
-- `3e46d93a` — RF→R3F parity-gap audit written to
-  `docs/planning/visual-editor/rf-to-r3f-cutover.md` (branch-local).
-
-### Architecture decision: staged RF removal (IMPORTANT — record prominently)
-
-**RF→R3F is a STAGED REPLACEMENT, not a permanent toggle.**
-
-R3F at z=0 is an exact replica of RF and is designed to subsume it. Full React
-Flow removal is the **tracked next milestone** — but it is staged AFTER all of:
-
-1. Live-render verification (**CONFIRMED** — user verified render + content-pivoted
-   rotation about a chosen node works).
-2. R3F gets its **own load/save/state pipeline** (currently borrows RF's
-   `rf-imperative` bridge — that bridge must be replaced before RF is removed).
-3. Feature parity confirmed.
-
-Only then: delete the 2D/3D toggle, the React Flow node/edge components, and the
-`reactflow` dependency, and rename the `rf-*` exports.
-
-**Do NOT remove RF before R3F is proven in real use — RF is the fallback until
-then.**
-
-### RF→R3F cutover checklist (key artifact)
-
-`docs/planning/visual-editor/rf-to-r3f-cutover.md` is the definitive cutover
-checklist. 3D currently covers ~6/37 authoring ops. All create/edit/delete/undo
-operations are MISSING. The state layer is ~60% RF-free already (`rf-imperative`
-is a clean module store; adapters/save/viewer-state are RF-free).
-
-### Verified
-
-`npm run build` clean; `go build ./...` + `go test ./...` pass;
-`scripts/stop-checks.sh` (all guards + substrate-vocabulary) pass.
-Security: `npm audit` 0 vulns, no unsafe sinks
-(no dangerouslySetInnerHTML/eval/innerHTML) in the 3D code, CSP
-unchanged (script-src 'nonce-…', no unsafe-eval), publishers
-confirmed.
-
-Live-render: **CONFIRMED by user** — renders correctly; content-pivoted rotation
-about a chosen node works.
-
-### Known gaps (latent — not spec deferrals; must be fixed in the named slice)
-
-- **3D POSITION PERSISTENCE GAP (latent):** ThreeView has NO save path — it calls no
-  `patchViewerState`/`scheduleViewSave`. The `z` coordinate (and any 3D-side x/y change)
-  is loaded+rendered but never written back. Harmless today because the 3D view has no
-  node-move/z-authoring interaction yet (rotate/dolly/pick/wire only). MUST be fixed in
-  the same slice that adds 3D node manipulation, or 3D layout will be lost on reload.
-- **rfCreateEdge weaker guard:** has a weaker `lastSpec` guard than `onConnectImpl`
-  and no grow-port support (`TODO(3d)`).
-- **3 in-code TODOs (intentional):** pick-by-position fragility (`scene.traverse`),
-  roll-slider zero drift, CameraSettleDetector per-frame string snapshot cost.
-- **Pan/dolly-after-rotation** — fixed in `391cb421`; should be re-checked live.
-- **User live-use bugs:** user has "plenty of bugs" from live use not yet
-  enumerated/triaged — collect that list next session.
-
-### Deliberately deferred (not built; record so next session doesn't think they're missed)
-
-The spec marks these deferred — they are NOT implementation gaps:
-
-- **Fold-node primitive (#9):** new node kind FoldNode.tsx + registry +
-  Go `nodes/Fold/`; design is settled (independent interface, fed-value
-  output, simple-subgraph constraint), build deferred.
-- **What drives z:** structural rank/ring/lattice z-derivation — z=0
-  for all nodes currently; deferred until friction.
-- **Trackpad multitouch, SpaceMouse, touch bindings** — deferred per
-  #10.
-- **User-saved camera snapshots** — deferred per #6.
-- **Occlusion badge edge-cases** — edge-on counting, placement when
-  front partly occluded, large-count cap (TODO left in code).
-- **Pulse end-on direction-at-a-glance** — accepted residue.
-- **Multi-port disambiguation (#4)** — first available handle used;
-  disambiguation TODO in code.
-
-### Next concrete step
-
-**GATING primitive: node drag (move a node on the 3D plane).** The 3D view is
-currently a read-only viewport — no node-move capability. Nearly all other
-authoring ops in the cutover checklist depend on being able to place nodes.
-Build order = the 17-item checklist in `rf-to-r3f-cutover.md` §B, front-loaded
-by node drag.
-
-Before or alongside node drag:
-- **Collect the live-use bug list** — user has bugs from real editor use not yet
-  enumerated; triage first.
-- **Re-check pan/dolly-after-rotation live** — fixed in `391cb421` but not yet
-  confirmed in real use.
-- Fix the **3D position persistence gap** in the same slice as node drag (or
-  dragged positions will not survive reload).
+- **Persist** to a NEW field on `EdgeView` in `src/webview/state/viewer/types.ts` + its parser `parse.ts` — e.g. `bend?: { x: number; y: number; z: number }`. **Do NOT use the substrate `midpointOffset` WireProp** (that's spec-level / topology; this is view-only and must stay in `topology.view.json`).
+- **Render:** `SingleEdgeTube` (`ThreeView.tsx` ~L295–327) currently auto-computes control point `_p1 = mid + lift*(span*0.25)` where `lift = (0,0,1)×edgeDir`. Add the stored bend: `_p1 = mid + autoLift + bend`. Render a small DRAGGABLE handle sphere at the curve midpoint, shown on hover/selected edge (edge hover/selection state does not exist yet — add minimal hover).
+- **Interaction:** mirror the just-added `nodeDragRef` pattern with `edgeHandleDragRef { edgeId, planePointAtStart, midAtStart, snapshotPushed }`. Handles must be pickable (extend the pickRequest raycast to recognize handle meshes via `userData`). **Drag on a CAMERA-FACING plane through the handle (NOT the z=0 plane node-drag uses)** so the curve can be pulled out-of-plane in true 3D. `newMid = planePoint + (midAtStart − planePointAtStart)`; `bend = newMid − autoMid`. Persist on pointer-up: `patchViewerState(v => v.edges[id].bend = …)` + `scheduleViewSave()`; `pushSnapshot()` at drag start. Reuse/generalize `unprojectToPlane` to accept an arbitrary plane.
 
 ### Separate deferred task (paused — NOT this branch)
 
@@ -226,16 +92,13 @@ has multiple outputs. Paused while 3D work is in flight.
 
 ### Key files
 
-- [3d-editor.md](3d-editor.md) — full 3D design (branch-local; does NOT ride the merge)
-- [rf-to-r3f-cutover.md](rf-to-r3f-cutover.md) — RF→R3F parity-gap audit + cutover checklist (branch-local)
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole 3D view (moved out of `rf/` by `b96d8be3`)
-- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — the RF-free survivor store: rfGetNodes/rfSetNodes/rfGetEdges/rfSetEdges/rfCreateEdge/subscribeRFState/pushSnapshot
-- `tools/topology-vscode/src/webview/rf/pulse-state.ts` — pulse timing consumed by 3D
-- `tools/topology-vscode/src/webview/main.tsx` — Root toggle + hoisted run/save (run/pause/stop + save-status work in both 2D and 3D)
-- [`memory/project_interaction_control_is_substance.md`](../../../memory/project_interaction_control_is_substance.md) — control-is-substance anti-drift principle (rides to main)
-- `tools/topology-vscode/src/webview/rf/` — 2D React Flow editor (node registry, `SubstrateEdge.tsx`, RF store) that coexists with the 3D view
-- `pump.ts` — pump firing + pulse-animation logic; stays put (only the geometry pulses travel over changes)
-- `tools/topology-vscode/src/schema/parse-spec.ts` — node position model (has `z`) + 3D port-anchor model
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole (sole) 3D view: node drag, edge tubes, pointer state machine.
+- `tools/topology-vscode/src/webview/three/store.ts` — the single zustand source of truth (nodes/edges/selection, load/save actions).
+- `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar.
+- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/rf/pump.ts` — read from the store now.
+- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — LEGACY, only `history.ts` uses it (undo/redo); to be retired.
+- `tools/topology-vscode/src/webview/rf/adapter/{spec-to-flow,flow-to-spec}.ts`, `tools/topology-vscode/src/webview/state/viewer/*` — pure adapters/state, shared and RF-free.
+- `docs/planning/visual-editor/rf-to-r3f-cutover.md` — note it is now partially superseded (toggle/staged-removal framing is gone; the cut happened).
 
 Pseudo files below are for the **deferred** `task/inhibitright-pseudo` branch only, not this one:
 
