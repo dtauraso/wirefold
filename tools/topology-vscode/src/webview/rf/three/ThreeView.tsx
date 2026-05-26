@@ -7,7 +7,7 @@
 //   - Dolly buttons (hold-to-dolly)
 //   - Pan pad (200ms dwell over empty canvas → draggable pad)
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
@@ -40,8 +40,13 @@ const DWELL_MS = 200;
 const MOVE_SLOP_PX = 6;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Shared helpers
 // ---------------------------------------------------------------------------
+
+/** Node sphere radius from node dimensions. */
+function nodeRadius(node: RFNode<NodeData>): number {
+  return Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
+}
 
 function boundingBox(nodes: RFNode<NodeData>[]) {
   if (nodes.length === 0) return { minX: -200, maxX: 200, minY: -200, maxY: 200 };
@@ -64,15 +69,76 @@ function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return new THREE.Vector3(x, y, 0);
 }
 
+/**
+ * Scene center (centroid of node bounding box), used for dolly distance.
+ * Falls back to origin when no nodes.
+ */
+function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
+  if (nodes.length === 0) return new THREE.Vector3(0, 0, 0);
+  const { minX, maxX, minY, maxY } = boundingBox(nodes);
+  return new THREE.Vector3((minX + maxX) / 2, -(minY + maxY) / 2, 0);
+}
+
+/**
+ * True perpendicular distance from camera to the z=0 plane (content plane).
+ * This is the projection of the camera-to-origin vector onto the camera forward
+ * direction, computed as: |cam.position · viewDir| where viewDir is the camera
+ * forward in world space. Correct after arbitrary rotation (not just looking down -Z).
+ * Clamped to a minimum of 10 to avoid zero/negative values.
+ */
+function camToPlaneDistance(cam: THREE.PerspectiveCamera): number {
+  // Camera forward in world space (points away from camera, into scene).
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+  // Distance = projection of camera position onto the (negated) forward vector.
+  // The z=0 plane has normal (0,0,1). Distance = |cam.position · (0,0,1)| = |cam.position.z|
+  // when looking straight down. After rotation, use the component of the camera
+  // position along the view axis (how far back the camera is from z=0 along view).
+  // More precisely: distance from cam to the plane along the view ray.
+  // Ray: origin=cam.position, dir=forward. Plane: z=0, normal=(0,0,1).
+  // t = -cam.position.z / forward.z  (ray-plane intersection param)
+  // If forward.z ≈ 0 (camera looking sideways), fall back to |cam.position.z|.
+  const fwdZ = forward.z;
+  if (Math.abs(fwdZ) > 0.01) {
+    return Math.max(Math.abs(-cam.position.z / fwdZ), 10);
+  }
+  return Math.max(Math.abs(cam.position.z), 10);
+}
+
+/**
+ * World-units-per-pixel for panning in the camera's screen plane.
+ * Computed from the perpendicular distance to the content plane and the camera FOV.
+ */
+function worldPerPixel(cam: THREE.PerspectiveCamera, canvasH: number): number {
+  const d = camToPlaneDistance(cam);
+  const fovRad = (cam.fov * Math.PI) / 180;
+  return (2 * d * Math.tan(fovRad / 2)) / canvasH;
+}
+
+// NDC ↔ pixel helpers
+function ndcToPixel(ndcX: number, ndcY: number, size: { width: number; height: number }): { px: number; py: number } {
+  const px = (ndcX + 1) / 2 * size.width;
+  const py = (1 - (ndcY + 1) / 2) * size.height;
+  return { px, py };
+}
+
+function pixelToNDC(clientX: number, clientY: number, rect: DOMRect): { ndcX: number; ndcY: number } {
+  const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+  return { ndcX, ndcY };
+}
+
 // ---------------------------------------------------------------------------
 // Camera fitter: perspective camera framed head-on to show graph flat at z=0.
+// Fits once, but waits until nodes are actually non-empty (not just on mount).
 // ---------------------------------------------------------------------------
 
 function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const { camera, size } = useThree();
   const fitted = useRef(false);
   useEffect(() => {
-    if (fitted.current) return; // only auto-fit once on mount
+    // Wait until we have real nodes; retry when nodes.length transitions 0→N.
+    if (fitted.current) return;
+    if (nodes.length === 0) return; // no nodes yet — wait for next render
     fitted.current = true;
     const persp = camera as THREE.PerspectiveCamera;
     const PAD = 80;
@@ -92,8 +158,10 @@ function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
     persp.near = 0.1;
     persp.far = 20000;
     persp.updateProjectionMatrix();
+  // Re-run when nodes.length changes so we can catch the first non-empty batch.
+  // Once fitted.current is true, subsequent runs are no-ops.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty deps — fit once on first mount
+  }, [nodes.length]);
   return null;
 }
 
@@ -113,7 +181,7 @@ function GraphNode({
   hovered: boolean;
 }) {
   const pos = nodeWorldPos(node);
-  const r = Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
+  const r = nodeRadius(node);
   const flagged = !!node.data?.validationError;
 
   const fillHex = flagged ? FLAG_FILL : (node.data?.fill ?? "#ffffff");
@@ -122,8 +190,19 @@ function GraphNode({
     : selected ? "#ffcc00"
     : hovered ? "#aaddff"
     : (node.data?.stroke ?? "#888888");
-  const fillColor = new THREE.Color(fillHex);
-  const strokeColor = new THREE.Color(strokeHex);
+
+  // Memoize THREE.Color objects to avoid allocating on every render.
+  const fillColor = useMemo(() => new THREE.Color(fillHex), [fillHex]);
+  const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
+  const emissiveFill = useMemo(
+    () => flagged ? new THREE.Color(FLAG_FILL) : new THREE.Color(0x000000),
+    [flagged],
+  );
+  const emissiveStroke = useMemo(
+    () => flagged ? new THREE.Color(FLAG_RING) : new THREE.Color(0x000000),
+    [flagged],
+  );
+
   const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
 
   return (
@@ -132,7 +211,7 @@ function GraphNode({
         <sphereGeometry args={[r, 16, 16]} />
         <meshStandardMaterial
           color={fillColor}
-          emissive={flagged ? new THREE.Color(FLAG_FILL) : new THREE.Color(0x000000)}
+          emissive={emissiveFill}
           emissiveIntensity={flagged ? 0.4 : 0}
         />
       </mesh>
@@ -140,7 +219,7 @@ function GraphNode({
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
           color={strokeColor}
-          emissive={flagged ? new THREE.Color(FLAG_RING) : new THREE.Color(0x000000)}
+          emissive={emissiveStroke}
           emissiveIntensity={flagged ? 0.5 : 0}
         />
       </mesh>
@@ -157,7 +236,7 @@ function GraphNode({
 function surfacePoint(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Vector3 {
   const origin = nodeWorldPos(node);
   const target = nodeWorldPos(other);
-  const r = Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
+  const r = nodeRadius(node);
   const dir = target.clone().sub(origin).normalize();
   return origin.clone().addScaledVector(dir, r);
 }
@@ -211,20 +290,22 @@ function PulseBead({
 }
 
 function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData> }) {
-  const p0 = surfacePoint(src, tgt);
-  const p2 = surfacePoint(tgt, src);
-  // Control point: midpoint lifted along the cross product of the edge and Z axis,
-  // giving a gentle curve out of the plane.
-  const mid = p0.clone().add(p2).multiplyScalar(0.5);
-  const edgeDir = p2.clone().sub(p0).normalize();
-  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-  const span = p0.distanceTo(p2);
-  const p1 = mid.clone().addScaledVector(lift, span * 0.25);
-
-  const curve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
-  // Approximate arc length for pulse timing: sample the curve.
-  const arcLength = curve.getLength();
-  const tubeGeo = new THREE.TubeGeometry(curve, 16, 1.5, 6, false);
+  // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
+  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
+  const { curve, arcLength, tubeGeo } = useMemo(() => {
+    const _p0 = surfacePoint(src, tgt);
+    const _p2 = surfacePoint(tgt, src);
+    const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
+    const edgeDir = _p2.clone().sub(_p0).normalize();
+    const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+    const span = _p0.distanceTo(_p2);
+    const _p1 = mid.clone().addScaledVector(lift, span * 0.25);
+    const _curve = new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
+    const _arcLength = _curve.getLength();
+    const _tubeGeo = new THREE.TubeGeometry(_curve, 16, 1.5, 6, false);
+    return { curve: _curve, arcLength: _arcLength, tubeGeo: _tubeGeo };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p0key]);
 
   return (
     <>
@@ -278,7 +359,9 @@ function CameraRefBridge({
 }
 
 // ---------------------------------------------------------------------------
-// LabelProjector: runs on every frame to project node world positions to screen.
+// LabelProjector: runs every N frames (throttled) to project node world
+// positions to screen. Projects only the visible set (hovered ∪ selected ∪
+// nearest-N) plus a full refresh every 6 frames for smooth camera motion.
 // Updates positions via a ref callback (no React state → no re-render cost).
 // ---------------------------------------------------------------------------
 
@@ -290,14 +373,17 @@ function LabelProjector({
   onPositions: (positions: { id: string; px: number; py: number }[]) => void;
 }) {
   const { camera, size } = useThree();
+  const frameCountRef = useRef(0);
 
   useFrame(() => {
+    frameCountRef.current++;
+    // Project every 2 frames (~30fps) for label smoothness during camera motion.
+    // This is much cheaper than every frame while still tracking well visually.
+    if (frameCountRef.current % 2 !== 0) return;
     const positions = nodes.map((n) => {
       const world = nodeWorldPos(n);
       world.project(camera);
-      // NDC → pixels (y flipped: NDC +1 = top)
-      const px = (world.x + 1) / 2 * size.width;
-      const py = (1 - (world.y + 1) / 2) * size.height;
+      const { px, py } = ndcToPixel(world.x, world.y, size);
       return { id: n.id, px, py };
     });
     onPositions(positions);
@@ -360,14 +446,13 @@ function computeOcclusionCounts(
     const dist = worldCenter.distanceTo(camera.position);
 
     const center = worldCenter.clone().project(camera);
-    const px = (center.x + 1) / 2 * size.width;
-    const py = (1 - (center.y + 1) / 2) * size.height;
+    const { px, py } = ndcToPixel(center.x, center.y, size);
 
     // Compute screen radius: project a point offset by the world node radius.
-    const worldR = Math.min((n.data?.width ?? 110), (n.data?.height ?? 60)) / 4;
+    const worldR = nodeRadius(n);
     const offsetWorld = worldCenter.clone().add(new THREE.Vector3(worldR, 0, 0));
     const offsetProj = offsetWorld.clone().project(camera);
-    const offsetPx = (offsetProj.x + 1) / 2 * size.width;
+    const offsetPx = ndcToPixel(offsetProj.x, offsetProj.y, size).px;
     const screenR = Math.abs(offsetPx - px);
 
     return { id: n.id, px, py, dist, screenR };
@@ -385,12 +470,9 @@ function computeOcclusionCounts(
 
       // Overlap: use front node's screen radius as threshold.
       const front = a.dist < b.dist ? a : b;
-      const behind = a.dist < b.dist ? b : a;
 
       if (screenDist < front.screenR) {
         counts.set(front.id, (counts.get(front.id) ?? 0) + 1);
-        // behind is occluded — no badge needed on it for this pair
-        void behind; // suppress lint
       }
     }
   }
@@ -445,10 +527,6 @@ function RaycasterHelper({
 }
 
 // ---------------------------------------------------------------------------
-// Scene
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // NearestNTracker: computes nearest-N nodes to camera each frame (throttled).
 // Notifies via callback so the outer React tree can re-render label visibility.
 // ---------------------------------------------------------------------------
@@ -462,11 +540,12 @@ function NearestNTracker({
 }) {
   const { camera } = useThree();
   const lastIds = useRef<string>("");
-  let frameCount = 0;
+  // useRef so frameCount persists across renders without resetting.
+  const frameCountRef = useRef(0);
 
   useFrame(() => {
-    frameCount++;
-    if (frameCount % 6 !== 0) return; // throttle: recompute ~10fps
+    frameCountRef.current++;
+    if (frameCountRef.current % 6 !== 0) return; // throttle: recompute ~10fps
     const sorted = nodes
       .map((n) => ({ id: n.id, dist: nodeWorldPos(n).distanceTo(camera.position) }))
       .sort((a, b) => a.dist - b.dist)
@@ -481,6 +560,10 @@ function NearestNTracker({
 
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Scene
+// ---------------------------------------------------------------------------
 
 function Scene({
   nodes,
@@ -558,8 +641,9 @@ function useInteractionControls(
   pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number) => string | null) | null>,
   onSelect: (id: string | null) => void,
   onPanPadActive: (pos: { x: number; y: number } | null) => void,
-  connectPendingId: string | null,
+  connectPendingIdRef: React.MutableRefObject<string | null>,
   onConnectClick: (id: string | null) => void,
+  nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -577,19 +661,12 @@ function useInteractionControls(
 
   // ------ helpers ------
 
-  const getNDC = useCallback((clientX: number, clientY: number, rect: DOMRect) => {
-    return {
-      ndcX: ((clientX - rect.left) / rect.width) * 2 - 1,
-      ndcY: -((clientY - rect.top) / rect.height) * 2 + 1,
-    };
-  }, []);
-
   /** Pick the 3D point under the cursor (raycasts; falls back to scene center). */
   const pickPivot = useCallback(
     (clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 => {
       const cam = cameraRef.current;
       if (!cam) return new THREE.Vector3();
-      const { ndcX, ndcY } = getNDC(clientX, clientY, rect);
+      const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
       if (hitId !== null) {
         // Raycast a node: return its world position as pivot.
@@ -609,7 +686,7 @@ function useInteractionControls(
       raycaster.ray.intersectPlane(plane, target);
       return target.lengthSq() > 0 ? target : new THREE.Vector3();
     },
-    [cameraRef, getNDC, pickRequest],
+    [cameraRef, pickRequest],
   );
 
   /**
@@ -665,7 +742,7 @@ function useInteractionControls(
 
       // Check if pointer is over empty space: start dwell timer.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-      const { ndcX, ndcY } = getNDC(e.clientX, e.clientY, rect);
+      const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
 
       if (hitId === null) {
@@ -683,7 +760,7 @@ function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, getNDC, onPanPadActive, pickRequest],
+    [cameraRef, onPanPadActive, pickRequest],
   );
 
   const onPointerMove = useCallback(
@@ -719,15 +796,13 @@ function useInteractionControls(
         // Pan camera in its local XY plane proportional to pointer delta.
         const panDx = (e.clientX - panPadOrigin.current.x);
         const panDy = (e.clientY - panPadOrigin.current.y);
-        // Scale pan to world units: use distance from camera to z=0 plane.
-        const dist2origin = Math.abs(cam.position.z);
-        const fovRad = (cam.fov * Math.PI) / 180;
-        const worldPerPx = (2 * dist2origin * Math.tan(fovRad / 2)) / canvasSize.h;
+        // worldPerPixel uses true perpendicular distance — correct after rotation.
+        const wpp = worldPerPixel(cam, canvasSize.h);
         const rightDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
         const upDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
         cam.position.copy(panStartCamPos.current)
-          .addScaledVector(rightDir, -panDx * worldPerPx)
-          .addScaledVector(upDir, panDy * worldPerPx);
+          .addScaledVector(rightDir, -panDx * wpp)
+          .addScaledVector(upDir, panDy * wpp);
       }
     },
     [applyArcball, cameraRef, canvasSize, onPanPadActive, pickPivot],
@@ -743,15 +818,17 @@ function useInteractionControls(
         const elapsed = Date.now() - s.downTime;
         const ddx = e.clientX - s.downX;
         const ddy = e.clientY - s.downY;
-        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-        if (elapsed < CLICK_MAX_MS && dist < MOVE_SLOP_PX) {
+        const clickDist = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (elapsed < CLICK_MAX_MS && clickDist < MOVE_SLOP_PX) {
           // CLICK → pick
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const { ndcX, ndcY } = getNDC(e.clientX, e.clientY, rect);
+          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
           const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
-          // Connect mode: route click to connect handler; else normal select
+          // Connect mode: read through ref to avoid stale closure.
+          // onConnectClick reads connectPendingIdRef.current (live value).
+          const inConnectMode = connectPendingIdRef.current !== null;
           onConnectClick(hitId);
-          if (connectPendingId === null) {
+          if (!inConnectMode) {
             onSelect(hitId); // normal select when not in connect mode
           }
         }
@@ -759,7 +836,7 @@ function useInteractionControls(
 
       s.phase = "idle";
     },
-    [connectPendingId, getNDC, onConnectClick, onPanPadActive, onSelect, pickRequest],
+    [connectPendingIdRef, onConnectClick, onPanPadActive, onSelect, pickRequest],
   );
 
   const onWheel = useCallback(
@@ -768,10 +845,13 @@ function useInteractionControls(
       if (!cam) return;
       // Dolly along view direction. Positive deltaY = scroll-down = zoom out.
       const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion);
-      const speed = 0.001 * Math.abs(cam.position.z || 500);
+      // Use distance from camera to scene center (correct after rotation).
+      const center = sceneCenter(nodesRef.current);
+      const dist = cam.position.distanceTo(center);
+      const speed = 0.001 * Math.max(dist, 10);
       cam.position.addScaledVector(dir, e.deltaY * speed);
     },
-    [cameraRef],
+    [cameraRef, nodesRef],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheel };
@@ -842,7 +922,13 @@ function RollSlider({ cameraRef }: { cameraRef: React.MutableRefObject<THREE.Per
 }
 
 /** DOLLY BUTTONS: hold ^/v to dolly in/out. Positive direction = toward scene (z decreases). */
-function DollyButtons({ cameraRef }: { cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null> }) {
+function DollyButtons({
+  cameraRef,
+  nodesRef,
+}: {
+  cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+  nodesRef: React.MutableRefObject<RFNode<NodeData>[]>;
+}) {
   const frameRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
   const startDolly = useCallback((sign: number) => {
@@ -851,12 +937,15 @@ function DollyButtons({ cameraRef }: { cameraRef: React.MutableRefObject<THREE.P
       if (!cam) return;
       // sign = +1 → dolly toward scene (move camera in -z of its view)
       const dir = new THREE.Vector3(0, 0, -sign).applyQuaternion(cam.quaternion);
-      const speed = 0.008 * Math.abs(cam.position.z || 500);
+      // Use distance to scene center for correct speed after rotation.
+      const center = sceneCenter(nodesRef.current);
+      const dist = cam.position.distanceTo(center);
+      const speed = 0.008 * Math.max(dist, 10);
       cam.position.addScaledVector(dir, speed);
       frameRef.current = requestAnimationFrame(tick);
     };
     frameRef.current = requestAnimationFrame(tick);
-  }, [cameraRef]);
+  }, [cameraRef, nodesRef]);
 
   const stopDolly = useCallback(() => {
     if (frameRef.current !== null) {
@@ -942,14 +1031,13 @@ function PanPad({
     if (!cam) return;
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
-    const dist2origin = Math.abs(cam.position.z);
-    const fovRad = (cam.fov * Math.PI) / 180;
-    const worldPerPx = (2 * dist2origin * Math.tan(fovRad / 2)) / canvasSize.h;
+    // worldPerPixel uses true perpendicular distance — correct after rotation.
+    const wpp = worldPerPixel(cam, canvasSize.h);
     const rightDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
     const upDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
     cam.position.copy(camStartPos.current)
-      .addScaledVector(rightDir, -dx * worldPerPx)
-      .addScaledVector(upDir, dy * worldPerPx);
+      .addScaledVector(rightDir, -dx * wpp)
+      .addScaledVector(upDir, dy * wpp);
   }, [cameraRef, canvasSize]);
 
   const onPadPointerUp = useCallback((e: React.PointerEvent) => {
@@ -1003,11 +1091,24 @@ export function ThreeView() {
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
   // Connect mode: first click = pending source node id; second click = create edge.
   const [connectPendingId, setConnectPendingId] = useState<string | null>(null);
+  // Ref mirror of connectPendingId — read in onPointerUp to avoid stale closure.
+  const connectPendingIdRef = useRef<string | null>(null);
+  // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
+  const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const pickRequest = useRef<((ndcX: number, ndcY: number) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
+
+  // Keep refs in sync with state.
+  useEffect(() => {
+    connectPendingIdRef.current = connectPendingId;
+  }, [connectPendingId]);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   // RF state subscription
   useEffect(() => {
@@ -1044,21 +1145,23 @@ export function ThreeView() {
   // Connect-mode click handler: first click picks source, second click creates edge.
   // Clicking empty space (null) cancels.
   const onConnectClick = useCallback((hitId: string | null) => {
-    if (connectPendingId === null) {
+    // Read through ref for live value (called from onPointerUp which uses the ref).
+    const pending = connectPendingIdRef.current;
+    if (pending === null) {
       // Start connect mode only if a node was clicked
       if (hitId !== null) setConnectPendingId(hitId);
     } else {
       // We have a pending source
-      if (hitId === null || hitId === connectPendingId) {
+      if (hitId === null || hitId === pending) {
         // Cancel: empty click or re-click same node
         setConnectPendingId(null);
       } else {
         // Create the edge — auto-pick first output/input ports
-        rfCreateEdge(connectPendingId, null, hitId, null);
+        rfCreateEdge(pending, null, hitId, null);
         setConnectPendingId(null);
       }
     }
-  }, [connectPendingId]);
+  }, []); // no deps — reads live value through connectPendingIdRef
 
   // Escape key cancels connect mode
   useEffect(() => {
@@ -1075,8 +1178,9 @@ export function ThreeView() {
     pickRequest,
     setSelectedId,
     setPanPadOrigin,
-    connectPendingId,
+    connectPendingIdRef,
     onConnectClick,
+    nodesRef,
   );
 
   // Hover tracking: lightweight raycast on pointer-move to update hoveredId.
@@ -1092,8 +1196,7 @@ export function ThreeView() {
       hoverRafRef.current = requestAnimationFrame(() => {
         hoverRafRef.current = null;
         if (!pickRequest.current) return;
-        const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
-        const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+        const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
         const hitId = pickRequest.current(ndcX, ndcY);
         setHoveredId(hitId);
       });
@@ -1102,6 +1205,11 @@ export function ThreeView() {
   );
 
   const onPointerLeave = useCallback(() => {
+    // Cancel any pending hover rAF to avoid phantom hover after pointer leaves.
+    if (hoverRafRef.current !== null) {
+      cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
     setHoveredId(null);
   }, []);
 
@@ -1251,7 +1359,7 @@ export function ThreeView() {
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <RollSlider cameraRef={cameraRef} />
-      <DollyButtons cameraRef={cameraRef} />
+      <DollyButtons cameraRef={cameraRef} nodesRef={nodesRef} />
 
       {/* Pan pad — shown on dwell */}
       {panPadOrigin && (
