@@ -113,14 +113,31 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
   alone; direction remains recoverable from the edge's known orientation, the
   endpoint node's reaction a beat later, and a small camera nudge. End-on
   direction-at-a-glance loss treated as ACCEPTABLE.
+- **Problem #9 (rendering scale → fold nodes):** resolved. The original framing
+  ("many nodes + 3D edges + transparency + text performance") was a PHANTOM, born
+  of flat-graph / fat-node thinking. Real shape: NOT a GPU/perf problem, NOT a
+  generic clutter problem — the ABSENCE of a composition primitive. The primitive:
+  a **FOLD NODE** that contains a subgraph and inherits its boundary-crossing wires
+  as its own ports. General case: ALL boundary-crossing wires (any wire from
+  outside into the subgraph → fold-node input; any wire from inside to outside →
+  fold-node output). Linear-chain is the special case (first-child inputs /
+  last-child outputs), not the definition. When folded, only the fold node is
+  active/animated; the interior is dormant. Execution is bounded to the visible
+  level — "only run the visible nodes" — so neither render load nor simulation load
+  reaches 50–100 at once. Comfortable zone ~15 active nodes per level; if more
+  needed, fold. This inversion is available because nodes are LIGHTWEIGHT (thin
+  nodes make attention-scoped on-demand execution cheap and correct; the pump means
+  human-speed observation IS the pacing). Industry runs the whole flat graph and
+  render-culls because its nodes are fat and its graphs must evaluate completely.
+  Substrate: fold node is a new node kind (structural, not view-only) — requires
+  FoldNode.tsx + registry entry + Go nodes/Fold/ in one commit per the landing
+  rule. Open: what a folded node presents at its boundary while interior is dormant.
 
 ### Open problems (next session works these one at a time, recording each into 3d-editor.md)
 
 - **#5 layout-derivation coverage** — does the structure→coordinate function
   place real, irregular/mixed topologies, or fall back to manual 3D placement?
 - **#6 (disorientation) — RETIRED as a phantom:** the only real bearing is flow direction, which is invariant and self-displaying via the pump animation; "see the whole graph at once" was a 2D-flatness artifact wrongly imported as a required "home" state. No fix. Optional user-saved camera snapshots are the one honest convenience, deferred until friction.
-- **#9 rendering scale** — many nodes + 3D edges + transparency + text
-  performance.
 - **#10 input-device variance** — gesture bindings across
   mouse/trackpad/SpaceMouse/touch (ties to the device hierarchy in #1).
 

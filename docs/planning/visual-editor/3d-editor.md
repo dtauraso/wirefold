@@ -636,6 +636,84 @@ as a **stationary flash** — you learn that the wire fired but not direction
 End-on is the degenerate case. This **direction-at-a-glance loss for end-on
 edges only** is treated as **ACCEPTABLE**.
 
+## Problem #9 (rendering scale → fold nodes) — resolved
+
+### Reframe: the phantom and the real shape
+
+The original framing — "rendering scale: many nodes + 3D edges + transparency +
+text performance" — is a **PHANTOM**, born of flat-graph / fat-node thinking.
+It treats "many visible nodes at once" as an inevitable condition to optimize
+around, when the real question is: why would there be many nodes at once?
+
+The real shape: this is NOT a GPU/perf problem and NOT a generic clutter problem.
+It is the **ABSENCE of a composition primitive.** With that primitive, scale never
+becomes a question.
+
+### The primitive: the fold node
+
+A **FOLD NODE** is a node that contains a subgraph. It inherits the subgraph's
+**boundary-crossing wires** as its own ports:
+
+- **General case:** any wire from outside the subgraph into the subgraph becomes a
+  fold-node input; any wire from inside the subgraph to outside becomes a fold-node
+  output. ALL boundary-crossing wires — however many, at whatever nodes inside —
+  become the fold node's interface.
+- **Linear-chain special case** (one in, one out): the inputs to the first child and
+  the outputs from the last child. This is only the clean-chain case, not the general
+  definition.
+
+When **FOLDED**, only the fold node is active and animated; the interior is
+dormant and its pulses collapse into the single fold node's behavior. The outer
+wiring is fully agnostic — a folded node is a drop-in single node at its level.
+
+### Execution and render load are both bounded
+
+"Only run the visible nodes." Folding bounds **both**:
+
+- **Render load:** instead of 50–100 nodes on screen, you see ~15 active nodes
+  at any one level — the fold nodes stand in for their interiors.
+- **Active-simulation load:** instead of 50–100 goroutines/channels firing
+  simultaneously, only the visible level runs. Interior nodes are dormant.
+
+Comfortable zone is ~15 active nodes at any one level. If a level needs more,
+fold. The act of folding is what keeps both render and simulation load bounded —
+neither problem arises to begin with.
+
+### Why this inversion is available here but not to industry
+
+Industry graphs are **computations** that must evaluate completely (every node's
+output feeds downstream; camera-independence treated as a correctness requirement),
+built from **fat nodes** (heavy logic, state, lifecycle) that can't be cheaply
+composed or run on demand. Industry's answer: run the whole flat graph and
+render-cull.
+
+This project's nodes are **lightweight** — "hand them the input signals, expect
+the output signals." The value lives in the **topology**, not the nodes. Thin
+nodes are exactly what make folding/unfolding and **attention-scoped on-demand
+execution** cheap. The human observes and drives at human speed (the pump), so
+attention-scoped execution is a **FEATURE**, not a correctness violation. Same
+substance-vs-medium split CLAUDE.md names: industry puts value+weight in nodes;
+this project keeps nodes thin and puts structure in the wiring.
+
+### Substrate implication
+
+A fold node is a new **node kind** — structural, not merely a view operation. Per
+CLAUDE.md's landing rule, it requires three things in one commit:
+
+1. `tools/topology-vscode/src/webview/rf/nodes/FoldNode.tsx` — the R3F render
+   component (render only; no substrate logic).
+2. Registration in `tools/topology-vscode/src/webview/rf/nodes/registry.ts`.
+3. The Go node package under `nodes/Fold/`.
+
+Because folding affects execution (interior nodes go dormant, the fold node
+stands in), this is NOT a pure view operation — it is a new substrate primitive.
+
+### Open (next)
+
+What a folded node presents at its boundary while its interior is dormant — and
+the run-vs-don't-run-interior detail (cheap either way because nodes are
+lightweight).
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
