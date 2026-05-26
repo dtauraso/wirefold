@@ -651,12 +651,15 @@ becomes a question.
 
 ### The primitive: the fold node
 
-A **FOLD NODE** is a node that contains a subgraph. It has its **OWN DECLARED
-INTERFACE** (its own ports), mapped internally to its children — it does NOT
-inherit the subgraph's boundary-crossing wires. This makes the fold node a true
-encapsulation boundary: a black box with a stable contract that does NOT shift when
-the interior is rewired. Signals meant for child nodes stay internal; the fold
-node's interface is a separate, deliberate thing.
+A **FOLD NODE** is a node that contains a subgraph. It has its **OWN FULLY
+INDEPENDENT INTERFACE** (its own ports) — this interface is NOT mapped to the
+children, NOT a re-exposure of the children's ports, and NOT an alias for or
+derived from the subgraph's boundary-crossing wires. The fold node's interface is
+its own declared contract, entirely separate from what the interior wires look like.
+This makes the fold node a true encapsulation boundary: a black box with a stable
+contract that does NOT shift when the interior is rewired. Signals meant for child
+nodes stay internal; the fold node's interface is a separate, deliberate thing that
+stands on its own.
 
 (Superseded alternative: earlier the fold node was to inherit the subgraph's
 boundary-crossing wires directly — transparent, but coupling the fold's contract to
@@ -713,9 +716,12 @@ stands in), this is NOT a pure view operation — it is a new substrate primitiv
 **No behavior synthesis at the boundary.** A fold node does NOT compute the
 subgraph's behavior; there is no behavior synthesis.
 
-**Own-interface model** (chosen): the fold node has its own declared ports, mapped
-internally to its children. The fold's contract is stable and does not shift when
-the interior is rewired.
+**Own-interface model** (chosen): the fold node has its own fully independent
+declared ports. The interface is NOT mapped to the children, NOT derived from the
+children's ports, and NOT a re-exposure of the subgraph's boundary wires. When
+folded, you interact with and feed the fold node's own interface directly; the
+children are NOT wired into that interface. The fold's contract is stable and does
+not shift when the interior is rewired.
 
 **Producing outputs while folded** (interior dormant): the value is **FED
 directly to the fold node** — handed a value (edge-seed-style) that it presents
