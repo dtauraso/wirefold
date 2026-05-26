@@ -8,7 +8,7 @@
 // (registerHistory() is retained as a no-op for callers that still invoke it;
 // the store is read/written directly so no instance handle is needed.)
 
-import type { RFNode, RFEdge } from "../types";
+import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import { useThreeStore } from "../three/store";
 import { viewerState, setViewerState } from "./viewer-state";
 import type { ViewerState } from "./viewer/types";
@@ -16,8 +16,8 @@ import type { ViewerState } from "./viewer/types";
 const HISTORY_LIMIT = 50;
 
 interface Snapshot {
-  nodes: RFNode[];
-  edges: RFEdge[];
+  nodes: RFNode<NodeData>[];
+  edges: RFEdge<EdgeData>[];
   viewerState: ViewerState;
 }
 
@@ -50,8 +50,8 @@ export function undo() {
   const prev = past.pop()!;
   setViewerState(prev.viewerState);
   useThreeStore.getState().restoreNodesEdges(
-    prev.nodes as RFNode[],
-    prev.edges as RFEdge[],
+    prev.nodes,
+    prev.edges,
   );
 }
 
@@ -61,8 +61,8 @@ export function redo() {
   const next = future.pop()!;
   setViewerState(next.viewerState);
   useThreeStore.getState().restoreNodesEdges(
-    next.nodes as RFNode[],
-    next.edges as RFEdge[],
+    next.nodes,
+    next.edges,
   );
 }
 

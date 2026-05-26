@@ -102,5 +102,5 @@ export function specToFlow(
   const noteNodes = buildNoteNodes(spec);
 
   // Fold rectangles render *behind* the rest, so emit them first.
-  return { nodes: [...foldNodes, ...memberNodes, ...noteNodes], edges };
+  return { nodes: [...foldNodes, ...memberNodes, ...noteNodes] as RFNode<NodeData>[], edges };
 }
