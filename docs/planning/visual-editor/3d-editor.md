@@ -404,6 +404,48 @@ drag or rotate. No per-frame cost, no flicker mid-motion.
 - **Large-count format.** Threshold and display format for large behind-counts
   (e.g. "+99+" cap).
 
+## Problem #4 (port picking) — resolved
+
+### Reframe: React Flow plus a Z axis
+
+Going 3D is **adding a dimension, nothing more.** The reframe bounds the whole
+problem: React Flow already models ports as handles; each edge already carries
+`sourceHandle`/`targetHandle` — the logical channel between nodes. That structure
+is unchanged. The question "how does port picking work in 3D?" dissolves once the
+frame is correct.
+
+### Three layers, kept strictly separate
+
+1. **Logical connection (Go substrate).** Output channel of node A to input
+   channel of node B — the truth. No geometry, no position.
+2. **Human-speed timing / pulse-animation layer (pump-driven).** Bridges logical
+   events to what a human sees. Geography-free.
+3. **Geographical connection (rendered 3D wire/path).** The spline or tube that
+   represents the wire in space, including where it exits/enters the node body.
+   This is a visual/path concern only.
+
+The logical port (layer 1) is decided by what RF already does — `sourceHandle`/
+`targetHandle` on the edge. The optimizer-picked exit point (layer 3) never
+decides the logical port. The layers are distinct.
+
+### What the extra dimension actually changes
+
+The extra dimension changes **geography only** — rendering. In 3D, a port handle
+may be tiny, occluded, or facing away; you cannot reliably aim at it. The
+resolution: **you click the NODE**, not the port handle. The wire takes the most
+efficient 3D path between the two nodes, exiting and entering the node bodies
+wherever the path optimizer picks. That is a layer-3 decision. The
+`sourceHandle`/`targetHandle` (layer 1) is not a geographical decision and
+requires no new disambiguation step.
+
+### Why the earlier framing was wrong
+
+Earlier framing tried to force the logical-port choice into the geographical
+click — treating "which exit point did the cursor aim at?" as the mechanism for
+port assignment. That conflated layer 1 with layer 3. The logical port is not a
+geographical decision; RF already handles it. There is no new port-picking UI to
+design.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
