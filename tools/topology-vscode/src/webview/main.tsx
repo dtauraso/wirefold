@@ -30,7 +30,6 @@ postLog("lifecycle", { phase: "bundle-eval" });
 
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
-import "reactflow/dist/style.css";
 import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
 import { flushSave, flushViewSave } from "./save";
