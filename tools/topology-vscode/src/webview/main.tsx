@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "reactflow/dist/style.css";
 import "./webview.css";
 import App from "./rf/app";
@@ -8,10 +8,13 @@ import { flushSave, flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
 import { rfGetNodes, rfGetEdges } from "./rf/rf-imperative";
 import { flowToSpec } from "./rf/adapter/flow-to-spec";
-import { setRunStatusImperative } from "./rf/run-status";
+import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./rf/run-status";
+import type { RunStatusUI } from "./rf/run-status";
 import { setDimmedImperative } from "./rf/dimmed";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
+import { RunButton } from "./rf/panels/RunButton";
+import { SaveLifecycle } from "./SaveLifecycle";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -30,8 +33,10 @@ import { CrashListeners } from "./log/CrashListeners";
 
 function Root() {
   const [mode, setMode] = useState<"2d" | "3d">("2d");
+  const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
+  useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
   return (
-    <>
+    <RunStatusCtx.Provider value={runStatus}>
       {/* Toggle button — fixed top-right, always visible */}
       <button
         onClick={() => setMode((m) => (m === "2d" ? "3d" : "2d"))}
@@ -52,8 +57,12 @@ function Root() {
       >
         {mode === "2d" ? "3D view" : "2D view"}
       </button>
+      {/* SaveLifecycle and RunButton are mode-independent — mounted once here
+          so they remain active in both 2D and 3D views. */}
+      <SaveLifecycle />
+      <RunButton />
       {mode === "2d" ? <App /> : <ThreeView />}
-    </>
+    </RunStatusCtx.Provider>
   );
 }
 

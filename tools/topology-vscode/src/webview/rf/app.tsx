@@ -4,8 +4,6 @@ import {
   type Edge as RFEdge, type EdgeChange, type Node as RFNode, type NodeChange,
 } from "reactflow";
 import { specToFlow } from "./adapter";
-import { RunButton } from "./panels/RunButton";
-import { SaveLifecycle } from "../SaveLifecycle";
 import { viewerState } from "./viewer-state";
 import { getFolds } from "./folds-state";
 import { isLegacyCamera } from "../state/viewer/types";
@@ -24,8 +22,6 @@ import type { AppCtx } from "./app/_ctx";
 import { EdgeActionsCtx } from "./app/_edge-actions-ctx";
 import { registerRFSetters, notifyRFState } from "./rf-imperative";
 import { registerHistory, undo as rfUndo, redo as rfRedo } from "./history";
-import { registerRunStatusSetter, RunStatusCtx } from "./run-status";
-import type { RunStatusUI } from "./run-status";
 import { registerDimmedSetter, DimmedCtx, useDimmedCtx } from "./dimmed";
 import { registerHeldValuesSetter, HeldValuesCtx } from "./held-values";
 import type { HeldValues } from "./held-values";
@@ -137,13 +133,11 @@ function Inner() {
 }
 
 export default function App() {
-  const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
   const [dimmed, setDimmed] = useState<Set<string> | null>(null);
   const [heldValues, setHeldValues] = useState<HeldValues>(new Map());
   const [pulseMap, setPulseMap] = useState<PulseMap>(new Map());
   const [lastFireMap, setLastFireMap] = useState<LastFireMap>(new Map());
   const [slotsMap, setSlotsMap] = useState<SlotsMap>(new Map());
-  useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
   useEffect(() => { registerDimmedSetter(setDimmed); }, []);
   useEffect(() => { registerHeldValuesSetter(setHeldValues); }, []);
   useEffect(() => { registerPulseSetter(setPulseMap); }, []);
@@ -155,14 +149,10 @@ export default function App() {
     <LastFireCtx.Provider value={lastFireMap}>
     <SlotsCtx.Provider value={slotsMap}>
     <DimmedCtx.Provider value={dimmed}>
-    <RunStatusCtx.Provider value={runStatus}>
       <ReactFlowProvider>
-        <SaveLifecycle />
         <Inner />
-        <RunButton />
         <PseudoErrorOverlay />
       </ReactFlowProvider>
-    </RunStatusCtx.Provider>
     </DimmedCtx.Provider>
     </SlotsCtx.Provider>
     </LastFireCtx.Provider>
