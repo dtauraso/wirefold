@@ -14,6 +14,7 @@ import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./rf/panels/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { useThreeStore } from "./three/store";
+import { vscode } from "./vscode-api";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -72,3 +73,7 @@ window.addEventListener("message", (e) => {
   }
   // load/view-load for 2D is fully handled inside App's message effect.
 });
+
+// Signal readiness after the message listener is registered so the host's
+// response (load + view-load) is guaranteed not missed.
+vscode.postMessage({ type: "ready" });

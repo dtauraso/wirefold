@@ -438,9 +438,11 @@ function CameraSettleDetector({
 function computeOcclusionCounts(
   nodes: RFNode<NodeData>[],
   camera: THREE.Camera,
-  size: { width: number; height: number },
+  size: { w: number; h: number },
 ): Map<string, number> {
   if (nodes.length < 2) return new Map();
+
+  const wh = { width: size.w, height: size.h };
 
   // Project each node: screen px/py, camera distance, screen radius.
   type Proj = { id: string; px: number; py: number; dist: number; screenR: number };
@@ -449,13 +451,13 @@ function computeOcclusionCounts(
     const dist = worldCenter.distanceTo(camera.position);
 
     const center = worldCenter.clone().project(camera);
-    const { px, py } = ndcToPixel(center.x, center.y, size);
+    const { px, py } = ndcToPixel(center.x, center.y, wh);
 
     // Compute screen radius: project a point offset by the world node radius.
     const worldR = nodeRadius(n);
     const offsetWorld = worldCenter.clone().add(new THREE.Vector3(worldR, 0, 0));
     const offsetProj = offsetWorld.clone().project(camera);
-    const offsetPx = ndcToPixel(offsetProj.x, offsetProj.y, size).px;
+    const offsetPx = ndcToPixel(offsetProj.x, offsetProj.y, wh).px;
     const screenR = Math.abs(offsetPx - px);
 
     return { id: n.id, px, py, dist, screenR };
