@@ -12,7 +12,10 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
 
-const ERROR_LABELS = new Set(["window-error", "unhandled-rejection", "render-error"]);
+const ERROR_LABELS = new Set([
+  "window-error", "unhandled-rejection", "render-error",
+  "early-window-error", "early-unhandled-rejection",
+]);
 
 let pendingTs: Promise<void> = Promise.resolve();
 let pendingTsErrors: Promise<void> = Promise.resolve();

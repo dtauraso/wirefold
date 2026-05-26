@@ -1,3 +1,33 @@
+// lifecycle: bundle-eval start — this line runs as soon as the bundle is
+// evaluated by the webview, before any React or heavy side effects.
+import { vscode } from "./vscode-api";
+import { postLog } from "./log/post";
+postLog("lifecycle", { phase: "bundle-eval" });
+
+// Early crash listeners — fire BEFORE React mounts so blank-window crashes
+// are captured. These run synchronously here; CrashListeners (mounted inside
+// the React tree) duplicates coverage once the tree is up and removes these.
+{
+  const earlyOnError = (e: ErrorEvent) => {
+    postLog("early-window-error", {
+      message: e.message,
+      filename: e.filename,
+      lineno: e.lineno,
+      colno: e.colno,
+      stack: (e.error as Error | undefined)?.stack ?? "",
+    });
+  };
+  const earlyOnRejection = (e: PromiseRejectionEvent) => {
+    const reason = e.reason as { message?: string; stack?: string } | undefined;
+    postLog("early-unhandled-rejection", {
+      message: reason?.message ?? String(e.reason),
+      stack: reason?.stack ?? "",
+    });
+  };
+  window.addEventListener("error", earlyOnError);
+  window.addEventListener("unhandledrejection", earlyOnRejection);
+}
+
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "reactflow/dist/style.css";
@@ -14,7 +44,6 @@ import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./rf/panels/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { useThreeStore } from "./three/store";
-import { vscode } from "./vscode-api";
 import { handleTraceEvent } from "./rf/pump";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
@@ -45,6 +74,7 @@ function Root() {
   );
 }
 
+postLog("lifecycle", { phase: "before-render" });
 const app = document.getElementById("app")!;
 createRoot(app).render(
   <ErrorBoundary>
@@ -56,6 +86,7 @@ createRoot(app).render(
 window.addEventListener("message", (e) => {
   const msg = parseHostToWebview(e.data);
   if (!msg) return;
+  postLog("lifecycle", { phase: `msg:${msg.type}` });
   if (msg.type === "run-status") {
     setRunStatusImperative(msg.state === "error"
       ? { state: "error", message: msg.message ?? "" }
@@ -80,3 +111,4 @@ window.addEventListener("message", (e) => {
 // Signal readiness after the message listener is registered so the host's
 // response (load + view-load) is guaranteed not missed.
 vscode.postMessage({ type: "ready" });
+postLog("lifecycle", { phase: "ready-sent" });
