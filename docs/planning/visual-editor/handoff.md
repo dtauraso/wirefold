@@ -57,15 +57,17 @@ merge).
 - **Wire-pulse animation WIRED (commit 3154816e):** main.tsx message handler gained a `trace-event` case calling `handleTraceEvent(msg.event)` (imported from ./rf/pump). This connects the existing producer (pump.ts → setPulse, keyed by edge.id) to the existing consumer (ThreeView PulseBead reading getPulseMap().get(edgeId)). Message shape `{type:"trace-event", event}` matches what extension.ts posts; edge.id keys line up. `npm run build` clean, out/webview.js refreshed. NOT yet live-verified — beads-animate-on-Run is UNCONFIRMED.
 - **rf-retirement plan written (commit 3c819011):** docs/planning/visual-editor/rf-retirement.md (branch-tagged). 6-phase plan to retire the rf/ folder. Key facts it records: R3F NEVER renders via reactflow at runtime — only couplings are one dead CSS import in main.tsx + RFNode/RFEdge type aliases in 7 files (all `import type`). Three-way bucket: (A) dead-now = rf-imperative.ts; (B) live-but-misfiled-under-rf = types.ts, viewer-state.ts, history.ts, dimmed.ts, folds-state.ts, run-status.ts, pulse-state.ts, pump.ts, trace-kinds.ts, adapter/*, panels/RunButton.tsx, nodes/node-defs.ts+registry.ts (relocatable, no runtime reactflow dep); (C) genuine reactflow coupling = the RFNode/RFEdge type sites only. DECISION LOCKED: keep pulses (pulse-state.ts + pump.ts + trace-kinds.ts are live R3F animation infra); fire-flash-state.ts/slots-state.ts/held-values.ts have NO R3F consumer and are deletable.
 
-### BLOCKING open bug — blank diagram on reload (intermittent)
+### Resolved this session — blank diagram on reload
 
-- Symptom: on window reload the 3D diagram sometimes comes up blank.
-- CRITICAL clue captured this session: it came back WITHOUT a reload (user confirmed "I have not reloaded") — i.e. the view populated asynchronously after an initial empty window. So it is NOT a load-order race that re-running `load` fixes; it is an async-arrival / late-render window.
-- RULED OUT this session (do not re-investigate): viewer-state module duplication (single holder at rf/viewer-state.ts — store reads/writes the same instance); parseSpec throwing on the embedded top-level `view` key (parseSpec TOLERATES extra keys, loadSpec does not throw); module-load throw in the pump import chain (chain is clean, no top-level side effects); stale bundle (out/webview.js is fresh, contains the trace-event handler).
-- NOT yet captured: the actual webview DevTools console error/log ordering during a blank instance — probe bridge wrote ZERO .jsonl on the blank reload. This is the missing evidence.
-- Design smell noted (agent finding, not yet the confirmed cause): extension posts the FULL topology.json (incl. embedded `view` key) as the `load` message, and the `view` separately as `view-load` — two order-dependent messages. extension `send()` = document.getText() (unstripped); `sendView()` = extractViewText(). loadView() NO-OPS if `_lastSpec` not yet cached. The clean fix if confirmed: make store render order-independent (render when both spec+view present), or strip `view` from the load text and fold it into one render path.
-- Two unanswered diagnostic questions for next session to ask the user (or capture via console): (1) how long was it blank — sub-second startup latency vs several seconds; (2) did it return on its own or only after an interaction (resize/click/mouseover). Sub-second + self-return = benign startup latency (render-as-soon-as-spec-lands fix); interaction-triggered = scene not re-rendering until forced.
-- Process note for next session: 5 static-analysis subagents ran without catching a real error (cost-overrun pattern — speculating on an unverified diagnosis). NEXT STEP IS EVIDENCE, NOT MORE INFERENCE: open webview DevTools (Developer: Open Webview Developer Tools; switch to inner active-frame), reload until blank repros, capture the console error + log ordering, THEN fix.
+**FIXED. Verified: consistently framed across many reloads.**
+
+Root cause was NOT the order-dependent load/view-load message theory the doc previously led with. Data path was always healthy (store:load nodes:6 every reload).
+
+Actual cause: `CameraFitter` (ThreeView.tsx) fit the camera ONCE on `nodes.length 0→N`. When `view-load` relocated nodes AFTER that initial `load`-phase fit, the camera kept framing the old (pre-relocation) positions — content appeared off to the side or blank. The "rotated" look was oblique framing of wrong positions, not actual camera roll.
+
+Fix: added `loadEpoch` counter to the store (store.ts), bumped at the end of `loadSpec` and `loadView`; `CameraFitter` now re-fits keyed on `[loadEpoch]` instead of a one-shot ref. Both load phases trigger a fresh fit, so the final node positions are always framed correctly.
+
+Diagnostic instrumentation retained: early-error window listeners + once-per-load lifecycle/store breadcrumbs write to `.probe/ts.jsonl` and `ts-errors.jsonl`. The per-frame `threeview:render` breadcrumb (~60fps) was removed this session.
 
 ### Working-tree state
 
@@ -73,8 +75,12 @@ merge).
 
 ### Next concrete steps (in order)
 
-1. **Phase 0 verification (BLOCKING all rf cleanup):** (a) confirm wire-pulses animate on Run; (b) capture + fix the intermittent blank-on-reload bug per the evidence-first note above. Do NOT start rf deletions until Phase 0 passes — debugging a flaky load path gets harder once modules are moving.
+1. **Phase 0 verification (BLOCKING all rf cleanup):** (a) confirm wire-pulses animate on Run — STILL UNVERIFIED, still the blocker before rf-retirement Phase 1+2 deletions; (b) blank-on-reload — DONE (fixed this session via loadEpoch; verified consistently framed). Do NOT start rf deletions until (a) passes.
 2. Then execute rf-retirement.md: Phase 1+2 (deletions — needs sign-off), Phase 3+4 (refactor — lands freely), Phase 5+6 (reactflow dep removal — needs sign-off).
+
+### Known issues (non-blocking)
+
+- **ThreeView re-renders every frame when idle.** Observed via the now-removed per-frame `threeview:render` breadcrumb (~60fps identical nodes:6/edges:7 even with no interaction). Perf smell; root cause not yet investigated — likely an unmemoized store selector or a per-frame `setState` somewhere in the render tree. Out of scope for the camera fix; investigate when it causes measurable jank.
 
 ### Separate deferred task (paused — NOT this branch)
 

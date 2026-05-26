@@ -18,7 +18,6 @@ import { getPauseAdjustedNow } from "../rf/run-status";
 import { pushSnapshot, undo, redo } from "../rf/history";
 import { patchViewerState } from "../rf/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
-import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants
@@ -1185,7 +1184,6 @@ function PanPad({
 export function ThreeView() {
   const nodes = useThreeStore((s) => s.nodes);
   const edges = useThreeStore((s) => s.edges);
-  postLog("lifecycle", { phase: "threeview:render", nodes: nodes.length, edges: edges.length });
   const storeMoveNode = useThreeStore((s) => s.moveNode);
   const storeCreateEdge = useThreeStore((s) => s.createEdge);
   const [selectedId, setSelectedId] = useState<string | null>(null);
