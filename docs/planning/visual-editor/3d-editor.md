@@ -561,6 +561,40 @@ membership tier, and lattice layer, but none of these are resolved here.
 
 #6 (disorientation) — RETIRED as a phantom: the only real bearing is flow direction, which is invariant and self-displaying via the pump animation; "see the whole graph at once" was a 2D-flatness artifact wrongly imported as a required "home" state. No fix. Optional user-saved camera snapshots are the one honest convenience, deferred until friction.
 
+## Problem #7 (label/panel legibility) — resolved
+
+### Two separate carriers; no new 3D surface
+
+The concern was: pseudo panels and red validation flags rotating edge-on or
+overlapping in 3D. The resolution identifies two distinct things that people
+label "legibility" and routes each to the correct carrier.
+
+**TEXT (node label + the editable pseudo panel)** rides the **single billboarded
+sign post** established in Problem #2 — an HTML/DOM overlay (React div or
+CSS2DRenderer) that always faces the camera. The pseudo panel is the sign post's
+expanded/edit state; it is not a separate surface. Because the sign post
+billboards, text never goes edge-on. The hover/nearest/selected LOD from Problem
+#2 prevents panel overlap/forest in dense graphs.
+
+**VALIDATION FLAG** is NOT text and does NOT go on the sign post. It is **color +
+edge highlight on the 3D node BODY** — exactly the existing flagged-node
+mechanism (today's red node) carried into 3D. Visible from any angle; no
+billboarding required; no LOD gating. This is consistent with Problem #2's rule
+that **color is for DATA** (validation state is data, not a label).
+
+**ADDITIONALLY:** when a node is flagged, the sign post ALSO takes the same flag
+color + edge style as the body. This ensures the flag is readable whether the
+viewer is looking at the body or at the text surface — both surfaces carry the
+signal simultaneously.
+
+### Net
+
+- Text → sign post (billboarded; never edge-on; LOD controls overlap).
+- Flag → body color/edge-highlight (mirrored onto the sign post).
+- No edge-on problem.
+- No overlap problem.
+- No new 3D surface introduced.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture

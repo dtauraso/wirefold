@@ -105,9 +105,6 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
 - **#5 layout-derivation coverage** — does the structure→coordinate function
   place real, irregular/mixed topologies, or fall back to manual 3D placement?
 - **#6 (disorientation) — RETIRED as a phantom:** the only real bearing is flow direction, which is invariant and self-displaying via the pump animation; "see the whole graph at once" was a 2D-flatness artifact wrongly imported as a required "home" state. No fix. Optional user-saved camera snapshots are the one honest convenience, deferred until friction.
-- **#7 label/panel legibility** — pseudo panels + red validation flags rotating
-  edge-on/overlapping. (PARTLY addressed by #2's billboarded-label decision and
-  further helped by the medium-stack HTML/DOM overlay decision for labels.)
 - **#8 pulse-animation legibility** — pump-driven pulses on edges pointing into
   the screen foreshorten/occlude.
 - **#9 rendering scale** — many nodes + 3D edges + transparency + text
