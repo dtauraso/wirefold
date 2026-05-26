@@ -9,30 +9,21 @@
 //  1. Go emits "send" (node, port, value)
 //     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
 //     → pulse-state.ts:setPulse  writes { value, simStep, target, targetHandle } into PulseCtx
-//     (held-value badge is NOT written here; it fires at t=1 in use-pulse-animation)
 //
 //  2. RAF loop in edges/use-pulse-animation.ts animates pulse 0→1
-//     → on t=1: calls held-values.ts:setHeldValue (badge appears at pulse arrival)
 //     → posts "delivered" message so Go's PacedWire unblocks Recv
-//     → clears pulseT (dot disappears); held-value badge stays visible
+//     → clears pulseT (dot disappears)
 //
 //  3. Go emits "done" (node, port)
 //     → pump.ts  filters ALL RF edges by target+targetHandle (fan-in)
 //     → pulse-state.ts:clearPulse  removes animation data from PulseCtx
-//     → held value is intentionally NOT cleared — badge is sticky
 // ────────────────────────────────────────────────────────────────────────────
 
-import type { TraceEvent, SlotEvent, SlotMap } from "../../messages";
+import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "../three/store";
 import { postLog } from "../log/post";
 import { setPulse, clearPulse } from "./pulse-state";
-import { setLastFire } from "./fire-flash-state";
-import { setSlots } from "./slots-state";
-
-// Local accumulator: tracks the merged SlotMap per node across slot events.
-// setSlots always receives the full merged map; this holds the previous state.
-const _currentSlots = new Map<string, SlotMap>();
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -45,27 +36,12 @@ export function handleTraceEvent(event: TraceEvent): void {
   // Cast to the generated enum so tsc checks all branches are covered.
   const k = kind as TraceEventKind;
   switch (k) {
-    // PUMP_SLOT_HANDLER
-    case "slot": {
-      const { nodeId, port, phase, value } = event as SlotEvent;
-      const prevSlots = (_currentSlots.get(nodeId) ?? {}) as SlotMap;
-      const nextSlots: SlotMap = {
-        ...prevSlots,
-        [port]: phase === "filled"
-          ? { phase: "filled", value: value ?? 0 }
-          : { phase: "empty" },
-      };
-      _currentSlots.set(nodeId, nextSlots);
-      setSlots(nodeId, nextSlots);
+    case "slot":
       return;
-    }
     case "recv":
       return;
-    case "fire": {
-      const { node } = event as Extract<TraceEvent, { kind: "fire" }>;
-      setLastFire(node, step);
+    case "fire":
       return;
-    }
     case "send": {
       // Match ALL edges by source node id + sourceHandle (fan-out).
       // RF edges store source/sourceHandle; trace send events carry node/port.
