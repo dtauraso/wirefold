@@ -201,6 +201,38 @@ all-widgets approach, which is only clearly justified when targeting touch,
 accessibility, or no-wheel hardware. Currently leaning all-widgets per David;
 revisit before the prototype.
 
+### Pointer gesture discrimination (pick / rotate / pan-pad)
+
+The pan pad is a FLOATING control summoned under the cursor (like a mobile
+floating joystick), not a fixed widget. Three actions share a single
+pointer-down, discriminated by movement and time-held:
+
+| You do | Resolves to |
+|---|---|
+| press → move beyond a small slop | drag → rotate |
+| press → release quickly, no move | click → pick the item |
+| press → hold still a very short beat | pan pad summons at cursor; then move = pan |
+
+**Discrimination rule: movement-first wins.** Any motion past the slop
+threshold (~4–8 px) commits to rotate and cancels the pad even mid-dwell, so
+only a truly stationary hold summons the pad. This protects the hesitant user
+(press, pause, then drag to rotate) from accidentally summoning the pad.
+
+**Recommended timings** (with rationale grounded in perception thresholds):
+
+- **Normal click (pick):** release under ~150 ms with no move. (~100 ms is the
+  "instantaneous" perceptual floor; a click lands here.)
+- **Pan-pad dwell:** ~200 ms stationary hold. Above the ~150 ms click-release
+  floor so it reliably distinguishes from a tap; below the ~300 ms "consciously
+  perceptible pause" line so it feels like a brief settle, not a wait; well
+  under the 500 ms OS long-press standard (Android `getLongPressTimeout` / iOS
+  `minimumPressDuration`) so it won't collide with long-press muscle memory.
+- **Movement slop:** ~4–8 px overrides the dwell timer.
+
+**Touch caveat:** ~200 ms is too short for touch (finger jitter, slower taps);
+on touch the comfortable long-press is ~400–500 ms. If the editor ever targets
+touch, make the dwell device-adaptive: ~200 ms mouse, ~500 ms touch.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
