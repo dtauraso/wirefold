@@ -714,6 +714,51 @@ What a folded node presents at its boundary while its interior is dormant — an
 the run-vs-don't-run-interior detail (cheap either way because nodes are
 lightweight).
 
+## Problem #10 (input-device variance) — resolved
+
+### Scope for now: trackpad-first
+
+The editor ships first on a **TRACKPAD**. The Problem #1 gesture design stands
+as-is for that device:
+
+| DOF | Trackpad gesture |
+|---|---|
+| Rotate (2 in-plane rotational DOF) | **drag** (pointer drag — arcball, pivot = clicked point) |
+| Translate X / Y | floating **pan pad** (summoned under cursor) |
+| Translate Z (dolly) | **^/v hold** buttons |
+| Screen-plane spin / roll | **roll slider** |
+
+No new gesture bindings. No new design. Problem #1's control table is the
+complete trackpad mapping.
+
+### Trackpad multitouch (acknowledged, deferred)
+
+A trackpad's richer multitouch capability — two-finger pan, pinch dolly,
+two-finger rotate (roll) — would replace the most awkward click-tricks with
+direct gestures and is a **natural later upgrade**. It is real but is **not
+designed now**. It is deferred until friction in actual trackpad use surfaces it.
+
+### Other devices (hierarchy from #1, per-device maps deferred)
+
+Problem #1 already states the device hierarchy:
+
+- **Native target: SpaceMouse-class 6-DOF input** — all click-tricks vanish; all
+  6 DOF available simultaneously. The design is expressed without contortion.
+- **Good fallback: trackpad multitouch** — deferred (see above).
+- **Last resort: bare 2D mouse** — gesture discrimination and dwell timings
+  specified in Problem #1; they exist only to fake DOF out of a 2D device.
+- **Touch** — ~400–500 ms dwell noted in Problem #1; nothing further designed now.
+
+Problem #10 does **not** pin concrete per-device gesture maps for SpaceMouse,
+touch, or any device beyond the trackpad. Those are taken up when the
+recoverable-by-device test (#1) calls for them and real friction appears.
+
+### Net
+
+No new design. #10 confirms **trackpad-first using Problem #1's gestures**.
+Everything device-specific beyond that — trackpad multitouch, SpaceMouse native
+6-DOF binding, touch, bare-2D-mouse optimizations — is deferred until friction.
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture

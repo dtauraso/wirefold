@@ -132,14 +132,21 @@ assistant records each resolution into `3d-editor.md`. Do not batch or get ahead
   Substrate: fold node is a new node kind (structural, not view-only) — requires
   FoldNode.tsx + registry entry + Go nodes/Fold/ in one commit per the landing
   rule. Open: what a folded node presents at its boundary while interior is dormant.
+- **Problem #10 (input-device variance):** resolved. **Trackpad-first.** The
+  editor ships first on a trackpad; Problem #1's gesture design stands as-is —
+  drag = rotation, floating pan pad for X/Y, ^/v hold for Z, roll slider. Trackpad
+  multitouch (two-finger pan, pinch dolly, two-finger rotate) is acknowledged as a
+  natural upgrade but **deferred** until friction surfaces it. Other devices follow
+  the #1 hierarchy: SpaceMouse-class 6-DOF is the native target; bare-2D-mouse
+  click-tricks are last resort. No concrete per-device gesture maps beyond the
+  trackpad are pinned now. The recoverable-by-device test (#1) governs when those
+  are taken up. Net: no new design — #10 confirms trackpad-first using #1's
+  gestures; everything else deferred until friction.
 
-### Open problems (next session works these one at a time, recording each into 3d-editor.md)
+### Open problems
 
-- **#5 layout-derivation coverage** — does the structure→coordinate function
-  place real, irregular/mixed topologies, or fall back to manual 3D placement?
-- **#6 (disorientation) — RETIRED as a phantom:** the only real bearing is flow direction, which is invariant and self-displaying via the pump animation; "see the whole graph at once" was a 2D-flatness artifact wrongly imported as a required "home" state. No fix. Optional user-saved camera snapshots are the one honest convenience, deferred until friction.
-- **#10 input-device variance** — gesture bindings across
-  mouse/trackpad/SpaceMouse/touch (ties to the device hierarchy in #1).
+All design problems #1–#10 are resolved. No open problems remain on this planning
+branch. Next work is implementation (see "Next concrete step" in 3d-editor.md).
 
 ### Next concrete step
 
