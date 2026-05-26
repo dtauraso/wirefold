@@ -138,12 +138,11 @@ function pixelToNDC(clientX: number, clientY: number, rect: DOMRect): { ndcX: nu
 
 function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const { camera, size } = useThree();
-  const fitted = useRef(false);
+  const loadEpoch = useThreeStore((s) => s.loadEpoch);
   useEffect(() => {
-    // Wait until we have real nodes; retry when nodes.length transitions 0→N.
-    if (fitted.current) return;
-    if (nodes.length === 0) return; // no nodes yet — wait for next render
-    fitted.current = true;
+    // Skip if no content or canvas not yet sized.
+    if (nodes.length === 0) return;
+    if (size.width === 0 || size.height === 0) return;
     const persp = camera as THREE.PerspectiveCamera;
     const PAD = 80;
     const { minX, maxX, minY, maxY } = boundingBox(nodes);
@@ -162,10 +161,9 @@ function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
     persp.near = 0.1;
     persp.far = 20000;
     persp.updateProjectionMatrix();
-  // Re-run when nodes.length changes so we can catch the first non-empty batch.
-  // Once fitted.current is true, subsequent runs are no-ops.
+  // Re-fit whenever a load epoch completes (loadSpec or loadView); skip on drag.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length]);
+  }, [loadEpoch]);
   return null;
 }
 

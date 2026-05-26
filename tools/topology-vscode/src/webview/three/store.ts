@@ -25,6 +25,8 @@ export interface ThreeStoreState {
   selectedId: string | null;
   // Cached spec for re-running specToFlow after a view-load.
   _lastSpec: Spec | null;
+  // Incremented each time content is (re)loaded; used to trigger camera re-fit.
+  loadEpoch: number;
 
   // --- Actions ---
   loadSpec: (specText: string) => void;
@@ -52,6 +54,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   edges: [],
   selectedId: null,
   _lastSpec: null,
+  loadEpoch: 0,
 
   loadSpec(specText: string) {
     try {
@@ -60,7 +63,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const flow = specToFlow(spec, getFolds(), viewerState, viewerState.lastSelectionIds ?? [], getDimmed());
       const nodes = flow.nodes as RFNode<NodeData>[];
       const edges = flow.edges as RFEdge<EdgeData>[];
-      set({ nodes, edges, _lastSpec: spec });
+      set({ nodes, edges, _lastSpec: spec, loadEpoch: get().loadEpoch + 1 });
       setSpecMeta(spec);
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
@@ -77,7 +80,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const flow = specToFlow(lastSpec, getFolds(), next, next.lastSelectionIds ?? [], getDimmed());
       const nodes = flow.nodes as RFNode<NodeData>[];
       const edges = flow.edges as RFEdge<EdgeData>[];
-      set({ nodes, edges });
+      set({ nodes, edges, loadEpoch: get().loadEpoch + 1 });
       postLog("lifecycle", { phase: "store:view-load", nodes: nodes.length, edges: edges.length });
     } else {
       postLog("lifecycle", { phase: "store:view-load-noop" });
