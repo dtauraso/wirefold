@@ -245,6 +245,98 @@ function LabelProjector({
 }
 
 // ---------------------------------------------------------------------------
+// CameraSettleDetector: fires onSettle ~250ms after the camera stops moving.
+// Compares camera matrix each frame; on change resets a debounce timer.
+// ---------------------------------------------------------------------------
+
+function CameraSettleDetector({
+  onSettle,
+}: {
+  onSettle: () => void;
+}) {
+  const { camera } = useThree();
+  const lastMatrix = useRef<string>("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useFrame(() => {
+    // Snapshot the camera matrix as a compact string (16 floats, 2 decimal places).
+    camera.updateMatrixWorld();
+    const key = camera.matrixWorld.elements.map((v) => v.toFixed(2)).join(",");
+    if (key !== lastMatrix.current) {
+      lastMatrix.current = key;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        onSettle();
+      }, 250);
+    }
+  });
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// computeOcclusionCounts: given projected positions + world positions, return
+// a map from frontNodeId → count of nodes hidden directly behind it.
+//
+// Two nodes "overlap" if their projected screen-center distance < front node's
+// projected radius. Front = nearer to camera. N = count of farther overlapping
+// nodes behind the front one.
+// ---------------------------------------------------------------------------
+
+function computeOcclusionCounts(
+  nodes: RFNode<NodeData>[],
+  camera: THREE.Camera,
+  size: { width: number; height: number },
+): Map<string, number> {
+  if (nodes.length < 2) return new Map();
+
+  // Project each node: screen px/py, camera distance, screen radius.
+  type Proj = { id: string; px: number; py: number; dist: number; screenR: number };
+  const projected: Proj[] = nodes.map((n) => {
+    const worldCenter = nodeWorldPos(n);
+    const dist = worldCenter.distanceTo(camera.position);
+
+    const center = worldCenter.clone().project(camera);
+    const px = (center.x + 1) / 2 * size.width;
+    const py = (1 - (center.y + 1) / 2) * size.height;
+
+    // Compute screen radius: project a point offset by the world node radius.
+    const worldR = Math.min((n.data?.width ?? 110), (n.data?.height ?? 60)) / 4;
+    const offsetWorld = worldCenter.clone().add(new THREE.Vector3(worldR, 0, 0));
+    const offsetProj = offsetWorld.clone().project(camera);
+    const offsetPx = (offsetProj.x + 1) / 2 * size.width;
+    const screenR = Math.abs(offsetPx - px);
+
+    return { id: n.id, px, py, dist, screenR };
+  });
+
+  const counts = new Map<string, number>();
+
+  for (let i = 0; i < projected.length; i++) {
+    for (let j = i + 1; j < projected.length; j++) {
+      const a = projected[i];
+      const b = projected[j];
+      const dx = a.px - b.px;
+      const dy = a.py - b.py;
+      const screenDist = Math.sqrt(dx * dx + dy * dy);
+
+      // Overlap: use front node's screen radius as threshold.
+      const front = a.dist < b.dist ? a : b;
+      const behind = a.dist < b.dist ? b : a;
+
+      if (screenDist < front.screenR) {
+        counts.set(front.id, (counts.get(front.id) ?? 0) + 1);
+        // behind is occluded — no badge needed on it for this pair
+        void behind; // suppress lint
+      }
+    }
+  }
+
+  return counts;
+}
+
+// ---------------------------------------------------------------------------
 // RaycasterHelper: performs pick on demand via ref callback.
 // ---------------------------------------------------------------------------
 
@@ -338,6 +430,7 @@ function Scene({
   onPickRequest,
   onPositions,
   onNearestN,
+  onCameraSettle,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
@@ -350,6 +443,7 @@ function Scene({
   >;
   onPositions: (positions: { id: string; px: number; py: number }[]) => void;
   onNearestN: (ids: Set<string>) => void;
+  onCameraSettle: () => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   return (
@@ -359,6 +453,7 @@ function Scene({
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <NearestNTracker nodes={nodes} onNearestN={onNearestN} />
+      <CameraSettleDetector onSettle={onCameraSettle} />
       <ambientLight intensity={0.6} />
       <directionalLight position={[0, 0, 10]} intensity={0.8} />
       {nodes.map((n) => (
@@ -952,6 +1047,17 @@ export function ThreeView() {
     setNearestNIds(ids);
   }, []);
 
+  // Occlusion counts: recomputed only when the camera settles (not per-frame).
+  // Map from frontNodeId → N (nodes hidden directly behind it from current viewpoint).
+  const [occlusionCounts, setOcclusionCounts] = useState<Map<string, number>>(new Map());
+
+  const onCameraSettle = useCallback(() => {
+    const cam = cameraRef.current;
+    if (!cam) return;
+    const counts = computeOcclusionCounts(nodes, cam, canvasSize);
+    setOcclusionCounts(counts);
+  }, [nodes, cameraRef, canvasSize]);
+
   const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
 
   return (
@@ -981,6 +1087,7 @@ export function ThreeView() {
             onPickRequest={pickRequest}
             onPositions={onPositions}
             onNearestN={onNearestN}
+            onCameraSettle={onCameraSettle}
           />
         </Canvas>
       </div>
@@ -1020,6 +1127,41 @@ export function ThreeView() {
             {n.data?.sublabel ? (
               <span style={{ opacity: 0.7 }}> · {n.data.sublabel}</span>
             ) : null}
+          </div>
+        );
+      })}
+
+      {/* Occlusion count badges — "+N" pill at top-right of front node's projected center.
+          Only shown when N >= 1. Recomputed on camera settle (not per-frame).
+          Full occlusion is allowed — layout never moves (honesty preserved).
+          TODO(3d): large-count cap/format deferred */}
+      {nodes.map((n) => {
+        const count = occlusionCounts.get(n.id);
+        if (!count || count < 1) return null;
+        const pos = labelMap.get(n.id);
+        if (!pos) return null;
+        return (
+          <div
+            key={`badge-${n.id}`}
+            style={{
+              position: "absolute",
+              left: pos.px + 10,
+              top: pos.py - 18,
+              background: "rgba(30,30,50,0.88)",
+              color: "#7df",
+              fontSize: 9,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              padding: "1px 5px",
+              borderRadius: 8,
+              border: "1px solid rgba(100,180,255,0.5)",
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+              zIndex: 15,
+              lineHeight: "14px",
+            }}
+          >
+            +{count}
           </div>
         );
       })}
