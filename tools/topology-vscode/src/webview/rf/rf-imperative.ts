@@ -35,11 +35,17 @@ export function notifyRFState(nodes: RFNode[], edges: RFEdge[]) {
 }
 
 export function rfSetNodes(updater: (ns: RFNode[]) => RFNode[]) {
+  const next = updater(_nodes);
+  _nodes = next;
   _setNodes?.(updater);
+  for (const fn of _listeners) fn(_nodes, _edges);
 }
 
 export function rfSetEdges(updater: (es: RFEdge[]) => RFEdge[]) {
+  const next = updater(_edges);
+  _edges = next;
   _setEdges?.(updater);
+  for (const fn of _listeners) fn(_nodes, _edges);
 }
 
 // Read the latest RF node/edge snapshots without hooks.
@@ -118,20 +124,20 @@ export function rfCreateEdge(
   let m = 2;
   while (_edges.some((e) => e.data?.label === label)) label = `${baseLabel}_${m++}`;
 
+  const newEdge = {
+    id,
+    source: sourceId,
+    sourceHandle,
+    target: targetId,
+    targetHandle,
+    type: "substrate",
+    style: { stroke: KIND_COLORS[kind] ?? "#888", strokeWidth: 1.5 },
+    data: { kind, label, sourceHandle, targetHandle },
+  };
   pushSnapshot();
-  _setEdges?.((es) => [
-    ...es,
-    {
-      id,
-      source: sourceId,
-      sourceHandle,
-      target: targetId,
-      targetHandle,
-      type: "substrate",
-      style: { stroke: KIND_COLORS[kind] ?? "#888", strokeWidth: 1.5 },
-      data: { kind, label, sourceHandle, targetHandle },
-    },
-  ]);
+  _edges = [..._edges, newEdge];
+  _setEdges?.((es) => [...es, newEdge]);
+  for (const fn of _listeners) fn(_nodes, _edges);
   scheduleSave();
   return id;
 }
