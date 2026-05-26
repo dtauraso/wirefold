@@ -109,22 +109,66 @@ geometry it travels over changes.
 
 ## Problem #1 (DOF mismatch) — resolved control scheme
 
-**The problem.** 3D navigation needs 6 degrees of freedom (translate X/Y/Z plus
-three rotations). A mouse gives 2 (drag) plus scroll wheel plus buttons. Without
-a principled mapping, multiple operations must share an input and disambiguation
-requires modes — hidden state that causes errors.
+3D navigation needs 6 degrees of freedom (translate X/Y/Z plus three rotations).
+An input device may provide fewer. Without a principled mapping, operations must
+share inputs and disambiguation requires modes — hidden state that causes errors.
 
-**The resolution.** Reserve the pointer drag *entirely* for rotation. Give every
-other DOF its own dedicated on-screen widget. No two operations ever share an
-input: zero mode-collision, fully discoverable.
+### Governing axiom: never sacrifice control
 
-### Rotation rule (the drag)
+The cardinal rule: an interaction scheme must keep **all six DOF directly and
+fully controllable**. Sacrificing control to make an input device feel fast or
+smooth is the disqualifying flaw. Fluency is not worth control — being expert at
+a tool that took control from you is still a loss.
 
-Pivot = the clicked point at its depth `(x_picked, y_picked, z)`. Rotation is
-computed per successive pair of points in the drag: each segment defines a line,
-the rotation axis lies in the screen plane perpendicular to that segment, the
-slope sign gives direction, and magnitude is proportional to segment length.
-Increments compose as quaternion products.
+**Why the conventions fail this.** The dominant families — orbit/pan/zoom,
+modifier-chord schemes (OrbitControls, Blender, Maya, CAD) — sacrifice control:
+fixed pivot instead of a movable one, locked "up" vector with no roll, hidden
+modes, no visible model of state. The trade is made purely to make a 2D mouse
+feel fluent. That trade is backwards.
+
+**Evidence it was always a workaround, not a good design.** The 3Dconnexion
+SpaceMouse exists. The same professionals who mastered Blender and Maya bought a
+separate 6-DOF puck specifically to escape the chords — voting with money that
+the 2D-input scheme was tolerated, not good. "Pros got fast" means "pros adapted
+to bad software/input, and the ones who could afford it paid to get out."
+
+### The design vs. the input fallbacks
+
+**THE DESIGN (device-independent).** All six DOF are directly controllable. Drag
+= content-pivoted, path-integrated rotation about the picked point. The
+remaining DOF are each independently addressable. This is the invariant; it does
+not change with the input device.
+
+**NATIVE TARGET — 6-DOF input (SpaceMouse-class).** On it every click-trick
+disappears: no dwell, no mode discrimination, no summoned pad. Push/twist gives
+translation + rotation simultaneously, full control, zero sacrifice. This is the
+version that is "just fine" — the design expressed without contortion.
+
+**GOOD FALLBACK — trackpad multitouch.** A trackpad is not a 2D mouse. Two-finger
+pan, pinch dolly, and two-finger twist (roll) are real extra channels that replace
+the most awkward click-tricks with direct gestures, no control sacrifice. It sits
+between the bare mouse and the 6-DOF puck.
+
+**LAST-RESORT FALLBACK — bare 2D mouse.** The single-button click-tricks (dwell
+to summon a floating pan pad, movement-vs-dwell gesture discrimination, ~200 ms
+timings) exist **only** to fake DOF out of a 2D device. They are a degraded
+fallback, not the interaction model. The awkwardness they carry is correctly
+located in the **device**, not the design — the design refuses to paper over a
+2D input by stealing control, unlike the conventions, which paper over it by
+stealing control.
+
+### The design: rotation rule and control table
+
+*The following describes the device-independent design. On a 6-DOF puck the
+table collapses to "push/twist"; on trackpad two-finger gestures cover pan and
+dolly directly. The table as written is the explicit per-DOF mapping exposed
+when all else degrades to a bare mouse.*
+
+**Rotation rule.** Pivot = the clicked point at its depth `(x_picked, y_picked, z)`.
+Rotation is computed per successive pair of points in the drag: each segment
+defines a line, the rotation axis lies in the screen plane perpendicular to that
+segment, the slope sign gives direction, and magnitude is proportional to segment
+length. Increments compose as quaternion products.
 
 Consequences:
 
@@ -136,7 +180,7 @@ Consequences:
   drag *cannot* directly produce is spin about the line of sight (screen-plane
   twist/roll); that gets its own dedicated control.
 
-### Control table
+**Control table.**
 
 | DOF | Control |
 |---|---|
@@ -147,61 +191,18 @@ Consequences:
 | Translate Y | pan pad |
 | Translate Z | ^/v button (hold to dolly) |
 
-### Open conventions (not blockers)
+**Open conventions (not blockers):**
 
 - Which sign `^` is: dolly toward the scene or dolly away.
 - Empty-space pivot: what a drag rotates about when no item was clicked at
   mouse-down. Options: disable rotation entirely; fall back to scene center;
   fall back to a fixed depth.
 
-### How 3D interaction is usually solved (medium comparison)
+### Last-resort 2D-mouse fallback: gesture discrimination and timings
 
-Per CLAUDE.md's medium-vs-substance rule, interaction is **medium** — the
-converged industry answer is the default unless a deviation is justified. The
-five families:
-
-1. **Orbit/pan/zoom** (Three.js `OrbitControls`, Google Earth, most web and CAD
-   viewers): orbit = left-drag (yaw + pitch, up vector locked, no roll);
-   pan = right-drag or Shift+drag; zoom = scroll wheel. This is the converged
-   default for a web 3D viewer.
-
-2. **Trackball / arcball**: drag → rotation via a virtual sphere; free tumble
-   including roll, no locked-up vector. Our drag rule is an arcball variant; the
-   distinctive part is pivoting about the *picked point* ("rotate about cursor"
-   in some CAD tools).
-
-3. **Modifier/button chords** (Blender MMB / Shift+MMB / Ctrl+MMB; Maya
-   Alt+L/M/R): same drag, meaning set by button or key held plus scroll wheel.
-   Fluid for experts; hidden and error-prone for anyone else.
-
-4. **Dedicated 6-DOF hardware** (3Dconnexion SpaceMouse): all 6 DOF
-   simultaneously via a puck. Not a software design choice.
-
-5. **Touch / on-screen controls**: one-finger orbit, two-finger pan, pinch
-   zoom, two-finger twist for roll; or on-screen joysticks, gizmos, ViewCube
-   (mobile, kiosk, games).
-
-**Where our scheme lands and the trade-off.** Rotation = family 2 (well-trodden;
-free tumble is the distinctive benefit over locked-up orbit). Pan-pad +
-z-buttons + roll-slider = NOT the desktop default; it is closer to family 5
-(touch/kiosk). The trade-off: widget-per-DOF is collision-free and fully
-discoverable but slower, less fluid, and consumes screen space; the default
-(drag + chords + wheel) is fast but hidden and mode-error-prone.
-
-Deviation is **justified for rotation**: topology needs genuine 3D orientation
-that locked-up orbit denies, and the collision-free discoverability matters for
-a tool where orientation errors silently scramble structural meaning. The
-widget-per-DOF choice for pan/z-translate is the more questionable deviation —
-scroll-to-zoom and shift-drag-pan are near-universal muscle memory.
-
-**Open question (record, do not resolve):** whether to keep arcball rotation but
-still use scroll wheel for z and shift-drag for pan — capturing the free-tumble
-benefit without reinventing the two most-muscle-memorized controls — vs. the
-all-widgets approach, which is only clearly justified when targeting touch,
-accessibility, or no-wheel hardware. Currently leaning all-widgets per David;
-revisit before the prototype.
-
-### Pointer gesture discrimination (pick / rotate / pan-pad)
+*This section applies only when the input is a bare 2D mouse. On trackpad, the
+two-finger channels replace the tricks below. On a 6-DOF puck, none of this is
+needed.*
 
 The pan pad is a FLOATING control summoned under the cursor (like a mobile
 floating joystick), not a fixed widget. Three actions share a single
@@ -232,6 +233,42 @@ only a truly stationary hold summons the pad. This protects the hesitant user
 **Touch caveat:** ~200 ms is too short for touch (finger jitter, slower taps);
 on touch the comfortable long-press is ~400–500 ms. If the editor ever targets
 touch, make the dwell device-adaptive: ~200 ms mouse, ~500 ms touch.
+
+### Why the conventions sacrifice control (medium comparison)
+
+Per CLAUDE.md's medium-vs-substance rule, interaction is **medium** — the
+converged industry answer is the default unless a deviation is justified. The
+five families, examined through the axiom:
+
+1. **Orbit/pan/zoom** (Three.js `OrbitControls`, Google Earth, most web and CAD
+   viewers): orbit = left-drag (yaw + pitch, up vector **locked**, no roll);
+   pan = right-drag or Shift+drag; zoom = scroll wheel. Sacrifices roll and
+   movable pivot to make a 2D mouse feel smooth. Fails the axiom.
+
+2. **Trackball / arcball**: drag → rotation via a virtual sphere; free tumble
+   including roll, no locked-up vector. Our drag rule is an arcball variant; the
+   distinctive part is pivoting about the *picked point* ("rotate about cursor"
+   in some CAD tools). Does not sacrifice rotational DOF — closest to the axiom
+   among drag-only approaches.
+
+3. **Modifier/button chords** (Blender MMB / Shift+MMB / Ctrl+MMB; Maya
+   Alt+L/M/R): same drag, meaning set by button or key held plus scroll wheel.
+   Hides modes; fails the axiom's "no hidden state" corollary. The SpaceMouse
+   adoption rate in Blender/Maya users is the market verdict.
+
+4. **Dedicated 6-DOF hardware** (3Dconnexion SpaceMouse): all 6 DOF
+   simultaneously via a puck. This is the native target — the axiom is trivially
+   satisfied because the input matches the DOF count.
+
+5. **Touch / on-screen controls**: one-finger orbit, two-finger pan, pinch
+   zoom, two-finger twist for roll; or on-screen joysticks, gizmos, ViewCube
+   (mobile, kiosk, games). The trackpad variant of this is the good fallback;
+   on-screen-only widgets are the 2D-mouse fallback generalized.
+
+**Where our scheme lands.** Rotation = family 2 (arcball; free tumble is the
+benefit over locked orbit, and it does not sacrifice DOF). The pan-pad +
+z-buttons + roll-slider for the 2D-mouse fallback sit closest to family 5. That
+is the correct location: they are degraded-device scaffolding, not the design.
 
 ## Next concrete step
 
