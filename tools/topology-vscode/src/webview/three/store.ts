@@ -12,6 +12,7 @@ import { getFolds } from "../rf/folds-state";
 import { getDimmed } from "../rf/dimmed";
 import { KIND_COLORS, NODE_TYPES, type EdgeKind } from "../../schema";
 import { scheduleSave, setSpecMeta, markViewSynced } from "../save";
+import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const edges = flow.edges as RFEdge<EdgeData>[];
       set({ nodes, edges, _lastSpec: spec });
       setSpecMeta(spec);
+      postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
       console.error("[ThreeStore] loadSpec failed", err);
     }
@@ -73,7 +75,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const lastSpec = get()._lastSpec;
     if (lastSpec) {
       const flow = specToFlow(lastSpec, getFolds(), next, next.lastSelectionIds ?? [], getDimmed());
-      set({ nodes: flow.nodes as RFNode<NodeData>[], edges: flow.edges as RFEdge<EdgeData>[] });
+      const nodes = flow.nodes as RFNode<NodeData>[];
+      const edges = flow.edges as RFEdge<EdgeData>[];
+      set({ nodes, edges });
+      postLog("lifecycle", { phase: "store:view-load", nodes: nodes.length, edges: edges.length });
+    } else {
+      postLog("lifecycle", { phase: "store:view-load-noop" });
     }
   },
 
