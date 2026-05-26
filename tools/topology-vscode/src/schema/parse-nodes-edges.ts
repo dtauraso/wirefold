@@ -40,6 +40,19 @@ function parsePort(v: unknown, path: string): Port {
     }
     out.slot = o.slot;
   }
+  if (o.anchor !== undefined) {
+    const a = o.anchor;
+    if (
+      a === null || typeof a !== "object" || Array.isArray(a) ||
+      typeof (a as Record<string, unknown>).x !== "number" ||
+      typeof (a as Record<string, unknown>).y !== "number" ||
+      typeof (a as Record<string, unknown>).z !== "number"
+    ) {
+      throw new Error(`${path}.anchor: expected {x,y,z} numbers, got ${JSON.stringify(o.anchor)}`);
+    }
+    const ar = a as Record<string, unknown>;
+    out.anchor = { x: ar.x as number, y: ar.y as number, z: ar.z as number };
+  }
   return out;
 }
 

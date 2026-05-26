@@ -5,15 +5,12 @@ metadata:
   type: project
 ---
 
-The pre-RF "modifiable snake edge" feature was rebuilt on `task/diagram-animation-fixes`. The plumbing for `midpointOffset` was already in place from a prior pass and does NOT need re-wiring when working on edges:
+**NOTE (post-R3F cutover, 2026-05-26):** The RF app layer (`rf/app/`, `rf/edges/SubstrateEdge.tsx`) was deleted in Slice 3 of the R3F cutover. The mutation hook and EdgeActionsCtx no longer exist. The current edge rendering is `SingleEdgeTube` in `tools/topology-vscode/src/webview/three/ThreeView.tsx`. The spec-field and adapter plumbing still applies:
 
-- **Spec field:** `midpointOffset?: number` is in `WireProps` / `WIRE_PROPS` (schema), and `pickWireProps` in `tools/topology-vscode/src/webview/rf/adapter/spec-to-flow.ts` already threads it generically into RF edge `data`.
-- **Mutation:** `setEdgeMidpointOffset(edgeId, midpointOffset)` exists in `tools/topology-vscode/src/webview/rf/app/_use-edge-handlers.ts`; it patches the spec edge's `midpointOffset` and calls `scheduleSave()`.
-- **Context:** `EdgeActionsCtx` is provided by `app.tsx` wrapping the RF canvas; `useEdgeActions()` is the consumer hook.
-- **Renderer:** `tools/topology-vscode/src/webview/rf/edges/SubstrateEdge.tsx` contains `pickShape`, `snakeD/snakeVD/belowD`, `buildEdgePathD`, and the `MidpointDragHandle` inner component — all in one file.
+- **Spec field:** `midpointOffset?: number` is in `WireProps` / `WIRE_PROPS` (`tools/topology-vscode/src/schema/wire-defs.ts`), and `pickWireProps` in `tools/topology-vscode/src/webview/rf/adapter/spec-to-flow.ts` threads it generically into edge `data`.
+- **Renderer (R3F):** `SingleEdgeTube` in `tools/topology-vscode/src/webview/three/ThreeView.tsx` reads edge geometry. A new edge-level scalar added to `WireProps` is available via the store's `EdgeData` — thread it through `SingleEdgeTube`'s props.
+- The next planned edge scalar is `bend: { x, y, z }` on `EdgeView` (view-only, not a `WireProp`), per handoff.md.
 
-**Why:** A prior session paid ~$ in subagent grep cost re-discovering all of this. Two of the four expected wiring sites were no-ops.
-
-**How to apply:** When extending edge rendering or adding a new edge-level scalar (similar shape to `midpointOffset`), look at how `midpointOffset` flows first — copy the pattern. Don't re-grep schema/adapter/mutation; assume they already auto-thread anything added to `WIRE_PROPS`.
+**How to apply:** When extending edge rendering or adding a new edge-level scalar (similar shape to `midpointOffset`), add it to `WIRE_PROPS` in `wire-defs.ts` — the adapter auto-threads it via `pickWireProps`. Then use it in `SingleEdgeTube`.
 
 Related: [[feedback-schema-parser-parity]] still applies for the schema side; the parser is what makes generic threading work.

@@ -1,7 +1,7 @@
 # Substrate model
 
 Read this before changing anything in the **Go substrate** (`nodes/`,
-`Wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump**
+`nodes/Wiring/paced_wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump**
 (`tools/topology-vscode/src/webview/rf/pump.ts`),
 or anything that schedules/orders work. If your
 reasoning slips into banned vocabulary (below), you are in the wrong
@@ -97,7 +97,7 @@ render-only: it animates trace events received from Go.
   current RF node data as static React Flow custom nodes. They read
   phase indicators from the data the pump has written; they own no
   substrate state.
-- **`SubstrateEdge.tsx`** (`rf/edges/SubstrateEdge.tsx`) renders wire
+- **`SingleEdgeTube`** (in `tools/topology-vscode/src/webview/three/ThreeView.tsx`) renders wire
   animations driven by trace events written by the pump. It owns no
   delivery logic.
 - **Global gate** is a play/pause signal sent to the Go process.

@@ -1,1 +1,1 @@
-export { specToFlow } from "./adapter/spec-to-flow";
+export { specToFlow } from "../state/adapter/spec-to-flow";

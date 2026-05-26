@@ -52,9 +52,9 @@ Each `webview/<feature>.ts` owns one UI affordance. Most expose
 | `run.ts` | "▶ run" button + status pill |
 | `defs.ts` | SVG `<defs>` (markers, gradients) |
 | `geom.ts` | Coordinate / hit-test helpers |
-| `src/webview/rf/app.tsx` | React Flow canvas — nodes, edges, handles, interaction |
-| `src/webview/rf/AnimatedEdge.tsx`, `src/webview/rf/AnimatedNode.tsx` | Animated edge/node components |
-| `src/webview/rf/adapter.ts` | Spec ↔ React Flow node/edge model conversion |
+| `src/webview/three/ThreeView.tsx` | R3F 3D canvas — sole view: node drag, edge tubes, pointer state machine |
+| `src/webview/three/store.ts` | zustand store: nodes/edges/selection, `loadSpec`/`loadView` actions |
+| `src/webview/rf/adapter/spec-to-flow.ts` | Spec → store node/edge model conversion |
 
 ## Spec vs viewer state (load-bearing distinction)
 
@@ -64,29 +64,13 @@ Each `webview/<feature>.ts` owns one UI affordance. Most expose
   side, `viewerState.ts` types on the webview side.
 
 If a field affects generated Go, it belongs in the spec. Otherwise the
-sidecar. See [visual-editor-plan.md](../../docs/planning/visual-editor-plan.md).
+sidecar.
 
 ## Editor substrate
 
-The webview renders with React Flow (migrated during Phase 3). The runtime loader stays authoritative — the substrate change was about *how nodes/edges are rendered and interacted with*, not about who owns the spec.
+The webview renders with React Three Fiber (R3F) — a 3D canvas. The runtime loader stays authoritative — the substrate change was about *how nodes/edges are rendered and interacted with*, not about who owns the spec.
 
-What was rejected:
-
-- Hand-rolling all gestures (selection, marquee, port-drag, fold
-  re-routing) on top of lit-html + SVG. Viable but every gesture is its
-  own custom state machine, hit-testing, and ghost-edge geometry.
-- A standalone browser editor decoupled from the runtime — the deleted
-  `tools/topology-editor/` (commit `df2b101`). The lesson was *not*
-  "React Flow is wrong" but "the editor must live inside the runtime pipeline."
-
-Why React Flow specifically: subflows, multi-handle ports, and
-controlled flows all stabilized together in v11 (late 2022), making the
-library a viable substrate for a spec-driven editor where the spec —
-not the library — is the source of truth. Adapters translate
-`topology.json` ↔ React Flow's node/edge model.
-
-See [docs/decisions/0001-react-flow-substrate.md](../../docs/decisions/0001-react-flow-substrate.md)
-for the full decision record.
+The topology has genuine depth (inhibitor chain, rings, lateral-inhibition lattices). 2D React Flow was retired because it flattened real 3D structure into misleading edge crossings. R3F is the sole view; RF types are kept for their node/edge shapes but no RF component is instantiated.
 
 ## Build
 

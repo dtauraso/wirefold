@@ -8,8 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-TRACE_KINDS_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/rf/trace-kinds.ts"
-PUMP_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/rf/pump.ts"
+TRACE_KINDS_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/three/trace-kinds.ts"
+PUMP_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/three/pump.ts"
 
 # Extract kinds from TRACE_EVENT_KINDS array (quoted string literals on that line).
 kinds_from_ts() {

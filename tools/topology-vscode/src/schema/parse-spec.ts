@@ -8,7 +8,7 @@ import { arr, obj } from "./parse-primitives";
 import { parseEdge, parseNode } from "./parse-nodes-edges";
 import { validatePorts } from "./parse-meta";
 import { TOPOLOGY_META_FIELDS } from "./meta-field-defs";
-import { REQUIRED_INPUTS } from "../webview/rf/nodes/node-defs";
+import { REQUIRED_INPUTS } from "../webview/schema/node-defs";
 
 export function parseSpec(input: unknown, view?: { edges?: Record<string, unknown> }): Spec {
   const o = obj(input, "spec");

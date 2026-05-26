@@ -3,8 +3,8 @@
 // identical to the rendered label without a positioning round-trip.
 
 import { scheduleViewSave } from "./save";
-import { rfSetNodes, rfGetNodes } from "./rf/rf-imperative";
-import { pushSnapshot } from "./rf/history";
+import { useThreeStore } from "./three/store";
+import { pushSnapshot } from "./state/history";
 
 type RerenderFn = () => void;
 
@@ -73,7 +73,7 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
 
 export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
   // Read current sublabel from RF node data.
-  const rfNode = rfGetNodes().find((n) => n.id === nodeId);
+  const rfNode = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
   const original = (rfNode?.data?.sublabel as string | undefined) ?? "";
   beginInlineEdit(el, {
     initial: original,
@@ -81,7 +81,7 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
     onCommit: (next) => {
       if (next === original) return "";
       pushSnapshot();
-      rfSetNodes((ns) => ns.map((n) => {
+      useThreeStore.getState().setNodes((ns) => ns.map((n) => {
         if (n.id !== nodeId) return n;
         const data = { ...n.data };
         if (next === "") {
