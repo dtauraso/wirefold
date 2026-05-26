@@ -33,15 +33,15 @@
           "name": "FromChainInhibitor",
           "kind": "chain",
           "side": "bottom",
-          "slot": 1
+          "slot": 0
         }
       ],
       "outputs": [
         {
           "name": "ToChainInhibitor",
           "kind": "chain",
-          "side": "right",
-          "slot": 1
+          "side": "top",
+          "slot": 0
         }
       ]
     },
@@ -65,14 +65,14 @@
         {
           "name": "ToNext0",
           "kind": "chain",
-          "side": "right",
+          "side": "bottom",
           "slot": 1
         },
         {
           "name": "ToNext1",
           "kind": "inhibit-in",
-          "side": "top",
-          "slot": 1
+          "side": "left",
+          "slot": 2
         }
       ]
     },
@@ -88,7 +88,7 @@
         {
           "name": "FromPrevChainInhibitorNode",
           "kind": "chain",
-          "side": "left",
+          "side": "top",
           "slot": 1
         }
       ],
@@ -96,14 +96,14 @@
         {
           "name": "ToNext0",
           "kind": "inhibit-in",
-          "side": "top",
+          "side": "left",
           "slot": 0
         },
         {
           "name": "ToNext1",
           "kind": "chain",
           "side": "bottom",
-          "slot": 1
+          "slot": 2
         }
       ]
     },
@@ -114,13 +114,13 @@
         {
           "name": "FromLeft",
           "kind": "inhibit-in",
-          "side": "bottom",
+          "side": "right",
           "slot": 0
         },
         {
           "name": "FromRight",
           "kind": "inhibit-in",
-          "side": "bottom",
+          "side": "right",
           "slot": 2
         }
       ],
@@ -220,7 +220,7 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "i1ToReadGate1",
-      "midpointOffset": -71.5246564284947,
+      "midpointOffset": -61.03470535861882,
       "data": {
         "slots": 1,
         "route": "below"
@@ -234,7 +234,7 @@
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
       "label": "bootstrapRgToReadGate1",
-      "midpointOffset": -0.7898018096109922,
+      "midpointOffset": -16.658168020508526,
       "data": {
         "slots": 1
       }
@@ -254,22 +254,22 @@
         "sublabel": "Input"
       },
       "readGate1": {
-        "x": 244.47798426279974,
-        "y": 290.3410390143104,
+        "x": 225.273654398372,
+        "y": 300.1652600524147,
         "sublabel": "AND"
       },
       "i0": {
-        "x": 624.8625655732826,
-        "y": 298.3825093868614
+        "x": 646.1693204908323,
+        "y": 241.06598073719593
       },
       "i1": {
-        "x": 858.5159161431833,
-        "y": 296.3905571590508,
+        "x": 643.32216015854,
+        "y": 342.962576198407,
         "sublabel": "ChainInhibitor"
       },
       "inhibitRight0": {
-        "x": 461.02730524313336,
-        "y": 212.0562020385164,
+        "x": 456.30532675279215,
+        "y": 306.70043988751576,
         "sublabel": "INHIBIT(L=1,R=0)"
       },
       "bootstrap_rg": {

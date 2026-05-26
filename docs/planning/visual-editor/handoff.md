@@ -7,44 +7,58 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-25, task/chaininhibitor-pseudo)
+## State at handoff (2026-05-25, task/inhibitright-pseudo)
 
-**Active branch:** `task/chaininhibitor-pseudo`. Freshly branched from main, no work commits yet. NOT merged to main.
+**Active branch:** `task/inhibitright-pseudo`. Freshly branched from main after chaininhibitor merge; no work commits yet. NOT merged to main.
 
-### What just merged to main (task/readgate-input-label, fast-forward, branch deleted)
+### What just merged to main (task/chaininhibitor-pseudo)
 
-1. **ReadGate guard-term rename:** the canonical first guard term changed from `"input value"` to `"input"` in `tools/pseudo/readgate.go` — grammar, parser, `valueTerm()` return, and guard detector. All affected sites in `readgate_test.go` updated.
+**ChainInhibitor pseudo-text projection landed**, mirroring the ReadGate pattern.
 
-2. **ReadGate pseudo-save edge re-sync:** pseudo-save now re-points the canvas edge AND posts a load so the edge re-sync is visible; single-undo preserved.
+Grammar — per-neighbor lines:
+```
+send held -> <neighbor>
+send held -> <neighbor2>
+keep input
+```
 
-3. **validate.go Check 4 demoted to non-fatal:** a node with an unfed required port now loads and stays inert via precondition-gating instead of aborting the whole load. Memory `feedback_enforce_required_inputs` reversed to match (substrate lenient at load; editor flags instead of rejecting).
+Semantics: "send prev, hold current" — on input v, emit the previously-held value to all ToNext targets, then set held = v.
 
-4. **Editor dead-node legibility:** `parseSpec` is tolerant (no throw on missing required wire); `requiredInputDiagnostics` computes a per-node flag inside `specToFlow` (survives rebuilds); dead-node status propagates along input edges to a fixpoint (a node fed only by dead nodes is also flagged). Flagged nodes render a 3px red border + light-red (`#ffe5e5`) background with a hover tooltip. Newly-dropped palette nodes with required inputs also flag.
-
-5. **Run model — SNAPSHOT + Tier-1 auto-restart:** a run reflects the graph as of Run time. Undo/redo + external `topology.json` edits now restart the running process (debounced 300ms in `extension.ts` `onDidChangeTextDocument`), consistent with pseudo-save's existing auto-restart. Live incremental update (Tier 2) explicitly rejected as not worth the cost.
+Key changes:
+- `tools/pseudo/chaininhibitor.go` + `chaininhibitor_test.go` — new pseudo package
+- `cmd/pseudo/main.go` — chaininhibitor dispatch with `--out-neighbors` (plural)
+- `nodes/chaininhibitor/SPEC.md` — `hasPseudo: true`
+- `tools/topology-vscode/src/handle-message.ts` — `handleChainInhibitorRender` + `handleChainInhibitorSave`; suffix-stripped OutMulti handle matching (ToNext0/ToNext1 → base ToNext)
+- `tools/topology-vscode/src/webview/rf/PseudoPanel.tsx` — clears "loading" on `m.error`; renders flush-left (`textAlign: left`)
+- **Save semantics:** ChainInhibitor save regenerates only `node.go`; topology owns the broadcast edge set (unlike ReadGate which re-points its single out edge)
 
 ### Open / next (the task this branch is for)
 
-- **Goal:** pseudo-text projection for the ChainInhibitor node (the `i0`/`i1` node kind), following the same pattern as Input and ReadGate: a `cmd/pseudo` subcommand (render/save) + PseudoPanel double-click-to-edit + Go template regeneration of `nodes/chaininhibitor/node.go`.
-- **Prior blocker to resolve with David first:** the ChainInhibitor pseudo was previously deferred as "blocked on unresolved 'keep prev send current' spec" — clarify the intended pseudo grammar/semantics for ChainInhibitor (it holds a value, waits for a chain signal, fires forward) before implementing. **Do not start coding the projection until the grammar is agreed.**
-- **Pattern reference:** `tools/pseudo/readgate.go` (FromReadGate/RenderReadGate/ParseReadGate/ToReadGate), `cmd/pseudo/main.go` (subcommand dispatch), `handle-message.ts` (handleReadgateSave + pseudoTable), `PseudoPanel.tsx`.
+**Goal:** InhibitRightGate pseudo-text projection — same Input/ReadGate/ChainInhibitor pattern.
+
+- **Params:** L (left) and R (right) inputs
+- **Semantic:** "L pass / R inhibit" — result = Left==1 && Right==0
+- **Steps:** `cmd/pseudo` subcommand (render/save) + `nodes/inhibitrightgate/SPEC.md` hasPseudo:true + `handle-message.ts` handler + Go template regen of `node.go`
+- **Watch:** apply the OutMulti handle-matching lesson from ChainInhibitor if InhibitRightGate has multiple outputs (suffix-strip to base port name)
+- **Pattern reference:** `tools/pseudo/chaininhibitor.go`, `tools/pseudo/readgate.go`, `cmd/pseudo/main.go`, `handle-message.ts` handleChainInhibitor{Render,Save}, `PseudoPanel.tsx`
 
 ### Deferred (still valid)
 
-- **InhibitRightGate pseudo projection** — same pattern as Input/ReadGate, has L/R params; "L pass / R inhibit" semantic: result = Left==1 && Right==0.
-- **Known non-issue (do NOT treat as a bug):** undo/redo + pause/unpause on flipping valid/invalid nodes cannot revive a deadlocked Go process — only re-Run rebuilds. This is the intended snapshot model; the Tier-1 auto-restart now makes a fixed graph resume automatically.
-- **Latent:** `i1`-style OUTPUT backpressure deadness is NOT flagged (the flag follows input edges forward only; backpressure travels backward along outputs). Add a backward rule only if it surfaces as real friction.
+- **`i1`-style OUTPUT backpressure deadness flag (backward rule)** — add only if real friction surfaces. Current flag follows input edges forward only; backpressure travels backward along outputs.
+- **Latent UX:** pseudo panel error display is minimal (clears loading, shows empty) — improve only if needed.
 
 ### Key files
 
+- `tools/pseudo/chaininhibitor.go` — ChainInhibitor pseudo package (pattern reference)
 - `tools/pseudo/readgate.go` — ReadGate pseudo package (pattern reference)
-- `nodes/chaininhibitor/node.go` — ChainInhibitor Go source (target to regenerate)
+- `nodes/inhibitrightgate/node.go` — InhibitRightGate Go source (target to regenerate)
+- `nodes/inhibitrightgate/SPEC.md` — spec (needs `hasPseudo: true`)
 - `cmd/pseudo/main.go` — pseudo subcommand dispatch
 - `tools/topology-vscode/src/webview/rf/PseudoPanel.tsx` — double-click-to-edit panel
-- `tools/topology-vscode/src/handle-message.ts` — handleReadgateSave + pseudoTable
+- `tools/topology-vscode/src/handle-message.ts` — handleChainInhibitor{Render,Save} + pseudoTable
 - `tools/topology-vscode/src/schema/parse-spec.ts` — requiredInputDiagnostics fixpoint
 - `tools/topology-vscode/src/extension.ts` — debounced restart listener
-- `nodes/Wiring/validate.go` — parse-time validateSpec (Check 4 now non-fatal)
+- `nodes/Wiring/validate.go` — parse-time validateSpec (Check 4 non-fatal)
 - `tools/topology-vscode/src/webview/rf/nodes/registry.ts` — NODE_DEFS (PascalCase keys)
 
 ### Substrate model contract (stable)
