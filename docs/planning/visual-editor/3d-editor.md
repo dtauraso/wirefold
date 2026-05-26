@@ -82,16 +82,16 @@ React Flow is fundamentally 2D and load-bearing everywhere (node registry,
 `SubstrateEdge.tsx`, RF store, pan/zoom/select/connect). 3D means **replacing**
 it with the converged-on React 3D stack:
 
-> **react-three-fiber + drei (Three.js)**
+> **react-three-fiber + three.js — no drei**
 
-This is the non-weird medium choice — what the rest of the world converged on
-for React + 3D.
+R3F is the non-weird medium choice — what the rest of the world converged on
+for React + 3D. drei is explicitly excluded (see Medium stack section below).
 
 ### Component mapping
 
 | Current (2D) | 3D equivalent |
 |---|---|
-| `<Kind>Node.tsx` custom node | Mesh or billboarded `<Html>` panel (drei) |
+| `<Kind>Node.tsx` custom node | Mesh + HTML/DOM overlay (React div or CSS2DRenderer) |
 | Validation flag + pseudo panels | Projected/billboarded overlays |
 | `SubstrateEdge.tsx` 2D path | 3D spline/tube geometry |
 | Pulse animation (pump-driven) | Same pump logic; geometry it travels changes from 2D SVG path to 3D curve |
@@ -419,13 +419,26 @@ frame is correct.
 The "RF plus a Z axis" reframe clarifies which pieces RF was actually supplying
 and what happens to each:
 
-- **Renderer → R3F + minimal drei.** React Flow is a 2D library; it goes away.
-  R3F (react-three-fiber) is the React renderer for Three.js — it is ONLY a 3D
-  scene renderer (meshes, camera, lights). It is **not** a graph/node-editor
-  library. RF had given us nodes, edges, handles, and connection logic for free;
-  no turnkey "React Flow in 3D" exists, so that graph/edge/handle model is now
-  ours to maintain on top of R3F. The data shape we called "the RF model" survives
-  — RF the library no longer supplies it. (Medium — adopt the industry default.)
+- **Renderer → R3F + three.js only — no drei.** React Flow is a 2D library; it
+  goes away. R3F (react-three-fiber) is the React renderer for Three.js — it is
+  ONLY a 3D scene renderer (meshes, camera, lights). It is **not** a
+  graph/node-editor library. RF had given us nodes, edges, handles, and connection
+  logic for free; no turnkey "React Flow in 3D" exists, so that graph/edge/handle
+  model is now ours to maintain on top of R3F. The data shape we called "the RF
+  model" survives — RF the library no longer supplies it. (Medium — adopt the
+  industry default.)
+
+  **Why no drei:** drei's headline feature is OrbitControls, which Problem #1
+  explicitly rejects on substance grounds — we build custom controls regardless,
+  so drei's main draw is dead weight. drei's `<Text>` wraps `troika-three-text`,
+  the exact source of the CSP/worker/blob watch-item below. Per Problems #2/#7,
+  labels are billboarded + LOD'd and render as **HTML/DOM overlays** (React divs
+  over the canvas, or three's CSS2DRenderer) — not in-scene SDF text. This gives
+  crisper text, easier styling for the red validation flags, and eliminates the
+  troika CSP risk entirely. The few remaining drei conveniences (Billboard,
+  fat Line, Html) are small: fat lines via three's own `Line2`/`LineMaterial`;
+  billboarding via a few lines in a frame callback. Modest cost; avoids drei's
+  whole transitive tree.
 
 - **Graph state → Zustand stays.** RF's store was Zustand under the hood, but
   Zustand is standalone with no RF dependency. When RF goes away, Zustand remains
@@ -436,11 +449,11 @@ and what happens to each:
   path optimizer — these are not supplied by any medium library and were never
   supplied by RF. We own them regardless of renderer choice.
 
-**Security watch-item (not a blocker).** R3F core is a thin reconciler with
-minimal attack surface. The only CSP-relevant knob: `drei`'s 3D text helper
-(`troika-three-text`) and some Three.js loaders use web workers + blob URLs,
-which may require a VS Code webview CSP relaxation. Import only the drei helpers
-actually used; pin the lockfile; run `npm audit` when these are added.
+**Security note.** R3F core + three.js core are low-surface — no worker/blob
+paths. Dropping drei/troika **resolves** the former CSP watch-item: there is no
+longer a troika worker/blob path that could force a VS Code webview CSP
+relaxation. Hygiene going forward: pin the lockfile and run `npm audit` when any
+new dependency is added.
 
 ### Three layers, kept strictly separate
 
