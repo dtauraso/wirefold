@@ -414,6 +414,34 @@ problem: React Flow already models ports as handles; each edge already carries
 is unchanged. The question "how does port picking work in 3D?" dissolves once the
 frame is correct.
 
+### Medium stack: renderer vs. state vs. logic
+
+The "RF plus a Z axis" reframe clarifies which pieces RF was actually supplying
+and what happens to each:
+
+- **Renderer → R3F + minimal drei.** React Flow is a 2D library; it goes away.
+  R3F (react-three-fiber) is the React renderer for Three.js — it is ONLY a 3D
+  scene renderer (meshes, camera, lights). It is **not** a graph/node-editor
+  library. RF had given us nodes, edges, handles, and connection logic for free;
+  no turnkey "React Flow in 3D" exists, so that graph/edge/handle model is now
+  ours to maintain on top of R3F. The data shape we called "the RF model" survives
+  — RF the library no longer supplies it. (Medium — adopt the industry default.)
+
+- **Graph state → Zustand stays.** RF's store was Zustand under the hood, but
+  Zustand is standalone with no RF dependency. When RF goes away, Zustand remains
+  the home for graph state (nodes, edges, `sourceHandle`/`targetHandle`,
+  selection). (Medium — adopt the default; do not hand-roll a store.)
+
+- **Graph logic → ours (substance).** Connection rules, what a wire means, the 3D
+  path optimizer — these are not supplied by any medium library and were never
+  supplied by RF. We own them regardless of renderer choice.
+
+**Security watch-item (not a blocker).** R3F core is a thin reconciler with
+minimal attack surface. The only CSP-relevant knob: `drei`'s 3D text helper
+(`troika-three-text`) and some Three.js loaders use web workers + blob URLs,
+which may require a VS Code webview CSP relaxation. Import only the drei helpers
+actually used; pin the lockfile; run `npm audit` when these are added.
+
 ### Three layers, kept strictly separate
 
 1. **Logical connection (Go substrate).** Output channel of node A to input
