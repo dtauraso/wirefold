@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26, editor-r3f — R3F cutover complete)
+## State at handoff (2026-05-26, editor-r3f — audit merged, blank-diagram fixed)
 
-**Active branch:** `editor-r3f` (renamed from `task/editor-3d-r3f-canvas`; old name deleted from origin). This is a **long-lived R3F source line** — a deliberate, conscious override of CLAUDE.md's "avoid long-lived feature branches" hygiene rule. R3F is a whole new editor, not a task. Inheritor branches track this line; RF leaves `main` only when this branch merges and supersedes it. NOT merged to main.
+**Active branch:** `editor-r3f` (long-lived R3F source line; NOT merged to main). This session: fixed the blank-diagram regression, ran a four-stream code audit on task/full-code-audit, fixed the actionable findings, and fast-forward-merged the audit back into editor-r3f. task/full-code-audit remains on origin (not deleted).
 
 ### Why 3D
 
@@ -52,23 +52,30 @@ This principle is also saved in
 [3d-editor.md](3d-editor.md) (branch-local — does **not** ride the
 merge).
 
-### Cutover completed this session (3 slices, build green each)
+### Fixed this session (all committed + pushed, build green)
 
-- **Slice 1:** new zustand store `src/webview/three/store.ts` (`useThreeStore`) holds nodes/edges/selection; `loadSpec`/`loadView` via the pure adapters (`specToFlow`/`parseViewerState`); ThreeView reads/writes it. `main.tsx` feeds it on load/view-load. Replaced ThreeView's `rf-imperative` borrow.
-- **Slice 2:** ThreeView is the ONLY mounted view — 2D/3D toggle + React Flow 2D App removed from `main.tsx`. Run/pause/stop + save-status toolbar still works (reads imperative getters).
-- **Slice 3:** store is the SOLE source of truth — repointed `save.ts` (`performSave`), `pump.ts`, `RunButton`, `inline-edit.ts`, and the `__wirefold_test` hook to `useThreeStore.getState()`; removed the transitional rf-imperative mirror. Deleted the dead 2D RF component tree: `rf/app.tsx`, all `rf/app/*` (26 files), RF node/edge components (`GenericNode`, `PortRim`, `port-rim-grow`, `SubstrateEdge`, `FoldNode`, `NoteNode`, `MarkerDefs`, etc.), panels (`NodePalette`, `PseudoPanel`, etc.) — each proven import-dead.
+- **Blank diagram:** the R3F cutover dropped the webview→host "ready" post that the old RF App owned. The host waits for "ready" before sending load/view-load (handle-message.ts case "ready"), so the store was never fed. main.tsx now posts { type: "ready" } after the message listener registers. (Plus a tsc fix: computeOcclusionCounts now takes {w,h}.)
+- **View-save + spec-metadata dead wiring (audit H1/H2):** markViewSynced and setSpecMeta were never called in the R3F path → view-saves permanently early-returned (drag positions dropped) and flowToSpec stripped passThrough/notes metadata on first save. Now called in store.loadView / store.loadSpec respectively.
+- **Undo/redo repointed to the store:** rf/history.ts no longer writes to the dead rf-imperative; pushSnapshot reads useThreeStore, undo/redo call a new store.restoreNodesEdges action; Cmd/Ctrl+Z + Cmd/Ctrl+Shift+Z wired into ThreeView's existing keydown handler. rf-imperative.ts is now FULLY ORPHANED (zero importers).
+- **createEdge silent rejections:** the three return-null guards (self-loop, unresolved handles, input-already-wired) now console.warn with reasons.
+- **Audit tooling/docs:** audit-spec-view-hygiene.mjs repointed from nonexistent cmd/topogen/main.go to nodes/Wiring/loader.go (now runs); stale doc refs fixed (Wire.go→paced_wire.go in MODEL.md/CLAUDE.md, SubstrateEdge.tsx→SingleEdgeTube, handoff path depths, 2 memory files, ARCHITECTURE.md).
 
-### Remaining RF residue (not yet removed)
+### Audit verdict (docs/planning/visual-editor/audit-*.md — branch-tagged)
 
-- `rf/rf-imperative.ts` KEPT — only `rf/history.ts` still uses it (undo/redo).
-- `reactflow` dependency still in `package.json`: live code has only TYPE-only imports (`RFNode`/`RFEdge` in `store.ts`, `rf/types.ts`, `rf/adapter/*`, `rf/history.ts`) + one CSS import `reactflow/dist/style.css` in `main.tsx`. No RF component or hook is instantiated anywhere. Removing the dep needs BOTH: (a) user sign-off [CLAUDE.md dependency-removal rule], and (b) re-homing the `RFNode`/`RFEdge` type shapes into our own types first.
+- **Substrate: CLEAN.** No MODEL.md violations; go build/test pass; all five guard scripts green; pump.ts is render-only with its slot-phase write at the canonical home. Only the substance was verified healthy — every real finding was in the TS editor layer or docs.
+- Three audit docs are on disk (substrate-integrity, correctness, hygiene). audit-r3f-residue.md was NOT written to disk (the residue findings live in the cutover-residue summary; regenerate if a standalone doc is wanted).
 
-### Known gaps / verification pending
+### Open items NOT yet done (need decision or sign-off)
 
-- **LIVE VERIFICATION PENDING for the whole cutover** — user to reload and check: load+render (R3F sole view), node drag + persist-across-reload (drag CONFIRMED working + persisting earlier this session), **connect A→B (the never-confirmed-live bug; store fix in place but not yet visually confirmed)**, run/pause/stop + save-status. Triage findings in one pass.
-- **Undo/redo wired-but-inert:** `rf/history.ts` restore path writes to `rf-imperative`, which nothing live reads anymore → undo won't reflect in R3F. Was already a missing 3D op (not a regression); must be repointed to the store in a follow-up slice.
-- **z still 0 for all nodes** — z-derivation deferred until friction. Node-position persistence now works through the store + node drag.
-- **3 in-code TODOs remain** (pick-by-position `scene.traverse` fragility, roll-slider zero drift, CameraSettleDetector per-frame string snapshot).
+- **Trace-event animations (residue #3 / DECISION NEEDED):** pump.ts / handleTraceEvent is never imported by the R3F path → run animations (fire flashes, pulse dots, held-value badges) are inert. This is feature-vs-cleanup: either WIRE handleTraceEvent into main.tsx's message handler AND build the ThreeView render layer for pulse/fire/held-value state (real feature work), OR DELETE pump.ts + its 4 state modules (fire-flash-state, slots-state, held-values, trace-kinds) as dead RF code. Not yet decided.
+- **Safe deletions pending sign-off (destructive):** rf-imperative.ts (now zero importers), rf/nodes/node-defs.ts + rf/nodes/registry.ts (zero importers — but CLAUDE.md's substrate landing rule still NAMES registry.ts as THE node-kind registry; deleting it means updating that rule to the R3F reality first). pump.ts cluster depends on the #3 decision.
+- **reactflow dep removal (sign-off + prep):** all 7 reactflow imports are TYPE-only (RFNode/RFEdge) + one dead CSS import in main.tsx. Removable once those type shapes are re-homed into our own types file and the CSS import dropped. Needs user sign-off (dependency removal).
+- **No transient-message UI surface:** createEdge rejections are console-only; run-status is reserved for sim state. A small editorMessage store field + auto-clear is the missing piece if UI feedback is wanted.
+- **LIVE VERIFICATION STILL PENDING:** reload and confirm — diagram renders (ready-handshake fix), drag persists across reload (H1 fix — the handoff's prior "confirmed persisting" predates today's fixes and is suspect), undo (Cmd+Z) reflects in R3F, connect A→B. Triage in one pass.
+
+### Deferred-until-friction (do NOT speculatively patch)
+
+- z still 0 for all nodes (z-derivation deferred). The 3 in-code low-sev items: pick-by-position scene.traverse fragility, roll-slider zero drift, CameraSettleDetector per-frame string snapshot. parseCamera is 2D-only (will need a 3D branch WHEN 3D camera persistence is built — not before).
 
 ### Next concrete step: edge BEND/route (view-only midpoint handle)
 
@@ -94,9 +101,9 @@ has multiple outputs. Paused while 3D work is in flight.
 
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole (sole) 3D view: node drag, edge tubes, pointer state machine.
 - `tools/topology-vscode/src/webview/three/store.ts` — the single zustand source of truth (nodes/edges/selection, load/save actions).
-- `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar.
-- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/rf/pump.ts` — read from the store now.
-- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — LEGACY, only `history.ts` uses it (undo/redo); to be retired.
+- `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar; posts { type: "ready" } to unblock host load sequence.
+- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/rf/pump.ts` — read from the store now. pump.ts is INERT in the R3F path (handleTraceEvent not wired; see open items).
+- `tools/topology-vscode/src/webview/rf/rf-imperative.ts` — FULLY ORPHANED (zero importers); pending deletion sign-off.
 - `tools/topology-vscode/src/webview/rf/adapter/{spec-to-flow,flow-to-spec}.ts`, `tools/topology-vscode/src/webview/state/viewer/*` — pure adapters/state, shared and RF-free.
 - `docs/planning/visual-editor/rf-to-r3f-cutover.md` — note it is now partially superseded (toggle/staged-removal framing is gone; the cut happened).
 
