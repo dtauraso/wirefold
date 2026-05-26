@@ -340,6 +340,76 @@ Problem #7.)
 are reserved for DATA: kind, validation flag, port/wire kind, pulses. Mapping
 depth onto those channels would collide with semantics — a sacrifice, rejected.
 
+## Problem #3 (occlusion) — resolved
+
+Occlusion is the **strongest depth cue** (ranked #1 in Problem #2). That makes
+it both the sharpest threat — a fully hidden node is invisible — and the most
+valuable signal to preserve. The resolution keeps that value intact while
+closing the one gap a pure-motion recovery cannot close: a node you do not know
+exists.
+
+### What is NOT done
+
+**Partial occlusion is left completely untouched.** A node peeking out from
+behind another is still partially visible; the occlusion depth cue is working
+exactly as designed. No transparency, no relocation, no shadow/fade machinery
+for partial cases — each would either falsify structure (honesty axiom) or
+spend the depth cue.
+
+**No wholesale defeat of occlusion.** Techniques that make occluders transparent
+or ghost-out foreground objects are rejected: they destroy the #1 depth cue to
+solve a problem that motion already solves for the cases where the hidden item
+is known.
+
+### General recovery: camera gestures (Problem #1 answer applied)
+
+For any hidden item the user knows about, the primary recovery is the controls
+from Problem #1 — rotate, dolly, pan. Changing the viewpoint reveals the hidden
+node without altering the structure. No special occlusion-handling mode; the
+existing gesture grammar is sufficient.
+
+### THE ONE ADDED RULE: no node may be 0% visible
+
+The one gap motion cannot close is **total occlusion of a node the user has
+never seen**. A completely hidden node is an unknown unknown — there is no
+"look behind that node" impulse if you do not know something is back there.
+
+**Rule:** when a node is fully occluded (0% of its body visible from the current
+viewpoint), a minimal **outline / silhouette** of that node is drawn on top of
+the occluder — through the depth buffer, in front of everything. This is the
+games and scientific-viz "silhouette-through-walls" / Interrante
+occluded-structure technique, scoped tightly to full occlusion only.
+
+The outline serves both halves of the problem:
+
+1. **Discovery signal.** It tells the user "something is back there" — kills
+   the unknown-unknown. The outline's shape encodes kind (same kind-geometry as
+   the node body) so it is informative, not just a dot.
+2. **Pickability.** The outline is **clickable**, keeping the hidden node
+   selectable without moving anything or making the occluder transparent.
+
+### Timing: post-gesture, not per-frame
+
+The occlusion test and outline placement are computed **after a gesture settles**,
+not continuously during drag or rotate. No per-frame GPU cost, no mid-motion
+flicker. Once the camera comes to rest, the pass runs, and outlines appear or
+disappear as needed.
+
+### Empirical grounding
+
+Ware & Franck showed that motion parallax makes 3D node-link graphs readable
+(~3× error reduction) where passive render tricks did not — this resolution
+treats motion as the primary recovery and adds only the minimal outline marker.
+
+### Open conventions (not blockers)
+
+1. **Full-occlusion trigger.** The rule fires at 0% visible only — confirm
+   partial occlusion never triggers the outline.
+2. **Edge-on-node occlusion.** Does a wire/tube edge fully occluding a node
+   trigger the outline, or only node-on-node occlusion?
+3. **Outline click behavior.** Clicking the outline selects / targets the hidden
+   node directly (assumed).
+
 ## Next concrete step
 
 Build a **throwaway react-three-fiber prototype** that validates the gesture
