@@ -11,10 +11,10 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
-import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge } from "../rf-imperative";
-import type { NodeData, EdgeData } from "../types";
-import { getPulseMap } from "../pulse-state";
-import { getPauseAdjustedNow } from "../run-status";
+import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge } from "../rf/rf-imperative";
+import type { NodeData, EdgeData } from "../rf/types";
+import { getPulseMap } from "../rf/pulse-state";
+import { getPauseAdjustedNow } from "../rf/run-status";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants

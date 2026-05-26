@@ -3,7 +3,7 @@ import { useState } from "react";
 import "reactflow/dist/style.css";
 import "./webview.css";
 import App from "./rf/app";
-import { ThreeView } from "./rf/three/ThreeView";
+import { ThreeView } from "./three/ThreeView";
 import { flushSave, flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
 import { rfGetNodes, rfGetEdges } from "./rf/rf-imperative";
