@@ -1,14 +1,15 @@
-// RF-snapshot-based undo/redo. Replaces the 4 paired Zustand stacks
-// (undoSpec/redoSpec/undoViewer/redoViewer) with a single history backed
-// by RF's toObject() snapshot.
+// Snapshot-based undo/redo. Backed by the zustand store (useThreeStore),
+// which is the sole source of truth for node/edge state post-R3F-cutover.
 //
 // Usage:
-//   registerHistory(rf)  — call once in Inner() on mount
-//   pushSnapshot()       — call after any mutation that changes nodes/edges
-//   undo() / redo()      — restore previous/next RF state
+//   pushSnapshot()  — call after any mutation that changes nodes/edges
+//   undo() / redo() — restore previous/next state into the store
+//
+// (registerHistory() is retained as a no-op for callers that still invoke it;
+// the store is read/written directly so no instance handle is needed.)
 
-import type { ReactFlowInstance, Node as RFNode, Edge as RFEdge } from "reactflow";
-import { rfSetNodes, rfSetEdges } from "./rf-imperative";
+import type { Node as RFNode, Edge as RFEdge } from "reactflow";
+import { useThreeStore } from "../three/store";
 import { viewerState, setViewerState } from "./viewer-state";
 import type { ViewerState } from "../state/viewer/types";
 
@@ -22,10 +23,9 @@ interface Snapshot {
 
 let past: Snapshot[] = [];
 let future: Snapshot[] = [];
-let _rf: ReactFlowInstance | null = null;
 
-export function registerHistory(rf: ReactFlowInstance) {
-  _rf = rf;
+export function registerHistory() {
+  // No-op: the store is the source of truth; kept for call-site compatibility.
 }
 
 function cloneSnapshot(s: Snapshot): Snapshot {
@@ -33,36 +33,37 @@ function cloneSnapshot(s: Snapshot): Snapshot {
 }
 
 function currentSnapshot(): Snapshot {
-  return cloneSnapshot({ nodes: _rf!.getNodes(), edges: _rf!.getEdges(), viewerState });
+  const { nodes, edges } = useThreeStore.getState();
+  return cloneSnapshot({ nodes, edges, viewerState });
 }
 
 export function pushSnapshot() {
-  if (!_rf) return;
-  const { nodes, edges } = _rf.toObject();
-  past.push(cloneSnapshot({ nodes: structuredClone(nodes), edges: structuredClone(edges), viewerState }));
+  past.push(currentSnapshot());
   if (past.length > HISTORY_LIMIT) past.shift();
   // Any new action clears the redo stack.
   future = [];
 }
 
 export function undo() {
-  if (!_rf || past.length === 0) return;
-  const curr = currentSnapshot();
-  future.push(curr);
+  if (past.length === 0) return;
+  future.push(currentSnapshot());
   const prev = past.pop()!;
   setViewerState(prev.viewerState);
-  rfSetNodes(() => prev.nodes);
-  rfSetEdges(() => prev.edges);
+  useThreeStore.getState().restoreNodesEdges(
+    prev.nodes as RFNode[],
+    prev.edges as RFEdge[],
+  );
 }
 
 export function redo() {
-  if (!_rf || future.length === 0) return;
-  const curr = currentSnapshot();
-  past.push(curr);
+  if (future.length === 0) return;
+  past.push(currentSnapshot());
   const next = future.pop()!;
   setViewerState(next.viewerState);
-  rfSetNodes(() => next.nodes);
-  rfSetEdges(() => next.edges);
+  useThreeStore.getState().restoreNodesEdges(
+    next.nodes as RFNode[],
+    next.edges as RFEdge[],
+  );
 }
 
 export function canUndo() { return past.length > 0; }

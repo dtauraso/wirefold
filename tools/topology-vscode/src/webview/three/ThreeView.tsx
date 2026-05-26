@@ -15,7 +15,7 @@ import { useThreeStore } from "./store";
 import type { NodeData, EdgeData } from "../rf/types";
 import { getPulseMap } from "../rf/pulse-state";
 import { getPauseAdjustedNow } from "../rf/run-status";
-import { pushSnapshot } from "../rf/history";
+import { pushSnapshot, undo, redo } from "../rf/history";
 import { patchViewerState } from "../rf/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 
@@ -1262,7 +1262,13 @@ export function ThreeView() {
   // Escape key cancels connect mode
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setConnectPendingId(null);
+      if (e.key === "Escape") { setConnectPendingId(null); return; }
+      // Undo/redo: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z (redo).
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

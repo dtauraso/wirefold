@@ -11,7 +11,8 @@ import { parseViewerState } from "../state/viewer/types";
 import { getFolds } from "../rf/folds-state";
 import { getDimmed } from "../rf/dimmed";
 import { KIND_COLORS, NODE_TYPES, type EdgeKind } from "../../schema";
-import { scheduleSave } from "../save";
+import { scheduleSave, setSpecMeta, markViewSynced } from "../save";
+import { serializeViewerState } from "../state/viewer/types";
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -37,6 +38,7 @@ export interface ThreeStoreState {
     targetHandle: string | null,
   ) => string | null;
   moveNode: (id: string, x: number, y: number) => void;
+  restoreNodesEdges: (nodes: RFNode<NodeData>[], edges: RFEdge<EdgeData>[]) => void;
   saveSpec: () => void;
 }
 
@@ -58,6 +60,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const nodes = flow.nodes as RFNode<NodeData>[];
       const edges = flow.edges as RFEdge<EdgeData>[];
       set({ nodes, edges, _lastSpec: spec });
+      setSpecMeta(spec);
     } catch (err) {
       console.error("[ThreeStore] loadSpec failed", err);
     }
@@ -66,6 +69,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   loadView(viewText: string | undefined) {
     const next = parseViewerState(viewText);
     setViewerState(next);
+    markViewSynced(serializeViewerState(next));
     const lastSpec = get()._lastSpec;
     if (lastSpec) {
       const flow = specToFlow(lastSpec, getFolds(), next, next.lastSelectionIds ?? [], getDimmed());
@@ -93,7 +97,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const srcRF = nodes.find((n) => n.id === sourceId);
     const dstRF = nodes.find((n) => n.id === targetId);
     if (!srcRF || !dstRF) return null;
-    if (sourceId === targetId) return null;
+    if (sourceId === targetId) {
+      console.warn("[createEdge] Can't connect: source and target are the same node.");
+      return null;
+    }
 
     const srcType = (srcRF.data?.type ?? srcRF.type) as string;
     const dstType = (dstRF.data?.type ?? dstRF.type) as string;
@@ -108,9 +115,22 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const sourceHandle = sourceHandleIn ?? srcOutputs[0]?.name ?? null;
     const targetHandle = targetHandleIn ?? dstInputs[0]?.name ?? null;
 
-    if (!sourceHandle || !targetHandle) return null;
+    if (!sourceHandle || !targetHandle) {
+      console.warn(
+        `[createEdge] Can't connect ${sourceId} → ${targetId}: ` +
+        `no resolvable port handle (sourceHandle=${sourceHandle}, targetHandle=${targetHandle}). ` +
+        `Check that both nodes have outputs/inputs defined in NODE_TYPES or node data.`,
+      );
+      return null;
+    }
 
-    if (edges.some((e) => e.target === targetId && e.targetHandle === targetHandle)) return null;
+    if (edges.some((e) => e.target === targetId && e.targetHandle === targetHandle)) {
+      console.warn(
+        `[createEdge] Can't connect: input "${targetHandle}" on node "${targetId}" is already wired. ` +
+        `Disconnect the existing edge first.`,
+      );
+      return null;
+    }
 
     const srcPort = srcDef?.outputs.find((p) => p.name === sourceHandle)
       ?? (srcRF.data?.outputs as { name: string; kind: string }[] | undefined)?.find((p) => p.name === sourceHandle);
@@ -156,6 +176,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       n.id === id ? { ...n, position: { x, y } } : n,
     );
     set({ nodes: nextNodes });
+  },
+
+  // Wholesale replace nodes+edges (undo/redo restore). Persists the result.
+  restoreNodesEdges(nodes, edges) {
+    set({ nodes, edges });
+    scheduleSave();
   },
 
   saveSpec() {
