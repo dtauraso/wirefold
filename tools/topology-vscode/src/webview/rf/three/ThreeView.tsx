@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
-import { rfGetNodes, rfGetEdges, subscribeRFState } from "../rf-imperative";
+import { rfGetNodes, rfGetEdges, subscribeRFState, rfCreateEdge } from "../rf-imperative";
 import type { NodeData, EdgeData } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -90,14 +90,18 @@ function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
 function GraphNode({
   node,
   selected,
+  connectPending,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
+  connectPending: boolean;
 }) {
   const pos = nodeWorldPos(node);
   const r = Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
   const fillHex = node.data?.fill ?? "#ffffff";
-  const strokeHex = selected ? "#ffcc00" : (node.data?.stroke ?? "#888888");
+  const strokeHex = connectPending ? "#00ffaa"
+    : selected ? "#ffcc00"
+    : (node.data?.stroke ?? "#888888");
   const fillColor = new THREE.Color(fillHex);
   const strokeColor = new THREE.Color(strokeHex);
 
@@ -116,8 +120,38 @@ function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
-// Edges
+// Edges — 3D tube path using QuadraticBezierCurve3.
+// Exit/entry points: point on each node's sphere surface facing the other node.
 // ---------------------------------------------------------------------------
+
+/** Point on the sphere surface of `node` facing toward `other`. */
+function surfacePoint(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Vector3 {
+  const origin = nodeWorldPos(node);
+  const target = nodeWorldPos(other);
+  const r = Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
+  const dir = target.clone().sub(origin).normalize();
+  return origin.clone().addScaledVector(dir, r);
+}
+
+function SingleEdgeTube({ src, tgt }: { src: RFNode<NodeData>; tgt: RFNode<NodeData> }) {
+  const p0 = surfacePoint(src, tgt);
+  const p2 = surfacePoint(tgt, src);
+  // Control point: midpoint lifted along the cross product of the edge and Z axis,
+  // giving a gentle curve out of the plane.
+  const mid = p0.clone().add(p2).multiplyScalar(0.5);
+  const edgeDir = p2.clone().sub(p0).normalize();
+  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+  const span = p0.distanceTo(p2);
+  const p1 = mid.clone().addScaledVector(lift, span * 0.25);
+
+  const curve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
+  const tubeGeo = new THREE.TubeGeometry(curve, 16, 1.5, 6, false);
+  return (
+    <mesh geometry={tubeGeo}>
+      <meshStandardMaterial color="#888888" />
+    </mesh>
+  );
+}
 
 function GraphEdges({
   edges,
@@ -126,19 +160,15 @@ function GraphEdges({
   edges: RFEdge<EdgeData>[];
   nodeMap: Map<string, RFNode<NodeData>>;
 }) {
-  const points: THREE.Vector3[] = [];
-  for (const e of edges) {
-    const s = nodeMap.get(e.source);
-    const t = nodeMap.get(e.target);
-    if (!s || !t) continue;
-    points.push(nodeWorldPos(s), nodeWorldPos(t));
-  }
-  if (points.length === 0) return null;
-  const geo = new THREE.BufferGeometry().setFromPoints(points);
   return (
-    <lineSegments geometry={geo}>
-      <lineBasicMaterial color="#888888" />
-    </lineSegments>
+    <>
+      {edges.map((e) => {
+        const s = nodeMap.get(e.source);
+        const t = nodeMap.get(e.target);
+        if (!s || !t) return null;
+        return <SingleEdgeTube key={e.id} src={s} tgt={t} />;
+      })}
+    </>
   );
 }
 
@@ -241,6 +271,7 @@ function Scene({
   nodes,
   edges,
   selectedId,
+  connectPendingId,
   cameraRef,
   onPickRequest,
   onPositions,
@@ -248,6 +279,7 @@ function Scene({
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
+  connectPendingId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number) => string | null) | null
@@ -264,7 +296,7 @@ function Scene({
       <ambientLight intensity={0.6} />
       <directionalLight position={[0, 0, 10]} intensity={0.8} />
       {nodes.map((n) => (
-        <GraphNode key={n.id} node={n} selected={n.id === selectedId} />
+        <GraphNode key={n.id} node={n} selected={n.id === selectedId} connectPending={n.id === connectPendingId} />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} />
     </>
@@ -297,6 +329,8 @@ function useInteractionControls(
   pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number) => string | null) | null>,
   onSelect: (id: string | null) => void,
   onPanPadActive: (pos: { x: number; y: number } | null) => void,
+  connectPendingId: string | null,
+  onConnectClick: (id: string | null) => void,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -486,13 +520,17 @@ function useInteractionControls(
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const { ndcX, ndcY } = getNDC(e.clientX, e.clientY, rect);
           const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
-          onSelect(hitId); // null = clear selection
+          // Connect mode: route click to connect handler; else normal select
+          onConnectClick(hitId);
+          if (connectPendingId === null) {
+            onSelect(hitId); // normal select when not in connect mode
+          }
         }
       }
 
       s.phase = "idle";
     },
-    [getNDC, onPanPadActive, onSelect, pickRequest],
+    [connectPendingId, getNDC, onConnectClick, onPanPadActive, onSelect, pickRequest],
   );
 
   const onWheel = useCallback(
@@ -732,6 +770,8 @@ export function ThreeView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
+  // Connect mode: first click = pending source node id; second click = create edge.
+  const [connectPendingId, setConnectPendingId] = useState<string | null>(null);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const pickRequest = useRef<((ndcX: number, ndcY: number) => string | null) | null>(null);
@@ -770,12 +810,42 @@ export function ThreeView() {
     }
   }, []);
 
+  // Connect-mode click handler: first click picks source, second click creates edge.
+  // Clicking empty space (null) cancels.
+  const onConnectClick = useCallback((hitId: string | null) => {
+    if (connectPendingId === null) {
+      // Start connect mode only if a node was clicked
+      if (hitId !== null) setConnectPendingId(hitId);
+    } else {
+      // We have a pending source
+      if (hitId === null || hitId === connectPendingId) {
+        // Cancel: empty click or re-click same node
+        setConnectPendingId(null);
+      } else {
+        // Create the edge — auto-pick first output/input ports
+        rfCreateEdge(connectPendingId, null, hitId, null);
+        setConnectPendingId(null);
+      }
+    }
+  }, [connectPendingId]);
+
+  // Escape key cancels connect mode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConnectPendingId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const { onPointerDown, onPointerMove, onPointerUp, onWheel } = useInteractionControls(
     cameraRef,
     canvasSize,
     pickRequest,
     setSelectedId,
     setPanPadOrigin,
+    connectPendingId,
+    onConnectClick,
   );
 
   const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
@@ -800,6 +870,7 @@ export function ThreeView() {
             nodes={nodes}
             edges={edges}
             selectedId={selectedId}
+            connectPendingId={connectPendingId}
             cameraRef={cameraRef}
             onPickRequest={pickRequest}
             onPositions={onPositions}
@@ -835,6 +906,27 @@ export function ThreeView() {
           </div>
         );
       })}
+
+      {/* Connect-mode hint banner */}
+      {connectPendingId !== null && (
+        <div style={{
+          position: "absolute",
+          top: 10,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(0,200,120,0.85)",
+          color: "#000",
+          fontSize: 11,
+          fontFamily: "monospace",
+          padding: "4px 12px",
+          borderRadius: 5,
+          pointerEvents: "none",
+          zIndex: 40,
+          whiteSpace: "nowrap",
+        }}>
+          Click target node to wire · Esc to cancel
+        </div>
+      )}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <RollSlider cameraRef={cameraRef} />
