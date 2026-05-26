@@ -137,7 +137,7 @@ func TestChainInhibitor_OutNeighborChange(t *testing.T) {
 	}
 }
 
-// TestChainInhibitor_MultipleOutNeighbors: comma-separated neighbors parse and render correctly.
+// TestChainInhibitor_MultipleOutNeighbors: per-line neighbors render and parse correctly.
 func TestChainInhibitor_MultipleOutNeighbors(t *testing.T) {
 	goSrc := loadChainInhibitorNodeGo(t)
 
@@ -151,7 +151,7 @@ func TestChainInhibitor_MultipleOutNeighbors(t *testing.T) {
 	}
 
 	rendered := RenderChainInhibitor(v)
-	want := "send held -> a0, b1, c2\nkeep input\n"
+	want := "send held -> a0\nsend held -> b1\nsend held -> c2\nkeep input\n"
 	if rendered != want {
 		t.Errorf("RenderChainInhibitor: got %q want %q", rendered, want)
 	}

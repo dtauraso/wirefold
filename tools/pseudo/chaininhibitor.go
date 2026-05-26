@@ -16,7 +16,8 @@ import (
 //
 // Grammar:
 //
-//	send held -> <OutNeighbor>[, <OutNeighbor> ...]
+//	send held -> <OutNeighbor>
+//	[send held -> <OutNeighbor> ...]
 //	keep input
 type ChainInhibitorView struct {
 	OutNeighbors []string // downstream node ids, supplied by caller from topology
@@ -42,13 +43,16 @@ func FromChainInhibitor(goSrc []byte, outNeighbors []string) (ChainInhibitorView
 
 // RenderChainInhibitor emits the human-readable pseudo text for a ChainInhibitorView.
 //
-//	send held -> <OutNeighbor>[, <OutNeighbor> ...]
+//	send held -> <OutNeighbor>
+//	[send held -> <OutNeighbor> ...]
 //	keep input
 func RenderChainInhibitor(v ChainInhibitorView) string {
 	var b strings.Builder
-	b.WriteString("send held -> ")
-	b.WriteString(strings.Join(v.OutNeighbors, ", "))
-	b.WriteString("\n")
+	for _, n := range v.OutNeighbors {
+		b.WriteString("send held -> ")
+		b.WriteString(n)
+		b.WriteString("\n")
+	}
 	b.WriteString("keep input")
 	b.WriteString("\n")
 	return b.String()
@@ -67,11 +71,18 @@ func (e *ParseChainInhibitorError) Suggestion() string { return e.suggestion }
 
 // buildChainInhibitorSuggestion builds the canonical suggestion string from a prior view.
 func buildChainInhibitorSuggestion(prior ChainInhibitorView) string {
-	neighbors := strings.Join(prior.OutNeighbors, ", ")
-	if neighbors == "" {
-		neighbors = "<node>"
+	var b strings.Builder
+	b.WriteString("Try:")
+	neighbors := prior.OutNeighbors
+	if len(neighbors) == 0 {
+		neighbors = []string{"<node>"}
 	}
-	return fmt.Sprintf("Try: send held -> %s\n   keep input", neighbors)
+	for _, n := range neighbors {
+		b.WriteString("\n   send held -> ")
+		b.WriteString(n)
+	}
+	b.WriteString("\n   keep input")
+	return b.String()
 }
 
 // ParseChainInhibitor parses edited pseudo text back into a ChainInhibitorView.
@@ -198,47 +209,49 @@ func verifyChainInhibitorStructure(f *ast.File) error {
 
 // parseChainInhibitorPseudo parses the ChainInhibitor pseudo grammar:
 //
-//	"send" "held" "->" ident NEWLINE "keep" "input"
+//	"send" "held" "->" ident
+//	["send" "held" "->" ident ...]
+//	"keep" "input"
+//
+// Each broadcast target is on its own line. Comma lists are not accepted.
 func (p *pseudoParser) parseChainInhibitorPseudo() (ChainInhibitorView, error) {
-	// Line 1: "send" "held" "->" ident
-	if rawErr := p.consumeWord("send"); rawErr != nil {
+	// At least one "send held -> <ident>" line is required.
+	var outNeighbors []string
+	for {
+		p.skipWS()
+		// Peek to decide whether this line is a "send" line or "keep".
+		saved := p.pos
+		if err := p.consumeWord("send"); err != nil {
+			// Not a send line — break and expect "keep input".
+			p.pos = saved
+			break
+		}
+		if rawErr := p.consumeWord("held"); rawErr != nil {
+			tok := excerpt(p.input, p.pos)
+			return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
+		}
+		if rawErr := p.consumeToken("->"); rawErr != nil {
+			tok := excerpt(p.input, p.pos)
+			return ChainInhibitorView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
+		}
+		ident, rawErr := p.consumeIdent()
+		if rawErr != nil {
+			tok := excerpt(p.input, p.pos)
+			return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
+		}
+		outNeighbors = append(outNeighbors, ident)
+	}
+
+	if len(outNeighbors) == 0 {
 		tok := p.peekWord()
 		if tok == "" {
 			tok = excerpt(p.input, p.pos)
 		}
-		return ChainInhibitorView{}, &parseError{kind: parseErrBadStart, token: tok, wrapped: rawErr}
-	}
-	if rawErr := p.consumeWord("held"); rawErr != nil {
-		tok := excerpt(p.input, p.pos)
-		return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
-	}
-	if rawErr := p.consumeToken("->"); rawErr != nil {
-		tok := excerpt(p.input, p.pos)
-		return ChainInhibitorView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
-	}
-	// Parse one or more comma-separated idents: n0[, n1[, n2 ...]]
-	first, rawErr := p.consumeIdent()
-	if rawErr != nil {
-		tok := excerpt(p.input, p.pos)
-		return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr}
-	}
-	outNeighbors := []string{first}
-	for {
-		p.skipWS()
-		if p.pos >= len(p.input) || p.input[p.pos] != ',' {
-			break
-		}
-		p.pos++ // consume comma
-		p.skipWS()
-		next, rawErr2 := p.consumeIdent()
-		if rawErr2 != nil {
-			tok := excerpt(p.input, p.pos)
-			return ChainInhibitorView{}, &parseError{kind: parseErrMissingIdent, token: tok, wrapped: rawErr2}
-		}
-		outNeighbors = append(outNeighbors, next)
+		return ChainInhibitorView{}, &parseError{kind: parseErrBadStart, token: tok,
+			wrapped: fmt.Errorf("expected at least one \"send held -> <ident>\" line")}
 	}
 
-	// Line 2: "keep" "input"
+	// Trailing "keep input"
 	if rawErr := p.consumeWord("keep"); rawErr != nil {
 		tok := excerpt(p.input, p.pos)
 		return ChainInhibitorView{}, &parseError{kind: parseErrGeneric, token: tok, wrapped: rawErr}
