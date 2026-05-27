@@ -4,11 +4,12 @@
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items; 0 dead-code orphans (§3d — all removed).
+**Scorecard:** 26 features implemented and working; 14 cutover-debt items (10 restore-parity, 3 half-wired, 1 not-started); 0 never-specced decision points; 3 accepted-for-build items; 0 dead-code orphans (§3d — all removed). Fold (old view-only collapse) fully removed (commit `9d4091c5`); new file-dive fold design captured in §3b as a not-implemented proposal.
 
 > **Re-verified 2026-05-26** against post-architecture-audit code. Undo/redo moved from half-wired to not-started (no history.ts, no pushSnapshot exists). Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 > **Updated 2026-05-27** (commit `45cee602`, branch `task/remove-saved-views`): saved-views dead-code orphan REMOVED in full. Scorecard adjusted from 4 to 3 dead-code orphans.
 > **Updated 2026-05-27** (commits `9cc63677`, `93b6412a`, branch `main`): `valueLabel` wire prop and fold mutators (`setFolds`, `toggleFoldCollapse`, `updateFoldPosition`) REMOVED. Orphan count → 0.
+> **Updated 2026-05-27** (commit `9d4091c5`, branch `main`): old view-only fold feature (Fold type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor` edge rerouting, `foldId` on NodeData, viewer-state fold parse/serialize, all fold tests/e2e) FULLY REMOVED. §3a "Folds (collapsed subgraph)" row and §3b "Fold node Go primitive" row replaced by new file-dive fold proposal (§3b). Scorecard: half-wired count 4→3, never-specced count 1→0.
 
 ---
 
@@ -35,7 +36,7 @@ The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (
 | Run-status pause accounting | `tools/topology-vscode/src/webview/three/store.ts` (runStatus state) |
 | Debounced spec save | `tools/topology-vscode/src/webview/save.ts` (scheduleSave) |
 | Load spec / load view from VS Code | `store.ts:loadSpec`, `store.ts:loadView` |
-| Fold state module (RF-free) | `tools/topology-vscode/src/webview/state/folds-state.ts` |
+| ~~Fold state module (RF-free)~~ | **REMOVED** (commit `9d4091c5`): `folds-state.ts`, `ops/fold.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId` on NodeData, viewer-state fold parse/serialize, fold tests/e2e all deleted. |
 | Node dimming | Removed with saved-views teardown (commit `45cee602`, branch `task/remove-saved-views`). `dimmed.ts`, `data.dimmed` in specToFlow/NodeData, `.dim` CSS, and `__wirefold_test.applyDim` hook all deleted. |
 | Spec↔flow adapters | `tools/topology-vscode/src/webview/three/adapters/specToFlow.ts`, `flowToSpec.ts` |
 | Ring-topology deadlock break | Bootstrap `Input` node (`data.init=[seed]`, `data.repeat=false`) wired by a real edge into the receiving port; single-fires seed at tick-0. `edgeSeeds` TS pipeline removed entirely. |
@@ -74,16 +75,23 @@ The following were started in the R3F move but left inert — the infrastructure
 | Undo/redo | **NOT-STARTED** — no `history.ts`, no `pushSnapshot` anywhere; node drags and edge-create both only call `scheduleSave`/`scheduleViewSave`; undo/redo does not exist at all | — |
 | View-save on settle | **half-wired** — `markViewSynced` IS called inside `loadView`; not called after camera/drag, so positions lost on reload | `tools/topology-vscode/src/webview/three/store.ts`; `save.ts:48,78` |
 | Fit-view hotkey | **half-wired** — fit-on-load only (ThreeView orchestrator); no f/Shift-F for manual re-fit | `tools/topology-vscode/src/webview/three/ThreeView.tsx` |
-| Folds (collapsed subgraph) | **half-wired** — view-state module exists (`state/folds-state.ts`); `getFolds()` wired into `specToFlow` via `buildFoldNodes` (renders as React Flow "note" placeholder nodes); no 3D mesh render | `tools/topology-vscode/src/webview/state/folds-state.ts`; `tools/topology-vscode/src/webview/three/store.ts` |
 | Z-coordinate (node depth) | **half-wired** — schema parses `z`; always 0 in practice; no UI to set depth | `tools/topology-vscode/src/schema/node-defs.ts`; `specToFlow` adapter |
 
 ---
 
-### 3b. Never-Specced — Planned only loosely, needs a decision
+### 3b. Never-Specced / Proposals — Planned only loosely or newly redesigned, needs a decision before build
 
-| Feature | Open question |
-|---|---|
-| Fold node Go primitive | No `nodes/fold/` package has ever existed; fold was always view-state only. Needs an explicit yes/no: does fold ever become a Go substrate node, or stay view-state forever? |
+#### Fold (file-dive containment) — proposed, not implemented
+
+The old view-only collapse/frame fold feature was fully removed (commit `9d4091c5`). A redesigned fold is proposed below. Status: **not implemented; not yet specced at the spec/viewer-state layer**.
+
+- **Fold is an attribute, not a node kind.** Any node can be marked as a fold. There is no separate `Fold` kind — folding is a property applied to an existing node of any type.
+- **The folded node continues to run as its own kind.** Applying the fold attribute does not change how that node executes in its parent diagram. It is a normal executing node, not an inert placeholder.
+- **Self-contained child diagram.** The folded child nodes live inside the fold node's child diagram. Children run independently — the fold node does NOT forward or proxy messages to them. Nothing crosses the dive boundary at runtime. The fold node's own I/O (as a node of its type) is determined by the boundary edges adopted during authoring (see below); the contained diagram is its own execution context.
+- **Authoring gesture.** Create a node → assign the fold attribute → select the nodes to place inside → selected nodes move into the fold node's child diagram. The fold node adopts the boundary edges: input edges that targeted the first inner node(s) and output edges leaving the last inner node(s) become the fold node's own I/O at the parent level.
+- **Navigation ("file dive").** Double-click the fold node to dive into its child diagram — the canvas swaps to show the children. A breadcrumb "file path" at the top-left of the editor shows the current location and depth. A back button returns up the hierarchy. Diving is a view/navigation operation only — it does not affect message flow.
+- **Hierarchy.** Folds can presumably nest; a fold's child diagram may itself contain folds. The breadcrumb path reflects depth.
+- **Open substrate question (must resolve before implementing).** The parent-level boundary edges are the fold node's real I/O as a node of its type; the contained diagram is self-contained and runs on its own. Confirm during design whether/how a child diagram is associated with a node in the spec vs. viewer-state layer before implementing (per the project's "specify substrate layer first" rule — `feedback_specify_substrate_layer_first.md`).
 
 ---
 
@@ -108,7 +116,7 @@ Each is infrastructure that exists in code but reaches no user today — some ne
 | Named / saved views | **REMOVED** — commit `45cee602` on branch `task/remove-saved-views`. Deleted: `SavedView` type + parse/serialize + rename-remap; `state/dimmed.ts`; `data.dimmed` in specToFlow + NodeData; `.dim` CSS; `__wirefold_test.applyDim` hook; saved-view assertions within `parseViewerState.test.ts` (file retained); saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). Build/tsc/17 unit tests clean after removal. | COMPLETE — no orphan remains | N/A |
 | Spec diff | **REMOVED** — `state/ops/diff.ts` + `test/diff-core.test.ts` deleted; `diffSpecs` had no production caller. | COMPLETE — no orphan remains | N/A |
 | Wire value label | **REMOVED** — `valueLabel` deleted from `nodes/Wiring/loader.go` wire tag and `wire-defs.ts` regenerated via gen-node-defs (commit `9cc63677`, branch `main`). TS + Go builds clean. | COMPLETE — no orphan remains | N/A |
-| Fold mutators | **REMOVED** — `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained (live consumer in `store.ts`). (commit `93b6412a`, branch `main`). Build clean. | COMPLETE — no orphan remains | N/A |
+| Fold mutators | **REMOVED** — `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained at that time (commit `93b6412a`, branch `main`). Subsequently the entire old fold feature — including `folds-state.ts`, `ops/fold.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId`, viewer-state fold parse/serialize, fold tests/e2e — was deleted in full (commit `9d4091c5`). | COMPLETE — no orphan remains | N/A |
 
 > `midpointOffset` (§3a item 10) and sublabel inline edit (§3a item 6) were also surfaced by the same sweep but are already tracked there and are not duplicated here.
 
