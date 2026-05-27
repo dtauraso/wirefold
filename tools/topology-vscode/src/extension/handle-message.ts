@@ -30,7 +30,6 @@ export type MessageCtx = {
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
   send: () => Thenable<boolean>;
-  sendView: () => Promise<unknown>;
   setLastAppliedVersion: (v: number) => void;
 };
 
@@ -89,7 +88,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
   switch (msg.type) {
     case "ready":
       ctx.send();
-      await ctx.sendView();
       return;
     case "save":
       try {

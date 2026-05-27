@@ -45,10 +45,9 @@ export function performSave() {
 }
 
 export function performViewSave() {
-  // Race guard: until view-load has been processed (markViewSynced called),
-  // viewerState lacks the persisted nodes/edges from the sidecar. Saving in
-  // that window serializes empty {nodes,edges} and clobbers the file on
-  // disk. See task/view-load-race-guard.
+  // Race guard: until load has been processed (markViewSynced called),
+  // viewerState lacks the persisted positions from topology.json#view. Saving
+  // in that window serializes empty state and clobbers the file on disk.
   if (lastViewSyncedText === undefined) return;
   const text = serializeViewerState(viewerState);
   if (text.trim() === "null") { return; }

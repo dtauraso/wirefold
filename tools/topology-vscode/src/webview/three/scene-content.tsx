@@ -61,7 +61,7 @@ export function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
     persp.near = 0.1;
     persp.far = 20000;
     persp.updateProjectionMatrix();
-  // Re-fit whenever a load epoch completes (loadSpec or loadView); skip on drag.
+  // Re-fit whenever a load epoch completes; skip on drag.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadEpoch]);
   return null;

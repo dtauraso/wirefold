@@ -3,7 +3,7 @@
 
 import { create } from "zustand";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
-import { parseSpec, type Spec } from "../../schema";
+import { parseSpec } from "../../schema";
 import { specToFlow } from "../state/adapter/spec-to-flow";
 import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
 import { parseViewerState } from "../state/viewer/types";
@@ -23,8 +23,6 @@ export interface ThreeStoreState {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
-  // Cached spec for re-running specToFlow after a view-load.
-  _lastSpec: Spec | null;
   // Incremented each time content is (re)loaded; used to trigger camera re-fit.
   loadEpoch: number;
 
@@ -36,8 +34,7 @@ export interface ThreeStoreState {
   fadeEdgeOrder: string[];
 
   // --- Actions ---
-  loadSpec: (specText: string) => void;
-  loadView: (viewText: string | undefined) => void;
+  load: (text: string) => void;
   setNodes: (updater: RFNode<NodeData>[] | ((ns: RFNode<NodeData>[]) => RFNode<NodeData>[])) => void;
   setEdges: (updater: RFEdge<EdgeData>[] | ((es: RFEdge<EdgeData>[]) => RFEdge<EdgeData>[])) => void;
   setSelected: (id: string | null) => void;
@@ -61,39 +58,22 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedId: null,
-  _lastSpec: null,
   loadEpoch: 0,
   directlyFadedNodes: new Set<string>(),
   directlyFadedEdges: new Set<string>(),
   fadeEdgeOrder: [],
 
-  loadSpec(specText: string) {
+  load(text: string) {
     try {
-      const rawJson = JSON.parse(specText);
-      const spec = parseSpec(rawJson);
-      const flow = specToFlow(spec, viewerState, viewerState.lastSelectionIds ?? []);
-      let nodes = flow.nodes as RFNode<NodeData>[];
-      let edges = flow.edges as RFEdge<EdgeData>[];
-      const { directlyFadedNodes, directlyFadedEdges } = get();
-      ({ nodes, edges } = applyFade(nodes, edges, directlyFadedNodes, directlyFadedEdges));
-      const fadeEdgeOrder = reconcileFadeOrder(get().fadeEdgeOrder, edges);
-      set({ nodes, edges, _lastSpec: spec, loadEpoch: get().loadEpoch + 1, fadeEdgeOrder });
-      setSpecMeta(spec);
-      postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
-    } catch (err) {
-      console.error("[ThreeStore] loadSpec failed", err);
-    }
-  },
-
-  loadView(viewText: string | undefined) {
-    const next = parseViewerState(viewText);
-    setViewerState(next);
-    markViewSynced(serializeViewerState(next));
-    const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
-    const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
-    const lastSpec = get()._lastSpec;
-    if (lastSpec) {
-      const flow = specToFlow(lastSpec, next, next.lastSelectionIds ?? []);
+      const raw = JSON.parse(text);
+      const spec = parseSpec(raw);
+      const viewText = raw.view !== undefined ? JSON.stringify(raw.view) : undefined;
+      const next = parseViewerState(viewText);
+      setViewerState(next);
+      markViewSynced(serializeViewerState(next));
+      const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
+      const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
+      const flow = specToFlow(spec, next, next.lastSelectionIds ?? []);
       let nodes = flow.nodes as RFNode<NodeData>[];
       let edges = flow.edges as RFEdge<EdgeData>[];
       ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
@@ -106,14 +86,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         directlyFadedEdges: restoredFadedEdges,
         fadeEdgeOrder,
       });
-      postLog("lifecycle", { phase: "store:view-load", nodes: nodes.length, edges: edges.length });
-    } else {
-      set({
-        directlyFadedNodes: restoredFadedNodes,
-        directlyFadedEdges: restoredFadedEdges,
-        fadeEdgeOrder: next.fadeEdgeOrder ?? [],
-      });
-      postLog("lifecycle", { phase: "store:view-load-noop" });
+      setSpecMeta(spec);
+      postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
+    } catch (err) {
+      console.error("[ThreeStore] load failed", err);
     }
   },
 
