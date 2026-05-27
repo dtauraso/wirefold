@@ -40,9 +40,9 @@ Second pass, aimed at organization rather than substrate discipline: file-size h
 
 1. **ThreeView.tsx is a 1,489-line god-object — CRITICAL cohesion debt.** Bundles six unrelated domains: geometry helpers, scene/render components, a 326-line `useInteractionControls` state machine, camera UI widgets (RollSlider/DollyButtons/PanPad), occlusion raycasting, and the main orchestrator. Splits cleanly along existing section boundaries into ~5 modules (geometry-helpers, scene-content, interaction-controls, camera-ui, orchestrator); main component would shrink 239 → ~60 lines.
 
-2. **Backwards layer dependency: spec layer imports from webview layer — HIGH (CONVERGENT).** `src/schema/` is meant to be authoritative spec-side, knowing nothing of the view, but: `schema/node-types.ts:13` imports `NODE_DEFS` from `webview/schema/registry`; `schema/parse-spec.ts:11` imports `REQUIRED_INPUTS` from `webview/schema/node-defs`; `extension/handle-message.ts:23` also reaches into `webview/schema/node-defs`. So `parseSpec()` can't run without view-layer code, and the extension host crosses the postMessage boundary by direct import. Root cause: codegen emits `node-defs.ts` into `webview/schema/` but three layers need it. Fix (one move): relocate generated `node-defs.ts` to `src/schema/`, update codegen output path + imports. Resolves the backwards dep AND the extension violation together. Highest-value correction.
+2. **Backwards layer dependency: spec layer imports from webview layer — HIGH (CONVERGENT). ✅ RESOLVED (commit `76af8c02`).** Codegen now emits `node-defs.ts` to `src/schema/`; the `registry.ts` shim and the `webview/schema/` directory are deleted; all importers (incl. a contract test) updated; zero `webview/schema` references remain. Original finding: `src/schema/` is meant to be authoritative spec-side, knowing nothing of the view, but: `schema/node-types.ts:13` imports `NODE_DEFS` from `webview/schema/registry`; `schema/parse-spec.ts:11` imports `REQUIRED_INPUTS` from `webview/schema/node-defs`; `extension/handle-message.ts:23` also reaches into `webview/schema/node-defs`. So `parseSpec()` can't run without view-layer code, and the extension host crosses the postMessage boundary by direct import. Root cause: codegen emits `node-defs.ts` into `webview/schema/` but three layers need it. Fix (one move): relocate generated `node-defs.ts` to `src/schema/`, update codegen output path + imports. Resolves the backwards dep AND the extension violation together. Highest-value correction.
 
-3. **Double-`schema` directory — symptom of #2.** `src/webview/schema/` holds only generated `node-defs.ts` + a `registry.ts` shim. Once #2 moves `node-defs.ts` out, this directory nearly disappears.
+3. **Double-`schema` directory — symptom of #2. ✅ RESOLVED (commit `76af8c02`).** `src/webview/schema/` is deleted as a side effect of #2; only one `schema/` directory remains.
 
 4. **Dead code — confirmed orphans.** `webview/state/dimmed.ts`: `DimmedCtx`, `useDimmedCtx`, `registerDimmedSetter` exported with zero consumers (context never provided). `webview/three/pulse-state.ts`: `PulseCtx`, `usePulseCtx` unused (`setPulse`/`clearPulse` do the real work).
 
@@ -56,6 +56,6 @@ Second pass, aimed at organization rather than substrate discipline: file-size h
 Go substrate (no file >1,200 LOC, tight single-responsibility), pump.ts, runCommand.ts, the parsers, PacedWire primacy, stdin dispatch.
 
 ### Next-step candidates (organization)
-- **Highest value:** finding #2 — relocate generated `node-defs.ts` to `src/schema/`; fixes the inverted layer dependency and the extension boundary crossing in one move.
-- Split `ThreeView.tsx` (#1) along the documented section boundaries.
-- Remove dead code (#4) and rename/retire `webview/rf/` (#5) — cheap, low-risk.
+- ~~finding #2 — relocate generated `node-defs.ts`~~ ✅ DONE (commit `76af8c02`).
+- Remove dead code (#4) and rename/retire `webview/rf/` (#5) — cheap, low-risk; good next.
+- Split `ThreeView.tsx` (#1) along the documented section boundaries — biggest impact, larger effort.
