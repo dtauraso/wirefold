@@ -13,6 +13,8 @@ import { KIND_COLORS, NODE_TYPES, type EdgeKind } from "../../schema";
 import { scheduleSave, setSpecMeta, markViewSynced } from "../save";
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
+import { computeFade, type FadeEdge } from "./fade";
+import { vscode } from "../vscode-api";
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -26,6 +28,10 @@ export interface ThreeStoreState {
   _lastSpec: Spec | null;
   // Incremented each time content is (re)loaded; used to trigger camera re-fit.
   loadEpoch: number;
+
+  // --- Fade state ---
+  directlyFadedNodes: Set<string>;
+  directlyFadedEdges: Set<string>;
 
   // --- Actions ---
   loadSpec: (specText: string) => void;
@@ -42,6 +48,8 @@ export interface ThreeStoreState {
   moveNode: (id: string, x: number, y: number) => void;
   restoreNodesEdges: (nodes: RFNode<NodeData>[], edges: RFEdge<EdgeData>[]) => void;
   saveSpec: () => void;
+  /** Toggle fade on a node or edge. Recomputes fixpoint and emits updated faded-edge set to host. */
+  toggleFade: (target: { kind: "node" | "edge"; id: string }) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +62,8 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   selectedId: null,
   _lastSpec: null,
   loadEpoch: 0,
+  directlyFadedNodes: new Set<string>(),
+  directlyFadedEdges: new Set<string>(),
 
   loadSpec(specText: string) {
     try {
@@ -195,5 +205,47 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
 
   saveSpec() {
     scheduleSave();
+  },
+
+  toggleFade({ kind, id }) {
+    const { nodes, edges, directlyFadedNodes, directlyFadedEdges } = get();
+
+    // Clone sets so we don't mutate the stored references.
+    const nextFadedNodes = new Set<string>(directlyFadedNodes);
+    const nextFadedEdges = new Set<string>(directlyFadedEdges);
+
+    if (kind === "node") {
+      if (nextFadedNodes.has(id)) nextFadedNodes.delete(id);
+      else nextFadedNodes.add(id);
+    } else {
+      if (nextFadedEdges.has(id)) nextFadedEdges.delete(id);
+      else nextFadedEdges.add(id);
+    }
+
+    const nodeIds = nodes.map((n) => n.id);
+    const fadeEdges: FadeEdge[] = edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
+    const { fadedNodes, fadedEdges } = computeFade(nodeIds, fadeEdges, nextFadedNodes, nextFadedEdges);
+
+    // Write faded flags onto node/edge data (shallow-map; only copy when flag changes).
+    const nextNodes = nodes.map((n) => {
+      const f = fadedNodes.has(n.id);
+      if (!!n.data.faded === f) return n;
+      return { ...n, data: { ...n.data, faded: f } };
+    });
+    const nextEdges = edges.map((e) => {
+      const f = fadedEdges.has(e.id);
+      if (!!(e.data?.faded) === f) return e;
+      return { ...e, data: { ...(e.data ?? {}), faded: f } as typeof e.data };
+    });
+
+    set({
+      directlyFadedNodes: nextFadedNodes,
+      directlyFadedEdges: nextFadedEdges,
+      nodes: nextNodes,
+      edges: nextEdges,
+    });
+
+    // Emit the full faded-edge set to the host so Go can update its wire flags.
+    vscode.postMessage({ type: "fade", edges: [...fadedEdges] });
   },
 }));
