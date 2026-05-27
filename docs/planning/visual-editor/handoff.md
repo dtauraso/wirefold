@@ -7,72 +7,59 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26 — audit recut: deferral bucket eliminated; items removed or promoted to accepted-for-build.)
+## State at handoff (2026-05-26 — fade feature implemented; undo/redo stack removed; bash approval guard added)
 
-**Active branch:** `task/feature-audit`. Branched off main after editor-r3f was merged at ccbff474.
+**Active branch:** `task/undo-redo`. Branched off main; all of main is merged in (branch is ahead, nothing behind).
 
-Branch-local doc: `docs/planning/visual-editor/feature-audit.md` (frontmatter `branch: task/feature-audit`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated.
+Branch-local doc: `docs/planning/visual-editor/fade.md` (frontmatter `branch: task/undo-redo`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated. Decide relocate-vs-strip before merging.
 
-### Last completed — second recut: deferral bucket eliminated
+### What shipped on this branch
 
-The "Deferred Industry Patterns (14)" bucket was deleted in full. Each item was individually triaged:
+**1. Fade feature (replaces undo/redo with a non-destructive mask).** Spec: `fade.md`. Fade is a per-node/per-edge mask; topology is unchanged. It is a pure START GATE — in-flight pulses finish; faded nodes/edges start no new pulse. Symmetric across the boundary: TS suppresses animation, Go suppresses firing. End-to-end data flow, all landed and verified headlessly (Go tests, tsc, npm build, 6 fade unit tests, parity + vocab guards green):
+- `e527d07f` PacedWire fade gate — `Send` skips on a faded wire (+ tests). No `Drop` primitive; in-flight values are NOT interrupted.
+- `68b402b0` `"fade"` stdin message applies the FULL faded-edge set to the WireRegistry wholesale (idempotent). Go only ever receives faded EDGE ids; node-fade expands to edges in TS.
+- `26159aa8` TS state model (`faded` on NodeData/EdgeData), `fade.ts` fixpoint `computeFade`, store `toggleFade` action, bridge emit + host relay (`handle-message.ts`).
+- `c7650e98` muted rendering (0.25 opacity) + `f` hotkey to fade the current selection.
+- Fixpoint rules: faded node → all incident edges faded; node with zero non-faded edges auto-fades; spreads/contracts to a fixpoint. Unfade by direct unfade OR adding an edge (new edges are non-faded).
 
-- **11 removed outright** as not-worth-building. Includes auto-layout, which was removed on substrate grounds: node arrangement is dictated by topology+timing, so an aesthetic layout engine breaks the algorithm — it is not a deferred feature, it is a wrong feature.
-- **3 promoted into new §3c Accepted for Build:** bend points/waypoints, multi-node alignment guides, undo coalescing at gesture level.
+**2. Undo/redo stack removed** (`1975d655`). Deleted `state/history.ts`; removed Cmd/Ctrl+Z keybind, `pushSnapshot` calls, and `restoreNodesEdges`. `mutateViewer` keeps mutating+persisting, no longer snapshots. Fade is the replacement for the reversible-navigation role; delete is the (terminal) cleanup pass.
 
-The gap structure is now THREE causes (§3a / §3b / §3c):
-
-- **§3a Cutover Debt (15 total):** worked in RF editor, lost or half-wired in the R3F move. 10 restore-parity items (node delete, edge delete, multi-select, edge reconnect, node palette, sublabel inline edit, PseudoPanel, port drag, edge-kind context menu, edge midpoint drag); 5 half-wired (undo, view-save-on-settle, fit-view hotkey, folds-mesh, z-coord).
-- **§3b Never-Specced (1):** Fold Go primitive — needs explicit yes/no decision (become a Go substrate node, or stay view-state forever).
-- **§3c Accepted for Build (3):** bend points/waypoints, multi-node alignment guides, undo coalescing at gesture level.
-
-**New scorecard:** 26 implemented; 15 cutover-debt (10 restore-parity + 5 half-wired); 1 never-specced; 3 accepted-for-build.
+**3. Bash approval guard** (`tools/bash-approve-guard.sh`, committed on main, merged here). PreToolUse(Bash) hook in `.claude/settings.json`. Three tiers over the full command string: CATASTROPHIC → `deny` (hard block); DESTRUCTIVE/NETWORK → pass-through (no decision, native prompt handles them so "always allow" persists); otherwise → `allow` (silent). Static `permissions.allow` list removed (hook supersedes it). The `>` overwrite matcher was dropped; `git push/pull/fetch` auto-allow; `git push --force` and `git clone` still prompt. Edit the pattern arrays to tune. Hook is live (confirmed this session).
 
 ### Open decisions / next
 
-**(a) feature-audit.md fate:** still branch-local (frontmatter `branch: task/feature-audit`), will be stripped by `tools/strip-branch-local-docs.sh` on merge. Decide relocate-to-survive vs let-it-strip. Relocation likely worth it now that it's a clean three-bucket reference.
+**(a) Live editor verification of fade — NOT done.** Everything passed headless, but no one has driven the editor: reload the VS Code window, select a node/edge, press `f`, Run, and confirm the right element mutes and Go stops emitting on it (faded wire carries no new pulse; in-flight finishes). This is the first thing to do.
 
-**(b) Fold decision:** the only open never-specced item — resolving it zeroes that bucket. Needs explicit yes/no: become a Go substrate node, or stay view-state forever.
+**(b) Orphaned test `tools/topology-vscode/test/spec-undo-invariant.test.ts`** — 10 failures, PRE-EXISTING (broken on main since 2026-05-19 commit 89125567 deleted the spec-state functions it imports; `setSpec is not a function`). It tests a spec-undo system that no longer exists. Delete it (and any dangling spec-history references) — unrelated to this branch's work but should be cleaned before merge.
 
-**(c) audit-correctness.md stale claims:** H1 and H2 claim `setSpecMeta` and `markViewSynced` are "never called" — both are factually wrong against current code (`setSpecMeta` IS called store.ts:66; `markViewSynced` IS called store.ts:76). Annotate with a correction note or drop before merge. Correction note is preserved in feature-audit.md §4.
+**(c) fade.md fate:** branch-local (frontmatter `branch: task/undo-redo`); will be stripped on merge. Relocate to survive if it should land on main.
 
-**(d) Highest-friction cutover-debt:** node/edge delete and multi-select — were present in the RF editor, conspicuously absent in 3D editor. Pick one as the next task branch when friction justifies it.
-
-**(e) Interactive view-save gap:** `markViewSynced` is not called after camera moves or node drags, so positions are lost on reload without a manual Save. Small scope, clear contract.
-
-**(f) topology.json working-tree modification:** node-drag view positions are modified but uncommitted intentionally. Do NOT stage or discard.
-
-**(g) Latent substrate-contract question:** is pulse arrival anchored to logical simTime or to geometric edge length? If geometric, that is a contract violation — arrival order must be arrangement-invariant, independent of any layout feature. Read `pump.ts` / `pulse-state.ts` to determine which governs travel time before closing this question.
+**(d) topology.json working-tree modification:** node-drag view positions, modified-but-uncommitted INTENTIONALLY. Do NOT stage or discard.
 
 ### Key files
 
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — the whole (sole) 3D view: node drag, edge tubes, pointer state machine.
-- `tools/topology-vscode/src/webview/three/store.ts` — single zustand source of truth (nodes/edges/selection, load/save actions). `setSpecMeta` called at :66; `markViewSynced` called on loadView at :76.
-- `tools/topology-vscode/src/webview/main.tsx` — renders only ThreeView; feeds store on load; hoisted run/save toolbar; posts `{ type: "ready" }` to unblock host load sequence.
-- `tools/topology-vscode/src/webview/save.ts`, `tools/topology-vscode/src/webview/three/pump.ts` — read from the store.
-- `tools/topology-vscode/src/webview/three/pulse-state.ts` — R3F pulse read-store (getPulseMap, setPulse).
-- `tools/topology-vscode/src/webview/types.ts` — local `RFNode`/`RFEdge` type aliases (no reactflow import).
-- `tools/topology-vscode/src/webview/state/adapter/{spec-to-flow,flow-to-spec}.ts` — pure adapters, RF-free.
-- `tools/topology-vscode/src/webview/rf/` — two residual re-export/metadata files (`adapter.ts`, `animation-fields.ts`); folder name is a misnomer post-retirement.
-- `tools/topology-vscode/src/webview/schema/` — node-defs.ts + registry.ts (relocated from rf/).
-- `docs/planning/visual-editor/feature-audit.md` — branch-local audit doc (frontmatter `branch: task/feature-audit`).
+- `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + skip-at-top-of-`Send` gate.
+- `nodes/Wiring/stdin_reader.go` + `loader.go` (`WireRegistry.ForEach`) — `"fade"` message applies the edge set.
+- `tools/topology-vscode/src/webview/three/fade.ts` — pure `computeFade` fixpoint.
+- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` + bridge emit.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey.
+- `tools/topology-vscode/src/extension/handle-message.ts` — relays `"fade"` to Go stdin.
+- `tools/topology-vscode/src/webview/types.ts` — `faded?: boolean` on NodeData/EdgeData.
+- `docs/planning/visual-editor/fade.md` — branch-local fade spec.
+- `tools/bash-approve-guard.sh` — the approval hook (on main).
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Unchanged by the
-3D move — going 3D is a medium change; the Go substrate,
-slot-phase/AND-gate/backpressure model, and `pump.ts` firing logic stay
-untouched.
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Fade did not change the model: it is a start-gate on `Send`, no new `PacedWire` op, slot-phase/AND-gate/backpressure untouched. `pump.ts` stays render-only.
 
 ## Dev-loop
 
 After TS edit: `npm run build` from `tools/topology-vscode/`.
 After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
-After pseudo change (deferred branch): `go test ./tools/pseudo/...`.
+Fade unit tests: `cd tools/topology-vscode && npx vitest run test/fade.test.ts`.
 To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
 
-Check: `go test ./...`. All five guard scripts — the four boundary guards plus
-`check-substrate-vocabulary` — run automatically via the Stop hook (`scripts/stop-checks.sh`).
+Check: `go test ./...`. All guard scripts run via the Stop hook (`scripts/stop-checks.sh`). Bash approval guard runs via PreToolUse.
 
 ## ALWAYS clause
 
