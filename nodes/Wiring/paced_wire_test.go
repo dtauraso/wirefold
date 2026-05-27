@@ -272,6 +272,64 @@ func TestSendBlocksUntilDone(t *testing.T) {
 	}
 }
 
+// TestFadedSendSkips: a faded wire returns nil from Send immediately without
+// filling the slot. A concurrent Recv with a short-timeout context must time
+// out (proving no slot fill).
+func TestFadedSendSkips(t *testing.T) {
+	pw := NewPacedWire()
+	pw.SetFaded(true)
+
+	// Send must return immediately with nil.
+	sendErr := make(chan error, 1)
+	go func() { sendErr <- pw.Send(context.Background(), 99) }()
+
+	select {
+	case err := <-sendErr:
+		if err != nil {
+			t.Fatalf("Send on faded wire: expected nil, got %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Send on faded wire did not return immediately")
+	}
+
+	// Slot must not be filled — Recv with a short timeout should time out.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := pw.Recv(ctx)
+	if err != ErrCanceled {
+		t.Fatalf("Recv after faded Send: expected ErrCanceled, got %v", err)
+	}
+}
+
+// TestUnfadedAfterSetFaded: after SetFaded(false), Send works normally again.
+func TestUnfadedAfterSetFaded(t *testing.T) {
+	pw := NewPacedWire()
+	pw.SetFaded(true)
+	pw.SetFaded(false)
+
+	ctx := context.Background()
+
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- pw.Send(ctx, "resumed") }()
+	time.Sleep(5 * time.Millisecond)
+
+	pw.NotifyDelivered()
+	v, err := pw.Recv(ctx)
+	if err != nil || v != "resumed" {
+		t.Fatalf("Recv: v=%v err=%v", v, err)
+	}
+
+	pw.Done()
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Send did not unblock after Done")
+	}
+}
+
 // TestRecvUnblocksOnDelivery: Recv returns at NotifyDelivered, not at Done.
 func TestRecvUnblocksOnDelivery(t *testing.T) {
 	pw := NewPacedWire()
