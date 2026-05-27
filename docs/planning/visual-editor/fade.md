@@ -28,26 +28,23 @@ Propagation rules:
 
 ## TS side (animation)
 
-- Faded edges render muted (reuse the existing `dimmed` view-state precedent on `NodeData`, `types.ts:61`; add the parallel field for edges on `EdgeData`).
-- No pulse is drawn for a faded edge.
+- A `faded: boolean` field on node data (`NodeData`) and edge data (`EdgeData`) is the source of truth. Muted rendering derives from it — there is no separate "dimmed" pipeline; `faded` replaces the role the `dimmed` view-state played.
+- Faded edges render muted and draw no pulse.
 - A pulse already **in-flight** on a wire when it is faded is **left to finish normally** — it completes on the usual delivery path. Fade does not interrupt in-flight pulses; it only prevents new ones from starting.
 
 ## Go side (firing/delivery)
 
-Go holds an ignore set mirroring the TS ignore lists.
+The fade gate lives entirely in the `Wiring` layer (`paced_wire.go` + `WireRegistry`). Per-kind node packages (`input`, `readgate`, `inhibitrightgate`, …) are **not touched** — there are ZERO per-kind changes. All per-kind loops inherit the gate automatically.
 
-**Centralized (decided).** The fade gate lives in one shared place in the `Wiring` layer — wrapping the poll precondition and the `Send` boundary — not copied into each per-kind node package. Per-kind node loops (`input`, `readgate`, `inhibitrightgate`, …) stay untouched; they inherit the fade behavior. This avoids the stuck-node risk of missing a kind and keeps the gate logic in a single auditable location.
-
-- A **faded node**'s poll loop treats its precondition as unmet and returns immediately — same shape as the existing context/precondition gate (e.g. `readgate/node.go:40`, `inhibitrightgate/node.go:42`). It never fires, so it never `Send`s. Because no `Send` is issued on a faded wire, no `NotifyDelivered` is awaited, so no backpressure deadlock can form (the deadlock that a render-only fade would cause).
-- A **faded edge**: the source does not `Send` across it; the destination does not treat it as a satisfied input.
+Mechanism: each `PacedWire` carries a `faded` flag. The `"fade"` bridge handler sets these flags via the `WireRegistry`. `Send` checks the flag at the top of the function, under the mutex; if the wire is faded, the send is **skipped** — returns benignly, does not fill the slot, does not block. A faded node has all its incident edges faded, so all of its sends skip and it goes inert without any poll-loop changes. In-flight values already past the gate finish normally.
 
 
 ## Bridge
 
 Fade is a **live control signal**, analogous to the existing global play/pause gate — not a spec/topology change. It crosses webview → host → Go stdin, following the `"delivered"` precedent (`stdin_reader.go:52`).
 
-- New webview→host message kind: `"fade"` carrying the current faded set (node ids + edge ids). Add to `WebviewToHostMsg` / `WEBVIEW_TO_HOST_TYPES` (`messages.ts:35,95`) and to `stdin_reader.go`'s accepted types; keep `tools/check-message-kind-parity.sh` green.
-- Go applies the fade set to the `WireRegistry` / per-node ignore sets live. No in-flight `Send` is interrupted — faded nodes simply stop initiating new sends.
+- New webview→host message kind: `"fade"` carrying the **complete current faded edge set** — every time anything changes, the full set is sent. Go replaces its set wholesale (idempotent, self-correcting, no delta stream to keep in sync). Add to `WebviewToHostMsg` / `WEBVIEW_TO_HOST_TYPES` (`messages.ts:35,95`) and to `stdin_reader.go`'s accepted types; keep `tools/check-message-kind-parity.sh` green.
+- **Node fade is NOT sent.** A faded node expands to its incident edges via the TS fixpoint, so Go only ever receives faded **edge** ids. The `WireRegistry` receives the edge id set and sets the `faded` flag on each matching `PacedWire`. No in-flight `Send` is interrupted — faded nodes simply stop initiating new sends.
 
 ## Persistence
 
@@ -57,7 +54,3 @@ Faded state is **view-state**: it serializes with the view and survives reload. 
 
 - The entire undo/redo **stack recording system**: command stack, linear history, undo coalescing. Gone, not replaced by an equivalent. The §3a "undo (half-wired)" and §3c "undo coalescing at gesture level" audit items are closed as *removed*, not *built*.
 
-## Open questions (decide before implementation)
-
-1. **Fade message shape:** send the full faded set on every change (simplest, fewest states) vs. per-toggle deltas. Leaning full-set.
-2. **Edge view field name:** mirror `dimmed`, or introduce `faded` and derive `dimmed` from it.
