@@ -1,30 +1,52 @@
 #!/usr/bin/env bash
-# PreToolUse(Bash) approval guard.
-# Auto-approves a Bash command UNLESS it contains a destructive OR network
-# operation, in which case it falls through to normal manual approval ("ask").
-# The scan is over the FULL command string, so a flagged sub-command anywhere
-# in a compound command (a && b ; c | d) triggers "ask".
-#
-# Tune by editing the arrays below (extended regex, grep -E). The '>' overwrite
-# matcher is the most aggressive destructive pattern — comment it out to reduce prompts.
+# PreToolUse(Bash) approval guard. Three tiers, evaluated in order over the
+# FULL command string (so a flagged sub-command anywhere in a compound command
+# a && b ; c | d triggers the tier):
+#   CATASTROPHIC -> deny  (hard block; no approval prompt — edit this file to run)
+#   DESTRUCTIVE  -> ask   (manual approval prompt)
+#   NETWORK      -> ask   (manual approval prompt)
+#   otherwise    -> allow (runs silently)
+# Patterns are extended-regex (grep -E). Avoid leading "--" (BSD grep treats it
+# as a flag) — use [-][-] instead. The '>' overwrite matcher in DESTRUCTIVE is
+# the most aggressive; comment it out to reduce prompts.
 set -uo pipefail
 
 input="$(cat)"
 cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty')"
 
-emit() { # $1=allow|ask  $2=reason
+emit() { # $1=allow|ask|deny  $2=reason
   jq -nc --arg d "$1" --arg r "$2" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:$d,permissionDecisionReason:$r}}'
 }
 
 if [ -z "$cmd" ]; then emit allow "no command string"; exit 0; fi
 
+CATASTROPHIC_PATTERNS=(
+  'no-preserve-root'
+  'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+/([[:space:]]|$)'
+  'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+/[*]'
+  'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+~([[:space:]/]|$)'
+  'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+[$]HOME'
+  'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+[*]([[:space:]]|$)'
+  'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+[.][[:space:]]*$'
+  '(^|[^[:alnum:]_./-])mkfs'
+  '(^|[^[:alnum:]_./-])(fdisk|parted|wipefs)([[:space:]]|$)'
+  'dd[[:space:]].*[[:space:]]of=/dev/'
+  '>[[:space:]]*/dev/(sd|nvme|disk|hd|vd|mmcblk)'
+  ':[[:space:]]*\(\)[[:space:]]*\{[[:space:]]*:[[:space:]]*\|'
+  '(curl|wget)[[:space:]].*\|[[:space:]]*(sudo[[:space:]]+)?[a-z]*sh([[:space:]]|$)'
+  '(chmod|chown)[[:space:]]+-[a-zA-Z]*R[a-zA-Z]*.*[[:space:]]/([[:space:]]|$)'
+  '(^|[^[:alnum:]_./-])(shutdown|reboot|halt|poweroff)([[:space:]]|$)'
+  '(^|[^[:alnum:]_./-])init[[:space:]]+[06]([[:space:]]|$)'
+  'crontab[[:space:]]+-r([[:space:]]|$)'
+  'find[[:space:]]+/[[:space:]].*-delete'
+)
+
 DESTRUCTIVE_PATTERNS=(
   '(^|[^[:alnum:]_./-])rm([[:space:]]|$)'
   '(^|[^[:alnum:]_./-])rmdir([[:space:]]|$)'
   '(^|[^[:alnum:]_./-])shred([[:space:]]|$)'
   '(^|[^[:alnum:]_./-])dd([[:space:]]|$)'
-  '(^|[^[:alnum:]_./-])mkfs'
   '(^|[^[:alnum:]_./-])truncate([[:space:]]|$)'
   '[[:space:]]-delete([[:space:]]|$)'
   'git[[:space:]]+clean'
@@ -57,11 +79,16 @@ NETWORK_PATTERNS=(
   'gem[[:space:]]+install'
 )
 
+for pat in "${CATASTROPHIC_PATTERNS[@]}"; do
+  if printf '%s' "$cmd" | grep -Eq "$pat"; then emit deny "catastrophic command blocked"; exit 0; fi
+done
+# Strip benign /dev/null redirects before destructive check so "> /dev/null" doesn't trigger.
+cmd_safe="$(printf '%s' "$cmd" | sed 's|>[[:space:]]*/dev/null||g')"
 for pat in "${DESTRUCTIVE_PATTERNS[@]}"; do
-  if printf '%s' "$cmd" | grep -Eq "$pat"; then emit ask "destructive pattern matched"; exit 0; fi
+  if printf '%s' "$cmd_safe" | grep -Eq "$pat"; then emit ask "destructive pattern matched"; exit 0; fi
 done
 for pat in "${NETWORK_PATTERNS[@]}"; do
   if printf '%s' "$cmd" | grep -Eq "$pat"; then emit ask "network pattern matched"; exit 0; fi
 done
-emit allow "no destructive or network pattern matched"
+emit allow "no flagged pattern matched"
 exit 0
