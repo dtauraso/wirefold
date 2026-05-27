@@ -48,12 +48,12 @@ Second pass, aimed at organization rather than substrate discipline: file-size h
 
 5. **Vestigial `webview/rf/` directory — MEDIUM. ✅ RESOLVED (commit `5e1f95b9`).** `animation-fields.ts` moved to `three/`; the `adapter.ts` re-export shim (zero importers) deleted; `rf/` removed. Original finding: Named for React Flow (retired). Only `adapter.ts` (a re-export) and `animation-fields.ts` remain; name misleads.
 
-6. **store.ts (381 LOC) has two extractable subsystems — MEDIUM.** `toggleFade` (102 lines: reverse-playback walk + fixpoint + pulse cleanup) and `createEdge` (78 lines: port resolution + kind inference + collision). Justified as a state hub, but the fade machinery is a hidden module.
+6. **store.ts (381 LOC) has two extractable subsystems — MEDIUM. ✅ RESOLVED (commit `aa6f9040`).** Extracted `three/fade-actions.ts` (`applyFade`/`reconcileFadeOrder`/`computeToggleFade`) and `three/edge-creation.ts` (`buildEdge`) as pure functions; store.ts now 187 lines of thin orchestration. Original finding: `toggleFade` (102 lines: reverse-playback walk + fixpoint + pulse cleanup) and `createEdge` (78 lines: port resolution + kind inference + collision). Justified as a state hub, but the fade machinery is a hidden module.
 
-7. **Minor.** `isObj()` duplicated in `schema/parse-primitives.ts` and `webview/state/viewer/parse.ts`. `store.ts ↔ save.ts` import cycle is a safe Zustand `getState()` pattern — leave it.
+7. **Minor. ✅ RESOLVED (commit `db30725f`).** `isObj()` now has a single definition in `schema/parse-primitives.ts`; `webview/state/viewer/parse.ts` imports + re-exports it (clean direction: webview→schema). Original finding: `isObj()` duplicated in `schema/parse-primitives.ts` and `webview/state/viewer/parse.ts`. `store.ts ↔ save.ts` import cycle is a safe Zustand `getState()` pattern — leave it.
 
 ### Still clean (no action)
 Go substrate (no file >1,200 LOC, tight single-responsibility), pump.ts, runCommand.ts, the parsers, PacedWire primacy, stdin dispatch.
 
 ### Status
-Findings #1–#5 all resolved (see ✅ tags above). Remaining open: #6 (extract `store.ts` subsystems — `toggleFade`/`createEdge`) and #7 (`isObj` duplication — minor). Both MEDIUM/minor; pick up as friction warrants.
+All Organization-Health findings (#1–#7) resolved (see ✅ tags above).
