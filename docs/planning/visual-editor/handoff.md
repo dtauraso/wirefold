@@ -7,77 +7,40 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26 — fade bugs fixed + edge selectability + view-file persistence + test cleanup)
+## State at handoff (2026-05-26 — task/undo-redo merged to main; no task in flight)
 
-**Active branch:** `task/undo-redo`. Branched off main; all of main is merged in (branch is ahead, nothing behind).
+- **Active branch:** `main`. `task/undo-redo` was merged via `884eeaa1` (merge commit) and deleted locally + remote. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
+- The fade feature and this session's editor UX work are fully on main. No task is in flight; pick from KNOWN ISSUES below or wait for new friction.
 
-`docs/planning/visual-editor/fade.md` was relocated to land on main (branch tag dropped, commit `d6254fac`) — no longer branch-local; will not be stripped on merge.
+### What's on main (this session)
 
-### What shipped on this branch
+- **Fade feature:** per-node/edge non-destructive mask; pure START GATE (Go suppresses `Send` on faded wires, TS suppresses pulse animation). `computeFade` fixpoint in `three/fade.ts` (Rule1: faded node fades its edges; Rule3: node auto-fades when all incident edges faded). Persisted to `topology.json#view`.
+- Fade toggle keys off VISIBLE state (`data.faded`), not direct-set membership.
+- **Node-unfade = reverse-playback PATH walk:** unfade the node, its most-recently-faded incident edge, that edge's far node, then continue along each node's most-recent faded edge until the chain ends. Edge-unfade clears the edge + both endpoint nodes. Fade order tracked in `fadeEdgeOrder` (store) and persisted.
+- **Selection halos:** edge + node selection halos (orange-red `#ff5a00`; edge halo is also the wide clickable pick area, radius 5).
+- **Interaction model:** click = select (free re-selection); drag node→empty = move node; drag node→another node = wire (`createEdge`). Old click-to-arm connect-mode + green banner REMOVED.
+- **Undo/redo stack removed** (fade replaces it). Orphaned undo/spec tests deleted; 6 stale test import paths fixed.
 
-**1. Fade feature (replaces undo/redo with a non-destructive mask).** Spec: `fade.md`. Fade is a per-node/per-edge mask; topology is unchanged. It is a pure START GATE — in-flight pulses finish; faded nodes/edges start no new pulse. Symmetric across the boundary: TS suppresses animation, Go suppresses firing. End-to-end data flow, all landed and verified headlessly (Go tests, tsc, npm build, 6 fade unit tests, parity + vocab guards green):
-- `e527d07f` PacedWire fade gate — `Send` skips on a faded wire (+ tests). No `Drop` primitive; in-flight values are NOT interrupted.
-- `68b402b0` `"fade"` stdin message applies the FULL faded-edge set to the WireRegistry wholesale (idempotent). Go only ever receives faded EDGE ids; node-fade expands to edges in TS.
-- `26159aa8` TS state model (`faded` on NodeData/EdgeData), `fade.ts` fixpoint `computeFade`, store `toggleFade` action, bridge emit + host relay (`handle-message.ts`).
-- `c7650e98` muted rendering (0.25 opacity) + `f` hotkey to fade the current selection.
-- Fixpoint rules: faded node → all incident edges faded; node with zero non-faded edges auto-fades; spreads/contracts to a fixpoint. Unfade by direct unfade OR adding an edge (new edges are non-faded).
+### KNOWN ISSUES (candidate next work)
 
-**2. Fade bugfixes, edge selectability, and persistence (live-verified by user this session):**
-- `d0d3eec7` Three rendering/animation fixes — (A) `data.faded` is now re-derived from the fade sets on every rebuild via a shared `applyFade` helper used by `toggleFade`/`loadSpec`/`loadView` (a topology re-sync no longer clobbers the dim); (B) `clearPulse` on newly-faded edges so a stale in-flight pulse doesn't resume on unfade; (C) `curve.getPointAt` instead of `getPoint` for arc-length-constant pulse speed on bent edges.
-- `713c2456` Persist `directlyFadedNodes`/`directlyFadedEdges` to `topology.json#view` (ViewerState + `parseViewerState` validation; `toggleFade` writes via `patchViewerState`+`scheduleViewSave`; `loadView` restores). Fade now survives a FULL window reload, not just topology saves. Toggling fade writes a debounced save to `topology.json#view`.
-- `2e471efe` Edge tubes are now selectable (`userData.edgeId` on the tube mesh + `pickRequest` returns it), so `f` fades/unfades a selected edge (previously the raycaster only matched nodes, so `f` never targeted edges).
-- `cc9e62e9` + `753792f4` Removed 7 orphaned spec/viewer-undo tests and fixed 6 stale import paths after a module refactor (`rf/` → `state/ops`, `schema/`, `three/`).
-- `952fe5c8` Edge selection now has a visual halo: `SingleEdgeTube` renders a concentric larger-radius tube (`haloGeo`, radius 5 vs main 1.5) in saturated orange-red `#ff5a00` at 0.6 opacity (normal blending, DoubleSide, depthWrite=false) when selected; chosen for contrast against the WHITE scene background and the blue edge (gold/additive washed out on white). Fixes the earlier bug where fading "the last edge" unfaded a sibling — root cause was wrong-edge selection with no edge highlight (computeFade was NOT at fault; it only grows the faded set). Caveat: near a node junction overlapping tubes can still mis-pick; click mid-span.
-- All fade behavior live-verified by the user: node + edge fade dims and gates pulses, survives window reload, fresh pulse on unfade, constant pulse speed.
-
-**5. Selection halos, clickable edge pick area, connect-mode redirect, fade toggle rework (this session).**
-- `006889a9` `toggleFade` reworked: toggle direction is now decided by the element's *visible* state. Derived-faded elements unfade instead of being promoted into the direct set — fixes the all-edges-faded lock. Node-unfade clears the node's region; edge-unfade clears the connected nodes.
-- `bda0b15f` ThreeView selection/connect UX:
-  - Edge selection halo (orange-red `#ff5a00` concentric tube) is now always-mounted at opacity 0, so the wide halo radius doubles as the clickable pick area (no longer relies on the thin tube for raycasting).
-  - Node selection halo: concentric orange-red sphere (`r*1.45`, opacity 0.5) shown when the node is selected.
-  - Clicking an edge no longer arms connect-mode (banner) — only nodes arm it.
-  - Connect-mode second click resolves inline: a different node creates the edge; an edge selects it and exits; empty space exits + deselects; the same node cancels — no separate exit click needed.
-
-**6. Reverse-playback path unfade + fade-order persistence, drag-to-wire (this session).**
-- `a30b020b` Node-unfade now walks a linear reverse-playback path instead of clearing a region: pressing `f` on a faded node unfades the node, its most-recently-faded incident edge, that edge's far node, then continues from there along each node's most-recent faded edge until the chain ends. Reverse fade order; off-path nodes stay faded; revealed paths stick (each path node keeps a visible edge so the auto-fade rule doesn't re-fade it). New `fadeEdgeOrder` state (oldest→newest) tracks edge fade order, reconciled on every recompute and persisted to `topology.json#view` alongside the fade sets (`viewer/types.ts`).
-- `188edaf3` Wiring is now drag-from-node, release-on-another-node → `createEdge`. Release hit-test excludes the source node and resolves nodes-only (`pickRequest` gained `{excludeId, nodesOnly}`); on a wire the source reverts to its start position. Drag-to-empty still moves the node; click selects. Removed click-to-arm connect-mode entirely: `onConnectClick`, `connectPendingId` state/ref, the green banner, the Escape-cancel line, and the teal connect ring on GraphNode.
-  - **drag-to-wire v1 note:** the source node follows the cursor then snaps back on a wire release — refine to live target-highlight/freeze if it proves jarring (user accepted v1).
-
-**KNOWN ISSUE:** node-to-node wiring can fail when the two node KINDS are port-incompatible (`createEdge` auto-picks ports). Still applies: drag-to-wire reuses `createEdge` with auto-picked ports. Deferred — this is a port-compatibility gap, not a click-routing bug.
-
-**3. Undo/redo stack removed** (`1975d655`). Deleted `state/history.ts`; removed Cmd/Ctrl+Z keybind, `pushSnapshot` calls, and `restoreNodesEdges`. `mutateViewer` keeps mutating+persisting, no longer snapshots. Fade is the replacement for the reversible-navigation role; delete is the (terminal) cleanup pass.
-
-**4. Bash approval guard** (`tools/bash-approve-guard.sh`, committed on main, merged here). PreToolUse(Bash) hook in `.claude/settings.json`. Three tiers over the full command string: CATASTROPHIC → `deny` (hard block); DESTRUCTIVE/NETWORK → pass-through (no decision, native prompt handles them so "always allow" persists); otherwise → `allow` (silent). Static `permissions.allow` list removed (hook supersedes it). The `>` overwrite matcher was dropped; `git push/pull/fetch` auto-allow; `git push --force` and `git clone` still prompt. Edit the pattern arrays to tune. Hook is live (confirmed this session).
-
-### Open decisions / next
-
-**(a) Fade live-verified — DONE.** Node + edge fade dims and gates pulses, survives window reload, fresh pulse on unfade, constant pulse speed. No open items on fade behavior.
-
-**(b) fade.md relocated to main** (branch tag dropped, commit `d6254fac`). No longer branch-local; `strip-branch-local-docs.sh` will not remove it on merge.
-
-**(c) Pre-existing behavioral test failures (NOT fade/undo related, deferred by user).** 5 test files with failures that predate this branch's work — triage one at a time when picked up:
-- `parseSpec.test.ts` — 2 cases: legacy `timing.steps` not dropped, legend bad-kind not rejected.
-- `diff-core.test.ts` — 8 failures cascading from the `parseSpec` fixture.
-- `fold.test.ts` — 1 failure: "expanded fold emits a frame".
-- `contracts/topology-edge-handles.test.ts` — 2 failures: `topology.json` references node kinds `InhibitRightGate`/`ReadGate` absent from `NODE_DEFS` (data drift).
-- `contracts/trace-event-fields.test.ts` — 1 failure: `TRACE_EVENT_KINDS` has `"done"` but fixture jsonl lacks a done event.
-
-These span parser/schema/fold subsystems; none are fade- or undo-related.
-
-**(d) topology.json working-tree modification:** node-drag view positions, modified-but-uncommitted INTENTIONALLY. Do NOT stage or discard.
+1. **Drag-to-wire edge creation is NON-FUNCTIONAL** (shipped as-is by user decision). Dragging node A onto node B does not create an edge. Unconfirmed root cause: likely `createEdge` (`store.ts`) silently returns null when auto-picked port handles resolve to null (node kinds with empty inputs/outputs in `NODE_DEFS`), and the call site (`ThreeView.tsx` pointer-up drag branch) ignores the return value. Could also be the `nodesOnly`/`excludeId` release pick. Confirm with a runtime breadcrumb before fixing. **This is the top open item.**
+2. Node-to-node wiring fails for port-incompatible node kinds (same `createEdge` auto-pick path).
+3. **5 pre-existing behavioral test failures** (parser/schema/fold), unrelated to fade/editor work — triage one at a time:
+   - `parseSpec.test.ts` — 2: legacy `timing.steps` not dropped; legend bad-kind not rejected.
+   - `diff-core.test.ts` — cascades from the `parseSpec` fixture.
+   - `fold.test.ts` — "expanded fold emits a frame".
+   - `contracts/topology-edge-handles.test.ts` — `topology.json` references kinds `InhibitRightGate`/`ReadGate` absent from `NODE_DEFS` (data drift).
+   - `contracts/trace-event-fields.test.ts` — `"done"` kind vs fixture.
+4. **Junction-click ambiguity:** overlapping edge pick-tubes near a node junction can mis-pick; click mid-span.
 
 ### Key files
 
-- `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + skip-at-top-of-`Send` gate.
-- `nodes/Wiring/stdin_reader.go` + `loader.go` (`WireRegistry.ForEach`) — `"fade"` message applies the edge set.
-- `tools/topology-vscode/src/webview/three/fade.ts` — pure `computeFade` fixpoint.
-- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` (node-unfade walks a reverse-playback path; edge-unfade clears connected nodes) + `fadeEdgeOrder` (oldest→newest, reconciled per recompute, persisted) + `applyFade` helper (re-derives `data.faded` on every rebuild) + bridge emit.
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey + edge-tube `userData.edgeId` + `pickRequest` edge resolution (`{excludeId, nodesOnly}`) + edge/node selection halos (always-mounted edge halo = pick area) + drag-node-to-node wiring (connect-mode removed).
-- `tools/topology-vscode/src/webview/state/viewer/types.ts` — `ViewerState` fade fields (`directlyFadedNodes`/`directlyFadedEdges`) + `parseViewerState` validation.
-- `tools/topology-vscode/src/extension/handle-message.ts` — relays `"fade"` to Go stdin.
-- `tools/topology-vscode/src/webview/types.ts` — `faded?: boolean` on NodeData/EdgeData.
-- `docs/planning/visual-editor/fade.md` — fade spec (now main-bound; no longer branch-local).
-- `tools/bash-approve-guard.sh` — the approval hook (on main).
+- `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + `Send` gate.
+- `nodes/Wiring/stdin_reader.go`, `loader.go` — `"fade"` message applies edge set.
+- `tools/topology-vscode/src/webview/three/fade.ts` — `computeFade` fixpoint.
+- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `fadeEdgeOrder` + `toggleFade` (path-walk unfade) + `applyFade` + `createEdge`.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — render (halos), `pickRequest` (`excludeId`/`nodesOnly`), `useInteractionControls` (click-select / drag-move / drag-to-wire).
+- `tools/topology-vscode/src/webview/state/viewer/types.ts` — `ViewerState` fade fields (`directlyFadedNodes`/`directlyFadedEdges`/`fadeEdgeOrder`) + `parseViewerState`.
 
 ### Substrate model contract (stable)
 
