@@ -1,4 +1,4 @@
-// gen-node-defs walks nodes/*/ and emits src/webview/schema/node-defs.ts.
+// gen-node-defs walks nodes/*/ and emits src/schema/node-defs.ts.
 // Port names and directions are derived from Go channel-typed struct fields.
 // View metadata and per-port accent overrides are read from SPEC.md.
 // Run: go run ../../tools/gen-node-defs (from tools/topology-vscode/)
@@ -137,7 +137,7 @@ func main() {
 		return kinds[i].goKind < kinds[j].goKind
 	})
 
-	outPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "webview", "schema", "node-defs.ts")
+	outPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "node-defs.ts")
 	if err := writeNodeDefs(outPath, kinds); err != nil {
 		fatalf("write %s: %v", outPath, err)
 	}
