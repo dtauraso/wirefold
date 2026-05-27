@@ -47,6 +47,28 @@ function applyFade(
   return { nodes: nextNodes, edges: nextEdges };
 }
 
+/**
+ * Reconcile the fade-order list against the current faded-edge set:
+ * - drop any id no longer faded,
+ * - append (in stable `edges` order) any newly-faded id not already present.
+ * Result equals the current faded-edge set, ordered oldest → newest.
+ */
+function reconcileFadeOrder(
+  prevOrder: string[],
+  edges: RFEdge<EdgeData>[],
+): string[] {
+  const fadedNow = new Set(edges.filter((e) => !!e.data?.faded).map((e) => e.id));
+  const next = prevOrder.filter((id) => fadedNow.has(id));
+  const seen = new Set(next);
+  for (const e of edges) {
+    if (e.data?.faded && !seen.has(e.id)) {
+      next.push(e.id);
+      seen.add(e.id);
+    }
+  }
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // State shape
 // ---------------------------------------------------------------------------
@@ -63,6 +85,9 @@ export interface ThreeStoreState {
   // --- Fade state ---
   directlyFadedNodes: Set<string>;
   directlyFadedEdges: Set<string>;
+  // Faded-edge ids in fade order (oldest → newest). Single source of truth
+  // for "which edge faded most recently" — drives the reverse-playback walk.
+  fadeEdgeOrder: string[];
 
   // --- Actions ---
   loadSpec: (specText: string) => void;
@@ -94,6 +119,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   loadEpoch: 0,
   directlyFadedNodes: new Set<string>(),
   directlyFadedEdges: new Set<string>(),
+  fadeEdgeOrder: [],
 
   loadSpec(specText: string) {
     try {
@@ -104,7 +130,8 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       let edges = flow.edges as RFEdge<EdgeData>[];
       const { directlyFadedNodes, directlyFadedEdges } = get();
       ({ nodes, edges } = applyFade(nodes, edges, directlyFadedNodes, directlyFadedEdges));
-      set({ nodes, edges, _lastSpec: spec, loadEpoch: get().loadEpoch + 1 });
+      const fadeEdgeOrder = reconcileFadeOrder(get().fadeEdgeOrder, edges);
+      set({ nodes, edges, _lastSpec: spec, loadEpoch: get().loadEpoch + 1, fadeEdgeOrder });
       setSpecMeta(spec);
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
@@ -124,16 +151,22 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       let nodes = flow.nodes as RFNode<NodeData>[];
       let edges = flow.edges as RFEdge<EdgeData>[];
       ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
+      const fadeEdgeOrder = reconcileFadeOrder(next.fadeEdgeOrder ?? [], edges);
       set({
         nodes,
         edges,
         loadEpoch: get().loadEpoch + 1,
         directlyFadedNodes: restoredFadedNodes,
         directlyFadedEdges: restoredFadedEdges,
+        fadeEdgeOrder,
       });
       postLog("lifecycle", { phase: "store:view-load", nodes: nodes.length, edges: edges.length });
     } else {
-      set({ directlyFadedNodes: restoredFadedNodes, directlyFadedEdges: restoredFadedEdges });
+      set({
+        directlyFadedNodes: restoredFadedNodes,
+        directlyFadedEdges: restoredFadedEdges,
+        fadeEdgeOrder: next.fadeEdgeOrder ?? [],
+      });
       postLog("lifecycle", { phase: "store:view-load-noop" });
     }
   },
@@ -244,7 +277,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   },
 
   toggleFade({ kind, id }) {
-    const { nodes, edges, directlyFadedNodes, directlyFadedEdges } = get();
+    const { nodes, edges, directlyFadedNodes, directlyFadedEdges, fadeEdgeOrder } = get();
 
     // Clone sets so we don't mutate the stored references.
     const nextFadedNodes = new Set<string>(directlyFadedNodes);
@@ -254,16 +287,40 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     // (data.faded), which covers both directly- and derived-faded. Keying
     // off membership in the direct sets would let a derived-faded node be
     // re-added to the direct set, locking the fixpoint into re-fading forever.
-    const incidentEdges = (nodeId: string) =>
-      edges.filter((e) => e.source === nodeId || e.target === nodeId);
 
     if (kind === "node") {
       const node = nodes.find((n) => n.id === id);
       const isFaded = !!node?.data.faded;
       if (isFaded) {
-        // Unfade the region: the node plus all its incident edges.
-        nextFadedNodes.delete(id);
-        for (const e of incidentEdges(id)) nextFadedEdges.delete(e.id);
+        // Reverse-playback unfade: walk a linear path backward through fade
+        // history. Unfade N, then its most-recently-faded still-faded incident
+        // edge and far node, and continue from that node, never reusing an edge.
+        let current: string | undefined = id;
+        const usedEdges = new Set<string>();
+        const visitedNodes = new Set<string>();
+        while (current && !visitedNodes.has(current)) {
+          visitedNodes.add(current);
+          nextFadedNodes.delete(current);
+          const cur: string = current;
+          // Candidate edges: incident to `cur`, currently visibly faded
+          // (pre-toggle data.faded), and not yet walked.
+          const cand: RFEdge<EdgeData>[] = edges.filter(
+            (e) =>
+              (e.source === cur || e.target === cur) &&
+              !usedEdges.has(e.id) &&
+              !!e.data?.faded,
+          );
+          if (cand.length === 0) break;
+          // Most-recently faded among candidates = highest index in fadeEdgeOrder.
+          const pick: RFEdge<EdgeData> = cand.reduce((best: RFEdge<EdgeData>, e: RFEdge<EdgeData>) =>
+            fadeEdgeOrder.indexOf(e.id) > fadeEdgeOrder.indexOf(best.id) ? e : best,
+          );
+          usedEdges.add(pick.id);
+          nextFadedEdges.delete(pick.id);
+          const far: string = pick.source === cur ? pick.target : pick.source;
+          nextFadedNodes.delete(far);
+          current = far;
+        }
       } else {
         nextFadedNodes.add(id);
       }
@@ -300,9 +357,13 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     // Derive fadedEdges set for the host message.
     const fadedEdges = new Set(nextEdges.filter((e) => !!(e.data?.faded)).map((e) => e.id));
 
+    // Recompute fade order against the newly-derived faded-edge set.
+    const nextFadeEdgeOrder = reconcileFadeOrder(fadeEdgeOrder, nextEdges);
+
     set({
       directlyFadedNodes: nextFadedNodes,
       directlyFadedEdges: nextFadedEdges,
+      fadeEdgeOrder: nextFadeEdgeOrder,
       nodes: nextNodes,
       edges: nextEdges,
     });
@@ -310,6 +371,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     patchViewerState((v) => {
       v.directlyFadedNodes = [...nextFadedNodes];
       v.directlyFadedEdges = [...nextFadedEdges];
+      v.fadeEdgeOrder = [...nextFadeEdgeOrder];
     });
     scheduleViewSave();
 
