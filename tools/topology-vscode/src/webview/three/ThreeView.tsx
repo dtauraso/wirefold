@@ -15,7 +15,6 @@ import { useThreeStore } from "./store";
 import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../state/run-status";
-import { pushSnapshot, undo, redo } from "../state/history";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 
@@ -173,13 +172,13 @@ function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
 function GraphNode({
   node,
   selected,
-  connectPending,
   hovered,
+  faded,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
-  connectPending: boolean;
   hovered: boolean;
+  faded: boolean;
 }) {
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
@@ -187,7 +186,6 @@ function GraphNode({
 
   const fillHex = flagged ? FLAG_FILL : (node.data?.fill ?? "#ffffff");
   const strokeHex = flagged ? FLAG_RING
-    : connectPending ? "#00ffaa"
     : selected ? "#ffcc00"
     : hovered ? "#aaddff"
     : (node.data?.stroke ?? "#888888");
@@ -205,23 +203,40 @@ function GraphNode({
   );
 
   const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
+  const fadeOpacity = 0.25;
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh>
         <sphereGeometry args={[r, 16, 16]} />
         <meshStandardMaterial
+          key={faded ? "faded" : "solid"}
           color={fillColor}
           emissive={emissiveFill}
           emissiveIntensity={flagged ? 0.4 : 0}
+          transparent={faded}
+          opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
       <mesh>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
+          key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}
           emissiveIntensity={flagged ? 0.5 : 0}
+          transparent={faded}
+          opacity={faded ? fadeOpacity : 1}
+        />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[r * 1.45, 16, 16]} />
+        <meshBasicMaterial
+          color="#ff5a00"
+          transparent
+          opacity={selected ? 0.5 : 0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
         />
       </mesh>
     </group>
@@ -276,7 +291,7 @@ function PulseBead({
       }
       return;
     }
-    const pt = curve.getPoint(t);
+    const pt = curve.getPointAt(t);
     mesh.position.set(pt.x, pt.y, pt.z);
     mesh.visible = true;
   });
@@ -293,10 +308,10 @@ function PulseBead({
   );
 }
 
-function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData> }) {
+function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean }) {
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
   const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
-  const { curve, arcLength, tubeGeo } = useMemo(() => {
+  const { curve, arcLength, tubeGeo, haloGeo } = useMemo(() => {
     const _p0 = surfacePoint(src, tgt);
     const _p2 = surfacePoint(tgt, src);
     const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
@@ -307,22 +322,39 @@ function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<Node
     const _curve = new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
     const _arcLength = _curve.getLength();
     const _tubeGeo = new THREE.TubeGeometry(_curve, 16, 1.5, 6, false);
-    return { curve: _curve, arcLength: _arcLength, tubeGeo: _tubeGeo };
+    // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
+    const _haloGeo = new THREE.TubeGeometry(_curve, 16, 5, 6, false);
+    return { curve: _curve, arcLength: _arcLength, tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p0key]);
 
   return (
     <>
       {/* Always-lit base tube — emissive so it reads at any camera angle */}
-      <mesh geometry={tubeGeo}>
+      <mesh geometry={tubeGeo} userData={{ edgeId }}>
         <meshStandardMaterial
+          key={faded ? "faded" : "solid"}
           color="#5599cc"
           emissive={new THREE.Color(0x2255aa)}
           emissiveIntensity={0.8}
+          transparent={faded}
+          opacity={faded ? 0.25 : 1}
+        />
+      </mesh>
+      {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
+          can hit anywhere within the halo radius; painted only when selected (opacity 0
+          otherwise — an opacity-0 visible mesh is still raycast-hittable). */}
+      <mesh geometry={haloGeo} userData={{ edgeId }}>
+        <meshBasicMaterial
+          color="#ff5a00"
+          transparent
+          opacity={selected ? 0.6 : 0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
         />
       </mesh>
       {/* Pulse bead: stronger highlight traveling source → target */}
-      <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />
+      {!faded && <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />}
     </>
   );
 }
@@ -330,9 +362,11 @@ function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<Node
 function GraphEdges({
   edges,
   nodeMap,
+  selectedId,
 }: {
   edges: RFEdge<EdgeData>[];
   nodeMap: Map<string, RFNode<NodeData>>;
+  selectedId: string | null;
 }) {
   return (
     <>
@@ -340,7 +374,7 @@ function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} />;
       })}
     </>
   );
@@ -490,20 +524,25 @@ function computeOcclusionCounts(
 // RaycasterHelper: performs pick on demand via ref callback.
 // ---------------------------------------------------------------------------
 
+interface PickOptions {
+  excludeId?: string;
+  nodesOnly?: boolean;
+}
+
 function RaycasterHelper({
   nodes,
   onPickRequest,
 }: {
   nodes: RFNode<NodeData>[];
   onPickRequest: React.MutableRefObject<
-    ((ndcX: number, ndcY: number) => string | null) | null
+    ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
 }) {
   const { camera, scene } = useThree();
   const raycaster = useRef(new THREE.Raycaster());
 
   useEffect(() => {
-    onPickRequest.current = (ndcX: number, ndcY: number): string | null => {
+    onPickRequest.current = (ndcX: number, ndcY: number, opts?: PickOptions): string | null => {
       const ndc = new THREE.Vector2(ndcX, ndcY);
       raycaster.current.setFromCamera(ndc, camera);
       const meshes: THREE.Mesh[] = [];
@@ -512,8 +551,33 @@ function RaycasterHelper({
       });
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
+
+      if (opts?.nodesOnly) {
+        // Iterate all hits to find the first node that isn't excluded.
+        for (const hit of hits) {
+          const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.edgeId) continue; // skip edges
+          const hitPoint = hitObj.parent;
+          if (!hitPoint) continue;
+          for (const n of nodes) {
+            if (opts.excludeId && n.id === opts.excludeId) continue;
+            const wp = nodeWorldPos(n);
+            if (
+              Math.abs(hitPoint.position.x - wp.x) < 1 &&
+              Math.abs(hitPoint.position.y - wp.y) < 1
+            ) {
+              return n.id;
+            }
+          }
+        }
+        return null;
+      }
+
+      // Check if the hit mesh is an edge tube (carries userData.edgeId).
+      const hitObj = hits[0].object as THREE.Mesh;
+      if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
       // Walk up to find a group that has a matching node position.
-      const hitPoint = hits[0].object.parent;
+      const hitPoint = hitObj.parent;
       if (!hitPoint) return null;
       // Match the group position to a node world pos.
       for (const n of nodes) {
@@ -576,7 +640,6 @@ function Scene({
   edges,
   selectedId,
   hoveredId,
-  connectPendingId,
   cameraRef,
   onPickRequest,
   onPositions,
@@ -587,10 +650,9 @@ function Scene({
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
   hoveredId: string | null;
-  connectPendingId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   onPickRequest: React.MutableRefObject<
-    ((ndcX: number, ndcY: number) => string | null) | null
+    ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
   onPositions: (positions: { id: string; px: number; py: number }[]) => void;
   onNearestN: (ids: Set<string>) => void;
@@ -613,10 +675,10 @@ function Scene({
           node={n}
           selected={n.id === selectedId}
           hovered={n.id === hoveredId}
-          connectPending={n.id === connectPendingId}
+          faded={!!n.data?.faded}
         />
       ))}
-      <GraphEdges edges={edges} nodeMap={nodeMap} />
+      <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
     </>
   );
 }
@@ -644,13 +706,12 @@ interface ControlState {
 function useInteractionControls(
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>,
   canvasSize: { w: number; h: number },
-  pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number) => string | null) | null>,
+  pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>,
   onSelect: (id: string | null) => void,
   onPanPadActive: (pos: { x: number; y: number } | null) => void,
-  connectPendingIdRef: React.MutableRefObject<string | null>,
-  onConnectClick: (id: string | null) => void,
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
   onMoveNode: (id: string, x: number, y: number) => void,
+  storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -664,7 +725,7 @@ function useInteractionControls(
     nodeId: string;
     planePointAtStart: THREE.Vector3;
     nodeCenterAtStart: THREE.Vector3;
-    snapshotPushed: boolean;
+    rfPosAtStart: { x: number; y: number };
   } | null>(null);
 
   // Pivot for the current drag (world space)
@@ -789,7 +850,7 @@ function useInteractionControls(
             nodeId: hitId,
             planePointAtStart: planePoint.clone(),
             nodeCenterAtStart: nodeWorldPos(node),
-            snapshotPushed: false,
+            rfPosAtStart: { x: node.position.x, y: node.position.y },
           };
         }
         // Do NOT start dwell timer when a node is hit.
@@ -827,11 +888,6 @@ function useInteractionControls(
         s.phase = "dragging";
 
         if (nodeDragRef.current) {
-          // Node drag: push snapshot at drag start (before any position change).
-          if (!nodeDragRef.current.snapshotPushed) {
-            pushSnapshot();
-            nodeDragRef.current.snapshotPushed = true;
-          }
           // Do NOT compute arcball pivot — node drag suppresses arcball.
         } else {
           // Empty-space drag: compute arcball pivot.
@@ -895,9 +951,23 @@ function useInteractionControls(
       if (s.dwellTimer !== null) { clearTimeout(s.dwellTimer); s.dwellTimer = null; }
       onPanPadActive(null);
 
-      // Node drag completed: persist position and suppress click/select.
-      if (s.phase === "dragging" && nodeDragRef.current?.snapshotPushed) {
+      // Node drag completed: check for drag-to-wire, else persist position.
+      if (s.phase === "dragging" && nodeDragRef.current) {
         const nd = nodeDragRef.current;
+        // Hit-test at release point excluding the source node, nodes only.
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+        const sourceId = nd.nodeId;
+        const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: sourceId, nodesOnly: true }) ?? null;
+        if (targetId !== null && targetId !== sourceId) {
+          // WIRE: revert the source node to its start position, then create the edge.
+          onMoveNode(sourceId, nd.rfPosAtStart.x, nd.rfPosAtStart.y);
+          storeCreateEdge(sourceId, null, targetId, null);
+          nodeDragRef.current = null;
+          s.phase = "idle";
+          return;
+        }
+        // Normal move: persist position.
         // Read from store directly so we get the position applied by the last onPointerMove,
         // which may not have re-rendered yet (nodesRef.current could be one frame stale).
         const node = useThreeStore.getState().nodes.find((n) => n.id === nd.nodeId);
@@ -927,19 +997,13 @@ function useInteractionControls(
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
           const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
-          // Connect mode: read through ref to avoid stale closure.
-          // onConnectClick reads connectPendingIdRef.current (live value).
-          const inConnectMode = connectPendingIdRef.current !== null;
-          onConnectClick(hitId);
-          if (!inConnectMode) {
-            onSelect(hitId); // normal select when not in connect mode
-          }
+          onSelect(hitId);
         }
       }
 
       s.phase = "idle";
     },
-    [connectPendingIdRef, nodesRef, onConnectClick, onPanPadActive, onSelect, pickRequest],
+    [nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
   );
 
   const onWheel = useCallback(
@@ -1189,28 +1253,21 @@ export function ThreeView() {
   const edges = useThreeStore((s) => s.edges);
   const storeMoveNode = useThreeStore((s) => s.moveNode);
   const storeCreateEdge = useThreeStore((s) => s.createEdge);
+  const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
-  // Connect mode: first click = pending source node id; second click = create edge.
-  const [connectPendingId, setConnectPendingId] = useState<string | null>(null);
-  // Ref mirror of connectPendingId — read in onPointerUp to avoid stale closure.
-  const connectPendingIdRef = useRef<string | null>(null);
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const pickRequest = useRef<((ndcX: number, ndcY: number) => string | null) | null>(null);
+  const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
 
   // Keep refs in sync with state.
-  useEffect(() => {
-    connectPendingIdRef.current = connectPendingId;
-  }, [connectPendingId]);
-
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
@@ -1239,41 +1296,18 @@ export function ThreeView() {
     }
   }, []);
 
-  // Connect-mode click handler: first click picks source, second click creates edge.
-  // Clicking empty space (null) cancels.
-  const onConnectClick = useCallback((hitId: string | null) => {
-    // Read through ref for live value (called from onPointerUp which uses the ref).
-    const pending = connectPendingIdRef.current;
-    if (pending === null) {
-      // Start connect mode only if a node was clicked
-      if (hitId !== null) setConnectPendingId(hitId);
-    } else {
-      // We have a pending source
-      if (hitId === null || hitId === pending) {
-        // Cancel: empty click or re-click same node
-        setConnectPendingId(null);
-      } else {
-        // Create the edge — auto-pick first output/input ports
-        storeCreateEdge(pending, null, hitId, null);
-        setConnectPendingId(null);
-      }
-    }
-  }, [storeCreateEdge]); // storeCreateEdge is stable (zustand action)
-
-  // Escape key cancels connect mode
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setConnectPendingId(null); return; }
-      // Undo/redo: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z (redo).
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && (e.key === "z" || e.key === "Z")) {
-        e.preventDefault();
-        if (e.shiftKey) redo(); else undo();
+      // "f": toggle fade on the selected element.
+      if (e.key === "f" && !mod && selectedId) {
+        const isEdge = edges.some((ed) => ed.id === selectedId);
+        toggleFade({ kind: isEdge ? "edge" : "node", id: selectedId });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selectedId, edges, toggleFade]);
 
   const { onPointerDown, onPointerMove, onPointerUp, onWheel } = useInteractionControls(
     cameraRef,
@@ -1281,10 +1315,9 @@ export function ThreeView() {
     pickRequest,
     setSelectedId,
     setPanPadOrigin,
-    connectPendingIdRef,
-    onConnectClick,
     nodesRef,
     storeMoveNode,
+    storeCreateEdge,
   );
 
   // Hover tracking: lightweight raycast on pointer-move to update hoveredId.
@@ -1356,7 +1389,6 @@ export function ThreeView() {
             edges={edges}
             selectedId={selectedId}
             hoveredId={hoveredId}
-            connectPendingId={connectPendingId}
             cameraRef={cameraRef}
             onPickRequest={pickRequest}
             onPositions={onPositions}
@@ -1439,27 +1471,6 @@ export function ThreeView() {
           </div>
         );
       })}
-
-      {/* Connect-mode hint banner */}
-      {connectPendingId !== null && (
-        <div style={{
-          position: "absolute",
-          top: 10,
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "rgba(0,200,120,0.85)",
-          color: "#000",
-          fontSize: 11,
-          fontFamily: "monospace",
-          padding: "4px 12px",
-          borderRadius: 5,
-          pointerEvents: "none",
-          zIndex: 40,
-          whiteSpace: "nowrap",
-        }}>
-          Click target node to wire · Esc to cancel
-        </div>
-      )}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <RollSlider cameraRef={cameraRef} />

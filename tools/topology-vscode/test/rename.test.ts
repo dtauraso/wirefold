@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from "vitest";
 import { type Spec } from "../src/schema";
-import { applyRename } from "../src/webview/rename-core";
-import { type ViewerState } from "../src/webview/viewerState";
+import { applyRename } from "../src/webview/state/ops/rename";
+import { type ViewerState } from "../src/webview/state/viewer/types";
 
 function fixture(): { spec: Spec; vs: ViewerState } {
   const spec: Spec = {

@@ -22,7 +22,8 @@ type PacedWire struct {
 	mu         sync.Mutex
 	cond       *sync.Cond
 	slot       any
-	hasSend    bool        // slot holds a value (not yet Done'd)
+	hasSend    bool         // slot holds a value (not yet Done'd)
+	faded      bool         // when true, Send skips without sending
 	deliveryCh chan struct{} // closed by NotifyDelivered
 	doneCh     chan struct{} // closed by Done
 }
@@ -34,9 +35,26 @@ func NewPacedWire() *PacedWire {
 	return pw
 }
 
+// SetFaded sets the faded flag. When faded is true, Send returns nil immediately
+// without filling the slot. In-flight values already past the gate are unaffected.
+func (pw *PacedWire) SetFaded(v bool) {
+	pw.mu.Lock()
+	pw.faded = v
+	pw.mu.Unlock()
+}
+
 // Send places value into the slot, then blocks until Done is called by the
 // receiver. Returns ErrCanceled if ctx is done before Done fires.
+// If the wire is faded, Send returns nil immediately without filling the slot.
 func (pw *PacedWire) Send(ctx context.Context, value any) error {
+	// Fade gate: skip benignly when the wire is faded.
+	pw.mu.Lock()
+	if pw.faded {
+		pw.mu.Unlock()
+		return nil
+	}
+	pw.mu.Unlock()
+
 	// Phase 1: wait for slot to be empty, then atomically claim it.
 	done := pw.watchCtx(ctx)
 	defer close(done)

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { parseSpec, type Spec } from "../src/schema";
-import { diffSpecs } from "../src/webview/diff-core";
+import { diffSpecs } from "../src/webview/state/ops/diff";
 
 function spec(s: Partial<Spec> & { nodes: Spec["nodes"]; edges: Spec["edges"] }): Spec {
   return parseSpec({ nodes: s.nodes, edges: s.edges });

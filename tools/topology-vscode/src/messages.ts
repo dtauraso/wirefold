@@ -33,6 +33,7 @@ export type WebviewToHostMsg =
   | { type: "stop" }
   | { type: "webview-log"; entry: string }
   | { type: "delivered"; edge: string }
+  | { type: "fade"; edges: string[] }
   | { type: `${PseudoPrefix}-render`; nodeId: string }
   | { type: `${PseudoPrefix}-save`; nodeId: string; pseudo: string };
 
@@ -92,7 +93,7 @@ export const ALL_PSEUDO_SAVE_TYPES: ReadonlySet<string> = new Set(
 );
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered", "fade",
   ..._pseudoPrefixes.flatMap((p) => [`${p}-render`, `${p}-save`] as const),
 ]);
 

@@ -13,13 +13,20 @@ STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
 
 # Extract string literals compared against msg.Type in stdin_reader.go.
-# Pattern: msg.Type != "..." or msg.Type == "..."
-# We extract only the token immediately after the comparison operator.
+# Patterns matched:
+#   msg.Type != "..." or msg.Type == "..."  (if-style comparisons)
+#   case "...":  inside a switch msg.Type block
 kinds_from_go() {
-  grep -oE 'msg\.Type[[:space:]]*[!=]=[[:space:]]*"[^"]+"' "$STDIN_READER" \
-    | grep -oE '"[^"]+"' \
-    | tr -d '"' \
-    | sort -u
+  {
+    grep -oE 'msg\.Type[[:space:]]*[!=]=[[:space:]]*"[^"]+"' "$STDIN_READER" \
+      | grep -oE '"[^"]+"' \
+      | tr -d '"'
+    # Extract case literals from switch msg.Type blocks.
+    grep -A 200 'switch msg\.Type' "$STDIN_READER" \
+      | grep -oE 'case[[:space:]]+"[^"]+"' \
+      | grep -oE '"[^"]+"' \
+      | tr -d '"'
+  } | sort -u
 }
 
 # Extract the string literals inside WEBVIEW_TO_HOST_TYPES in messages.ts.

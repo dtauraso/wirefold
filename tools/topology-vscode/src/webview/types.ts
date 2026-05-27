@@ -62,6 +62,8 @@ export interface NodeData {
   state?: Record<string, StateValue>;
   /** Set when a required inbound edge is missing; causes the node to render with a red border. */
   validationError?: string;
+  /** Viewer-only fade mask. Faded nodes render muted; their incident edges draw no pulse. */
+  faded?: boolean;
 
   // --- Runtime trace fields (Phase 4) ---
   /** Last fire event step for this node (used for visual highlight). */
@@ -93,6 +95,8 @@ export interface EdgeData extends WireProps {
   // --- Runtime trace fields (Phase 4) ---
   /** Set by pump on a "send" event: the value in flight on this edge. */
   pulse?: typeof ANIMATION_FIELDS["pulse"]["type"];
+  /** Viewer-only fade mask. Faded edges render muted and draw no pulse. */
+  faded?: boolean;
 }
 
 // Runtime trace fields added to NodeData (Phase 4).

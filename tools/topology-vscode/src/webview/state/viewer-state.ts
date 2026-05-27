@@ -14,8 +14,7 @@ export function setViewerState(next: ViewerState) {
   viewerState = next;
 }
 
-// History-bypassing patch for incidental viewer fields (camera, selection,
-// fold position). Distinct from mutateViewer which pushes onto undo.
+// Lightweight patch for incidental viewer fields (camera, selection, fold position).
 export function patchViewerState(fn: (v: ViewerState) => void) {
   viewerState = produce(viewerState, fn);
 }

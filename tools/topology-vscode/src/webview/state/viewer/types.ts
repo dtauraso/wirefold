@@ -56,6 +56,10 @@ export type ViewerState = {
   lastSelectionIds?: string[];
   nodes?: Record<string, NodeView>;
   edges?: Record<string, EdgeView>;
+  directlyFadedNodes?: string[];
+  directlyFadedEdges?: string[];
+  // Faded-edge ids in fade order (oldest → newest). Drives reverse-playback unfade.
+  fadeEdgeOrder?: string[];
 };
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};
@@ -102,6 +106,18 @@ export function parseViewerState(text: string | undefined): ViewerState {
     const ev = parseEdgeViews(raw.edges);
     if (ev) out.edges = ev;
     else console.warn("topology.view.json: edges is not a valid edge-view map, dropping");
+  }
+  if (raw.directlyFadedNodes !== undefined) {
+    if (isStrArr(raw.directlyFadedNodes)) out.directlyFadedNodes = raw.directlyFadedNodes;
+    else console.warn("topology.view.json: directlyFadedNodes is not a string[], dropping");
+  }
+  if (raw.directlyFadedEdges !== undefined) {
+    if (isStrArr(raw.directlyFadedEdges)) out.directlyFadedEdges = raw.directlyFadedEdges;
+    else console.warn("topology.view.json: directlyFadedEdges is not a string[], dropping");
+  }
+  if (raw.fadeEdgeOrder !== undefined) {
+    if (isStrArr(raw.fadeEdgeOrder)) out.fadeEdgeOrder = raw.fadeEdgeOrder;
+    else console.warn("topology.view.json: fadeEdgeOrder is not a string[], dropping");
   }
   return out;
 }
