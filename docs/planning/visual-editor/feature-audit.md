@@ -4,10 +4,11 @@
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items; 3 dead-code orphans (§3d).
+**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items; 0 dead-code orphans (§3d — all removed).
 
 > **Re-verified 2026-05-26** against post-architecture-audit code. Undo/redo moved from half-wired to not-started (no history.ts, no pushSnapshot exists). Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 > **Updated 2026-05-27** (commit `45cee602`, branch `task/remove-saved-views`): saved-views dead-code orphan REMOVED in full. Scorecard adjusted from 4 to 3 dead-code orphans.
+> **Updated 2026-05-27** (commits `9cc63677`, `93b6412a`, branch `main`): `valueLabel` wire prop and fold mutators (`setFolds`, `toggleFoldCollapse`, `updateFoldPosition`) REMOVED. Orphan count → 0.
 
 ---
 
@@ -106,8 +107,8 @@ Each is infrastructure that exists in code but reaches no user today — some ne
 |---|---|---|---|
 | Named / saved views | **REMOVED** — commit `45cee602` on branch `task/remove-saved-views`. Deleted: `SavedView` type + parse/serialize + rename-remap; `state/dimmed.ts`; `data.dimmed` in specToFlow + NodeData; `.dim` CSS; `__wirefold_test.applyDim` hook; saved-view assertions within `parseViewerState.test.ts` (file retained); saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). Build/tsc/17 unit tests clean after removal. | COMPLETE — no orphan remains | N/A |
 | Spec diff | **REMOVED** — `state/ops/diff.ts` + `test/diff-core.test.ts` deleted; `diffSpecs` had no production caller. | COMPLETE — no orphan remains | N/A |
-| Wire value label | `schema/wire-defs.ts:13,25` + Go `nodes/Wiring/loader.go:47` (`valueLabel`) | Truly dead — schema-only on both TS and Go sides, never read or rendered | Render edge value labels, or strip the prop from both layers? |
-| Fold mutators | `state/folds-state.ts:13–30` (`toggleFoldCollapse`, `updateFoldPosition`, `setFolds`) | Truly dead — zero callers anywhere; only `getFolds()` is consumed (`store.ts:10`). Complements the §3a half-wired Folds item (collapse/expand + drag-reposition built but unreachable) | Wire fold interactions, or delete the mutators? |
+| Wire value label | **REMOVED** — `valueLabel` deleted from `nodes/Wiring/loader.go` wire tag and `wire-defs.ts` regenerated via gen-node-defs (commit `9cc63677`, branch `main`). TS + Go builds clean. | COMPLETE — no orphan remains | N/A |
+| Fold mutators | **REMOVED** — `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained (live consumer in `store.ts`). (commit `93b6412a`, branch `main`). Build clean. | COMPLETE — no orphan remains | N/A |
 
 > `midpointOffset` (§3a item 10) and sublabel inline edit (§3a item 6) were also surfaced by the same sweep but are already tracked there and are not duplicated here.
 

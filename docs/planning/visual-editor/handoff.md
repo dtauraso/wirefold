@@ -27,6 +27,8 @@ read this file first (no chat history needed) and proceed.
 - Added feature-audit §3d "Dead-Code Orphans" (`d154e30d`): named/saved views, spec diff (diffSpecs, test-only), wire `valueLabel` (schema-only, TS+Go), fold mutators (toggleFoldCollapse/updateFoldPosition/setFolds, zero callers).
 - **Saved-views REMOVED** (merged to `main` ~`96bb4a60`, branch deleted): `SavedView` type + parse/serialize + rename-remap, `state/dimmed.ts`, `data.dimmed` in specToFlow + NodeData, `.dim` CSS, `__wirefold_test.applyDim` hook, `parseViewerState.test.ts`, and saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). The dim mechanism only ever drove a dead 2D React Flow `.dim` path — never the live R3F 3D diagram. Build/tsc/17 unit tests clean. Feature-audit §3d scorecard updated from 4 to 3 dead-code orphans. Remaining orphans: diffSpecs (test-only), valueLabel (schema-only TS+Go), fold mutators (zero callers).
 - **diffSpecs REMOVED** (`state/ops/diff.ts` + `test/diff-core.test.ts` deleted): had no production caller; test-only dead code. Feature-audit §3d orphan count now 2. Remaining orphans: valueLabel (schema-only TS+Go), fold mutators (zero callers).
+- **valueLabel REMOVED** (commit `9cc63677`, branch `main`): `valueLabel` struct field + wire tag removed from `nodes/Wiring/loader.go`; `wire-defs.ts` regenerated via gen-node-defs. Orphan count now 1.
+- **Fold mutators REMOVED** (commit `93b6412a`, branch `main`): `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained. Orphan count now 0 — all §3d dead-code orphans cleared.
 
 ### KNOWN ISSUES (candidate next work)
 
@@ -34,7 +36,7 @@ read this file first (no chat history needed) and proceed.
 2. Node-to-node wiring fails for port-incompatible node kinds (same `buildEdge` auto-pick path).
 3. **Pre-existing test failures (predate audit, unrelated):** TS — `parseSpec.test.ts` (2: legacy `timing.steps` not dropped; legend bad-kind not rejected), `diff-core.test.ts` (cascades from parseSpec fixture), `fold.test.ts` ("expanded fold emits a frame"). Go — `Trace.TestMarshalEventMatchesFixture`. (The two contract failures — topology-edge-handles, trace-event-fields — were FIXED this session.)
 4. **Junction-click ambiguity:** overlapping edge pick-tubes near a node junction can mis-pick; click mid-span.
-5. Dead-code orphans (feature-audit §3d) need disposition decisions — valueLabel (render vs strip from both layers), fold mutators (wire vs delete). Saved views and diffSpecs are fully removed.
+5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
 
 ### Key files
 
