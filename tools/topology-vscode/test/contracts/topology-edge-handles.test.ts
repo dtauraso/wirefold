@@ -28,10 +28,6 @@ interface Topology {
   edges: TopoEdge[];
 }
 
-function specKindToDefKey(kind: string): string {
-  return kind.charAt(0).toLowerCase() + kind.slice(1);
-}
-
 // Go OutMulti ports are referenced as "<portName><index>" in topology.json.
 // If the port carries isMulti:true (from generated metadata), match by base name prefix.
 // Exact match is always accepted (covers non-multi ports).
@@ -53,9 +49,8 @@ describe("topology-edge-handles contract", () => {
     for (const edge of topo.edges) {
       const src = nodeById.get(edge.source);
       if (!src) { failures.push(`edge ${edge.id}: source node "${edge.source}" not found`); continue; }
-      const key = specKindToDefKey(src.type);
-      const def = NODE_DEFS[key as keyof typeof NODE_DEFS];
-      if (!def) { failures.push(`edge ${edge.id}: kind "${src.type}" not in NODE_DEFS`); continue; }
+      const def = NODE_DEFS[src.type as keyof typeof NODE_DEFS];
+      if (!def) { failures.push(`edge ${edge.id}: kind "${src.type}" not in NODE_DEFS (checked verbatim)`); continue; }
       const outputs = (def as { outputs?: { name: string; isMulti?: boolean }[] }).outputs ?? [];
       if (!outputs.some((o) => handleMatchesPort(edge.sourceHandle, o.name, o.isMulti))) {
         failures.push(`edge ${edge.id}: node "${edge.source}" (${src.type}) has no output "${edge.sourceHandle}"`);
@@ -69,9 +64,8 @@ describe("topology-edge-handles contract", () => {
     for (const edge of topo.edges) {
       const tgt = nodeById.get(edge.target);
       if (!tgt) { failures.push(`edge ${edge.id}: target node "${edge.target}" not found`); continue; }
-      const key = specKindToDefKey(tgt.type);
-      const def = NODE_DEFS[key as keyof typeof NODE_DEFS];
-      if (!def) { failures.push(`edge ${edge.id}: kind "${tgt.type}" not in NODE_DEFS`); continue; }
+      const def = NODE_DEFS[tgt.type as keyof typeof NODE_DEFS];
+      if (!def) { failures.push(`edge ${edge.id}: kind "${tgt.type}" not in NODE_DEFS (checked verbatim)`); continue; }
       const inputs = (def as { inputs?: { name: string; isMulti?: boolean }[] }).inputs ?? [];
       if (!inputs.some((i) => handleMatchesPort(edge.targetHandle, i.name, i.isMulti))) {
         failures.push(`edge ${edge.id}: node "${edge.target}" (${tgt.type}) has no input "${edge.targetHandle}"`);
