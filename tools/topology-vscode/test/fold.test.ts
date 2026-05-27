@@ -74,7 +74,7 @@ describe("fold-aware specToFlow", () => {
     toggleFold(vs, "fold0"); // collapse → expand
 
     const flow = specToFlow(spec, vs.folds, vs);
-    const memberIds = flow.nodes.filter((n) => n.type === "animated").map((n) => n.id).sort();
+    const memberIds = flow.nodes.filter((n) => n.type !== "fold").map((n) => n.id).sort();
     expect(memberIds).toEqual(["a", "b", "c", "d"]);
 
     const frame = flow.nodes.find((n) => n.type === "fold")!;
