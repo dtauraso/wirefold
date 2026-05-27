@@ -238,7 +238,7 @@ func TestToReadGate_AndGate_UnconditionalDone(t *testing.T) {
 // If a field is renamed in node.go without updating the const block here, this
 // test fails at `go test` rather than silently producing broken pseudo saves.
 func TestReadGate_PortConstantsMatchStructFields(t *testing.T) {
-	nodeType := reflect.TypeOf(readgate.Node{})
+	nodeType := reflect.TypeFor[readgate.Node]()
 	for _, portConst := range []string{portFromInput, portFromChainInhibitor, portToChainInhibitor} {
 		if _, ok := nodeType.FieldByName(portConst); !ok {
 			t.Errorf("port-name constant %q has no matching exported field on readgate.Node", portConst)
