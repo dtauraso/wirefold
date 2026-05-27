@@ -5,16 +5,47 @@ import { create } from "zustand";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import { parseSpec, type Spec } from "../../schema";
 import { specToFlow } from "../state/adapter/spec-to-flow";
-import { viewerState, setViewerState } from "../state/viewer-state";
+import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
 import { parseViewerState } from "../state/viewer/types";
 import { getFolds } from "../state/folds-state";
 import { getDimmed } from "../state/dimmed";
 import { KIND_COLORS, NODE_TYPES, type EdgeKind } from "../../schema";
-import { scheduleSave, setSpecMeta, markViewSynced } from "../save";
+import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../save";
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 import { computeFade, type FadeEdge } from "./fade";
 import { vscode } from "../vscode-api";
+import { clearPulse } from "./pulse-state";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-derive data.faded on every node/edge from the current fade sets.
+ * Called after any rebuild that replaces the node/edge arrays.
+ */
+function applyFade(
+  nodes: RFNode<NodeData>[],
+  edges: RFEdge<EdgeData>[],
+  directlyFadedNodes: Set<string>,
+  directlyFadedEdges: Set<string>,
+): { nodes: RFNode<NodeData>[]; edges: RFEdge<EdgeData>[] } {
+  const nodeIds = nodes.map((n) => n.id);
+  const fadeEdges: FadeEdge[] = edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
+  const { fadedNodes, fadedEdges } = computeFade(nodeIds, fadeEdges, directlyFadedNodes, directlyFadedEdges);
+  const nextNodes = nodes.map((n) => {
+    const f = fadedNodes.has(n.id);
+    if (!!n.data.faded === f) return n;
+    return { ...n, data: { ...n.data, faded: f } };
+  });
+  const nextEdges = edges.map((e) => {
+    const f = fadedEdges.has(e.id);
+    if (!!(e.data?.faded) === f) return e;
+    return { ...e, data: { ...(e.data ?? {}), faded: f } as typeof e.data };
+  });
+  return { nodes: nextNodes, edges: nextEdges };
+}
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -69,8 +100,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const rawJson = JSON.parse(specText);
       const spec = parseSpec(rawJson);
       const flow = specToFlow(spec, getFolds(), viewerState, viewerState.lastSelectionIds ?? [], getDimmed());
-      const nodes = flow.nodes as RFNode<NodeData>[];
-      const edges = flow.edges as RFEdge<EdgeData>[];
+      let nodes = flow.nodes as RFNode<NodeData>[];
+      let edges = flow.edges as RFEdge<EdgeData>[];
+      const { directlyFadedNodes, directlyFadedEdges } = get();
+      ({ nodes, edges } = applyFade(nodes, edges, directlyFadedNodes, directlyFadedEdges));
       set({ nodes, edges, _lastSpec: spec, loadEpoch: get().loadEpoch + 1 });
       setSpecMeta(spec);
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
@@ -215,21 +248,22 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       else nextFadedEdges.add(id);
     }
 
-    const nodeIds = nodes.map((n) => n.id);
-    const fadeEdges: FadeEdge[] = edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
-    const { fadedNodes, fadedEdges } = computeFade(nodeIds, fadeEdges, nextFadedNodes, nextFadedEdges);
+    // Compute which edges were previously unfaded so we can clear stale pulses.
+    const prevFadedEdgeIds = new Set(
+      edges.filter((e) => !!(e.data?.faded)).map((e) => e.id),
+    );
 
-    // Write faded flags onto node/edge data (shallow-map; only copy when flag changes).
-    const nextNodes = nodes.map((n) => {
-      const f = fadedNodes.has(n.id);
-      if (!!n.data.faded === f) return n;
-      return { ...n, data: { ...n.data, faded: f } };
-    });
-    const nextEdges = edges.map((e) => {
-      const f = fadedEdges.has(e.id);
-      if (!!(e.data?.faded) === f) return e;
-      return { ...e, data: { ...(e.data ?? {}), faded: f } as typeof e.data };
-    });
+    const { nodes: nextNodes, edges: nextEdges } = applyFade(nodes, edges, nextFadedNodes, nextFadedEdges);
+
+    // Clear pulse state for any edge that is NEWLY faded this toggle.
+    for (const e of nextEdges) {
+      if (e.data?.faded && !prevFadedEdgeIds.has(e.id)) {
+        clearPulse(e.id);
+      }
+    }
+
+    // Derive fadedEdges set for the host message.
+    const fadedEdges = new Set(nextEdges.filter((e) => !!(e.data?.faded)).map((e) => e.id));
 
     set({
       directlyFadedNodes: nextFadedNodes,

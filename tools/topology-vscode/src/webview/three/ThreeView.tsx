@@ -213,6 +213,7 @@ function GraphNode({
       <mesh>
         <sphereGeometry args={[r, 16, 16]} />
         <meshStandardMaterial
+          key={faded ? "faded" : "solid"}
           color={fillColor}
           emissive={emissiveFill}
           emissiveIntensity={flagged ? 0.4 : 0}
@@ -223,6 +224,7 @@ function GraphNode({
       <mesh>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
+          key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}
           emissiveIntensity={flagged ? 0.5 : 0}
@@ -282,7 +284,7 @@ function PulseBead({
       }
       return;
     }
-    const pt = curve.getPoint(t);
+    const pt = curve.getPointAt(t);
     mesh.position.set(pt.x, pt.y, pt.z);
     mesh.visible = true;
   });
@@ -322,6 +324,7 @@ function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNo
       {/* Always-lit base tube — emissive so it reads at any camera angle */}
       <mesh geometry={tubeGeo}>
         <meshStandardMaterial
+          key={faded ? "faded" : "solid"}
           color="#5599cc"
           emissive={new THREE.Color(0x2255aa)}
           emissiveIntensity={0.8}
