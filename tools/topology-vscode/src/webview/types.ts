@@ -57,7 +57,6 @@ export interface NodeData {
   // 3D depth coordinate. Defaults to 0 when absent (exact 2D replica).
   z?: number;
   sublabel?: string;
-  foldId?: string;
   state?: Record<string, StateValue>;
   /** Set when a required inbound edge is missing; causes the node to render with a red border. */
   validationError?: string;
@@ -79,16 +78,15 @@ export interface NodeData {
 // Per-edge data carried in RF Edge<EdgeData>.data.
 // RF-native fields (id, source, sourceHandle, target, targetHandle) live on
 // the RF edge itself and are NOT duplicated here — except sourceHandle /
-// targetHandle are also stored in data for round-trip when endpoints are
-// rerouted through a fold placeholder.
+// targetHandle are also stored in data for round-trip.
 export interface EdgeData extends WireProps {
   /** Raw Spec.Edge.data — carried verbatim for round-trip. */
   edgeData?: unknown;
   route?: string;
   value?: unknown;
-  /** Original sourceHandle before any fold rerouting. */
+  /** Original sourceHandle stored in data for round-trip. */
   sourceHandle?: string;
-  /** Original targetHandle before any fold rerouting. */
+  /** Original targetHandle stored in data for round-trip. */
   targetHandle?: string;
 
   // --- Runtime trace fields (Phase 4) ---

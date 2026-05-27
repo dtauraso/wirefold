@@ -20,7 +20,6 @@ function fixture(): { spec: Spec; vs: ViewerState } {
     ],
   };
   const vs: ViewerState = {
-    folds: [{ id: "f", label: "F", memberIds: ["old", "other"], position: [0, 0], collapsed: false }],
     lastSelectionIds: ["old"],
   };
   return { spec, vs };
@@ -31,7 +30,6 @@ describe("applyRename atomicity", () => {
   const sites: Site[] = [
     { name: "edge.source", pull: (s) => s.edges.map((e) => e.source) },
     { name: "edge.target", pull: (s) => s.edges.map((e) => e.target) },
-    { name: "fold.memberIds", pull: (_, v) => v.folds!.flatMap((x) => x.memberIds) },
     { name: "lastSelectionIds", pull: (_, v) => v.lastSelectionIds! },
   ];
 

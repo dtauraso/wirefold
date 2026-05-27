@@ -68,18 +68,6 @@ describe("parseViewerState", () => {
     expect(v.lastSelectionIds).toEqual(["a", "b"]);
   });
 
-  it("folds drops entries with missing required fields", () => {
-    const v = parseViewerState(JSON.stringify({
-      folds: [
-        { id: "f1", label: "L", memberIds: ["a"], position: [0, 0], collapsed: true },
-        { id: "f2", label: "L", memberIds: ["a"], position: [0] },         // bad position
-        { id: "f3", label: "L", memberIds: ["a"], position: [0, 0], collapsed: "yes" }, // bad collapsed
-      ],
-    }));
-    expect(v.folds).toHaveLength(1);
-    expect(v.folds![0].id).toBe("f1");
-  });
-
   it("lastSelectionIds with non-string entry is dropped", () => {
     const v = parseViewerState(JSON.stringify({
       lastSelectionIds: ["a", 1, "c"],

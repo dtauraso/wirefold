@@ -1,5 +1,5 @@
 // Reverse adapter: RF state → Spec.
-// Mirrors spec-to-flow.ts field-by-field. Position/sublabel/foldId/state
+// Mirrors spec-to-flow.ts field-by-field. Position/sublabel/state
 // are viewer-only and are NOT written into the spec. edgeData and nodeData are
 // carried verbatim so simulator-relevant fields survive the round-trip.
 // currentSpec provides passthrough for top-level metadata fields via TOPOLOGY_META_FIELDS
@@ -19,9 +19,6 @@ export function flowToSpec(
   const notes: Note[] = [];
 
   for (const n of rfNodes) {
-    // Skip fold placeholders (type "fold") — viewer-only.
-    if (n.type === "fold") continue;
-
     // Note nodes are stored as spec.notes[], not spec.nodes[].
     if (n.type === "note") {
       const d = n.data as {
@@ -66,7 +63,6 @@ export function flowToSpec(
   const edges: SpecEdge[] = [];
   for (const e of rfEdges) {
     const d = e.data as EdgeData | undefined;
-    // Use original handles from data (pre-fold-rerouting) when present.
     const sourceHandle = d?.sourceHandle ?? e.sourceHandle ?? "";
     const targetHandle = d?.targetHandle ?? e.targetHandle ?? "";
     const edge: SpecEdge = {

@@ -14,7 +14,7 @@ export function setViewerState(next: ViewerState) {
   viewerState = next;
 }
 
-// Lightweight patch for incidental viewer fields (camera, selection, fold position).
+// Lightweight patch for incidental viewer fields (camera, selection, node positions).
 export function patchViewerState(fn: (v: ViewerState) => void) {
   viewerState = produce(viewerState, fn);
 }

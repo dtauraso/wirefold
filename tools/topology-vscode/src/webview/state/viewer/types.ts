@@ -5,8 +5,8 @@
 import type { StateValue } from "../../../schema";
 import {
   isObj, isStrArr,
-  parseCamera, parseFold,
-  collect, parseNodeViews, parseEdgeViews,
+  parseCamera,
+  parseNodeViews, parseEdgeViews,
 } from "./parse";
 
 // Canonical camera is React Flow's pan/zoom: `{x, y, zoom}`. The lit-html
@@ -19,14 +19,6 @@ export type LegacyCameraBox = { x: number; y: number; w: number; h: number };
 export function isLegacyCamera(c: Camera | LegacyCameraBox): c is LegacyCameraBox {
   return typeof (c as Camera).zoom !== "number";
 }
-
-export type Fold = {
-  id: string;
-  label: string;
-  memberIds: string[];
-  position: [number, number];
-  collapsed: boolean;
-};
 
 export type NodeView = {
   x: number;
@@ -43,7 +35,6 @@ export type EdgeView = {
 
 export type ViewerState = {
   camera?: Camera | LegacyCameraBox;
-  folds?: Fold[];
   lastSelectionIds?: string[];
   nodes?: Record<string, NodeView>;
   edges?: Record<string, EdgeView>;
@@ -73,11 +64,6 @@ export function parseViewerState(text: string | undefined): ViewerState {
     const cam = parseCamera(raw.camera);
     if (cam) out.camera = cam;
     else console.warn("topology.view.json: dropping malformed camera");
-  }
-  if (raw.folds !== undefined) {
-    const folds = collect(raw.folds, parseFold);
-    if (folds) out.folds = folds;
-    else console.warn("topology.view.json: folds is not an array, dropping");
   }
   if (raw.lastSelectionIds !== undefined) {
     if (isStrArr(raw.lastSelectionIds)) out.lastSelectionIds = raw.lastSelectionIds;
