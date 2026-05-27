@@ -322,7 +322,7 @@ function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNo
   return (
     <>
       {/* Always-lit base tube — emissive so it reads at any camera angle */}
-      <mesh geometry={tubeGeo}>
+      <mesh geometry={tubeGeo} userData={{ edgeId }}>
         <meshStandardMaterial
           key={faded ? "faded" : "solid"}
           color="#5599cc"
@@ -523,8 +523,11 @@ function RaycasterHelper({
       });
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
+      // Check if the hit mesh is an edge tube (carries userData.edgeId).
+      const hitObj = hits[0].object as THREE.Mesh;
+      if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
       // Walk up to find a group that has a matching node position.
-      const hitPoint = hits[0].object.parent;
+      const hitPoint = hitObj.parent;
       if (!hitPoint) return null;
       // Match the group position to a node world pos.
       for (const n of nodes) {
