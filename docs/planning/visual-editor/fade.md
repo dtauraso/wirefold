@@ -1,7 +1,3 @@
----
-branch: task/undo-redo
----
-
 # Fade — non-destructive mask over nodes and edges
 
 Status: spec. Supersedes and removes the undo/redo stack recording system entirely (no command stack, no linear history).
