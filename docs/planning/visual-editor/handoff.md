@@ -38,7 +38,12 @@ read this file first (no chat history needed) and proceed.
   - Clicking an edge no longer arms connect-mode (banner) — only nodes arm it.
   - Connect-mode second click resolves inline: a different node creates the edge; an edge selects it and exits; empty space exits + deselects; the same node cancels — no separate exit click needed.
 
-**KNOWN ISSUE:** node-to-node wiring via connect-mode can fail when the two node KINDS are port-incompatible (`createEdge` auto-picks ports). Deferred — this is a port-compatibility gap, not a click-routing bug.
+**6. Reverse-playback path unfade + fade-order persistence, drag-to-wire (this session).**
+- `a30b020b` Node-unfade now walks a linear reverse-playback path instead of clearing a region: pressing `f` on a faded node unfades the node, its most-recently-faded incident edge, that edge's far node, then continues from there along each node's most-recent faded edge until the chain ends. Reverse fade order; off-path nodes stay faded; revealed paths stick (each path node keeps a visible edge so the auto-fade rule doesn't re-fade it). New `fadeEdgeOrder` state (oldest→newest) tracks edge fade order, reconciled on every recompute and persisted to `topology.json#view` alongside the fade sets (`viewer/types.ts`).
+- `188edaf3` Wiring is now drag-from-node, release-on-another-node → `createEdge`. Release hit-test excludes the source node and resolves nodes-only (`pickRequest` gained `{excludeId, nodesOnly}`); on a wire the source reverts to its start position. Drag-to-empty still moves the node; click selects. Removed click-to-arm connect-mode entirely: `onConnectClick`, `connectPendingId` state/ref, the green banner, the Escape-cancel line, and the teal connect ring on GraphNode.
+  - **drag-to-wire v1 note:** the source node follows the cursor then snaps back on a wire release — refine to live target-highlight/freeze if it proves jarring (user accepted v1).
+
+**KNOWN ISSUE:** node-to-node wiring can fail when the two node KINDS are port-incompatible (`createEdge` auto-picks ports). Still applies: drag-to-wire reuses `createEdge` with auto-picked ports. Deferred — this is a port-compatibility gap, not a click-routing bug.
 
 **3. Undo/redo stack removed** (`1975d655`). Deleted `state/history.ts`; removed Cmd/Ctrl+Z keybind, `pushSnapshot` calls, and `restoreNodesEdges`. `mutateViewer` keeps mutating+persisting, no longer snapshots. Fade is the replacement for the reversible-navigation role; delete is the (terminal) cleanup pass.
 
@@ -66,8 +71,8 @@ These span parser/schema/fold subsystems; none are fade- or undo-related.
 - `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + skip-at-top-of-`Send` gate.
 - `nodes/Wiring/stdin_reader.go` + `loader.go` (`WireRegistry.ForEach`) — `"fade"` message applies the edge set.
 - `tools/topology-vscode/src/webview/three/fade.ts` — pure `computeFade` fixpoint.
-- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` (direction by visible state; node-unfade clears region, edge-unfade clears connected nodes) + `applyFade` helper (re-derives `data.faded` on every rebuild) + bridge emit.
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey + edge-tube `userData.edgeId` + `pickRequest` edge resolution + edge/node selection halos (always-mounted edge halo = pick area) + connect-mode redirect.
+- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` (node-unfade walks a reverse-playback path; edge-unfade clears connected nodes) + `fadeEdgeOrder` (oldest→newest, reconciled per recompute, persisted) + `applyFade` helper (re-derives `data.faded` on every rebuild) + bridge emit.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey + edge-tube `userData.edgeId` + `pickRequest` edge resolution (`{excludeId, nodesOnly}`) + edge/node selection halos (always-mounted edge halo = pick area) + drag-node-to-node wiring (connect-mode removed).
 - `tools/topology-vscode/src/webview/state/viewer/types.ts` — `ViewerState` fade fields (`directlyFadedNodes`/`directlyFadedEdges`) + `parseViewerState` validation.
 - `tools/topology-vscode/src/extension/handle-message.ts` — relays `"fade"` to Go stdin.
 - `tools/topology-vscode/src/webview/types.ts` — `faded?: boolean` on NodeData/EdgeData.
