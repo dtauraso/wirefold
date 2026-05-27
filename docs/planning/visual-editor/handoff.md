@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-27 — saved-views fully removed on task/remove-saved-views; feature-audit updated)
+## State at handoff (2026-05-27 — saved-views removal merged to main; no task in flight)
 
-- **Active branch:** `task/remove-saved-views`. Do NOT merge. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
+- **Active branch:** `main`. No task branch in flight. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
 
 ### What's on main (this session) — architecture + organization audit, all 13 findings resolved
 
@@ -25,7 +25,7 @@ read this file first (no chat history needed) and proceed.
 - Re-verified all open feature-audit items against post-architecture-audit code (`eec03390`). Corrected drifts: undo/redo is NOT half-wired — it does not exist at all (no `state/history.ts`, no `pushSnapshot`); `folds.ts` → `state/folds-state.ts` (folds DO render as RF "note" nodes via buildFoldNodes, just no 3D mesh); sublabel inline edit is PARTIAL (`beginEditSublabel` exists in inline-edit.ts, no 3D trigger); §3a "proof of prior existence" files are deleted from tree (git-history-only now). Scorecard now: 26 working / 9 restore-parity + 4 half-wired + 1 not-started / 1 never-specced / 3 accepted-for-build / 4 dead-code orphans.
 - Corrected memory `project_edge_midpoint_offset_plumbing`: `midpointOffset` is a schema-only stub (wire-defs.ts), NOT wired end-to-end as previously recorded.
 - Added feature-audit §3d "Dead-Code Orphans" (`d154e30d`): named/saved views, spec diff (diffSpecs, test-only), wire `valueLabel` (schema-only, TS+Go), fold mutators (toggleFoldCollapse/updateFoldPosition/setFolds, zero callers).
-- **Saved-views REMOVED** (commit `45cee602`, branch `task/remove-saved-views`): `SavedView` type + parse/serialize + rename-remap, `state/dimmed.ts`, `data.dimmed` in specToFlow + NodeData, `.dim` CSS, `__wirefold_test.applyDim` hook, `parseViewerState.test.ts`, and saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). The dim mechanism only ever drove a dead 2D React Flow `.dim` path — never the live R3F 3D diagram. Build/tsc/17 unit tests clean. Feature-audit §3d scorecard updated from 4 to 3 dead-code orphans. Remaining orphans: diffSpecs (test-only), valueLabel (schema-only TS+Go), fold mutators (zero callers).
+- **Saved-views REMOVED** (merged to `main` ~`96bb4a60`, branch deleted): `SavedView` type + parse/serialize + rename-remap, `state/dimmed.ts`, `data.dimmed` in specToFlow + NodeData, `.dim` CSS, `__wirefold_test.applyDim` hook, `parseViewerState.test.ts`, and saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). The dim mechanism only ever drove a dead 2D React Flow `.dim` path — never the live R3F 3D diagram. Build/tsc/17 unit tests clean. Feature-audit §3d scorecard updated from 4 to 3 dead-code orphans. Remaining orphans: diffSpecs (test-only), valueLabel (schema-only TS+Go), fold mutators (zero callers).
 
 ### KNOWN ISSUES (candidate next work)
 
@@ -33,7 +33,7 @@ read this file first (no chat history needed) and proceed.
 2. Node-to-node wiring fails for port-incompatible node kinds (same `buildEdge` auto-pick path).
 3. **Pre-existing test failures (predate audit, unrelated):** TS — `parseSpec.test.ts` (2: legacy `timing.steps` not dropped; legend bad-kind not rejected), `diff-core.test.ts` (cascades from parseSpec fixture), `fold.test.ts` ("expanded fold emits a frame"). Go — `Trace.TestMarshalEventMatchesFixture`. (The two contract failures — topology-edge-handles, trace-event-fields — were FIXED this session.)
 4. **Junction-click ambiguity:** overlapping edge pick-tubes near a node junction can mis-pick; click mid-span.
-5. Dead-code orphans (feature-audit §3d) need disposition decisions — diffSpecs (surface diff view vs drop), valueLabel (render vs strip from both layers), fold mutators (wire vs delete). Saved views are fully removed (commit `45cee602`).
+5. Dead-code orphans (feature-audit §3d) need disposition decisions — diffSpecs (surface diff view vs drop), valueLabel (render vs strip from both layers), fold mutators (wire vs delete). Saved views are fully removed (landed on main, ~`96bb4a60`).
 
 ### Key files
 
