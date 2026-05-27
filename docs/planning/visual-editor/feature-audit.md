@@ -4,7 +4,9 @@
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 5 half-wired); 1 never-specced decision point; 3 accepted-for-build items.
+**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items.
+
+> **Re-verified 2026-05-26** against post-architecture-audit code. Undo/redo moved from half-wired to not-started (no history.ts, no pushSnapshot exists). Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 
 ---
 
@@ -31,7 +33,7 @@ The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (
 | Run-status pause accounting | `tools/topology-vscode/src/webview/three/store.ts` (runStatus state) |
 | Debounced spec save | `tools/topology-vscode/src/webview/save.ts` (scheduleSave) |
 | Load spec / load view from VS Code | `store.ts:loadSpec`, `store.ts:loadView` |
-| Fold state module (RF-free) | `tools/topology-vscode/src/webview/state/folds.ts` |
+| Fold state module (RF-free) | `tools/topology-vscode/src/webview/state/folds-state.ts` |
 | Node dimming | `tools/topology-vscode/src/webview/state/dimmed.ts` (note: `DimmedCtx`/`useDimmedCtx`/`registerDimmedSetter` exports removed; core dimming logic retained) |
 | Spec↔flow adapters | `tools/topology-vscode/src/webview/three/adapters/specToFlow.ts`, `flowToSpec.ts` |
 | Ring-topology deadlock break | Bootstrap `Input` node (`data.init=[seed]`, `data.repeat=false`) wired by a real edge into the receiving port; single-fires seed at tick-0. `edgeSeeds` TS pipeline removed entirely. |
@@ -48,7 +50,7 @@ The gaps in this editor have three distinct causes: regression (worked in the RF
 
 ### 3a. Cutover Debt — Worked in the RF editor, lost in the R3F move (restore-parity, bounded)
 
-Each item existed and worked in the old React Flow editor. The R3F cutover dropped or half-wired it. Proof-of-prior-existence cited per line.
+Each item existed and worked in the old React Flow editor. The R3F cutover dropped or half-wired it. Proof-of-prior-existence cited per line. Note: all proof files listed below (`AppView.tsx`, `_handle-delete.ts`, `panels/*`, `app/EdgeContextMenu.tsx`, `edges/MidpointDragHandle.tsx`) have since been deleted from the tree in the R3F cutover; the proof is git-history-only, not checkable in-tree.
 
 | Feature | Proof of prior existence |
 |---|---|
@@ -57,20 +59,20 @@ Each item existed and worked in the old React Flow editor. The R3F cutover dropp
 | Edge delete | `_handle-delete.ts` `onEdgesDelete` |
 | Edge reconnect (drag endpoint) | `_on-reconnect.ts` `onReconnectImpl` |
 | Node palette / add-node UI | `panels/NodePalette.tsx` |
-| Sublabel inline edit | `inline-edit.ts` `beginEditSublabel` |
+| Sublabel inline edit | `inline-edit.ts` `beginEditSublabel` — **PARTIAL**: `beginEditSublabel` still exists in `src/webview/inline-edit.ts`; what's missing is a 3D gesture to trigger it (RunButton only calls `flushActiveInlineEdit`) |
 | PseudoPanel | `panels/PseudoPanel.tsx` (was 2D-only; never had a 3D form) |
 | Port drag (wire from handle) | RF native handle drag-to-connect |
 | Edge-kind context menu | `app/EdgeContextMenu.tsx` |
-| Edge midpoint drag | `edges/MidpointDragHandle.tsx` |
+| Edge midpoint drag | `edges/MidpointDragHandle.tsx` — **FULLY MISSING**: `midpointOffset` is schema-declared only (`src/schema/wire-defs.ts`); no adapter reads it, no setter exists, no drag UI wired |
 
-The following were started in the R3F move but left inert — the infrastructure landed without the completing wiring (marked **half-wired**):
+The following were started in the R3F move but left inert — the infrastructure landed without the completing wiring (marked **half-wired**). One item (undo/redo) has no infrastructure at all and is marked **not-started**:
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Undo/redo | **half-wired** — snapshot stack exists (`history.ts`); `pushSnapshot` called only on edge-create; node drags don't push | `tools/topology-vscode/src/webview/state/history.ts:27–29`; `tools/topology-vscode/src/webview/three/interaction-controls.ts` (edge-create path) |
+| Undo/redo | **NOT-STARTED** — no `history.ts`, no `pushSnapshot` anywhere; node drags and edge-create both only call `scheduleSave`/`scheduleViewSave`; undo/redo does not exist at all | — |
 | View-save on settle | **half-wired** — `markViewSynced` IS called inside `loadView`; not called after camera/drag, so positions lost on reload | `tools/topology-vscode/src/webview/three/store.ts`; `save.ts:48,78` |
 | Fit-view hotkey | **half-wired** — fit-on-load only (ThreeView orchestrator); no f/Shift-F for manual re-fit | `tools/topology-vscode/src/webview/three/ThreeView.tsx` |
-| Folds (collapsed subgraph) | **half-wired** — view-state module exists (`folds.ts`); `getFolds()` wired into `specToFlow`; no 3D mesh render | `tools/topology-vscode/src/webview/state/folds.ts`; `tools/topology-vscode/src/webview/three/store.ts` |
+| Folds (collapsed subgraph) | **half-wired** — view-state module exists (`state/folds-state.ts`); `getFolds()` wired into `specToFlow` via `buildFoldNodes` (renders as React Flow "note" placeholder nodes); no 3D mesh render | `tools/topology-vscode/src/webview/state/folds-state.ts`; `tools/topology-vscode/src/webview/three/store.ts` |
 | Z-coordinate (node depth) | **half-wired** — schema parses `z`; always 0 in practice; no UI to set depth | `tools/topology-vscode/src/schema/node-defs.ts`; `specToFlow` adapter |
 
 ---
@@ -91,7 +93,7 @@ Items promoted because real use justified building them. These are committed wor
 |---|---|---|---|
 | 1 | Bend points / waypoints on orthogonal edges | M-L | Generalizes the cutover-debt "Edge midpoint drag" (§3a) from a single midpoint to arbitrary waypoints; per-edge persisted state threaded through schema + adapters. |
 | 2 | Multi-node alignment guides | S | Generalizes existing single-node drag guides/snap to a multi-selection's collective bounding box. Gated behind multi-select restore (§3a cutover debt). |
-| 3 | Undo coalescing at gesture level | S | One undo entry per drag gesture (snapshot on pointer-up, not per pointer-move). Same work as finishing the §3a half-wired undo for node drags. |
+| 3 | Undo coalescing at gesture level | S | One undo entry per drag gesture (snapshot on pointer-up, not per pointer-move). This is a from-scratch undo/redo build (§3a undo is not-started, not half-wired). |
 
 ---
 
