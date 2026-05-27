@@ -116,14 +116,24 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const next = parseViewerState(viewText);
     setViewerState(next);
     markViewSynced(serializeViewerState(next));
+    const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
+    const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
     const lastSpec = get()._lastSpec;
     if (lastSpec) {
       const flow = specToFlow(lastSpec, getFolds(), next, next.lastSelectionIds ?? [], getDimmed());
-      const nodes = flow.nodes as RFNode<NodeData>[];
-      const edges = flow.edges as RFEdge<EdgeData>[];
-      set({ nodes, edges, loadEpoch: get().loadEpoch + 1 });
+      let nodes = flow.nodes as RFNode<NodeData>[];
+      let edges = flow.edges as RFEdge<EdgeData>[];
+      ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
+      set({
+        nodes,
+        edges,
+        loadEpoch: get().loadEpoch + 1,
+        directlyFadedNodes: restoredFadedNodes,
+        directlyFadedEdges: restoredFadedEdges,
+      });
       postLog("lifecycle", { phase: "store:view-load", nodes: nodes.length, edges: edges.length });
     } else {
+      set({ directlyFadedNodes: restoredFadedNodes, directlyFadedEdges: restoredFadedEdges });
       postLog("lifecycle", { phase: "store:view-load-noop" });
     }
   },
@@ -271,6 +281,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       nodes: nextNodes,
       edges: nextEdges,
     });
+
+    patchViewerState((v) => {
+      v.directlyFadedNodes = [...nextFadedNodes];
+      v.directlyFadedEdges = [...nextFadedEdges];
+    });
+    scheduleViewSave();
 
     // Emit the full faded-edge set to the host so Go can update its wire flags.
     vscode.postMessage({ type: "fade", edges: [...fadedEdges] });
