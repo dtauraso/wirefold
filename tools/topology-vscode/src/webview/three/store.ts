@@ -250,12 +250,37 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const nextFadedNodes = new Set<string>(directlyFadedNodes);
     const nextFadedEdges = new Set<string>(directlyFadedEdges);
 
+    // Toggle direction is driven by the element's VISIBLE faded state
+    // (data.faded), which covers both directly- and derived-faded. Keying
+    // off membership in the direct sets would let a derived-faded node be
+    // re-added to the direct set, locking the fixpoint into re-fading forever.
+    const incidentEdges = (nodeId: string) =>
+      edges.filter((e) => e.source === nodeId || e.target === nodeId);
+
     if (kind === "node") {
-      if (nextFadedNodes.has(id)) nextFadedNodes.delete(id);
-      else nextFadedNodes.add(id);
+      const node = nodes.find((n) => n.id === id);
+      const isFaded = !!node?.data.faded;
+      if (isFaded) {
+        // Unfade the region: the node plus all its incident edges.
+        nextFadedNodes.delete(id);
+        for (const e of incidentEdges(id)) nextFadedEdges.delete(e.id);
+      } else {
+        nextFadedNodes.add(id);
+      }
     } else {
-      if (nextFadedEdges.has(id)) nextFadedEdges.delete(id);
-      else nextFadedEdges.add(id);
+      const edge = edges.find((e) => e.id === id);
+      const isFaded = !!edge?.data?.faded;
+      if (isFaded) {
+        nextFadedEdges.delete(id);
+        // Also unfade any nodes this edge connects to, so an auto-faded
+        // endpoint doesn't immediately re-fade the edge via Rule 1.
+        if (edge) {
+          nextFadedNodes.delete(edge.source);
+          nextFadedNodes.delete(edge.target);
+        }
+      } else {
+        nextFadedEdges.add(id);
+      }
     }
 
     // Compute which edges were previously unfaded so we can clear stale pulses.
