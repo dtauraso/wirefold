@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-27 — dead-code sweep complete (0 orphans) + old fold feature removed, file-dive fold redesign queued; no task in flight)
+## State at handoff (2026-05-27 — fold proposal refined: show/hide expand-in-place + coupled visibility/execution; no task in flight)
 
 - **Active branch:** `main`. No task branch in flight. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
 
@@ -38,7 +38,7 @@ read this file first (no chat history needed) and proceed.
 3. **Pre-existing test failures (predate audit, unrelated):** TS — `parseSpec.test.ts` (2: legacy `timing.steps` not dropped; legend bad-kind not rejected). Go — `Trace.TestMarshalEventMatchesFixture`. (`fold.test.ts` is gone — the entire old fold test suite was deleted with the fold removal, commit `9d4091c5`.) (The two contract failures — topology-edge-handles, trace-event-fields — were FIXED this session.)
 4. **Junction-click ambiguity:** overlapping edge pick-tubes near a node junction can mis-pick; click mid-span.
 5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
-6. **Fold (file-dive containment) — new design, not implemented.** The old view-only collapse fold was fully removed. A redesigned fold (fold-as-attribute, self-contained child diagram, double-click dive, breadcrumb navigation) is captured as a proposal in `feature-audit.md §3b`. Candidate next work once the substrate question (spec vs. viewer-state layer for child diagrams) is resolved.
+6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
 
 ### Key files
 
