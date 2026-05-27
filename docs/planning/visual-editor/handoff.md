@@ -30,6 +30,16 @@ read this file first (no chat history needed) and proceed.
 - `952fe5c8` Edge selection now has a visual halo: `SingleEdgeTube` renders a concentric larger-radius tube (`haloGeo`, radius 5 vs main 1.5) in saturated orange-red `#ff5a00` at 0.6 opacity (normal blending, DoubleSide, depthWrite=false) when selected; chosen for contrast against the WHITE scene background and the blue edge (gold/additive washed out on white). Fixes the earlier bug where fading "the last edge" unfaded a sibling — root cause was wrong-edge selection with no edge highlight (computeFade was NOT at fault; it only grows the faded set). Caveat: near a node junction overlapping tubes can still mis-pick; click mid-span.
 - All fade behavior live-verified by the user: node + edge fade dims and gates pulses, survives window reload, fresh pulse on unfade, constant pulse speed.
 
+**5. Selection halos, clickable edge pick area, connect-mode redirect, fade toggle rework (this session).**
+- `006889a9` `toggleFade` reworked: toggle direction is now decided by the element's *visible* state. Derived-faded elements unfade instead of being promoted into the direct set — fixes the all-edges-faded lock. Node-unfade clears the node's region; edge-unfade clears the connected nodes.
+- `bda0b15f` ThreeView selection/connect UX:
+  - Edge selection halo (orange-red `#ff5a00` concentric tube) is now always-mounted at opacity 0, so the wide halo radius doubles as the clickable pick area (no longer relies on the thin tube for raycasting).
+  - Node selection halo: concentric orange-red sphere (`r*1.45`, opacity 0.5) shown when the node is selected.
+  - Clicking an edge no longer arms connect-mode (banner) — only nodes arm it.
+  - Connect-mode second click resolves inline: a different node creates the edge; an edge selects it and exits; empty space exits + deselects; the same node cancels — no separate exit click needed.
+
+**KNOWN ISSUE:** node-to-node wiring via connect-mode can fail when the two node KINDS are port-incompatible (`createEdge` auto-picks ports). Deferred — this is a port-compatibility gap, not a click-routing bug.
+
 **3. Undo/redo stack removed** (`1975d655`). Deleted `state/history.ts`; removed Cmd/Ctrl+Z keybind, `pushSnapshot` calls, and `restoreNodesEdges`. `mutateViewer` keeps mutating+persisting, no longer snapshots. Fade is the replacement for the reversible-navigation role; delete is the (terminal) cleanup pass.
 
 **4. Bash approval guard** (`tools/bash-approve-guard.sh`, committed on main, merged here). PreToolUse(Bash) hook in `.claude/settings.json`. Three tiers over the full command string: CATASTROPHIC → `deny` (hard block); DESTRUCTIVE/NETWORK → pass-through (no decision, native prompt handles them so "always allow" persists); otherwise → `allow` (silent). Static `permissions.allow` list removed (hook supersedes it). The `>` overwrite matcher was dropped; `git push/pull/fetch` auto-allow; `git push --force` and `git clone` still prompt. Edit the pattern arrays to tune. Hook is live (confirmed this session).
@@ -56,8 +66,8 @@ These span parser/schema/fold subsystems; none are fade- or undo-related.
 - `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + skip-at-top-of-`Send` gate.
 - `nodes/Wiring/stdin_reader.go` + `loader.go` (`WireRegistry.ForEach`) — `"fade"` message applies the edge set.
 - `tools/topology-vscode/src/webview/three/fade.ts` — pure `computeFade` fixpoint.
-- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` + `applyFade` helper (re-derives `data.faded` on every rebuild) + bridge emit.
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey + edge-tube `userData.edgeId` + `pickRequest` edge resolution.
+- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` (direction by visible state; node-unfade clears region, edge-unfade clears connected nodes) + `applyFade` helper (re-derives `data.faded` on every rebuild) + bridge emit.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey + edge-tube `userData.edgeId` + `pickRequest` edge resolution + edge/node selection halos (always-mounted edge halo = pick area) + connect-mode redirect.
 - `tools/topology-vscode/src/webview/state/viewer/types.ts` — `ViewerState` fade fields (`directlyFadedNodes`/`directlyFadedEdges`) + `parseViewerState` validation.
 - `tools/topology-vscode/src/extension/handle-message.ts` — relays `"fade"` to Go stdin.
 - `tools/topology-vscode/src/webview/types.ts` — `faded?: boolean` on NodeData/EdgeData.
