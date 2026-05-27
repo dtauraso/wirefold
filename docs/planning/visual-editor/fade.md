@@ -43,7 +43,7 @@ Go holds an ignore set mirroring the TS ignore lists.
 
 A wire that is `in-flight(v)` at the instant of fade already has a blocked `Send` on it (`paced_wire.go:39`, blocked on `myDone` after filling the slot). Neither `Done` (which delivers) nor any current path releases that `Send` *without* writing the slot. Fade requires a new `PacedWire` operation:
 
-- **`Drop`** (new): unblock the parked `Send` *without* delivery. Clears the slot, returns a sentinel (e.g. `ErrFaded`) up through the sender's poll loop, broadcasts on `cond`. The slot is left `empty`; no value is consumed downstream. The sender's loop then re-evaluates its precondition (now faded) and stays inert.
+- **`Drop`** (new): the channel's response to a TS fade mark. When TS marks a wire faded, the fade message crosses the bridge and Go calls `Drop` on that `PacedWire` — the capability to remove the in-flight signal lives on the channel itself. `Drop` unblocks the parked `Send` *without* delivery: clears the slot, returns a sentinel (e.g. `ErrFaded`) up through the sender's poll loop, broadcasts on `cond`. The slot is left `empty`; no value is consumed downstream. The sender's loop then re-evaluates its precondition (now faded) and stays inert. The dropped value is gone — unfade does not resurrect it; the node restarts fresh from its current state.
 
 This is the only substrate addition the feature needs.
 
@@ -65,6 +65,5 @@ Faded state is **view-state**: it serializes with the view and survives reload. 
 ## Open questions (decide before implementation)
 
 1. **Fade message shape:** send the full faded set on every change (simplest, fewest states) vs. per-toggle deltas. Leaning full-set.
-2. **`Drop` sentinel & sender contract:** exact error value and how each per-kind poll loop distinguishes `Drop`-release from `ctx`-cancel.
-3. **Unfade semantics:** on unfade a node resumes polling and fires normally if its precondition holds; dropped in-flight values are gone (not restored). Confirm this "clean restart" is the intended behavior.
-4. **Edge view field name:** mirror `dimmed`, or introduce `faded` and derive `dimmed` from it.
+2. **Unfade semantics:** on unfade a node resumes polling and fires normally if its precondition holds; dropped in-flight values are gone (not restored). Confirm this "clean restart" is the intended behavior.
+3. **Edge view field name:** mirror `dimmed`, or introduce `faded` and derive `dimmed` from it.
