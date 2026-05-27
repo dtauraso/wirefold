@@ -30,31 +30,24 @@ Propagation rules:
 
 - Faded edges render muted (reuse the existing `dimmed` view-state precedent on `NodeData`, `types.ts:61`; add the parallel field for edges on `EdgeData`).
 - No pulse is drawn for a faded edge.
-- A pulse already **in-flight** on a wire at the instant it is faded is **removed**: call `clearPulse(edgeId)` (`pulse-state.ts:51`). The pulse disappears without completing.
+- A pulse already **in-flight** on a wire when it is faded is **left to finish normally** — it completes on the usual delivery path. Fade does not interrupt in-flight pulses; it only prevents new ones from starting.
 
 ## Go side (firing/delivery)
 
 Go holds an ignore set mirroring the TS ignore lists.
 
-**Centralized (decided).** The fade gate and `ErrFaded` handling live in one shared place in the `Wiring` layer — wrapping the `Send` boundary and the poll precondition — not copied into each per-kind node package. Per-kind node loops (`input`, `readgate`, `inhibitrightgate`, …) stay untouched; they inherit the fade behavior. This avoids the stuck-node risk of missing a kind and keeps `Drop`/gate logic in a single auditable location.
+**Centralized (decided).** The fade gate lives in one shared place in the `Wiring` layer — wrapping the poll precondition and the `Send` boundary — not copied into each per-kind node package. Per-kind node loops (`input`, `readgate`, `inhibitrightgate`, …) stay untouched; they inherit the fade behavior. This avoids the stuck-node risk of missing a kind and keeps the gate logic in a single auditable location.
 
 - A **faded node**'s poll loop treats its precondition as unmet and returns immediately — same shape as the existing context/precondition gate (e.g. `readgate/node.go:40`, `inhibitrightgate/node.go:42`). It never fires, so it never `Send`s. Because no `Send` is issued on a faded wire, no `NotifyDelivered` is awaited, so no backpressure deadlock can form (the deadlock that a render-only fade would cause).
 - A **faded edge**: the source does not `Send` across it; the destination does not treat it as a satisfied input.
 
-### The one new substrate primitive: dropping an in-flight value
-
-A wire that is `in-flight(v)` at the instant of fade already has a blocked `Send` on it (`paced_wire.go:39`, blocked on `myDone` after filling the slot). Neither `Done` (which delivers) nor any current path releases that `Send` *without* writing the slot. Fade requires a new `PacedWire` operation:
-
-- **`Drop`** (new): the channel's response to a TS fade mark. When TS marks a wire faded, the fade message crosses the bridge and Go calls `Drop` on that `PacedWire` — the capability to remove the in-flight signal lives on the channel itself. `Drop` unblocks the parked `Send` *without* delivery: clears the slot, returns a sentinel (e.g. `ErrFaded`) up through the sender's poll loop, broadcasts on `cond`. The slot is left `empty`; no value is consumed downstream. The sender's loop then re-evaluates its precondition (now faded) and stays inert. The dropped value is gone — unfade does not resurrect it; the node restarts fresh from its current state.
-
-This is the only substrate addition the feature needs.
 
 ## Bridge
 
 Fade is a **live control signal**, analogous to the existing global play/pause gate — not a spec/topology change. It crosses webview → host → Go stdin, following the `"delivered"` precedent (`stdin_reader.go:52`).
 
 - New webview→host message kind: `"fade"` carrying the current faded set (node ids + edge ids). Add to `WebviewToHostMsg` / `WEBVIEW_TO_HOST_TYPES` (`messages.ts:35,95`) and to `stdin_reader.go`'s accepted types; keep `tools/check-message-kind-parity.sh` green.
-- Go applies the fade set to the `WireRegistry` / per-node ignore sets live and issues `Drop` on any wire that is currently in-flight and newly faded.
+- Go applies the fade set to the `WireRegistry` / per-node ignore sets live. No in-flight `Send` is interrupted — faded nodes simply stop initiating new sends.
 
 ## Persistence
 
@@ -67,5 +60,4 @@ Faded state is **view-state**: it serializes with the view and survives reload. 
 ## Open questions (decide before implementation)
 
 1. **Fade message shape:** send the full faded set on every change (simplest, fewest states) vs. per-toggle deltas. Leaning full-set.
-2. **Unfade semantics:** on unfade a node resumes polling and fires normally if its precondition holds; dropped in-flight values are gone (not restored). Confirm this "clean restart" is the intended behavior.
-3. **Edge view field name:** mirror `dimmed`, or introduce `faded` and derive `dimmed` from it.
+2. **Edge view field name:** mirror `dimmed`, or introduce `faded` and derive `dimmed` from it.
