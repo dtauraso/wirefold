@@ -1,13 +1,13 @@
 // Parser helpers for parseViewerState (viewerState.ts owns types + public API).
 
 import type { StateValue } from "../../../schema";
+import { isObj } from "../../../schema/parse-primitives";
 import type {
   Camera, EdgeView, Fold, LegacyCameraBox,
   NodeView, SavedView,
 } from "./types";
 
-export const isObj = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === "object" && !Array.isArray(v);
+export { isObj };
 
 export const isNum = (v: unknown): v is number =>
   typeof v === "number" && Number.isFinite(v);

@@ -4,9 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/dtauraso/wirefold/nodes/readgate"
 )
 
 // loadReadGateNodeGo reads nodes/readgate/node.go relative to repo root.
@@ -227,6 +230,19 @@ func TestToReadGate_AndGate_UnconditionalDone(t *testing.T) {
 	// Must have unconditional back-to-back Done calls.
 	if !strings.Contains(srcStr, "g.FromInput.Done()\n\t\t\tg.FromChainInhibitor.Done()") {
 		t.Errorf("and-gate source must call Done() on both inputs unconditionally back-to-back")
+	}
+}
+
+// TestReadGate_PortConstantsMatchStructFields guards that each port-name constant
+// in the pseudo package equals an actual exported field name on readgate.Node.
+// If a field is renamed in node.go without updating the const block here, this
+// test fails at `go test` rather than silently producing broken pseudo saves.
+func TestReadGate_PortConstantsMatchStructFields(t *testing.T) {
+	nodeType := reflect.TypeFor[readgate.Node]()
+	for _, portConst := range []string{portFromInput, portFromChainInhibitor, portToChainInhibitor} {
+		if _, ok := nodeType.FieldByName(portConst); !ok {
+			t.Errorf("port-name constant %q has no matching exported field on readgate.Node", portConst)
+		}
 	}
 }
 

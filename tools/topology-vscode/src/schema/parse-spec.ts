@@ -8,7 +8,7 @@ import { arr, obj } from "./parse-primitives";
 import { parseEdge, parseNode } from "./parse-nodes-edges";
 import { validatePorts } from "./parse-meta";
 import { TOPOLOGY_META_FIELDS } from "./meta-field-defs";
-import { REQUIRED_INPUTS } from "../webview/schema/node-defs";
+import { REQUIRED_INPUTS } from "./node-defs";
 
 export function parseSpec(input: unknown, view?: { edges?: Record<string, unknown> }): Spec {
   const o = obj(input, "spec");
@@ -40,6 +40,14 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
   return spec;
 }
 
+// DIAGNOSTIC / RENDER-ONLY — must NEVER gate substrate execution.
+// This fixpoint propagates "dead node" status for editor display (red nodes,
+// parse-spec diagnostics). It deliberately mirrors the shape of substrate
+// firing-rule logic but carries none of it — the Go substrate does NOT reject
+// graphs with missing required inputs (see commit 0e8d843 and memory:
+// feedback_enforce_required_inputs). REQUIRED_INPUTS is generated from Go AST
+// so the port list cannot drift; only this editor-side propagation can.
+//
 // Returns a map of nodeId → reason string for every node that is missing a
 // required inbound edge or whose required inputs are fed only by dead nodes.
 // Uses a fixpoint: newly-dead nodes can kill downstream nodes transitively.
@@ -64,10 +72,8 @@ export function requiredInputDiagnostics(spec: Spec): Map<string, string> {
     for (const node of requiredNodes) {
       if (dead.has(node.id)) continue;
       const required = REQUIRED_INPUTS[node.type];
-      const seeds = node.edgeSeeds as Record<string, unknown> | undefined;
       let isDead = false;
       for (const port of required) {
-        if (seeds?.[port] !== undefined) continue; // satisfied by seed
         const sources = feeders.get(`${node.id}:${port}`) ?? [];
         const hasLiveFeeder = sources.some((s) => !dead.has(s));
         if (sources.length === 0 || !hasLiveFeeder) { isDead = true; break; }
@@ -81,10 +87,8 @@ export function requiredInputDiagnostics(spec: Spec): Map<string, string> {
   for (const node of requiredNodes) {
     if (!dead.has(node.id)) continue;
     const required = REQUIRED_INPUTS[node.type];
-    const seeds = node.edgeSeeds as Record<string, unknown> | undefined;
     const reasons: string[] = [];
     for (const port of required) {
-      if (seeds?.[port] !== undefined) continue;
       const sources = feeders.get(`${node.id}:${port}`) ?? [];
       if (sources.length === 0) {
         reasons.push(`missing required input "${port}"`);

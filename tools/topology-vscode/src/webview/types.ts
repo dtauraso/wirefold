@@ -5,7 +5,7 @@
 import type { Port, StateValue } from "../schema/types";
 import type { NodeSpec } from "../schema/types-graph";
 import type { WireProps } from "../schema/wire-defs";
-import { ANIMATION_FIELDS } from "./rf/animation-fields";
+import { ANIMATION_FIELDS } from "./three/animation-fields";
 
 // ---------------------------------------------------------------------------
 // Own Node / Edge type shapes (Phase 3 rf-retirement).
@@ -49,7 +49,7 @@ export interface NodeData {
   outputs: Port[];
   /** Spec-side Go field seeds (data.state in JSON). Distinct from viewer state below. */
   initState?: Record<string, number>;
-  edgeSeeds?: Record<string, number>;
+
 
   // --- Viewer-only fields (from NodeView / store) ---
   x?: number;

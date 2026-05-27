@@ -9,6 +9,11 @@ export type RunStatus =
   | { state: "error"; message: string }
   | { state: "cancelled" };
 
+// Curated pseudo-editable subset of registered node kinds. InhibitRightGate is
+// intentionally excluded (not pseudo-editable). PseudoKind (below) is derived
+// from these keys, and handle-message.ts's pseudoTable is typed
+// Record<PseudoKind, ...> — so adding a kind here without a pseudoTable entry
+// is a compile error.
 export const PSEUDO_KIND_PREFIX = { Input: "pseudo", ReadGate: "readgate", ChainInhibitor: "chaininhibitor" } as const;
 export type PseudoKind = keyof typeof PSEUDO_KIND_PREFIX;
 export type PseudoPrefix = (typeof PSEUDO_KIND_PREFIX)[PseudoKind];

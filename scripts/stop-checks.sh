@@ -55,7 +55,7 @@ if [ -n "$ts_changed" ]; then
   fi
 fi
 
-for chk in check-substrate-vocabulary check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-slot-phase-boundary; do
+for chk in check-substrate-vocabulary check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-slot-phase-boundary check-generated; do
   if ! chk_out=$(bash "tools/$chk.sh" 2>&1); then
     out+="$chk failed:\n$chk_out\n\n"
     fail=1

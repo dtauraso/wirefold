@@ -1,3 +1,8 @@
+// RENDER-MASK FIXPOINT ONLY — must never reference substrate state (slot phase,
+// backpressure, firing rules, or slot contents). Its fixpoint shape resembles
+// substrate propagation logic but it carries none: it determines which nodes
+// and edges are visually dimmed, nothing more. Keep this file substrate-free.
+//
 // Pure fixpoint computation for the fade mask.
 // No imports from store or React — easy to unit-test in isolation.
 

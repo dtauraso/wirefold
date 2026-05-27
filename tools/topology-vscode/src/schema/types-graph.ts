@@ -34,9 +34,7 @@ export type Node = {
   outputs?: Port[];
   // Struct field values injected before the first tick (wire:"data.state").
   state?: Record<string, number>;
-  // Channel pre-seeds: pre-sent into named input channels before goroutines start.
-  // Keys must match declared input port names.
-  edgeSeeds?: Record<string, number>;
+
 };
 
 export type Edge = WireProps & {

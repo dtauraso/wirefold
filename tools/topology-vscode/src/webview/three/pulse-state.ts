@@ -8,7 +8,6 @@
 // lets remounted components resume animation at the correct t rather
 // than restarting from 0.
 
-import { createContext, useContext } from "react";
 import { getPauseAdjustedNow } from "../state/run-status";
 
 export interface PulseData {
@@ -60,8 +59,3 @@ export function getPulseMap(): PulseMap {
   return _current;
 }
 
-export const PulseCtx = createContext<PulseMap>(new Map());
-
-export function usePulseCtx(): PulseMap {
-  return useContext(PulseCtx);
-}
