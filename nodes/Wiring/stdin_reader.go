@@ -1,7 +1,8 @@
-// stdin_reader.go — reads JSON-line "delivered" messages from stdin and
-// unblocks the corresponding PacedWire.
+// stdin_reader.go — reads JSON-line messages from stdin and dispatches them.
 //
-// Message shape: {"type":"delivered","edge":"<edge-label>"}
+// Supported message shapes:
+//   {"type":"delivered","edge":"<edge-label>"}
+//   {"type":"fade","edges":["<edge-id>", ...]}
 //
 // One goroutine; cancellable via context. On EOF or context cancel, exits
 // cleanly. Unknown message types are silently ignored (forward-compat).
@@ -15,12 +16,13 @@ import (
 	"io"
 )
 
-type deliveredMsg struct {
-	Type string `json:"type"`
-	Edge string `json:"edge"`
+type stdinMsg struct {
+	Type  string   `json:"type"`
+	Edge  string   `json:"edge"`
+	Edges []string `json:"edges"`
 }
 
-// RunStdinReader reads JSON lines from r, dispatching "delivered" messages
+// RunStdinReader reads JSON lines from r, dispatching messages
 // to the WireRegistry. Returns when ctx is done or r reaches EOF.
 // Call in a goroutine alongside the node run loop.
 func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry) {
@@ -45,18 +47,31 @@ func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry) {
 			if !ok {
 				return
 			}
-			var msg deliveredMsg
+			var msg stdinMsg
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
 				continue
 			}
-			if msg.Type != "delivered" || msg.Edge == "" {
-				continue
+			switch msg.Type {
+			case "delivered":
+				if msg.Edge == "" {
+					continue
+				}
+				pw, found := reg[msg.Edge]
+				if !found {
+					continue
+				}
+				pw.NotifyDelivered()
+			case "fade":
+				// Build a set of faded edge ids for O(1) lookup.
+				faded := make(map[string]bool, len(msg.Edges))
+				for _, id := range msg.Edges {
+					faded[id] = true
+				}
+				// Apply wholesale: set every wire's faded flag.
+				reg.ForEach(func(id string, pw *PacedWire) {
+					pw.SetFaded(faded[id])
+				})
 			}
-			pw, found := reg[msg.Edge]
-			if !found {
-				continue
-			}
-			pw.NotifyDelivered()
 		}
 	}
 }

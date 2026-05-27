@@ -67,6 +67,13 @@ type topoSpec struct {
 // sharing a destination port map to the same *PacedWire.
 type WireRegistry map[string]*PacedWire
 
+// ForEach calls fn for every (edgeID, wire) pair in the registry.
+func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
+	for id, pw := range reg {
+		fn(id, pw)
+	}
+}
+
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
 // WireRegistry keyed by edge label.
 func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, WireRegistry, error) {
