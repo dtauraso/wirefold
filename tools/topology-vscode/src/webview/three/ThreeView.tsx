@@ -232,6 +232,16 @@ function GraphNode({
           opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
+      <mesh>
+        <sphereGeometry args={[r * 1.45, 16, 16]} />
+        <meshBasicMaterial
+          color="#ff5a00"
+          transparent
+          opacity={selected ? 0.5 : 0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
     </group>
   );
 }
@@ -334,19 +344,18 @@ function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: string;
           opacity={faded ? 0.25 : 1}
         />
       </mesh>
-      {/* Selection halo: translucent gold glow surrounding the core tube. Kept visible
-          even when faded so a selected faded edge stays identifiable. */}
-      {selected && (
-        <mesh geometry={haloGeo}>
-          <meshBasicMaterial
-            color="#ff5a00"
-            transparent
-            opacity={0.6}
-            side={THREE.DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
-      )}
+      {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
+          can hit anywhere within the halo radius; painted only when selected (opacity 0
+          otherwise — an opacity-0 visible mesh is still raycast-hittable). */}
+      <mesh geometry={haloGeo} userData={{ edgeId }}>
+        <meshBasicMaterial
+          color="#ff5a00"
+          transparent
+          opacity={selected ? 0.6 : 0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
       {/* Pulse bead: stronger highlight traveling source → target */}
       {!faded && <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />}
     </>
@@ -1268,23 +1277,29 @@ export function ThreeView() {
   // Connect-mode click handler: first click picks source, second click creates edge.
   // Clicking empty space (null) cancels.
   const onConnectClick = useCallback((hitId: string | null) => {
-    // Read through ref for live value (called from onPointerUp which uses the ref).
     const pending = connectPendingIdRef.current;
     if (pending === null) {
-      // Start connect mode only if a node was clicked
-      if (hitId !== null) setConnectPendingId(hitId);
+      // Arm connect mode only if a node was clicked.
+      if (hitId !== null && nodesRef.current.some((n) => n.id === hitId)) {
+        setConnectPendingId(hitId);
+      }
     } else {
-      // We have a pending source
-      if (hitId === null || hitId === pending) {
-        // Cancel: empty click or re-click same node
+      // Second click while connect mode is armed.
+      if (hitId === null) {
         setConnectPendingId(null);
-      } else {
-        // Create the edge — auto-pick first output/input ports
+        setSelectedId(null);
+      } else if (hitId === pending) {
+        setConnectPendingId(null);
+      } else if (nodesRef.current.some((n) => n.id === hitId)) {
         storeCreateEdge(pending, null, hitId, null);
         setConnectPendingId(null);
+      } else {
+        // Landed on an edge: select it, exit connect mode, no edge.
+        setConnectPendingId(null);
+        setSelectedId(hitId);
       }
     }
-  }, [storeCreateEdge]); // storeCreateEdge is stable (zustand action)
+  }, [storeCreateEdge, nodesRef, setSelectedId]);
 
   // Escape key cancels connect mode
   useEffect(() => {
