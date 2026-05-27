@@ -12,33 +12,33 @@ The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (
 
 | Feature | Evidence (file:line) |
 |---|---|
-| Three.js/R3F 3D canvas replacing React Flow | `tools/topology-vscode/src/webview/three/ThreeView.tsx` |
-| Arcball rotation (pointer drag) | `ThreeView.tsx:~400` (pointerdown/move handlers) |
-| Scroll dolly (zoom) | `ThreeView.tsx:~460` (wheel handler) |
-| Dwell-pan via PanPad | `tools/topology-vscode/src/webview/three/PanPad.tsx` |
-| Roll slider | `tools/topology-vscode/src/webview/three/RollSlider.tsx` |
-| Raycast node pick / single select | `ThreeView.tsx:~600` (raycast + setSelectedNodeId) |
-| Two-click edge creation | `ThreeView.tsx:~820–840` (pendingEdgeSource state + pushSnapshot call) |
+| Three.js/R3F 3D canvas replacing React Flow | `tools/topology-vscode/src/webview/three/ThreeView.tsx` (now ~264-line orchestrator; geometry in `geometry-helpers.ts`, render in `scene-content.tsx`) |
+| Arcball rotation (pointer drag) | `tools/topology-vscode/src/webview/three/interaction-controls.ts` (pointer state machine extracted from ThreeView) |
+| Scroll dolly (zoom) | `tools/topology-vscode/src/webview/three/interaction-controls.ts` (wheel handler) |
+| Dwell-pan via PanPad | `tools/topology-vscode/src/webview/three/camera-ui.tsx` (PanPad extracted from ThreeView) |
+| Roll slider | `tools/topology-vscode/src/webview/three/camera-ui.tsx` (RollSlider extracted from ThreeView) |
+| Raycast node pick / single select | `tools/topology-vscode/src/webview/three/interaction-controls.ts` (raycast + setSelectedNodeId) |
+| Two-click edge creation | `tools/topology-vscode/src/webview/three/interaction-controls.ts`; edge built in `tools/topology-vscode/src/webview/three/edge-creation.ts` (`buildEdge`) |
 | Bezier tube edges (`SingleEdgeTube`) | `tools/topology-vscode/src/webview/three/SingleEdgeTube.tsx` |
 | Pulse bead animation | `tools/topology-vscode/src/webview/three/PulseBead.tsx` |
-| Pulse delivered handshake (Go↔TS pacing) | `tools/topology-vscode/src/webview/rf/pump.ts`; `handoff.md` Phase 0 resolved |
+| Pulse delivered handshake (Go↔TS pacing) | `tools/topology-vscode/src/webview/three/pump.ts`; `handoff.md` Phase 0 resolved |
 | Validation flag colors (missing required input) | `tools/topology-vscode/src/webview/three/ThreeNodeMesh.tsx`; `parseSpec` diagnostics |
-| Billboarded node labels | `ThreeView.tsx` (Billboard + Text from @react-three/drei) |
-| Occlusion badge | `tools/topology-vscode/src/webview/three/OcclusionBadge.tsx` (or inline in ThreeView) |
-| Nearest-N LOD | `ThreeView.tsx` (distance-sorted visibility culling) |
-| Camera fit-on-load / re-fit on loadEpoch | `ThreeView.tsx:~1240` (fitCamera effect on loadEpoch) |
+| Billboarded node labels | `tools/topology-vscode/src/webview/three/scene-content.tsx` (Billboard + Text from @react-three/drei) |
+| Occlusion badge | `tools/topology-vscode/src/webview/three/OcclusionBadge.tsx` (or inline in scene-content.tsx) |
+| Nearest-N LOD | `tools/topology-vscode/src/webview/three/scene-content.tsx` (distance-sorted visibility culling) |
+| Camera fit-on-load / re-fit on loadEpoch | `tools/topology-vscode/src/webview/three/ThreeView.tsx` (fitCamera effect on loadEpoch; ThreeView orchestrator) |
 | Run / pause / stop controls | `tools/topology-vscode/src/webview/three/ControlBar.tsx` |
 | Run-status pause accounting | `tools/topology-vscode/src/webview/three/store.ts` (runStatus state) |
 | Debounced spec save | `tools/topology-vscode/src/webview/save.ts` (scheduleSave) |
 | Load spec / load view from VS Code | `store.ts:loadSpec`, `store.ts:loadView` |
 | Fold state module (RF-free) | `tools/topology-vscode/src/webview/state/folds.ts` |
-| Node dimming | `tools/topology-vscode/src/webview/state/dimmed.ts` |
+| Node dimming | `tools/topology-vscode/src/webview/state/dimmed.ts` (note: `DimmedCtx`/`useDimmedCtx`/`registerDimmedSetter` exports removed; core dimming logic retained) |
 | Spec↔flow adapters | `tools/topology-vscode/src/webview/three/adapters/specToFlow.ts`, `flowToSpec.ts` |
-| Edge seeds (ring-topology deadlock break) | Go loader `nodes/Wiring/loader.go`; `topology.json` `edgeSeeds` field |
+| Ring-topology deadlock break | Bootstrap `Input` node (`data.init=[seed]`, `data.repeat=false`) wired by a real edge into the receiving port; single-fires seed at tick-0. `edgeSeeds` TS pipeline removed entirely. |
 | Paced wire substrate | `nodes/Wiring/paced_wire.go` |
 | Trace/probe logging (4 JSONL files) | `.probe/`; `tools/topology-vscode/src/webview/probe.ts` |
 | Error boundary | `tools/topology-vscode/src/webview/three/ErrorBoundary.tsx` (or ThreeView wrapper) |
-| Node kinds: ChainInhibitor, InhibitRightGate, Input, ReadGate (TS + Go) | `tools/topology-vscode/src/webview/schema/node-defs.ts` (NODE_DEFS keys); `nodes/chaininhibitor/`, `nodes/inhibitrightgate/`, `nodes/input/`, `nodes/readgate/` |
+| Node kinds: ChainInhibitor, InhibitRightGate, Input, ReadGate (TS + Go) | `tools/topology-vscode/src/schema/node-defs.ts` (NODE_DEFS keys; moved from `src/webview/schema/`); `nodes/chaininhibitor/`, `nodes/inhibitrightgate/`, `nodes/input/`, `nodes/readgate/` |
 
 ---
 
@@ -67,11 +67,11 @@ The following were started in the R3F move but left inert — the infrastructure
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Undo/redo | **half-wired** — snapshot stack exists (`history.ts`); `pushSnapshot` called only on edge-create; node drags don't push | `tools/topology-vscode/src/webview/state/history.ts:27–29`; `ThreeView.tsx:832,1267–1271` |
-| View-save on settle | **half-wired** — `markViewSynced` IS called in `store.ts:76` inside `loadView`; not called after camera/drag, so positions lost on reload | `tools/topology-vscode/src/webview/three/store.ts:76`; `save.ts:48,78` |
-| Fit-view hotkey | **half-wired** — fit-on-load only (`ThreeView.tsx:~1240`); no f/Shift-F for manual re-fit | `ThreeView.tsx:~1240` |
-| Folds (collapsed subgraph) | **half-wired** — view-state module exists (`folds.ts`); `getFolds()` wired into `specToFlow`; no 3D mesh render | `tools/topology-vscode/src/webview/state/folds.ts`; `store.ts:62` |
-| Z-coordinate (node depth) | **half-wired** — schema parses `z`; always 0 in practice; no UI to set depth | `tools/topology-vscode/src/webview/schema/node-defs.ts`; `specToFlow` adapter |
+| Undo/redo | **half-wired** — snapshot stack exists (`history.ts`); `pushSnapshot` called only on edge-create; node drags don't push | `tools/topology-vscode/src/webview/state/history.ts:27–29`; `tools/topology-vscode/src/webview/three/interaction-controls.ts` (edge-create path) |
+| View-save on settle | **half-wired** — `markViewSynced` IS called inside `loadView`; not called after camera/drag, so positions lost on reload | `tools/topology-vscode/src/webview/three/store.ts`; `save.ts:48,78` |
+| Fit-view hotkey | **half-wired** — fit-on-load only (ThreeView orchestrator); no f/Shift-F for manual re-fit | `tools/topology-vscode/src/webview/three/ThreeView.tsx` |
+| Folds (collapsed subgraph) | **half-wired** — view-state module exists (`folds.ts`); `getFolds()` wired into `specToFlow`; no 3D mesh render | `tools/topology-vscode/src/webview/state/folds.ts`; `tools/topology-vscode/src/webview/three/store.ts` |
+| Z-coordinate (node depth) | **half-wired** — schema parses `z`; always 0 in practice; no UI to set depth | `tools/topology-vscode/src/schema/node-defs.ts`; `specToFlow` adapter |
 
 ---
 
@@ -101,9 +101,9 @@ Cross-referenced from `docs/planning/visual-editor/audit-correctness.md` (H1/H2/
 
 | ID | Severity | Claim | Verification result |
 |---|---|---|---|
-| H1 | HIGH | `markViewSynced` never called → view-saves permanently dropped | **Partially stale.** `markViewSynced` is called in `store.ts:76` inside `loadView`. However it is NOT called after user-driven camera moves/drags, so post-interaction view state still does not persist. The audit-correctness.md claim holds in spirit (interactive view-saves are dropped) but the "never called" wording is no longer accurate. |
-| H2 | HIGH | `setSpecMeta` never called → top-level spec metadata stripped on save | **Fixed.** `setSpecMeta(spec)` is called in `store.ts:66` inside `loadSpec`. The audit-correctness.md entry is stale; this path is now wired. |
-| H3 | HIGH | `loadView` before `loadSpec` silently drops the view (order-dependent) | **Unverified change.** `store.ts:loadView` now calls `specToFlow` only when `_lastSpec` is non-null, logging `store:view-load-noop` otherwise (`store.ts:84`). The ordering dependency still exists; arriving view-load before spec-load produces no nodes. |
+| H1 | HIGH | `markViewSynced` never called → view-saves permanently dropped | **Partially stale.** `markViewSynced` is called inside `loadView` in `store.ts`. However it is NOT called after user-driven camera moves/drags, so post-interaction view state still does not persist. The audit-correctness.md claim holds in spirit (interactive view-saves are dropped) but the "never called" wording is no longer accurate. |
+| H2 | HIGH | `setSpecMeta` never called → top-level spec metadata stripped on save | **Fixed.** `setSpecMeta(spec)` is called inside `loadSpec` in `store.ts`. The audit-correctness.md entry is stale; this path is now wired. |
+| H3 | HIGH | `loadView` before `loadSpec` silently drops the view (order-dependent) | **Unverified change.** `store.ts:loadView` now calls `specToFlow` only when `_lastSpec` is non-null, logging `store:view-load-noop` otherwise. The ordering dependency still exists; arriving view-load before spec-load produces no nodes. |
 
 See `audit-correctness.md` for full reproduction steps and original severity ratings.
 
@@ -117,5 +117,5 @@ These features were built but do not appear in `3d-editor.md`, `rf-to-r3f-cutove
 |---|---|
 | PanPad dwell-pan (hold-to-pan overlay) | `tools/topology-vscode/src/webview/three/PanPad.tsx` |
 | Roll slider (camera roll axis control) | `tools/topology-vscode/src/webview/three/RollSlider.tsx` |
-| Occlusion badge (node hidden-behind indicator) | Referenced in ThreeView; no plan doc entry |
-| Nearest-N LOD (distance-based mesh culling) | ThreeView; not in cutover checklist |
+| Occlusion badge (node hidden-behind indicator) | Referenced in scene-content.tsx; no plan doc entry |
+| Nearest-N LOD (distance-based mesh culling) | `tools/topology-vscode/src/webview/three/scene-content.tsx`; not in cutover checklist |
