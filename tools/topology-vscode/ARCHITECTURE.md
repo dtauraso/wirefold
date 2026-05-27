@@ -42,11 +42,9 @@ Each `webview/<feature>.ts` owns one UI affordance. Most expose
 |---|---|
 | `main.ts` | Entry point, message handler, top-level orchestration |
 | `state.ts` | Mutable shared state (`spec`, `view`, `viewerState`, SVG_NS) |
-| `viewerState.ts` | Types for sidecar (`Camera`, `SavedView`, `Fold`, `Bookmark`) |
+| `viewerState.ts` | Types for sidecar (`Camera`, `Fold`, `NodeView`, `EdgeView`, `ViewerState`) |
 | `save.ts` | `vscode` API handle + sync detection + post helpers |
 | `view.ts` | Camera (pan/zoom) → `viewBox` |
-| `views.ts` | Saved-views panel (top-right) |
-| `timeline.ts` | Bottom timeline (play/pause/scrub + bookmark markers) |
 | `playback.ts` | Master playback clock animations register against |
 | `rename.ts` | Double-click node-id in-place edit |
 | `run.ts` | "▶ run" button + status pill |
@@ -59,7 +57,7 @@ Each `webview/<feature>.ts` owns one UI affordance. Most expose
 ## Spec vs viewer state (load-bearing distinction)
 
 - **`topology.json`** — read directly by the runtime loader at startup; every field maps to live wiring. Edited through `save` messages. Owned by `extension.ts` + the document.
-- **`topology.view.json`** — sidecar; camera/views/folds/bookmarks. Edited
+- **`topology.view.json`** — sidecar; camera/folds/node-views/edge-views. Edited
   through `view-save` messages. Owned by `sidecar.ts` on the extension
   side, `viewerState.ts` types on the webview side.
 
