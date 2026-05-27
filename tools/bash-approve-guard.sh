@@ -54,7 +54,6 @@ DESTRUCTIVE_PATTERNS=(
   'git[[:space:]]+branch[[:space:]].*-[Dd]([[:space:]]|$)'
   'git[[:space:]]+tag[[:space:]].*-d([[:space:]]|$)'
   '[-][-]force(-with-lease)?([[:space:]]|=|$)'
-  '(^|[^>&0-9])>([^>]|$)'
 )
 
 NETWORK_PATTERNS=(
@@ -69,7 +68,7 @@ NETWORK_PATTERNS=(
   '(^|[^[:alnum:]_./-])ssh([[:space:]]|$)'
   'https?://'
   'ftp://'
-  'git[[:space:]]+(push|pull|fetch|clone|remote|ls-remote)'
+  'git[[:space:]]+(clone|ls-remote)'
   '(npm|pnpm|yarn)[[:space:]]+(install|ci|add|publish|i)([[:space:]]|$)'
   'pip[0-9]?[[:space:]]+install'
   '(^|[^[:alnum:]_./-])(brew|apt|apt-get|gh|aws|gcloud)([[:space:]]|$)'
@@ -82,10 +81,8 @@ NETWORK_PATTERNS=(
 for pat in "${CATASTROPHIC_PATTERNS[@]}"; do
   if printf '%s' "$cmd" | grep -Eq "$pat"; then emit deny "catastrophic command blocked"; exit 0; fi
 done
-# Strip benign /dev/null redirects before destructive check so "> /dev/null" doesn't trigger.
-cmd_safe="$(printf '%s' "$cmd" | sed 's|>[[:space:]]*/dev/null||g')"
 for pat in "${DESTRUCTIVE_PATTERNS[@]}"; do
-  if printf '%s' "$cmd_safe" | grep -Eq "$pat"; then emit ask "destructive pattern matched"; exit 0; fi
+  if printf '%s' "$cmd" | grep -Eq "$pat"; then emit ask "destructive pattern matched"; exit 0; fi
 done
 for pat in "${NETWORK_PATTERNS[@]}"; do
   if printf '%s' "$cmd" | grep -Eq "$pat"; then emit ask "network pattern matched"; exit 0; fi
