@@ -300,13 +300,17 @@ export function CameraRefBridge({
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera;
     cameraRef.current = cam;
-    // Restore saved 3D camera state on first mount.
+    // Restore saved 3D camera state when available.
+    // NOTE: initialCamera3d is a dependency so that if load() populates
+    // viewerState.camera3d after the first mount (which happens asynchronously
+    // on reload), the effect re-runs and the saved orientation is applied.
     if (initialCamera3d) {
       cam.position.set(...initialCamera3d.position);
       cam.quaternion.set(...initialCamera3d.quaternion);
+      cam.updateMatrixWorld(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camera, cameraRef]);
+  }, [camera, cameraRef, initialCamera3d]);
   return null;
 }
 
