@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Spec } from "../src/schema";
-import { specToFlow } from "../src/webview/rf/adapter";
+import { specToFlow } from "../src/webview/state/adapter/spec-to-flow";
 import { createFold, toggleFold } from "../src/webview/state/ops/fold";
 import type { ViewerState } from "../src/webview/state/viewer/types";
 
