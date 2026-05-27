@@ -20,6 +20,7 @@ user-visible impact × likelihood.
 
 - `save.ts:78` `markViewSynced(text)` is exported but **never called**
   anywhere in the R3F entry path (`grep` confirms only the definition).
+> **Correction (2026-05-26):** stale — `markViewSynced` IS called at `three/store.ts:76` (on loadView). The "never called" claim predates the R3F store wiring.
 - `save.ts:52` `performViewSave()` early-returns while
   `lastViewSyncedText === undefined`.
 - `save.ts:70` `scheduleViewSave()` *also* early-returns while
@@ -41,6 +42,7 @@ gesture does not persist.
 ### H2 — `setSpecMeta` never called; top-level spec metadata lost on every save
 
 - `save.ts:13` `setSpecMeta(s)` exported, **never called** in the R3F path.
+> **Correction (2026-05-26):** stale — `setSpecMeta` IS called at `three/store.ts:66`. The "never called" claim predates the R3F store wiring.
 - `save.ts:12` `_specMeta` therefore stays `{ nodes: [], edges: [] }`.
 - `save.ts:41` `performSave()` passes `_specMeta` as `currentSpec` to
   `flowToSpec`, which uses it for (a) `notes` fallback (`flow-to-spec.ts:98`)

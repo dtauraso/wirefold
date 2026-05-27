@@ -1,7 +1,3 @@
----
-branch: task/feature-audit
----
-
 # Feature Audit: Wirefold 3D Visual Editor (Planned vs. Implemented)
 
 ## 1. Summary
