@@ -172,13 +172,11 @@ function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
 function GraphNode({
   node,
   selected,
-  connectPending,
   hovered,
   faded,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
-  connectPending: boolean;
   hovered: boolean;
   faded: boolean;
 }) {
@@ -188,7 +186,6 @@ function GraphNode({
 
   const fillHex = flagged ? FLAG_FILL : (node.data?.fill ?? "#ffffff");
   const strokeHex = flagged ? FLAG_RING
-    : connectPending ? "#00ffaa"
     : selected ? "#ffcc00"
     : hovered ? "#aaddff"
     : (node.data?.stroke ?? "#888888");
@@ -527,20 +524,25 @@ function computeOcclusionCounts(
 // RaycasterHelper: performs pick on demand via ref callback.
 // ---------------------------------------------------------------------------
 
+interface PickOptions {
+  excludeId?: string;
+  nodesOnly?: boolean;
+}
+
 function RaycasterHelper({
   nodes,
   onPickRequest,
 }: {
   nodes: RFNode<NodeData>[];
   onPickRequest: React.MutableRefObject<
-    ((ndcX: number, ndcY: number) => string | null) | null
+    ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
 }) {
   const { camera, scene } = useThree();
   const raycaster = useRef(new THREE.Raycaster());
 
   useEffect(() => {
-    onPickRequest.current = (ndcX: number, ndcY: number): string | null => {
+    onPickRequest.current = (ndcX: number, ndcY: number, opts?: PickOptions): string | null => {
       const ndc = new THREE.Vector2(ndcX, ndcY);
       raycaster.current.setFromCamera(ndc, camera);
       const meshes: THREE.Mesh[] = [];
@@ -549,6 +551,28 @@ function RaycasterHelper({
       });
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
+
+      if (opts?.nodesOnly) {
+        // Iterate all hits to find the first node that isn't excluded.
+        for (const hit of hits) {
+          const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.edgeId) continue; // skip edges
+          const hitPoint = hitObj.parent;
+          if (!hitPoint) continue;
+          for (const n of nodes) {
+            if (opts.excludeId && n.id === opts.excludeId) continue;
+            const wp = nodeWorldPos(n);
+            if (
+              Math.abs(hitPoint.position.x - wp.x) < 1 &&
+              Math.abs(hitPoint.position.y - wp.y) < 1
+            ) {
+              return n.id;
+            }
+          }
+        }
+        return null;
+      }
+
       // Check if the hit mesh is an edge tube (carries userData.edgeId).
       const hitObj = hits[0].object as THREE.Mesh;
       if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
@@ -616,7 +640,6 @@ function Scene({
   edges,
   selectedId,
   hoveredId,
-  connectPendingId,
   cameraRef,
   onPickRequest,
   onPositions,
@@ -627,10 +650,9 @@ function Scene({
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
   hoveredId: string | null;
-  connectPendingId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   onPickRequest: React.MutableRefObject<
-    ((ndcX: number, ndcY: number) => string | null) | null
+    ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
   onPositions: (positions: { id: string; px: number; py: number }[]) => void;
   onNearestN: (ids: Set<string>) => void;
@@ -653,7 +675,6 @@ function Scene({
           node={n}
           selected={n.id === selectedId}
           hovered={n.id === hoveredId}
-          connectPending={n.id === connectPendingId}
           faded={!!n.data?.faded}
         />
       ))}
@@ -685,13 +706,12 @@ interface ControlState {
 function useInteractionControls(
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>,
   canvasSize: { w: number; h: number },
-  pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number) => string | null) | null>,
+  pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>,
   onSelect: (id: string | null) => void,
   onPanPadActive: (pos: { x: number; y: number } | null) => void,
-  connectPendingIdRef: React.MutableRefObject<string | null>,
-  onConnectClick: (id: string | null) => void,
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
   onMoveNode: (id: string, x: number, y: number) => void,
+  storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -705,6 +725,7 @@ function useInteractionControls(
     nodeId: string;
     planePointAtStart: THREE.Vector3;
     nodeCenterAtStart: THREE.Vector3;
+    rfPosAtStart: { x: number; y: number };
   } | null>(null);
 
   // Pivot for the current drag (world space)
@@ -829,6 +850,7 @@ function useInteractionControls(
             nodeId: hitId,
             planePointAtStart: planePoint.clone(),
             nodeCenterAtStart: nodeWorldPos(node),
+            rfPosAtStart: { x: node.position.x, y: node.position.y },
           };
         }
         // Do NOT start dwell timer when a node is hit.
@@ -929,9 +951,23 @@ function useInteractionControls(
       if (s.dwellTimer !== null) { clearTimeout(s.dwellTimer); s.dwellTimer = null; }
       onPanPadActive(null);
 
-      // Node drag completed: persist position and suppress click/select.
+      // Node drag completed: check for drag-to-wire, else persist position.
       if (s.phase === "dragging" && nodeDragRef.current) {
         const nd = nodeDragRef.current;
+        // Hit-test at release point excluding the source node, nodes only.
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+        const sourceId = nd.nodeId;
+        const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: sourceId, nodesOnly: true }) ?? null;
+        if (targetId !== null && targetId !== sourceId) {
+          // WIRE: revert the source node to its start position, then create the edge.
+          onMoveNode(sourceId, nd.rfPosAtStart.x, nd.rfPosAtStart.y);
+          storeCreateEdge(sourceId, null, targetId, null);
+          nodeDragRef.current = null;
+          s.phase = "idle";
+          return;
+        }
+        // Normal move: persist position.
         // Read from store directly so we get the position applied by the last onPointerMove,
         // which may not have re-rendered yet (nodesRef.current could be one frame stale).
         const node = useThreeStore.getState().nodes.find((n) => n.id === nd.nodeId);
@@ -961,19 +997,13 @@ function useInteractionControls(
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
           const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
-          // Connect mode: read through ref to avoid stale closure.
-          // onConnectClick reads connectPendingIdRef.current (live value).
-          const inConnectMode = connectPendingIdRef.current !== null;
-          onConnectClick(hitId);
-          if (!inConnectMode) {
-            onSelect(hitId); // normal select when not in connect mode
-          }
+          onSelect(hitId);
         }
       }
 
       s.phase = "idle";
     },
-    [connectPendingIdRef, nodesRef, onConnectClick, onPanPadActive, onSelect, pickRequest],
+    [nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
   );
 
   const onWheel = useCallback(
@@ -1229,23 +1259,15 @@ export function ThreeView() {
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
-  // Connect mode: first click = pending source node id; second click = create edge.
-  const [connectPendingId, setConnectPendingId] = useState<string | null>(null);
-  // Ref mirror of connectPendingId — read in onPointerUp to avoid stale closure.
-  const connectPendingIdRef = useRef<string | null>(null);
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const pickRequest = useRef<((ndcX: number, ndcY: number) => string | null) | null>(null);
+  const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
 
   // Keep refs in sync with state.
-  useEffect(() => {
-    connectPendingIdRef.current = connectPendingId;
-  }, [connectPendingId]);
-
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
@@ -1274,37 +1296,8 @@ export function ThreeView() {
     }
   }, []);
 
-  // Connect-mode click handler: first click picks source, second click creates edge.
-  // Clicking empty space (null) cancels.
-  const onConnectClick = useCallback((hitId: string | null) => {
-    const pending = connectPendingIdRef.current;
-    if (pending === null) {
-      // Arm connect mode only if a node was clicked.
-      if (hitId !== null && nodesRef.current.some((n) => n.id === hitId)) {
-        setConnectPendingId(hitId);
-      }
-    } else {
-      // Second click while connect mode is armed.
-      if (hitId === null) {
-        setConnectPendingId(null);
-        setSelectedId(null);
-      } else if (hitId === pending) {
-        setConnectPendingId(null);
-      } else if (nodesRef.current.some((n) => n.id === hitId)) {
-        storeCreateEdge(pending, null, hitId, null);
-        setConnectPendingId(null);
-      } else {
-        // Landed on an edge: select it, exit connect mode, no edge.
-        setConnectPendingId(null);
-        setSelectedId(hitId);
-      }
-    }
-  }, [storeCreateEdge, nodesRef, setSelectedId]);
-
-  // Escape key cancels connect mode
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setConnectPendingId(null); return; }
       const mod = e.metaKey || e.ctrlKey;
       // "f": toggle fade on the selected element.
       if (e.key === "f" && !mod && selectedId) {
@@ -1322,10 +1315,9 @@ export function ThreeView() {
     pickRequest,
     setSelectedId,
     setPanPadOrigin,
-    connectPendingIdRef,
-    onConnectClick,
     nodesRef,
     storeMoveNode,
+    storeCreateEdge,
   );
 
   // Hover tracking: lightweight raycast on pointer-move to update hoveredId.
@@ -1397,7 +1389,6 @@ export function ThreeView() {
             edges={edges}
             selectedId={selectedId}
             hoveredId={hoveredId}
-            connectPendingId={connectPendingId}
             cameraRef={cameraRef}
             onPickRequest={pickRequest}
             onPositions={onPositions}
@@ -1480,27 +1471,6 @@ export function ThreeView() {
           </div>
         );
       })}
-
-      {/* Connect-mode hint banner */}
-      {connectPendingId !== null && (
-        <div style={{
-          position: "absolute",
-          top: 10,
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "rgba(0,200,120,0.85)",
-          color: "#000",
-          fontSize: 11,
-          fontFamily: "monospace",
-          padding: "4px 12px",
-          borderRadius: 5,
-          pointerEvents: "none",
-          zIndex: 40,
-          whiteSpace: "nowrap",
-        }}>
-          Click target node to wire · Esc to cancel
-        </div>
-      )}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <RollSlider cameraRef={cameraRef} />
