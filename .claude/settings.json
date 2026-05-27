@@ -1,35 +1,4 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(npm run build)",
-      "Bash(npm run build *)",
-      "Bash(npm test)",
-      "Bash(npm test *)",
-"Bash(npx tsc)",
-      "Bash(npx tsc *)",
-      "Bash(npx --no-install tsc *)",
-      "Bash(npx vitest run *)",
-      "Bash(npx vitest *)",
-      "Bash(npx playwright test *)",
-      "Bash(go build *)",
-      "Bash(go test *)",
-      "Bash(git checkout *)",
-      "Bash(git stash *)",
-      "Bash(git log *)",
-      "Bash(git diff *)",
-      "Bash(git merge *)",
-      "Bash(git push *)",
-      "Bash(mkdir -p *)",
-      "Bash(cd *)",
-      "Bash(git add -A && git commit *)",
-      "Bash(git add -A && git commit -m *)",
-      "Bash(git add * && git commit *)",
-      "Bash(git add * && git commit -m *)",
-      "Bash(cd * && git add * && git commit *)",
-      "Bash(cd * && git add * && git commit -m *)",
-      "Bash(kill *)"
-    ]
-  },
   "hooks": {
     "Stop": [
       {
