@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NODE_DEFS } from "../../src/webview/rf/nodes/node-defs";
+import { NODE_DEFS } from "../../src/webview/schema/node-defs";
 
 const TOPOLOGY_PATH = join(__dirname, "../../../../topology.json");
 

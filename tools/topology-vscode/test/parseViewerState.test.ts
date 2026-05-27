@@ -4,7 +4,7 @@
 // top-level non-object or unparseable JSON falls back to defaults.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isLegacyCamera, parseViewerState } from "../src/webview/viewerState";
+import { isLegacyCamera, parseViewerState } from "../src/webview/state/viewer/types";
 
 beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});

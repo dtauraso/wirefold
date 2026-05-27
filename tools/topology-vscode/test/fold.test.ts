@@ -9,8 +9,8 @@
 import { describe, expect, it } from "vitest";
 import type { Spec } from "../src/schema";
 import { specToFlow } from "../src/webview/rf/adapter";
-import { createFold, toggleFold } from "../src/webview/fold-core";
-import type { ViewerState } from "../src/webview/viewerState";
+import { createFold, toggleFold } from "../src/webview/state/ops/fold";
+import type { ViewerState } from "../src/webview/state/viewer/types";
 
 function makeSpec(): Spec {
   return {
