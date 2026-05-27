@@ -46,7 +46,6 @@ export interface ThreeStoreState {
     targetHandle: string | null,
   ) => string | null;
   moveNode: (id: string, x: number, y: number) => void;
-  restoreNodesEdges: (nodes: RFNode<NodeData>[], edges: RFEdge<EdgeData>[]) => void;
   saveSpec: () => void;
   /** Toggle fade on a node or edge. Recomputes fixpoint and emits updated faded-edge set to host. */
   toggleFade: (target: { kind: "node" | "edge"; id: string }) => void;
@@ -195,12 +194,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       n.id === id ? { ...n, position: { x, y } } : n,
     );
     set({ nodes: nextNodes });
-  },
-
-  // Wholesale replace nodes+edges (undo/redo restore). Persists the result.
-  restoreNodesEdges(nodes, edges) {
-    set({ nodes, edges });
-    scheduleSave();
   },
 
   saveSpec() {

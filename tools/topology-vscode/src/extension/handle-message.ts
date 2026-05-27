@@ -335,9 +335,8 @@ async function handleReadgateSave(
   post({ type: m.saveResult, nodeId });
 
   // The edge re-point/prune is derived server-side — the canvas didn't author it.
-  // Push the updated topology so the forward save re-syncs, mirroring what the
-  // doc-change listener already posts on undo/redo. Plain guard/text edits leave
-  // edges untouched and stay suppressed (no canvas flash on every keystroke).
+  // Push the updated topology so the forward save re-syncs. Plain guard/text
+  // edits leave edges untouched and stay suppressed (no canvas flash on every keystroke).
   const edgesChanged =
     currentNeighbor !== result.outNeighbor ||
     (result.removedPorts?.length ?? 0) > 0;

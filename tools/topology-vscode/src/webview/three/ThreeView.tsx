@@ -15,7 +15,6 @@ import { useThreeStore } from "./store";
 import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../state/run-status";
-import { pushSnapshot, undo, redo } from "../state/history";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 
@@ -674,7 +673,6 @@ function useInteractionControls(
     nodeId: string;
     planePointAtStart: THREE.Vector3;
     nodeCenterAtStart: THREE.Vector3;
-    snapshotPushed: boolean;
   } | null>(null);
 
   // Pivot for the current drag (world space)
@@ -799,7 +797,6 @@ function useInteractionControls(
             nodeId: hitId,
             planePointAtStart: planePoint.clone(),
             nodeCenterAtStart: nodeWorldPos(node),
-            snapshotPushed: false,
           };
         }
         // Do NOT start dwell timer when a node is hit.
@@ -837,11 +834,6 @@ function useInteractionControls(
         s.phase = "dragging";
 
         if (nodeDragRef.current) {
-          // Node drag: push snapshot at drag start (before any position change).
-          if (!nodeDragRef.current.snapshotPushed) {
-            pushSnapshot();
-            nodeDragRef.current.snapshotPushed = true;
-          }
           // Do NOT compute arcball pivot — node drag suppresses arcball.
         } else {
           // Empty-space drag: compute arcball pivot.
@@ -906,7 +898,7 @@ function useInteractionControls(
       onPanPadActive(null);
 
       // Node drag completed: persist position and suppress click/select.
-      if (s.phase === "dragging" && nodeDragRef.current?.snapshotPushed) {
+      if (s.phase === "dragging" && nodeDragRef.current) {
         const nd = nodeDragRef.current;
         // Read from store directly so we get the position applied by the last onPointerMove,
         // which may not have re-rendered yet (nodesRef.current could be one frame stale).
@@ -1275,12 +1267,7 @@ export function ThreeView() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setConnectPendingId(null); return; }
-      // Undo/redo: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z (redo).
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && (e.key === "z" || e.key === "Z")) {
-        e.preventDefault();
-        if (e.shiftKey) redo(); else undo();
-      }
       // "f": toggle fade on the selected element.
       if (e.key === "f" && !mod && selectedId) {
         const isEdge = edges.some((ed) => ed.id === selectedId);

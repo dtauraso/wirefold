@@ -4,7 +4,6 @@
 
 import { scheduleViewSave } from "./save";
 import { useThreeStore } from "./three/store";
-import { pushSnapshot } from "./state/history";
 
 type RerenderFn = () => void;
 
@@ -80,7 +79,6 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
     activeClass: "sublabel-active",
     onCommit: (next) => {
       if (next === original) return "";
-      pushSnapshot();
       useThreeStore.getState().setNodes((ns) => ns.map((n) => {
         if (n.id !== nodeId) return n;
         const data = { ...n.data };
