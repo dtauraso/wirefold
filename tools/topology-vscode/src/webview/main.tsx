@@ -37,7 +37,6 @@ import { parseHostToWebview } from "../messages";
 import { flowToSpec } from "./state/adapter/flow-to-spec";
 import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
 import type { RunStatusUI } from "./state/run-status";
-import { setDimmedImperative } from "./state/dimmed";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./three/RunButton";
@@ -53,11 +52,6 @@ import { handleTraceEvent } from "./three/pump";
   getSpec: () => { const { nodes, edges } = useThreeStore.getState(); return flowToSpec(nodes, edges, { nodes: [], edges: [] }); },
   getSent: () =>
     (window as unknown as { __wirefold_sent?: unknown[] }).__wirefold_sent ?? [],
-  // Test-only: drive the dim state directly so tests don't need to click
-  // the saved-views panel. Pass a string[] of member ids to dim everything
-  // *not* in the set; pass undefined to clear.
-  applyDim: (members: string[] | undefined) =>
-    setDimmedImperative(members ? new Set(members) : null),
 };
 
 function Root() {

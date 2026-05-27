@@ -18,7 +18,6 @@ export function specToFlow(
   folds: Fold[] = [],
   vs: Pick<ViewerState, "nodes" | "edges"> = {},
   lastSelectionIds: string[] = [],
-  dimmed: Set<string> | null = null,
 ): { nodes: RFNode<NodeData>[]; edges: RFEdge<EdgeData>[] } {
   const invalid = requiredInputDiagnostics(spec);
   // Map memberId → containing collapsed fold id. Nested folds are not
@@ -86,7 +85,6 @@ export function specToFlow(
         initState: n.state,
         index: n.index,
         foldId: foldOf.get(n.id),
-        dimmed: dimmed?.has(n.id) ?? false,
         validationError: invalid.get(n.id),
       },
     };

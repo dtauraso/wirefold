@@ -4,9 +4,10 @@
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items; 4 dead-code orphans (§3d).
+**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items; 3 dead-code orphans (§3d).
 
 > **Re-verified 2026-05-26** against post-architecture-audit code. Undo/redo moved from half-wired to not-started (no history.ts, no pushSnapshot exists). Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
+> **Updated 2026-05-27** (commit `45cee602`, branch `task/remove-saved-views`): saved-views dead-code orphan REMOVED in full. Scorecard adjusted from 4 to 3 dead-code orphans.
 
 ---
 
@@ -34,7 +35,7 @@ The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (
 | Debounced spec save | `tools/topology-vscode/src/webview/save.ts` (scheduleSave) |
 | Load spec / load view from VS Code | `store.ts:loadSpec`, `store.ts:loadView` |
 | Fold state module (RF-free) | `tools/topology-vscode/src/webview/state/folds-state.ts` |
-| Node dimming | `tools/topology-vscode/src/webview/state/dimmed.ts` (note: `DimmedCtx`/`useDimmedCtx`/`registerDimmedSetter` exports removed; core dimming logic retained) |
+| Node dimming | Removed with saved-views teardown (commit `45cee602`, branch `task/remove-saved-views`). `dimmed.ts`, `data.dimmed` in specToFlow/NodeData, `.dim` CSS, and `__wirefold_test.applyDim` hook all deleted. |
 | Spec↔flow adapters | `tools/topology-vscode/src/webview/three/adapters/specToFlow.ts`, `flowToSpec.ts` |
 | Ring-topology deadlock break | Bootstrap `Input` node (`data.init=[seed]`, `data.repeat=false`) wired by a real edge into the receiving port; single-fires seed at tick-0. `edgeSeeds` TS pipeline removed entirely. |
 | Paced wire substrate | `nodes/Wiring/paced_wire.go` |
@@ -103,7 +104,7 @@ Each is infrastructure that exists in code but reaches no user today — some ne
 
 | Feature | Evidence (file:line) | State | Disposition question |
 |---|---|---|---|
-| Named / saved views | `state/viewer/types.ts:23,54,88` (SavedView type, `views?` array, parse); `ops/rename.ts:31` (nodeId remap on rename); orphan comments `main.tsx:57` ("saved-views panel"), `webview.css:168` ("views panel"). Introduced `20024759` (2026-05-02, "Saved-views panel… click-to-frame, dim non-members"); panel UI deliberately removed `d05d2376` (2026-05-18, "remove saved-views panel UI"). Live dim mechanism it drove: `state/dimmed.ts` (`setDimmedImperative`/`getDimmed`) → `adapter/spec-to-flow.ts` sets `data.dimmed` → `.dim` CSS; exercised by e2e `compare-fold-and-view.spec.ts` via `window.__wirefold_test.applyDim`. | NOT abandoned scaffolding — panel was fully built then deliberately removed (`d05d2376`), with an explicit commit note that dimming infra + SavedView state parsing were left intentionally. Still LIVE and tested: SavedView type + parse/serialize + rename-remap (`parseViewerState.test.ts`, `rename.test.ts`); the dim mechanism is live and e2e-tested. Stale: `main.tsx:57` + `webview.css:168` comments still reference the removed "views panel". `SavedView.viewport` is a legacy field, unused by current saves. | Was infra retention staging for a rebuild, or leftover to tear down? Rebuild ≈200 lines (resurrect ViewsPanel + CSS from `d05d2376`). Full teardown ≈150 lines but also removes the LIVE dim mechanism + its e2e test — so teardown is NOT free dead-code removal. |
+| Named / saved views | **REMOVED** — commit `45cee602` on branch `task/remove-saved-views`. Deleted: `SavedView` type + parse/serialize + rename-remap; `state/dimmed.ts`; `data.dimmed` in specToFlow + NodeData; `.dim` CSS; `__wirefold_test.applyDim` hook; `parseViewerState.test.ts`; saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). Build/tsc/17 unit tests clean after removal. | COMPLETE — no orphan remains | N/A |
 | Spec diff | `state/ops/diff.ts:16` (`diffSpecs` computes added/removed/rewired; comment notes "moved" detection unfinished) | TEST-ONLY — imported only by `test/diff-core.test.ts`, no app integration | Surface a diff view, or drop the module + test? |
 | Wire value label | `schema/wire-defs.ts:13,25` + Go `nodes/Wiring/loader.go:47` (`valueLabel`) | Truly dead — schema-only on both TS and Go sides, never read or rendered | Render edge value labels, or strip the prop from both layers? |
 | Fold mutators | `state/folds-state.ts:13–30` (`toggleFoldCollapse`, `updateFoldPosition`, `setFolds`) | Truly dead — zero callers anywhere; only `getFolds()` is consumed (`store.ts:10`). Complements the §3a half-wired Folds item (collapse/expand + drag-reposition built but unreachable) | Wire fold interactions, or delete the mutators? |

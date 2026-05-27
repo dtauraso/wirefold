@@ -5,7 +5,7 @@
 import type { StateValue } from "../../../schema";
 import {
   isObj, isStrArr,
-  parseCamera, parseSavedView, parseFold,
+  parseCamera, parseFold,
   collect, parseNodeViews, parseEdgeViews,
 } from "./parse";
 
@@ -19,14 +19,6 @@ export type LegacyCameraBox = { x: number; y: number; w: number; h: number };
 export function isLegacyCamera(c: Camera | LegacyCameraBox): c is LegacyCameraBox {
   return typeof (c as Camera).zoom !== "number";
 }
-
-export type SavedView = {
-  name: string;
-  // Legacy field — older sidecars captured the camera at save time. New
-  // saves omit it; clicking a view frames its members via RF fitView.
-  viewport?: { x: number; y: number; w: number; h: number };
-  nodeIds: string[];
-};
 
 export type Fold = {
   id: string;
@@ -51,7 +43,6 @@ export type EdgeView = {
 
 export type ViewerState = {
   camera?: Camera | LegacyCameraBox;
-  views?: SavedView[];
   folds?: Fold[];
   lastSelectionIds?: string[];
   nodes?: Record<string, NodeView>;
@@ -82,11 +73,6 @@ export function parseViewerState(text: string | undefined): ViewerState {
     const cam = parseCamera(raw.camera);
     if (cam) out.camera = cam;
     else console.warn("topology.view.json: dropping malformed camera");
-  }
-  if (raw.views !== undefined) {
-    const views = collect(raw.views, parseSavedView);
-    if (views) out.views = views;
-    else console.warn("topology.view.json: views is not an array, dropping");
   }
   if (raw.folds !== undefined) {
     const folds = collect(raw.folds, parseFold);

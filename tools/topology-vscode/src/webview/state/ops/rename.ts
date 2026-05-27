@@ -28,11 +28,6 @@ export function applyRename(
     if (e.source === oldId) e.source = newId;
     if (e.target === oldId) e.target = newId;
   }
-  if (viewerState.views) {
-    for (const v of viewerState.views) {
-      v.nodeIds = v.nodeIds.map((x) => (x === oldId ? newId : x));
-    }
-  }
   if (viewerState.folds) {
     for (const f of viewerState.folds) {
       f.memberIds = f.memberIds.map((x) => (x === oldId ? newId : x));

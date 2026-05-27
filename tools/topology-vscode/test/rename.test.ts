@@ -20,7 +20,6 @@ function fixture(): { spec: Spec; vs: ViewerState } {
     ],
   };
   const vs: ViewerState = {
-    views: [{ name: "v", viewport: { x: 0, y: 0, w: 100, h: 100 }, nodeIds: ["old", "other"] }],
     folds: [{ id: "f", label: "F", memberIds: ["old", "other"], position: [0, 0], collapsed: false }],
     lastSelectionIds: ["old"],
   };
@@ -32,7 +31,6 @@ describe("applyRename atomicity", () => {
   const sites: Site[] = [
     { name: "edge.source", pull: (s) => s.edges.map((e) => e.source) },
     { name: "edge.target", pull: (s) => s.edges.map((e) => e.target) },
-    { name: "view.nodeIds", pull: (_, v) => v.views!.flatMap((x) => x.nodeIds) },
     { name: "fold.memberIds", pull: (_, v) => v.folds!.flatMap((x) => x.memberIds) },
     { name: "lastSelectionIds", pull: (_, v) => v.lastSelectionIds! },
   ];
@@ -51,7 +49,6 @@ describe("applyRename atomicity", () => {
     const { spec, vs } = fixture();
     applyRename(spec, vs, "old", "renamed");
     expect(spec.nodes.find((n) => n.id === "other")).toBeTruthy();
-    expect(vs.views![0].nodeIds).toContain("other");
   });
 
   it("rejects invalid Go identifiers", () => {

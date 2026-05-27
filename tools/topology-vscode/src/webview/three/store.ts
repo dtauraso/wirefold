@@ -8,7 +8,6 @@ import { specToFlow } from "../state/adapter/spec-to-flow";
 import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
 import { parseViewerState } from "../state/viewer/types";
 import { getFolds } from "../state/folds-state";
-import { getDimmed } from "../state/dimmed";
 import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../save";
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
@@ -73,7 +72,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     try {
       const rawJson = JSON.parse(specText);
       const spec = parseSpec(rawJson);
-      const flow = specToFlow(spec, getFolds(), viewerState, viewerState.lastSelectionIds ?? [], getDimmed());
+      const flow = specToFlow(spec, getFolds(), viewerState, viewerState.lastSelectionIds ?? []);
       let nodes = flow.nodes as RFNode<NodeData>[];
       let edges = flow.edges as RFEdge<EdgeData>[];
       const { directlyFadedNodes, directlyFadedEdges } = get();
@@ -95,7 +94,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
     const lastSpec = get()._lastSpec;
     if (lastSpec) {
-      const flow = specToFlow(lastSpec, getFolds(), next, next.lastSelectionIds ?? [], getDimmed());
+      const flow = specToFlow(lastSpec, getFolds(), next, next.lastSelectionIds ?? []);
       let nodes = flow.nodes as RFNode<NodeData>[];
       let edges = flow.edges as RFEdge<EdgeData>[];
       ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
