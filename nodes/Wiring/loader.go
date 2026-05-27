@@ -44,7 +44,6 @@ type NodeData struct {
 // Fields tagged wire:"prop,..." are wire props emitted to wire-defs.ts by gen-node-defs.
 type specEdge struct {
 	Label          string  `json:"label"          wire:"prop,optional,tsType:string"`
-	ValueLabel     string  `json:"valueLabel"     wire:"prop,optional,tsType:string"`
 	MidpointOffset float64 `json:"midpointOffset" wire:"prop,optional,tsType:number"`
 	ArrowStyle     string  `json:"arrowStyle"     wire:"prop,optional,tsType:ArrowStyle"`
 	Concurrent     *bool   `json:"concurrent"     wire:"prop,optional,tsType:boolean"`
