@@ -103,13 +103,6 @@ export function parseNode(v: unknown, path: string): Node {
       const d = o.data as Record<string, unknown> | undefined;
       return opt(d?.["state"], (x) => numMap(x, `${path}.data.state`));
     })(),
-    edgeSeeds: (() => {
-      if (o.edgeSeeds !== undefined) throw new Error(
-        `${path}.edgeSeeds: root-level "edgeSeeds" is not valid; use data.edgeSeeds instead (Go data.edgeSeeds contract).`,
-      );
-      const d = o.data as Record<string, unknown> | undefined;
-      return opt(d?.["edgeSeeds"], (x) => numMap(x, `${path}.data.edgeSeeds`));
-    })(),
   };
 }
 

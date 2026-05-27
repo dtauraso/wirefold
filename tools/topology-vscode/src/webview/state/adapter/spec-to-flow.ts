@@ -75,17 +75,15 @@ export function specToFlow(
         // Round-trip node.state so initial dx/dy (and any other handler-state
         // seed) survives spec → flow → spec. Runner overwrites world.state
         // from initWorld; the spec field is the seed, not the live value.
-        // node.state / node.edgeSeeds are parsed from data.state / data.edgeSeeds
-        // (Go wire:"data.state" / data.edgeSeeds contract).
+        // node.state is parsed from data.state (Go wire:"data.state" contract).
         state: nv?.state,
         props: n.props,
         spec: n.spec,
         notes: n.notes,
-        // n.data is the raw data blob (includes init, state, edgeSeeds per kind).
-        // flow-to-spec rebuilds it from nodeData + initState + edgeSeeds.
+        // n.data is the raw data blob (includes init, state per kind).
+        // flow-to-spec rebuilds it from nodeData + initState.
         nodeData: n.data,
         initState: n.state,
-        edgeSeeds: n.edgeSeeds,
         index: n.index,
         foldId: foldOf.get(n.id),
         dimmed: dimmed?.has(n.id) ?? false,

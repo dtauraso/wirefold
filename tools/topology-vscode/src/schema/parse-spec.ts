@@ -72,10 +72,8 @@ export function requiredInputDiagnostics(spec: Spec): Map<string, string> {
     for (const node of requiredNodes) {
       if (dead.has(node.id)) continue;
       const required = REQUIRED_INPUTS[node.type];
-      const seeds = node.edgeSeeds as Record<string, unknown> | undefined;
       let isDead = false;
       for (const port of required) {
-        if (seeds?.[port] !== undefined) continue; // satisfied by seed
         const sources = feeders.get(`${node.id}:${port}`) ?? [];
         const hasLiveFeeder = sources.some((s) => !dead.has(s));
         if (sources.length === 0 || !hasLiveFeeder) { isDead = true; break; }
@@ -89,10 +87,8 @@ export function requiredInputDiagnostics(spec: Spec): Map<string, string> {
   for (const node of requiredNodes) {
     if (!dead.has(node.id)) continue;
     const required = REQUIRED_INPUTS[node.type];
-    const seeds = node.edgeSeeds as Record<string, unknown> | undefined;
     const reasons: string[] = [];
     for (const port of required) {
-      if (seeds?.[port] !== undefined) continue;
       const sources = feeders.get(`${node.id}:${port}`) ?? [];
       if (sources.length === 0) {
         reasons.push(`missing required input "${port}"`);
