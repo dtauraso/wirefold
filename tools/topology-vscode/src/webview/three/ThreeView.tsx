@@ -301,10 +301,10 @@ function PulseBead({
   );
 }
 
-function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean }) {
+function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean }) {
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
   const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
-  const { curve, arcLength, tubeGeo } = useMemo(() => {
+  const { curve, arcLength, tubeGeo, haloGeo } = useMemo(() => {
     const _p0 = surfacePoint(src, tgt);
     const _p2 = surfacePoint(tgt, src);
     const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
@@ -315,7 +315,9 @@ function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNo
     const _curve = new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
     const _arcLength = _curve.getLength();
     const _tubeGeo = new THREE.TubeGeometry(_curve, 16, 1.5, 6, false);
-    return { curve: _curve, arcLength: _arcLength, tubeGeo: _tubeGeo };
+    // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
+    const _haloGeo = new THREE.TubeGeometry(_curve, 16, 5, 6, false);
+    return { curve: _curve, arcLength: _arcLength, tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p0key]);
 
@@ -332,6 +334,19 @@ function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNo
           opacity={faded ? 0.25 : 1}
         />
       </mesh>
+      {/* Selection halo: translucent gold glow surrounding the core tube. Kept visible
+          even when faded so a selected faded edge stays identifiable. */}
+      {selected && (
+        <mesh geometry={haloGeo}>
+          <meshBasicMaterial
+            color="#ff5a00"
+            transparent
+            opacity={0.6}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
       {/* Pulse bead: stronger highlight traveling source → target */}
       {!faded && <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />}
     </>
@@ -341,9 +356,11 @@ function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNo
 function GraphEdges({
   edges,
   nodeMap,
+  selectedId,
 }: {
   edges: RFEdge<EdgeData>[];
   nodeMap: Map<string, RFNode<NodeData>>;
+  selectedId: string | null;
 }) {
   return (
     <>
@@ -351,7 +368,7 @@ function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} />;
       })}
     </>
   );
@@ -631,7 +648,7 @@ function Scene({
           faded={!!n.data?.faded}
         />
       ))}
-      <GraphEdges edges={edges} nodeMap={nodeMap} />
+      <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
     </>
   );
 }
