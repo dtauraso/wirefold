@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "slot"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "slot", "done"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {

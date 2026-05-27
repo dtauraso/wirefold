@@ -3,3 +3,4 @@
 {"step":2,"kind":"send","node":"A","port":"out","value":1}
 {"step":3,"kind":"slot","nodeId":"B","port":"in","phase":"filled","value":1}
 {"step":4,"kind":"slot","nodeId":"B","port":"in","phase":"empty"}
+{"step":5,"kind":"done","node":"A","port":"out"}
