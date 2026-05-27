@@ -5,7 +5,7 @@
 import type { Port, StateValue } from "../schema/types";
 import type { NodeSpec } from "../schema/types-graph";
 import type { WireProps } from "../schema/wire-defs";
-import { ANIMATION_FIELDS } from "./rf/animation-fields";
+import { ANIMATION_FIELDS } from "./three/animation-fields";
 
 // ---------------------------------------------------------------------------
 // Own Node / Edge type shapes (Phase 3 rf-retirement).
