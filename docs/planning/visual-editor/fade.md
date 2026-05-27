@@ -20,8 +20,9 @@ Each node carries an **ignore list**: the set of incident edge ids that are fade
 
 Propagation rules:
 - **Fade a node** → every incident edge becomes faded → every node on the other end of those edges adds those edge ids to its ignore list. Unfade reverses this.
-- **Fade an edge** directly → only that edge is faded; both endpoint nodes update their ignore lists. The endpoint nodes are NOT themselves faded.
-- Node-fade and edge-fade are independent dimensions: fading every edge of a node does not mark the node faded, and a node with all edges faded is inert but not "faded".
+- **Fade an edge** directly → only that edge is faded; both endpoint nodes update their ignore lists. The endpoint nodes are NOT themselves faded — unless this removes their last non-faded edge, which auto-fades them per the rule below.
+- **A node with no non-faded edges auto-fades.** When fading an edge (or a cascade) leaves a node with zero non-faded incident edges, that node itself becomes faded — which in turn fades any remaining edges and can cascade to neighbors.
+- Fade therefore spreads to a **fixpoint**: apply (node-fade → fade all incident edges) and (all incident edges faded → fade the node) repeatedly until the faded set is stable. Unfade likewise contracts to a fixpoint.
 
 ## TS side (animation)
 
