@@ -17,6 +17,15 @@ import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../state/run-status";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
+import {
+  nodeRadius,
+  boundingBox,
+  nodeWorldPos,
+  sceneCenter,
+  worldPerPixel,
+  ndcToPixel,
+  pixelToNDC,
+} from "./geometry-helpers";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants
@@ -40,94 +49,6 @@ const CLICK_MAX_MS = 150;
 const DWELL_MS = 200;
 /** Pixel movement threshold between CLICK and DRAG. */
 const MOVE_SLOP_PX = 6;
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/** Node sphere radius from node dimensions. */
-function nodeRadius(node: RFNode<NodeData>): number {
-  return Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
-}
-
-function boundingBox(nodes: RFNode<NodeData>[]) {
-  if (nodes.length === 0) return { minX: -200, maxX: 200, minY: -200, maxY: 200 };
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const n of nodes) {
-    const w = (n.data?.width ?? 110) / 2;
-    const h = (n.data?.height ?? 60) / 2;
-    minX = Math.min(minX, n.position.x - w);
-    maxX = Math.max(maxX, n.position.x + w);
-    minY = Math.min(minY, n.position.y - h);
-    maxY = Math.max(maxY, n.position.y + h);
-  }
-  return { minX, maxX, minY, maxY };
-}
-
-/** World position for a node center (RF y-down → Three y-up). */
-function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
-  const x = node.position.x + (node.data?.width ?? 110) / 2;
-  const y = -(node.position.y + (node.data?.height ?? 60) / 2);
-  return new THREE.Vector3(x, y, 0);
-}
-
-/**
- * Scene center (centroid of node bounding box), used for dolly distance.
- * Falls back to origin when no nodes.
- */
-function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
-  if (nodes.length === 0) return new THREE.Vector3(0, 0, 0);
-  const { minX, maxX, minY, maxY } = boundingBox(nodes);
-  return new THREE.Vector3((minX + maxX) / 2, -(minY + maxY) / 2, 0);
-}
-
-/**
- * True perpendicular distance from camera to the z=0 plane (content plane).
- * This is the projection of the camera-to-origin vector onto the camera forward
- * direction, computed as: |cam.position · viewDir| where viewDir is the camera
- * forward in world space. Correct after arbitrary rotation (not just looking down -Z).
- * Clamped to a minimum of 10 to avoid zero/negative values.
- */
-function camToPlaneDistance(cam: THREE.PerspectiveCamera): number {
-  // Camera forward in world space (points away from camera, into scene).
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-  // Distance = projection of camera position onto the (negated) forward vector.
-  // The z=0 plane has normal (0,0,1). Distance = |cam.position · (0,0,1)| = |cam.position.z|
-  // when looking straight down. After rotation, use the component of the camera
-  // position along the view axis (how far back the camera is from z=0 along view).
-  // More precisely: distance from cam to the plane along the view ray.
-  // Ray: origin=cam.position, dir=forward. Plane: z=0, normal=(0,0,1).
-  // t = -cam.position.z / forward.z  (ray-plane intersection param)
-  // If forward.z ≈ 0 (camera looking sideways), fall back to |cam.position.z|.
-  const fwdZ = forward.z;
-  if (Math.abs(fwdZ) > 0.01) {
-    return Math.max(Math.abs(-cam.position.z / fwdZ), 10);
-  }
-  return Math.max(Math.abs(cam.position.z), 10);
-}
-
-/**
- * World-units-per-pixel for panning in the camera's screen plane.
- * Computed from the perpendicular distance to the content plane and the camera FOV.
- */
-function worldPerPixel(cam: THREE.PerspectiveCamera, canvasH: number): number {
-  const d = camToPlaneDistance(cam);
-  const fovRad = (cam.fov * Math.PI) / 180;
-  return (2 * d * Math.tan(fovRad / 2)) / canvasH;
-}
-
-// NDC ↔ pixel helpers
-function ndcToPixel(ndcX: number, ndcY: number, size: { width: number; height: number }): { px: number; py: number } {
-  const px = (ndcX + 1) / 2 * size.width;
-  const py = (1 - (ndcY + 1) / 2) * size.height;
-  return { px, py };
-}
-
-function pixelToNDC(clientX: number, clientY: number, rect: DOMRect): { ndcX: number; ndcY: number } {
-  const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
-  const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
-  return { ndcX, ndcY };
-}
 
 // ---------------------------------------------------------------------------
 // Camera fitter: perspective camera framed head-on to show graph flat at z=0.
