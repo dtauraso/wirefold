@@ -23,6 +23,8 @@ Propagation rules:
 - **Fade an edge** directly → only that edge is faded; both endpoint nodes update their ignore lists. The endpoint nodes are NOT themselves faded — unless this removes their last non-faded edge, which auto-fades them per the rule below.
 - **A node with no non-faded edges auto-fades.** When fading an edge (or a cascade) leaves a node with zero non-faded incident edges, that node itself becomes faded — which in turn fades any remaining edges and can cascade to neighbors.
 - Fade therefore spreads to a **fixpoint**: apply (node-fade → fade all incident edges) and (all incident edges faded → fade the node) repeatedly until the faded set is stable. Unfade likewise contracts to a fixpoint.
+- **Unfade triggers:** (1) the user unfades a node or edge directly; (2) adding a new edge to a faded node — new edges are always created non-faded — gives that node a non-faded incident edge, which unfades it. This is the escape hatch out of a fully-faded region.
+- A node is faded iff it has zero non-faded incident edges OR was directly faded by the user; gaining any non-faded edge clears the auto-fade.
 
 ## TS side (animation)
 
