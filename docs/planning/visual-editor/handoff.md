@@ -7,11 +7,11 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-26 — fade feature implemented; undo/redo stack removed; bash approval guard added)
+## State at handoff (2026-05-26 — fade bugs fixed + edge selectability + view-file persistence + test cleanup)
 
 **Active branch:** `task/undo-redo`. Branched off main; all of main is merged in (branch is ahead, nothing behind).
 
-Branch-local doc: `docs/planning/visual-editor/fade.md` (frontmatter `branch: task/undo-redo`). Will be stripped by `tools/strip-branch-local-docs.sh` before any merge unless relocated. Decide relocate-vs-strip before merging.
+`docs/planning/visual-editor/fade.md` was relocated to land on main (branch tag dropped, commit `d6254fac`) — no longer branch-local; will not be stripped on merge.
 
 ### What shipped on this branch
 
@@ -22,17 +22,31 @@ Branch-local doc: `docs/planning/visual-editor/fade.md` (frontmatter `branch: ta
 - `c7650e98` muted rendering (0.25 opacity) + `f` hotkey to fade the current selection.
 - Fixpoint rules: faded node → all incident edges faded; node with zero non-faded edges auto-fades; spreads/contracts to a fixpoint. Unfade by direct unfade OR adding an edge (new edges are non-faded).
 
-**2. Undo/redo stack removed** (`1975d655`). Deleted `state/history.ts`; removed Cmd/Ctrl+Z keybind, `pushSnapshot` calls, and `restoreNodesEdges`. `mutateViewer` keeps mutating+persisting, no longer snapshots. Fade is the replacement for the reversible-navigation role; delete is the (terminal) cleanup pass.
+**2. Fade bugfixes, edge selectability, and persistence (live-verified by user this session):**
+- `d0d3eec7` Three rendering/animation fixes — (A) `data.faded` is now re-derived from the fade sets on every rebuild via a shared `applyFade` helper used by `toggleFade`/`loadSpec`/`loadView` (a topology re-sync no longer clobbers the dim); (B) `clearPulse` on newly-faded edges so a stale in-flight pulse doesn't resume on unfade; (C) `curve.getPointAt` instead of `getPoint` for arc-length-constant pulse speed on bent edges.
+- `713c2456` Persist `directlyFadedNodes`/`directlyFadedEdges` to `topology.json#view` (ViewerState + `parseViewerState` validation; `toggleFade` writes via `patchViewerState`+`scheduleViewSave`; `loadView` restores). Fade now survives a FULL window reload, not just topology saves. Toggling fade writes a debounced save to `topology.json#view`.
+- `2e471efe` Edge tubes are now selectable (`userData.edgeId` on the tube mesh + `pickRequest` returns it), so `f` fades/unfades a selected edge (previously the raycaster only matched nodes, so `f` never targeted edges).
+- `cc9e62e9` + `753792f4` Removed 7 orphaned spec/viewer-undo tests and fixed 6 stale import paths after a module refactor (`rf/` → `state/ops`, `schema/`, `three/`).
+- All fade behavior live-verified by the user: node + edge fade dims and gates pulses, survives window reload, fresh pulse on unfade, constant pulse speed.
 
-**3. Bash approval guard** (`tools/bash-approve-guard.sh`, committed on main, merged here). PreToolUse(Bash) hook in `.claude/settings.json`. Three tiers over the full command string: CATASTROPHIC → `deny` (hard block); DESTRUCTIVE/NETWORK → pass-through (no decision, native prompt handles them so "always allow" persists); otherwise → `allow` (silent). Static `permissions.allow` list removed (hook supersedes it). The `>` overwrite matcher was dropped; `git push/pull/fetch` auto-allow; `git push --force` and `git clone` still prompt. Edit the pattern arrays to tune. Hook is live (confirmed this session).
+**3. Undo/redo stack removed** (`1975d655`). Deleted `state/history.ts`; removed Cmd/Ctrl+Z keybind, `pushSnapshot` calls, and `restoreNodesEdges`. `mutateViewer` keeps mutating+persisting, no longer snapshots. Fade is the replacement for the reversible-navigation role; delete is the (terminal) cleanup pass.
+
+**4. Bash approval guard** (`tools/bash-approve-guard.sh`, committed on main, merged here). PreToolUse(Bash) hook in `.claude/settings.json`. Three tiers over the full command string: CATASTROPHIC → `deny` (hard block); DESTRUCTIVE/NETWORK → pass-through (no decision, native prompt handles them so "always allow" persists); otherwise → `allow` (silent). Static `permissions.allow` list removed (hook supersedes it). The `>` overwrite matcher was dropped; `git push/pull/fetch` auto-allow; `git push --force` and `git clone` still prompt. Edit the pattern arrays to tune. Hook is live (confirmed this session).
 
 ### Open decisions / next
 
-**(a) Live editor verification of fade — NOT done.** Everything passed headless, but no one has driven the editor: reload the VS Code window, select a node/edge, press `f`, Run, and confirm the right element mutes and Go stops emitting on it (faded wire carries no new pulse; in-flight finishes). This is the first thing to do.
+**(a) Fade live-verified — DONE.** Node + edge fade dims and gates pulses, survives window reload, fresh pulse on unfade, constant pulse speed. No open items on fade behavior.
 
-**(b) Orphaned test `tools/topology-vscode/test/spec-undo-invariant.test.ts`** — 10 failures, PRE-EXISTING (broken on main since 2026-05-19 commit 89125567 deleted the spec-state functions it imports; `setSpec is not a function`). It tests a spec-undo system that no longer exists. Delete it (and any dangling spec-history references) — unrelated to this branch's work but should be cleaned before merge.
+**(b) fade.md relocated to main** (branch tag dropped, commit `d6254fac`). No longer branch-local; `strip-branch-local-docs.sh` will not remove it on merge.
 
-**(c) fade.md fate:** branch-local (frontmatter `branch: task/undo-redo`); will be stripped on merge. Relocate to survive if it should land on main.
+**(c) Pre-existing behavioral test failures (NOT fade/undo related, deferred by user).** 5 test files with failures that predate this branch's work — triage one at a time when picked up:
+- `parseSpec.test.ts` — 2 cases: legacy `timing.steps` not dropped, legend bad-kind not rejected.
+- `diff-core.test.ts` — 8 failures cascading from the `parseSpec` fixture.
+- `fold.test.ts` — 1 failure: "expanded fold emits a frame".
+- `contracts/topology-edge-handles.test.ts` — 2 failures: `topology.json` references node kinds `InhibitRightGate`/`ReadGate` absent from `NODE_DEFS` (data drift).
+- `contracts/trace-event-fields.test.ts` — 1 failure: `TRACE_EVENT_KINDS` has `"done"` but fixture jsonl lacks a done event.
+
+These span parser/schema/fold subsystems; none are fade- or undo-related.
 
 **(d) topology.json working-tree modification:** node-drag view positions, modified-but-uncommitted INTENTIONALLY. Do NOT stage or discard.
 
@@ -41,11 +55,12 @@ Branch-local doc: `docs/planning/visual-editor/fade.md` (frontmatter `branch: ta
 - `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + skip-at-top-of-`Send` gate.
 - `nodes/Wiring/stdin_reader.go` + `loader.go` (`WireRegistry.ForEach`) — `"fade"` message applies the edge set.
 - `tools/topology-vscode/src/webview/three/fade.ts` — pure `computeFade` fixpoint.
-- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` + bridge emit.
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey.
+- `tools/topology-vscode/src/webview/three/store.ts` — `directlyFadedNodes/Edges` + `toggleFade` + `applyFade` helper (re-derives `data.faded` on every rebuild) + bridge emit.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — muted render + `f` hotkey + edge-tube `userData.edgeId` + `pickRequest` edge resolution.
+- `tools/topology-vscode/src/webview/state/viewer/types.ts` — `ViewerState` fade fields (`directlyFadedNodes`/`directlyFadedEdges`) + `parseViewerState` validation.
 - `tools/topology-vscode/src/extension/handle-message.ts` — relays `"fade"` to Go stdin.
 - `tools/topology-vscode/src/webview/types.ts` — `faded?: boolean` on NodeData/EdgeData.
-- `docs/planning/visual-editor/fade.md` — branch-local fade spec.
+- `docs/planning/visual-editor/fade.md` — fade spec (now main-bound; no longer branch-local).
 - `tools/bash-approve-guard.sh` — the approval hook (on main).
 
 ### Substrate model contract (stable)
