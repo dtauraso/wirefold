@@ -36,6 +36,8 @@ Propagation rules:
 
 Go holds an ignore set mirroring the TS ignore lists.
 
+**Centralized (decided).** The fade gate and `ErrFaded` handling live in one shared place in the `Wiring` layer — wrapping the `Send` boundary and the poll precondition — not copied into each per-kind node package. Per-kind node loops (`input`, `readgate`, `inhibitrightgate`, …) stay untouched; they inherit the fade behavior. This avoids the stuck-node risk of missing a kind and keeps `Drop`/gate logic in a single auditable location.
+
 - A **faded node**'s poll loop treats its precondition as unmet and returns immediately — same shape as the existing context/precondition gate (e.g. `readgate/node.go:40`, `inhibitrightgate/node.go:42`). It never fires, so it never `Send`s. Because no `Send` is issued on a faded wire, no `NotifyDelivered` is awaited, so no backpressure deadlock can form (the deadlock that a render-only fade would cause).
 - A **faded edge**: the source does not `Send` across it; the destination does not treat it as a satisfied input.
 
