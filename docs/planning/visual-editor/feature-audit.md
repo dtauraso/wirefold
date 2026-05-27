@@ -105,7 +105,7 @@ Each is infrastructure that exists in code but reaches no user today — some ne
 | Feature | Evidence (file:line) | State | Disposition question |
 |---|---|---|---|
 | Named / saved views | **REMOVED** — commit `45cee602` on branch `task/remove-saved-views`. Deleted: `SavedView` type + parse/serialize + rename-remap; `state/dimmed.ts`; `data.dimmed` in specToFlow + NodeData; `.dim` CSS; `__wirefold_test.applyDim` hook; saved-view assertions within `parseViewerState.test.ts` (file retained); saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). Build/tsc/17 unit tests clean after removal. | COMPLETE — no orphan remains | N/A |
-| Spec diff | `state/ops/diff.ts:16` (`diffSpecs` computes added/removed/rewired; comment notes "moved" detection unfinished) | TEST-ONLY — imported only by `test/diff-core.test.ts`, no app integration | Surface a diff view, or drop the module + test? |
+| Spec diff | **REMOVED** — `state/ops/diff.ts` + `test/diff-core.test.ts` deleted; `diffSpecs` had no production caller. | COMPLETE — no orphan remains | N/A |
 | Wire value label | `schema/wire-defs.ts:13,25` + Go `nodes/Wiring/loader.go:47` (`valueLabel`) | Truly dead — schema-only on both TS and Go sides, never read or rendered | Render edge value labels, or strip the prop from both layers? |
 | Fold mutators | `state/folds-state.ts:13–30` (`toggleFoldCollapse`, `updateFoldPosition`, `setFolds`) | Truly dead — zero callers anywhere; only `getFolds()` is consumed (`store.ts:10`). Complements the §3a half-wired Folds item (collapse/expand + drag-reposition built but unreachable) | Wire fold interactions, or delete the mutators? |
 
