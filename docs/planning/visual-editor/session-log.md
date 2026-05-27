@@ -145,6 +145,18 @@ Suggested cluster order: state→zustand (R1-R3) → panels→React
 
 ---
 
+## 2026-05-27 — Load-transport collapse + 3D camera persistence (task/collapse-load-transport)
+
+**Observation:** Two separate correctness flaws from feature-audit §4 (H1 and H3) both verified fixed and working in the editor.
+
+**H3 — Single-message load transport (order-fragility gone):** The old two-message protocol (`load` + `view-load`) let `view-load` arrive before `load`, silently dropping the view (the `_lastSpec` reorder cache only partially mitigated this). Collapsed into one `load` message and one `load(text)` store action that parses spec + `topology.json#view` together and builds flow once. Deleted `loadView`, `_lastSpec`, `view-load-noop` branch, `view-load` message variant, and host-side `sendView`. On-disk representations were already merged (single `topology.json` with a `view` key) by a prior effort; this collapsed only the in-memory transport.
+
+**H1 — 3D camera persistence:** The old `viewerState.camera` was RF pan/zoom only — Three.js PerspectiveCamera state was never persisted. Added `Camera3D` (position + quaternion) to viewer-state schema and parser; committed on orbit/dolly/pan/roll gesture-end via `scheduleViewSave`; restored on mount, skipping auto-fit when a saved camera exists. A follow-up fixed a React effect-deps timing bug: `camera3d` arrives async after first render, so `initialCamera3d` was added to `CameraRefBridge` effect deps + `updateMatrixWorld` called to force the matrix before the skip-auto-fit guard ran.
+
+**Outcome:** Both verified working in the editor — load preserves node positions/fade; rotate+reload restores orientation; topologies with no saved camera still auto-fit. H1 and H3 marked RESOLVED in feature-audit §4. Branch ready to merge pending sign-off.
+
+---
+
 
 ## 2026-05-14 — Integration test suite (task/integrated-substrate-tests)
 
