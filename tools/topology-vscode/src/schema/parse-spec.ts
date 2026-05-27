@@ -40,6 +40,14 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
   return spec;
 }
 
+// DIAGNOSTIC / RENDER-ONLY — must NEVER gate substrate execution.
+// This fixpoint propagates "dead node" status for editor display (red nodes,
+// parse-spec diagnostics). It deliberately mirrors the shape of substrate
+// firing-rule logic but carries none of it — the Go substrate does NOT reject
+// graphs with missing required inputs (see commit 0e8d843 and memory:
+// feedback_enforce_required_inputs). REQUIRED_INPUTS is generated from Go AST
+// so the port list cannot drift; only this editor-side propagation can.
+//
 // Returns a map of nodeId → reason string for every node that is missing a
 // required inbound edge or whose required inputs are fed only by dead nodes.
 // Uses a fixpoint: newly-dead nodes can kill downstream nodes transitively.
