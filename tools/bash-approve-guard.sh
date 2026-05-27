@@ -2,10 +2,11 @@
 # PreToolUse(Bash) approval guard. Three tiers, evaluated in order over the
 # FULL command string (so a flagged sub-command anywhere in a compound command
 # a && b ; c | d triggers the tier):
-#   CATASTROPHIC -> deny  (hard block; no approval prompt — edit this file to run)
-#   DESTRUCTIVE  -> ask   (manual approval prompt)
-#   NETWORK      -> ask   (manual approval prompt)
-#   otherwise    -> allow (runs silently)
+#   CATASTROPHIC -> deny        (hard block; no prompt — edit this file to ever run it)
+#   DESTRUCTIVE  -> pass-through (no output; Claude Code's native prompt handles it,
+#                                 so a "yes, and don't ask again" choice persists)
+#   NETWORK      -> pass-through (same — native prompt; remembered allows work)
+#   otherwise    -> allow       (silent)
 # Patterns are extended-regex (grep -E). Avoid leading "--" (BSD grep treats it
 # as a flag) — use [-][-] instead. The '>' overwrite matcher in DESTRUCTIVE is
 # the most aggressive; comment it out to reduce prompts.
@@ -82,10 +83,10 @@ for pat in "${CATASTROPHIC_PATTERNS[@]}"; do
   if printf '%s' "$cmd" | grep -Eq "$pat"; then emit deny "catastrophic command blocked"; exit 0; fi
 done
 for pat in "${DESTRUCTIVE_PATTERNS[@]}"; do
-  if printf '%s' "$cmd" | grep -Eq "$pat"; then emit ask "destructive pattern matched"; exit 0; fi
+  if printf '%s' "$cmd" | grep -Eq "$pat"; then exit 0; fi
 done
 for pat in "${NETWORK_PATTERNS[@]}"; do
-  if printf '%s' "$cmd" | grep -Eq "$pat"; then emit ask "network pattern matched"; exit 0; fi
+  if printf '%s' "$cmd" | grep -Eq "$pat"; then exit 0; fi
 done
 emit allow "no flagged pattern matched"
 exit 0
