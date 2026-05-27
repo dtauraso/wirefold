@@ -4,7 +4,7 @@
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items.
+**Scorecard:** 26 features implemented and working; 15 cutover-debt items (10 restore-parity, 4 half-wired, 1 not-started); 1 never-specced decision point; 3 accepted-for-build items; 4 dead-code orphans (§3d).
 
 > **Re-verified 2026-05-26** against post-architecture-audit code. Undo/redo moved from half-wired to not-started (no history.ts, no pushSnapshot exists). Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 
@@ -94,6 +94,21 @@ Items promoted because real use justified building them. These are committed wor
 | 1 | Bend points / waypoints on orthogonal edges | M-L | Generalizes the cutover-debt "Edge midpoint drag" (§3a) from a single midpoint to arbitrary waypoints; per-edge persisted state threaded through schema + adapters. |
 | 2 | Multi-node alignment guides | S | Generalizes existing single-node drag guides/snap to a multi-selection's collective bounding box. Gated behind multi-select restore (§3a cutover debt). |
 | 3 | Undo coalescing at gesture level | S | One undo entry per drag gesture (snapshot on pointer-up, not per pointer-move). This is a from-scratch undo/redo build (§3a undo is not-started, not half-wired). |
+
+---
+
+### 3d. Dead-Code Orphans — built/specced, never surfaced (sweep 2026-05-27)
+
+These are not in any active backlog; each is infrastructure that exists in code but reaches no user. Decide per item: wire it up, or delete it as fossil.
+
+| Feature | Evidence (file:line) | State | Disposition question |
+|---|---|---|---|
+| Named / saved views | `state/viewer/types.ts:23,54,88` (SavedView type, `views?` array, parse); `ops/rename.ts:31` (nodeId remap on rename); orphan comments `main.tsx:57` ("saved-views panel"), `webview.css:168` ("views panel") | Full read/parse/rename plumbing but NO create/add-view path and NO UI; `SavedView.viewport` field entirely unused | Build the saved-views panel, or remove the type + plumbing? |
+| Spec diff | `state/ops/diff.ts:16` (`diffSpecs` computes added/removed/rewired; comment notes "moved" detection unfinished) | TEST-ONLY — imported only by `test/diff-core.test.ts`, no app integration | Surface a diff view, or drop the module + test? |
+| Wire value label | `schema/wire-defs.ts:13,25` + Go `nodes/Wiring/loader.go:47` (`valueLabel`) | Truly dead — schema-only on both TS and Go sides, never read or rendered | Render edge value labels, or strip the prop from both layers? |
+| Fold mutators | `state/folds-state.ts:13–30` (`toggleFoldCollapse`, `updateFoldPosition`, `setFolds`) | Truly dead — zero callers anywhere; only `getFolds()` is consumed (`store.ts:10`). Complements the §3a half-wired Folds item (collapse/expand + drag-reposition built but unreachable) | Wire fold interactions, or delete the mutators? |
+
+> `midpointOffset` (§3a item 10) and sublabel inline edit (§3a item 6) were also surfaced by the same sweep but are already tracked there and are not duplicated here.
 
 ---
 
