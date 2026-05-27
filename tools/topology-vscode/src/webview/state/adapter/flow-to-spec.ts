@@ -1,5 +1,5 @@
 // Reverse adapter: RF state → Spec.
-// Mirrors spec-to-flow.ts field-by-field. Position/sublabel/foldId/dimmed/state
+// Mirrors spec-to-flow.ts field-by-field. Position/sublabel/foldId/state
 // are viewer-only and are NOT written into the spec. edgeData and nodeData are
 // carried verbatim so simulator-relevant fields survive the round-trip.
 // currentSpec provides passthrough for top-level metadata fields via TOPOLOGY_META_FIELDS

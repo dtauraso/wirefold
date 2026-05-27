@@ -68,17 +68,6 @@ describe("parseViewerState", () => {
     expect(v.lastSelectionIds).toEqual(["a", "b"]);
   });
 
-  it("views drops malformed entries but keeps valid ones", () => {
-    const v = parseViewerState(JSON.stringify({
-      views: [
-        { name: "good", nodeIds: ["a", "b"] },
-        { name: 7, nodeIds: ["c"] },           // bad name
-        { name: "bad", nodeIds: [1, 2] },      // bad nodeIds
-      ],
-    }));
-    expect(v.views).toEqual([{ name: "good", nodeIds: ["a", "b"] }]);
-  });
-
   it("folds drops entries with missing required fields", () => {
     const v = parseViewerState(JSON.stringify({
       folds: [

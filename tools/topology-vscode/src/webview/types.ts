@@ -58,7 +58,6 @@ export interface NodeData {
   z?: number;
   sublabel?: string;
   foldId?: string;
-  dimmed?: boolean;
   state?: Record<string, StateValue>;
   /** Set when a required inbound edge is missing; causes the node to render with a red border. */
   validationError?: string;

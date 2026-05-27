@@ -4,7 +4,7 @@ import type { StateValue } from "../../../schema";
 import { isObj } from "../../../schema/parse-primitives";
 import type {
   Camera, EdgeView, Fold, LegacyCameraBox,
-  NodeView, SavedView,
+  NodeView,
 } from "./types";
 
 export { isObj };
@@ -25,17 +25,6 @@ export function parseCamera(v: unknown): Camera | LegacyCameraBox | undefined {
     return { x: v.x, y: v.y, w: v.w, h: v.h };
   }
   return undefined;
-}
-
-export function parseSavedView(v: unknown): SavedView | undefined {
-  if (!isObj(v)) return undefined;
-  if (!isStr(v.name) || !isStrArr(v.nodeIds)) return undefined;
-  const out: SavedView = { name: v.name, nodeIds: v.nodeIds };
-  if (isObj(v.viewport) && isNum(v.viewport.x) && isNum(v.viewport.y) &&
-      isNum(v.viewport.w) && isNum(v.viewport.h)) {
-    out.viewport = { x: v.viewport.x, y: v.viewport.y, w: v.viewport.w, h: v.viewport.h };
-  }
-  return out;
 }
 
 export function parseFold(v: unknown): Fold | undefined {

@@ -7,11 +7,6 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .timeline-panel { z-index: 10; }
 .react-flow__controls { bottom: 56px !important; }
 .rf-anim-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-/* Dim the inner body, not the wrapper, so box-shadow / outline halos
-   (diff-added / diff-removed / diff-moved) keep full opacity even when
-   the node is dimmed by a saved-view focus. */
-.react-flow__node.dim > * { opacity: 0.18; transition: opacity 0.18s ease; }
-.react-flow__edge.dim { opacity: 0.18; transition: opacity 0.18s ease; }
 .react-flow__edge.selected .react-flow__edge-path { stroke-width: 3 !important; }
 .react-flow__edge:hover .react-flow__edge-path { stroke-width: 2.5; }
 .dirty { color: #c62828; font-weight: 600; }
@@ -27,8 +22,6 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .run-error { color: #c62828; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-probe-stuck { color: #c62828; font-weight: 600; margin-left: 8px; cursor: text; user-select: text; }
 
-.node.dim, g[data-edge-id].dim { opacity: 0.15; transition: opacity 0.18s ease; }
-.node:not(.dim), g[data-edge-id]:not(.dim) { transition: opacity 0.18s ease; }
 
 .timeline-panel {
   position: fixed; bottom: 8px; left: 8px;
@@ -115,8 +108,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 
 /* ─── Comparison-mode decoration ─────────────────────────────────────
  * Halos render *outside* the node body so playback flashes (which paint
- * the body) stay uncontaminated. Halos punch through .dim per phase-5
- * spec — the node body dims to ~18% but the halo stays at full opacity.
+ * the body) stay uncontaminated.
  */
 .react-flow__node.diff-added {
   box-shadow: 0 0 0 3px #2e7d32, 0 0 0 5px rgba(46, 125, 50, 0.25);
@@ -149,7 +141,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
   pointer-events: none;
 }
 /* When a node is both .ghost and a diff category, keep the halo bright
-   even though the body is faded — same punch-through rule as .dim. */
+   even though the body is faded. */
 .react-flow__node.ghost.diff-removed,
 .react-flow__node.ghost.diff-moved {
   opacity: 0.35;
