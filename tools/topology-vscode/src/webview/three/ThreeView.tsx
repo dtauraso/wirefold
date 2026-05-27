@@ -175,11 +175,13 @@ function GraphNode({
   selected,
   connectPending,
   hovered,
+  faded,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
   connectPending: boolean;
   hovered: boolean;
+  faded: boolean;
 }) {
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
@@ -205,6 +207,7 @@ function GraphNode({
   );
 
   const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
+  const fadeOpacity = 0.25;
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
@@ -214,6 +217,8 @@ function GraphNode({
           color={fillColor}
           emissive={emissiveFill}
           emissiveIntensity={flagged ? 0.4 : 0}
+          transparent={faded}
+          opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
       <mesh>
@@ -222,6 +227,8 @@ function GraphNode({
           color={strokeColor}
           emissive={emissiveStroke}
           emissiveIntensity={flagged ? 0.5 : 0}
+          transparent={faded}
+          opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
     </group>
@@ -293,7 +300,7 @@ function PulseBead({
   );
 }
 
-function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData> }) {
+function SingleEdgeTube({ edgeId, src, tgt, faded }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean }) {
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
   const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
   const { curve, arcLength, tubeGeo } = useMemo(() => {
@@ -319,10 +326,12 @@ function SingleEdgeTube({ edgeId, src, tgt }: { edgeId: string; src: RFNode<Node
           color="#5599cc"
           emissive={new THREE.Color(0x2255aa)}
           emissiveIntensity={0.8}
+          transparent={faded}
+          opacity={faded ? 0.25 : 1}
         />
       </mesh>
       {/* Pulse bead: stronger highlight traveling source → target */}
-      <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />
+      {!faded && <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />}
     </>
   );
 }
@@ -340,7 +349,7 @@ function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} />;
       })}
     </>
   );
@@ -614,6 +623,7 @@ function Scene({
           selected={n.id === selectedId}
           hovered={n.id === hoveredId}
           connectPending={n.id === connectPendingId}
+          faded={!!n.data?.faded}
         />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} />
@@ -1189,6 +1199,7 @@ export function ThreeView() {
   const edges = useThreeStore((s) => s.edges);
   const storeMoveNode = useThreeStore((s) => s.moveNode);
   const storeCreateEdge = useThreeStore((s) => s.createEdge);
+  const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
@@ -1270,10 +1281,15 @@ export function ThreeView() {
         e.preventDefault();
         if (e.shiftKey) redo(); else undo();
       }
+      // "f": toggle fade on the selected element.
+      if (e.key === "f" && !mod && selectedId) {
+        const isEdge = edges.some((ed) => ed.id === selectedId);
+        toggleFade({ kind: isEdge ? "edge" : "node", id: selectedId });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selectedId, edges, toggleFade]);
 
   const { onPointerDown, onPointerMove, onPointerUp, onWheel } = useInteractionControls(
     cameraRef,
