@@ -9,6 +9,7 @@ branch: main
 - **2026-05-27** Cross-cut analysis and reduction proposals added; undo/redo removed from audit (fade animation replaced its one real responsibility); old view-only fold feature (Fold type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId`, fold tests/e2e) fully removed (commit `9d4091c5`). New file-dive fold proposal captured under Folds & containment.
 - **2026-05-26** Re-verified against post-architecture-audit code. Undo/redo moved from half-wired to not-started. Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 - **2026-05-27** (restructure) Reorganized into consistent per-feature template; summary table regenerated; categories grouped by `##` heading; features sorted high→low within each category.
+- **2026-05-28** Pulse substrate transport refactor complete (Phases 1–4, commits `0572704a`–`d6ba967e`): `arcLength`+`simLatencyMs` on `PacedWire`; emitted on `send` trace events; `pump.ts` consumes `simLatencyMs` directly; `PULSE_SPEED_WU_PER_MS` and Bezier arcLength recompute removed from render layer; latency-live on node drag via `NodeMoveRegistry` + IPC. Cross-cut count: 8 → 4. RESOLVED.
 
 ---
 
@@ -25,7 +26,7 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 | Feature | Status | Cross-cut weight | Surfaces | Files | Proposal type |
 |---|---|---|---|---|---|
 | **Substrate** | | | | | |
-| Pulse bead + delivered handshake | working | **High** (structural: Go↔TS pacing contract locked by contract test) | pump · Go substrate · store · messages · schema · 3D render | 8 | store-subscribe (Strategy B: TS owns animation semantics) |
+| Pulse bead + delivered handshake | working | **RESOLVED** (8→4 files; substrate-owned transport timing landed, commits `0572704a`–`d6ba967e`) | pump · Go substrate · Trace · 3D render | 4 | — (complete; render layer is pure consumer) |
 | Run/pause/stop controls (runStatus) | working | **High** (structural: threads extension→messages→pulse-state) | store · extension · messages · 3D render · pulse-state | 7 | store-subscribe |
 | Paced wire substrate | working | **Low** (local: TS sees only trace events; Go internals opaque) | Go substrate only | 5 Go | already-minimal (hard boundary at pump.ts) |
 | Ring-topology deadlock break | working | **Low** (local: startup concern, no TS surface change) | Go substrate · e2e | 2 | already-minimal (irreducible minimum) |
@@ -65,30 +66,24 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 
 ### Pulse bead animation + delivered handshake
 
-**Status:** working
+**Status:** working — **RESOLVED** (substrate-owned transport timing; commits `0572704a`–`d6ba967e` on `task/pulse-substrate-transport`)
 
-**Files:**
-- `tools/topology-vscode/src/webview/three/PulseBead.tsx` (in `scene-content.tsx`)
-- `tools/topology-vscode/src/webview/pump.ts`
-- `tools/topology-vscode/src/webview/pulse-state.ts`
-- `tools/topology-vscode/src/webview/animation-fields.ts`
-- `tools/topology-vscode/src/webview/store.ts`
-- `tools/topology-vscode/src/webview/types.ts`
-- `nodes/Wiring/Trace/Trace.go`
-- `tools/topology-vscode/test/contracts/trace-event-fields.test.ts`
+**Files (post-refactor, 4 files):**
+- `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs` const; substrate owns transport duration
+- `nodes/Wiring/Trace/Trace.go` — `send` events now emit `arcLength` + `simLatencyMs`
+- `tools/topology-vscode/src/webview/pump.ts` — consumes `simLatencyMs` from trace; no clock fabrication
+- `tools/topology-vscode/src/webview/three/scene-content.tsx` — pure render consumer; `PULSE_SPEED_WU_PER_MS` const and Bezier arcLength recompute removed
 
-**Cross-cuts:** Surfaces: pump · Go substrate (Trace) · store · messages · extension · schema (animation-fields) · 3D render · save/load. Distinct files: 8. Weight: **High** (structural: `pump.ts` is the Go↔TS pacing contract; every trace-event field name is locked by a contract test).
+**Removed by refactor:**
+- `pulse-state.ts` `startTime`/wallclock-duration fabrication (replaced by substrate `simLatencyMs`)
+- `scene-content.tsx:167` hardcoded `PULSE_SPEED_WU_PER_MS = 0.08`
+- `scene-content.tsx:228` arcLength recompute from Bezier control points
 
-**Reduction proposal:**
-- Axis: Go's channel/`PacedWire` is rendezvous-instant — no "value is on the wire" state. TS fabricates bead duration as wallclock animation, creating two clocks (sim-time vs wallclock) and a derived TS-side cache (`pulse-state.ts`) that must be kept in sync with the trace stream by `pump.ts`. The "8-file cross-cut" is a symptom of this seam, not duplication.
-- Strategy: **Move transport duration into the substrate.** `PacedWire` holds a sent value for a sim-time window before the receiver can rendezvous with it — "in-flight" becomes a phase of the wire state machine, not a render-only construct. Trace emits `transport-start(simTime=t0)` and `transport-end(simTime=t1)`; TS animates the interval `[t0,t1]` and does no clock fabrication. `pulse-state.ts` collapses (wire state IS the pulse); pause/sim-speed fall out for free.
-- Expected post-change cross-cut count: **8 → ~3** (Go `PacedWire` + Trace envelope + TS render reader). `pulse-state.ts`, `animation-fields.ts`-as-source-of-truth, and the bead-duration policy in `pump.ts` all go away.
-- Resolved model: **uniform pulse speed in pixels-per-sim-step (one global constant); per-wire `simLatency` = visible-length ÷ that constant.** Longer wires take more sim-steps to traverse, by design — visible wire length is the physical authoring surface for transport latency. Bead and downstream-firing always coincide because both are functions of the same sim-time. Layout geometry feeds substrate timing intentionally; this relaxes the "substrate is a pure function of spec, layout is render-policy" rule for transport latency only (positions become substrate-relevant input, not pure render-state).
-- Consequences to design for: (a) save/load must include positions to reproduce a run; viewer-state positions are no longer purely cosmetic. (b) Dragging a node during a run changes that wire's `simLatency` — decide whether latency is captured at send-time (in-flight beads keep their original latency) or recomputed live (drag mid-flight stretches/squeezes the bead). (c) AND-gate/round-close ordering is layout-dependent; canonical positions are required for headless/test execution.
-- Blockers resolved:
-  1. **MODEL.md gate — open.** MODEL.md already names `arcLength`, `pulseSpeed`, `inFlightTime = arcLength / pulseSpeed`, and `in-flight(v)` as substrate vocabulary (lines 33–47, 178–187). No model revision needed; implementation is *behind* the model.
-  2. **Trace.Event field audit — done.** Existing emitted fields (`step`, `kind`, `node`, `port`, `value`, `edge`, slot `phase`/`nodeId`) are all substrate-truth and stay. Render-policy fields (`pulse-state.ts:startTime`, `pump.ts` wallclock-duration fabrication, hardcoded `PULSE_SPEED_WU_PER_MS` in `scene-content.tsx:167`, `arcLength` recomputed in `scene-content.tsx:228`) live entirely TS-side — the trace doesn't carry them today, the renderer fabricates them. **Missing from trace:** `arcLength`, `pulseSpeed`, explicit `in-flight-start`/`in-flight-end` events, `arrives`. The refactor *promotes* these into the substrate rather than deleting them from the trace.
-  3. **Latency policy — decided: latency-live (Option B).** Wire's traversal time tracks current geometry; dragging a node mid-flight reshapes the in-flight bead and shifts its arrival sim-time. Consistent extension of the "layout feeds substrate timing" choice — bead is always on the wire you see, downstream lights up at the geometric endpoint. Cost: a run's reproducibility requires position-over-time, not just initial positions; headless mode requires frozen positions.
+**Latency-live (drag):** `nodes/Wiring/stdin_reader.go` `NodeMoveRegistry` recomputes `simLatencyMs` on node-move IPC messages and emits `latency-changed` trace events; `pump.ts` adjusts in-flight bead timing on receipt.
+
+**Cross-cuts:** Distinct files: **4** (down from 8). Weight: minimal — render layer is a pure consumer; no clock fabrication, no dual-clock seam.
+
+**Reduction proposal:** Complete. No further action.
 
 ---
 

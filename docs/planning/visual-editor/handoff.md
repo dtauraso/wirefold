@@ -7,24 +7,40 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — branch task/pulse-substrate-transport; design resolved, no code yet)
+## State at handoff (2026-05-28 — branch task/pulse-substrate-transport; Phases 1–4 complete; pending user runtime verify)
 
-- **Active branch:** `task/pulse-substrate-transport` (pushed; tracks origin). Task: cross-cut refactor (a) from feature-audit — collapse pulse/pump duplication by moving transport duration into the substrate. **Design phase complete; first code change not yet picked.** Working tree clean except the usual `topology.json` drift.
-- **Items 1–3 from prior KNOWN ISSUES are PARKED** — do not surface them until this cross-cut work lands. (Drag-to-wire, port-incompat wiring, pre-existing test failures.)
+- **Active branch:** `task/pulse-substrate-transport` (pushed). All code work done. Pending: user runtime verify before merge to main (substrate-touching merge requires user sign-off per project rules).
+- **Items 1–3 from KNOWN ISSUES are un-parked** — drag-to-wire, port-incompat wiring, pre-existing test failures are back on the menu after this lands.
 
-### Pulse substrate transport — resolved design (this session)
+### What landed (Phases 1–4)
 
-- **Model chosen:** uniform pulse speed in pixels-per-sim-step (one global constant); per-wire `simLatency = arcLength / pulseSpeed`. Longer wires take more sim-steps to traverse. Layout geometry intentionally feeds substrate timing — relaxes the "substrate is a pure function of spec, layout is render-policy" rule for transport latency only.
-- **Latency policy: B (latency-live).** Wire's traversal time tracks current geometry; dragging a node mid-flight reshapes the in-flight bead and shifts its arrival sim-time. Bead is always on the wire as drawn; downstream lights up at the geometric endpoint. Cost: reproducibility needs position-over-time, headless mode requires frozen positions.
-- **MODEL.md gate is OPEN.** MODEL.md (lines 33–47, 178–187) already names `arcLength`, `pulseSpeed`, `inFlightTime = arcLength / pulseSpeed`, and `in-flight(v)` as substrate vocabulary. No model revision needed — implementation is *behind* the model, not the other way around.
-- **Trace.Event field audit done.** Substrate-truth fields stay (`step`, `kind`, `node`, `port`, `value`, `edge`, slot `phase`/`nodeId`). Render-policy fields are entirely TS-side fabrications (`pulse-state.ts:18 startTime`, `pump.ts` wallclock-duration math, hardcoded `PULSE_SPEED_WU_PER_MS = 0.08` at `scene-content.tsx:167`, `arcLength` recomputed from Bezier at `scene-content.tsx:228`). **Missing from trace, must be added:** `arcLength`, `pulseSpeed`, `in-flight-start`/`in-flight-end` events (or augmented `send`), `arrives`. The refactor *promotes* these into the substrate rather than deleting them.
-- **Audit entry (`docs/planning/visual-editor/feature-audit.md`) updated** with the resolved model + decided latency policy + blocker resolutions. Commits on this branch: `f4b8fe5f` (replaced old Strategy B), `89266648` (uniform-speed resolution), `c39fc8e7` (blockers resolved).
+All commits on branch beyond main:
 
-### First code change — not picked yet
+- `0572704a` — `ArcLength`/`SimLatencyMs` fields + `PulseSpeedWuPerMs` const on `PacedWire` (`nodes/Wiring/paced_wire.go`).
+- `d87beaff` — `specNode.Position` threaded from `view.nodes` into wire construction; `arcLength` computed at wire-build time (`nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`).
+- `cdc79e45` — Updated `NewPacedWire()` call sites in tests.
+- `ac002dc8` — `send` trace events now emit `arcLength` + `simLatencyMs` (`nodes/Wiring/Trace/Trace.go`).
+- `5a2efac3` — `simLatencyMs` added to `PulseData` in `pulse-state.ts`.
+- `7e4ded20` — `pump.ts` consumes `simLatencyMs` from trace; no wallclock fabrication, no dual-clock seam.
+- `2d3a256b` — `PULSE_SPEED_WU_PER_MS` constant and Bezier arcLength recompute deleted from `scene-content.tsx`; render layer is now a pure consumer.
+- `d2ecdc0d` — `NodeMoveRegistry` in `nodes/Wiring/stdin_reader.go`: recomputes `simLatencyMs` on node-move messages; emits `latency-changed` trace events. Latency-live on drag.
+- `843694bf` — TS node-move IPC + `latency-changed` trace event wiring (`pump.ts`, `pulse-state.ts`).
+- `d6ba967e` — Throttled node-move drag emission in `interaction-controls.ts`; `pump.ts` latency-changed handler.
+- `55794c30` — `maps.Copy` cleanup in `stdin_reader.go` (lint nit).
 
-The natural first commit is making `arcLength` real on the Go side: thread the wire's spec-time geometry (source/target positions → straight-line distance) into `PacedWire` at construction, and emit it on `send` trace events. That unblocks pump.ts to stop computing arcLength from Bezier curves and pulse-state.ts to stop being the cache. But it requires the spec → loader path to thread position info into wires — a real chunk, not a one-liner.
+**Net effect:** Transport duration is substrate-owned. The 8-file cross-cut (pump · Go substrate · store · messages · schema · 3D render · pulse-state · animation-fields) is now 4 files (paced_wire · Trace · pump · scene-content). `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. Dragging a node live updates every connected wire's `simLatencyMs` via `NodeMoveRegistry`.
 
-Alternative smaller readiness step: add `arcLength` to the spec schema as a field with no consumer yet, then wire consumers incrementally. Decide before next code edit.
+### Build / test gate (verified 2026-05-28)
+
+- `go build ./... && go test ./...` — all pass.
+- `npx tsc --noEmit` — clean.
+- `npm run build` — `out/webview.js` refreshed (1.1 MB).
+
+### KNOWN ISSUES (back on the menu after merge)
+
+1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; was parked.
+2. **Port-incompat wiring** — no visual guard when connecting incompatible port types; was parked.
+3. **Pre-existing test failures** — investigate before next task branch.
 
 ### Prior main-branch state (unchanged this session)
 
@@ -70,12 +86,10 @@ Alternative smaller readiness step: add `arcLength` to the spec schema as a fiel
 
 ### KNOWN ISSUES (candidate next work)
 
-**Active focus: cross-cut refactors (feature-audit top 4).** Items 1–3 below are PARKED — do not mention or surface them until the cross-cut work is done.
-
-1. *(parked)*
-2. *(parked)*
-3. *(parked)*
-4. **Cross-cut refactors** — feature-audit top 4: (a) Pulse/pump schema single-source + codegen; (b) runStatus store-subscribe to remove prop-drilling; (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts`; (d) explicit viewer-state derivation from spec.
+1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle (was parked during pulse transport work; back on the menu).
+2. **Port-incompat wiring** — no visual guard when connecting incompatible port types (was parked; back on the menu).
+3. **Pre-existing test failures** — investigate before next task branch (was parked; back on the menu).
+4. **Cross-cut refactors (remaining)** — feature-audit top 3 remaining: (b) runStatus store-subscribe to remove prop-drilling; (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts`; (d) explicit viewer-state derivation from spec. Cross-cut (a) Pulse/pump is RESOLVED (this branch).
 5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
 6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
 
@@ -84,8 +98,11 @@ Alternative smaller readiness step: add `arcLength` to the spec schema as a fiel
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`.
 - `tools/topology-vscode/src/webview/three/store.ts` — thin Zustand store; fade in `fade-actions.ts`, edge creation in `edge-creation.ts`.
 - `tools/topology-vscode/src/webview/three/fade.ts` — `computeFade` fixpoint (render-mask only).
-- `tools/topology-vscode/src/schema/node-defs.ts` — generated node defs (now in spec layer); `src/schema/parse-spec.ts` — `requiredInputDiagnostics` (editor-diagnostic only).
-- `nodes/Wiring/paced_wire.go` — `faded` flag + `SetFaded` + `Send` gate. `nodes/input/node.go` — Input node (also serves bootstrap role).
+- `tools/topology-vscode/src/schema/node-defs.ts` — generated node defs (spec layer); `src/schema/parse-spec.ts` — `requiredInputDiagnostics` (editor-diagnostic only).
+- `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs`; `faded` flag + `SetFaded` + `Send` gate.
+- `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `simLatencyMs` recompute → `latency-changed` trace events.
+- `nodes/Wiring/loader.go` — threads node positions into wire construction for initial `arcLength`.
+- `nodes/input/node.go` — Input node (also serves bootstrap role).
 
 ### Substrate model contract (stable)
 
