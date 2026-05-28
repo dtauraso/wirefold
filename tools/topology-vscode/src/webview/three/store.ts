@@ -11,8 +11,8 @@ import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 import { vscode } from "../vscode-api";
-import { clearPulse, getPulseMap, patchPulse } from "./pulse-state";
-import { rfArcLength, arcLengthToSimLatencyMs } from "./geometry-helpers";
+import { clearPulse, getPulseMap, patchPulse, setCurve } from "./pulse-state";
+import { rfArcLength, arcLengthToSimLatencyMs, buildEdgeCurve } from "./geometry-helpers";
 import { getPauseAdjustedNow } from "../state/run-status";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
@@ -89,6 +89,14 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         fadeEdgeOrder,
       });
       setSpecMeta(spec);
+      // Populate curve store synchronously after load so PulseBead can read
+      // curves before the first React commit completes.
+      const nodeMapForLoad = new Map(nodes.map((n) => [n.id, n]));
+      for (const edge of edges) {
+        const s = nodeMapForLoad.get(edge.source);
+        const t = nodeMapForLoad.get(edge.target);
+        if (s && t) setCurve(edge.id, buildEdgeCurve(s, t));
+      }
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
       console.error("[ThreeStore] load failed", err);
@@ -115,6 +123,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     if (!result) return null;
     const nextEdges = [...edges, result.newEdge];
     set({ edges: nextEdges });
+    // Populate curve store for the new edge synchronously.
+    const srcNode = nodes.find((n) => n.id === sourceId);
+    const tgtNode = nodes.find((n) => n.id === targetId);
+    if (srcNode && tgtNode) setCurve(result.id, buildEdgeCurve(srcNode, tgtNode));
     scheduleSave();
     return result.id;
   },
@@ -130,16 +142,21 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     // bead speed stays at the uniform 0.08 wu/ms target during drag, without
     // waiting for the Go latency-changed trace event (which lags by one IPC round-trip).
     // The latency-changed handler in pump.ts remains as a reconciliation safety net.
+    // Curve store is updated for ALL touching edges (not just in-flight) so the
+    // next pulse always reads the correct geometry without a React-commit lag.
     const pulseMap = getPulseMap();
     const now = getPauseAdjustedNow();
     for (const edge of edges) {
       if (edge.source !== id && edge.target !== id) continue;
-      const pulse = pulseMap.get(edge.id);
-      if (!pulse) continue;
       // Use the NEW position for the dragged node, current position for the other.
       const srcNode = nextNodes.find((n) => n.id === edge.source);
       const tgtNode = nextNodes.find((n) => n.id === edge.target);
       if (!srcNode || !tgtNode) continue;
+      // Always update curve store synchronously so PulseBead reads the new geometry
+      // in the same useFrame tick without waiting for a React commit.
+      setCurve(edge.id, buildEdgeCurve(srcNode, tgtNode));
+      const pulse = pulseMap.get(edge.id);
+      if (!pulse) continue;
       const newArcLength = rfArcLength(
         srcNode.position.x, srcNode.position.y,
         tgtNode.position.x, tgtNode.position.y,

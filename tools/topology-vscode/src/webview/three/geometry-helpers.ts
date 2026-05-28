@@ -5,6 +5,41 @@ import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 
 // ---------------------------------------------------------------------------
+// Edge curve
+// ---------------------------------------------------------------------------
+
+/**
+ * Point on the sphere surface of `node` facing toward `other`.
+ * Matches the surfacePoint() logic in scene-content.tsx — kept in sync.
+ */
+function surfacePointForNodes(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Vector3 {
+  const origin = nodeWorldPos(node);
+  const target = nodeWorldPos(other);
+  const r = nodeRadius(node);
+  const dir = target.clone().sub(origin).normalize();
+  return origin.clone().addScaledVector(dir, r);
+}
+
+/**
+ * Build the QuadraticBezierCurve3 for an edge between two nodes.
+ * Control-point math matches SingleEdgeTube's useMemo exactly.
+ * Called from moveNode (synchronous, same drag tick) and from initial load / createEdge.
+ */
+export function buildEdgeCurve(
+  src: RFNode<NodeData>,
+  tgt: RFNode<NodeData>,
+): THREE.QuadraticBezierCurve3 {
+  const p0 = surfacePointForNodes(src, tgt);
+  const p2 = surfacePointForNodes(tgt, src);
+  const mid = p0.clone().add(p2).multiplyScalar(0.5);
+  const edgeDir = p2.clone().sub(p0).normalize();
+  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+  const span = p0.distanceTo(p2);
+  const p1 = mid.clone().addScaledVector(lift, span * 0.25);
+  return new THREE.QuadraticBezierCurve3(p0, p1, p2);
+}
+
+// ---------------------------------------------------------------------------
 // Node geometry
 // ---------------------------------------------------------------------------
 
