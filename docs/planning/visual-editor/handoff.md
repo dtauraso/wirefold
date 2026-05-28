@@ -7,13 +7,20 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — feature-audit pruned + HTML audit site shipped)
+## State at handoff (2026-05-28 — audit board status cleanup)
 
-- **Active branch:** `main`. Local + origin/main in sync at `da4804f0`.
-- Working tree: `topology.json` modified (pre-existing this session, untouched by all session work).
-- Build/test gate last verified at the pulse-substrate-transport merge (2026-05-28). Only code-affecting change this session: removed dead `getPauseAdjustedNow` import from `pump.ts` (covered by tsc clean check at that commit).
+- **Active branch:** `main`. Local + origin/main in sync at `6a1b2c99`.
+- Working tree: `topology.json` modified (pre-existing, untouched this session).
+- Build/test gate last verified at the pulse-substrate-transport merge (2026-05-28). This session was docs-only.
 
-### What this session did (commits ~467b40c3–da4804f0 on main)
+### What this session did (commits a45ebcae, 6a1b2c99 on main)
+
+1. **Introduced REWORK verification status** (orange badge) in `feature-audit/styles.css` for features that need to be redone rather than removed.
+2. **Re-classified billboarded-node-labels and arcball-camera-controls** from NEEDS_REMOVAL → REWORK in `data.js` and per-feature HTML.
+3. **Removed fold-containment from the audit site** (`features/fold-containment.html` deleted, entry removed from `data.js`). Old fold was already gone from code; the redesign note is parked outside the actionable board.
+4. **Dropped fold KNOWN_ISSUE** from handoff.
+
+### Prior session (commits ~467b40c3–da4804f0 on main)
 
 1. **Removed dead `getPauseAdjustedNow` import** from `tools/topology-vscode/src/webview/three/pump.ts` (commit `467b40c3`).
 
@@ -36,8 +43,8 @@ read this file first (no chat history needed) and proceed.
 
 The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists all 15 remaining features. Four are flagged as needs-work:
 
-- **`billboarded-node-labels`** — half-wired, NEEDS_REMOVAL verification. Defects: wrong position relative to nodes, wrong text format, possibly missing label content.
-- **`arcball-camera-controls`** — half-wired, NEEDS_REMOVAL verification. Rotation has an issue; click-to-activate for XY drag may be the wrong activation model. Per CLAUDE.md `interaction-control-is-substance` rule, this is substance, not a medium choice.
+- **`billboarded-node-labels`** — REWORK. Defects: wrong position relative to nodes, wrong text format, possibly missing label content.
+- **`arcball-camera-controls`** — REWORK. Rotation has an issue; click-to-activate for XY drag may be the wrong activation model. Per CLAUDE.md `interaction-control-is-substance` rule, this is substance, not a medium choice.
 - **`validation-flag-colors`** — code reads correctly, UNCHECKED (user has not hands-on verified).
 - **`two-click-edge-creation`** — code reads correctly, UNCHECKED (user has not hands-on verified).
 
