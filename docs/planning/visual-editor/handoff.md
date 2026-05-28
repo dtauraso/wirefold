@@ -7,10 +7,11 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — branch task/pulse-substrate-transport; Phases 1–6 complete)
+## State at handoff (2026-05-28 — pulse substrate transport merged to main)
 
-- **Active branch:** `task/pulse-substrate-transport` (pushed). All code work done. Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms is genuinely uniform across all wires; TS→Go relationship is strictly one-way.
-- **Items 1–3 from KNOWN ISSUES are un-parked** — drag-to-wire, port-incompat wiring, pre-existing test failures are back on the menu after this lands.
+- **Active branch:** `main`. `task/pulse-substrate-transport` merged 2026-05-28 (commit range `0572704a`–`2662baa4`); branch deleted local + remote.
+- Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
+- **Items 1–3 from KNOWN ISSUES are un-parked** — drag-to-wire, port-incompat wiring, pre-existing test failures are back on the menu.
 
 ### What landed (Phases 1–6)
 
