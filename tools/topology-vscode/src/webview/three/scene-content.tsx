@@ -16,6 +16,7 @@ import {
   nodeRadius,
   boundingBox,
   nodeWorldPos,
+  nodeTopWorldPos,
   ndcToPixel,
 } from "./geometry-helpers";
 import { CURVE_PARAM_BULGE_FACTOR } from "../../schema/curve-params";
@@ -342,7 +343,7 @@ export function LabelProjector({
     // This is much cheaper than every frame while still tracking well visually.
     if (frameCountRef.current % 2 !== 0) return;
     const positions = nodes.map((n) => {
-      const world = nodeWorldPos(n);
+      const world = nodeTopWorldPos(n);
       world.project(camera);
       const { px, py } = ndcToPixel(world.x, world.y, size);
       return { id: n.id, px, py };
