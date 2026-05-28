@@ -13,7 +13,7 @@
   <div class="detail-header">
     <span class="badge badge-working">working</span>
     <span class="badge badge-cat">Persistence</span>
-    <span class="badge badge-weight-Medium">cross-cut: Medium</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
     <span class="badge badge-VERIFIED">VERIFIED</span>
   </div>
 
@@ -29,12 +29,12 @@
 
   <section>
     <h2>Reduction proposal</h2>
-    <div class="proposal-block">unify — make viewer/parse.ts return a typed result whose inferred type IS ViewerState, eliminating separately maintained types.ts. Expected: 6 → 5 files.</div>
+    <div class="proposal-block">REMOVED 2026-05-28 — re-audit: viewer/types.ts is the schema of truth, not a separately-maintained duplicate. parse.ts contains only parser functions; you cannot delete types.ts and infer ViewerState from it. The 6→5 reduction is illusory; the real cost would be burying a 30-line typedef inside a parser function and losing readable schema. Adding a new field is 4 hand-edits today (types.ts, parse.ts, viewer-state.ts default, consumer) and would still be 4 after.</div>
   </section>
 
   <section>
     <h2>Notes</h2>
-    <p>Files confirmed to exist. Separate parse.ts and types.ts risk silent blank-load bug if they diverge.</p>
+    <p>Re-audit 2026-05-28: types.ts holds ViewerState/Camera3D/NodeView/EdgeView type defs; parse.ts is functions only. Not a duplicate-maintenance hazard. Original proposal misread the relationship.</p>
   </section>
 </div>
 </body>

@@ -13,7 +13,7 @@
   <div class="detail-header">
     <span class="badge badge-half-wired">half-wired</span>
     <span class="badge badge-cat">Interaction</span>
-    <span class="badge badge-weight-High">cross-cut: High</span>
+    <span class="badge badge-weight-Medium">cross-cut: Medium</span>
     <span class="badge badge-VERIFIED">VERIFIED</span>
   </div>
 
@@ -34,7 +34,7 @@
 
   <section>
     <h2>Notes</h2>
-    <p>markViewSynced called only in loadView; NOT called after camera/drag, so positions lost on reload. camera ref exposed via CameraRefBridge.</p>
+    <p>Re-audit 2026-05-28: today's adding-a-new-gesture cost is 1 file (gesture handler with commitCamera() call); proposal reduces to 1 file (gesture handler that just mutates camera). Real reduction is from 3 call sites today to a single observe-debounce, but for current 5-gesture portfolio the gain is marginal. Weight downgraded from High to Medium; proposal kept.</p>
   </section>
 </div>
 </body>

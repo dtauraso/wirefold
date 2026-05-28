@@ -13,7 +13,7 @@
   <div class="detail-header">
     <span class="badge badge-working">working</span>
     <span class="badge badge-cat">Validation</span>
-    <span class="badge badge-weight-Medium">cross-cut: Medium</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
     <span class="badge badge-VERIFIED">VERIFIED</span>
   </div>
 
@@ -29,12 +29,12 @@
 
   <section>
     <h2>Reduction proposal</h2>
-    <div class="proposal-block">observe-not-assert — parse-spec emits validationColor or hasError directly; ThreeNodeMesh reads passively. Expected: 5 → 3 files.</div>
+    <div class="proposal-block">REMOVED 2026-05-28 — re-audit: parse-spec.ts computes validationError once via requiredInputDiagnostics(); spec-to-flow.ts attaches it to node.data; scene-content.tsx and ThreeView.tsx consume the same field passively to choose color. No duplicated computation. The proposed observe-not-assert refactor would push validation logic into renderers, INCREASING file count and breaking single-source-of-truth. Adding a new validation rule today = 1 hand-edit (parse-spec.ts).</div>
   </section>
 
   <section>
     <h2>Notes</h2>
-    <p>Required-input validation checked in parse-spec but color decision re-derived in ThreeNodeMesh. New constraints require touching both ends.</p>
+    <p>Re-audit 2026-05-28: scene-content + ThreeView are passive consumers of validationError, not parallel validators. The 5-file claim was cross-cut surface count, not per-change edit count.</p>
   </section>
 </div>
 </body>
