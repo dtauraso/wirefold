@@ -14,7 +14,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { RollSlider, DollyButtons, PanPad, GlobalLabelsToggle } from "./camera-ui";
+import { RollSlider, DollyButtons, PanPad, GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
@@ -279,6 +279,7 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <RollSlider cameraRef={cameraRef} />
       <DollyButtons cameraRef={cameraRef} nodesRef={nodesRef} />
+      <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
 
       {/* Pan pad — shown on dwell */}

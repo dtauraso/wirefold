@@ -4,7 +4,7 @@
 import { useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { sceneCenter, worldPerPixel } from "./geometry-helpers";
+import { sceneCenter, worldPerPixel, nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -164,6 +164,73 @@ export function DollyButtons({
         onMouseLeave={stopDolly}
         title="Dolly out"
       >▼</div>
+    </div>
+  );
+}
+
+/** HOME BUTTON: reframes the camera to fit all nodes in view. */
+export function HomeButton({
+  cameraRef,
+  nodesRef,
+  aspect,
+}: {
+  cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+  nodesRef: React.MutableRefObject<RFNode<NodeData>[]>;
+  aspect: number;
+}) {
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cam = cameraRef.current;
+    const nodes = nodesRef.current;
+    if (!cam || nodes.length === 0) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const n of nodes) {
+      const p = nodeWorldPos(n);
+      const r = nodeRadius(n);
+      minX = Math.min(minX, p.x - r); maxX = Math.max(maxX, p.x + r);
+      minY = Math.min(minY, p.y - r); maxY = Math.max(maxY, p.y + r);
+      minZ = Math.min(minZ, p.z - r); maxZ = Math.max(maxZ, p.z + r);
+    }
+
+    const center = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+    const sizeX = maxX - minX;
+    const sizeY = maxY - minY;
+    const sizeZ = maxZ - minZ;
+    const fovRad = (cam.fov * Math.PI) / 180;
+    const dist = (Math.max(sizeX / aspect, sizeY) / 2) / Math.tan(fovRad / 2) + sizeZ / 2;
+    const paddedDist = dist * 1.2;
+
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    const newPos = center.clone().addScaledVector(forward, -paddedDist);
+    cam.position.copy(newPos);
+    commitCamera(cam);
+  }, [cameraRef, nodesRef, aspect]);
+
+  return (
+    <div
+      onClick={onClick}
+      title="Fit diagram in view"
+      style={{
+        position: "absolute",
+        top: 44,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: "#ddd",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ⌂ fit
     </div>
   );
 }
