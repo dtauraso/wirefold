@@ -5,6 +5,19 @@ import { useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import { sceneCenter, worldPerPixel } from "./geometry-helpers";
+import { patchViewerState } from "../state/viewer-state";
+import { scheduleViewSave } from "../save";
+
+/** Write current camera position + quaternion to viewerState and schedule a save. */
+function commitCamera(cam: THREE.PerspectiveCamera) {
+  patchViewerState((v) => {
+    v.camera3d = {
+      position: [cam.position.x, cam.position.y, cam.position.z],
+      quaternion: [cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w],
+    };
+  });
+  scheduleViewSave();
+}
 
 // ---------------------------------------------------------------------------
 // Widgets: Roll slider, Dolly buttons, Pan pad
@@ -27,6 +40,8 @@ export function RollSlider({ cameraRef }: { cameraRef: React.MutableRefObject<TH
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
     const q = new THREE.Quaternion().setFromAxisAngle(forward, (delta * Math.PI) / 180);
     cam.quaternion.premultiply(q);
+    // Commit on each step; scheduleViewSave debounces the actual write.
+    commitCamera(cam);
   }, [cameraRef]);
 
   return (
@@ -101,7 +116,9 @@ export function DollyButtons({
       cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     }
-  }, []);
+    // Commit final camera position after the dolly gesture ends.
+    if (cameraRef.current) commitCamera(cameraRef.current);
+  }, [cameraRef]);
 
   const btnStyle: React.CSSProperties = {
     width: 32,
@@ -192,7 +209,9 @@ export function PanPad({
   const onPadPointerUp = useCallback((e: React.PointerEvent) => {
     e.stopPropagation();
     dragging.current = false;
-  }, []);
+    // Commit final camera position after the pan gesture ends.
+    if (cameraRef.current) commitCamera(cameraRef.current);
+  }, [cameraRef]);
 
   const PAD_SIZE = 64;
   return (

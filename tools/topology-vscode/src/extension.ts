@@ -1,7 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "./runCommand";
-import { extractViewText } from "./sidecar";
 import type { HostToWebviewMsg } from "./messages";
 import { buildWebviewHtml } from "./extension/html";
 import { handleMessage } from "./extension/handle-message";
@@ -39,11 +38,6 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
     // whose version bumps); version comparison handles those correctly.
     let lastAppliedVersion = document.version;
     const send = () => post({ type: "load", text: document.getText() });
-    // View state is now stored under the `view` key of topology.json.
-    const sendView = () => {
-      post({ type: "view-load", text: extractViewText(document.getText()) });
-      return Promise.resolve();
-    };
 
     let restartTimer: ReturnType<typeof setTimeout> | undefined;
     const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
@@ -112,7 +106,6 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
         runner,
         post,
         send,
-        sendView,
         setLastAppliedVersion: (v) => { lastAppliedVersion = v; },
       }),
     );

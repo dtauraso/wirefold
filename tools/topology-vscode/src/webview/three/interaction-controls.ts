@@ -10,6 +10,21 @@ import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 
 // ---------------------------------------------------------------------------
+// Camera persistence helper
+// ---------------------------------------------------------------------------
+
+/** Write current camera position + quaternion to viewerState and schedule a save. */
+function commitCamera(cam: THREE.PerspectiveCamera) {
+  patchViewerState((v) => {
+    v.camera3d = {
+      position: [cam.position.x, cam.position.y, cam.position.z],
+      quaternion: [cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w],
+    };
+  });
+  scheduleViewSave();
+}
+
+// ---------------------------------------------------------------------------
 // Gesture discrimination constants
 // ---------------------------------------------------------------------------
 
@@ -349,9 +364,15 @@ export function useInteractionControls(
         }
       }
 
+      // Commit camera state after orbit (empty-space drag) or pan gesture ends.
+      // Orbit reuses phase "dragging" with no nodeDragRef; pan uses "panning".
+      if ((s.phase === "panning" || (s.phase === "dragging" && !nodeDragRef.current)) && cameraRef.current) {
+        commitCamera(cameraRef.current);
+      }
+
       s.phase = "idle";
     },
-    [nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
+    [cameraRef, nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
   );
 
   const onWheel = useCallback(
@@ -365,6 +386,8 @@ export function useInteractionControls(
       const dist = cam.position.distanceTo(center);
       const speed = 0.001 * Math.max(dist, 10);
       cam.position.addScaledVector(dir, e.deltaY * speed);
+      // Commit camera position after each wheel step (scheduleViewSave debounces).
+      commitCamera(cam);
     },
     [cameraRef, nodesRef],
   );

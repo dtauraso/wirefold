@@ -18,6 +18,7 @@ import { RollSlider, DollyButtons, PanPad } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
+import { viewerState } from "../state/viewer-state";
 
 // ---------------------------------------------------------------------------
 // ThreeView: Canvas wrapper + interaction + label overlay + widgets
@@ -165,6 +166,7 @@ export function ThreeView() {
             selectedId={selectedId}
             hoveredId={hoveredId}
             cameraRef={cameraRef}
+            initialCamera3d={viewerState.camera3d}
             onPickRequest={pickRequest}
             onPositions={onPositions}
             onNearestN={onNearestN}

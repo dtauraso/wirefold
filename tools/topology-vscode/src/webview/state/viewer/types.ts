@@ -5,7 +5,7 @@
 import type { StateValue } from "../../../schema";
 import {
   isObj, isStrArr,
-  parseCamera,
+  parseCamera, parseCamera3d,
   parseNodeViews, parseEdgeViews,
 } from "./parse";
 
@@ -15,6 +15,13 @@ import {
 // shape ourselves.
 export type Camera = { x: number; y: number; zoom: number };
 export type LegacyCameraBox = { x: number; y: number; w: number; h: number };
+
+// 3-D camera state: position (world space) + orientation quaternion.
+// Stored as plain number arrays for JSON round-trip simplicity.
+export type Camera3D = {
+  position: [number, number, number];
+  quaternion: [number, number, number, number]; // x y z w
+};
 
 export function isLegacyCamera(c: Camera | LegacyCameraBox): c is LegacyCameraBox {
   return typeof (c as Camera).zoom !== "number";
@@ -35,6 +42,7 @@ export type EdgeView = {
 
 export type ViewerState = {
   camera?: Camera | LegacyCameraBox;
+  camera3d?: Camera3D;
   lastSelectionIds?: string[];
   nodes?: Record<string, NodeView>;
   edges?: Record<string, EdgeView>;
@@ -64,6 +72,11 @@ export function parseViewerState(text: string | undefined): ViewerState {
     const cam = parseCamera(raw.camera);
     if (cam) out.camera = cam;
     else console.warn("topology.view.json: dropping malformed camera");
+  }
+  if (raw.camera3d !== undefined) {
+    const cam3d = parseCamera3d(raw.camera3d);
+    if (cam3d) out.camera3d = cam3d;
+    else console.warn("topology.view.json: dropping malformed camera3d");
   }
   if (raw.lastSelectionIds !== undefined) {
     if (isStrArr(raw.lastSelectionIds)) out.lastSelectionIds = raw.lastSelectionIds;

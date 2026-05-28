@@ -66,7 +66,6 @@ export type TraceEvent =
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string }
-  | { type: "view-load"; text?: string }
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
   | { type: "flush" }
   | { type: "save-error"; message: string }
@@ -103,7 +102,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "load", "view-load", "run-status", "flush", "save-error", "trace-event",
+  "load", "run-status", "flush", "save-error", "trace-event",
   ..._pseudoPrefixes.flatMap((p) => [`${p}-render-result`, `${p}-save-result`, `${p}-error`] as const),
 ]);
 

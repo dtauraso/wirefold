@@ -7,6 +7,7 @@ import { useEffect, useRef, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
+import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
 import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
@@ -36,13 +37,15 @@ export const FLAG_LABEL_BG = "rgba(198,40,40,0.85)";
 // Fits once, but waits until nodes are actually non-empty (not just on mount).
 // ---------------------------------------------------------------------------
 
-export function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
+export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeData>[]; hasRestoredCamera?: boolean }) {
   const { camera, size } = useThree();
   const loadEpoch = useThreeStore((s) => s.loadEpoch);
   useEffect(() => {
     // Skip if no content or canvas not yet sized.
     if (nodes.length === 0) return;
     if (size.width === 0 || size.height === 0) return;
+    // Skip auto-fit when the saved camera is being restored.
+    if (hasRestoredCamera) return;
     const persp = camera as THREE.PerspectiveCamera;
     const PAD = 80;
     const { minX, maxX, minY, maxY } = boundingBox(nodes);
@@ -61,7 +64,7 @@ export function CameraFitter({ nodes }: { nodes: RFNode<NodeData>[] }) {
     persp.near = 0.1;
     persp.far = 20000;
     persp.updateProjectionMatrix();
-  // Re-fit whenever a load epoch completes (loadSpec or loadView); skip on drag.
+  // Re-fit whenever a load epoch completes; skip on drag.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadEpoch]);
   return null;
@@ -288,13 +291,26 @@ export function GraphEdges({
 
 export function CameraRefBridge({
   cameraRef,
+  initialCamera3d,
 }: {
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+  initialCamera3d?: Camera3D;
 }) {
   const { camera } = useThree();
   useEffect(() => {
-    cameraRef.current = camera as THREE.PerspectiveCamera;
-  }, [camera, cameraRef]);
+    const cam = camera as THREE.PerspectiveCamera;
+    cameraRef.current = cam;
+    // Restore saved 3D camera state when available.
+    // NOTE: initialCamera3d is a dependency so that if load() populates
+    // viewerState.camera3d after the first mount (which happens asynchronously
+    // on reload), the effect re-runs and the saved orientation is applied.
+    if (initialCamera3d) {
+      cam.position.set(...initialCamera3d.position);
+      cam.quaternion.set(...initialCamera3d.quaternion);
+      cam.updateMatrixWorld(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera, cameraRef, initialCamera3d]);
   return null;
 }
 
@@ -538,6 +554,7 @@ export function Scene({
   selectedId,
   hoveredId,
   cameraRef,
+  initialCamera3d,
   onPickRequest,
   onPositions,
   onNearestN,
@@ -548,6 +565,7 @@ export function Scene({
   selectedId: string | null;
   hoveredId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+  initialCamera3d?: Camera3D;
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
@@ -556,10 +574,11 @@ export function Scene({
   onCameraSettle: () => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const hasRestoredCamera = initialCamera3d !== undefined;
   return (
     <>
-      <CameraFitter nodes={nodes} />
-      <CameraRefBridge cameraRef={cameraRef} />
+      <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
+      <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCamera3d} />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <NearestNTracker nodes={nodes} onNearestN={onNearestN} />

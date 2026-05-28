@@ -3,7 +3,7 @@
 import type { StateValue } from "../../../schema";
 import { isObj } from "../../../schema/parse-primitives";
 import type {
-  Camera, EdgeView, LegacyCameraBox,
+  Camera, Camera3D, EdgeView, LegacyCameraBox,
   NodeView,
 } from "./types";
 
@@ -25,6 +25,20 @@ export function parseCamera(v: unknown): Camera | LegacyCameraBox | undefined {
     return { x: v.x, y: v.y, w: v.w, h: v.h };
   }
   return undefined;
+}
+
+export function parseCamera3d(v: unknown): Camera3D | undefined {
+  if (!isObj(v)) return undefined;
+  const pos = v.position;
+  const quat = v.quaternion;
+  if (
+    !Array.isArray(pos) || pos.length !== 3 || !pos.every(isNum) ||
+    !Array.isArray(quat) || quat.length !== 4 || !quat.every(isNum)
+  ) return undefined;
+  return {
+    position: [pos[0] as number, pos[1] as number, pos[2] as number],
+    quaternion: [quat[0] as number, quat[1] as number, quat[2] as number, quat[3] as number],
+  };
 }
 
 export function collect<T>(v: unknown, parse: (x: unknown) => T | undefined): T[] | undefined {

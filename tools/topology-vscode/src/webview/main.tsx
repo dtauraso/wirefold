@@ -90,18 +90,15 @@ window.addEventListener("message", (e) => {
     flushSave();
     flushViewSave();
   } else if (msg.type === "load") {
-    // Feed the R3F store independently of the 2D RF handler.
-    useThreeStore.getState().loadSpec(msg.text);
-  } else if (msg.type === "view-load") {
-    // Feed the R3F store with viewer-state independently of the 2D RF handler.
-    useThreeStore.getState().loadView(msg.text);
+    // Feed the R3F store; full document text includes spec + view key.
+    useThreeStore.getState().load(msg.text);
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
   }
-  // load/view-load for 2D is fully handled inside App's message effect.
+  // load for 2D is fully handled inside App's message effect.
 });
 
 // Signal readiness after the message listener is registered so the host's
-// response (load + view-load) is guaranteed not missed.
+// load response is guaranteed not missed.
 vscode.postMessage({ type: "ready" });
 postLog("lifecycle", { phase: "ready-sent" });

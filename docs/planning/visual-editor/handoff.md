@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-27 — fold proposal refined: show/hide expand-in-place + coupled visibility/execution; no task in flight)
+## State at handoff (2026-05-27 — branch task/collapse-load-transport; H1 + H3 resolved and verified; ready to merge pending sign-off)
 
-- **Active branch:** `main`. No task branch in flight. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
+- **Active branch:** `task/collapse-load-transport`. H1 (3D camera persistence) and H3 (single-message load transport) from feature-audit §4 are resolved and verified working in the editor. Branch is ready to merge into `main` pending sign-off. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
 
 ### What's on main (this session) — architecture + organization audit, all 13 findings resolved
 
@@ -35,10 +35,12 @@ read this file first (no chat history needed) and proceed.
 
 1. **Drag-to-wire edge creation is NON-FUNCTIONAL** (top open item). Dragging node A onto node B does not create an edge. Confirm with a runtime breadcrumb before fixing; logic now lives in `three/edge-creation.ts` (`buildEdge`) and the pointer-up branch in `three/interaction-controls.ts`. NOTE: createEdge/store call sites moved during the audit — re-grep before assuming line numbers.
 2. Node-to-node wiring fails for port-incompatible node kinds (same `buildEdge` auto-pick path).
-3. **Pre-existing test failures (predate audit, unrelated):** TS — `parseSpec.test.ts` (2: legacy `timing.steps` not dropped; legend bad-kind not rejected). Go — `Trace.TestMarshalEventMatchesFixture`. (`fold.test.ts` is gone — the entire old fold test suite was deleted with the fold removal, commit `9d4091c5`.) (The two contract failures — topology-edge-handles, trace-event-fields — were FIXED this session.)
+3. **Pre-existing test failures (predate audit, unrelated):** TS — `parseSpec.test.ts` (2: legacy `timing.steps` not dropped; legend bad-kind not rejected). Go — `Trace.TestMarshalEventMatchesFixture`. (`fold.test.ts` is gone — the entire old fold test suite was deleted with the fold removal, commit `9d4091c5`.) (The two contract failures — topology-edge-handles, trace-event-fields — were FIXED in a prior session.)
 4. **Junction-click ambiguity:** overlapping edge pick-tubes near a node junction can mis-pick; click mid-span.
 5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
 6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
+7. ~~H1 (3D camera persistence)~~ — RESOLVED this session (branch `task/collapse-load-transport`). See feature-audit §4.
+8. ~~H3 (load transport order-fragility)~~ — RESOLVED this session (branch `task/collapse-load-transport`). See feature-audit §4.
 
 ### Key files
 
