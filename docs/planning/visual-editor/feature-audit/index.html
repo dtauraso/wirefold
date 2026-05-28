@@ -26,9 +26,10 @@
 (function() {
   const data = window.AUDIT_DATA;
 
-  const STATUSES = ["working","restore-parity","half-wired","accepted-for-build","proposal","dead-code"];
+  const STATUSES = ["working","untested","restore-parity","half-wired","accepted-for-build","proposal","dead-code"];
   const STATUS_LABELS = {
     "working": "working",
+    "untested": "untested",
     "restore-parity": "restore-parity",
     "half-wired": "half-wired",
     "accepted-for-build": "accepted-for-build",
