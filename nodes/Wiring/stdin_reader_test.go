@@ -14,7 +14,7 @@ import (
 )
 
 func TestRunStdinReaderDelivered(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	reg := WireRegistry{"e1": pw}
 
 	ctx, cancel := context.WithCancel(context.Background())
