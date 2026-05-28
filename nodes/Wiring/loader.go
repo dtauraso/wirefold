@@ -20,17 +20,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
+// arcLengthBetween returns the straight-line distance between two node positions.
+// If either position is the zero value (node not positioned), a minimum of
+// minArcLength is returned so SimLatencyMs is never zero.
+const minArcLength = 1.0 // world units
+
+func arcLengthBetween(a, b specPosition) float64 {
+	dx := b.X - a.X
+	dy := b.Y - a.Y
+	dz := b.Z - a.Z
+	d := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if d < minArcLength {
+		return minArcLength
+	}
+	return d
+}
+
+// specPosition is the 3-D canvas position of a node as stored in view.nodes.
+type specPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"` // optional; defaults to 0 when absent
+}
+
 // specNode mirrors the JSON node shape.
 type specNode struct {
-	ID    string    `json:"id"`
-	Type  string    `json:"type"`
-	Index *int      `json:"index,omitempty"`
-	Data  *NodeData `json:"data,omitempty"`
+	ID       string    `json:"id"`
+	Type     string    `json:"type"`
+	Index    *int      `json:"index,omitempty"`
+	Data     *NodeData `json:"data,omitempty"`
+	Position specPosition // populated from view.nodes after JSON parse
 }
 
 // NodeData mirrors the JSON data block on a node.
@@ -54,10 +79,16 @@ type specEdge struct {
 	TargetHandle   string  `json:"targetHandle"`
 }
 
+// topoView is the viewer-state block inside the JSON (view.nodes carries positions).
+type topoView struct {
+	Nodes map[string]specPosition `json:"nodes"`
+}
+
 // topoSpec is the top-level JSON shape.
 type topoSpec struct {
 	Nodes []specNode `json:"nodes"`
 	Edges []specEdge `json:"edges"`
+	View  topoView   `json:"view"`
 }
 
 // WireRegistry maps edge label → *PacedWire. The stdin-reader goroutine uses
@@ -88,6 +119,19 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		return nil, nil, err
 	}
 
+	// Populate Position on each specNode from view.nodes.
+	for i := range spec.Nodes {
+		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
+			spec.Nodes[i].Position = pos
+		}
+	}
+
+	// Build id→position map for arc-length computation at wire construction.
+	nodePos := map[string]specPosition{}
+	for _, n := range spec.Nodes {
+		nodePos[n.ID] = n.Position
+	}
+
 	// Allocate one *PacedWire per destination port (fan-in safe).
 	// destWire: "destNode.destPort" → *PacedWire (owned by the destination).
 	// edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
@@ -97,7 +141,8 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		destKey := e.Target + "." + e.TargetHandle
 		pw, exists := destWire[destKey]
 		if !exists {
-			pw = NewPacedWire()
+			arcLength := arcLengthBetween(nodePos[e.Source], nodePos[e.Target])
+			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
