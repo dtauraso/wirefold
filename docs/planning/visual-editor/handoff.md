@@ -7,18 +7,24 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — audit board status cleanup)
+## State at handoff (2026-05-28 — billboarded-labels rework + home button merged)
 
-- **Active branch:** `main`. Local + origin/main in sync at `6a1b2c99`.
+- **Active branch:** `main`. Local + origin/main in sync after merge `d2ae9929`.
 - Working tree: `topology.json` modified (pre-existing, untouched this session).
-- Build/test gate last verified at the pulse-substrate-transport merge (2026-05-28). This session was docs-only.
+- Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js).
 
-### What this session did (commits a45ebcae, 6a1b2c99 on main)
+### What this session did
 
-1. **Introduced REWORK verification status** (orange badge) in `feature-audit/styles.css` for features that need to be redone rather than removed.
-2. **Re-classified billboarded-node-labels and arcball-camera-controls** from NEEDS_REMOVAL → REWORK in `data.js` and per-feature HTML.
-3. **Removed fold-containment from the audit site** (`features/fold-containment.html` deleted, entry removed from `data.js`). Old fold was already gone from code; the redesign note is parked outside the actionable board.
-4. **Dropped fold KNOWN_ISSUE** from handoff.
+**Merge `d2ae9929` from `task/billboarded-labels-rework` (deleted local + remote):**
+1. `d0ad7614` — two-line pill labels anchored above node top (name + pseudocode), `nodeTopWorldPos()` helper.
+2. `e5ee7e49` — per-node ▾/▴ toggle + global labels toggle in `camera-ui.tsx`; viewer-state fields `NodeView.labelHidden`, `ViewerState.labelsGlobalHidden`.
+3. `9c365368` — reverted the per-node toggle; kept the global toggle. `NodeView.labelHidden` removed; `labelsGlobalHidden` stays.
+4. `53e31d1a` — ⌂ fit (home) button in `camera-ui.tsx`. Computes AABB of node positions (`nodeWorldPos` + `nodeRadius`), repositions camera along current view direction at fit distance, commits via `commitCamera` (debounced save). No node mutation.
+
+**Docs on main:**
+- `a45ebcae` — added REWORK status; reclassified billboarded-labels + arcball-camera-controls REWORK.
+- `6a1b2c99` — removed fold-containment from audit site.
+- Post-merge: billboarded-labels updated REWORK → VERIFIED in audit.
 
 ### Prior session (commits ~467b40c3–da4804f0 on main)
 
@@ -41,19 +47,17 @@ read this file first (no chat history needed) and proceed.
 
 ### Actionable shortlist from the audit board
 
-The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists all 15 remaining features. Four are flagged as needs-work:
+The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features. Three flagged as needs-work:
 
-- **`billboarded-node-labels`** — REWORK. Defects: wrong position relative to nodes, wrong text format, possibly missing label content.
 - **`arcball-camera-controls`** — REWORK. Rotation has an issue; click-to-activate for XY drag may be the wrong activation model. Per CLAUDE.md `interaction-control-is-substance` rule, this is substance, not a medium choice.
 - **`validation-flag-colors`** — code reads correctly, UNCHECKED (user has not hands-on verified).
 - **`two-click-edge-creation`** — code reads correctly, UNCHECKED (user has not hands-on verified).
 
 ### Next-task candidates (friction-driven)
 
-1. Diagnose and fix `billboarded-node-labels` (concrete defects reported; branch when repro confirmed).
-2. Redesign `arcball-camera-controls` rotation/activation (needs concrete repro before branching).
-3. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
-4. Pre-existing test failures (parked from prior session — investigate before the next task branch).
+1. Redesign `arcball-camera-controls` rotation/activation (needs concrete repro before branching).
+2. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
+3. Pre-existing test failures (parked from prior session — investigate before the next task branch).
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
