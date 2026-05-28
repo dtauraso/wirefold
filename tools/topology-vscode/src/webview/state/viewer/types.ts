@@ -34,7 +34,6 @@ export type NodeView = {
   z?: number;
   sublabel?: string;
   state?: Record<string, StateValue>;
-  labelHidden?: boolean;
 };
 
 export type EdgeView = {
