@@ -24,7 +24,6 @@ import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulse, clearPulse, getPulseMap, patchPulse } from "./pulse-state";
-import { getPauseAdjustedNow } from "../state/run-status";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.

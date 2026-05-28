@@ -85,7 +85,7 @@ All commits on branch beyond main:
 - **Undo/redo entry removed** from audit: fade is its replacement strategy; undo/redo will not be reintroduced.
 - **Top 4 cross-cut candidates** (touch the most files and are the highest-leverage targets):
   1. ~~**Pulse/pump schema**~~ — **RESOLVED** (Phases 1–6, `0572704a`–`2662baa4`): constants codegen-shared via `curve_params.go`→`curve-params.ts`; `simLatencyMs` substrate-owned end-to-end; TS→Go one-way.
-  2. **runStatus pipeline** — Go→IPC→store→render chain; store-subscribe would eliminate prop-drilling.
+  2. ~~**runStatus pipeline**~~ — **RE-AUDITED 2026-05-28, REMOVED from candidate list.** Independent audit confirmed zero prop-drilling: `RunStatusCtx` is provided at root (`main.tsx:61`) with zero intermediate layers; one React consumer (`RunButton.tsx:9` via `useRunStatusCtx()`); per-frame and pause-clock consumers (`scene-content.tsx:192`, `store.ts:146`, `pulse-state.ts:15,45`) call `getPauseAdjustedNow()` directly as a synchronous module-level function read — none receive runStatus as a prop. A Zustand swap would move module-scoped state to a store with identical semantics: zero correctness gain, zero file reduction, adds subscription lifecycle for nothing. Pure churn.
   3. **Spec↔flow adapter** (`spec-to-flow.ts`) — large, touches every node kind; node-specific adapters would isolate blast radius.
   4. **View-save derivation** — viewer-state is partially derived from spec; explicit derivation would remove redundant sync.
 
@@ -94,7 +94,7 @@ All commits on branch beyond main:
 1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle (was parked during pulse transport work; back on the menu).
 2. **Port-incompat wiring** — no visual guard when connecting incompatible port types (was parked; back on the menu).
 3. **Pre-existing test failures** — investigate before next task branch (was parked; back on the menu).
-4. **Cross-cut refactors (remaining)** — ~~(a) Pulse/pump~~ RESOLVED (this branch). Remaining: (b) runStatus store-subscribe to remove prop-drilling; (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts`; (d) explicit viewer-state derivation from spec.
+4. **Cross-cut refactors (remaining)** — ~~(a) Pulse/pump~~ RESOLVED (this branch). ~~(b) runStatus~~ REMOVED 2026-05-28 (independent re-audit: zero prop-drill, pure churn — see "Top 4 cross-cut candidates" entry above). Remaining: (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (d) explicit viewer-state derivation from spec (6 of 8 fields are genuinely independent; main hazard is the `spec-to-flow.ts:41-45` round-trip invariant — pin with a test, not a refactor).
 5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
 6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
 
