@@ -45,7 +45,14 @@ export function handleTraceEvent(event: TraceEvent): void {
     case "send": {
       // Match ALL edges by source node id + sourceHandle (fan-out).
       // RF edges store source/sourceHandle; trace send events carry node/port.
-      const { node, port, value } = event as Extract<TraceEvent, { kind: "send" }>;
+      const { node, port, value, simLatencyMs } = event as Extract<TraceEvent, { kind: "send" }>;
+      // simLatencyMs should always be present after Phase 2; fallback guards
+      // against stale Go binaries or future schema gaps.
+      const FALLBACK_MS = 500;
+      if (simLatencyMs == null) {
+        console.warn("[pump] send event missing simLatencyMs — falling back to", FALLBACK_MS, "ms");
+      }
+      const resolvedLatency = simLatencyMs ?? FALLBACK_MS;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
@@ -59,6 +66,7 @@ export function handleTraceEvent(event: TraceEvent): void {
           simStep: step,
           target: edge.target ?? "",
           targetHandle: edge.targetHandle ?? "",
+          simLatencyMs: resolvedLatency,
         });
       }
       return;
