@@ -7,12 +7,12 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — branch task/pulse-substrate-transport; Phases 1–4 complete; pending user runtime verify)
+## State at handoff (2026-05-28 — branch task/pulse-substrate-transport; Phases 1–6 complete)
 
-- **Active branch:** `task/pulse-substrate-transport` (pushed). All code work done. Pending: user runtime verify before merge to main (substrate-touching merge requires user sign-off per project rules).
+- **Active branch:** `task/pulse-substrate-transport` (pushed). All code work done. Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms is genuinely uniform across all wires; TS→Go relationship is strictly one-way.
 - **Items 1–3 from KNOWN ISSUES are un-parked** — drag-to-wire, port-incompat wiring, pre-existing test failures are back on the menu after this lands.
 
-### What landed (Phases 1–4)
+### What landed (Phases 1–6)
 
 All commits on branch beyond main:
 
@@ -32,7 +32,7 @@ All commits on branch beyond main:
 - `c6089bbd` — `latency-changed` trace event removed end-to-end (`Trace.go`, `stdin_reader.go`, `trace-kinds.ts`, `messages.ts`, `pump.ts`); was a pure echo (~120 events/sec on drag); Go silently keeps `PacedWire` geometry current; `node-move` IPC (TS→Go) retained for future-send correctness.
 - `2662baa4` — Phase 6: `nodes/Wiring/curve_params.go` (single source of truth for curve constants + `BezierArcLength` helper); `gen-node-defs` extended to emit `curve-params.ts`; `geometry-helpers.ts` imports constants + `rfArcLength` reimplemented as Bezier integration; `arcLengthBetween3` removed; Bezier-vs-chord discrepancy closed; dual-constant risk eliminated via codegen.
 
-**Net effect:** Transport duration is substrate-owned. The 8-file cross-cut (pump · Go substrate · store · messages · schema · 3D render · pulse-state · animation-fields) is now 5 files (paced_wire · Trace · pump · pulse-state · scene-content). `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. `latency-changed` event gone. Dragging a node updates curve + `simLatencyMs` + pulse map synchronously in `moveNode`; Go keeps geometry current for future-send via `node-move` IPC (one-way TS→Go, no echo).
+**Net effect:** Transport duration is substrate-owned. `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. `latency-changed` event gone. Curve constants codegen-shared between Go and TS via `curve_params.go` → `curve-params.ts`; Bezier-vs-chord arc-length discrepancy closed. Dragging a node updates curve + `simLatencyMs` + pulse map synchronously in `moveNode` (preserving `t_curr` for in-flight beads); Go keeps geometry current for future-send via `node-move` IPC (one-way TS→Go, no echo). 11-file cross-cut, each file with a distinct non-overlapping responsibility; prior cross-cut candidate #1 (Pulse/pump schema) fully resolved.
 
 ### Build / test gate (verified 2026-05-28)
 
@@ -83,7 +83,7 @@ All commits on branch beyond main:
 - **2 stubs flagged for removal:** `midpointOffset` in `wire-defs.ts` (schema-only, no setter/adapter/ctx); z-coordinate half-wiring in `node-defs.ts` / `spec-to-flow.ts` (field present but unused in 3D layout).
 - **Undo/redo entry removed** from audit: fade is its replacement strategy; undo/redo will not be reintroduced.
 - **Top 4 cross-cut candidates** (touch the most files and are the highest-leverage targets):
-  1. **Pulse/pump schema** — pulse data repeated across `wire-defs.ts`, `pump.ts`, store; single-source-of-truth + codegen.
+  1. ~~**Pulse/pump schema**~~ — **RESOLVED** (Phases 1–6, `0572704a`–`2662baa4`): constants codegen-shared via `curve_params.go`→`curve-params.ts`; `simLatencyMs` substrate-owned end-to-end; TS→Go one-way.
   2. **runStatus pipeline** — Go→IPC→store→render chain; store-subscribe would eliminate prop-drilling.
   3. **Spec↔flow adapter** (`spec-to-flow.ts`) — large, touches every node kind; node-specific adapters would isolate blast radius.
   4. **View-save derivation** — viewer-state is partially derived from spec; explicit derivation would remove redundant sync.
@@ -93,7 +93,7 @@ All commits on branch beyond main:
 1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle (was parked during pulse transport work; back on the menu).
 2. **Port-incompat wiring** — no visual guard when connecting incompatible port types (was parked; back on the menu).
 3. **Pre-existing test failures** — investigate before next task branch (was parked; back on the menu).
-4. **Cross-cut refactors (remaining)** — feature-audit top 3 remaining: (b) runStatus store-subscribe to remove prop-drilling; (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts`; (d) explicit viewer-state derivation from spec. Cross-cut (a) Pulse/pump is RESOLVED (this branch).
+4. **Cross-cut refactors (remaining)** — ~~(a) Pulse/pump~~ RESOLVED (this branch). Remaining: (b) runStatus store-subscribe to remove prop-drilling; (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts`; (d) explicit viewer-state derivation from spec.
 5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
 6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
 
