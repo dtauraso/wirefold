@@ -37,6 +37,18 @@ read this file first (no chat history needed) and proceed.
 - **Fold mutators REMOVED** (commit `93b6412a`, branch `main`): `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained. Orphan count now 0 — all §3d dead-code orphans cleared.
 - **Old fold feature FULLY REMOVED** (commit `9d4091c5`, branch `main`): deleted `Fold` type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor` edge rerouting, `foldId` on NodeData, viewer-state fold parse/serialize, and all fold tests/e2e. The old view-only collapse/frame fold never had a 3D form and was dead infrastructure. Feature-audit §3a half-wired count 4→3, §3b never-specced count 1→0. A redesigned fold (file-dive containment, fold-as-attribute, self-contained child diagram, breadcrumb navigation) is captured as a not-implemented proposal in feature-audit §3b.
 
+### Feature-audit reorganization + reduction proposals (2026-05-27)
+
+- **feature-audit.md** walked end-to-end with per-feature analysis: each feature now has a template block (Status / Files / Cross-cuts / Reduction proposal) under category headings, sorted by cross-cut weight.
+- **25 reduction proposals** generated across features; **10 features already minimal** (no proposal needed).
+- **2 stubs flagged for removal:** `midpointOffset` in `wire-defs.ts` (schema-only, no setter/adapter/ctx); z-coordinate half-wiring in `node-defs.ts` / `spec-to-flow.ts` (field present but unused in 3D layout).
+- **Undo/redo entry removed** from audit: fade is its replacement strategy; undo/redo will not be reintroduced.
+- **Top 4 cross-cut candidates** (touch the most files and are the highest-leverage targets):
+  1. **Pulse/pump schema** — pulse data repeated across `wire-defs.ts`, `pump.ts`, store; single-source-of-truth + codegen.
+  2. **runStatus pipeline** — Go→IPC→store→render chain; store-subscribe would eliminate prop-drilling.
+  3. **Spec↔flow adapter** (`spec-to-flow.ts`) — large, touches every node kind; node-specific adapters would isolate blast radius.
+  4. **View-save derivation** — viewer-state is partially derived from spec; explicit derivation would remove redundant sync.
+
 ### KNOWN ISSUES (candidate next work)
 
 1. **Drag-to-wire edge creation is NON-FUNCTIONAL** (top open item). Dragging node A onto node B does not create an edge. Confirm with a runtime breadcrumb before fixing; logic now lives in `three/edge-creation.ts` (`buildEdge`) and the pointer-up branch in `three/interaction-controls.ts`. NOTE: createEdge/store call sites moved during the audit — re-grep before assuming line numbers.

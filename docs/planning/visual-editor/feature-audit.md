@@ -1,147 +1,543 @@
+---
+branch: main
+---
+
 # Feature Audit: Wirefold 3D Visual Editor (Planned vs. Implemented)
 
-## 1. Summary
+## Revision history
+
+- **2026-05-27** Cross-cut analysis and reduction proposals added; undo/redo removed from audit (fade animation replaced its one real responsibility); old view-only fold feature (Fold type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId`, fold tests/e2e) fully removed (commit `9d4091c5`). New file-dive fold proposal captured under Folds & containment.
+- **2026-05-26** Re-verified against post-architecture-audit code. Undo/redo moved from half-wired to not-started. Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
+- **2026-05-27** (restructure) Reorganized into consistent per-feature template; summary table regenerated; categories grouped by `##` heading; features sorted high→low within each category.
+
+---
+
+## Summary
 
 The plan was to replace the React Flow 2D editor with a Three.js/R3F 3D canvas (`ThreeView`) backed by a Go substrate (`paced_wire`) that enforces backpressure and slot-phase discipline. The cutover spec (`rf-to-r3f-cutover.md`, `3d-editor.md`) named a full editor: arcball navigation, select/pick, two-click edge creation, inline label edit, multi-select, delete, palette add, undo/redo, persistent view-saves, and a Fold node in both Go and 3D mesh form.
 
-**Scorecard:** 26 features implemented and working; 14 cutover-debt items (10 restore-parity, 3 half-wired, 1 not-started); 0 never-specced decision points; 3 accepted-for-build items; 0 dead-code orphans (§3d — all removed). Fold (old view-only collapse) fully removed (commit `9d4091c5`); new file-dive fold design captured in §3b as a not-implemented proposal.
+**Scorecard by status:** 15 working · 4 half-wired · 8 restore-parity · 3 accepted-for-build · 1 proposal
 
-> **Re-verified 2026-05-26** against post-architecture-audit code. Undo/redo moved from half-wired to not-started (no history.ts, no pushSnapshot exists). Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
-> **Updated 2026-05-27** (commit `45cee602`, branch `task/remove-saved-views`): saved-views dead-code orphan REMOVED in full. Scorecard adjusted from 4 to 3 dead-code orphans.
-> **Updated 2026-05-27** (commits `9cc63677`, `93b6412a`, branch `main`): `valueLabel` wire prop and fold mutators (`setFolds`, `toggleFoldCollapse`, `updateFoldPosition`) REMOVED. Orphan count → 0.
-> **Updated 2026-05-27** (commit `9d4091c5`, branch `main`): old view-only fold feature (Fold type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor` edge rerouting, `foldId` on NodeData, viewer-state fold parse/serialize, all fold tests/e2e) FULLY REMOVED. §3a "Folds (collapsed subgraph)" row and §3b "Fold node Go primitive" row replaced by new file-dive fold proposal (§3b). Scorecard: half-wired count 4→3, never-specced count 1→0.
+### Master feature table
 
----
+Sorted by cross-cut weight (high → low) within each category. Proposal type shorthand: **codegen** = generate adapter/parser from schema; **store-subscribe** = eliminate prop-drilling, consumers read store directly; **unify** = collapse two separately maintained files into one authoritative source; **observe-not-assert** = derive dirty state by comparison rather than push-notification at gesture sites; **stub-removal** = delete schema stub until feature is actively built; **complete-stub** = wire the field or remove it; **already-minimal** = no reduction available with a one-line reason.
 
-## 2. Implemented and Working
-
-| Feature | Evidence (file:line) |
-|---|---|
-| Three.js/R3F 3D canvas replacing React Flow | `tools/topology-vscode/src/webview/three/ThreeView.tsx` (now ~264-line orchestrator; geometry in `geometry-helpers.ts`, render in `scene-content.tsx`) |
-| Arcball rotation (pointer drag) | `tools/topology-vscode/src/webview/three/interaction-controls.ts` (pointer state machine extracted from ThreeView) |
-| Scroll dolly (zoom) | `tools/topology-vscode/src/webview/three/interaction-controls.ts` (wheel handler) |
-| Dwell-pan via PanPad | `tools/topology-vscode/src/webview/three/camera-ui.tsx` (PanPad extracted from ThreeView) |
-| Roll slider | `tools/topology-vscode/src/webview/three/camera-ui.tsx` (RollSlider extracted from ThreeView) |
-| Raycast node pick / single select | `tools/topology-vscode/src/webview/three/interaction-controls.ts` (raycast + setSelectedNodeId) |
-| Two-click edge creation | `tools/topology-vscode/src/webview/three/interaction-controls.ts`; edge built in `tools/topology-vscode/src/webview/three/edge-creation.ts` (`buildEdge`) |
-| Bezier tube edges (`SingleEdgeTube`) | `tools/topology-vscode/src/webview/three/SingleEdgeTube.tsx` |
-| Pulse bead animation | `tools/topology-vscode/src/webview/three/PulseBead.tsx` |
-| Pulse delivered handshake (Go↔TS pacing) | `tools/topology-vscode/src/webview/three/pump.ts`; `handoff.md` Phase 0 resolved |
-| Validation flag colors (missing required input) | `tools/topology-vscode/src/webview/three/ThreeNodeMesh.tsx`; `parseSpec` diagnostics |
-| Billboarded node labels | `tools/topology-vscode/src/webview/three/scene-content.tsx` (Billboard + Text from @react-three/drei) |
-| Occlusion badge | `tools/topology-vscode/src/webview/three/OcclusionBadge.tsx` (or inline in scene-content.tsx) |
-| Nearest-N LOD | `tools/topology-vscode/src/webview/three/scene-content.tsx` (distance-sorted visibility culling) |
-| Camera fit-on-load / re-fit on loadEpoch | `tools/topology-vscode/src/webview/three/ThreeView.tsx` (fitCamera effect on loadEpoch; ThreeView orchestrator) |
-| Run / pause / stop controls | `tools/topology-vscode/src/webview/three/ControlBar.tsx` |
-| Run-status pause accounting | `tools/topology-vscode/src/webview/three/store.ts` (runStatus state) |
-| Debounced spec save | `tools/topology-vscode/src/webview/save.ts` (scheduleSave) |
-| Load spec / load view from VS Code | `store.ts:loadSpec`, `store.ts:loadView` |
-| ~~Fold state module (RF-free)~~ | **REMOVED** (commit `9d4091c5`): `folds-state.ts`, `ops/fold.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId` on NodeData, viewer-state fold parse/serialize, fold tests/e2e all deleted. |
-| Node dimming | Removed with saved-views teardown (commit `45cee602`, branch `task/remove-saved-views`). `dimmed.ts`, `data.dimmed` in specToFlow/NodeData, `.dim` CSS, and `__wirefold_test.applyDim` hook all deleted. |
-| Spec↔flow adapters | `tools/topology-vscode/src/webview/three/adapters/specToFlow.ts`, `flowToSpec.ts` |
-| Ring-topology deadlock break | Bootstrap `Input` node (`data.init=[seed]`, `data.repeat=false`) wired by a real edge into the receiving port; single-fires seed at tick-0. `edgeSeeds` TS pipeline removed entirely. |
-| Paced wire substrate | `nodes/Wiring/paced_wire.go` |
-| Trace/probe logging (4 JSONL files) | `.probe/`; `tools/topology-vscode/src/webview/probe.ts` |
-| Error boundary | `tools/topology-vscode/src/webview/three/ErrorBoundary.tsx` (or ThreeView wrapper) |
-| Node kinds: ChainInhibitor, InhibitRightGate, Input, ReadGate (TS + Go) | `tools/topology-vscode/src/schema/node-defs.ts` (NODE_DEFS keys; moved from `src/webview/schema/`); `nodes/chaininhibitor/`, `nodes/inhibitrightgate/`, `nodes/input/`, `nodes/readgate/` |
-
----
-
-## 3. Gaps — Three Causes
-
-The gaps in this editor have three distinct causes: regression (worked in the RF editor, dropped in the R3F cutover), under-specification (planned only loosely, needs an explicit decision), and accepted-for-build (friction surfaced, promoted to committed work). The old single "planned-not-built" list conflated these, inflating the apparent backlog. The three-cause split makes each item actionable on its own terms.
-
-### 3a. Cutover Debt — Worked in the RF editor, lost in the R3F move (restore-parity, bounded)
-
-Each item existed and worked in the old React Flow editor. The R3F cutover dropped or half-wired it. Proof-of-prior-existence cited per line. Note: all proof files listed below (`AppView.tsx`, `_handle-delete.ts`, `panels/*`, `app/EdgeContextMenu.tsx`, `edges/MidpointDragHandle.tsx`) have since been deleted from the tree in the R3F cutover; the proof is git-history-only, not checkable in-tree.
-
-| Feature | Proof of prior existence |
-|---|---|
-| Multi-select (box/shift-click) | `AppView.tsx` `selectionMode={SelectionMode.Partial}`, `selectionOnDrag` |
-| Node delete | `_handle-delete.ts` `onNodesDelete`; `deleteKeyCode={["Delete","Backspace"]}` |
-| Edge delete | `_handle-delete.ts` `onEdgesDelete` |
-| Edge reconnect (drag endpoint) | `_on-reconnect.ts` `onReconnectImpl` |
-| Node palette / add-node UI | `panels/NodePalette.tsx` |
-| Sublabel inline edit | `inline-edit.ts` `beginEditSublabel` — **PARTIAL**: `beginEditSublabel` still exists in `src/webview/inline-edit.ts`; what's missing is a 3D gesture to trigger it (RunButton only calls `flushActiveInlineEdit`) |
-| PseudoPanel | `panels/PseudoPanel.tsx` (was 2D-only; never had a 3D form) |
-| Port drag (wire from handle) | RF native handle drag-to-connect |
-| Edge-kind context menu | `app/EdgeContextMenu.tsx` |
-| Edge midpoint drag | `edges/MidpointDragHandle.tsx` — **FULLY MISSING**: `midpointOffset` is schema-declared only (`src/schema/wire-defs.ts`); no adapter reads it, no setter exists, no drag UI wired |
-
-The following were started in the R3F move but left inert — the infrastructure landed without the completing wiring (marked **half-wired**). One item (undo/redo) has no infrastructure at all and is marked **not-started**:
-
-| Feature | Status | Evidence |
-|---|---|---|
-| Undo/redo | **NOT-STARTED** — no `history.ts`, no `pushSnapshot` anywhere; node drags and edge-create both only call `scheduleSave`/`scheduleViewSave`; undo/redo does not exist at all | — |
-| View-save on settle | **half-wired** — `markViewSynced` IS called inside `loadView`; not called after camera/drag, so positions lost on reload | `tools/topology-vscode/src/webview/three/store.ts`; `save.ts:48,78` |
-| Fit-view hotkey | **half-wired** — fit-on-load only (ThreeView orchestrator); no f/Shift-F for manual re-fit | `tools/topology-vscode/src/webview/three/ThreeView.tsx` |
-| Z-coordinate (node depth) | **half-wired** — schema parses `z`; always 0 in practice; no UI to set depth | `tools/topology-vscode/src/schema/node-defs.ts`; `specToFlow` adapter |
+| Feature | Status | Cross-cut weight | Surfaces | Files | Proposal type |
+|---|---|---|---|---|---|
+| **Substrate** | | | | | |
+| Pulse bead + delivered handshake | working | **High** (structural: Go↔TS pacing contract locked by contract test) | pump · Go substrate · store · messages · schema · 3D render | 8 | store-subscribe (Strategy B: TS owns animation semantics) |
+| Run/pause/stop controls (runStatus) | working | **High** (structural: threads extension→messages→pulse-state) | store · extension · messages · 3D render · pulse-state | 7 | store-subscribe |
+| Paced wire substrate | working | **Low** (local: TS sees only trace events; Go internals opaque) | Go substrate only | 5 Go | already-minimal (hard boundary at pump.ts) |
+| Ring-topology deadlock break | working | **Low** (local: startup concern, no TS surface change) | Go substrate · e2e | 2 | already-minimal (irreducible minimum) |
+| **Render** | | | | | |
+| Spec↔flow adapters + validation flags | working | **High** (structural: every new field threads parse-spec→adapters→store→ThreeNodeMesh) | schema · store · adapters · save/load · 3D render · tests | 6+ | codegen (Strategy B: generate adapters from node-defs.ts) |
+| Sublabel inline edit | half-wired | **Medium** (structural: data path load-bearing; missing only 3D gesture trigger) | store · viewer-state · adapters · 3D render · extension/messages | 7 | complete-stub (add 3D gesture in interaction-controls.ts) |
+| Node kinds (ChainInhibitor, InhibitRightGate, Input, ReadGate) | working | **Medium** (structural: 3-surface co-commit rule per CLAUDE.md) | schema/codegen · store · adapters · 3D render · Go substrate | 5+ per kind | already-minimal (per CLAUDE.md 3-surface rule; adapter cross-cut addressed by codegen proposal) |
+| Two-click edge creation | working | **Medium** (local: creation path self-contained; schema/Go unaware) | 3D render · store · mutation paths · adapters | 5 | already-minimal (irreducible surface for stateful 3D interaction) |
+| Three.js/R3F 3D canvas (ThreeView) | working | **Medium** (structural: orchestrator; every new visual feature routes through it) | 3D render · store · schema · save/load · adapters | many | already-minimal (orchestrator cross-cut reflects feature count, not redundancy) |
+| Bezier tube edges (SingleEdgeTube) | working | **Low** (local: render-only; no other layer reads WireProps yet) | 3D render · schema · types | 4 | already-minimal (minimum for typed render feature) |
+| Billboarded node labels | working | **Low** (local: fully contained in scene-content.tsx) | 3D render | 1 | already-minimal (cross-cut count 1) |
+| Nearest-N LOD + occlusion badge | working | **Low** (local: self-contained in 3D render pass) | 3D render | 2 | already-minimal (minimum for any 3D feature) |
+| Raycast node pick / single select | working | **Low** (local: single `selectedNodeId` in store; no other layer aware) | 3D render · store | 3 | already-minimal (irreducible for a 3D gesture→store mutation) |
+| Z-coordinate (node depth) | half-wired | **Low** (local: parsed but always 0; no UI or render uses it) | schema · adapters | 2 | complete-stub (remove `z` from node-defs.ts + adapter until depth editing is planned) |
+| Edge midpoint drag | restore-parity | **Low** (local: schema stub only; no adapter, setter, or drag UI) | schema | 1 | stub-removal (remove `midpointOffset` from wire-defs.ts; reintroduce as `waypoints` when built) |
+| Multi-select, Node delete, Node palette, PseudoPanel | restore-parity | — (absent; git-history only) | — | 0 | no action (no stubs; restore as 3–5 file pattern) |
+| Port drag, Edge reconnect, Edge delete, Edge-kind context menu | restore-parity | — (absent; git-history only) | — | 0 | no action (no stubs) |
+| Multi-node alignment guides | accepted-for-build | — (not present) | — | 0 | no action (gated behind multi-select restore) |
+| Bend points / waypoints | accepted-for-build | — (not present; supersedes midpointOffset stub) | — | 0 | no action (spec before code) |
+| **Interaction** | | | | | |
+| View-save on settle | half-wired | **High** (structural: missing markViewSynced call taxes every new camera gesture) | store · save · viewer-state · 3D render · interaction-controls · camera-ui | 6 | observe-not-assert |
+| Arcball / dolly / pan / roll (camera controls) | working | **Medium** (local: camera3d isolated field in viewer-state) | 3D render · store · save/load · schema | 6 | already-minimal (each file has distinct responsibility; view-save closure handled separately) |
+| Fit-view hotkey | half-wired | — | ThreeView | 1 | complete-stub (add f/Shift-F handler) |
+| **Persistence** | | | | | |
+| Load spec / load view | working | **Medium** (structural: new viewer-state field must extend parse.ts + types.ts or loads produce blank state) | store · save/load · viewer-state · schema | 6 | unify (derive ViewerState type from parse.ts inferred return; eliminate separately maintained types.ts) |
+| Debounced spec save | working | **Medium** (local: well-isolated in save.ts; callers add one scheduleSave() call) | save/load · store · mutation paths · extension | 6 | already-minimal (natural surface; no parallel structures) |
+| Trace/probe logging | working | **Low** (local: one-way log funnel; no feature cross-cuts it) | extension · messages · webview | 5 | already-minimal (each hop distinct; no parallel structure) |
+| Undo coalescing at gesture level | accepted-for-build | — (not present) | — | 0 | no action (snapshot-on-pointer-up, 2–3 files when built) |
+| **Validation** | | | | | |
+| Validation flag colors | working | **Medium** (structural: required-input check in parse-spec; color re-derived in ThreeNodeMesh) | schema · store · 3D render | 5 | observe-not-assert (parse-spec emits `hasError`; ThreeNodeMesh reads passively) |
+| **Folds & containment** | | | | | |
+| Fold / containment | proposal | — (not present in code) | — | 0 | no action pre-implementation (resolve substrate-layer question first per feedback_specify_substrate_layer_first.md) |
 
 ---
 
-### 3b. Never-Specced / Proposals — Planned only loosely or newly redesigned, needs a decision before build
+## Substrate
 
-#### Fold (file-dive containment) — proposed, not implemented
+### Pulse bead animation + delivered handshake
 
-The old view-only collapse/frame fold feature was fully removed (commit `9d4091c5`). A redesigned fold is proposed below. Status: **not implemented; not yet specced at the spec/viewer-state layer**.
+**Status:** working
 
-- **Fold is an attribute, not a node kind.** Any node can be marked as a fold. There is no separate `Fold` kind — folding is a property applied to an existing node of any type.
-- **Visibility and execution are coupled.** Running is tied to being unfolded/shown. When the fold node is FOLDED (hidden), the child diagram is not visible and does not run. When you UNFOLD (show) it, the next level becomes visible AND starts running. Unfold = visible + running; fold = hidden + not running. The earlier claim that "the folded node continues to run as its own kind independent of reveal" and "nothing crosses the dive boundary at runtime" was an incorrect extrapolation and is replaced by this model.
-- **Authoring gesture.** Create a node → assign the fold attribute → select the nodes to place inside → selected nodes move into the fold node's child diagram. The fold node adopts the boundary edges: input edges that targeted the first inner node(s) and output edges leaving the last inner node(s) become the fold node's own I/O at the parent level.
-- **Reveal gesture (show/hide, expand-in-place).** Each fold node has a show/hide toggle button. Toggling "show" reveals ONE level down: the child network is rendered inline, anchored to the fold node — it expands in place within the parent canvas. The top child node connects visually to the fold node, which acts as the attach/anchor point for the revealed diagram. Toggling "hide" collapses it. This replaces the earlier "double-click dive + breadcrumb navigation" framing — there is no full-screen canvas swap and no breadcrumb navigation bar.
-- **Hierarchy.** Folds can nest; a fold's child diagram may itself contain fold nodes, each with their own show/hide toggle.
-- **Open substrate question (must resolve before implementing).** The parent-level boundary edges are the fold node's real I/O as a node of its type; the contained diagram is self-contained and runs on its own. Confirm during design whether/how a child diagram is associated with a node in the spec vs. viewer-state layer before implementing (per the project's "specify substrate layer first" rule — `feedback_specify_substrate_layer_first.md`).
+**Files:**
+- `tools/topology-vscode/src/webview/three/PulseBead.tsx` (in `scene-content.tsx`)
+- `tools/topology-vscode/src/webview/pump.ts`
+- `tools/topology-vscode/src/webview/pulse-state.ts`
+- `tools/topology-vscode/src/webview/animation-fields.ts`
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/types.ts`
+- `nodes/Wiring/Trace/Trace.go`
+- `tools/topology-vscode/test/contracts/trace-event-fields.test.ts`
 
----
+**Cross-cuts:** Surfaces: pump · Go substrate (Trace) · store · messages · extension · schema (animation-fields) · 3D render · save/load. Distinct files: 8. Weight: **High** (structural: `pump.ts` is the Go↔TS pacing contract; every trace-event field name is locked by a contract test).
 
-### 3c. Accepted for Build — friction surfaced, promoted to committed work
-
-Items promoted because real use justified building them. These are committed work, not parked patterns.
-
-| # | Feature | Size | Notes |
-|---|---|---|---|
-| 1 | Bend points / waypoints on orthogonal edges | M-L | Generalizes the cutover-debt "Edge midpoint drag" (§3a) from a single midpoint to arbitrary waypoints; per-edge persisted state threaded through schema + adapters. |
-| 2 | Multi-node alignment guides | S | Generalizes existing single-node drag guides/snap to a multi-selection's collective bounding box. Gated behind multi-select restore (§3a cutover debt). |
-| 3 | Undo coalescing at gesture level | S | One undo entry per drag gesture (snapshot on pointer-up, not per pointer-move). This is a from-scratch undo/redo build (§3a undo is not-started, not half-wired). |
-
----
-
-### 3d. Dead-Code Orphans — built/specced, never surfaced (sweep 2026-05-27)
-
-Each is infrastructure that exists in code but reaches no user today — some never wired, some deliberately unwired. Decide per item: wire it up, or delete it as fossil.
-
-| Feature | Evidence (file:line) | State | Disposition question |
-|---|---|---|---|
-| Named / saved views | **REMOVED** — commit `45cee602` on branch `task/remove-saved-views`. Deleted: `SavedView` type + parse/serialize + rename-remap; `state/dimmed.ts`; `data.dimmed` in specToFlow + NodeData; `.dim` CSS; `__wirefold_test.applyDim` hook; saved-view assertions within `parseViewerState.test.ts` (file retained); saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (folds + diff assertions kept). Build/tsc/17 unit tests clean after removal. | COMPLETE — no orphan remains | N/A |
-| Spec diff | **REMOVED** — `state/ops/diff.ts` + `test/diff-core.test.ts` deleted; `diffSpecs` had no production caller. | COMPLETE — no orphan remains | N/A |
-| Wire value label | **REMOVED** — `valueLabel` deleted from `nodes/Wiring/loader.go` wire tag and `wire-defs.ts` regenerated via gen-node-defs (commit `9cc63677`, branch `main`). TS + Go builds clean. | COMPLETE — no orphan remains | N/A |
-| Fold mutators | **REMOVED** — `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained at that time (commit `93b6412a`, branch `main`). Subsequently the entire old fold feature — including `folds-state.ts`, `ops/fold.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId`, viewer-state fold parse/serialize, fold tests/e2e — was deleted in full (commit `9d4091c5`). | COMPLETE — no orphan remains | N/A |
-
-> `midpointOffset` (§3a item 10) and sublabel inline edit (§3a item 6) were also surfaced by the same sweep but are already tracked there and are not duplicated here.
+**Reduction proposal:**
+- Axis: Go and TS independently maintain the trace-event schema. A field added in `Trace/Trace.go` must be manually mirrored in `pump.ts`, `animation-fields.ts`, and the contract test (4+ file minimum).
+- Strategy: **B (TS owns animation semantics)** — `pump.ts` receives only raw primitives from Go (e.g. `{kind, edgeId, simTime}`); all animation-specific fields (duration, easing, bead color) are derived client-side in `animation-fields.ts`. Fields that genuinely vary per-substrate-tick (backpressure-driven speed) remain in the Go struct.
+- Expected post-change cross-cut count: **8 → 2** (Go struct + `pump.ts` for pacing primitives; `animation-fields.ts` + `scene-content.tsx` are TS-internal and don't require Go-side awareness).
+- Blocker: audit the contract test at `test/contracts/trace-event-fields.test.ts` to classify each field as substrate-driven vs. animation-policy before moving anything.
 
 ---
 
-## 4. Known Correctness Flaws
+### Run/pause/stop controls (runStatus)
 
-Cross-referenced from `docs/planning/visual-editor/audit-correctness.md` (H1/H2/H3). STEP 1 verification updated H1 and H2 findings against current code:
+**Status:** working
 
-| ID | Severity | Claim | Verification result |
-|---|---|---|---|
-| H1 | HIGH | `markViewSynced` never called → view-saves permanently dropped | **RESOLVED** (branch `task/collapse-load-transport`, commits `e859e072`/`a267829e` + timing fix). 3D camera state (`Camera3D`: position + quaternion) added to viewer-state schema; committed on orbit/dolly/pan/roll gesture-end via `scheduleViewSave`; restored on mount, skipping auto-fit when a saved camera exists. A React effect-deps timing bug (camera3d arriving async after first render) was fixed by adding `initialCamera3d` to `CameraRefBridge` effect deps + `updateMatrixWorld`. Verified in-editor: load preserves positions/fade; rotate+reload restores orientation; no-camera topologies still auto-fit. |
-| H2 | HIGH | `setSpecMeta` never called → top-level spec metadata stripped on save | **Fixed.** `setSpecMeta(spec)` is called inside `loadSpec` in `store.ts`. The audit-correctness.md entry is stale; this path is now wired. |
-| H3 | HIGH | `loadView` before `loadSpec` silently drops the view (order-dependent) | **RESOLVED** (branch `task/collapse-load-transport`, commits `e859e072`/`a267829e`). Collapsed the two-message load transport (`load` + `view-load`) into a single `load` message and a single `load(text)` store action that parses spec + `topology.json#view` together and builds flow once. Deleted `loadView`, `_lastSpec` reorder cache, `view-load-noop` branch, the `view-load` message variant, and host-side `sendView`. Order-fragility is gone; there is no second message to arrive out of order. Verified in-editor. |
+**Files:**
+- `tools/topology-vscode/src/webview/state/run-status.ts`
+- `tools/topology-vscode/src/extension.ts`
+- `tools/topology-vscode/src/messages.ts`
+- `tools/topology-vscode/src/webview/main.tsx`
+- `tools/topology-vscode/src/webview/three/RunButton.tsx`
+- `tools/topology-vscode/src/webview/three/scene-content.tsx`
+- `tools/topology-vscode/src/webview/pulse-state.ts`
 
-See `audit-correctness.md` for full reproduction steps and original severity ratings.
+**Cross-cuts:** Surfaces: store · extension · messages · 3D render · pulse-state. Distinct files: 7. Weight: **High** (structural: `runStatus` threads from `extension.ts` through `messages.ts` into `pulse-state` and `scene-content`; a new control state requires editing every relay hop).
+
+**Reduction proposal:**
+- Axis: `runStatus` is relayed hand-to-hand through `main.tsx` as a prop into `<ThreeView>`, then into `scene-content.tsx` and `pulse-state.ts`. Each relay hop is a mandatory edit site for any new run-state variant.
+- Strategy: **store-subscribe** — `scene-content.tsx`, `pulse-state.ts`, and `RunButton.tsx` read `runStatus` directly from the store via `useEditorStore`. Remove prop-drilling through `main.tsx` and `ThreeView`.
+- Expected post-change cross-cut count: **7 → 4** (`state/run-status.ts`, `extension.ts`, `messages.ts`, `RunButton.tsx`). `main.tsx`, `scene-content.tsx`, and `pulse-state.ts` become direct store subscribers.
+- Blocker: none structural. `useEditorStore` is already available in every component in the `three/` subtree.
 
 ---
 
-## 5. Code with No Plan Doc
+### Paced wire substrate
 
-These features were built but do not appear in `3d-editor.md`, `rf-to-r3f-cutover.md`, or the session-log cutover checklist:
+**Status:** working
 
-| Feature | Location |
-|---|---|
-| PanPad dwell-pan (hold-to-pan overlay) | `tools/topology-vscode/src/webview/three/PanPad.tsx` |
-| Roll slider (camera roll axis control) | `tools/topology-vscode/src/webview/three/RollSlider.tsx` |
-| Occlusion badge (node hidden-behind indicator) | Referenced in scene-content.tsx; no plan doc entry |
-| Nearest-N LOD (distance-based mesh culling) | `tools/topology-vscode/src/webview/three/scene-content.tsx`; not in cutover checklist |
+**Files:**
+- `nodes/Wiring/paced_wire.go`
+- `nodes/Wiring/builders.go`
+- `nodes/Wiring/loader.go`
+- `nodes/Wiring/ports.go`
+- `main.go`
+
+**Cross-cuts:** Surfaces: Go substrate only. Distinct files: 5 Go. Weight: **Low** (local: TS side sees only trace events through `pump.ts`; Go internals are opaque to all TS surfaces).
+
+**Reduction proposal:** Already minimal. `pump.ts` is the hard boundary. TS sees zero Go internals. The Go-internal structure is governed by MODEL.md, not by cross-cut audit.
+
+---
+
+### Ring-topology deadlock break
+
+**Status:** working
+
+**Files:**
+- `nodes/input/` (Go package)
+- `e2e/scenario-ring-animates.spec.ts`
+
+**Cross-cuts:** Surfaces: Go substrate · e2e tests. Distinct files: 2. Weight: **Low** (local: startup concern; no TS surface change required).
+
+**Reduction proposal:** Already minimal. 2-file cross-cut is the irreducible minimum for a Go-only startup concern.
+
+---
+
+## Render
+
+### Spec↔flow adapters + validation flag colors
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts`
+- `tools/topology-vscode/src/webview/state/adapter/flow-to-spec.ts`
+- `tools/topology-vscode/src/webview/state/adapter/spec-to-flow-helpers.ts`
+- `tools/topology-vscode/src/webview/schema/parse-spec.ts`
+- `tools/topology-vscode/src/webview/schema/parse-nodes-edges.ts`
+- `tools/topology-vscode/src/webview/schema/index.ts`
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/save.ts`
+- `tools/topology-vscode/src/webview/three/ThreeNodeMesh.tsx` (in `scene-content.tsx`)
+
+**Cross-cuts:** Surfaces: schema · store · adapters · save/load · 3D render · tests. Distinct files: 6+. Weight: **High** (structural: every new node or edge field passes through both adapter files plus `parse-spec.ts`; a field addition is a 6-file minimum change).
+
+**Reduction proposal:**
+- Axis: `spec-to-flow.ts` and `flow-to-spec.ts` must be manually updated for every new field. The schema in `schema/node-defs.ts` is already the authoritative field list and is the natural codegen source.
+- Strategy: **codegen (Strategy B)** — generate `spec-to-flow.ts` and `flow-to-spec.ts` from `schema/node-defs.ts` + `schema/wire-defs.ts`. A field addition becomes one schema edit; adapters regenerate. Strategy A (unify spec and flow shapes) is partially blocked by RF-shaped fields in `types.ts` that have no spec equivalent (e.g. `z` half-wiring, RF-internal `id` conventions).
+- Expected post-change cross-cut count: **6 → 2** (schema edit + regenerate; `store.ts` and `save.ts` unaffected).
+- Blocker: no codegen infrastructure exists today. Defer until ≥3 field additions in one session make the friction acute. Start with `node-defs.ts → spec-to-flow.ts` only.
+
+---
+
+### Sublabel inline edit
+
+**Status:** half-wired — `beginEditSublabel` exists in `inline-edit.ts`; missing is a 3D gesture to trigger it (only `RunButton` calls `flushActiveInlineEdit`).
+
+**Files:**
+- `tools/topology-vscode/src/webview/inline-edit.ts`
+- `tools/topology-vscode/src/webview/types.ts`
+- `tools/topology-vscode/src/webview/state/viewer-state.ts`
+- `tools/topology-vscode/src/webview/state/adapter/flow-to-spec.ts`
+- `tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts`
+- `tools/topology-vscode/src/webview/state/viewer/parse.ts`
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/three/RunButton.tsx`
+- `tools/topology-vscode/src/webview/schema/node-defs.ts`
+
+**Cross-cuts:** Surfaces: store · viewer-state · adapters · 3D render · extension/messages. Distinct files: 7 (9 with RunButton + node-defs). Weight: **Medium** (structural: `inline-edit.ts` is the trigger; the data path through `viewer-state → adapters → spec` is load-bearing; the missing piece is a single 3D gesture).
+
+**Reduction proposal:** The half-wiring IS the cross-cut. Do not restructure the existing path — add one gesture trigger in `interaction-controls.ts` calling `beginEditSublabel`. Once wired, the 7-file cross-cut is structurally justified (each file has a distinct role). No further reduction warranted.
+
+---
+
+### Node kinds (ChainInhibitor, InhibitRightGate, Input, ReadGate)
+
+**Status:** working
+
+**Files (per kind):**
+- `tools/topology-vscode/src/webview/schema/node-defs.ts`
+- `tools/topology-vscode/src/webview/schema/node-data-types.ts`
+- `tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts`
+- `tools/topology-vscode/src/webview/state/adapter/flow-to-spec.ts`
+- `tools/topology-vscode/src/webview/three/scene-content.tsx`
+- `nodes/<Kind>/` (Go package)
+
+**Cross-cuts:** Surfaces: schema/codegen · store · adapters · 3D render · Go substrate. Distinct files: 5+ per kind. Weight: **Medium** (structural per CLAUDE.md: adding a kind requires 3 co-committed surfaces — `<Kind>Node.tsx`, registry, Go package).
+
+**Reduction proposal:** Already minimal per CLAUDE.md. The 3-surface co-commit rule is the minimum coherent unit for adding a kind. The adapter cross-cut is addressed by the Spec↔flow codegen proposal (Strategy B). No further reduction independent of that proposal.
+
+---
+
+### Two-click edge creation
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/edge-creation.ts`
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts`
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts`
+
+**Cross-cuts:** Surfaces: 3D render · store · mutation paths · adapters. Distinct files: 5. Weight: **Medium** (local: creation path is self-contained in the 3D layer; schema and Go are unaware of how an edge is created).
+
+**Reduction proposal:** Already minimal. 5 files is the irreducible surface for a stateful 3D interaction (gesture capture, creation logic, orchestrator, store mutation, adapter). No parallel structure exists.
+
+---
+
+### Three.js/R3F 3D canvas (ThreeView)
+
+**Status:** working — `ThreeView.tsx` (~264-line orchestrator); geometry in `geometry-helpers.ts`; render in `scene-content.tsx`.
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/three/scene-content.tsx`
+- `tools/topology-vscode/src/webview/three/geometry-helpers.ts`
+- (virtually every other `three/` file)
+
+**Cross-cuts:** Surfaces: 3D render · store · schema · save/load · adapters. Weight: **Medium** (structural: ThreeView is the orchestrator; any new visual feature must route through it).
+
+**Reduction proposal:** Already minimal. ThreeView's cross-cut count reflects the number of 3D features, not redundancy. No reduction available without collapsing distinct features.
+
+---
+
+### Bezier tube edges (SingleEdgeTube)
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/SingleEdgeTube.tsx` (rendered inside `scene-content.tsx`)
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/types.ts`
+- `tools/topology-vscode/src/schema/wire-defs.ts`
+
+**Cross-cuts:** Surfaces: 3D render · schema (wire-defs) · types. Distinct files: 4. Weight: **Low** (local: render-only; `WireProps` in `wire-defs.ts` carries props but no other layer reads them yet).
+
+**Reduction proposal:** Already minimal. 4 files is the minimum for a typed render feature (render component, types, schema, orchestrator). `wire-defs.ts` is the single source of truth for wire props.
+
+---
+
+### Billboarded node labels
+
+**Status:** working — `@react-three/drei` `Billboard` + `Text` in `scene-content.tsx`.
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/scene-content.tsx`
+
+**Cross-cuts:** Surfaces: 3D render only. Distinct files: 1. Weight: **Low** (local: fully contained in `scene-content.tsx`).
+
+**Reduction proposal:** Already minimal. Cross-cut count is 1. No reduction available.
+
+---
+
+### Nearest-N LOD + occlusion badge
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/scene-content.tsx`
+- `tools/topology-vscode/src/webview/three/OcclusionBadge.tsx`
+
+**Cross-cuts:** Surfaces: 3D render only. Distinct files: 2. Weight: **Low** (local: fully self-contained in the 3D render pass).
+
+**Reduction proposal:** Already minimal. Cross-cut count is 2 (scene-content + OcclusionBadge). Minimum for any 3D feature.
+
+---
+
+### Raycast node pick / single select
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts`
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/store.ts`
+
+**Cross-cuts:** Surfaces: 3D render · store. Distinct files: 3. Weight: **Low** (local: selection state is a single `selectedNodeId` in store; no other layer is selection-aware today).
+
+**Reduction proposal:** Already minimal. 3 files is the irreducible surface for a 3D gesture that mutates store state.
+
+---
+
+### Z-coordinate (node depth)
+
+**Status:** half-wired — schema parses `z`; always 0 in practice; no UI to set depth.
+
+**Files:**
+- `tools/topology-vscode/src/webview/schema/node-defs.ts`
+- `tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts`
+
+**Cross-cuts:** Surfaces: schema · adapters. Distinct files: 2. Weight: **Low** (local: parsed but always 0; no 3D render or UI surface reads it meaningfully).
+
+**Reduction proposal:** Complete it or remove it. **Preferred: (a) remove `z` from `node-defs.ts` and the adapter** until a depth-editing UI is planned. The stub pays schema-parse and adapter tax with no user benefit. Reintroduce when depth editing is actively built.
+
+---
+
+### Edge midpoint drag
+
+**Status:** restore-parity — `midpointOffset` at `schema/wire-defs.ts:13,24` is a schema stub only; no adapter reads it, no setter, no drag UI.
+
+**Files:**
+- `tools/topology-vscode/src/schema/wire-defs.ts` (lines 13, 24 — stub only)
+
+**Cross-cuts:** Surfaces: schema (stub only). Distinct files: 1. Weight: **Low** (local: purely a schema stub; no live cross-cuts).
+
+**Reduction proposal:** Stub-removal. Remove `midpointOffset` from `wire-defs.ts` now to keep the schema honest. The accepted-for-build bend-points feature supersedes it; reintroduce as a generalized `waypoints` field when actively built. Leaving the stub risks a future adapter silently treating a zero-valued field as meaningful.
+
+---
+
+### Port drag / Edge reconnect / Edge delete / Edge-kind context menu
+
+**Status:** restore-parity — all absent from code (deleted; git-history only).
+
+**Files:** none (deleted)
+
+**Cross-cuts:** Distinct files: 0. Weight: —
+
+**Reduction proposal:** No action. No stubs to remove. When restored, each should follow the same 3–5 file pattern as two-click edge creation.
+
+---
+
+### Multi-select / Node delete / Node palette / PseudoPanel
+
+**Status:** restore-parity — all absent from code (deleted; git-history only).
+
+**Files:** none (deleted)
+
+**Cross-cuts:** Distinct files: 0. Weight: —
+
+**Reduction proposal:** No action. No stubs to remove. When restored, scope to the analogous working-feature pattern.
+
+---
+
+### Multi-node alignment guides
+
+**Status:** accepted-for-build — not present in code; generalizes single-node drag guides to multi-selection bounding box; gated behind multi-select restore.
+
+**Files:** none yet
+
+**Cross-cuts:** Distinct files: 0. Weight: —
+
+**Reduction proposal:** No action now. When built, will touch interaction-controls + store (selection) + 3D render. No pre-build reduction possible.
+
+---
+
+### Bend points / waypoints
+
+**Status:** accepted-for-build — generalizes midpoint drag to arbitrary waypoints; supersedes `midpointOffset` stub; per-edge persisted state threaded through schema + adapters.
+
+**Files:** none yet
+
+**Cross-cuts:** Distinct files: 0. Weight: —
+
+**Reduction proposal:** No action now. When built, will be structural (schema → adapters → store → 3D render → save/load all touched).
+
+---
+
+## Interaction
+
+### View-save on settle
+
+**Status:** half-wired — `markViewSynced` called inside `loadView`; NOT called after camera/drag, so positions are lost on reload.
+
+**Files:**
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/save.ts` (lines 48, 78)
+- `tools/topology-vscode/src/webview/state/viewer-state.ts`
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/three/camera-ui.tsx`
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts`
+
+**Cross-cuts:** Surfaces: store · save/load · viewer-state · 3D render · interaction-controls · camera-ui. Distinct files: 6. Weight: **High** (structural: missing `markViewSynced` call after camera/drag means every new camera gesture must remember to also trigger the view-save path — a tax on every future gesture added).
+
+**Reduction proposal:**
+- Axis: every camera gesture (arcball drag, dolly, pan, roll) must call `markViewSynced` to close the view-save loop. Today none of them do; only `loadView` calls it.
+- Strategy: **observe-not-assert** — derive dirty state by comparison. A single effect compares `currentCamera3d` (read from the camera ref on `pointerup`/`wheel`-end events) against `lastSavedCamera3d` (written on each successful save). When they differ for longer than a debounce interval (e.g. 1.5 s), trigger `scheduleViewSave`. No per-gesture call site needed; new gestures are automatically covered.
+- Implementation: add `lastSavedCamera3d` to `state/viewer/types.ts`; update `save.ts` to write it after a successful save; add one debounced `useEffect` in `ThreeView.tsx` (or `CameraRefBridge`); remove or no-op `markViewSynced` in `store.ts`.
+- Expected post-change cross-cut count: **6 → 3** (`state/viewer/types.ts`, `save.ts`, `ThreeView.tsx`). `store.ts`, `camera-ui.tsx`, and `interaction-controls.ts` need no changes.
+- Blocker: camera ref already exposed via `CameraRefBridge` in `ThreeView.tsx`. No structural blocker.
+
+---
+
+### Arcball / dolly / pan / roll (camera controls)
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts`
+- `tools/topology-vscode/src/webview/three/camera-ui.tsx`
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/save.ts`
+- `tools/topology-vscode/src/webview/state/viewer/types.ts`
+
+**Cross-cuts:** Surfaces: 3D render · store · save/load · schema (viewer/types). Distinct files: 6. Weight: **Medium** (local: `camera3d` is an isolated field in `viewer-state`; only `save.ts` and `store.ts` need to be aware of it).
+
+**Reduction proposal:** Already minimal. Camera3d is a single isolated field in `state/viewer/types.ts`; the 6 files are the natural surface (gesture capture, UI, scene, store, save, schema). Each has a distinct responsibility. View-save closure is handled by the separate View-save proposal above.
+
+---
+
+### Fit-view hotkey
+
+**Status:** half-wired — fit-on-load only; no f/Shift-F for manual re-fit.
+
+**Files:**
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+
+**Cross-cuts:** Surfaces: 3D render. Distinct files: 1. Weight: —
+
+**Reduction proposal:** Complete-stub. Add `f`/`Shift-F` keyboard handler in `ThreeView.tsx` triggering the existing `fitCamera` logic.
+
+---
+
+## Persistence
+
+### Load spec / load view
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/store.ts` (`loadSpec`, `loadView`)
+- `tools/topology-vscode/src/webview/save.ts`
+- `tools/topology-vscode/src/webview/state/viewer-state.ts`
+- `tools/topology-vscode/src/webview/state/viewer/parse.ts`
+- `tools/topology-vscode/src/webview/state/viewer/types.ts`
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx`
+
+**Cross-cuts:** Surfaces: store · save/load · viewer-state · schema. Distinct files: 6. Weight: **Medium** (structural: any new viewer-state field must extend both `viewer/parse.ts` and `viewer/types.ts` or loads produce blank state).
+
+**Reduction proposal:**
+- Axis: `viewer/parse.ts` and `viewer/types.ts` must be kept in sync manually. A mismatch produces a silent blank-load bug.
+- Strategy: **unify** — make `viewer/parse.ts` return a typed result whose inferred return type IS the `ViewerState` type, eliminating the separately maintained `types.ts` interface. A type mismatch becomes a compile error rather than a silent bug.
+- Expected post-change cross-cut count: **6 → 5** (the two parse files collapse into one authoritative source; `store.ts`, `save.ts`, and `ThreeView.tsx` unaffected).
+- Blocker: none structural; a pure TS refactor with no behavior change.
+
+---
+
+### Debounced spec save
+
+**Status:** working
+
+**Files:**
+- `tools/topology-vscode/src/webview/save.ts`
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts`
+- `tools/topology-vscode/src/webview/main.tsx`
+- `tools/topology-vscode/src/webview/three/SaveLifecycle.tsx`
+- e2e specs
+
+**Cross-cuts:** Surfaces: save/load · store · mutation paths · extension. Distinct files: 6. Weight: **Medium** (local: well-isolated in `save.ts`; callers add exactly one `scheduleSave()` call, no awareness of internals required).
+
+**Reduction proposal:** Already minimal. `save.ts` is the single locus of save logic. The 6-file cross-cut is the natural surface (save engine, store, two caller gesture files, lifecycle component, e2e coverage). No parallel structures exist.
+
+---
+
+### Trace/probe logging
+
+**Status:** working — `.probe/` JSONL files; `probe.ts` in webview.
+
+**Files:**
+- `tools/topology-vscode/src/webview/log/post.ts`
+- `tools/topology-vscode/src/extension/webview-log.ts`
+- `tools/topology-vscode/src/messages.ts`
+- `tools/topology-vscode/src/runCommand.ts`
+- `tools/topology-vscode/src/webview/probe.ts`
+
+**Cross-cuts:** Surfaces: extension · messages · webview log pipeline. Distinct files: 5. Weight: **Low** (local: well-isolated one-way log funnel; no feature cross-cuts it).
+
+**Reduction proposal:** Already minimal. The 5-file pipeline is a one-way log funnel (Go → extension → messages → webview → probe.ts). Each hop is distinct; no parallel structure exists.
+
+---
+
+### Undo coalescing at gesture level
+
+**Status:** accepted-for-build — snapshot-on-pointer-up pattern; from-scratch undo/redo build.
+
+**Files:** none yet
+
+**Cross-cuts:** Distinct files: 0. Weight: —
+
+**Reduction proposal:** No action now. When built, the snapshot-on-pointer-up pattern is scoped to interaction-controls + a history store (2–3 files). No pre-build reduction possible.
+
+---
+
+## Validation
+
+### Validation flag colors
+
+**Status:** working — `ThreeNodeMesh.tsx`; `parseSpec` diagnostics.
+
+**Files:**
+- `tools/topology-vscode/src/webview/schema/parse-spec.ts`
+- `tools/topology-vscode/src/webview/schema/parse-nodes-edges.ts`
+- `tools/topology-vscode/src/webview/schema/index.ts`
+- `tools/topology-vscode/src/webview/store.ts`
+- `tools/topology-vscode/src/webview/three/ThreeNodeMesh.tsx` (inside `scene-content.tsx`)
+
+**Cross-cuts:** Surfaces: schema (parse-spec) · store · 3D render. Distinct files: 5. Weight: **Medium** (structural: required-input validation is checked in `parse-spec` but the color decision is re-derived in `ThreeNodeMesh`; new required constraints require touching both ends).
+
+**Reduction proposal:**
+- Strategy: **observe-not-assert** — `parse-spec` emits `validationColor` or the existing `hasError` boolean directly into node data; `ThreeNodeMesh` reads that field passively rather than re-checking required inputs. New required constraints then require only a `parse-spec` edit.
+- Expected post-change cross-cut count: **5 → 3** (`parse-spec.ts`, `store.ts`, `ThreeNodeMesh.tsx`). `parse-nodes-edges.ts` and `schema/index.ts` are already on the parse path; only their output shape changes.
+- Blocker: none structural.
+
+---
+
+## Folds & containment
+
+### Fold / containment
+
+**Status:** proposal — not implemented; old view-only fold feature fully removed (commit `9d4091c5`).
+
+**Files:** none yet
+
+**Cross-cuts:** Distinct files: 0. Weight: — (projected: **Very High** — spec layer, viewer-state, adapters, 3D render, Go substrate all affected by design).
+
+**Reduction proposal:** No reduction available pre-implementation. The projected cross-cut (spec, viewer-state, adapters, 3D render, Go substrate) is inherent to the feature's responsibility. Pre-work recommendation: resolve the open substrate question (how a child diagram associates with a node at spec vs. viewer-state layer) before writing any code, per `feedback_specify_substrate_layer_first.md`. That decision determines whether the cross-cut is 5 surfaces or 7.
+
+**Proposal shape (not yet specced at spec/viewer-state layer):**
+- Fold is an **attribute**, not a node kind. Any node can be marked as a fold.
+- **Visibility and execution are coupled.** Unfolded = visible + running; folded = hidden + not running.
+- **Authoring gesture.** Create a node → assign fold attribute → select nodes to place inside → they move into the fold node's child diagram. The fold node adopts boundary edges.
+- **Reveal gesture (expand-in-place).** Each fold node has a show/hide toggle. Toggling "show" reveals one level down inline, anchored to the fold node. No full-screen canvas swap, no breadcrumb navigation.
+- **Hierarchy.** Folds can nest; each child diagram may contain fold nodes with their own toggles.
+- **Open substrate question.** How a child diagram associates with a node at spec vs. viewer-state layer must be resolved first.
