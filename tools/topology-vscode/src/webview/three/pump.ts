@@ -23,7 +23,8 @@ import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
-import { setPulse, clearPulse } from "./pulse-state";
+import { setPulse, clearPulse, getPulseMap, patchPulse } from "./pulse-state";
+import { getPauseAdjustedNow } from "../state/run-status";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -68,6 +69,23 @@ export function handleTraceEvent(event: TraceEvent): void {
           targetHandle: edge.targetHandle ?? "",
           simLatencyMs: resolvedLatency,
         });
+      }
+      return;
+    }
+    case "latency-changed": {
+      // Adjust any in-flight bead on this edge so it finishes at the correct
+      // time after the node drag has changed the wire length.
+      // Preserve fractional progress t_curr, re-anchor startTime accordingly:
+      //   t_curr = (now - oldStartTime) / oldSimLatencyMs
+      //   newStartTime = now - t_curr * newSimLatencyMs
+      const { edge, simLatencyMs: newLatencyMs } = event as Extract<TraceEvent, { kind: "latency-changed" }>;
+      const pulse = getPulseMap().get(edge);
+      if (pulse) {
+        const now = getPauseAdjustedNow();
+        const elapsed = now - pulse.startTime;
+        const tCurr = Math.min(1, elapsed / pulse.simLatencyMs);
+        const newStartTime = now - tCurr * newLatencyMs;
+        patchPulse(edge, newLatencyMs, newStartTime);
       }
       return;
     }

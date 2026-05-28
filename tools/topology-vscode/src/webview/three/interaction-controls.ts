@@ -8,6 +8,7 @@ import { nodeWorldPos, sceneCenter, worldPerPixel, pixelToNDC } from "./geometry
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
+import { vscode } from "../vscode-api";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -90,6 +91,31 @@ export function useInteractionControls(
     nodeCenterAtStart: THREE.Vector3;
     rfPosAtStart: { x: number; y: number };
   } | null>(null);
+
+  // Throttle node-move IPC: one message per animation frame during drag.
+  // rafPending is truthy when a rAF is already scheduled; the scheduled
+  // callback reads the latest position from pendingNodeMove.
+  const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number } | null>(null);
+  const rafPending = useRef(false);
+
+  const flushNodeMove = useCallback((nodeId: string, x: number, y: number) => {
+    vscode.postMessage({ type: "node-move", nodeId, x, y, z: 0 });
+  }, []);
+
+  const scheduleNodeMove = useCallback((nodeId: string, x: number, y: number) => {
+    pendingNodeMove.current = { nodeId, x, y };
+    if (!rafPending.current) {
+      rafPending.current = true;
+      requestAnimationFrame(() => {
+        rafPending.current = false;
+        const p = pendingNodeMove.current;
+        if (p) {
+          flushNodeMove(p.nodeId, p.x, p.y);
+          pendingNodeMove.current = null;
+        }
+      });
+    }
+  }, [flushNodeMove]);
 
   // Pivot for the current drag (world space)
   const dragPivot = useRef(new THREE.Vector3());
@@ -278,6 +304,7 @@ export function useInteractionControls(
               const newPosX = newCenterX - w / 2;
               const newPosY = -newCenterY - h / 2;
               onMoveNode(nd.nodeId, newPosX, newPosY);
+              scheduleNodeMove(nd.nodeId, newPosX, newPosY);
             }
           }
         } else {
@@ -305,7 +332,7 @@ export function useInteractionControls(
           .addScaledVector(upDir, panDy * wpp);
       }
     },
-    [applyArcball, cameraRef, canvasSize, nodesRef, onMoveNode, onPanPadActive, pickPivot, unprojectToPlane],
+    [applyArcball, cameraRef, canvasSize, nodesRef, onMoveNode, onPanPadActive, pickPivot, scheduleNodeMove, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -342,6 +369,10 @@ export function useInteractionControls(
           });
           scheduleViewSave();
           scheduleSave();
+          // Final flush: cancel any pending rAF and send the precise final position.
+          pendingNodeMove.current = null;
+          rafPending.current = false;
+          flushNodeMove(node.id, node.position.x, node.position.y);
         }
         nodeDragRef.current = null;
         s.phase = "idle";
@@ -372,7 +403,7 @@ export function useInteractionControls(
 
       s.phase = "idle";
     },
-    [cameraRef, nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
+    [cameraRef, flushNodeMove, nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
   );
 
   const onWheel = useCallback(

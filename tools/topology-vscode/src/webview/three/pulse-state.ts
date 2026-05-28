@@ -50,6 +50,18 @@ export function claimDelivered(edgeId: string, startTime: number): boolean {
   return true;
 }
 
+/** Overwrite an existing in-flight pulse with an explicit startTime.
+ *  Used by the latency-changed handler to preserve the bead's visual
+ *  progress fraction when wire geometry changes during a node drag. */
+export function patchPulse(edgeId: string, simLatencyMs: number, startTime: number) {
+  const existing = _current.get(edgeId);
+  if (!existing) return;
+  const next = new Map(_current);
+  next.set(edgeId, { ...existing, simLatencyMs, startTime });
+  _current = next;
+  _setter?.(next);
+}
+
 export function clearPulse(edgeId: string) {
   if (!_current.has(edgeId)) return;
   const next = new Map(_current);
