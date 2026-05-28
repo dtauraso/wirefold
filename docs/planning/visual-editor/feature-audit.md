@@ -80,10 +80,13 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 **Cross-cuts:** Surfaces: pump · Go substrate (Trace) · store · messages · extension · schema (animation-fields) · 3D render · save/load. Distinct files: 8. Weight: **High** (structural: `pump.ts` is the Go↔TS pacing contract; every trace-event field name is locked by a contract test).
 
 **Reduction proposal:**
-- Axis: Go and TS independently maintain the trace-event schema. A field added in `Trace/Trace.go` must be manually mirrored in `pump.ts`, `animation-fields.ts`, and the contract test (4+ file minimum).
-- Strategy: **B (TS owns animation semantics)** — `pump.ts` receives only raw primitives from Go (e.g. `{kind, edgeId, simTime}`); all animation-specific fields (duration, easing, bead color) are derived client-side in `animation-fields.ts`. Fields that genuinely vary per-substrate-tick (backpressure-driven speed) remain in the Go struct.
-- Expected post-change cross-cut count: **8 → 2** (Go struct + `pump.ts` for pacing primitives; `animation-fields.ts` + `scene-content.tsx` are TS-internal and don't require Go-side awareness).
-- Blocker: audit the contract test at `test/contracts/trace-event-fields.test.ts` to classify each field as substrate-driven vs. animation-policy before moving anything.
+- Axis: Go's channel/`PacedWire` is rendezvous-instant — no "value is on the wire" state. TS fabricates bead duration as wallclock animation, creating two clocks (sim-time vs wallclock) and a derived TS-side cache (`pulse-state.ts`) that must be kept in sync with the trace stream by `pump.ts`. The "8-file cross-cut" is a symptom of this seam, not duplication.
+- Strategy: **Move transport duration into the substrate.** `PacedWire` holds a sent value for a sim-time window before the receiver can rendezvous with it — "in-flight" becomes a phase of the wire state machine, not a render-only construct. Trace emits `transport-start(simTime=t0)` and `transport-end(simTime=t1)`; TS animates the interval `[t0,t1]` and does no clock fabrication. `pulse-state.ts` collapses (wire state IS the pulse); pause/sim-speed fall out for free.
+- Expected post-change cross-cut count: **8 → ~3** (Go `PacedWire` + Trace envelope + TS render reader). `pulse-state.ts`, `animation-fields.ts`-as-source-of-truth, and the bead-duration policy in `pump.ts` all go away.
+- Open question (resolve before coding): should the wire's transport duration be **sim-time** (substrate-driven; scales with sim-speed; pauses with sim-time) or **wallclock** (render-policy, current TS behavior)? Sim-time is the consistent choice — it eliminates the two-clocks-disagree bug class — but the call must be made explicitly because it changes round-close semantics: a wire mid-flight is busy in a way the current model doesn't express, and downstream nodes fire at the delivery step rather than the send step.
+- Blockers:
+  1. MODEL.md gate — per CLAUDE.md this is a substrate change; read MODEL.md's slot-phase + round-close sections and confirm whether per-wire transport duration fits the existing contract or requires a model revision.
+  2. Audit existing `Trace.Event` fields and classify each as substrate-truth (stays) vs render-policy (deletes); the contract test at `test/contracts/trace-event-fields.test.ts` is the worklist.
 
 ---
 
