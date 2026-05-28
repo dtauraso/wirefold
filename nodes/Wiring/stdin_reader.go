@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"math"
 	"sync"
 
@@ -54,9 +55,7 @@ func NewNodeMoveRegistry(positions map[string]NodePosition, edgeNodes map[string
 	}
 	// Defensively copy positions.
 	pos := make(map[string]NodePosition, len(positions))
-	for k, v := range positions {
-		pos[k] = v
-	}
+	maps.Copy(pos, positions)
 	return &NodeMoveRegistry{
 		positions: pos,
 		edgeNodes: edgeNodes,
