@@ -7,9 +7,28 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-27 — branch main; no task in flight)
+## State at handoff (2026-05-28 — branch task/pulse-substrate-transport; design resolved, no code yet)
 
-- **Active branch:** `main`. No task in flight. H1 (3D camera persistence) and H3 (single-message load transport) were resolved on branch `task/collapse-load-transport` and merged to `main` via merge commit `8b1d02a4`; branch deleted local + remote. Both features verified working in the editor. Working tree: only `topology.json` is modified (intentional node-drag positions — do NOT stage or discard).
+- **Active branch:** `task/pulse-substrate-transport` (pushed; tracks origin). Task: cross-cut refactor (a) from feature-audit — collapse pulse/pump duplication by moving transport duration into the substrate. **Design phase complete; first code change not yet picked.** Working tree clean except the usual `topology.json` drift.
+- **Items 1–3 from prior KNOWN ISSUES are PARKED** — do not surface them until this cross-cut work lands. (Drag-to-wire, port-incompat wiring, pre-existing test failures.)
+
+### Pulse substrate transport — resolved design (this session)
+
+- **Model chosen:** uniform pulse speed in pixels-per-sim-step (one global constant); per-wire `simLatency = arcLength / pulseSpeed`. Longer wires take more sim-steps to traverse. Layout geometry intentionally feeds substrate timing — relaxes the "substrate is a pure function of spec, layout is render-policy" rule for transport latency only.
+- **Latency policy: B (latency-live).** Wire's traversal time tracks current geometry; dragging a node mid-flight reshapes the in-flight bead and shifts its arrival sim-time. Bead is always on the wire as drawn; downstream lights up at the geometric endpoint. Cost: reproducibility needs position-over-time, headless mode requires frozen positions.
+- **MODEL.md gate is OPEN.** MODEL.md (lines 33–47, 178–187) already names `arcLength`, `pulseSpeed`, `inFlightTime = arcLength / pulseSpeed`, and `in-flight(v)` as substrate vocabulary. No model revision needed — implementation is *behind* the model, not the other way around.
+- **Trace.Event field audit done.** Substrate-truth fields stay (`step`, `kind`, `node`, `port`, `value`, `edge`, slot `phase`/`nodeId`). Render-policy fields are entirely TS-side fabrications (`pulse-state.ts:18 startTime`, `pump.ts` wallclock-duration math, hardcoded `PULSE_SPEED_WU_PER_MS = 0.08` at `scene-content.tsx:167`, `arcLength` recomputed from Bezier at `scene-content.tsx:228`). **Missing from trace, must be added:** `arcLength`, `pulseSpeed`, `in-flight-start`/`in-flight-end` events (or augmented `send`), `arrives`. The refactor *promotes* these into the substrate rather than deleting them.
+- **Audit entry (`docs/planning/visual-editor/feature-audit.md`) updated** with the resolved model + decided latency policy + blocker resolutions. Commits on this branch: `f4b8fe5f` (replaced old Strategy B), `89266648` (uniform-speed resolution), `c39fc8e7` (blockers resolved).
+
+### First code change — not picked yet
+
+The natural first commit is making `arcLength` real on the Go side: thread the wire's spec-time geometry (source/target positions → straight-line distance) into `PacedWire` at construction, and emit it on `send` trace events. That unblocks pump.ts to stop computing arcLength from Bezier curves and pulse-state.ts to stop being the cache. But it requires the spec → loader path to thread position info into wires — a real chunk, not a one-liner.
+
+Alternative smaller readiness step: add `arcLength` to the spec schema as a field with no consumer yet, then wire consumers incrementally. Decide before next code edit.
+
+### Prior main-branch state (unchanged this session)
+
+- H1 (3D camera persistence) and H3 (single-message load transport) were resolved on `task/collapse-load-transport` and merged to `main` via merge commit `8b1d02a4`; branch deleted local + remote. Both features verified working in the editor.
 
 ### Load-transport collapse + 3D camera persistence (this session, merged 8b1d02a4)
 
@@ -51,10 +70,12 @@ read this file first (no chat history needed) and proceed.
 
 ### KNOWN ISSUES (candidate next work)
 
-1. **Drag-to-wire edge creation is NON-FUNCTIONAL** (top open item). Dragging node A onto node B does not create an edge. Confirm with a runtime breadcrumb before fixing; logic now lives in `three/edge-creation.ts` (`buildEdge`) and the pointer-up branch in `three/interaction-controls.ts`. NOTE: createEdge/store call sites moved during the audit — re-grep before assuming line numbers.
-2. Node-to-node wiring fails for port-incompatible node kinds (same `buildEdge` auto-pick path).
-3. **Pre-existing test failures (predate audit, unrelated):** TS — `parseSpec.test.ts` (2: legacy `timing.steps` not dropped; legend bad-kind not rejected). Go — `Trace.TestMarshalEventMatchesFixture`. (`fold.test.ts` is gone — the entire old fold test suite was deleted with the fold removal, commit `9d4091c5`.) (The two contract failures — topology-edge-handles, trace-event-fields — were FIXED in a prior session.)
-4. **Junction-click ambiguity:** overlapping edge pick-tubes near a node junction can mis-pick; click mid-span.
+**Active focus: cross-cut refactors (feature-audit top 4).** Items 1–3 below are PARKED — do not mention or surface them until the cross-cut work is done.
+
+1. *(parked)*
+2. *(parked)*
+3. *(parked)*
+4. **Cross-cut refactors** — feature-audit top 4: (a) Pulse/pump schema single-source + codegen; (b) runStatus store-subscribe to remove prop-drilling; (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts`; (d) explicit viewer-state derivation from spec.
 5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
 6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
 
