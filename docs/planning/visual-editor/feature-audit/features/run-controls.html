@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run/pause/stop controls (runStatus) — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Run/pause/stop controls (runStatus)</h1>
+  <div class="detail-header">
+    <span class="badge badge-working">working</span>
+    <span class="badge badge-cat">Substrate</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>tools/topology-vscode/src/webview/state/run-status.ts</li><li>tools/topology-vscode/src/extension.ts</li><li>tools/topology-vscode/src/messages.ts</li><li>tools/topology-vscode/src/webview/main.tsx</li><li>tools/topology-vscode/src/webview/three/RunButton.tsx</li><li>tools/topology-vscode/src/webview/three/scene-content.tsx</li><li>tools/topology-vscode/src/webview/three/pulse-state.ts</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">store</span><span class="surface-chip">extension</span><span class="surface-chip">messages</span><span class="surface-chip">3D render</span><span class="surface-chip">pulse-state</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">REMOVED 2026-05-28 — zero prop-drilling detected; one React consumer via RunStatusCtx at root; all per-frame/pause-clock readers call getPauseAdjustedNow() directly.</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>Re-audit 2026-05-28 (commit 467b40c3) confirmed no prop-drill; original store-subscribe proposal was stale.</p>
+  </section>
+</div>
+</body>
+</html>

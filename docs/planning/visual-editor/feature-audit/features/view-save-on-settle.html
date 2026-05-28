@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>View-save on settle — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>View-save on settle</h1>
+  <div class="detail-header">
+    <span class="badge badge-half-wired">half-wired</span>
+    <span class="badge badge-cat">Interaction</span>
+    <span class="badge badge-weight-High">cross-cut: High</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>tools/topology-vscode/src/webview/store.ts</li><li>tools/topology-vscode/src/webview/save.ts</li><li>tools/topology-vscode/src/webview/state/viewer-state.ts</li><li>tools/topology-vscode/src/webview/three/ThreeView.tsx</li><li>tools/topology-vscode/src/webview/three/camera-ui.tsx</li><li>tools/topology-vscode/src/webview/three/interaction-controls.ts</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">store</span><span class="surface-chip">save/load</span><span class="surface-chip">viewer-state</span><span class="surface-chip">3D render</span><span class="surface-chip">interaction-controls</span><span class="surface-chip">camera-ui</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">observe-not-assert — derive dirty state by comparing currentCamera3d against lastSavedCamera3d with debounce; no per-gesture call site needed.</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>markViewSynced called only in loadView; NOT called after camera/drag, so positions lost on reload. camera ref exposed via CameraRefBridge.</p>
+  </section>
+</div>
+</body>
+</html>

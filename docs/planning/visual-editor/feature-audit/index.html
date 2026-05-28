@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visual Editor Feature Audit</title>
+<link rel="stylesheet" href="styles.css">
+<script src="data.js"></script>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Visual Editor Feature Audit</h1>
+    <div class="meta" id="meta">Re-audited 2026-05-28</div>
+  </header>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="chips-row">
+    <div class="chips" id="chips"></div>
+    <button class="sort-btn" id="sort-btn">Sort: Default</button>
+  </div>
+  <div class="cards" id="cards"></div>
+</div>
+
+<script>
+(function() {
+  const data = window.AUDIT_DATA;
+
+  const STATUSES = ["working","restore-parity","half-wired","accepted-for-build","proposal","dead-code"];
+  const STATUS_LABELS = {
+    "working": "working",
+    "restore-parity": "restore-parity",
+    "half-wired": "half-wired",
+    "accepted-for-build": "accepted-for-build",
+    "proposal": "proposal",
+    "dead-code": "dead-code"
+  };
+
+  const cats = ["All", ...new Set(data.map(d => d.category))];
+
+  const WEIGHT_ORDER = { "High": 0, "Medium": 1, "Low": 2 };
+  const SORT_STATES = ["Default", "Cross-cut ↓ (High→Low)", "Cross-cut ↑ (Low→High)"];
+
+  let activeTab = "All";
+  let activeStatuses = new Set(STATUSES);
+  let sortState = 0; // index into SORT_STATES
+
+  function badgeClass(status) {
+    return "badge badge-" + status;
+  }
+
+  function cardVisible(f) {
+    const catMatch = activeTab === "All" || f.category === activeTab;
+    const statusMatch = activeStatuses.has(f.status);
+    return catMatch && statusMatch;
+  }
+
+  function proposalSnippet(p) {
+    if (!p || p === "none") return "No reduction proposed.";
+    if (p.length > 100) return p.slice(0, 97) + "…";
+    return p;
+  }
+
+  function renderTabs() {
+    const el = document.getElementById("tabs");
+    el.innerHTML = "";
+    cats.forEach(cat => {
+      const btn = document.createElement("button");
+      btn.className = "tab-btn" + (activeTab === cat ? " active" : "");
+      btn.textContent = cat;
+      btn.onclick = () => { activeTab = cat; render(); };
+      el.appendChild(btn);
+    });
+  }
+
+  function renderChips() {
+    const el = document.getElementById("chips");
+    el.innerHTML = "";
+    STATUSES.forEach(s => {
+      const count = data.filter(f => f.status === s).length;
+      if (count === 0) return;
+      const chip = document.createElement("span");
+      chip.className = "chip" + (activeStatuses.has(s) ? "" : " off");
+      chip.innerHTML = STATUS_LABELS[s] + ' <span class="count">(' + count + ')</span>';
+      chip.onclick = () => {
+        if (activeStatuses.has(s)) { activeStatuses.delete(s); } else { activeStatuses.add(s); }
+        render();
+      };
+      el.appendChild(chip);
+    });
+  }
+
+  function sortedData() {
+    if (sortState === 0) return data;
+    const dir = sortState === 1 ? 1 : -1;
+    return data.slice().sort((a, b) => {
+      const w = (WEIGHT_ORDER[a.cross_cut_weight] - WEIGHT_ORDER[b.cross_cut_weight]) * dir;
+      return w !== 0 ? w : a.name.localeCompare(b.name);
+    });
+  }
+
+  function renderCards() {
+    const el = document.getElementById("cards");
+    el.innerHTML = "";
+    let shown = 0;
+    sortedData().forEach(f => {
+      const visible = cardVisible(f);
+      if (visible) shown++;
+      const card = document.createElement("div");
+      card.className = "card" + (visible ? "" : " hidden");
+      card.innerHTML =
+        '<div class="card-title"><a href="features/' + f.slug + '.html">' + escHtml(f.name) + '</a></div>' +
+        '<div class="card-meta">' +
+          '<span class="' + badgeClass(f.status) + '">' + escHtml(f.status) + '</span>' +
+          '<span class="badge badge-cat">' + escHtml(f.category) + '</span>' +
+          '<span class="badge badge-weight-' + f.cross_cut_weight + '">cross-cut: ' + f.cross_cut_weight + '</span>' +
+        '</div>' +
+        '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>';
+      el.appendChild(card);
+    });
+    document.getElementById("meta").textContent =
+      "Re-audited 2026-05-28 · " + data.length + " features · " + (cats.length - 1) + " categories · " + shown + " shown";
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderSortBtn() {
+    const btn = document.getElementById("sort-btn");
+    btn.textContent = "Sort: " + SORT_STATES[sortState];
+    btn.classList.toggle("active", sortState !== 0);
+  }
+
+  function render() {
+    renderTabs();
+    renderChips();
+    renderSortBtn();
+    renderCards();
+  }
+
+  document.getElementById("sort-btn").onclick = () => {
+    sortState = (sortState + 1) % SORT_STATES.length;
+    render();
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

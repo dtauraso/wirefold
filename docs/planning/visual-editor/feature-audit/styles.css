@@ -1,0 +1,116 @@
+:root {
+  --bg: #f5f5f7;
+  --card-bg: #ffffff;
+  --text: #1d1d1f;
+  --text-muted: #6e6e73;
+  --border: #d2d2d7;
+  --accent: #0071e3;
+  --tab-active-bg: #0071e3;
+  --tab-active-text: #fff;
+  --chip-on-bg: #e8f0fe;
+  --chip-on-border: #4285f4;
+  --chip-off-bg: #f1f1f1;
+  --chip-off-border: #ccc;
+  --radius: 10px;
+  --shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --card-bg: #2c2c2e;
+    --text: #f5f5f7;
+    --text-muted: #8e8e93;
+    --border: #3a3a3c;
+    --accent: #4da3ff;
+    --tab-active-bg: #4da3ff;
+    --tab-active-text: #000;
+    --chip-on-bg: #1a3a6e;
+    --chip-on-border: #4da3ff;
+    --chip-off-bg: #2c2c2e;
+    --chip-off-border: #555;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Layout */
+.page { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+header { margin-bottom: 20px; }
+header h1 { font-size: 22px; font-weight: 700; }
+header .meta { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+
+/* Tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.tab-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 500; transition: background 0.15s, color 0.15s; }
+.tab-btn:hover { border-color: var(--accent); }
+.tab-btn.active { background: var(--tab-active-bg); color: var(--tab-active-text); border-color: var(--tab-active-bg); }
+
+/* Filter chips + sort row */
+.chips-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.sort-btn { padding: 4px 12px; border-radius: 20px; border: 1px solid var(--chip-off-border); background: var(--chip-off-bg); color: var(--text-muted); cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.sort-btn:hover { border-color: var(--accent); color: var(--text); }
+.sort-btn.active { background: var(--chip-on-bg); border-color: var(--chip-on-border); color: var(--text); }
+.chip { padding: 4px 12px; border-radius: 20px; border: 1px solid var(--chip-on-border); background: var(--chip-on-bg); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; user-select: none; transition: background 0.15s; }
+.chip.off { background: var(--chip-off-bg); border-color: var(--chip-off-border); color: var(--text-muted); }
+.chip .count { font-size: 11px; opacity: 0.75; margin-left: 4px; }
+
+/* Cards */
+.cards { display: grid; gap: 12px; }
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+.card.hidden { display: none; }
+.card-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.card-title a { color: var(--text); }
+.card-title a:hover { color: var(--accent); }
+.card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.card-proposal { font-size: 12px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Badges */
+.badge { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.badge-working { background: #d1fae5; color: #065f46; }
+.badge-half-wired { background: #fff3cd; color: #7c5c00; }
+.badge-restore-parity { background: #dbeafe; color: #1e40af; }
+.badge-accepted-for-build { background: #ede9fe; color: #5b21b6; }
+.badge-proposal { background: #f3f4f6; color: #374151; }
+.badge-dead-code { background: #fee2e2; color: #991b1b; }
+.badge-cat { background: #e5e7eb; color: #374151; }
+.badge-weight-High { background: #fee2e2; color: #991b1b; }
+.badge-weight-Medium { background: #fff3cd; color: #7c5c00; }
+.badge-weight-Low { background: #d1fae5; color: #065f46; }
+.badge-VERIFIED { background: #d1fae5; color: #065f46; }
+.badge-STALE { background: #fff3cd; color: #7c5c00; }
+.badge-NEEDS_REMOVAL { background: #fee2e2; color: #991b1b; }
+.badge-UNCHECKED { background: #f3f4f6; color: #374151; }
+
+@media (prefers-color-scheme: dark) {
+  .badge-working { background: #064e3b; color: #6ee7b7; }
+  .badge-half-wired { background: #4a3600; color: #fcd34d; }
+  .badge-restore-parity { background: #1e3a5f; color: #93c5fd; }
+  .badge-accepted-for-build { background: #3b1f6e; color: #c4b5fd; }
+  .badge-proposal { background: #374151; color: #d1d5db; }
+  .badge-dead-code { background: #7f1d1d; color: #fca5a5; }
+  .badge-cat { background: #374151; color: #d1d5db; }
+  .badge-weight-High { background: #7f1d1d; color: #fca5a5; }
+  .badge-weight-Medium { background: #4a3600; color: #fcd34d; }
+  .badge-weight-Low { background: #064e3b; color: #6ee7b7; }
+  .badge-VERIFIED { background: #064e3b; color: #6ee7b7; }
+  .badge-STALE { background: #4a3600; color: #fcd34d; }
+  .badge-NEEDS_REMOVAL { background: #7f1d1d; color: #fca5a5; }
+  .badge-UNCHECKED { background: #374151; color: #d1d5db; }
+}
+
+/* Detail page */
+.detail { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+.detail h1 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+.detail-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 20px; }
+.detail section { margin-bottom: 20px; }
+.detail section h2 { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.detail ul { padding-left: 18px; }
+.detail ul li { font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
+.surfaces { display: flex; flex-wrap: wrap; gap: 6px; }
+.surface-chip { padding: 3px 10px; border-radius: 12px; background: var(--chip-on-bg); border: 1px solid var(--chip-on-border); font-size: 12px; }
+.proposal-block { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; font-size: 13px; }
+.back { display: inline-block; margin-bottom: 16px; font-size: 13px; color: var(--accent); }
+.back::before { content: "← "; }

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec↔flow adapters + validation flags — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Spec↔flow adapters + validation flags</h1>
+  <div class="detail-header">
+    <span class="badge badge-working">working</span>
+    <span class="badge badge-cat">Render</span>
+    <span class="badge badge-weight-High">cross-cut: High</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts</li><li>tools/topology-vscode/src/webview/state/adapter/flow-to-spec.ts</li><li>tools/topology-vscode/src/webview/state/adapter/spec-to-flow-helpers.ts</li><li>tools/topology-vscode/src/webview/schema/parse-spec.ts</li><li>tools/topology-vscode/src/webview/schema/parse-nodes-edges.ts</li><li>tools/topology-vscode/src/webview/schema/index.ts</li><li>tools/topology-vscode/src/webview/store.ts</li><li>tools/topology-vscode/src/webview/save.ts</li><li>tools/topology-vscode/src/webview/three/scene-content.tsx</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">schema</span><span class="surface-chip">store</span><span class="surface-chip">adapters</span><span class="surface-chip">save/load</span><span class="surface-chip">3D render</span><span class="surface-chip">tests</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">codegen — generate spec-to-flow.ts and flow-to-spec.ts from node-defs.ts. Expected post-change: 6 → 2 files touched by field addition (schema edit + regenerate).</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>Every new node/edge field requires edits to both adapter files; currently a 6-file minimum change.</p>
+  </section>
+</div>
+</body>
+</html>

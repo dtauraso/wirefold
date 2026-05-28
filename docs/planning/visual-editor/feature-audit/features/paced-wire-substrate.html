@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paced wire substrate — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Paced wire substrate</h1>
+  <div class="detail-header">
+    <span class="badge badge-working">working</span>
+    <span class="badge badge-cat">Substrate</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>nodes/Wiring/paced_wire.go</li><li>nodes/Wiring/builders.go</li><li>nodes/Wiring/loader.go</li><li>nodes/Wiring/ports.go</li><li>main.go</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">Go substrate only</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">none</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>TS sees only trace events through pump.ts; Go internals opaque. Hard boundary at pump.ts.</p>
+  </section>
+</div>
+</body>
+</html>

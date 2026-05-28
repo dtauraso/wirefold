@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fit-view hotkey — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Fit-view hotkey</h1>
+  <div class="detail-header">
+    <span class="badge badge-half-wired">half-wired</span>
+    <span class="badge badge-cat">Interaction</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
+    <span class="badge badge-STALE">STALE</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>tools/topology-vscode/src/webview/three/ThreeView.tsx</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">3D render</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">complete-stub — add f/Shift-F keyboard handler in ThreeView.tsx triggering existing fitCamera logic.</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>Current code has f key for toggle fade on selected element (line 79); no fit-view hotkey handler found. Audit's claim of 'fit-on-load only' needs clarification.</p>
+  </section>
+</div>
+</body>
+</html>

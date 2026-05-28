@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse bead animation + delivered handshake — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Pulse bead animation + delivered handshake</h1>
+  <div class="detail-header">
+    <span class="badge badge-working">working</span>
+    <span class="badge badge-cat">Substrate</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>nodes/Wiring/curve_params.go</li><li>nodes/Wiring/paced_wire.go</li><li>nodes/Wiring/ports.go</li><li>nodes/Wiring/loader.go</li><li>nodes/Wiring/stdin_reader.go</li><li>Trace/Trace.go</li><li>tools/gen-node-defs/main.go</li><li>tools/topology-vscode/src/schema/curve-params.ts</li><li>tools/topology-vscode/src/webview/three/pump.ts</li><li>tools/topology-vscode/src/webview/three/pulse-state.ts</li><li>tools/topology-vscode/src/webview/three/geometry-helpers.ts</li><li>tools/topology-vscode/src/webview/three/store.ts</li><li>tools/topology-vscode/src/webview/three/scene-content.tsx</li><li>tools/topology-vscode/src/webview/three/interaction-controls.ts</li><li>tools/topology-vscode/src/extension/handle-message.ts</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">Go substrate</span><span class="surface-chip">Trace</span><span class="surface-chip">pump</span><span class="surface-chip">pulse-state</span><span class="surface-chip">geometry-helpers</span><span class="surface-chip">store</span><span class="surface-chip">scene-content</span><span class="surface-chip">IPC relay</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">none</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>Phase 6 (2026-05-28) curve_params codegen resolved dual-constant cross-cut. Files verified; 11 files confirmed across Go + codegen + TS + IPC.</p>
+  </section>
+</div>
+</body>
+</html>

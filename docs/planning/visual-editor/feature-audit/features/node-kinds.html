@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node kinds (ChainInhibitor, InhibitRightGate, Input, ReadGate) — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Node kinds (ChainInhibitor, InhibitRightGate, Input, ReadGate)</h1>
+  <div class="detail-header">
+    <span class="badge badge-working">working</span>
+    <span class="badge badge-cat">Render</span>
+    <span class="badge badge-weight-Medium">cross-cut: Medium</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>tools/topology-vscode/src/webview/schema/node-defs.ts</li><li>tools/topology-vscode/src/webview/schema/node-data-types.ts</li><li>tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts</li><li>tools/topology-vscode/src/webview/state/adapter/flow-to-spec.ts</li><li>tools/topology-vscode/src/webview/three/scene-content.tsx</li><li>nodes/&lt;Kind&gt;/</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">schema/codegen</span><span class="surface-chip">store</span><span class="surface-chip">adapters</span><span class="surface-chip">3D render</span><span class="surface-chip">Go substrate</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">none — already minimal per CLAUDE.md 3-surface co-commit rule; adapter cross-cut addressed by codegen proposal.</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>4 kinds implemented; 5+ files per kind. Per CLAUDE.md: minimum coherent unit for adding a kind.</p>
+  </section>
+</div>
+</body>
+</html>

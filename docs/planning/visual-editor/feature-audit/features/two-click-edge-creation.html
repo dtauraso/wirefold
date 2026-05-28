@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Two-click edge creation — Feature Audit</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="detail">
+  <a class="back" href="../index.html">All features</a>
+  <h1>Two-click edge creation</h1>
+  <div class="detail-header">
+    <span class="badge badge-working">working</span>
+    <span class="badge badge-cat">Render</span>
+    <span class="badge badge-weight-Medium">cross-cut: Medium</span>
+    <span class="badge badge-VERIFIED">VERIFIED</span>
+  </div>
+
+  <section>
+    <h2>Files</h2>
+    <ul><li>tools/topology-vscode/src/webview/three/edge-creation.ts</li><li>tools/topology-vscode/src/webview/three/interaction-controls.ts</li><li>tools/topology-vscode/src/webview/three/ThreeView.tsx</li><li>tools/topology-vscode/src/webview/store.ts</li><li>tools/topology-vscode/src/webview/state/adapter/spec-to-flow.ts</li></ul>
+  </section>
+
+  <section>
+    <h2>Cross-cut surfaces</h2>
+    <div class="surfaces"><span class="surface-chip">3D render</span><span class="surface-chip">store</span><span class="surface-chip">mutation paths</span><span class="surface-chip">adapters</span></div>
+  </section>
+
+  <section>
+    <h2>Reduction proposal</h2>
+    <div class="proposal-block">none</div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <p>Self-contained creation path; schema and Go unaware of how edges are created.</p>
+  </section>
+</div>
+</body>
+</html>
