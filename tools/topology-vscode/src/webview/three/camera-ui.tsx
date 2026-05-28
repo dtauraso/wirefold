@@ -168,6 +168,42 @@ export function DollyButtons({
   );
 }
 
+/** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels. */
+export function GlobalLabelsToggle({
+  hidden,
+  onClick,
+}: {
+  hidden: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      title={hidden ? "Show labels" : "Hide labels"}
+      style={{
+        position: "absolute",
+        top: 12,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: hidden ? "#888" : "#ddd",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      {hidden ? "▴" : "▾"} labels
+    </div>
+  );
+}
+
 /** PAN PAD: small floating pad that appears on dwell; drag to pan the camera. */
 export function PanPad({
   origin,

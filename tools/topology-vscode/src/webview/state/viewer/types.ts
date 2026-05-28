@@ -34,6 +34,7 @@ export type NodeView = {
   z?: number;
   sublabel?: string;
   state?: Record<string, StateValue>;
+  labelHidden?: boolean;
 };
 
 export type EdgeView = {
@@ -50,6 +51,7 @@ export type ViewerState = {
   directlyFadedEdges?: string[];
   // Faded-edge ids in fade order (oldest → newest). Drives reverse-playback unfade.
   fadeEdgeOrder?: string[];
+  labelsGlobalHidden?: boolean;
 };
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};
@@ -104,6 +106,7 @@ export function parseViewerState(text: string | undefined): ViewerState {
     if (isStrArr(raw.fadeEdgeOrder)) out.fadeEdgeOrder = raw.fadeEdgeOrder;
     else console.warn("topology.view.json: fadeEdgeOrder is not a string[], dropping");
   }
+  if (raw.labelsGlobalHidden === true) out.labelsGlobalHidden = true;
   return out;
 }
 

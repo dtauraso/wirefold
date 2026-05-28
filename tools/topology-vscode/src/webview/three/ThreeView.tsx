@@ -14,11 +14,12 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { RollSlider, DollyButtons, PanPad } from "./camera-ui";
+import { RollSlider, DollyButtons, PanPad, GlobalLabelsToggle } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
-import { viewerState } from "../state/viewer-state";
+import { viewerState, patchViewerState } from "../state/viewer-state";
+import { scheduleViewSave } from "../save";
 
 // ---------------------------------------------------------------------------
 // ThreeView: Canvas wrapper + interaction + label overlay + widgets
@@ -35,6 +36,17 @@ export function ThreeView() {
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    const nv = viewerState.nodes ?? {};
+    for (const [id, v] of Object.entries(nv)) {
+      if (v.labelHidden) s.add(id);
+    }
+    return s;
+  });
+  const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
+    () => viewerState.labelsGlobalHidden ?? false,
+  );
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
 
@@ -143,6 +155,37 @@ export function ThreeView() {
 
   const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
 
+  const toggleNodeLabel = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setHiddenLabels((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      patchViewerState((v) => {
+        if (!v.nodes) v.nodes = {};
+        if (!v.nodes[id]) {
+          const pos = labelPositions.find((p) => p.id === id);
+          v.nodes[id] = { x: pos?.px ?? 0, y: pos?.py ?? 0 };
+        }
+        v.nodes[id].labelHidden = next.has(id) || undefined;
+      });
+      scheduleViewSave();
+      return next;
+    });
+  }, [labelPositions]);
+
+  const toggleGlobalLabels = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setGlobalLabelsHidden((prev) => {
+      const next = !prev;
+      patchViewerState((v) => {
+        v.labelsGlobalHidden = next || undefined;
+      });
+      scheduleViewSave();
+      return next;
+    });
+  }, []);
+
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
       {/* Canvas + gesture capture layer */}
@@ -177,13 +220,14 @@ export function ThreeView() {
 
       {/* Label overlay — real camera projection, updated every frame.
           LOD: show only hovered | selected | nearest-N nodes to avoid forest. */}
-      {nodes.map((n) => {
+      {!globalLabelsHidden && nodes.map((n) => {
         const pos = labelMap.get(n.id);
         if (!pos) return null;
         const isHovered = n.id === hoveredId;
         const isSelected = n.id === selectedId;
         const isNearest = nearestNIds.has(n.id);
         if (!isHovered && !isSelected && !isNearest) return null;
+        const labelHidden = hiddenLabels.has(n.id);
         const flagged = !!n.data?.validationError;
         const pillStyle: React.CSSProperties = flagged
           ? {
@@ -206,21 +250,52 @@ export function ThreeView() {
               left: pos.px,
               top: pos.py - 4,
               transform: "translate(-50%, -100%)",
-              fontSize: 11,
-              fontFamily: "monospace",
-              color: flagged ? "#fff" : "#e0e0e0",
               pointerEvents: "none",
-              maxWidth: 240,
-              lineHeight: 1.25,
-              textAlign: "center",
               zIndex: 10,
-              ...pillStyle,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 2,
             }}
           >
-            <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            {n.data?.sublabel ? (
-              <div style={{ opacity: 0.7, whiteSpace: "normal" }}>{n.data.sublabel}</div>
-            ) : null}
+            {!labelHidden && (
+              <div
+                style={{
+                  fontSize: 11,
+                  fontFamily: "monospace",
+                  color: flagged ? "#fff" : "#e0e0e0",
+                  maxWidth: 240,
+                  lineHeight: 1.25,
+                  textAlign: "center",
+                  ...pillStyle,
+                }}
+              >
+                <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
+                {n.data?.sublabel ? (
+                  <div style={{ opacity: 0.7, whiteSpace: "normal" }}>{n.data.sublabel}</div>
+                ) : null}
+              </div>
+            )}
+            <div
+              onClick={(e) => toggleNodeLabel(n.id, e)}
+              style={{
+                background: "rgba(0,0,0,0.55)",
+                borderRadius: 7,
+                width: 14,
+                height: 14,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                pointerEvents: "auto",
+                fontSize: 9,
+                color: "#aaa",
+                userSelect: "none",
+                lineHeight: 1,
+              }}
+            >
+              {labelHidden ? "▴" : "▾"}
+            </div>
           </div>
         );
       })}
@@ -263,6 +338,7 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <RollSlider cameraRef={cameraRef} />
       <DollyButtons cameraRef={cameraRef} nodesRef={nodesRef} />
+      <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
 
       {/* Pan pad — shown on dwell */}
       {panPadOrigin && (

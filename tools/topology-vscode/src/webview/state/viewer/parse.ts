@@ -60,6 +60,7 @@ export function parseNodeViews(v: unknown): Record<string, NodeView> | undefined
     if (isNum(raw.z)) nv.z = raw.z;
     if (isStr(raw.sublabel)) nv.sublabel = raw.sublabel;
     if (isObj(raw.state)) nv.state = raw.state as Record<string, StateValue>;
+    if (raw.labelHidden === true) nv.labelHidden = true;
     out[id] = nv;
   }
   return out;
