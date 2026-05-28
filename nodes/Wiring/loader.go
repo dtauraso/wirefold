@@ -105,18 +105,19 @@ func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
 }
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
-// WireRegistry keyed by edge label.
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, WireRegistry, error) {
+// WireRegistry keyed by edge label, and a NodeMoveRegistry for live position
+// updates (used by the stdin reader to handle node-move messages).
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, WireRegistry, *NodeMoveRegistry, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
+		return nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
 	}
 	var spec topoSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		return nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
+		return nil, nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
 	}
 	if err := validateSpec(&spec); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Populate Position on each specNode from view.nodes.
@@ -135,8 +136,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 	// Allocate one *PacedWire per destination port (fan-in safe).
 	// destWire: "destNode.destPort" → *PacedWire (owned by the destination).
 	// edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
+	// edgeEndpoints: edge label → source/target node IDs (for NodeMoveRegistry).
 	destWire := map[string]*PacedWire{}
 	edgeWire := WireRegistry{}
+	edgeEndpoints := map[string]EdgeEndpoints{}
 	for _, e := range spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
 		pw, exists := destWire[destKey]
@@ -146,7 +149,15 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
+		edgeEndpoints[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target}
 	}
+
+	// Build NodeMoveRegistry from initial positions and edge endpoints.
+	nmrPositions := make(map[string]NodePosition, len(nodePos))
+	for id, p := range nodePos {
+		nmrPositions[id] = NodePosition{X: p.X, Y: p.Y, Z: p.Z}
+	}
+	nmr := NewNodeMoveRegistry(nmrPositions, edgeEndpoints)
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}
@@ -250,10 +261,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 
 		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
+			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
 		nodes = append(nodes, nd)
 	}
 
-	return nodes, edgeWire, nil
+	return nodes, edgeWire, nmr, nil
 }

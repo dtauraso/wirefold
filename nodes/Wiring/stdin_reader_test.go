@@ -22,7 +22,7 @@ func TestRunStdinReaderDelivered(t *testing.T) {
 
 	// Feed one "delivered" message then close.
 	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, reg)
+	go RunStdinReader(ctx, r, reg, nil, nil)
 
 	// Send a value on pw in the background; it will block until delivered.
 	sendErr := make(chan error, 1)
@@ -62,5 +62,5 @@ func TestRunStdinReaderUnknownEdgeIgnored(t *testing.T) {
 
 	// Unknown edge label → no panic, reader exits cleanly on ctx cancel.
 	r := strings.NewReader(`{"type":"delivered","edge":"unknown"}` + "\n")
-	RunStdinReader(ctx, r, reg) // should return without hanging
+	RunStdinReader(ctx, r, reg, nil, nil) // should return without hanging
 }
