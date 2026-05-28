@@ -15,6 +15,7 @@ export interface PulseData {
   simStep: number;
   target: string;
   targetHandle: string;
+  simLatencyMs: number;
   startTime: number;
 }
 
@@ -32,6 +33,8 @@ export function registerPulseSetter(setter: Setter) {
 }
 
 export function setPulse(edgeId: string, data: Omit<PulseData, "startTime">) {
+  // data must include simLatencyMs (substrate-supplied duration) so PulseBead
+  // computes t from substrate truth rather than a fabricated speed constant.
   // data must include target + targetHandle so use-pulse-animation can write
   // the held-value badge at t=1 (pulse arrival) rather than at send time.
   const next = new Map(_current);
