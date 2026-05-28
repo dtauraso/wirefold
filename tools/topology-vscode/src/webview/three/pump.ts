@@ -72,23 +72,6 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
-    case "latency-changed": {
-      // Adjust any in-flight bead on this edge so it finishes at the correct
-      // time after the node drag has changed the wire length.
-      // Preserve fractional progress t_curr, re-anchor startTime accordingly:
-      //   t_curr = (now - oldStartTime) / oldSimLatencyMs
-      //   newStartTime = now - t_curr * newSimLatencyMs
-      const { edge, simLatencyMs: newLatencyMs } = event as Extract<TraceEvent, { kind: "latency-changed" }>;
-      const pulse = getPulseMap().get(edge);
-      if (pulse) {
-        const now = getPauseAdjustedNow();
-        const elapsed = now - pulse.startTime;
-        const tCurr = Math.min(1, elapsed / pulse.simLatencyMs);
-        const newStartTime = now - tCurr * newLatencyMs;
-        patchPulse(edge, newLatencyMs, newStartTime);
-      }
-      return;
-    }
     // PUMP_DONE_HANDLER
     case "done": {
       // Match ALL edges by target node id + targetHandle (fan-in).

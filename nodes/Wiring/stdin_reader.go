@@ -125,9 +125,8 @@ type stdinMsg struct {
 // to the WireRegistry. Returns when ctx is done or r reaches EOF.
 // Call in a goroutine alongside the node run loop.
 //
-// nmr may be nil; if non-nil, node-move messages update wire geometry
-// and emit latency-changed trace events via tr.
-// tr may be nil; if nil, latency-changed events are not emitted.
+// nmr may be nil; if non-nil, node-move messages update wire geometry.
+// tr is retained for future use but no longer used by the node-move handler.
 func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry, nmr *NodeMoveRegistry, tr *T.Trace) {
 	sc := bufio.NewScanner(r)
 	done := ctx.Done()
@@ -186,10 +185,6 @@ func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry, nmr *Nod
 						pw.SimLatencyMs = a.simLatencyMs
 						pw.ArcLength = a.simLatencyMs * PulseSpeedWuPerMs
 						pw.mu.Unlock()
-					}
-					// Emit latency-changed so TS can adjust any in-flight bead.
-					if tr != nil {
-						tr.LatencyChanged(a.edgeId, a.simLatencyMs)
 					}
 				}
 			}

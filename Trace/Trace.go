@@ -34,21 +34,20 @@ const (
 	KindSend           = "send"
 	KindSlot           = "slot"
 	KindDone           = "done"
-	KindLatencyChanged = "latency-changed"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindSlot, KindDone, KindLatencyChanged}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindSlot, KindDone}
 
 type Event struct {
 	Step      int    `json:"step"`
 	Kind      string `json:"kind"`
 	Node      string `json:"node"`
 	Port      string `json:"port,omitempty"`      // recv: input port; send: output port; slot: input port
-	Edge      string `json:"edge,omitempty"`      // canonical send only; set by Resolve; latency-changed: edge id
+	Edge      string `json:"edge,omitempty"`      // canonical send only; set by Resolve
 	SlotPhase string `json:"slotPhase,omitempty"` // slot only: "filled" | "empty"
 	Value     int    `json:"value,omitempty"`     // recv/send/slot(filled) only; fire and slot(empty) omit
 	// hasValue distinguishes "value 0" from "no value" for slot and send/recv events.
@@ -57,7 +56,6 @@ type Event struct {
 	// is backed by a PacedWire. Zero values are omitted from JSON output.
 	// ArriveStep is omitted: the substrate has no global ms-per-step cadence,
 	// so the TS layer derives arrival from emitTime + simLatencyMs instead.
-	// Also used on latency-changed events: Edge + SimLatencyMs carry the new values.
 	ArcLength    float64 `json:"arcLength,omitempty"`
 	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
 }
@@ -147,16 +145,6 @@ func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs f
 		return
 	}
 	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
-}
-
-// LatencyChanged emits a latency-changed event for a specific edge. Called
-// by the stdin reader when a node-move arrives and the affected wire's
-// geometry changes. TS pump adjusts any in-flight bead on that edge.
-func (t *Trace) LatencyChanged(edgeId string, simLatencyMs float64) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindLatencyChanged, Edge: edgeId, SimLatencyMs: simLatencyMs}
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
@@ -315,12 +303,6 @@ func marshalEvent(e Event) ([]byte, error) {
 		Port   string `json:"port"`
 		Phase  string `json:"phase"`
 	}
-	type latencyChanged struct {
-		Step         int     `json:"step"`
-		Kind         string  `json:"kind"`
-		Edge         string  `json:"edge"`
-		SimLatencyMs float64 `json:"simLatencyMs"`
-	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
@@ -336,8 +318,6 @@ func marshalEvent(e Event) ([]byte, error) {
 			return json.Marshal(slotFilled{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase, Value: e.Value})
 		}
 		return json.Marshal(slotEmpty{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase})
-	case KindLatencyChanged:
-		return json.Marshal(latencyChanged{Step: e.Step, Kind: e.Kind, Edge: e.Edge, SimLatencyMs: e.SimLatencyMs})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

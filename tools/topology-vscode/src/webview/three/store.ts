@@ -139,9 +139,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     set({ nodes: nextNodes });
 
     // TS-local latency recompute: patch in-flight pulses on affected edges so
-    // bead speed stays at the uniform 0.08 wu/ms target during drag, without
-    // waiting for the Go latency-changed trace event (which lags by one IPC round-trip).
-    // The latency-changed handler in pump.ts remains as a reconciliation safety net.
+    // bead speed stays at the uniform 0.08 wu/ms target during drag.
     // Curve store is updated for ALL touching edges (not just in-flight) so the
     // next pulse always reads the correct geometry without a React-commit lag.
     const pulseMap = getPulseMap();

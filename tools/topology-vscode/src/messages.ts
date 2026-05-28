@@ -64,7 +64,6 @@ export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
   | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number }
   | { step: number; kind: "done"; node: string; port: string }
-  | { step: number; kind: "latency-changed"; edge: string; simLatencyMs: number }
   | SlotEvent;
 
 export type HostToWebviewMsg =
