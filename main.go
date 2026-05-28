@@ -21,16 +21,16 @@ import (
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string) {
 	tr := T.NewWithSink(0, os.Stdout)
 
-	nodes, reg, err := W.LoadTopology(ctx, topologyPath, tr)
+	nodes, reg, nmr, err := W.LoadTopology(ctx, topologyPath, tr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Stage 3: read "delivered" JSON lines from stdin, unblocking PacedWires.
+	// Stage 3: read "delivered" / "fade" / "node-move" JSON lines from stdin.
 	// When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, reg)
+		W.RunStdinReader(ctx, os.Stdin, reg, nmr, tr)
 		cancel()
 	}()
 

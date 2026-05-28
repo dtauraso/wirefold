@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap, claimDelivered } from "./pulse-state";
+import { getPulseMap, claimDelivered, getCurve } from "./pulse-state";
 import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../state/run-status";
 import {
@@ -18,6 +18,7 @@ import {
   nodeWorldPos,
   ndcToPixel,
 } from "./geometry-helpers";
+import { CURVE_PARAM_BULGE_FACTOR } from "../../schema/curve-params";
 import type { PickOptions } from "./interaction-controls";
 
 // ---------------------------------------------------------------------------
@@ -162,20 +163,15 @@ function surfacePoint(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Ve
   return origin.clone().addScaledVector(dir, r);
 }
 
-// Speed constant matching the 2D pulse: PULSE_SPEED_PX_PER_MS = 0.08.
-// In 3D we treat world units as equivalent to 2D pixels (same coordinate space).
-const PULSE_SPEED_WU_PER_MS = 0.08;
-
-// PulseBead: a bright sphere that travels along `curve` at the current pulse t.
-// Driven by useFrame reading getPulseMap() imperatively (no React context needed).
+// PulseBead: a bright sphere that travels along the edge curve at the current pulse t.
+// Duration is substrate-supplied (pulse.simLatencyMs); no speed constant needed.
+// Driven by useFrame reading getPulseMap() and getCurve() imperatively (no React
+// context needed). The curve is read from the non-React curve store so it updates
+// atomically with position changes in the same drag tick (no React-commit lag).
 export function PulseBead({
   edgeId,
-  curve,
-  arcLength,
 }: {
   edgeId: string;
-  curve: THREE.QuadraticBezierCurve3;
-  arcLength: number;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -187,7 +183,12 @@ export function PulseBead({
       mesh.visible = false;
       return;
     }
-    const duration = arcLength / PULSE_SPEED_WU_PER_MS;
+    const curve = getCurve(edgeId);
+    if (!curve) {
+      mesh.visible = false;
+      return;
+    }
+    const duration = pulse.simLatencyMs;
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
       mesh.visible = false;
@@ -216,20 +217,24 @@ export function PulseBead({
 export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean }) {
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
   const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
-  const { curve, arcLength, tubeGeo, haloGeo } = useMemo(() => {
-    const _p0 = surfacePoint(src, tgt);
-    const _p2 = surfacePoint(tgt, src);
-    const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
-    const edgeDir = _p2.clone().sub(_p0).normalize();
-    const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-    const span = _p0.distanceTo(_p2);
-    const _p1 = mid.clone().addScaledVector(lift, span * 0.25);
-    const _curve = new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
-    const _arcLength = _curve.getLength();
+  const { tubeGeo, haloGeo } = useMemo(() => {
+    // Build tube geometry from the curve store (already populated synchronously
+    // by moveNode / load / createEdge). Fall back to constructing locally if the
+    // store entry is somehow absent (e.g. on first mount before load completes).
+    const _curve = getCurve(edgeId) ?? (() => {
+      const _p0 = surfacePoint(src, tgt);
+      const _p2 = surfacePoint(tgt, src);
+      const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
+      const edgeDir = _p2.clone().sub(_p0).normalize();
+      const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+      const span = _p0.distanceTo(_p2);
+      const _p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
+      return new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
+    })();
     const _tubeGeo = new THREE.TubeGeometry(_curve, 16, 1.5, 6, false);
     // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
     const _haloGeo = new THREE.TubeGeometry(_curve, 16, 5, 6, false);
-    return { curve: _curve, arcLength: _arcLength, tubeGeo: _tubeGeo, haloGeo: _haloGeo };
+    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p0key]);
 
@@ -259,7 +264,7 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: 
         />
       </mesh>
       {/* Pulse bead: stronger highlight traveling source → target */}
-      {!faded && <PulseBead edgeId={edgeId} curve={curve} arcLength={arcLength} />}
+      {!faded && <PulseBead edgeId={edgeId} />}
     </>
   );
 }

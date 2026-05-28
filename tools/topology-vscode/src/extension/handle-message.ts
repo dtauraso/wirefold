@@ -149,6 +149,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "fade":
       runner.writeStdin(JSON.stringify({ type: "fade", edges: msg.edges }));
       return;
+    case "node-move":
+      runner.writeStdin(JSON.stringify({ type: "node-move", nodeId: msg.nodeId, x: msg.x, y: msg.y, z: msg.z ?? 0 }));
+      return;
     default: {
       // Data-driven pseudo dispatch: matches render/save types for all registered PseudoKinds.
       type RenderFn = (cmdArg: string, nodeId: string, document: vscode.TextDocument, post: (msg: HostToWebviewMsg) => Thenable<boolean>) => Promise<void>;

@@ -3,6 +3,47 @@
 
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
+import {
+  CURVE_PARAM_PULSE_SPEED_WU_PER_MS,
+  CURVE_PARAM_MIN_ARC_LENGTH,
+  CURVE_PARAM_BULGE_FACTOR,
+  CURVE_PARAM_BEZIER_SAMPLE_COUNT,
+} from "../../schema/curve-params";
+
+// ---------------------------------------------------------------------------
+// Edge curve
+// ---------------------------------------------------------------------------
+
+/**
+ * Point on the sphere surface of `node` facing toward `other`.
+ * Matches the surfacePoint() logic in scene-content.tsx — kept in sync.
+ */
+function surfacePointForNodes(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Vector3 {
+  const origin = nodeWorldPos(node);
+  const target = nodeWorldPos(other);
+  const r = nodeRadius(node);
+  const dir = target.clone().sub(origin).normalize();
+  return origin.clone().addScaledVector(dir, r);
+}
+
+/**
+ * Build the QuadraticBezierCurve3 for an edge between two nodes.
+ * Control-point math matches SingleEdgeTube's useMemo exactly.
+ * Called from moveNode (synchronous, same drag tick) and from initial load / createEdge.
+ */
+export function buildEdgeCurve(
+  src: RFNode<NodeData>,
+  tgt: RFNode<NodeData>,
+): THREE.QuadraticBezierCurve3 {
+  const p0 = surfacePointForNodes(src, tgt);
+  const p2 = surfacePointForNodes(tgt, src);
+  const mid = p0.clone().add(p2).multiplyScalar(0.5);
+  const edgeDir = p2.clone().sub(p0).normalize();
+  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+  const span = p0.distanceTo(p2);
+  const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
+  return new THREE.QuadraticBezierCurve3(p0, p1, p2);
+}
 
 // ---------------------------------------------------------------------------
 // Node geometry
@@ -42,6 +83,69 @@ export function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
   if (nodes.length === 0) return new THREE.Vector3(0, 0, 0);
   const { minX, maxX, minY, maxY } = boundingBox(nodes);
   return new THREE.Vector3((minX + maxX) / 2, -(minY + maxY) / 2, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Pulse geometry
+// ---------------------------------------------------------------------------
+
+/**
+ * Uniform pulse speed — single source of truth in nodes/Wiring/curve_params.go.
+ * Re-exported for callers that reference PULSE_SPEED_WU_PER_MS directly.
+ */
+export const PULSE_SPEED_WU_PER_MS = CURVE_PARAM_PULSE_SPEED_WU_PER_MS;
+
+/**
+ * Quadratic Bezier arc length between two RF node-center positions.
+ * Mirrors Go's BezierArcLength in nodes/Wiring/curve_params.go exactly:
+ *   - control point = chord midpoint offset by BULGE_FACTOR * chordLen perpendicularly
+ *   - arc integrated with BEZIER_SAMPLE_COUNT equal-parameter segments
+ *   - result floored at MIN_ARC_LENGTH
+ * Using node centers (not surface points) keeps Go and TS inputs identical.
+ */
+export function rfArcLength(ax: number, ay: number, bx: number, by: number): number {
+  const chordX = bx - ax;
+  const chordY = by - ay;
+  const chordLen = Math.sqrt(chordX * chordX + chordY * chordY);
+
+  // Midpoint of chord.
+  const midX = (ax + bx) * 0.5;
+  const midY = (ay + by) * 0.5;
+
+  // Perpendicular: rotate chord direction 90° CCW and normalise.
+  let perpX = 0, perpY = 0;
+  if (chordLen > 0) {
+    perpX = -chordY / chordLen;
+    perpY = chordX / chordLen;
+  }
+
+  // Control point p1.
+  const p1x = midX + perpX * CURVE_PARAM_BULGE_FACTOR * chordLen;
+  const p1y = midY + perpY * CURVE_PARAM_BULGE_FACTOR * chordLen;
+
+  // Integrate arc length over BEZIER_SAMPLE_COUNT segments.
+  const n = CURVE_PARAM_BEZIER_SAMPLE_COUNT;
+  const inv = 1.0 / n;
+  let prevX = ax, prevY = ay;
+  let total = 0;
+  for (let i = 1; i <= n; i++) {
+    const t = i * inv;
+    const u = 1 - t;
+    const bpx = u * u * ax + 2 * u * t * p1x + t * t * bx;
+    const bpy = u * u * ay + 2 * u * t * p1y + t * t * by;
+    const dx = bpx - prevX;
+    const dy = bpy - prevY;
+    total += Math.sqrt(dx * dx + dy * dy);
+    prevX = bpx;
+    prevY = bpy;
+  }
+
+  return total < CURVE_PARAM_MIN_ARC_LENGTH ? CURVE_PARAM_MIN_ARC_LENGTH : total;
+}
+
+/** Convert arc length to simLatencyMs using the uniform pulse speed. */
+export function arcLengthToSimLatencyMs(arcLength: number): number {
+  return arcLength / CURVE_PARAM_PULSE_SPEED_WU_PER_MS;
 }
 
 // ---------------------------------------------------------------------------

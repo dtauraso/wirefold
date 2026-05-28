@@ -6,6 +6,11 @@ import (
 	"sync"
 )
 
+// PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs for call sites that
+// pass it to NewPacedWire.  The canonical value lives in curve_params.go so
+// the codegen tool can export it to TS.
+const PulseSpeedWuPerMs = CurveParamPulseSpeedWuPerMs
+
 // ErrCanceled is returned by Send or Recv when the context is canceled.
 var ErrCanceled = errors.New("paced wire: context canceled")
 
@@ -19,18 +24,25 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 //   Done: receiver signals it is finished; clears slot, unblocks Send.
 //   NotifyDelivered: visual layer signals delivery-complete, unblocks Recv.
 type PacedWire struct {
-	mu         sync.Mutex
-	cond       *sync.Cond
-	slot       any
-	hasSend    bool         // slot holds a value (not yet Done'd)
-	faded      bool         // when true, Send skips without sending
-	deliveryCh chan struct{} // closed by NotifyDelivered
-	doneCh     chan struct{} // closed by Done
+	mu           sync.Mutex
+	cond         *sync.Cond
+	slot         any
+	hasSend      bool         // slot holds a value (not yet Done'd)
+	faded        bool         // when true, Send skips without sending
+	deliveryCh   chan struct{} // closed by NotifyDelivered
+	doneCh       chan struct{} // closed by Done
+	ArcLength    float64      // straight-line distance between source and target nodes (world units)
+	SimLatencyMs float64      // ArcLength / pulseSpeed (ms); how long a pulse takes to traverse the wire
 }
 
-// NewPacedWire creates an empty PacedWire.
-func NewPacedWire() *PacedWire {
-	pw := &PacedWire{}
+// NewPacedWire creates an empty PacedWire with geometry-derived timing.
+// arcLength is the straight-line distance between source and target (world units).
+// pulseSpeed is in world-units per millisecond (use PulseSpeedWuPerMs).
+func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
+	pw := &PacedWire{
+		ArcLength:    arcLength,
+		SimLatencyMs: arcLength / pulseSpeed,
+	}
 	pw.cond = sync.NewCond(&pw.mu)
 	return pw
 }

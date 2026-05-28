@@ -46,6 +46,7 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 2, Kind: KindSend, Node: "A", Port: "out", Value: 1, hasValue: true},
 		{Step: 3, Kind: KindSlot, Node: "B", Port: "in", SlotPhase: "filled", Value: 1, hasValue: true},
 		{Step: 4, Kind: KindSlot, Node: "B", Port: "in", SlotPhase: "empty", hasValue: false},
+		{Step: 5, Kind: KindDone, Node: "A", Port: "out"},
 	}
 
 	fixture := fixtureLines(t)

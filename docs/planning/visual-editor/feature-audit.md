@@ -9,6 +9,7 @@ branch: main
 - **2026-05-27** Cross-cut analysis and reduction proposals added; undo/redo removed from audit (fade animation replaced its one real responsibility); old view-only fold feature (Fold type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor`, `foldId`, fold tests/e2e) fully removed (commit `9d4091c5`). New file-dive fold proposal captured under Folds & containment.
 - **2026-05-26** Re-verified against post-architecture-audit code. Undo/redo moved from half-wired to not-started. Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 - **2026-05-27** (restructure) Reorganized into consistent per-feature template; summary table regenerated; categories grouped by `##` heading; features sorted high→low within each category.
+- **2026-05-28** Pulse substrate transport (Phases 1–6, commits `0572704a`–`2662baa4`) — RESOLVED. Summary: `ArcLength`/`SimLatencyMs` added to `PacedWire`; emitted on `send` trace events; `pump.ts` consumes `simLatencyMs` directly; `PULSE_SPEED_WU_PER_MS` constant and Bezier arcLength recompute deleted from TS render layer; latency-live on drag via `NodeMoveRegistry` IPC + same-frame TS-local recompute in `moveNode` (preserves `t_curr` for in-flight beads); curve derived as non-React store state (`setCurve`/`getCurve` in `pulse-state.ts`), updated synchronously in `moveNode`; `latency-changed` trace event removed end-to-end (was ~120 events/sec echo on drag); `nodes/Wiring/curve_params.go` added as single source of truth for curve constants + `BezierArcLength` helper; `gen-node-defs` extended to emit `curve-params.ts`; `rfArcLength` reimplemented as Bezier integration driven by shared constants; Bezier-vs-chord discrepancy closed; dual-constant risk eliminated via codegen. TS→Go relationship is strictly one-way. Cross-cut candidate #1 (Pulse/pump schema) fully resolved.
 
 ---
 
@@ -25,7 +26,7 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 | Feature | Status | Cross-cut weight | Surfaces | Files | Proposal type |
 |---|---|---|---|---|---|
 | **Substrate** | | | | | |
-| Pulse bead + delivered handshake | working | **High** (structural: Go↔TS pacing contract locked by contract test) | pump · Go substrate · store · messages · schema · 3D render | 8 | store-subscribe (Strategy B: TS owns animation semantics) |
+| Pulse bead + delivered handshake | working | **RESOLVED** (substrate-owned transport timing; 11 files, each with distinct non-overlapping responsibility; dual-constant cross-cut eliminated by codegen via `curve-params.ts`) | Go substrate · Trace · pump · pulse-state · geometry-helpers · store · scene-content · IPC relay | 11 | already-minimal (constants codegen-shared; algorithm drift risk is small, both ~25 lines, same spec) |
 | Run/pause/stop controls (runStatus) | working | **High** (structural: threads extension→messages→pulse-state) | store · extension · messages · 3D render · pulse-state | 7 | store-subscribe |
 | Paced wire substrate | working | **Low** (local: TS sees only trace events; Go internals opaque) | Go substrate only | 5 Go | already-minimal (hard boundary at pump.ts) |
 | Ring-topology deadlock break | working | **Low** (local: startup concern, no TS surface change) | Go substrate · e2e | 2 | already-minimal (irreducible minimum) |
@@ -65,30 +66,57 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 
 ### Pulse bead animation + delivered handshake
 
-**Status:** working
+**Status:** Working — post-refactor steady state. Prior #1 cross-cut candidate resolved. Re-audited 2026-05-28 against code on `task/pulse-substrate-transport`. Phase 6 (commit `2662baa4`) added `curve_params.go` as single source of truth for curve constants + codegen to TS.
 
-**Files:**
-- `tools/topology-vscode/src/webview/three/PulseBead.tsx` (in `scene-content.tsx`)
-- `tools/topology-vscode/src/webview/pump.ts`
-- `tools/topology-vscode/src/webview/pulse-state.ts`
-- `tools/topology-vscode/src/webview/animation-fields.ts`
-- `tools/topology-vscode/src/webview/store.ts`
-- `tools/topology-vscode/src/webview/types.ts`
-- `nodes/Wiring/Trace/Trace.go`
-- `tools/topology-vscode/test/contracts/trace-event-fields.test.ts`
+**Files (11 files, verified against code):**
 
-**Cross-cuts:** Surfaces: pump · Go substrate (Trace) · store · messages · extension · schema (animation-fields) · 3D render · save/load. Distinct files: 8. Weight: **High** (structural: `pump.ts` is the Go↔TS pacing contract; every trace-event field name is locked by a contract test).
+Go substrate:
+- `nodes/Wiring/curve_params.go` — `CurveParamPulseSpeedWuPerMs = 0.08`, `CurveParamMinArcLength = 1.0`, `CurveParamBulgeFactor = 0.25`, `CurveParamBezierSampleCount = 64`; `BezierArcLength(p0, p2, bulgeFactor, samples)` helper (64-sample Bezier integration). Single source of truth; parsed by `gen-node-defs` and emitted as `curve-params.ts`.
+- `nodes/Wiring/paced_wire.go` — `PacedWire` struct with `ArcLength`/`SimLatencyMs` fields; `NewPacedWire(arcLength, pulseSpeed)` derives `SimLatencyMs = arcLength / pulseSpeed`; `NotifyDelivered` unblocks `Recv`; `Done` unblocks `Send`.
+- `nodes/Wiring/ports.go` — `TrySend` emits trace event via `trace.SendWire(node, port, v, pw.ArcLength, pw.SimLatencyMs)` BEFORE blocking on `pw.Send` (deadlock prevention comment in code).
+- `nodes/Wiring/loader.go` — `arcLengthBetween(a, b specPosition)` calls `BezierArcLength`; `NewPacedWire(arcLength, CurveParamPulseSpeedWuPerMs)` called per destination port. Chord-distance computation removed.
+- `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; `node-move` handler calls `BezierArcLength` and updates `pw.SimLatencyMs`/`pw.ArcLength` under mutex; `delivered` handler calls `pw.NotifyDelivered()`. `arcLengthBetween3` removed (consolidated into `BezierArcLength`).
+- `Trace/Trace.go` — `Event` struct carries `ArcLength float64` and `SimLatencyMs float64`; `SendWire` method populates both; `marshalEvent` emits them as `omitempty` JSON fields on `send` events.
 
-**Reduction proposal:**
-- Axis: Go's channel/`PacedWire` is rendezvous-instant — no "value is on the wire" state. TS fabricates bead duration as wallclock animation, creating two clocks (sim-time vs wallclock) and a derived TS-side cache (`pulse-state.ts`) that must be kept in sync with the trace stream by `pump.ts`. The "8-file cross-cut" is a symptom of this seam, not duplication.
-- Strategy: **Move transport duration into the substrate.** `PacedWire` holds a sent value for a sim-time window before the receiver can rendezvous with it — "in-flight" becomes a phase of the wire state machine, not a render-only construct. Trace emits `transport-start(simTime=t0)` and `transport-end(simTime=t1)`; TS animates the interval `[t0,t1]` and does no clock fabrication. `pulse-state.ts` collapses (wire state IS the pulse); pause/sim-speed fall out for free.
-- Expected post-change cross-cut count: **8 → ~3** (Go `PacedWire` + Trace envelope + TS render reader). `pulse-state.ts`, `animation-fields.ts`-as-source-of-truth, and the bead-duration policy in `pump.ts` all go away.
-- Resolved model: **uniform pulse speed in pixels-per-sim-step (one global constant); per-wire `simLatency` = visible-length ÷ that constant.** Longer wires take more sim-steps to traverse, by design — visible wire length is the physical authoring surface for transport latency. Bead and downstream-firing always coincide because both are functions of the same sim-time. Layout geometry feeds substrate timing intentionally; this relaxes the "substrate is a pure function of spec, layout is render-policy" rule for transport latency only (positions become substrate-relevant input, not pure render-state).
-- Consequences to design for: (a) save/load must include positions to reproduce a run; viewer-state positions are no longer purely cosmetic. (b) Dragging a node during a run changes that wire's `simLatency` — decide whether latency is captured at send-time (in-flight beads keep their original latency) or recomputed live (drag mid-flight stretches/squeezes the bead). (c) AND-gate/round-close ordering is layout-dependent; canonical positions are required for headless/test execution.
-- Blockers:
-  1. MODEL.md gate — per CLAUDE.md this is a substrate change; read MODEL.md's slot-phase + round-close sections and confirm per-wire `simLatency` fits the existing contract (in-flight as a busy phase) or requires a model revision.
-  2. Audit existing `Trace.Event` fields and classify each as substrate-truth (stays) vs render-policy (deletes); the contract test at `test/contracts/trace-event-fields.test.ts` is the worklist.
-  3. Decide latency-at-send vs latency-live (consequence (b) above) before wiring `PacedWire.simLatency`.
+Codegen:
+- `tools/gen-node-defs/main.go` — extended to parse `CurveParam*` constants from Go source and emit `curve-params.ts`.
+- `tools/topology-vscode/src/schema/curve-params.ts` — generated; exports `CURVE_PARAM_PULSE_SPEED_WU_PER_MS`, `CURVE_PARAM_MIN_ARC_LENGTH`, `CURVE_PARAM_BULGE_FACTOR`, `CURVE_PARAM_BEZIER_SAMPLE_COUNT`. Covered by `tools/check-generated.sh`.
+
+TS layer:
+- `tools/topology-vscode/src/webview/three/pump.ts` — `handleTraceEvent` for `send` reads `simLatencyMs` from event; calls `setPulse(edge.id, { value, simStep, target, targetHandle, simLatencyMs })`. 500ms fallback guards stale Go binary. No clock fabrication.
+- `tools/topology-vscode/src/webview/three/pulse-state.ts` — imperative non-React stores: `PulseMap` (per-edge in-flight pulse data including `simLatencyMs` + `startTime = getPauseAdjustedNow()`) and `_curveMap` (per-edge `QuadraticBezierCurve3`). Exports: `setPulse`, `clearPulse`, `patchPulse`, `getCurve`, `setCurve`, `claimDelivered`.
+- `tools/topology-vscode/src/webview/three/geometry-helpers.ts` — imports four constants from `curve-params.ts`; `rfArcLength(ax, ay, bx, by)` reimplemented as 64-sample Bezier integration (same algorithm as Go's `BezierArcLength`, driven by shared constants); `arcLengthToSimLatencyMs(arcLength)`.
+- `tools/topology-vscode/src/webview/three/store.ts` — `moveNode(id, x, y)`: updates node positions, then synchronously for every touching edge: calls `setCurve(buildEdgeCurve(...))` and, for in-flight pulses, calls `patchPulse(edge.id, newSimLatencyMs, newStartTime)` preserving fractional progress `t_curr`.
+- `tools/topology-vscode/src/webview/three/scene-content.tsx` — `PulseBead` reads `getPulseMap()` + `getCurve()` imperatively in `useFrame`; computes `t = (getPauseAdjustedNow() - pulse.startTime) / pulse.simLatencyMs`; at t≥1 calls `claimDelivered` + posts `{type:"delivered", edge:edgeId}`. Uses `CURVE_PARAM_BULGE_FACTOR` from `curve-params.ts` (was hardcoded `0.25`).
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — drag handler calls `store.moveNode(nodeId, x, y)` on pointer-move; rAF-throttled `node-move` IPC posts `{type:"node-move", nodeId, x, y, z:0}` to extension host.
+
+IPC relay (host):
+- `tools/topology-vscode/src/extension/handle-message.ts` — forwards `delivered` → `runner.writeStdin(JSON.stringify({type:"delivered", edge}))` and `node-move` → `runner.writeStdin(JSON.stringify({type:"node-move", ...}))`.
+
+**Data flow (send → bead → delivered → recv unblocks):**
+1. Go `TrySend` calls `trace.SendWire(node, port, v, pw.ArcLength, pw.SimLatencyMs)` then blocks in `pw.Send`.
+2. Extension streams `trace-event` to webview; `pump.ts:handleTraceEvent("send")` calls `setPulse(edgeId, { simLatencyMs, ... })` with `startTime = getPauseAdjustedNow()`.
+3. `PulseBead.useFrame` reads pulse + curve each frame; computes `t`; at `t ≥ 1` posts `"delivered"`.
+4. Extension host forwards `"delivered"` → Go stdin; `stdin_reader` calls `pw.NotifyDelivered()` → `deliveryCh` closed → `pw.Recv` unblocks.
+5. `pump.ts:handleTraceEvent("done")` clears pulse via `clearPulse(edgeId)`.
+
+**Drag geometry update (same-frame invariant):**
+- `store.ts:moveNode` recomputes curve + `simLatencyMs` synchronously, adjusting `startTime` to preserve `t_curr`. No Go round-trip for in-flight rendering.
+- rAF-throttled `node-move` IPC keeps Go `PacedWire` geometry current for future sends.
+- Relationship TS→Go is strictly one-way; Go does not echo back.
+
+**Invariant — uniform speed:** `simLatencyMs = max(arcLength, 1.0) / 0.08`. Longer wire = longer time, same speed.
+
+**Cross-cuts:** 11 files across Go substrate + codegen + TS store + TS render + IPC relay. Weight: **low** — each file has a distinct, non-overlapping responsibility. No redundant state. The TS→Go direction is needed for future-send correctness; the dual arc-length computation is required because Go computes at send time and TS recomputes at drag time without a round trip. Constants are codegen-shared; residual drift risk is algorithm-implementation drift only (both ~25 lines, same spec).
+
+**Known limitations:**
+- Go and TS implement the Bezier arc-length algorithm in parallel (~25 lines each, same spec, same constants). Both driven by `curve_params.go` constants via codegen. Algorithm-implementation drift is the residual risk; small and bounded.
+
+**Reduction proposal:** The dual-constant cross-cut (speed + min-arc-length + bulge-factor + sample-count) is fully resolved by Phase 6 codegen. Constants are generated from `curve_params.go` into `curve-params.ts`; no manual sync required. The residual is algorithm-implementation drift (Go `BezierArcLength` vs. TS `rfArcLength`): both are ~25 lines implementing the same quadratic-Bezier integration spec, isolated parallel implementations driven by shared constants. Drift risk is small; no further reduction warranted.
+
+**Revision history:**
+- 2026-05-28 (re-audit) — Rewrote from scratch against code on `task/pulse-substrate-transport`. Corrected stale file paths, documented actual 10-file shape, added Bezier-vs-chord known limitation, documented dual-function Go anomaly, updated cross-cut verdict.
+- 2026-05-28 (Phase 6, `2662baa4`) — `curve_params.go` added; codegen to `curve-params.ts`; `rfArcLength` reimplemented as Bezier integration; `arcLengthBetween3` removed; Bezier-vs-chord discrepancy closed; dual-constant risk eliminated. File count 10→11.
 
 ---
 
@@ -103,7 +131,7 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 - `tools/topology-vscode/src/webview/main.tsx`
 - `tools/topology-vscode/src/webview/three/RunButton.tsx`
 - `tools/topology-vscode/src/webview/three/scene-content.tsx`
-- `tools/topology-vscode/src/webview/pulse-state.ts`
+- `tools/topology-vscode/src/webview/three/pulse-state.ts`
 
 **Cross-cuts:** Surfaces: store · extension · messages · 3D render · pulse-state. Distinct files: 7. Weight: **High** (structural: `runStatus` threads from `extension.ts` through `messages.ts` into `pulse-state` and `scene-content`; a new control state requires editing every relay hop).
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestSendRecvInstantDelivery(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
@@ -38,7 +38,7 @@ func TestSendRecvInstantDelivery(t *testing.T) {
 }
 
 func TestBackPressureSecondSenderWaits(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
 
 	// First send without delivery — slot stays full.
@@ -100,7 +100,7 @@ func TestBackPressureSecondSenderWaits(t *testing.T) {
 }
 
 func TestRecvBlocksWhenEmpty(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -111,7 +111,7 @@ func TestRecvBlocksWhenEmpty(t *testing.T) {
 }
 
 func TestContextCancelUnblocksSend(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 
 	// Fill the slot manually.
 	pw.mu.Lock()
@@ -137,7 +137,7 @@ func TestContextCancelUnblocksSend(t *testing.T) {
 }
 
 func TestVisualPacingDeliveryGate(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
@@ -203,7 +203,7 @@ func TestVisualPacingDeliveryGate(t *testing.T) {
 }
 
 func TestRecvBlocksUntilDelivered(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
 
 	go pw.Send(ctx, "hello")
@@ -238,7 +238,7 @@ func TestRecvBlocksUntilDelivered(t *testing.T) {
 // TestSendBlocksUntilDone: Send fills slot, Recv returns value,
 // NotifyDelivered fires, but Send still blocks until Done is called.
 func TestSendBlocksUntilDone(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
@@ -276,7 +276,7 @@ func TestSendBlocksUntilDone(t *testing.T) {
 // filling the slot. A concurrent Recv with a short-timeout context must time
 // out (proving no slot fill).
 func TestFadedSendSkips(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	pw.SetFaded(true)
 
 	// Send must return immediately with nil.
@@ -303,7 +303,7 @@ func TestFadedSendSkips(t *testing.T) {
 
 // TestUnfadedAfterSetFaded: after SetFaded(false), Send works normally again.
 func TestUnfadedAfterSetFaded(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	pw.SetFaded(true)
 	pw.SetFaded(false)
 
@@ -332,7 +332,7 @@ func TestUnfadedAfterSetFaded(t *testing.T) {
 
 // TestRecvUnblocksOnDelivery: Recv returns at NotifyDelivered, not at Done.
 func TestRecvUnblocksOnDelivery(t *testing.T) {
-	pw := NewPacedWire()
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
 
 	go pw.Send(ctx, "data")

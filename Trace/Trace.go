@@ -29,11 +29,11 @@ import (
 // the emitting node — the one that received the value (recv) or sent
 // it (send/fire).
 const (
-	KindRecv = "recv"
-	KindFire = "fire"
-	KindSend = "send"
-	KindSlot = "slot"
-	KindDone = "done"
+	KindRecv           = "recv"
+	KindFire           = "fire"
+	KindSend           = "send"
+	KindSlot           = "slot"
+	KindDone           = "done"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
@@ -52,6 +52,12 @@ type Event struct {
 	Value     int    `json:"value,omitempty"`     // recv/send/slot(filled) only; fire and slot(empty) omit
 	// hasValue distinguishes "value 0" from "no value" for slot and send/recv events.
 	hasValue bool
+	// Wire geometry fields — populated on send events when the outgoing port
+	// is backed by a PacedWire. Zero values are omitted from JSON output.
+	// ArriveStep is omitted: the substrate has no global ms-per-step cadence,
+	// so the TS layer derives arrival from emitTime + simLatencyMs instead.
+	ArcLength    float64 `json:"arcLength,omitempty"`
+	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -129,6 +135,16 @@ func (t *Trace) Send(node, port string, value int) {
 		return
 	}
 	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true}
+}
+
+// SendWire emits a send event like Send, additionally carrying the wire geometry
+// fields (arcLength in world-units, simLatencyMs in milliseconds) from the
+// outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
+func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
@@ -252,10 +268,25 @@ func marshalEvent(e Event) ([]byte, error) {
 		Port  string `json:"port"`
 		Value int    `json:"value"`
 	}
+	type sendWire struct {
+		Step         int     `json:"step"`
+		Kind         string  `json:"kind"`
+		Node         string  `json:"node"`
+		Port         string  `json:"port"`
+		Value        int     `json:"value"`
+		ArcLength    float64 `json:"arcLength,omitempty"`
+		SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
+	}
 	type fire struct {
 		Step int    `json:"step"`
 		Kind string `json:"kind"`
 		Node string `json:"node"`
+	}
+	type doneEvent struct {
+		Step int    `json:"step"`
+		Kind string `json:"kind"`
+		Node string `json:"node"`
+		Port string `json:"port"`
 	}
 	type slotFilled struct {
 		Step   int    `json:"step"`
@@ -275,6 +306,13 @@ func marshalEvent(e Event) ([]byte, error) {
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
+	case KindSend:
+		if e.ArcLength != 0 || e.SimLatencyMs != 0 {
+			return json.Marshal(sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs})
+		}
+		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+	case KindDone:
+		return json.Marshal(doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port})
 	case KindSlot:
 		if e.hasValue {
 			return json.Marshal(slotFilled{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase, Value: e.Value})
