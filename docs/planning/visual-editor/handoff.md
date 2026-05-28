@@ -28,8 +28,10 @@ All commits on branch beyond main:
 - `d6ba967e` — Throttled node-move drag emission in `interaction-controls.ts`; `pump.ts` latency-changed handler.
 - `55794c30` — `maps.Copy` cleanup in `stdin_reader.go` (lint nit).
 - `4ff340ea` — Drag-speed bug fix: `moveNode` recomputes `arcLength`+`simLatencyMs` and calls `patchPulse` in the same synchronous frame as the position update; formula factored into `geometry-helpers.ts`; `latency-changed` handler in `pump.ts` is now a sanity reconciliation.
+- `e44f2b8e` — Curve derived as non-React store state (`setCurve`/`getCurve` in `pulse-state.ts`), updated synchronously inside `moveNode` via `buildEdgeCurve`; bead reads `getCurve` in `useFrame` instead of a React-`useMemo` prop; eliminates visual snap on fast/long drags.
+- `c6089bbd` — `latency-changed` trace event removed end-to-end (`Trace.go`, `stdin_reader.go`, `trace-kinds.ts`, `messages.ts`, `pump.ts`); was a pure echo (~120 events/sec on drag); Go silently keeps `PacedWire` geometry current; `node-move` IPC (TS→Go) retained for future-send correctness.
 
-**Net effect:** Transport duration is substrate-owned. The 8-file cross-cut (pump · Go substrate · store · messages · schema · 3D render · pulse-state · animation-fields) is now 4 files (paced_wire · Trace · pump · scene-content). `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. Dragging a node live updates every connected wire's `simLatencyMs` via `NodeMoveRegistry`.
+**Net effect:** Transport duration is substrate-owned. The 8-file cross-cut (pump · Go substrate · store · messages · schema · 3D render · pulse-state · animation-fields) is now 5 files (paced_wire · Trace · pump · pulse-state · scene-content). `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. `latency-changed` event gone. Dragging a node updates curve + `simLatencyMs` + pulse map synchronously in `moveNode`; Go keeps geometry current for future-send via `node-move` IPC (one-way TS→Go, no echo).
 
 ### Build / test gate (verified 2026-05-28)
 
@@ -101,7 +103,7 @@ All commits on branch beyond main:
 - `tools/topology-vscode/src/webview/three/fade.ts` — `computeFade` fixpoint (render-mask only).
 - `tools/topology-vscode/src/schema/node-defs.ts` — generated node defs (spec layer); `src/schema/parse-spec.ts` — `requiredInputDiagnostics` (editor-diagnostic only).
 - `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs`; `faded` flag + `SetFaded` + `Send` gate.
-- `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `simLatencyMs` recompute → `latency-changed` trace events.
+- `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `PacedWire.ArcLength`/`SimLatencyMs` recompute (silent; no trace event emitted back).
 - `nodes/Wiring/loader.go` — threads node positions into wire construction for initial `arcLength`.
 - `nodes/input/node.go` — Input node (also serves bootstrap role).
 

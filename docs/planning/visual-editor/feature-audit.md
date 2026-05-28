@@ -11,6 +11,7 @@ branch: main
 - **2026-05-27** (restructure) Reorganized into consistent per-feature template; summary table regenerated; categories grouped by `##` heading; features sorted high→low within each category.
 - **2026-05-28** Pulse substrate transport refactor complete (Phases 1–4, commits `0572704a`–`d6ba967e`): `arcLength`+`simLatencyMs` on `PacedWire`; emitted on `send` trace events; `pump.ts` consumes `simLatencyMs` directly; `PULSE_SPEED_WU_PER_MS` and Bezier arcLength recompute removed from render layer; latency-live on node drag via `NodeMoveRegistry` + IPC. Cross-cut count: 8 → 4. RESOLVED.
 - **2026-05-28** Drag-speed invariant enforced (commit `4ff340ea`): TS `moveNode` now recomputes `arcLength`+`simLatencyMs` locally in the same synchronous frame as the position update and calls `patchPulse` for in-flight beads; formula factored into `geometry-helpers.ts`. Go round-trip remains for future-send correctness; `latency-changed` handler in `pump.ts` is now a sanity reconciliation (should no-op in practice).
+- **2026-05-28** Final shape (commits `e44f2b8e`, `c6089bbd`): curve derived from positions in a non-React store (`pulse-state.ts`), updated synchronously in `moveNode` via `setCurve(edgeId, buildEdgeCurve(...))`. `latency-changed` trace event removed end-to-end — Go silently keeps `PacedWire.ArcLength`/`SimLatencyMs` current; TS recomputes locally; the event was a pure echo flooding stdout (~120/sec on drag). Removed from `Trace.go`, `stdin_reader.go`, `trace-kinds.ts`, `messages.ts`, `pump.ts`. `node-move` IPC (TS→Go) is kept for future-send correctness. Relationship is now strictly one-way TS→Go. Cross-cut fully resolved.
 
 ---
 
@@ -69,24 +70,25 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 
 **Status:** working — **RESOLVED** (substrate-owned transport timing; commits `0572704a`–`d6ba967e` on `task/pulse-substrate-transport`)
 
-**Files (post-refactor, 4 files):**
+**Files (final shape, 5 files):**
 - `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs` const; substrate owns transport duration
-- `nodes/Wiring/Trace/Trace.go` — `send` events now emit `arcLength` + `simLatencyMs`
-- `tools/topology-vscode/src/webview/pump.ts` — consumes `simLatencyMs` from trace; no clock fabrication
-- `tools/topology-vscode/src/webview/three/scene-content.tsx` — pure render consumer; `PULSE_SPEED_WU_PER_MS` const and Bezier arcLength recompute removed
+- `nodes/Wiring/Trace/Trace.go` — `send` events emit `arcLength` + `simLatencyMs`; `latency-changed` event removed
+- `tools/topology-vscode/src/webview/pump.ts` — consumes `simLatencyMs` from `send` trace; no clock fabrication; `latency-changed` handler removed
+- `tools/topology-vscode/src/webview/pulse-state.ts` — non-React store holds pulse map + per-edge curve (`setCurve`/`getCurve`); updated synchronously in `moveNode`
+- `tools/topology-vscode/src/webview/three/scene-content.tsx` — pure render consumer; reads curve from pulse store via `getCurve`; `PULSE_SPEED_WU_PER_MS` const and Bezier arcLength recompute removed
 
 **Removed by refactor:**
 - `pulse-state.ts` `startTime`/wallclock-duration fabrication (replaced by substrate `simLatencyMs`)
 - `scene-content.tsx:167` hardcoded `PULSE_SPEED_WU_PER_MS = 0.08`
 - `scene-content.tsx:228` arcLength recompute from Bezier control points
 
-**Latency-live (drag):** `nodes/Wiring/stdin_reader.go` `NodeMoveRegistry` recomputes `simLatencyMs` on node-move IPC messages and emits `latency-changed` trace events; `pump.ts` adjusts in-flight bead timing on receipt.
+**Latency-live (drag):** `nodes/Wiring/stdin_reader.go` `NodeMoveRegistry` recomputes `PacedWire.ArcLength`/`SimLatencyMs` on node-move IPC messages silently (no trace event emitted back). TS `moveNode` recomputes `arcLength`+`simLatencyMs` locally and calls `patchPulse` in the same frame; curve is updated via `setCurve` in the non-React pulse store. No Go round-trip for in-flight rendering.
 
 **Invariant — uniform px speed:** Edge length NEVER affects pulse speed. Pixel speed is constant at `0.08 wu/ms`. A longer edge takes more time; it does not change px/ms. Formula: `simLatencyMs = max(arcLength, 1.0) / 0.08`.
 
-**Two sources of latency (both authoritative for their scope):**
-- **Go** (`nodes/Wiring/paced_wire.go:PulseSpeedWuPerMs`) — authoritative at send time; determines the `simLatencyMs` emitted in `send` trace events.
-- **TS** (`tools/topology-vscode/src/webview/three/geometry-helpers.ts:arcLengthToSimLatencyMs`) — recomputes locally on drag so in-flight bead rendering stays consistent in the same frame as the geometry change; does not wait on a Go round-trip. Both sides compute `arcLength / 0.08` from the same inputs (node positions), so they should agree.
+**Two sources of latency (each authoritative for its scope):**
+- **Go** (`nodes/Wiring/paced_wire.go:PulseSpeedWuPerMs`) — authoritative at send time; determines the `simLatencyMs` emitted in `send` trace events. Receives `node-move` IPC from TS so future `send` events carry up-to-date geometry. Relationship is one-way TS→Go; Go does NOT send latency data back to TS.
+- **TS** (`tools/topology-vscode/src/webview/three/geometry-helpers.ts:arcLengthToSimLatencyMs`) — recomputes locally on drag so in-flight bead rendering (curve + `simLatencyMs` + pulse map) stays consistent in the same frame as the geometry change. Both sides compute `arcLength / 0.08` from the same inputs (node positions), so they agree; `latency-changed` trace event is gone — it was a pure echo.
 
 **Drag bug + fix (commit `4ff340ea`):** longer wire → bead sped up near end; shorter → slowed down. Root cause: curve geometry updated locally and instantly on drag, but `simLatencyMs` only updated after the TS→Go→TS round trip. For the gap frames, bead rendered the new curve at the old duration → px/ms drifted off the 0.08 wu/ms target. Fix: `moveNode` in `store.ts` now recomputes `arcLength` + `simLatencyMs` and calls `patchPulse` for every in-flight pulse on touching edges, all in the same synchronous frame as the position update. Lesson: **local geometry change must update local timing in the same frame; don't wait on a substrate round trip for in-flight rendering.**
 
