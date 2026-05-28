@@ -13,7 +13,7 @@
   <div class="detail-header">
     <span class="badge badge-working">working</span>
     <span class="badge badge-cat">Render</span>
-    <span class="badge badge-weight-High">cross-cut: High</span>
+    <span class="badge badge-weight-Low">cross-cut: Low</span>
     <span class="badge badge-VERIFIED">VERIFIED</span>
   </div>
 
@@ -29,12 +29,12 @@
 
   <section>
     <h2>Reduction proposal</h2>
-    <div class="proposal-block">codegen — generate spec-to-flow.ts and flow-to-spec.ts from node-defs.ts. Expected post-change: 6 → 2 files touched by field addition (schema edit + regenerate).</div>
+    <div class="proposal-block">REMOVED 2026-05-28 — re-audit: adapters already iterate generated registries (WIRE_PROPS, NODE_DEFS) and treat node data as a verbatim blob. Adding a wire prop = 2 hand-edits (Go struct + renderer); adding a node data field = 1 hand-edit (Go struct). Zero adapter edits in either case. The 'codegen' the proposal envisioned already exists via gen-node-defs.</div>
   </section>
 
   <section>
     <h2>Notes</h2>
-    <p>Every new node/edge field requires edits to both adapter files; currently a 6-file minimum change.</p>
+    <p>Re-audit 2026-05-28: pickWireProps + flow-to-spec wire-prop copy iterate Object.keys(WIRE_PROPS); spec-to-flow stores n.data as verbatim nodeData blob. No per-kind switch exists. The cross-cut surface count (6) was conflated with per-change edit count in the original proposal.</p>
   </section>
 </div>
 </body>
