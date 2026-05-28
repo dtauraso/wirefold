@@ -45,6 +45,35 @@ export function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
 }
 
 // ---------------------------------------------------------------------------
+// Pulse geometry
+// ---------------------------------------------------------------------------
+
+/**
+ * Uniform pulse speed — must match Go's nodes/Wiring/paced_wire.go:PulseSpeedWuPerMs.
+ * Both sides derive simLatencyMs = arcLength / PULSE_SPEED_WU_PER_MS.
+ */
+export const PULSE_SPEED_WU_PER_MS = 0.08;
+
+/** Minimum arc length, matching Go's loader.go:minArcLength. Prevents zero-duration pulses. */
+const MIN_ARC_LENGTH = 1.0;
+
+/**
+ * Straight-line distance between two RF positions (matching Go's arcLengthBetween).
+ * Uses raw RF position coords — same coordinate space Go uses for specPosition.
+ */
+export function rfArcLength(ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  return d < MIN_ARC_LENGTH ? MIN_ARC_LENGTH : d;
+}
+
+/** Convert arc length to simLatencyMs using the uniform pulse speed. */
+export function arcLengthToSimLatencyMs(arcLength: number): number {
+  return arcLength / PULSE_SPEED_WU_PER_MS;
+}
+
+// ---------------------------------------------------------------------------
 // Camera geometry
 // ---------------------------------------------------------------------------
 

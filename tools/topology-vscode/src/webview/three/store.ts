@@ -11,7 +11,9 @@ import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 import { vscode } from "../vscode-api";
-import { clearPulse } from "./pulse-state";
+import { clearPulse, getPulseMap, patchPulse } from "./pulse-state";
+import { rfArcLength, arcLengthToSimLatencyMs } from "./geometry-helpers";
+import { getPauseAdjustedNow } from "../state/run-status";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
 
@@ -118,10 +120,37 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   },
 
   moveNode(id, x, y) {
-    const nextNodes = get().nodes.map((n) =>
+    const { nodes, edges } = get();
+    const nextNodes = nodes.map((n) =>
       n.id === id ? { ...n, position: { x, y } } : n,
     );
     set({ nodes: nextNodes });
+
+    // TS-local latency recompute: patch in-flight pulses on affected edges so
+    // bead speed stays at the uniform 0.08 wu/ms target during drag, without
+    // waiting for the Go latency-changed trace event (which lags by one IPC round-trip).
+    // The latency-changed handler in pump.ts remains as a reconciliation safety net.
+    const pulseMap = getPulseMap();
+    const now = getPauseAdjustedNow();
+    for (const edge of edges) {
+      if (edge.source !== id && edge.target !== id) continue;
+      const pulse = pulseMap.get(edge.id);
+      if (!pulse) continue;
+      // Use the NEW position for the dragged node, current position for the other.
+      const srcNode = nextNodes.find((n) => n.id === edge.source);
+      const tgtNode = nextNodes.find((n) => n.id === edge.target);
+      if (!srcNode || !tgtNode) continue;
+      const newArcLength = rfArcLength(
+        srcNode.position.x, srcNode.position.y,
+        tgtNode.position.x, tgtNode.position.y,
+      );
+      const newSimLatencyMs = arcLengthToSimLatencyMs(newArcLength);
+      // Preserve fractional progress t_curr so the bead doesn't jump.
+      const elapsed = now - pulse.startTime;
+      const tCurr = Math.min(1, elapsed / pulse.simLatencyMs);
+      const newStartTime = now - tCurr * newSimLatencyMs;
+      patchPulse(edge.id, newSimLatencyMs, newStartTime);
+    }
   },
 
   saveSpec() {
