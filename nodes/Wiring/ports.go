@@ -96,7 +96,7 @@ func (o *Out) TrySend(v int) bool {
 		// webview sees it, animates, posts "delivered", and unblocks Send.
 		// Emitting after Send returns causes a deadlock: the webview never
 		// receives the event, never posts delivered, and Send never returns.
-		o.trace.Send(o.node, o.port, v)
+		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs)
 		if err := o.pw.Send(o.ctx, v); err != nil {
 			return false
 		}
