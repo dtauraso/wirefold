@@ -10,6 +10,7 @@ branch: main
 - **2026-05-26** Re-verified against post-architecture-audit code. Undo/redo moved from half-wired to not-started. Folds filename corrected. Sublabel edit and edge midpoint drag annotations updated.
 - **2026-05-27** (restructure) Reorganized into consistent per-feature template; summary table regenerated; categories grouped by `##` heading; features sorted high→low within each category.
 - **2026-05-28** Pulse substrate transport refactor complete (Phases 1–4, commits `0572704a`–`d6ba967e`): `arcLength`+`simLatencyMs` on `PacedWire`; emitted on `send` trace events; `pump.ts` consumes `simLatencyMs` directly; `PULSE_SPEED_WU_PER_MS` and Bezier arcLength recompute removed from render layer; latency-live on node drag via `NodeMoveRegistry` + IPC. Cross-cut count: 8 → 4. RESOLVED.
+- **2026-05-28** Drag-speed invariant enforced (commit `4ff340ea`): TS `moveNode` now recomputes `arcLength`+`simLatencyMs` locally in the same synchronous frame as the position update and calls `patchPulse` for in-flight beads; formula factored into `geometry-helpers.ts`. Go round-trip remains for future-send correctness; `latency-changed` handler in `pump.ts` is now a sanity reconciliation (should no-op in practice).
 
 ---
 
@@ -80,6 +81,14 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 - `scene-content.tsx:228` arcLength recompute from Bezier control points
 
 **Latency-live (drag):** `nodes/Wiring/stdin_reader.go` `NodeMoveRegistry` recomputes `simLatencyMs` on node-move IPC messages and emits `latency-changed` trace events; `pump.ts` adjusts in-flight bead timing on receipt.
+
+**Invariant — uniform px speed:** Edge length NEVER affects pulse speed. Pixel speed is constant at `0.08 wu/ms`. A longer edge takes more time; it does not change px/ms. Formula: `simLatencyMs = max(arcLength, 1.0) / 0.08`.
+
+**Two sources of latency (both authoritative for their scope):**
+- **Go** (`nodes/Wiring/paced_wire.go:PulseSpeedWuPerMs`) — authoritative at send time; determines the `simLatencyMs` emitted in `send` trace events.
+- **TS** (`tools/topology-vscode/src/webview/three/geometry-helpers.ts:arcLengthToSimLatencyMs`) — recomputes locally on drag so in-flight bead rendering stays consistent in the same frame as the geometry change; does not wait on a Go round-trip. Both sides compute `arcLength / 0.08` from the same inputs (node positions), so they should agree.
+
+**Drag bug + fix (commit `4ff340ea`):** longer wire → bead sped up near end; shorter → slowed down. Root cause: curve geometry updated locally and instantly on drag, but `simLatencyMs` only updated after the TS→Go→TS round trip. For the gap frames, bead rendered the new curve at the old duration → px/ms drifted off the 0.08 wu/ms target. Fix: `moveNode` in `store.ts` now recomputes `arcLength` + `simLatencyMs` and calls `patchPulse` for every in-flight pulse on touching edges, all in the same synchronous frame as the position update. Lesson: **local geometry change must update local timing in the same frame; don't wait on a substrate round trip for in-flight rendering.**
 
 **Cross-cuts:** Distinct files: **4** (down from 8). Weight: minimal — render layer is a pure consumer; no clock fabrication, no dual-clock seam.
 

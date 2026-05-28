@@ -27,6 +27,7 @@ All commits on branch beyond main:
 - `843694bf` — TS node-move IPC + `latency-changed` trace event wiring (`pump.ts`, `pulse-state.ts`).
 - `d6ba967e` — Throttled node-move drag emission in `interaction-controls.ts`; `pump.ts` latency-changed handler.
 - `55794c30` — `maps.Copy` cleanup in `stdin_reader.go` (lint nit).
+- `4ff340ea` — Drag-speed bug fix: `moveNode` recomputes `arcLength`+`simLatencyMs` and calls `patchPulse` in the same synchronous frame as the position update; formula factored into `geometry-helpers.ts`; `latency-changed` handler in `pump.ts` is now a sanity reconciliation.
 
 **Net effect:** Transport duration is substrate-owned. The 8-file cross-cut (pump · Go substrate · store · messages · schema · 3D render · pulse-state · animation-fields) is now 4 files (paced_wire · Trace · pump · scene-content). `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. Dragging a node live updates every connected wire's `simLatencyMs` via `NodeMoveRegistry`.
 
