@@ -18,6 +18,7 @@ import {
   nodeWorldPos,
   ndcToPixel,
 } from "./geometry-helpers";
+import { CURVE_PARAM_BULGE_FACTOR } from "../../schema/curve-params";
 import type { PickOptions } from "./interaction-controls";
 
 // ---------------------------------------------------------------------------
@@ -227,7 +228,7 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: 
       const edgeDir = _p2.clone().sub(_p0).normalize();
       const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
       const span = _p0.distanceTo(_p2);
-      const _p1 = mid.clone().addScaledVector(lift, span * 0.25);
+      const _p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
       return new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
     })();
     const _tubeGeo = new THREE.TubeGeometry(_curve, 16, 1.5, 6, false);

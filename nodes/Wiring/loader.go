@@ -20,26 +20,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// arcLengthBetween returns the straight-line distance between two node positions.
-// If either position is the zero value (node not positioned), a minimum of
-// minArcLength is returned so SimLatencyMs is never zero.
-const minArcLength = 1.0 // world units
-
+// arcLengthBetween returns the Bezier arc length between two node positions.
+// Uses CurveParamBulgeFactor and CurveParamBezierSampleCount from curve_params.go
+// so the result matches what TS renders and what rfArcLength computes.
 func arcLengthBetween(a, b specPosition) float64 {
-	dx := b.X - a.X
-	dy := b.Y - a.Y
-	dz := b.Z - a.Z
-	d := math.Sqrt(dx*dx + dy*dy + dz*dz)
-	if d < minArcLength {
-		return minArcLength
-	}
-	return d
+	return BezierArcLength(a.X, a.Y, b.X, b.Y, CurveParamBulgeFactor, CurveParamBezierSampleCount)
 }
 
 // specPosition is the 3-D canvas position of a node as stored in view.nodes.

@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"io"
 	"maps"
-	"math"
 	"sync"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -89,7 +88,7 @@ func (nmr *NodeMoveRegistry) updateNodeAndGetAffected(nodeId string, x, y, z flo
 		ep := nmr.edgeNodes[eid]
 		src := nmr.positions[ep.Source]
 		tgt := nmr.positions[ep.Target]
-		arcLen := arcLengthBetween3(src, tgt)
+		arcLen := BezierArcLength(src.X, src.Y, tgt.X, tgt.Y, CurveParamBulgeFactor, CurveParamBezierSampleCount)
 		result = append(result, struct {
 			edgeId       string
 			simLatencyMs float64
@@ -98,18 +97,6 @@ func (nmr *NodeMoveRegistry) updateNodeAndGetAffected(nodeId string, x, y, z flo
 	return result
 }
 
-// arcLengthBetween3 computes the straight-line distance between two NodePositions.
-// Returns at least minArcLength so SimLatencyMs is never zero.
-func arcLengthBetween3(a, b NodePosition) float64 {
-	dx := b.X - a.X
-	dy := b.Y - a.Y
-	dz := b.Z - a.Z
-	d := math.Sqrt(dx*dx + dy*dy + dz*dz)
-	if d < minArcLength {
-		return minArcLength
-	}
-	return d
-}
 
 type stdinMsg struct {
 	Type   string   `json:"type"`

@@ -6,10 +6,10 @@ import (
 	"sync"
 )
 
-// PulseSpeedWuPerMs is the uniform pulse speed in world-units per millisecond.
-// Matches PULSE_SPEED_WU_PER_MS in the TS layer so the visual travel time is
-// self-consistent with the substrate's simLatencyMs.
-const PulseSpeedWuPerMs = 0.08
+// PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs for call sites that
+// pass it to NewPacedWire.  The canonical value lives in curve_params.go so
+// the codegen tool can export it to TS.
+const PulseSpeedWuPerMs = CurveParamPulseSpeedWuPerMs
 
 // ErrCanceled is returned by Send or Recv when the context is canceled.
 var ErrCanceled = errors.New("paced wire: context canceled")

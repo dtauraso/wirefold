@@ -3,6 +3,12 @@
 
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
+import {
+  CURVE_PARAM_PULSE_SPEED_WU_PER_MS,
+  CURVE_PARAM_MIN_ARC_LENGTH,
+  CURVE_PARAM_BULGE_FACTOR,
+  CURVE_PARAM_BEZIER_SAMPLE_COUNT,
+} from "../../schema/curve-params";
 
 // ---------------------------------------------------------------------------
 // Edge curve
@@ -35,7 +41,7 @@ export function buildEdgeCurve(
   const edgeDir = p2.clone().sub(p0).normalize();
   const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
   const span = p0.distanceTo(p2);
-  const p1 = mid.clone().addScaledVector(lift, span * 0.25);
+  const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
   return new THREE.QuadraticBezierCurve3(p0, p1, p2);
 }
 
@@ -84,28 +90,62 @@ export function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
 // ---------------------------------------------------------------------------
 
 /**
- * Uniform pulse speed — must match Go's nodes/Wiring/paced_wire.go:PulseSpeedWuPerMs.
- * Both sides derive simLatencyMs = arcLength / PULSE_SPEED_WU_PER_MS.
+ * Uniform pulse speed — single source of truth in nodes/Wiring/curve_params.go.
+ * Re-exported for callers that reference PULSE_SPEED_WU_PER_MS directly.
  */
-export const PULSE_SPEED_WU_PER_MS = 0.08;
-
-/** Minimum arc length, matching Go's loader.go:minArcLength. Prevents zero-duration pulses. */
-const MIN_ARC_LENGTH = 1.0;
+export const PULSE_SPEED_WU_PER_MS = CURVE_PARAM_PULSE_SPEED_WU_PER_MS;
 
 /**
- * Straight-line distance between two RF positions (matching Go's arcLengthBetween).
- * Uses raw RF position coords — same coordinate space Go uses for specPosition.
+ * Quadratic Bezier arc length between two RF node-center positions.
+ * Mirrors Go's BezierArcLength in nodes/Wiring/curve_params.go exactly:
+ *   - control point = chord midpoint offset by BULGE_FACTOR * chordLen perpendicularly
+ *   - arc integrated with BEZIER_SAMPLE_COUNT equal-parameter segments
+ *   - result floored at MIN_ARC_LENGTH
+ * Using node centers (not surface points) keeps Go and TS inputs identical.
  */
 export function rfArcLength(ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const d = Math.sqrt(dx * dx + dy * dy);
-  return d < MIN_ARC_LENGTH ? MIN_ARC_LENGTH : d;
+  const chordX = bx - ax;
+  const chordY = by - ay;
+  const chordLen = Math.sqrt(chordX * chordX + chordY * chordY);
+
+  // Midpoint of chord.
+  const midX = (ax + bx) * 0.5;
+  const midY = (ay + by) * 0.5;
+
+  // Perpendicular: rotate chord direction 90° CCW and normalise.
+  let perpX = 0, perpY = 0;
+  if (chordLen > 0) {
+    perpX = -chordY / chordLen;
+    perpY = chordX / chordLen;
+  }
+
+  // Control point p1.
+  const p1x = midX + perpX * CURVE_PARAM_BULGE_FACTOR * chordLen;
+  const p1y = midY + perpY * CURVE_PARAM_BULGE_FACTOR * chordLen;
+
+  // Integrate arc length over BEZIER_SAMPLE_COUNT segments.
+  const n = CURVE_PARAM_BEZIER_SAMPLE_COUNT;
+  const inv = 1.0 / n;
+  let prevX = ax, prevY = ay;
+  let total = 0;
+  for (let i = 1; i <= n; i++) {
+    const t = i * inv;
+    const u = 1 - t;
+    const bpx = u * u * ax + 2 * u * t * p1x + t * t * bx;
+    const bpy = u * u * ay + 2 * u * t * p1y + t * t * by;
+    const dx = bpx - prevX;
+    const dy = bpy - prevY;
+    total += Math.sqrt(dx * dx + dy * dy);
+    prevX = bpx;
+    prevY = bpy;
+  }
+
+  return total < CURVE_PARAM_MIN_ARC_LENGTH ? CURVE_PARAM_MIN_ARC_LENGTH : total;
 }
 
 /** Convert arc length to simLatencyMs using the uniform pulse speed. */
 export function arcLengthToSimLatencyMs(arcLength: number): number {
-  return arcLength / PULSE_SPEED_WU_PER_MS;
+  return arcLength / CURVE_PARAM_PULSE_SPEED_WU_PER_MS;
 }
 
 // ---------------------------------------------------------------------------
