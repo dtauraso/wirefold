@@ -128,10 +128,12 @@ export class BuildAndRunRunner {
       this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
       const ev = tryParseTraceEvent(line);
       if (ev && this.onTraceEvent) {
-        console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${'node' in ev ? ev.node : ev.nodeId} port=${ev.port ?? "-"}`);
+        const _evNode = 'node' in ev ? ev.node : ('nodeId' in ev ? (ev as { nodeId?: string }).nodeId : undefined);
+        const _evPort = 'port' in ev ? (ev as { port?: string }).port : undefined;
+        console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${_evNode} port=${_evPort ?? "-"}`);
         if (this.tsFile) {
           try {
-            fs.appendFileSync(this.tsFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.trace-event", kind: ev.kind, node: 'node' in ev ? ev.node : (ev as { nodeId?: string }).nodeId, port: ev.port ?? null }) + "\n", "utf8");
+            fs.appendFileSync(this.tsFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.trace-event", kind: ev.kind, node: _evNode, port: _evPort ?? null }) + "\n", "utf8");
           } catch { /* swallow */ }
         }
         if (this.probeFile) {

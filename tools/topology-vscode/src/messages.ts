@@ -39,6 +39,7 @@ export type WebviewToHostMsg =
   | { type: "webview-log"; entry: string }
   | { type: "delivered"; edge: string }
   | { type: "fade"; edges: string[] }
+  | { type: "node-move"; nodeId: string; x: number; y: number; z?: number }
   | { type: `${PseudoPrefix}-render`; nodeId: string }
   | { type: `${PseudoPrefix}-save`; nodeId: string; pseudo: string };
 
@@ -63,6 +64,7 @@ export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
   | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number }
   | { step: number; kind: "done"; node: string; port: string }
+  | { step: number; kind: "latency-changed"; edge: string; simLatencyMs: number }
   | SlotEvent;
 
 export type HostToWebviewMsg =
@@ -98,7 +100,7 @@ export const ALL_PSEUDO_SAVE_TYPES: ReadonlySet<string> = new Set(
 );
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered", "fade",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered", "fade", "node-move",
   ..._pseudoPrefixes.flatMap((p) => [`${p}-render`, `${p}-save`] as const),
 ]);
 
@@ -126,6 +128,10 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "delivered":
       return typeof m.edge === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "node-move":
+      return typeof m.nodeId === "string" && typeof m.x === "number" && typeof m.y === "number"
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
     default: {
       // Handle pseudo render/save types derived from PSEUDO_KIND_PREFIX
       const renderTypes = new Set(_pseudoPrefixes.map((p) => `${p}-render`));
