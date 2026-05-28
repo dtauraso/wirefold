@@ -11,10 +11,10 @@
   <a class="back" href="../index.html">All features</a>
   <h1>Arcball / dolly / pan / roll (camera controls)</h1>
   <div class="detail-header">
-    <span class="badge badge-working">working</span>
+    <span class="badge badge-half-wired">half-wired</span>
     <span class="badge badge-cat">Interaction</span>
     <span class="badge badge-weight-Medium">cross-cut: Medium</span>
-    <span class="badge badge-VERIFIED">VERIFIED</span>
+    <span class="badge badge-NEEDS_REMOVAL">NEEDS_REMOVAL</span>
   </div>
 
   <section>
@@ -29,12 +29,12 @@
 
   <section>
     <h2>Reduction proposal</h2>
-    <div class="proposal-block">none</div>
+    <div class="proposal-block">redesign — rotation gesture has an issue (specifics TBD); reconsider whether XY drag should require click-to-activate at all. Possible directions: hover-driven orbit (no click), modifier-key activation, or a different gesture-to-camera-axis mapping. Capture concrete repro before branching.</div>
   </section>
 
   <section>
     <h2>Notes</h2>
-    <p>camera3d is isolated field in viewer-state; 6 files is natural surface. View-save closure handled separately.</p>
+    <p>Reported 2026-05-28: rotation behaves incorrectly; click-to-activate for XY drag may be the wrong activation model. Needs concrete repro (what camera move, what input, what wrong output) before opening a task branch. Per CLAUDE.md interaction-control-is-substance rule, this is not a medium choice (OrbitControls etc.) — the activation model is part of the substance of the editor.</p>
   </section>
 </div>
 </body>
