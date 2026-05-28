@@ -12,6 +12,7 @@ branch: main
 - **2026-05-28** Pulse substrate transport refactor complete (Phases 1–4, commits `0572704a`–`d6ba967e`): `arcLength`+`simLatencyMs` on `PacedWire`; emitted on `send` trace events; `pump.ts` consumes `simLatencyMs` directly; `PULSE_SPEED_WU_PER_MS` and Bezier arcLength recompute removed from render layer; latency-live on node drag via `NodeMoveRegistry` + IPC. Cross-cut count: 8 → 4. RESOLVED.
 - **2026-05-28** Drag-speed invariant enforced (commit `4ff340ea`): TS `moveNode` now recomputes `arcLength`+`simLatencyMs` locally in the same synchronous frame as the position update and calls `patchPulse` for in-flight beads; formula factored into `geometry-helpers.ts`. Go round-trip remains for future-send correctness; `latency-changed` handler in `pump.ts` is now a sanity reconciliation (should no-op in practice).
 - **2026-05-28** Final shape (commits `e44f2b8e`, `c6089bbd`): curve derived from positions in a non-React store (`pulse-state.ts`), updated synchronously in `moveNode` via `setCurve(edgeId, buildEdgeCurve(...))`. `latency-changed` trace event removed end-to-end — Go silently keeps `PacedWire.ArcLength`/`SimLatencyMs` current; TS recomputes locally; the event was a pure echo flooding stdout (~120/sec on drag). Removed from `Trace.go`, `stdin_reader.go`, `trace-kinds.ts`, `messages.ts`, `pump.ts`. `node-move` IPC (TS→Go) is kept for future-send correctness. Relationship is now strictly one-way TS→Go. Cross-cut fully resolved.
+- **2026-05-28** (re-audit) Pulse bead entry rewritten from scratch against current code. Stale file paths corrected; actual 10-file shape documented; Bezier-vs-chord arc-length discrepancy recorded as known limitation; dual Go arc-length function anomaly (`arcLengthBetween` / `arcLengthBetween3`) documented; dual-constant cross-cut (`PULSE_SPEED_WU_PER_MS`, `MIN_ARC_LENGTH`) assessed as no-further-action. Prior entry had wrong paths and incorrect "removed" claims.
 
 ---
 
@@ -28,7 +29,7 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 | Feature | Status | Cross-cut weight | Surfaces | Files | Proposal type |
 |---|---|---|---|---|---|
 | **Substrate** | | | | | |
-| Pulse bead + delivered handshake | working | **RESOLVED** (8→4 files; substrate-owned transport timing landed, commits `0572704a`–`d6ba967e`) | pump · Go substrate · Trace · 3D render | 4 | — (complete; render layer is pure consumer) |
+| Pulse bead + delivered handshake | working | **RESOLVED** (substrate-owned transport timing; 10 files, each with distinct non-overlapping responsibility; dual-constant cross-cut is the only residual, documented) | Go substrate · Trace · pump · pulse-state · geometry-helpers · store · scene-content · IPC relay | 10 | already-minimal (dual-constant cross-cut: complexity of codegen exceeds ~2-line risk; comment cross-reference adequate) |
 | Run/pause/stop controls (runStatus) | working | **High** (structural: threads extension→messages→pulse-state) | store · extension · messages · 3D render · pulse-state | 7 | store-subscribe |
 | Paced wire substrate | working | **Low** (local: TS sees only trace events; Go internals opaque) | Go substrate only | 5 Go | already-minimal (hard boundary at pump.ts) |
 | Ring-topology deadlock break | working | **Low** (local: startup concern, no TS surface change) | Go substrate · e2e | 2 | already-minimal (irreducible minimum) |
@@ -68,33 +69,54 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 
 ### Pulse bead animation + delivered handshake
 
-**Status:** working — **RESOLVED** (substrate-owned transport timing; commits `0572704a`–`d6ba967e` on `task/pulse-substrate-transport`)
+**Status:** Working — post-refactor steady state. Prior #1 cross-cut candidate resolved. Re-audited 2026-05-28 against code on `task/pulse-substrate-transport`.
 
-**Files (final shape, 5 files):**
-- `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs` const; substrate owns transport duration
-- `nodes/Wiring/Trace/Trace.go` — `send` events emit `arcLength` + `simLatencyMs`; `latency-changed` event removed
-- `tools/topology-vscode/src/webview/pump.ts` — consumes `simLatencyMs` from `send` trace; no clock fabrication; `latency-changed` handler removed
-- `tools/topology-vscode/src/webview/pulse-state.ts` — non-React store holds pulse map + per-edge curve (`setCurve`/`getCurve`); updated synchronously in `moveNode`
-- `tools/topology-vscode/src/webview/three/scene-content.tsx` — pure render consumer; reads curve from pulse store via `getCurve`; `PULSE_SPEED_WU_PER_MS` const and Bezier arcLength recompute removed
+**Files (7 files, verified against code):**
 
-**Removed by refactor:**
-- `pulse-state.ts` `startTime`/wallclock-duration fabrication (replaced by substrate `simLatencyMs`)
-- `scene-content.tsx:167` hardcoded `PULSE_SPEED_WU_PER_MS = 0.08`
-- `scene-content.tsx:228` arcLength recompute from Bezier control points
+Go substrate:
+- `nodes/Wiring/paced_wire.go` — `PacedWire` struct with `ArcLength`/`SimLatencyMs` fields; `PulseSpeedWuPerMs = 0.08` const; `NewPacedWire(arcLength, pulseSpeed)` derives `SimLatencyMs = arcLength / pulseSpeed`; `NotifyDelivered` unblocks `Recv`; `Done` unblocks `Send`.
+- `nodes/Wiring/ports.go` — `TrySend` emits trace event via `trace.SendWire(node, port, v, pw.ArcLength, pw.SimLatencyMs)` BEFORE blocking on `pw.Send` (deadlock prevention comment in code).
+- `nodes/Wiring/loader.go` — `arcLengthBetween(a, b specPosition)` computes straight-line distance; `minArcLength = 1.0` const; `NewPacedWire(arcLength, PulseSpeedWuPerMs)` called per destination port.
+- `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry` + `arcLengthBetween3(a, b NodePosition)` (same formula as `arcLengthBetween`, different type); `node-move` handler updates `pw.SimLatencyMs` and `pw.ArcLength` under mutex; `delivered` handler calls `pw.NotifyDelivered()`.
+- `Trace/Trace.go` — `Event` struct carries `ArcLength float64` and `SimLatencyMs float64`; `SendWire` method populates both; `marshalEvent` emits them as `omitempty` JSON fields on `send` events.
 
-**Latency-live (drag):** `nodes/Wiring/stdin_reader.go` `NodeMoveRegistry` recomputes `PacedWire.ArcLength`/`SimLatencyMs` on node-move IPC messages silently (no trace event emitted back). TS `moveNode` recomputes `arcLength`+`simLatencyMs` locally and calls `patchPulse` in the same frame; curve is updated via `setCurve` in the non-React pulse store. No Go round-trip for in-flight rendering.
+TS layer:
+- `tools/topology-vscode/src/webview/three/pump.ts` — `handleTraceEvent` for `send` reads `simLatencyMs` from event; calls `setPulse(edge.id, { value, simStep, target, targetHandle, simLatencyMs })`. 500ms fallback guards stale Go binary. No clock fabrication.
+- `tools/topology-vscode/src/webview/three/pulse-state.ts` — imperative non-React stores: `PulseMap` (per-edge in-flight pulse data including `simLatencyMs` + `startTime = getPauseAdjustedNow()`) and `_curveMap` (per-edge `QuadraticBezierCurve3`). Exports: `setPulse`, `clearPulse`, `patchPulse`, `getCurve`, `setCurve`, `claimDelivered`.
+- `tools/topology-vscode/src/webview/three/geometry-helpers.ts` — `PULSE_SPEED_WU_PER_MS = 0.08` const (must match Go); `MIN_ARC_LENGTH = 1.0` const (must match Go); `rfArcLength(ax, ay, bx, by)` (same formula as Go's `arcLengthBetween`); `arcLengthToSimLatencyMs(arcLength)`.
+- `tools/topology-vscode/src/webview/three/store.ts` — `moveNode(id, x, y)`: updates node positions, then synchronously for every touching edge: calls `setCurve(buildEdgeCurve(...))` and, for in-flight pulses, calls `patchPulse(edge.id, newSimLatencyMs, newStartTime)` preserving fractional progress `t_curr`.
+- `tools/topology-vscode/src/webview/three/scene-content.tsx` — `PulseBead` reads `getPulseMap()` + `getCurve()` imperatively in `useFrame`; computes `t = (getPauseAdjustedNow() - pulse.startTime) / pulse.simLatencyMs`; at t≥1 calls `claimDelivered` + posts `{type:"delivered", edge:edgeId}`.
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — drag handler calls `store.moveNode(nodeId, x, y)` on pointer-move; rAF-throttled `node-move` IPC posts `{type:"node-move", nodeId, x, y, z:0}` to extension host.
 
-**Invariant — uniform px speed:** Edge length NEVER affects pulse speed. Pixel speed is constant at `0.08 wu/ms`. A longer edge takes more time; it does not change px/ms. Formula: `simLatencyMs = max(arcLength, 1.0) / 0.08`.
+IPC relay (host):
+- `tools/topology-vscode/src/extension/handle-message.ts` — forwards `delivered` → `runner.writeStdin(JSON.stringify({type:"delivered", edge}))` and `node-move` → `runner.writeStdin(JSON.stringify({type:"node-move", ...}))`.
 
-**Two sources of latency (each authoritative for its scope):**
-- **Go** (`nodes/Wiring/paced_wire.go:PulseSpeedWuPerMs`) — authoritative at send time; determines the `simLatencyMs` emitted in `send` trace events. Receives `node-move` IPC from TS so future `send` events carry up-to-date geometry. Relationship is one-way TS→Go; Go does NOT send latency data back to TS.
-- **TS** (`tools/topology-vscode/src/webview/three/geometry-helpers.ts:arcLengthToSimLatencyMs`) — recomputes locally on drag so in-flight bead rendering (curve + `simLatencyMs` + pulse map) stays consistent in the same frame as the geometry change. Both sides compute `arcLength / 0.08` from the same inputs (node positions), so they agree; `latency-changed` trace event is gone — it was a pure echo.
+**Data flow (send → bead → delivered → recv unblocks):**
+1. Go `TrySend` calls `trace.SendWire(node, port, v, pw.ArcLength, pw.SimLatencyMs)` then blocks in `pw.Send`.
+2. Extension streams `trace-event` to webview; `pump.ts:handleTraceEvent("send")` calls `setPulse(edgeId, { simLatencyMs, ... })` with `startTime = getPauseAdjustedNow()`.
+3. `PulseBead.useFrame` reads pulse + curve each frame; computes `t`; at `t ≥ 1` posts `"delivered"`.
+4. Extension host forwards `"delivered"` → Go stdin; `stdin_reader` calls `pw.NotifyDelivered()` → `deliveryCh` closed → `pw.Recv` unblocks.
+5. `pump.ts:handleTraceEvent("done")` clears pulse via `clearPulse(edgeId)`.
 
-**Drag bug + fix (commit `4ff340ea`):** longer wire → bead sped up near end; shorter → slowed down. Root cause: curve geometry updated locally and instantly on drag, but `simLatencyMs` only updated after the TS→Go→TS round trip. For the gap frames, bead rendered the new curve at the old duration → px/ms drifted off the 0.08 wu/ms target. Fix: `moveNode` in `store.ts` now recomputes `arcLength` + `simLatencyMs` and calls `patchPulse` for every in-flight pulse on touching edges, all in the same synchronous frame as the position update. Lesson: **local geometry change must update local timing in the same frame; don't wait on a substrate round trip for in-flight rendering.**
+**Drag geometry update (same-frame invariant):**
+- `store.ts:moveNode` recomputes curve + `simLatencyMs` synchronously, adjusting `startTime` to preserve `t_curr`. No Go round-trip for in-flight rendering.
+- rAF-throttled `node-move` IPC keeps Go `PacedWire` geometry current for future sends.
+- Relationship TS→Go is strictly one-way; Go does not echo back.
 
-**Cross-cuts:** Distinct files: **4** (down from 8). Weight: minimal — render layer is a pure consumer; no clock fabrication, no dual-clock seam.
+**Invariant — uniform speed:** `simLatencyMs = max(arcLength, 1.0) / 0.08`. Longer wire = longer time, same speed.
 
-**Reduction proposal:** Complete. No further action.
+**Cross-cuts:** 10 files across Go substrate + TS store + TS render + IPC relay. Weight: **low** — each file has a distinct, non-overlapping responsibility. No redundant state. The TS→Go direction is needed for future-send correctness; the dual arc-length computation is required because Go computes at send time and TS recomputes at drag time without a round trip.
+
+**Known limitations:**
+- Go's `arcLengthBetween` (loader.go, uses `specPosition`) and `arcLengthBetween3` (stdin_reader.go, uses `NodePosition`) are the same formula on different types — duplication within the Go package. Shared helper not feasible without type unification. Currently harmless; both use the same `minArcLength` constant.
+- TS `rfArcLength` and Go `arcLengthBetween` use 2D Euclidean distance from raw RF positions (z=0 for both). The rendered wire is a QuadraticBezier whose arc length is slightly longer than the straight-line distance. This means Go's `simLatencyMs` is derived from a shorter distance than the actual curve length, so the bead travels the Bezier curve in the time it would take to traverse the chord. At typical node separations the visual difference is small. This is an intentional model choice: substrate owns the straight-line timing; the curve is a visual affordance only.
+- `PULSE_SPEED_WU_PER_MS = 0.08` appears in both `paced_wire.go` (as `PulseSpeedWuPerMs`) and `geometry-helpers.ts` (as `PULSE_SPEED_WU_PER_MS`). The comment in `geometry-helpers.ts` names `paced_wire.go` as the authoritative source. No codegen link; a manual edit to one constant requires updating the other.
+- `MIN_ARC_LENGTH = 1.0` appears in both `loader.go` (as `minArcLength`) and `geometry-helpers.ts` (as `MIN_ARC_LENGTH`). Same cross-reference situation.
+
+**Reduction proposal:** The dual-constant cross-cut (speed + min-arc-length in both Go and TS) is the only remaining item. Eliminating it would require a codegen step exporting Go consts to a TS file — complexity exceeds the ~2-line risk. The comment cross-reference is adequate. No further reduction warranted; the core cross-cut (transport timing logic duplicated in both layers) is fully resolved.
+
+**Revision history:**
+- 2026-05-28 (re-audit) — Rewrote from scratch against code on `task/pulse-substrate-transport`. Corrected stale file paths, documented actual 10-file shape, added Bezier-vs-chord known limitation, documented dual-function Go anomaly, updated cross-cut verdict.
 
 ---
 
