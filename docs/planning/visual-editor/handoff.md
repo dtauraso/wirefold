@@ -67,7 +67,6 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 5. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
 6. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
 7. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
-8. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** Old fold fully removed. Redesign: fold-as-attribute; show/hide toggle reveals ONE level down inline; visibility and execution coupled (folded = hidden + not running); folds can nest. Open gate: spec-layer vs. viewer-state-layer for the child diagram (deferred).
 
 ### Key files
 
