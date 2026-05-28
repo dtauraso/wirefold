@@ -27,7 +27,7 @@ Sorted by cross-cut weight (high → low) within each category. Proposal type sh
 |---|---|---|---|---|---|
 | **Substrate** | | | | | |
 | Pulse bead + delivered handshake | working | **RESOLVED** (substrate-owned transport timing; 11 files, each with distinct non-overlapping responsibility; dual-constant cross-cut eliminated by codegen via `curve-params.ts`) | Go substrate · Trace · pump · pulse-state · geometry-helpers · store · scene-content · IPC relay | 11 | already-minimal (constants codegen-shared; algorithm drift risk is small, both ~25 lines, same spec) |
-| Run/pause/stop controls (runStatus) | working | **High** (structural: threads extension→messages→pulse-state) | store · extension · messages · 3D render · pulse-state | 7 | store-subscribe |
+| Run/pause/stop controls (runStatus) | working | **Low** (re-audited 2026-05-28: no prop-drill) | store · extension · messages · 3D render · pulse-state | 7 | ~~store-subscribe~~ REMOVED — see detail block |
 | Paced wire substrate | working | **Low** (local: TS sees only trace events; Go internals opaque) | Go substrate only | 5 Go | already-minimal (hard boundary at pump.ts) |
 | Ring-topology deadlock break | working | **Low** (local: startup concern, no TS surface change) | Go substrate · e2e | 2 | already-minimal (irreducible minimum) |
 | **Render** | | | | | |
@@ -140,6 +140,8 @@ IPC relay (host):
 - Strategy: **store-subscribe** — `scene-content.tsx`, `pulse-state.ts`, and `RunButton.tsx` read `runStatus` directly from the store via `useEditorStore`. Remove prop-drilling through `main.tsx` and `ThreeView`.
 - Expected post-change cross-cut count: **7 → 4** (`state/run-status.ts`, `extension.ts`, `messages.ts`, `RunButton.tsx`). `main.tsx`, `scene-content.tsx`, and `pulse-state.ts` become direct store subscribers.
 - Blocker: none structural. `useEditorStore` is already available in every component in the `three/` subtree.
+
+**RE-AUDIT 2026-05-28 — proposal REMOVED.** Independent audit traced every reader: `RunStatusCtx` is provided at root (`main.tsx:61`) with zero intermediate prop hops — `<ThreeView>` does NOT receive runStatus as a prop, contrary to the original axis claim. Sole React consumer is `RunButton.tsx:9` via `useRunStatusCtx()`. Per-frame and pause-clock readers (`scene-content.tsx:192`, `store.ts:146`, `pulse-state.ts:15,45`) call `getPauseAdjustedNow()` directly as a synchronous module-level function — they receive nothing as props. A Zustand swap would move module-scoped state to a store with identical semantics: zero correctness gain, zero file reduction, adds subscription lifecycle for nothing. Pure churn. Original audit's prop-drill framing was stale (likely pre-dated the imperative bridge in `state/run-status.ts`).
 
 ---
 
