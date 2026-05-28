@@ -185,30 +185,41 @@ export function ThreeView() {
         const isNearest = nearestNIds.has(n.id);
         if (!isHovered && !isSelected && !isNearest) return null;
         const flagged = !!n.data?.validationError;
+        const pillStyle: React.CSSProperties = flagged
+          ? {
+              background: FLAG_LABEL_BG,
+              border: "1px solid #ff5252",
+              borderRadius: 4,
+              padding: "3px 6px",
+            }
+          : {
+              background: "rgba(0,0,0,0.55)",
+              border: "none",
+              borderRadius: 4,
+              padding: "3px 6px",
+            };
         return (
           <div
             key={n.id}
             style={{
               position: "absolute",
               left: pos.px,
-              top: pos.py + 4,
-              transform: "translateX(-50%)",
+              top: pos.py - 4,
+              transform: "translate(-50%, -100%)",
               fontSize: 11,
               fontFamily: "monospace",
               color: flagged ? "#fff" : "#e0e0e0",
-              background: flagged ? FLAG_LABEL_BG : "transparent",
-              border: flagged ? "1px solid #ff5252" : "none",
-              borderRadius: flagged ? 3 : 0,
-              padding: flagged ? "1px 4px" : 0,
-              textShadow: flagged ? "none" : "0 0 3px #000",
               pointerEvents: "none",
-              whiteSpace: "nowrap",
+              maxWidth: 240,
+              lineHeight: 1.25,
+              textAlign: "center",
               zIndex: 10,
+              ...pillStyle,
             }}
           >
-            {n.data?.label ?? n.id}
+            <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
             {n.data?.sublabel ? (
-              <span style={{ opacity: 0.7 }}> · {n.data.sublabel}</span>
+              <div style={{ opacity: 0.7, whiteSpace: "normal" }}>{n.data.sublabel}</div>
             ) : null}
           </div>
         );

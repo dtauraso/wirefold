@@ -75,6 +75,13 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return new THREE.Vector3(x, y, 0);
 }
 
+/** World position for the top of the node sphere (center.y + radius). */
+export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
+  const center = nodeWorldPos(node);
+  const r = nodeRadius(node);
+  return new THREE.Vector3(center.x, center.y + r, center.z);
+}
+
 /**
  * Scene center (centroid of node bounding box), used for dolly distance.
  * Falls back to origin when no nodes.
