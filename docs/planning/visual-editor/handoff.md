@@ -7,96 +7,67 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — pulse substrate transport merged to main)
+## State at handoff (2026-05-28 — feature-audit pruned + HTML audit site shipped)
 
-- **Active branch:** `main`. `task/pulse-substrate-transport` merged 2026-05-28 (commit range `0572704a`–`2662baa4`); branch deleted local + remote.
-- Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
-- **Items 1–3 from KNOWN ISSUES are un-parked** — drag-to-wire, port-incompat wiring, pre-existing test failures are back on the menu.
+- **Active branch:** `main`. Local + origin/main in sync at `da4804f0`.
+- Working tree: `topology.json` modified (pre-existing this session, untouched by all session work).
+- Build/test gate last verified at the pulse-substrate-transport merge (2026-05-28). Only code-affecting change this session: removed dead `getPauseAdjustedNow` import from `pump.ts` (covered by tsc clean check at that commit).
 
-### What landed (Phases 1–6)
+### What this session did (commits ~467b40c3–da4804f0 on main)
 
-All commits on branch beyond main:
+1. **Removed dead `getPauseAdjustedNow` import** from `tools/topology-vscode/src/webview/three/pump.ts` (commit `467b40c3`).
 
-- `0572704a` — `ArcLength`/`SimLatencyMs` fields + `PulseSpeedWuPerMs` const on `PacedWire` (`nodes/Wiring/paced_wire.go`).
-- `d87beaff` — `specNode.Position` threaded from `view.nodes` into wire construction; `arcLength` computed at wire-build time (`nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`).
-- `cdc79e45` — Updated `NewPacedWire()` call sites in tests.
-- `ac002dc8` — `send` trace events now emit `arcLength` + `simLatencyMs` (`nodes/Wiring/Trace/Trace.go`).
-- `5a2efac3` — `simLatencyMs` added to `PulseData` in `pulse-state.ts`.
-- `7e4ded20` — `pump.ts` consumes `simLatencyMs` from trace; no wallclock fabrication, no dual-clock seam.
-- `2d3a256b` — `PULSE_SPEED_WU_PER_MS` constant and Bezier arcLength recompute deleted from `scene-content.tsx`; render layer is now a pure consumer.
-- `d2ecdc0d` — `NodeMoveRegistry` in `nodes/Wiring/stdin_reader.go`: recomputes `simLatencyMs` on node-move messages; emits `latency-changed` trace events. Latency-live on drag.
-- `843694bf` — TS node-move IPC + `latency-changed` trace event wiring (`pump.ts`, `pulse-state.ts`).
-- `d6ba967e` — Throttled node-move drag emission in `interaction-controls.ts`; `pump.ts` latency-changed handler.
-- `55794c30` — `maps.Copy` cleanup in `stdin_reader.go` (lint nit).
-- `4ff340ea` — Drag-speed bug fix: `moveNode` recomputes `arcLength`+`simLatencyMs` and calls `patchPulse` in the same synchronous frame as the position update; formula factored into `geometry-helpers.ts`; `latency-changed` handler in `pump.ts` is now a sanity reconciliation.
-- `e44f2b8e` — Curve derived as non-React store state (`setCurve`/`getCurve` in `pulse-state.ts`), updated synchronously inside `moveNode` via `buildEdgeCurve`; bead reads `getCurve` in `useFrame` instead of a React-`useMemo` prop; eliminates visual snap on fast/long drags.
-- `c6089bbd` — `latency-changed` trace event removed end-to-end (`Trace.go`, `stdin_reader.go`, `trace-kinds.ts`, `messages.ts`, `pump.ts`); was a pure echo (~120 events/sec on drag); Go silently keeps `PacedWire` geometry current; `node-move` IPC (TS→Go) retained for future-send correctness.
-- `2662baa4` — Phase 6: `nodes/Wiring/curve_params.go` (single source of truth for curve constants + `BezierArcLength` helper); `gen-node-defs` extended to emit `curve-params.ts`; `geometry-helpers.ts` imports constants + `rfArcLength` reimplemented as Bezier integration; `arcLengthBetween3` removed; Bezier-vs-chord discrepancy closed; dual-constant risk eliminated via codegen.
+2. **Re-audited 5 cross-cut proposals from `feature-audit.md`**, removing 4 as stale and downgrading 1. Common failure: proposals sized cross-cut weight by surface count rather than per-change edit count.
+   - `runStatus` store-subscribe — REMOVED (no prop-drill; one Context consumer; animation path bypasses React).
+   - Spec↔flow codegen — REMOVED (adapters already iterate generated `WIRE_PROPS`/`NODE_DEFS`; field-add = 0 adapter edits today).
+   - load-spec/load-view unify — REMOVED (`viewer/types.ts` is schema-of-truth, not redundant; can't be inferred from `parse.ts`).
+   - validation-flag-colors observe-not-assert — REMOVED (passive consumers, not parallel validators; refactor would increase file count).
+   - view-save-on-settle observe-debounce — KEPT, downgraded High → Medium (marginal 3→2 file gain).
 
-**Net effect:** Transport duration is substrate-owned. `pulse-state.ts` wallclock fabrication gone. `PULSE_SPEED_WU_PER_MS` TS constant gone. `latency-changed` event gone. Curve constants codegen-shared between Go and TS via `curve_params.go` → `curve-params.ts`; Bezier-vs-chord arc-length discrepancy closed. Dragging a node updates curve + `simLatencyMs` + pulse map synchronously in `moveNode` (preserving `t_curr` for in-flight beads); Go keeps geometry current for future-send via `node-move` IPC (one-way TS→Go, no echo). 11-file cross-cut, each file with a distinct non-overlapping responsibility; prior cross-cut candidate #1 (Pulse/pump schema) fully resolved.
+3. **Replaced `feature-audit.md` with an HTML audit site** at `docs/planning/visual-editor/feature-audit/` (commit `d8226fd8`). Structure: `index.html` (category tabs + multi-select status filter chips + 3-state cross-cut sort), `data.js` (all features in `window.AUDIT_DATA`), `styles.css`, `features/<slug>.html` per feature. The old `feature-audit.md` is now a 3-line pointer. Viewable via VS Code Simple Browser / Live Preview.
 
-### Build / test gate (verified 2026-05-28)
+4. **Pruned audit board from 28 → 15 features.** Stable working features with no actionable proposal were removed. Audit board is now actionable-only.
+
+5. **Added `untested` status** (gray badge) for features whose code reads correctly but where user has not hands-on verified visible behavior.
+
+6. **Attempted task branch** `task/spec-flow-codegen` to implement the spec↔flow codegen proposal; immediately closed when concrete simulation confirmed the proposal was stale. Branch deleted local + remote; no commits landed.
+
+### Actionable shortlist from the audit board
+
+The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists all 15 remaining features. Four are flagged as needs-work:
+
+- **`billboarded-node-labels`** — half-wired, NEEDS_REMOVAL verification. Defects: wrong position relative to nodes, wrong text format, possibly missing label content.
+- **`arcball-camera-controls`** — half-wired, NEEDS_REMOVAL verification. Rotation has an issue; click-to-activate for XY drag may be the wrong activation model. Per CLAUDE.md `interaction-control-is-substance` rule, this is substance, not a medium choice.
+- **`validation-flag-colors`** — code reads correctly, UNCHECKED (user has not hands-on verified).
+- **`two-click-edge-creation`** — code reads correctly, UNCHECKED (user has not hands-on verified).
+
+### Next-task candidates (friction-driven)
+
+1. Diagnose and fix `billboarded-node-labels` (concrete defects reported; branch when repro confirmed).
+2. Redesign `arcball-camera-controls` rotation/activation (needs concrete repro before branching).
+3. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
+4. Pre-existing test failures (parked from prior session — investigate before the next task branch).
+
+### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
+
+Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
+
+### Build / test gate (last verified 2026-05-28)
 
 - `go build ./... && go test ./...` — all pass.
 - `npx tsc --noEmit` — clean.
 - `npm run build` — `out/webview.js` refreshed (1.1 MB).
 
-### KNOWN ISSUES (back on the menu after merge)
+### KNOWN ISSUES
 
-1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; was parked.
-2. **Port-incompat wiring** — no visual guard when connecting incompatible port types; was parked.
-3. **Pre-existing test failures** — investigate before next task branch.
-
-### Prior main-branch state (unchanged this session)
-
-- H1 (3D camera persistence) and H3 (single-message load transport) were resolved on `task/collapse-load-transport` and merged to `main` via merge commit `8b1d02a4`; branch deleted local + remote. Both features verified working in the editor.
-
-### Load-transport collapse + 3D camera persistence (this session, merged 8b1d02a4)
-
-- **H3 — Single-message load transport** (commit `e859e072`): deleted `loadView`, `_lastSpec`, the `view-load-noop` guard, the `view-load` IPC message variant, and the host-side `sendView` call. Spec and viewer-state now arrive in a single `load` message; the on-disk representation (topology.json) was already merged before this session.
-- **H1 — Camera3D persistence** (commit `a267829e`): `Camera3D` position + quaternion added to the viewer-state schema and parser (`parse-viewer-state.ts`). Camera is committed to viewer-state on every orbit/dolly/pan/roll gesture-end. On `CameraRefBridge` mount, stored camera3d is applied and auto-fit is skipped when a saved camera is present.
-- **H1 timing follow-up** (commit `dbfe1ca9`): added `initialCamera3d` to `CameraRefBridge` effect deps and called `updateMatrixWorld` so an async-arriving `camera3d` (loaded after the bridge mounts) still applies correctly.
-
-### What's on main (this session) — architecture + organization audit, all 13 findings resolved
-
-- **ThreeView.tsx split** 1489→264 lines (orchestrator). New modules under `src/webview/three/`: `geometry-helpers.ts` (pure math), `scene-content.tsx` (render components), `interaction-controls.ts` (pointer/arcball/drag state machine), `camera-ui.tsx` (RollSlider/DollyButtons/PanPad).
-- **store.ts split** 381→187 lines: fade logic → `three/fade-actions.ts` (`computeToggleFade`/`applyFade`/`reconcileFadeOrder`); edge creation → `three/edge-creation.ts` (`buildEdge`).
-- **Layer-dependency fix:** generated `node-defs.ts` relocated from `src/webview/schema/` to `src/schema/` (spec layer). `src/webview/schema/` and its `registry.ts` shim are gone. So is `src/webview/rf/` (animation-fields.ts → `three/`).
-- **Dead code removed:** `DimmedCtx`/`useDimmedCtx`/`registerDimmedSetter` (dimmed.ts), `PulseCtx`/`usePulseCtx` (pulse-state.ts).
-- **edgeSeeds removed entirely** (TS fossil). Ring startup deadlock is broken by a dedicated **bootstrap Input node** (kind `Input`, `data.init=[seed]`, `repeat=false`) wired by a real edge into the receiving port; single-fires the seed at tick-0. (Memory `feedback_edge_seed_required_for_rings` corrected to match.)
-- **Guards added:** `tools/check-generated.sh` (fails if generated TS files are stale; wired into `scripts/stop-checks.sh`); reflection test guarding readgate port-name constants; comments pinning `requiredInputDiagnostics` and `computeFade` as editor/render-only; `pseudoTable` documented as compile-time-exhaustive over `PseudoKind`.
-
-### Feature-audit re-verification + dead-code sweep (2026-05-27)
-
-- Re-verified all open feature-audit items against post-architecture-audit code (`eec03390`). Corrected drifts: undo/redo is NOT half-wired — it does not exist at all (no `state/history.ts`, no `pushSnapshot`); `folds.ts` → `state/folds-state.ts` (at that point folds rendered as RF "note" nodes via buildFoldNodes, no 3D mesh — subsequently the entire old fold feature was removed, commit `9d4091c5`); sublabel inline edit is PARTIAL (`beginEditSublabel` exists in inline-edit.ts, no 3D trigger); §3a "proof of prior existence" files are deleted from tree (git-history-only now). Scorecard now: 26 working / 9 restore-parity + 4 half-wired + 1 not-started / 1 never-specced / 3 accepted-for-build / 4 dead-code orphans (all 4 subsequently removed this session — see the sweep bullets below; orphan count now 0).
-- Corrected memory `project_edge_midpoint_offset_plumbing`: `midpointOffset` is a schema-only stub (wire-defs.ts), NOT wired end-to-end as previously recorded.
-- Added feature-audit §3d "Dead-Code Orphans" (`d154e30d`): named/saved views, spec diff (diffSpecs, test-only), wire `valueLabel` (schema-only, TS+Go), fold mutators (toggleFoldCollapse/updateFoldPosition/setFolds, zero callers).
-- **Saved-views REMOVED** (merged to `main` ~`96bb4a60`, branch deleted): `SavedView` type + parse/serialize + rename-remap, `state/dimmed.ts`, `data.dimmed` in specToFlow + NodeData, `.dim` CSS, `__wirefold_test.applyDim` hook, `parseViewerState.test.ts`, and saved-view / `.dim` assertions in `compare-fold-and-view.spec.ts` (fold assertions in that file were kept at the time; subsequently all fold tests removed, commit `9d4091c5`). The dim mechanism only ever drove a dead 2D React Flow `.dim` path — never the live R3F 3D diagram. Build/tsc/17 unit tests clean. Feature-audit §3d scorecard updated from 4 to 3 dead-code orphans. Remaining orphans: diffSpecs (test-only), valueLabel (schema-only TS+Go), fold mutators (zero callers).
-- **diffSpecs REMOVED** (`state/ops/diff.ts` + `test/diff-core.test.ts` deleted): had no production caller; test-only dead code. Feature-audit §3d orphan count now 2. Remaining orphans: valueLabel (schema-only TS+Go), fold mutators (zero callers).
-- **valueLabel REMOVED** (commit `9cc63677`, branch `main`): `valueLabel` struct field + wire tag removed from `nodes/Wiring/loader.go`; `wire-defs.ts` regenerated via gen-node-defs. Orphan count now 1.
-- **Fold mutators REMOVED** (commit `93b6412a`, branch `main`): `setFolds`, `toggleFoldCollapse`, `updateFoldPosition` deleted from `state/folds-state.ts`; `getFolds` retained. Orphan count now 0 — all §3d dead-code orphans cleared.
-- **Old fold feature FULLY REMOVED** (commit `9d4091c5`, branch `main`): deleted `Fold` type, `ops/fold.ts`, `folds-state.ts`, `buildFoldNodes`, `collapsedFoldFor` edge rerouting, `foldId` on NodeData, viewer-state fold parse/serialize, and all fold tests/e2e. The old view-only collapse/frame fold never had a 3D form and was dead infrastructure. Feature-audit §3a half-wired count 4→3, §3b never-specced count 1→0. A redesigned fold (file-dive containment, fold-as-attribute, self-contained child diagram, breadcrumb navigation) is captured as a not-implemented proposal in feature-audit §3b.
-
-### Feature-audit reorganization + reduction proposals (2026-05-27)
-
-- **feature-audit.md** walked end-to-end with per-feature analysis: each feature now has a template block (Status / Files / Cross-cuts / Reduction proposal) under category headings, sorted by cross-cut weight.
-- **25 reduction proposals** generated across features; **10 features already minimal** (no proposal needed).
-- **2 stubs flagged for removal:** `midpointOffset` in `wire-defs.ts` (schema-only, no setter/adapter/ctx); z-coordinate half-wiring in `node-defs.ts` / `spec-to-flow.ts` (field present but unused in 3D layout).
-- **Undo/redo entry removed** from audit: fade is its replacement strategy; undo/redo will not be reintroduced.
-- **Top 4 cross-cut candidates** (touch the most files and are the highest-leverage targets):
-  1. ~~**Pulse/pump schema**~~ — **RESOLVED** (Phases 1–6, `0572704a`–`2662baa4`): constants codegen-shared via `curve_params.go`→`curve-params.ts`; `simLatencyMs` substrate-owned end-to-end; TS→Go one-way.
-  2. ~~**runStatus pipeline**~~ — **RE-AUDITED 2026-05-28, REMOVED from candidate list.** Independent audit confirmed zero prop-drilling: `RunStatusCtx` is provided at root (`main.tsx:61`) with zero intermediate layers; one React consumer (`RunButton.tsx:9` via `useRunStatusCtx()`); per-frame and pause-clock consumers (`scene-content.tsx:192`, `store.ts:146`, `pulse-state.ts:15,45`) call `getPauseAdjustedNow()` directly as a synchronous module-level function read — none receive runStatus as a prop. A Zustand swap would move module-scoped state to a store with identical semantics: zero correctness gain, zero file reduction, adds subscription lifecycle for nothing. Pure churn.
-  3. **Spec↔flow adapter** (`spec-to-flow.ts`) — large, touches every node kind; node-specific adapters would isolate blast radius.
-  4. **View-save derivation** — viewer-state is partially derived from spec; explicit derivation would remove redundant sync.
-
-### KNOWN ISSUES (candidate next work)
-
-1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle (was parked during pulse transport work; back on the menu).
-2. **Port-incompat wiring** — no visual guard when connecting incompatible port types (was parked; back on the menu).
-3. **Pre-existing test failures** — investigate before next task branch (was parked; back on the menu).
-4. **Cross-cut refactors (remaining)** — ~~(a) Pulse/pump~~ RESOLVED (this branch). ~~(b) runStatus~~ REMOVED 2026-05-28 (independent re-audit: zero prop-drill, pure churn — see "Top 4 cross-cut candidates" entry above). Remaining: (c) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (d) explicit viewer-state derivation from spec (6 of 8 fields are genuinely independent; main hazard is the `spec-to-flow.ts:41-45` round-trip invariant — pin with a test, not a refactor).
-5. ~~Dead-code orphans (feature-audit §3d)~~ — all four orphans removed (saved views, diffSpecs, valueLabel, fold mutators). No orphans remain.
-6. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** The old view-only collapse fold was fully removed. The redesign (feature-audit §3b) records: fold-as-attribute (any node marked a fold; no separate Fold kind); show/hide toggle button reveals ONE level down, expanding inline in-place (NOT full-screen dive, NOT breadcrumb navigation); top child node connects to the fold node as the anchor; visibility and execution are COUPLED (folded = hidden + not running; unfold = visible + running); folds can nest. Open gate: spec-layer vs. viewer-state-layer association for the child diagram — user chose to leave proposal as-is, not resolve now.
+1. **`billboarded-node-labels`** — wrong position, wrong text format, possibly missing content (see audit board).
+2. **`arcball-camera-controls`** — rotation issue; activation model uncertain (see audit board).
+3. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
+4. **Pre-existing test failures** — parked; investigate before next task branch.
+5. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
+6. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
+7. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
+8. **Fold (show/hide expand-in-place) — redesigned proposal, not implemented.** Old fold fully removed. Redesign: fold-as-attribute; show/hide toggle reveals ONE level down inline; visibility and execution coupled (folded = hidden + not running); folds can nest. Open gate: spec-layer vs. viewer-state-layer for the child diagram (deferred).
 
 ### Key files
 
@@ -108,6 +79,7 @@ All commits on branch beyond main:
 - `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `PacedWire.ArcLength`/`SimLatencyMs` recompute (silent; no trace event emitted back).
 - `nodes/Wiring/loader.go` — threads node positions into wire construction for initial `arcLength`.
 - `nodes/input/node.go` — Input node (also serves bootstrap role).
+- `docs/planning/visual-editor/feature-audit/index.html` — audit board (15 features, 4 actionable).
 
 ### Substrate model contract (stable)
 
