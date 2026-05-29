@@ -78,7 +78,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .node-sublabel-placeholder { color: #aaa; font-style: italic; }
 .node-sublabel.sublabel-active {
   outline: 1px solid #1976d2; border-radius: 2px;
-  background: #fff; color: #111; font-style: normal;
+  background: transparent; color: inherit; font-style: normal;
   cursor: text; min-width: 40px;
 }
 .palette-panel {
