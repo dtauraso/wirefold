@@ -2,7 +2,6 @@ import { createPortal } from "react-dom";
 import { vscode } from "../vscode-api";
 import { useThreeStore } from "./store";
 import { flowToSpec } from "../state/adapter/flow-to-spec";
-import { flushActiveInlineEdit } from "../inline-edit";
 import { useRunStatusCtx } from "../state/run-status";
 
 export function RunButton() {
@@ -24,7 +23,6 @@ export function RunButton() {
       return;
     }
     // idle/stopped — start a new run
-    flushActiveInlineEdit();
     const { nodes, edges } = useThreeStore.getState();
     const spec = flowToSpec(nodes, edges, { nodes: [], edges: [] });
     const text = JSON.stringify(spec, null, 2) + "\n";

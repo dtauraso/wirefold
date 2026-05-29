@@ -7,8 +7,7 @@
 //   - Dolly buttons (hold-to-dolly)
 //   - Pan pad (200ms dwell over empty canvas → draggable pad)
 
-import { useEffect, useRef, useState, useCallback, useReducer } from "react";
-import { beginEditSublabel, setInlineEditRerender } from "../inline-edit";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, NodeData, EdgeData } from "../types";
@@ -47,14 +46,6 @@ export function ThreeView() {
   const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
-  const [, forceRerender] = useReducer((x: number) => x + 1, 0);
-
-  // Wire inline-edit rerender hook once on mount so commits/cancels refresh
-  // the label overlay from RF state.
-  useEffect(() => {
-    setInlineEditRerender(() => forceRerender());
-    return () => setInlineEditRerender(() => {});
-  }, []);
 
   // Keep refs in sync with state.
   useEffect(() => {
@@ -235,7 +226,6 @@ export function ThreeView() {
               fontFamily: "monospace",
               color: flagged ? "#fff" : "#e0e0e0",
               pointerEvents: "none",
-              maxWidth: 360,
               lineHeight: 1.25,
               textAlign: "center",
               zIndex: 10,
@@ -243,32 +233,7 @@ export function ThreeView() {
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            {(() => {
-              // Priority: saved sublabel override → generated pseudo → placeholder.
-              // Editing any of these saves as sublabel override (beginEditSublabel writes data.sublabel).
-              const saved = n.data?.sublabel;
-              const pseudo = n.data?.pseudo;
-              const displayText = saved || pseudo || "+ sublabel";
-              const isPlaceholder = !saved && !pseudo;
-              return (
-                <div
-                  className={isPlaceholder ? "node-sublabel node-sublabel-placeholder" : "node-sublabel"}
-                  style={{
-                    opacity: 0.7,
-                    whiteSpace: "pre-wrap",
-                    textAlign: "left",
-                    pointerEvents: "auto",
-                    cursor: "text",
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    beginEditSublabel(n.id, e.currentTarget);
-                  }}
-                >
-                  {displayText}
-                </div>
-              );
-            })()}
+            <div style={{ whiteSpace: "nowrap", fontSize: 9, opacity: 0.6 }}>{n.data?.type}</div>
           </div>
         );
       })}

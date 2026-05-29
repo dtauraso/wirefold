@@ -41,7 +41,6 @@ state is updated.
 | text | #rrggbb |
 | accent | #rrggbb |
 | minWidth | 90 |
-| sublabel | optional |
 | displays | queue, repeat |
 | defaultLabel | <rfType> |
 
@@ -96,7 +95,6 @@ The `## View` section is required for any kind that has a TSX render. It drives 
 | text | #c9d1d9 |
 | accent | #3fb950 |
 | minWidth | 90 |
-| sublabel | A + B |
 | displays | queue, repeat |
 | defaultLabel | input |
 ```
@@ -104,7 +102,6 @@ The `## View` section is required for any kind that has a TSX render. It drives 
 - `kind` — required. The RF camelCase type name (= spec kind with first char lowercased). Defines the key in `node-defs.ts`.
 - `bg`, `border`, `text`, `accent` — required hex colors.
 - `minWidth` — optional integer pixel width.
-- `sublabel` — optional secondary label string shown beneath the node title.
 - `displays` — optional comma-separated list of display features. Valid values: `queue`, `repeat`, `held`.
 - `defaultLabel` — optional default label string (falls back to `kind` if omitted).
 

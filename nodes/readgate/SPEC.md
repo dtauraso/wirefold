@@ -10,7 +10,6 @@
 | text | #4a148c |
 | accent | #7b1fa2 |
 | minWidth | 70 |
-| sublabel | val / inhibitor |
 | defaultLabel | readgate |
 | role | and-gate |
 | shape | rect |
@@ -18,7 +17,6 @@
 | stroke | #7b1fa2 |
 | width | 70 |
 | height | 40 |
-| hasPseudo | true |
 
 ## Runtime status
 
