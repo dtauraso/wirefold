@@ -5,9 +5,7 @@
 
 import { useEffect, useRef, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
-import { Billboard, Text } from "@react-three/drei";
 import * as THREE from "three";
-import { nodeOverrideText } from "./node-override-text";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
@@ -114,16 +112,6 @@ export function GraphNode({
   const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
   const fadeOpacity = 0.25;
 
-  const overrideText = nodeOverrideText(node);
-  // Size text to fit roughly within the sphere: width ~ 1.6r across.
-  const longestLine = overrideText
-    .split("\n")
-    .reduce((m, l) => Math.max(m, l.length), 0);
-  const lineCount = overrideText === "" ? 0 : overrideText.split("\n").length;
-  const fontSizeByWidth = longestLine > 0 ? (1.6 * r) / longestLine * 1.6 : r * 0.3;
-  const fontSizeByHeight = lineCount > 0 ? (1.6 * r) / lineCount * 0.7 : r * 0.3;
-  const textFontSize = Math.min(fontSizeByWidth, fontSizeByHeight, r * 0.45);
-
   return (
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh>
@@ -148,22 +136,6 @@ export function GraphNode({
           opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
-      {overrideText !== "" && (
-        <Billboard>
-          <Text
-            fontSize={textFontSize}
-            color="#ffffff"
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={textFontSize * 0.08}
-            outlineColor="#000000"
-            // Render in front of the sphere shell so it's legible.
-            position={[0, 0, r * 1.01]}
-          >
-            {overrideText}
-          </Text>
-        </Billboard>
-      )}
       <mesh>
         <sphereGeometry args={[r * 1.45, 16, 16]} />
         <meshBasicMaterial
