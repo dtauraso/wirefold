@@ -582,7 +582,7 @@ async function handlePseudoRender(
     post({ type: m.error, nodeId, message: `Input node ${nodeId} has no output edge` });
     return;
   }
-  const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
+  const goFile = path.join(repoRoot, "nodes", "input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     cmdArg, "render",
     "--go-file", goFile,
@@ -623,7 +623,7 @@ async function handlePseudoSave(
     post({ type: m.error, nodeId, message: `Input node ${nodeId} has no output edge` });
     return;
   }
-  const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
+  const goFile = path.join(repoRoot, "nodes", "input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     cmdArg, "save",
     "--go-file", goFile,
@@ -675,7 +675,7 @@ async function handlePseudoSave(
   post({ type: m.saveResult, nodeId });
 
   // If a substrate run is active, stop it and restart so the new
-  // topology.json + nodes/Input/node.go are picked up.
+  // topology.json + nodes/input/node.go are picked up.
   if (runner.isRunning()) {
     await runner.stopAndAwait();
     runner.run();
