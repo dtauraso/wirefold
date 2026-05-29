@@ -4,6 +4,8 @@
 
 import { scheduleViewSave } from "./save";
 import { useThreeStore } from "./three/store";
+import { PSEUDO_KIND_PREFIX, type PseudoKind } from "../messages";
+import { vscode } from "./vscode-api";
 
 type RerenderFn = () => void;
 
@@ -79,6 +81,8 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
   const rfNode = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
   const saved = rfNode?.data?.sublabel as string | undefined;
   const pseudo = rfNode?.data?.pseudo as string | undefined;
+  const kind = rfNode?.data?.type as string | undefined;
+  const hasPseudo = !!(kind && kind in PSEUDO_KIND_PREFIX);
   const visible = (el?.textContent ?? "").trim();
   const placeholderText = "+ sublabel";
   const fromVisible = visible === placeholderText ? "" : visible;
@@ -90,6 +94,25 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
       // If the user never replaced the visible placeholder, treat as empty.
       const next = rawNext === placeholderText ? "" : rawNext;
       if (next === original) return "";
+      if (hasPseudo) {
+        const prefix = PSEUDO_KIND_PREFIX[kind as PseudoKind];
+        if (next === "") {
+          // Clear any sublabel override so the pseudo re-renders.
+          useThreeStore.getState().setNodes((ns) => ns.map((n) => {
+            if (n.id !== nodeId) return n;
+            const data = { ...n.data };
+            delete data.sublabel;
+            return { ...n, data };
+          }));
+          scheduleViewSave();
+        } else {
+          // Route through Go validating save. On success, extension reloads
+          // the document; on failure it posts `${prefix}-error`. We do NOT
+          // touch data.sublabel — the unchanged pseudo re-renders on error.
+          vscode.postMessage({ type: `${prefix}-save`, nodeId, pseudo: next });
+        }
+        return null;
+      }
       useThreeStore.getState().setNodes((ns) => ns.map((n) => {
         if (n.id !== nodeId) return n;
         const data = { ...n.data };
