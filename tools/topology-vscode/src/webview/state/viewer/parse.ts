@@ -58,7 +58,6 @@ export function parseNodeViews(v: unknown): Record<string, NodeView> | undefined
     if (!isObj(raw) || !isNum(raw.x) || !isNum(raw.y)) continue;
     const nv: NodeView = { x: raw.x, y: raw.y };
     if (isNum(raw.z)) nv.z = raw.z;
-    if (isStr(raw.sublabel)) nv.sublabel = raw.sublabel;
     if (isObj(raw.state)) nv.state = raw.state as Record<string, StateValue>;
     out[id] = nv;
   }

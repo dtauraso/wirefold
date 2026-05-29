@@ -7,8 +7,7 @@
 //   - Dolly buttons (hold-to-dolly)
 //   - Pan pad (200ms dwell over empty canvas → draggable pad)
 
-import { useEffect, useRef, useState, useCallback, useReducer } from "react";
-import { beginEditSublabel, setInlineEditRerender } from "../inline-edit";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, NodeData, EdgeData } from "../types";
@@ -19,6 +18,7 @@ import { RollSlider, DollyButtons, PanPad, GlobalLabelsToggle, HomeButton } from
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
+import { nodeOverrideText } from "./node-override-text";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -35,7 +35,7 @@ export function ThreeView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
-  const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
+  const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
   const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
     () => viewerState.labelsGlobalHidden ?? false,
@@ -47,14 +47,6 @@ export function ThreeView() {
   const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
-  const [, forceRerender] = useReducer((x: number) => x + 1, 0);
-
-  // Wire inline-edit rerender hook once on mount so commits/cancels refresh
-  // the label overlay from RF state.
-  useEffect(() => {
-    setInlineEditRerender(() => forceRerender());
-    return () => setInlineEditRerender(() => {});
-  }, []);
 
   // Keep refs in sync with state.
   useEffect(() => {
@@ -74,8 +66,8 @@ export function ThreeView() {
   // Label positions are updated from inside the Canvas via useFrame (no state churn).
   // We use a ref-based callback that batches updates at ~60fps via requestAnimationFrame.
   const labelRaf = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
-  const pendingPositions = useRef<{ id: string; px: number; py: number }[]>([]);
-  const onPositions = useCallback((positions: { id: string; px: number; py: number }[]) => {
+  const pendingPositions = useRef<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
+  const onPositions = useCallback((positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => {
     pendingPositions.current = positions;
     if (labelRaf.current === null) {
       labelRaf.current = requestAnimationFrame(() => {
@@ -235,7 +227,6 @@ export function ThreeView() {
               fontFamily: "monospace",
               color: flagged ? "#fff" : "#e0e0e0",
               pointerEvents: "none",
-              maxWidth: 360,
               lineHeight: 1.25,
               textAlign: "center",
               zIndex: 10,
@@ -243,32 +234,7 @@ export function ThreeView() {
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            {(() => {
-              // Priority: saved sublabel override → generated pseudo → placeholder.
-              // Editing any of these saves as sublabel override (beginEditSublabel writes data.sublabel).
-              const saved = n.data?.sublabel;
-              const pseudo = n.data?.pseudo;
-              const displayText = saved || pseudo || "+ sublabel";
-              const isPlaceholder = !saved && !pseudo;
-              return (
-                <div
-                  className={isPlaceholder ? "node-sublabel node-sublabel-placeholder" : "node-sublabel"}
-                  style={{
-                    opacity: 0.7,
-                    whiteSpace: "pre-wrap",
-                    textAlign: "left",
-                    pointerEvents: "auto",
-                    cursor: "text",
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    beginEditSublabel(n.id, e.currentTarget);
-                  }}
-                >
-                  {displayText}
-                </div>
-              );
-            })()}
+            <div style={{ whiteSpace: "nowrap", fontSize: 9, opacity: 0.6 }}>{n.data?.type}</div>
           </div>
         );
       })}
@@ -304,6 +270,51 @@ export function ThreeView() {
             }}
           >
             +{count}
+          </div>
+        );
+      })}
+
+      {/* In-node spec-override text — HTML overlay (NOT drei) projected at
+          each node's world center. Mirrors the top billboard pattern above. */}
+      {nodes.map((n) => {
+        const pos = labelMap.get(n.id);
+        if (!pos) return null;
+        const text = nodeOverrideText(n);
+        if (!text) return null;
+        const flagged = !!n.data?.validationError;
+        const overrideOverlayPill: React.CSSProperties = flagged
+          ? {
+              background: FLAG_LABEL_BG,
+              border: "1px solid #ff5252",
+              borderRadius: 4,
+              padding: "3px 6px",
+            }
+          : {
+              background: "rgba(0,0,0,0.35)",
+              border: "none",
+              borderRadius: 4,
+              padding: "3px 6px",
+            };
+        return (
+          <div
+            key={`override-${n.id}`}
+            style={{
+              position: "absolute",
+              left: pos.cx,
+              top: pos.cy,
+              transform: "translate(-50%, -50%)",
+              fontSize: 9,
+              fontFamily: "monospace",
+              color: flagged ? "#fff" : "#e0e0e0",
+              pointerEvents: "none",
+              lineHeight: 1.25,
+              textAlign: "center",
+              whiteSpace: "pre",
+              zIndex: 12,
+              ...overrideOverlayPill,
+            }}
+          >
+            {text}
           </div>
         );
       })}

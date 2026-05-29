@@ -332,7 +332,7 @@ export function LabelProjector({
   onPositions,
 }: {
   nodes: RFNode<NodeData>[];
-  onPositions: (positions: { id: string; px: number; py: number }[]) => void;
+  onPositions: (positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => void;
 }) {
   const { camera, size } = useThree();
   const frameCountRef = useRef(0);
@@ -343,10 +343,13 @@ export function LabelProjector({
     // This is much cheaper than every frame while still tracking well visually.
     if (frameCountRef.current % 2 !== 0) return;
     const positions = nodes.map((n) => {
-      const world = nodeTopWorldPos(n);
-      world.project(camera);
-      const { px, py } = ndcToPixel(world.x, world.y, size);
-      return { id: n.id, px, py };
+      const top = nodeTopWorldPos(n);
+      top.project(camera);
+      const topPx = ndcToPixel(top.x, top.y, size);
+      const center = nodeWorldPos(n);
+      center.project(camera);
+      const centerPx = ndcToPixel(center.x, center.y, size);
+      return { id: n.id, px: topPx.px, py: topPx.py, cx: centerPx.px, cy: centerPx.py };
     });
     onPositions(positions);
   });
@@ -575,7 +578,7 @@ export function Scene({
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
-  onPositions: (positions: { id: string; px: number; py: number }[]) => void;
+  onPositions: (positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => void;
   onNearestN: (ids: Set<string>) => void;
   onCameraSettle: () => void;
 }) {

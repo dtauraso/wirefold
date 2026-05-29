@@ -33,7 +33,7 @@ import { useEffect, useState } from "react";
 import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
 import { flushSave, flushViewSave } from "./save";
-import { parseHostToWebview, ALL_PSEUDO_ERROR_TYPES, PSEUDO_PREFIX_TO_KIND, PSEUDO_KIND_PREFIX, type PseudoKind } from "../messages";
+import { parseHostToWebview } from "../messages";
 import { flowToSpec } from "./state/adapter/flow-to-spec";
 import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
 import type { RunStatusUI } from "./state/run-status";
@@ -54,63 +54,15 @@ import { handleTraceEvent } from "./three/pump";
     (window as unknown as { __wirefold_sent?: unknown[] }).__wirefold_sent ?? [],
 };
 
-type PseudoBanner = { message: string; suggestion?: string } | null;
-let setBannerImperative: (b: PseudoBanner) => void = () => {};
-
 function Root() {
   const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
-  const [banner, setBanner] = useState<PseudoBanner>(null);
   useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
-  useEffect(() => { setBannerImperative = setBanner; return () => { setBannerImperative = () => {}; }; }, []);
   return (
     <RunStatusCtx.Provider value={runStatus}>
       {/* SaveLifecycle and RunButton are mounted once here for all views. */}
       <SaveLifecycle />
       <RunButton />
       <ThreeView />
-      {banner && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 12,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "8px 12px",
-            background: "#b00020",
-            color: "white",
-            borderRadius: 4,
-            zIndex: 1000,
-            maxWidth: 480,
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-            fontFamily: "var(--vscode-font-family, sans-serif)",
-            fontSize: 13,
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div>{banner.message}</div>
-            {banner.suggestion && (
-              <div style={{ fontStyle: "italic", fontSize: 11, marginTop: 4, opacity: 0.9 }}>
-                {banner.suggestion}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => setBanner(null)}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "white",
-              cursor: "pointer",
-              fontSize: 16,
-              lineHeight: 1,
-              padding: "0 2px",
-            }}
-            aria-label="Dismiss"
-          >×</button>
-        </div>
-      )}
     </RunStatusCtx.Provider>
   );
 }
@@ -142,26 +94,6 @@ window.addEventListener("message", (e) => {
     useThreeStore.getState().load(msg.text);
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
-  } else if (ALL_PSEUDO_ERROR_TYPES.has(msg.type)) {
-    // Pseudo save/parse failed — show banner, then re-fire render so the
-    // billboard text snaps back to the unchanged pseudo immediately.
-    const { nodeId, message, suggestion } = msg as { nodeId: string; message: string; suggestion?: string };
-    setBannerImperative({ message, suggestion });
-    setTimeout(() => setBannerImperative(null), 6000);
-    const prefix = msg.type.slice(0, -"-error".length);
-    if (prefix in PSEUDO_PREFIX_TO_KIND) {
-      const kind = PSEUDO_PREFIX_TO_KIND[prefix as keyof typeof PSEUDO_PREFIX_TO_KIND];
-      const renderPrefix = PSEUDO_KIND_PREFIX[kind as PseudoKind];
-      vscode.postMessage({ type: `${renderPrefix}-render`, nodeId });
-    }
-  } else if (msg.type.endsWith("-render-result")) {
-    // Generated pseudocode for a hasPseudo node — patch into node data so the
-    // billboard sublabel ternary can render it. Saved sublabel overrides win.
-    const { nodeId, pseudo } = msg as { nodeId: string; pseudo: string };
-    console.debug("[pseudo]", nodeId, pseudo?.slice(0, 40));
-    useThreeStore.getState().setNodes((ns) =>
-      ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, pseudo } } : n)),
-    );
   }
   // load for 2D is fully handled inside App's message effect.
 });

@@ -48,7 +48,6 @@ type viewDef struct {
 	text         string
 	accent       string
 	minWidth     string
-	sublabel     string
 	displays     string
 	defaultLabel string
 	// NodeTypeDef-compatible fields (used by schema/node-types consumers).
@@ -58,7 +57,6 @@ type viewDef struct {
 	stroke    string
 	width     string
 	height    string
-	hasPseudo string
 }
 
 // kindEntry is one node kind to emit.
@@ -419,7 +417,6 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 		text:         vmap["text"],
 		accent:       vmap["accent"],
 		minWidth:     vmap["minWidth"],
-		sublabel:     vmap["sublabel"],
 		displays:     vmap["displays"],
 		defaultLabel: vmap["defaultLabel"],
 		role:         vmap["role"],
@@ -428,7 +425,6 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 		stroke:       vmap["stroke"],
 		width:        vmap["width"],
 		height:       vmap["height"],
-		hasPseudo:    vmap["hasPseudo"],
 	}
 
 	// Parse Ports section for accent and edgeKind overrides.
@@ -534,7 +530,6 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  text: string;`)
 	fmt.Fprintln(w, `  accent: string;`)
 	fmt.Fprintln(w, `  minWidth?: number;`)
-	fmt.Fprintln(w, `  sublabel?: string;`)
 	fmt.Fprintln(w, `  targets?: NodePort[];`)
 	fmt.Fprintln(w, `  sources?: NodePort[];`)
 	fmt.Fprintln(w, `  displays?: DisplayKind[];`)
@@ -549,7 +544,6 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  outputs?: { name: string; kind: string; isMulti?: boolean }[];`)
 	fmt.Fprintln(w, `  defaultData?: Record<string, unknown>;`)
 	fmt.Fprintln(w, `  requiredInputs?: string[];`)
-	fmt.Fprintln(w, `  hasPseudo?: boolean;`)
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
@@ -604,9 +598,6 @@ func buildDef(v viewDef, ports []port, defaultData string) string {
 	if v.minWidth != "" {
 		fields = append(fields, fmt.Sprintf(`minWidth: %s`, v.minWidth))
 	}
-	if v.sublabel != "" {
-		fields = append(fields, fmt.Sprintf(`sublabel: "%s"`, v.sublabel))
-	}
 	if len(targets) > 0 {
 		fields = append(fields, fmt.Sprintf(`targets: [%s]`, joinPorts(targets)))
 	}
@@ -655,9 +646,6 @@ func buildDef(v viewDef, ports []port, defaultData string) string {
 			reqNames = append(reqNames, fmt.Sprintf(`"%s"`, p.id))
 		}
 		fields = append(fields, fmt.Sprintf(`requiredInputs: [%s]`, strings.Join(reqNames, ", ")))
-	}
-	if v.hasPseudo == "true" {
-		fields = append(fields, `hasPseudo: true`)
 	}
 	return "{ " + strings.Join(fields, ", ") + " }"
 }

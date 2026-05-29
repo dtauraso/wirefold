@@ -10,7 +10,6 @@
 | text | #880e4f |
 | accent | #880e4f |
 | minWidth | 110 |
-| sublabel | L pass / R inhibit |
 | defaultLabel | inhibitRightGate |
 | role | inhibit-right-gate |
 | shape | rect |
