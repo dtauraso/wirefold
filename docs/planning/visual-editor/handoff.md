@@ -15,49 +15,20 @@ read this file first (no chat history needed) and proceed.
 
 ### What this session did
 
-**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted local + remote):** simplified the top-of-node billboard and moved per-instance state into an HTML overlay; removed all pseudocode plumbing.
+**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted local + remote):** simplified the top-of-node billboard to two static lines and moved per-instance state into an HTML overlay; ripped out all pseudocode plumbing.
 
-- Top billboard pill now shows `name + kind` only — no sublabel, no double-click inline-edit. The `inline-edit.ts` module, `beginEditSublabel`, the sublabel store actions, and the transient error-banner slot are gone.
-- Per-instance values now render in an HTML-projected in-node overlay (`tools/topology-vscode/src/webview/three/node-override-text.ts`) using the same screen-projection pattern already used elsewhere. Currently surfaces Input's `init` array and ChainInhibitor's `state.held`.
-- Pseudo plumbing fully removed: `cmd/pseudo/main.go`, `tools/pseudo/*` (chaininhibitor/input/readgate + tests), the `pseudo`/`hasPseudo` extension IPC in `handle-message.ts`, the `hasPseudo` SPEC field across all `nodes/*/SPEC.md` + `SPEC-FORMAT.md`, the `pseudo` and `sublabel` fields in `node-defs.ts`/codegen, viewer-state, and `EdgeData`. Net: -3408 lines, +98 lines (one new helper).
-- **drei tried and rejected:** attempted to use `@react-three/drei` for the overlay; reverted in favor of the existing in-house HTML-projection pattern already used for billboards. No new medium dependency adopted.
-- Audit board updated: removed `billboarded-node-labels` (replaced by name+kind + overlay) and `sublabel-inline-edit` (gesture and pseudo plumbing both gone). Commit `373c7f7b`.
+- Top billboard pill now shows two static lines: `label/id + kind`. No sublabel, no double-click inline-edit gesture.
+- New HTML-overlay pill centered on each node sphere shows per-instance VALUE: Input renders its `init` array; ChainInhibitor renders `state.held`; other kinds render nothing. Uses the existing in-house HTML projection pattern (`tools/topology-vscode/src/webview/three/node-override-text.ts`).
+- In-node overlay pill background is `rgba(0,0,0,0.35)` so it matches the top billboard perceptually over the sphere background.
+- drei `<Billboard><Text>` was tried for the overlay and rejected per user request; reverted in favor of the existing HTML projection. No new medium dependency adopted.
+- Pseudo plumbing fully removed: `cmd/pseudo/main.go`, `tools/pseudo/*` (chaininhibitor/input/readgate + tests), the `pseudo`/`hasPseudo` extension IPC in `handle-message.ts`, the `hasPseudo` SPEC field across all `nodes/*/SPEC.md` + `SPEC-FORMAT.md`, and the `pseudo` and `sublabel` fields across spec/view types (`node-defs.ts`/codegen, viewer-state, `EdgeData`). The `inline-edit.ts` module, `beginEditSublabel`, sublabel store actions, and the transient error-banner slot all gone. Net: -3408 lines, +98 lines (one new helper).
+- Audit board updated (commit `373c7f7b`): removed `billboarded-node-labels` (replaced by name+kind + overlay) and `sublabel-inline-edit` (gesture and pseudo plumbing both gone).
 
 Supersedes the prior `task/billboard-inline-edit` work (merge `1e9097c0`): double-click sublabel edit and pseudo-validation IPC are both gone.
 
-**Prior session (merge `d2ae9929` from `task/billboarded-labels-rework`):**
-1. `d0ad7614` — two-line pill labels anchored above node top (name + pseudocode), `nodeTopWorldPos()` helper.
-2. `e5ee7e49` — per-node ▾/▴ toggle + global labels toggle in `camera-ui.tsx`; viewer-state fields `NodeView.labelHidden`, `ViewerState.labelsGlobalHidden`.
-3. `9c365368` — reverted the per-node toggle; kept the global toggle. `NodeView.labelHidden` removed; `labelsGlobalHidden` stays.
-4. `53e31d1a` — ⌂ fit (home) button in `camera-ui.tsx`. Computes AABB of node positions (`nodeWorldPos` + `nodeRadius`), repositions camera along current view direction at fit distance, commits via `commitCamera` (debounced save). No node mutation.
-
-**Docs on main:**
-- `a45ebcae` — added REWORK status; reclassified billboarded-labels + arcball-camera-controls REWORK.
-- `6a1b2c99` — removed fold-containment from audit site.
-- Post-merge: billboarded-labels updated REWORK → VERIFIED in audit.
-
-### Prior session (commits ~467b40c3–da4804f0 on main)
-
-1. **Removed dead `getPauseAdjustedNow` import** from `tools/topology-vscode/src/webview/three/pump.ts` (commit `467b40c3`).
-
-2. **Re-audited 5 cross-cut proposals from `feature-audit.md`**, removing 4 as stale and downgrading 1. Common failure: proposals sized cross-cut weight by surface count rather than per-change edit count.
-   - `runStatus` store-subscribe — REMOVED (no prop-drill; one Context consumer; animation path bypasses React).
-   - Spec↔flow codegen — REMOVED (adapters already iterate generated `WIRE_PROPS`/`NODE_DEFS`; field-add = 0 adapter edits today).
-   - load-spec/load-view unify — REMOVED (`viewer/types.ts` is schema-of-truth, not redundant; can't be inferred from `parse.ts`).
-   - validation-flag-colors observe-not-assert — REMOVED (passive consumers, not parallel validators; refactor would increase file count).
-   - view-save-on-settle observe-debounce — KEPT, downgraded High → Medium (marginal 3→2 file gain).
-
-3. **Replaced `feature-audit.md` with an HTML audit site** at `docs/planning/visual-editor/feature-audit/` (commit `d8226fd8`). Structure: `index.html` (category tabs + multi-select status filter chips + 3-state cross-cut sort), `data.js` (all features in `window.AUDIT_DATA`), `styles.css`, `features/<slug>.html` per feature. The old `feature-audit.md` is now a 3-line pointer. Viewable via VS Code Simple Browser / Live Preview.
-
-4. **Pruned audit board from 28 → 15 features.** Stable working features with no actionable proposal were removed. Audit board is now actionable-only.
-
-5. **Added `untested` status** (gray badge) for features whose code reads correctly but where user has not hands-on verified visible behavior.
-
-6. **Attempted task branch** `task/spec-flow-codegen` to implement the spec↔flow codegen proposal; immediately closed when concrete simulation confirmed the proposal was stale. Branch deleted local + remote; no commits landed.
-
 ### Actionable shortlist from the audit board
 
-The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features. Three flagged as needs-work:
+The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features. Three flagged as needs-work / unverified:
 
 - **`arcball-camera-controls`** — REWORK. Rotation has an issue; click-to-activate for XY drag may be the wrong activation model. Per CLAUDE.md `interaction-control-is-substance` rule, this is substance, not a medium choice.
 - **`validation-flag-colors`** — code reads correctly, UNCHECKED (user has not hands-on verified).
@@ -82,28 +53,28 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 ### KNOWN ISSUES
 
 1. **`arcball-camera-controls`** — rotation issue; activation model uncertain (see audit board).
-3. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
-4. **Pre-existing test failures** — parked; investigate before next task branch.
-5. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
-6. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
-7. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
+2. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
+3. **Pre-existing test failures** — parked; investigate before next task branch.
+4. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
+5. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
+6. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
 
 ### Key files
 
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`. Top-of-node billboard renders the two-line `label/id + kind` pill; in-node value overlay is delegated to `node-override-text.ts`.
+- `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay pill for per-instance values (Input `init`, ChainInhibitor `state.held`); other kinds render nothing. Uses the existing screen-projection pattern, not drei.
 - `tools/topology-vscode/src/webview/three/store.ts` — thin Zustand store; fade in `fade-actions.ts`, edge creation in `edge-creation.ts`.
 - `tools/topology-vscode/src/webview/three/fade.ts` — `computeFade` fixpoint (render-mask only).
-- `tools/topology-vscode/src/schema/node-defs.ts` — generated node defs (spec layer); `src/schema/parse-spec.ts` — `requiredInputDiagnostics` (editor-diagnostic only).
+- `tools/topology-vscode/src/schema/node-defs.ts` — generated node defs (spec layer; `pseudo`/`sublabel` fields removed); `src/schema/parse-spec.ts` — `requiredInputDiagnostics` (editor-diagnostic only).
 - `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs`; `faded` flag + `SetFaded` + `Send` gate.
 - `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `PacedWire.ArcLength`/`SimLatencyMs` recompute (silent; no trace event emitted back).
 - `nodes/Wiring/loader.go` — threads node positions into wire construction for initial `arcLength`.
 - `nodes/input/node.go` — Input node (also serves bootstrap role).
-- `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay for per-instance values (Input `init`, ChainInhibitor `state.held`).
 - `docs/planning/visual-editor/feature-audit/index.html` — audit board (13 features after billboarded-labels + sublabel-inline-edit removal).
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Fade did not change the model: it is a start-gate on `Send`, no new `PacedWire` op, slot-phase/AND-gate/backpressure untouched. `pump.ts` stays render-only.
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Fade did not change the model: it is a start-gate on `Send`, no new `PacedWire` op, slot-phase/AND-gate/backpressure untouched. `pump.ts` stays render-only. The billboard / in-node overlay changes are pure render — no substrate touch.
 
 ## Dev-loop
 
