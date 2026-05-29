@@ -7,20 +7,23 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-29 — billboard inline-edit + pseudo validation merged)
+## State at handoff (2026-05-29 — name+kind billboard + in-node value overlays merged, pseudo removed)
 
-- **Active branch:** `main`. Local + origin/main in sync after merge `1e9097c0`.
+- **Active branch:** `main`. Local + origin/main in sync after merge `98584a6f`.
 - Working tree: `topology.json` modified (pre-existing, untouched this session).
 - Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js), `go build ./... && go test ./...` all pass.
 
 ### What this session did
 
-**Merge `1e9097c0` from `task/billboard-inline-edit` (deleted local + remote):** restored double-click-to-edit billboard sublabel from the RF era and routed it through Go validation.
+**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted local + remote):** simplified the top-of-node billboard and moved per-instance state into an HTML overlay; removed all pseudocode plumbing.
 
-- Double-click the billboard sublabel pill to edit in place; the inline editor inherits the pill's color and keeps the pill height when empty. Placeholder shows `+ sublabel` when blank.
-- `hasPseudo` node kinds render generated pseudocode in the sublabel slot; non-pseudo kinds use a saved sublabel override (fallback to `NODE_DEFS` default).
-- Pseudo edits route through Go parsers (`cmd/pseudo` via `handle-message.ts`); on parse failure the editor shows a red error banner and snaps the text back. On success the spec field commits and the pseudocode re-renders.
-- `n.data.pseudo` is preserved across reloads (`spec-to-flow.ts`); store gained pseudo-edit actions and a transient error-banner slot.
+- Top billboard pill now shows `name + kind` only — no sublabel, no double-click inline-edit. The `inline-edit.ts` module, `beginEditSublabel`, the sublabel store actions, and the transient error-banner slot are gone.
+- Per-instance values now render in an HTML-projected in-node overlay (`tools/topology-vscode/src/webview/three/node-override-text.ts`) using the same screen-projection pattern already used elsewhere. Currently surfaces Input's `init` array and ChainInhibitor's `state.held`.
+- Pseudo plumbing fully removed: `cmd/pseudo/main.go`, `tools/pseudo/*` (chaininhibitor/input/readgate + tests), the `pseudo`/`hasPseudo` extension IPC in `handle-message.ts`, the `hasPseudo` SPEC field across all `nodes/*/SPEC.md` + `SPEC-FORMAT.md`, the `pseudo` and `sublabel` fields in `node-defs.ts`/codegen, viewer-state, and `EdgeData`. Net: -3408 lines, +98 lines (one new helper).
+- **drei tried and rejected:** attempted to use `@react-three/drei` for the overlay; reverted in favor of the existing in-house HTML-projection pattern already used for billboards. No new medium dependency adopted.
+- Audit board updated: removed `billboarded-node-labels` (replaced by name+kind + overlay) and `sublabel-inline-edit` (gesture and pseudo plumbing both gone). Commit `373c7f7b`.
+
+Supersedes the prior `task/billboard-inline-edit` work (merge `1e9097c0`): double-click sublabel edit and pseudo-validation IPC are both gone.
 
 **Prior session (merge `d2ae9929` from `task/billboarded-labels-rework`):**
 1. `d0ad7614` — two-line pill labels anchored above node top (name + pseudocode), `nodeTopWorldPos()` helper.
@@ -78,8 +81,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. **`billboarded-node-labels`** — wrong position, wrong text format, possibly missing content (see audit board).
-2. **`arcball-camera-controls`** — rotation issue; activation model uncertain (see audit board).
+1. **`arcball-camera-controls`** — rotation issue; activation model uncertain (see audit board).
 3. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
 4. **Pre-existing test failures** — parked; investigate before next task branch.
 5. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
@@ -96,7 +98,8 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 - `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `PacedWire.ArcLength`/`SimLatencyMs` recompute (silent; no trace event emitted back).
 - `nodes/Wiring/loader.go` — threads node positions into wire construction for initial `arcLength`.
 - `nodes/input/node.go` — Input node (also serves bootstrap role).
-- `docs/planning/visual-editor/feature-audit/index.html` — audit board (15 features, 4 actionable).
+- `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay for per-instance values (Input `init`, ChainInhibitor `state.held`).
+- `docs/planning/visual-editor/feature-audit/index.html` — audit board (13 features after billboarded-labels + sublabel-inline-edit removal).
 
 ### Substrate model contract (stable)
 
