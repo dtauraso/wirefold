@@ -243,21 +243,39 @@ export function ThreeView() {
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            <div
-              className="node-sublabel"
-              style={{
-                opacity: 0.7,
-                whiteSpace: "normal",
-                pointerEvents: "auto",
-                cursor: "text",
-              }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                beginEditSublabel(n.id, e.currentTarget);
-              }}
-            >
-              {n.data?.sublabel ?? ""}
-            </div>
+            {n.data?.sublabel ? (
+              <div
+                className="node-sublabel"
+                style={{
+                  opacity: 0.7,
+                  whiteSpace: "normal",
+                  pointerEvents: "auto",
+                  cursor: "text",
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  beginEditSublabel(n.id, e.currentTarget);
+                }}
+              >
+                {n.data.sublabel}
+              </div>
+            ) : (
+              <div
+                className="node-sublabel node-sublabel-placeholder"
+                style={{
+                  opacity: 0.7,
+                  whiteSpace: "normal",
+                  pointerEvents: "auto",
+                  cursor: "text",
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  beginEditSublabel(n.id, e.currentTarget);
+                }}
+              >
+                + sublabel
+              </div>
+            )}
           </div>
         );
       })}
