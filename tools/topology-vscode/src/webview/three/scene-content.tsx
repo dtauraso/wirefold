@@ -3,11 +3,9 @@
 // CameraRefBridge, LabelProjector, CameraSettleDetector,
 // computeOcclusionCounts, RaycasterHelper, NearestNTracker, Scene.
 
-import { useEffect, useRef, useMemo, Suspense } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
-import { Billboard, Text } from "@react-three/drei";
 import * as THREE from "three";
-import { nodeOverrideText } from "./node-override-text";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
@@ -114,12 +112,6 @@ export function GraphNode({
   const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
   const fadeOpacity = 0.25;
 
-  // Per-instance spec-field summary (override list). Empty → render nothing.
-  // Helper is fail-soft; never throws. Text uses Suspense because drei's
-  // <Text> loads its font async — without the boundary the first render can
-  // throw and break the whole scene.
-  const overrideText = nodeOverrideText(node);
-
   return (
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh>
@@ -154,22 +146,6 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
-      {overrideText !== "" && (
-        <Suspense fallback={null}>
-          <Billboard position={[0, 0, r * 0.6]}>
-            <Text
-              fontSize={r * 0.18}
-              color="#ffffff"
-              anchorX="center"
-              anchorY="middle"
-              outlineWidth={r * 0.012}
-              outlineColor="#000000"
-            >
-              {overrideText}
-            </Text>
-          </Billboard>
-        </Suspense>
-      )}
     </group>
   );
 }
