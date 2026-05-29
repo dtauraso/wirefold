@@ -73,7 +73,9 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
 export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
   // Read current sublabel from RF node data.
   const rfNode = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
-  const original = (rfNode?.data?.sublabel as string | undefined) ?? "";
+  const saved = rfNode?.data?.sublabel as string | undefined;
+  const pseudo = rfNode?.data?.pseudo as string | undefined;
+  const original = saved ?? pseudo ?? "";
   beginInlineEdit(el, {
     initial: original,
     activeClass: "sublabel-active",
