@@ -35,9 +35,11 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
   el.classList.add(opts.activeClass, "nodrag", "nopan");
   el.contentEditable = "plaintext-only";
   el.spellcheck = false;
-  // When initial is empty, keep a single space so the pill retains height;
-  // the select-all below means typing replaces it. Stripped on commit via trim().
-  el.textContent = opts.initial === "" ? " " : opts.initial;
+  // When initial is empty, leave whatever was visibly rendered (e.g. the
+  // "+ sublabel" placeholder) in place so the pill doesn't collapse. The
+  // select-all below means typing still replaces it; callers detect the
+  // unreplaced placeholder string on commit and treat it as empty.
+  if (opts.initial !== "") el.textContent = opts.initial;
 
   // Select all text so typing replaces the existing label.
   const range = document.createRange();
@@ -84,7 +86,9 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
   beginInlineEdit(el, {
     initial: original,
     activeClass: "sublabel-active",
-    onCommit: (next) => {
+    onCommit: (rawNext) => {
+      // If the user never replaced the visible placeholder, treat as empty.
+      const next = rawNext === placeholderText ? "" : rawNext;
       if (next === original) return "";
       useThreeStore.getState().setNodes((ns) => ns.map((n) => {
         if (n.id !== nodeId) return n;
