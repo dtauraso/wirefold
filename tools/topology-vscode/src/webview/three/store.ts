@@ -77,9 +77,20 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       markViewSynced(serializeViewerState(next));
       const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
       const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
+      // Preserve previously-rendered pseudocode across reloads. The async
+      // `*-render-result` messages patch `n.data.pseudo` after load(); a second
+      // load() would otherwise wipe it because specToFlow rebuilds nodes
+      // without a `pseudo` field.
+      const prevPseudo = new Map(
+        get().nodes.map((n) => [n.id, (n.data as { pseudo?: string } | undefined)?.pseudo]),
+      );
       const flow = specToFlow(spec, next, next.lastSelectionIds ?? []);
       let nodes = flow.nodes as RFNode<NodeData>[];
       let edges = flow.edges as RFEdge<EdgeData>[];
+      nodes = nodes.map((n) => {
+        const p = prevPseudo.get(n.id);
+        return p ? { ...n, data: { ...n.data, pseudo: p } } : n;
+      });
       ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
       const fadeEdgeOrder = reconcileFadeOrder(next.fadeEdgeOrder ?? [], edges);
       set({

@@ -98,6 +98,7 @@ window.addEventListener("message", (e) => {
     // Generated pseudocode for a hasPseudo node — patch into node data so the
     // billboard sublabel ternary can render it. Saved sublabel overrides win.
     const { nodeId, pseudo } = msg as { nodeId: string; pseudo: string };
+    console.debug("[pseudo]", nodeId, pseudo?.slice(0, 40));
     useThreeStore.getState().setNodes((ns) =>
       ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, pseudo } } : n)),
     );
