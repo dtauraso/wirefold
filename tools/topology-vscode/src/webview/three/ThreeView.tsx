@@ -235,7 +235,7 @@ export function ThreeView() {
               fontFamily: "monospace",
               color: flagged ? "#fff" : "#e0e0e0",
               pointerEvents: "none",
-              maxWidth: 240,
+              maxWidth: 360,
               lineHeight: 1.25,
               textAlign: "center",
               zIndex: 10,
@@ -243,39 +243,32 @@ export function ThreeView() {
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            {n.data?.sublabel ? (
-              <div
-                className="node-sublabel"
-                style={{
-                  opacity: 0.7,
-                  whiteSpace: "normal",
-                  pointerEvents: "auto",
-                  cursor: "text",
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  beginEditSublabel(n.id, e.currentTarget);
-                }}
-              >
-                {n.data.sublabel}
-              </div>
-            ) : (
-              <div
-                className="node-sublabel node-sublabel-placeholder"
-                style={{
-                  opacity: 0.7,
-                  whiteSpace: "normal",
-                  pointerEvents: "auto",
-                  cursor: "text",
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  beginEditSublabel(n.id, e.currentTarget);
-                }}
-              >
-                + sublabel
-              </div>
-            )}
+            {(() => {
+              // Priority: saved sublabel override → generated pseudo → placeholder.
+              // Editing any of these saves as sublabel override (beginEditSublabel writes data.sublabel).
+              const saved = n.data?.sublabel;
+              const pseudo = n.data?.pseudo;
+              const displayText = saved || pseudo || "+ sublabel";
+              const isPlaceholder = !saved && !pseudo;
+              return (
+                <div
+                  className={isPlaceholder ? "node-sublabel node-sublabel-placeholder" : "node-sublabel"}
+                  style={{
+                    opacity: 0.7,
+                    whiteSpace: "pre-wrap",
+                    textAlign: "left",
+                    pointerEvents: "auto",
+                    cursor: "text",
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    beginEditSublabel(n.id, e.currentTarget);
+                  }}
+                >
+                  {displayText}
+                </div>
+              );
+            })()}
           </div>
         );
       })}

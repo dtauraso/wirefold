@@ -57,6 +57,10 @@ export interface NodeData {
   // 3D depth coordinate. Defaults to 0 when absent (exact 2D replica).
   z?: number;
   sublabel?: string;
+  /** Generated pseudocode rendered for kinds with NODE_DEFS[kind].hasPseudo. Filled
+   *  asynchronously by the store's load action after the spec-to-flow conversion. Not
+   *  round-tripped to the spec — saved sublabel overrides take precedence in the UI. */
+  pseudo?: string;
   state?: Record<string, StateValue>;
   /** Set when a required inbound edge is missing; causes the node to render with a red border. */
   validationError?: string;

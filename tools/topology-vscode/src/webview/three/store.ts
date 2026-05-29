@@ -11,6 +11,8 @@ import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 import { vscode } from "../vscode-api";
+import { NODE_DEFS } from "../../schema/node-defs";
+import { PSEUDO_KIND_PREFIX, type PseudoKind } from "../../messages";
 import { clearPulse, getPulseMap, patchPulse, setCurve } from "./pulse-state";
 import { rfArcLength, arcLengthToSimLatencyMs, buildEdgeCurve } from "./geometry-helpers";
 import { getPauseAdjustedNow } from "../state/run-status";
@@ -98,6 +100,17 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         if (s && t) setCurve(edge.id, buildEdgeCurve(s, t));
       }
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
+
+      // Fire per-node pseudocode render requests for kinds with hasPseudo.
+      // Responses arrive asynchronously and patch n.data.pseudo via the host
+      // message listener in main.tsx (no regen on edit; reload refreshes).
+      for (const n of nodes) {
+        const kind = n.data?.type;
+        if (!kind || !NODE_DEFS[kind]?.hasPseudo) continue;
+        if (!(kind in PSEUDO_KIND_PREFIX)) continue;
+        const prefix = PSEUDO_KIND_PREFIX[kind as PseudoKind];
+        vscode.postMessage({ type: `${prefix}-render`, nodeId: n.id });
+      }
     } catch (err) {
       console.error("[ThreeStore] load failed", err);
     }
