@@ -35,7 +35,9 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
   el.classList.add(opts.activeClass, "nodrag", "nopan");
   el.contentEditable = "plaintext-only";
   el.spellcheck = false;
-  el.textContent = opts.initial;
+  // When initial is empty, keep a single space so the pill retains height;
+  // the select-all below means typing replaces it. Stripped on commit via trim().
+  el.textContent = opts.initial === "" ? " " : opts.initial;
 
   // Select all text so typing replaces the existing label.
   const range = document.createRange();
@@ -75,7 +77,10 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
   const rfNode = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
   const saved = rfNode?.data?.sublabel as string | undefined;
   const pseudo = rfNode?.data?.pseudo as string | undefined;
-  const original = saved ?? pseudo ?? "";
+  const visible = (el?.textContent ?? "").trim();
+  const placeholderText = "+ sublabel";
+  const fromVisible = visible === placeholderText ? "" : visible;
+  const original = saved ?? pseudo ?? fromVisible;
   beginInlineEdit(el, {
     initial: original,
     activeClass: "sublabel-active",
