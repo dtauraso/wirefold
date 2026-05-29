@@ -281,6 +281,20 @@ export function ThreeView() {
         if (!pos) return null;
         const text = nodeOverrideText(n);
         if (!text) return null;
+        const flagged = !!n.data?.validationError;
+        const pillStyle: React.CSSProperties = flagged
+          ? {
+              background: FLAG_LABEL_BG,
+              border: "1px solid #ff5252",
+              borderRadius: 4,
+              padding: "3px 6px",
+            }
+          : {
+              background: "rgba(0,0,0,0.55)",
+              border: "none",
+              borderRadius: 4,
+              padding: "3px 6px",
+            };
         return (
           <div
             key={`override-${n.id}`}
@@ -289,17 +303,15 @@ export function ThreeView() {
               left: pos.cx,
               top: pos.cy,
               transform: "translate(-50%, -50%)",
-              color: "#fff",
               fontSize: 9,
               fontFamily: "monospace",
-              lineHeight: 1.1,
-              textAlign: "center",
-              background: "rgba(0,0,0,0.55)",
-              borderRadius: 4,
-              padding: "3px 6px",
+              color: flagged ? "#fff" : "#e0e0e0",
               pointerEvents: "none",
+              lineHeight: 1.25,
+              textAlign: "center",
               whiteSpace: "pre",
               zIndex: 12,
+              ...pillStyle,
             }}
           >
             {text}
