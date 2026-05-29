@@ -111,6 +111,14 @@ export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
           // touch data.sublabel — the unchanged pseudo re-renders on error.
           vscode.postMessage({ type: `${prefix}-save`, nodeId, pseudo: next });
         }
+        // Restore cell text to the current pseudo immediately. Without this,
+        // the typed text stays in the contentEditable element because store
+        // state didn't change, so React skips the DOM update. On save success
+        // the topology reload re-renders; on failure the error banner +
+        // rerender refreshes the cell from store.
+        const current = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
+        const pseudoNow = (current?.data?.pseudo as string | undefined) ?? "";
+        if (el) el.textContent = pseudoNow;
         return null;
       }
       useThreeStore.getState().setNodes((ns) => ns.map((n) => {
