@@ -4,6 +4,8 @@
 
 import { scheduleViewSave } from "./save";
 import { useThreeStore } from "./three/store";
+import { PSEUDO_KIND_PREFIX, type PseudoKind } from "../messages";
+import { vscode } from "./vscode-api";
 
 type RerenderFn = () => void;
 
@@ -35,7 +37,11 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
   el.classList.add(opts.activeClass, "nodrag", "nopan");
   el.contentEditable = "plaintext-only";
   el.spellcheck = false;
-  el.textContent = opts.initial;
+  // When initial is empty, leave whatever was visibly rendered (e.g. the
+  // "+ sublabel" placeholder) in place so the pill doesn't collapse. The
+  // select-all below means typing still replaces it; callers detect the
+  // unreplaced placeholder string on commit and treat it as empty.
+  if (opts.initial !== "") el.textContent = opts.initial;
 
   // Select all text so typing replaces the existing label.
   const range = document.createRange();
@@ -73,12 +79,48 @@ function beginInlineEdit(el: HTMLElement | null, opts: Options) {
 export function beginEditSublabel(nodeId: string, el: HTMLElement | null) {
   // Read current sublabel from RF node data.
   const rfNode = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
-  const original = (rfNode?.data?.sublabel as string | undefined) ?? "";
+  const saved = rfNode?.data?.sublabel as string | undefined;
+  const pseudo = rfNode?.data?.pseudo as string | undefined;
+  const kind = rfNode?.data?.type as string | undefined;
+  const hasPseudo = !!(kind && kind in PSEUDO_KIND_PREFIX);
+  const visible = (el?.textContent ?? "").trim();
+  const placeholderText = "+ sublabel";
+  const fromVisible = visible === placeholderText ? "" : visible;
+  const original = saved ?? pseudo ?? fromVisible;
   beginInlineEdit(el, {
     initial: original,
     activeClass: "sublabel-active",
-    onCommit: (next) => {
+    onCommit: (rawNext) => {
+      // If the user never replaced the visible placeholder, treat as empty.
+      const next = rawNext === placeholderText ? "" : rawNext;
       if (next === original) return "";
+      if (hasPseudo) {
+        const prefix = PSEUDO_KIND_PREFIX[kind as PseudoKind];
+        if (next === "") {
+          // Clear any sublabel override so the pseudo re-renders.
+          useThreeStore.getState().setNodes((ns) => ns.map((n) => {
+            if (n.id !== nodeId) return n;
+            const data = { ...n.data };
+            delete data.sublabel;
+            return { ...n, data };
+          }));
+          scheduleViewSave();
+        } else {
+          // Route through Go validating save. On success, extension reloads
+          // the document; on failure it posts `${prefix}-error`. We do NOT
+          // touch data.sublabel — the unchanged pseudo re-renders on error.
+          vscode.postMessage({ type: `${prefix}-save`, nodeId, pseudo: next });
+        }
+        // Restore cell text to the current pseudo immediately. Without this,
+        // the typed text stays in the contentEditable element because store
+        // state didn't change, so React skips the DOM update. On save success
+        // the topology reload re-renders; on failure the error banner +
+        // rerender refreshes the cell from store.
+        const current = useThreeStore.getState().nodes.find((n) => n.id === nodeId);
+        const pseudoNow = (current?.data?.pseudo as string | undefined) ?? "";
+        if (el) el.textContent = pseudoNow;
+        return null;
+      }
       useThreeStore.getState().setNodes((ns) => ns.map((n) => {
         if (n.id !== nodeId) return n;
         const data = { ...n.data };

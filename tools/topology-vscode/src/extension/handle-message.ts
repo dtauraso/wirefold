@@ -582,13 +582,28 @@ async function handlePseudoRender(
     post({ type: m.error, nodeId, message: `Input node ${nodeId} has no output edge` });
     return;
   }
-  const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
+  const goFile = path.join(repoRoot, "nodes", "input", "node.go");
+  await appendWebviewLog(JSON.stringify({
+    ts_ms: Date.now(), src: "ts-ext", phase: "pseudo:render:start",
+    nodeId, cmdArg, goFile, outNeighbor,
+  }), document.uri);
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     cmdArg, "render",
     "--go-file", goFile,
     "--out-neighbor", outNeighbor,
     "--spec-json", JSON.stringify(specEntry),
   ]);
+  await appendWebviewLog(JSON.stringify({
+    ts_ms: Date.now(), src: "ts-ext", phase: "pseudo:render:done",
+    nodeId, code, stdoutLen: stdout.length, stderrLen: stderr.length,
+    stdoutHead: stdout.slice(0, 120), stderrHead: stderr.slice(0, 200),
+  }), document.uri);
+  if (code !== 0 || stdout.length === 0) {
+    await appendWebviewLog(JSON.stringify({
+      ts_ms: Date.now(), src: "ts-ext", phase: "pseudo:render:fail",
+      nodeId, code, stderr: stderr.slice(0, 500),
+    }), document.uri);
+  }
   if (code !== 0) {
     let msg = stderr.trim();
     try { msg = (JSON.parse(msg) as { error?: string }).error ?? msg; } catch { /* use raw */ }
@@ -623,7 +638,7 @@ async function handlePseudoSave(
     post({ type: m.error, nodeId, message: `Input node ${nodeId} has no output edge` });
     return;
   }
-  const goFile = path.join(repoRoot, "nodes", "Input", "node.go");
+  const goFile = path.join(repoRoot, "nodes", "input", "node.go");
   const { stdout, stderr, code } = await spawnGoRun(repoRoot, [
     cmdArg, "save",
     "--go-file", goFile,
@@ -675,7 +690,7 @@ async function handlePseudoSave(
   post({ type: m.saveResult, nodeId });
 
   // If a substrate run is active, stop it and restart so the new
-  // topology.json + nodes/Input/node.go are picked up.
+  // topology.json + nodes/input/node.go are picked up.
   if (runner.isRunning()) {
     await runner.stopAndAwait();
     runner.run();

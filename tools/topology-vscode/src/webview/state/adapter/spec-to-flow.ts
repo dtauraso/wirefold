@@ -1,5 +1,6 @@
 import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
 import { NODE_TYPES, type Node as SpecNode, type Spec, requiredInputDiagnostics } from "../../../schema";
+import { NODE_DEFS } from "../../../schema/node-defs";
 import type { ViewerState } from "../viewer/types";
 import {
   buildEdges,
@@ -26,7 +27,7 @@ export function specToFlow(
       selected: lastSelectionIds.includes(n.id),
       data: {
         label: n.id,
-        sublabel: nv?.sublabel,
+        sublabel: nv?.sublabel ?? NODE_DEFS[n.type]?.sublabel ?? "",
         x: nv?.x,
         y: nv?.y,
         z: nv?.z ?? 0,
