@@ -7,7 +7,8 @@
 //   - Dolly buttons (hold-to-dolly)
 //   - Pan pad (200ms dwell over empty canvas → draggable pad)
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useReducer } from "react";
+import { beginEditSublabel, setInlineEditRerender } from "../inline-edit";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, NodeData, EdgeData } from "../types";
@@ -46,6 +47,14 @@ export function ThreeView() {
   const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
+  const [, forceRerender] = useReducer((x: number) => x + 1, 0);
+
+  // Wire inline-edit rerender hook once on mount so commits/cancels refresh
+  // the label overlay from RF state.
+  useEffect(() => {
+    setInlineEditRerender(() => forceRerender());
+    return () => setInlineEditRerender(() => {});
+  }, []);
 
   // Keep refs in sync with state.
   useEffect(() => {
@@ -234,9 +243,21 @@ export function ThreeView() {
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            {n.data?.sublabel ? (
-              <div style={{ opacity: 0.7, whiteSpace: "normal" }}>{n.data.sublabel}</div>
-            ) : null}
+            <div
+              className="node-sublabel"
+              style={{
+                opacity: 0.7,
+                whiteSpace: "normal",
+                pointerEvents: "auto",
+                cursor: "text",
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                beginEditSublabel(n.id, e.currentTarget);
+              }}
+            >
+              {n.data?.sublabel ?? ""}
+            </div>
           </div>
         );
       })}
