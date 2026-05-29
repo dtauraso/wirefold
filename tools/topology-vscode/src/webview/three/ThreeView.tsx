@@ -282,7 +282,7 @@ export function ThreeView() {
         const text = nodeOverrideText(n);
         if (!text) return null;
         const flagged = !!n.data?.validationError;
-        const pillStyle: React.CSSProperties = flagged
+        const overrideOverlayPill: React.CSSProperties = flagged
           ? {
               background: FLAG_LABEL_BG,
               border: "1px solid #ff5252",
@@ -290,7 +290,7 @@ export function ThreeView() {
               padding: "3px 6px",
             }
           : {
-              background: "rgba(0,0,0,0.55)",
+              background: "rgba(0,0,0,0.35)",
               border: "none",
               borderRadius: 4,
               padding: "3px 6px",
@@ -311,7 +311,7 @@ export function ThreeView() {
               textAlign: "center",
               whiteSpace: "pre",
               zIndex: 12,
-              ...pillStyle,
+              ...overrideOverlayPill,
             }}
           >
             {text}
