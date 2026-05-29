@@ -18,6 +18,7 @@ import { RollSlider, DollyButtons, PanPad, GlobalLabelsToggle, HomeButton } from
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
+import { nodeOverrideText } from "./node-override-text";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -34,7 +35,7 @@ export function ThreeView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
-  const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number }[]>([]);
+  const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
   const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
   const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
     () => viewerState.labelsGlobalHidden ?? false,
@@ -65,8 +66,8 @@ export function ThreeView() {
   // Label positions are updated from inside the Canvas via useFrame (no state churn).
   // We use a ref-based callback that batches updates at ~60fps via requestAnimationFrame.
   const labelRaf = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
-  const pendingPositions = useRef<{ id: string; px: number; py: number }[]>([]);
-  const onPositions = useCallback((positions: { id: string; px: number; py: number }[]) => {
+  const pendingPositions = useRef<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
+  const onPositions = useCallback((positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => {
     pendingPositions.current = positions;
     if (labelRaf.current === null) {
       labelRaf.current = requestAnimationFrame(() => {
@@ -269,6 +270,37 @@ export function ThreeView() {
             }}
           >
             +{count}
+          </div>
+        );
+      })}
+
+      {/* In-node spec-override text — HTML overlay (NOT drei) projected at
+          each node's world center. Mirrors the top billboard pattern above. */}
+      {nodes.map((n) => {
+        const pos = labelMap.get(n.id);
+        if (!pos) return null;
+        const text = nodeOverrideText(n);
+        if (!text) return null;
+        return (
+          <div
+            key={`override-${n.id}`}
+            style={{
+              position: "absolute",
+              left: pos.cx,
+              top: pos.cy,
+              transform: "translate(-50%, -50%)",
+              color: "#fff",
+              fontSize: 9,
+              fontFamily: "monospace",
+              lineHeight: 1.1,
+              textAlign: "center",
+              textShadow: "0 0 2px black, 0 0 3px black",
+              pointerEvents: "none",
+              whiteSpace: "pre",
+              zIndex: 12,
+            }}
+          >
+            {text}
           </div>
         );
       })}
