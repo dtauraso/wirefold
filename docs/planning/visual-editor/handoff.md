@@ -7,15 +7,22 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-28 — billboarded-labels rework + home button merged)
+## State at handoff (2026-05-29 — billboard inline-edit + pseudo validation merged)
 
-- **Active branch:** `main`. Local + origin/main in sync after merge `d2ae9929`.
+- **Active branch:** `main`. Local + origin/main in sync after merge `1e9097c0`.
 - Working tree: `topology.json` modified (pre-existing, untouched this session).
-- Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js).
+- Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js), `go build ./... && go test ./...` all pass.
 
 ### What this session did
 
-**Merge `d2ae9929` from `task/billboarded-labels-rework` (deleted local + remote):**
+**Merge `1e9097c0` from `task/billboard-inline-edit` (deleted local + remote):** restored double-click-to-edit billboard sublabel from the RF era and routed it through Go validation.
+
+- Double-click the billboard sublabel pill to edit in place; the inline editor inherits the pill's color and keeps the pill height when empty. Placeholder shows `+ sublabel` when blank.
+- `hasPseudo` node kinds render generated pseudocode in the sublabel slot; non-pseudo kinds use a saved sublabel override (fallback to `NODE_DEFS` default).
+- Pseudo edits route through Go parsers (`cmd/pseudo` via `handle-message.ts`); on parse failure the editor shows a red error banner and snaps the text back. On success the spec field commits and the pseudocode re-renders.
+- `n.data.pseudo` is preserved across reloads (`spec-to-flow.ts`); store gained pseudo-edit actions and a transient error-banner slot.
+
+**Prior session (merge `d2ae9929` from `task/billboarded-labels-rework`):**
 1. `d0ad7614` — two-line pill labels anchored above node top (name + pseudocode), `nodeTopWorldPos()` helper.
 2. `e5ee7e49` — per-node ▾/▴ toggle + global labels toggle in `camera-ui.tsx`; viewer-state fields `NodeView.labelHidden`, `ViewerState.labelsGlobalHidden`.
 3. `9c365368` — reverted the per-node toggle; kept the global toggle. `NodeView.labelHidden` removed; `labelsGlobalHidden` stays.
@@ -63,7 +70,7 @@ The audit site index at `docs/planning/visual-editor/feature-audit/index.html` l
 
 Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
 
-### Build / test gate (last verified 2026-05-28)
+### Build / test gate (last verified 2026-05-29)
 
 - `go build ./... && go test ./...` — all pass.
 - `npx tsc --noEmit` — clean.
