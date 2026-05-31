@@ -11,6 +11,7 @@ import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
 import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
+import { postLog } from "../log/post";
 import { getPauseAdjustedNow } from "../state/run-status";
 import {
   nodeRadius,
@@ -248,11 +249,13 @@ export function PulseBead({
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
       mesh.visible = false;
-      if (claimDelivered(edgeId, pulse.startTime)) {
-        // Use Go-authoritative slot identity from pulse data; fall back to React
-        // prop only if the pulse carries empty strings (old binary compat).
-        const resolvedTarget = (pulse.target !== "") ? pulse.target : tgt.id;
-        const resolvedHandle = (pulse.targetHandle !== "") ? pulse.targetHandle : (targetHandle ?? "");
+      const claimed = claimDelivered(edgeId, pulse.startTime);
+      // Use Go-authoritative slot identity from pulse data; fall back to React
+      // prop only if the pulse carries empty strings (old binary compat).
+      const resolvedTarget = (pulse.target !== "") ? pulse.target : tgt.id;
+      const resolvedHandle = (pulse.targetHandle !== "") ? pulse.targetHandle : (targetHandle ?? "");
+      postLog("pulse-deliver", { edgeId, target: pulse.target, targetHandle: pulse.targetHandle, propHandle: targetHandle ?? null, startTime: pulse.startTime, claimed, resolvedTarget, resolvedHandle, posted: claimed && !!resolvedHandle });
+      if (claimed) {
         if (resolvedHandle) {
           vscode.postMessage({ type: "delivered", target: resolvedTarget, targetHandle: resolvedHandle });
         }
