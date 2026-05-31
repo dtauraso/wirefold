@@ -7,35 +7,49 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-31 — edge-surface-rendering merged to main)
+## State at handoff (2026-05-31 — task/delete-edge in flight)
 
-- **Active branch:** `main` HEAD `05f9222e` (Merge task/edge-surface-rendering). No task branch in flight.
+- **Active branch:** `task/delete-edge` (branched from `main` HEAD `05f9222e`).
 - Working tree: `topology.json` modified + `.claude/scheduled_tasks.lock` untracked (both pre-existing/unrelated; not staged).
-- Build/test gate: baseline is green — `go test ./...` all pass; `npx tsc --noEmit` clean; `npm run build` refreshes `out/webview.js`.
+- Build/test gate: last verified 2026-05-31 at `f3e179f6` — all gates green (see Build/test gate section below).
 
-### What merged this session
+### What's on this branch (task/delete-edge)
 
-- **`task/edge-surface-rendering`** — edge tubes now start at the node sphere SURFACE instead of the node center. The curve is still defined center-to-center (latency/pulse-bead math is unchanged and stays center-based); the rendered tube is trimmed to the [t0,t1] range outside each node's `nodeRadius`, with the exact surface crossing found by linear interpolation between bracketing samples (no draw-then-delete). Applies uniformly to all edges via the single `SingleEdgeTube` renderer. PulseBead deliberately left traveling the full center-to-center curve (visible from node center) — timing is center-based by design. Edge tube WIDTH is a fixed constant 1.5 (does not scale with node radius like the torus `r*0.08`); user reviewed and chose to leave as-is this session. Commits: `6818a3e8`, `93a03fca`, `a1ab11b8`, `4a460a02`, merge `05f9222e`.
+In order:
+
+- `dfa37bf5` — delete-edge feature: select edge + Delete/Backspace removes it. Works.
+- `a6f5d04e` — slot-keyed delivery ack.
+- `f3e179f6` — Go-authoritative slot stamped into the send trace.
+- `17aa67a3` — targetHandle round-trip guard.
+- `89334b4d` — pulse-deliver debug breadcrumb — **REMOVE before merge**.
+
+An intermittent stall after delete+re-add remains; it is superseded by the wire-in-flight backpressure model change (next task).
+
+### Next task
+
+Implement the wire-in-flight backpressure model per [docs/planning/visual-editor/wire-inflight-backpressure.md](wire-inflight-backpressure.md). This is a substrate model change that amends MODEL.md (source observes wire in-flight, wire owns the one-bead bit); David confirmed the model 2026-05-31.
 
 ### Prior merge context (still relevant)
 
-**Merge `68c4da40` from `task/arcball-rework` (deleted):** camera rotation on single empty-space drag, implemented as two decoupled in-plane cylinders (horizontal->world Y, vertical->world X) pivoting on the selected node (else screen-center on z=0 plane); rigid rotation keeps the pivot pixel-fixed; tilt persists across reload. Pinch-zoom reworked to zoom-to-cursor and xy pan made tilt-aware so all three gestures are consistent at any tilt. z-spin (third axis) considered and declined. VERIFIED live by user.
+**Merge `05f9222e` from `task/edge-surface-rendering` (deleted):** edge tubes now start at the node sphere SURFACE instead of the node center. Curve is still center-to-center (latency/pulse-bead math unchanged). Tube trimmed to [t0,t1] range outside each node's `nodeRadius`, surface crossing found by linear interpolation. PulseBead deliberately left traveling the full center-to-center curve — timing is center-based by design. Edge tube WIDTH fixed constant 1.5. Commits: `6818a3e8`, `93a03fca`, `a1ab11b8`, `4a460a02`, merge `05f9222e`.
 
-**Merge `31a46dca` from `task/pinch-zoom-rework` (deleted):** reworked pinch-zoom to multiplicative exponential zoom on camera height above z=0 plane. Single knob `ZOOM_BASE=1.01`. Now superseded by zoom-to-cursor from `task/arcball-rework`.
+**Merge `68c4da40` from `task/arcball-rework` (deleted):** camera rotation on single empty-space drag, two decoupled in-plane cylinders (horizontal->world Y, vertical->world X) pivoting on selected node; tilt persists across reload. Pinch-zoom reworked to zoom-to-cursor; xy pan made tilt-aware. VERIFIED live by user.
 
-**Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y; arcball rotation and dwell→PanPad removed; camera locked square-on. Now superseded by tilt-aware pan from `task/arcball-rework`.
+**Merge `31a46dca` from `task/pinch-zoom-rework` (deleted):** multiplicative exponential zoom on camera height. Superseded by zoom-to-cursor from `task/arcball-rework`.
 
-**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified the top-of-node billboard to two static lines and moved per-instance state into an HTML overlay; ripped out all pseudocode plumbing. Net: -3408 lines, +98 lines. Audit board updated (commit `373c7f7b`).
+**Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y. Superseded by tilt-aware pan from `task/arcball-rework`.
 
-### Next-task candidates (friction-driven)
+**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified top-of-node billboard to two static lines; ripped out all pseudocode plumbing. Net: -3408 lines, +98 lines.
 
-Outstanding editor features are tracked on the audit board at `docs/planning/visual-editor/feature-audit/index.html` (12 features with status columns). Pick friction-driven from there. The one cross-cut item not on the board: per-kind spec↔flow adapters / explicit viewer-state derivation / view-save-on-settle (view-save-on-settle also appears on the board as half-wired).
+### Next-task candidates after task/delete-edge (friction-driven)
+
+Outstanding editor features are tracked on the audit board at `docs/planning/visual-editor/feature-audit/index.html` (12 features with status columns). Pick friction-driven from there. The one cross-cut item not on the board: per-kind spec↔flow adapters / explicit viewer-state derivation / view-save-on-settle.
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
 Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
 
-### Build / test gate (last verified 2026-05-31 post edge-surface-rendering merge)
+### Build / test gate (last verified 2026-05-31 at f3e179f6 — all green)
 
 - `go build ./... && go test ./...` — all pass.
 - `npx tsc --noEmit` — clean.
@@ -64,7 +78,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Fade did not change the model: it is a start-gate on `Send`, no new `PacedWire` op, slot-phase/AND-gate/backpressure untouched. `pump.ts` stays render-only. The billboard / in-node overlay changes are pure render — no substrate touch. Edge-surface trimming is purely visual (geometry only); the center-to-center curve and all timing math are unchanged.
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Fade did not change the model: it is a start-gate on `Send`, no new `PacedWire` op, slot-phase/AND-gate/backpressure untouched. `pump.ts` stays render-only. The billboard / in-node overlay changes are pure render — no substrate touch. Edge-surface trimming is purely visual (geometry only); the center-to-center curve and all timing math are unchanged. **The wire-in-flight backpressure spec (next task) amends MODEL.md — see [wire-inflight-backpressure.md](wire-inflight-backpressure.md).**
 
 ## Dev-loop
 
