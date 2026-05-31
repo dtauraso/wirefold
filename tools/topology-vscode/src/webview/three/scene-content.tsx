@@ -249,9 +249,12 @@ export function PulseBead({
     if (t >= 1) {
       mesh.visible = false;
       if (claimDelivered(edgeId, pulse.startTime)) {
-        const resolvedHandle = targetHandle ?? "";
+        // Use Go-authoritative slot identity from pulse data; fall back to React
+        // prop only if the pulse carries empty strings (old binary compat).
+        const resolvedTarget = (pulse.target !== "") ? pulse.target : tgt.id;
+        const resolvedHandle = (pulse.targetHandle !== "") ? pulse.targetHandle : (targetHandle ?? "");
         if (resolvedHandle) {
-          vscode.postMessage({ type: "delivered", target: tgt.id, targetHandle: resolvedHandle });
+          vscode.postMessage({ type: "delivered", target: resolvedTarget, targetHandle: resolvedHandle });
         }
       }
       return;

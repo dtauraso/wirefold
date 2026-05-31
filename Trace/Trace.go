@@ -58,6 +58,10 @@ type Event struct {
 	// so the TS layer derives arrival from emitTime + simLatencyMs instead.
 	ArcLength    float64 `json:"arcLength,omitempty"`
 	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
+	// Destination slot identity — authoritative from Go. Set on send events backed
+	// by a PacedWire so the TS layer never derives targetHandle from edge data.
+	Target       string  `json:"target,omitempty"`
+	TargetHandle string  `json:"targetHandle,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -138,13 +142,14 @@ func (t *Trace) Send(node, port string, value int) {
 }
 
 // SendWire emits a send event like Send, additionally carrying the wire geometry
-// fields (arcLength in world-units, simLatencyMs in milliseconds) from the
-// outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
-func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64) {
+// fields (arcLength in world-units, simLatencyMs in milliseconds) and the
+// authoritative destination slot identity (target node id, targetHandle port name)
+// from the outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
+func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64, target, targetHandle string) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
@@ -276,6 +281,8 @@ func marshalEvent(e Event) ([]byte, error) {
 		Value        int     `json:"value"`
 		ArcLength    float64 `json:"arcLength,omitempty"`
 		SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
+		Target       string  `json:"target,omitempty"`
+		TargetHandle string  `json:"targetHandle,omitempty"`
 	}
 	type fire struct {
 		Step int    `json:"step"`
@@ -308,7 +315,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
 	case KindSend:
 		if e.ArcLength != 0 || e.SimLatencyMs != 0 {
-			return json.Marshal(sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs})
+			return json.Marshal(sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs, Target: e.Target, TargetHandle: e.TargetHandle})
 		}
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	case KindDone:

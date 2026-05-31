@@ -42,7 +42,7 @@ export type SlotEvent = {
 
 export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
-  | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number }
+  | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
   | { step: number; kind: "done"; node: string; port: string }
   | SlotEvent;
 

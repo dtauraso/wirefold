@@ -33,6 +33,8 @@ type PacedWire struct {
 	doneCh       chan struct{} // closed by Done
 	ArcLength    float64      // straight-line distance between source and target nodes (world units)
 	SimLatencyMs float64      // ArcLength / pulseSpeed (ms); how long a pulse takes to traverse the wire
+	Target       string       // destination node id — authoritative slot identity (set by loader)
+	TargetHandle string       // destination input-port name — authoritative slot identity (set by loader)
 }
 
 // NewPacedWire creates an empty PacedWire with geometry-derived timing.

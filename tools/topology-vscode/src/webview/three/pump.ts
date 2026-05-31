@@ -45,7 +45,7 @@ export function handleTraceEvent(event: TraceEvent): void {
     case "send": {
       // Match ALL edges by source node id + sourceHandle (fan-out).
       // RF edges store source/sourceHandle; trace send events carry node/port.
-      const { node, port, value, simLatencyMs } = event as Extract<TraceEvent, { kind: "send" }>;
+      const { node, port, value, simLatencyMs, target: goTarget, targetHandle: goTargetHandle } = event as Extract<TraceEvent, { kind: "send" }>;
       // simLatencyMs should always be present after Phase 2; fallback guards
       // against stale Go binaries or future schema gaps.
       const FALLBACK_MS = 500;
@@ -59,13 +59,14 @@ export function handleTraceEvent(event: TraceEvent): void {
       );
       for (const edge of matched) {
         postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null, edgeId: edge.id });
-        // Pass target+targetHandle so use-pulse-animation can write the held-value
-        // badge at t=1 (pulse arrival) rather than eagerly at send time.
+        // Prefer Go-provided slot identity (target, targetHandle) — these are
+        // authoritative from PacedWire and are not derived from edge data, which
+        // can be empty for live-re-added edges.
         setPulse(edge.id, {
           value: value ?? 0,
           simStep: step,
-          target: edge.target ?? "",
-          targetHandle: edge.targetHandle ?? "",
+          target: (goTarget != null && goTarget !== "") ? goTarget : (edge.target ?? ""),
+          targetHandle: (goTargetHandle != null && goTargetHandle !== "") ? goTargetHandle : (edge.targetHandle ?? ""),
           simLatencyMs: resolvedLatency,
         });
       }
