@@ -5,7 +5,7 @@
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos, pixelToNDC, sceneCenter, worldPerPixel } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, worldPerPixel } from "./geometry-helpers";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
@@ -278,12 +278,13 @@ export function useInteractionControls(
       e.preventDefault();
 
       if (e.ctrlKey) {
-        // Pinch-to-zoom: dolly along view direction (matches dolly buttons).
-        const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion);
-        const center = sceneCenter(nodesRef.current);
-        const dist = cam.position.distanceTo(center);
-        const speed = 0.001 * Math.max(dist, 10);
-        cam.position.addScaledVector(dir, e.deltaY * speed);
+        // Pinch-to-zoom: multiplicative dolly on height above the z=0 plane.
+        // Exponential so a step feels uniform at every scale (industry standard).
+        // Base is the single speed knob; >1 deltaY (pinch out) zooms out.
+        const ZOOM_BASE = 1.01;
+        const factor = Math.pow(ZOOM_BASE, e.deltaY);
+        const minHeight = 5; // never cross/touch the plane
+        cam.position.z = Math.max(minHeight, cam.position.z * factor);
       } else {
         // Camera is locked square-on (looking straight down -z toward the z=0 plane,
         // up = +y). Pan directly in world x/y — no matrix-column extraction needed.

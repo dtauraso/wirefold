@@ -7,19 +7,24 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-30 — pan-only square-on camera + pinch-zoom merged to main)
+## State at handoff (2026-05-30 — pinch-zoom reworked to multiplicative, verified)
 
-- **Active branch:** `main`. In sync with origin/main at merge commit `bda401e1`. No task branch in flight. Branch `task/xy-pan-camera` merged and deleted (local + remote).
-- Working tree: `topology.json` modified (pre-existing, untouched across this session and the prior pan-camera session; still unstaged).
-- Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js), `go build ./... && go test ./...` all pass.
+- **Active branch:** `task/pinch-zoom-rework`. In flight; not yet merged to main.
+- Working tree: `topology.json` modified (pre-existing, unrelated; not staged).
+- Build/test gate: `tsc --noEmit` clean, `npm run build` clean, `go build ./... && go test ./...` all pass.
 
-### What merged (merge bda401e1 — branch task/xy-pan-camera, deleted)
+### What landed on this branch
 
-- Two-finger trackpad scroll pans the camera in world x/y (`interaction-controls.ts` `onWheelNative`).
-- One-finger arcball rotation and dwell→PanPad removed; RollSlider/PanPad dead code deleted.
-- Camera locked square-on: saved tilt quaternion no longer restored on load (`scene-content.tsx` `CameraRefBridge`); Home button re-levels to look straight at z=0 plane (`camera-ui.tsx` `HomeButton`).
-- Pinch-to-zoom (wheel+ctrlKey → dolly) retained but **FLAGGED FOR REWORK** in the audit (slug `pinch-zoom`): on the square-on camera it should be a straight z-axis zoom toward cursor/plane; feel/speed unverified.
-- Audit: `xy-drag` = working/verified; obsolete `arcball-rotation` + `gesture-activation-model` records and detail pages removed; new `pinch-zoom` record added (needs-rework).
+- **Pinch-zoom reworked** (`interaction-controls.ts` `onWheelNative` ctrlKey branch): replaced additive view-direction dolly with multiplicative exponential zoom on camera height above the z=0 plane. Single knob `ZOOM_BASE=1.01`. Camera stays square-on and screen-centered.
+- Reversal-direction lag investigated with runtime traces: confirmed to be native macOS trackpad gesture-ramp behavior (silent event gap + velocity ramp). Momentum-tail and pan-misrouting hypotheses both disproven. Left as native by design — no app mitigation added.
+- Audit: `pinch-zoom` record updated to `working` / `VERIFIED`.
+- Stale parseSpec tests were dropped and merged (main is past that; no action needed here).
+
+### Prior merge context (still relevant)
+
+**Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y; arcball rotation and dwell→PanPad removed; camera locked square-on.
+
+**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified top-of-node billboard; ripped out pseudocode plumbing. Net: -3408 lines, +98 lines.
 
 ### Prior merge context (still relevant)
 
@@ -29,15 +34,15 @@ read this file first (no chat history needed) and proceed.
 
 The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features.
 
-- **`xy-drag`** — DONE / VERIFIED. Two-finger trackpad scroll pans camera in world x/y; camera square-on, never tilts. Arcball rotation and dwell-pan removed.
+- **`xy-drag`** — DONE / VERIFIED. Two-finger trackpad scroll pans camera in world x/y; camera square-on, never tilts.
+- **`pinch-zoom`** — DONE / VERIFIED. Multiplicative exponential zoom, ZOOM_BASE=1.01, square-on screen-centered. Reversal lag is native macOS gesture-ramp; left as-is by design.
 - **`validation-flag-colors`** — code reads correctly, UNCHECKED (not hands-on verified).
 - **`two-click-edge-creation`** — code reads correctly, UNCHECKED (not hands-on verified).
 
 ### Next-task candidates (friction-driven)
 
-1. **`pinch-zoom` rework** — square-on camera needs straight z-axis zoom toward cursor/plane; feel/speed unverified; audit record `pinch-zoom` flagged needs-rework.
-2. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
-3. Pre-existing test failures (parked from prior session — investigate before the next task branch).
+1. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
+2. Pre-existing test failures (parked from prior session — investigate before the next task branch).
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
@@ -51,8 +56,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. Camera is pan-only square-on (merged). Pinch-zoom dolly needs rework — should be straight z-axis zoom toward cursor.
-2. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
+1. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
 3. **Pre-existing test failures** — parked; investigate before next task branch.
 4. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
 5. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
@@ -61,7 +65,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 ### Key files
 
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`. Top-of-node billboard renders the two-line `label/id + kind` pill; in-node value overlay is delegated to `node-override-text.ts`.
-- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — `onWheelNative`: two-finger scroll → world x/y pan; ctrlKey branch → dolly (pinch-zoom, needs rework).
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — `onWheelNative`: two-finger scroll → world x/y pan; ctrlKey branch → multiplicative exponential zoom on height above z=0 plane (ZOOM_BASE=1.01).
 - `tools/topology-vscode/src/webview/three/scene-content.tsx` — `CameraRefBridge`: square-on lock, saved tilt quaternion no longer restored on load.
 - `tools/topology-vscode/src/webview/three/camera-ui.tsx` — `HomeButton`: re-levels camera to look straight at z=0 plane.
 - `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay pill for per-instance values (Input `init`, ChainInhibitor `state.held`); other kinds render nothing. Uses the existing screen-projection pattern, not drei.
