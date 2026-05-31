@@ -21,7 +21,7 @@ import (
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string) {
 	tr := T.NewWithSink(0, os.Stdout)
 
-	nodes, reg, nmr, err := W.LoadTopology(ctx, topologyPath, tr)
+	nodes, slotReg, reg, nmr, err := W.LoadTopology(ctx, topologyPath, tr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
@@ -30,7 +30,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Stage 3: read "delivered" / "fade" / "node-move" JSON lines from stdin.
 	// When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, reg, nmr, tr)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, reg, nmr, tr)
 		cancel()
 	}()
 

@@ -19,7 +19,7 @@ export type WebviewToHostMsg =
   | { type: "resume" }
   | { type: "stop" }
   | { type: "webview-log"; entry: string }
-  | { type: "delivered"; edge: string }
+  | { type: "delivered"; target: string; targetHandle: string }
   | { type: "fade"; edges: string[] }
   | { type: "node-move"; nodeId: string; x: number; y: number; z?: number };
 
@@ -79,7 +79,7 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "delivered":
-      return typeof m.edge === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+      return typeof m.target === "string" && typeof m.targetHandle === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "node-move":
       return typeof m.nodeId === "string" && typeof m.x === "number" && typeof m.y === "number"
         ? (m as unknown as WebviewToHostMsg)

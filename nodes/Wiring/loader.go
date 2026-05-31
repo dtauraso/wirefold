@@ -81,10 +81,9 @@ type topoSpec struct {
 	View  topoView   `json:"view"`
 }
 
-// WireRegistry maps edge label → *PacedWire. The stdin-reader goroutine uses
-// this to call NotifyDelivered when the webview reports animation complete.
-// Each entry points to the wire owned by the destination port; multiple edges
-// sharing a destination port map to the same *PacedWire.
+// WireRegistry maps edge label → *PacedWire. Used for fade/node-move operations
+// where lookup by edge label is needed. Each entry points to the wire owned by
+// the destination port; multiple edges sharing a destination port map to the same *PacedWire.
 type WireRegistry map[string]*PacedWire
 
 // ForEach calls fn for every (edgeID, wire) pair in the registry.
@@ -95,19 +94,20 @@ func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
 }
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
-// WireRegistry keyed by edge label, and a NodeMoveRegistry for live position
+// SlotRegistry (keyed by "target.targetHandle" for delivery acks), a WireRegistry
+// (keyed by edge label for fade/node-move), and a NodeMoveRegistry for live position
 // updates (used by the stdin reader to handle node-move messages).
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, WireRegistry, *NodeMoveRegistry, error) {
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, SlotRegistry, WireRegistry, *NodeMoveRegistry, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
 	}
 	var spec topoSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		return nil, nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
 	}
 	if err := validateSpec(&spec); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// Populate Position on each specNode from view.nodes.
@@ -251,10 +251,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 
 		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
+			return nil, nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
 		nodes = append(nodes, nd)
 	}
 
-	return nodes, edgeWire, nmr, nil
+	return nodes, SlotRegistry(destWire), edgeWire, nmr, nil
 }

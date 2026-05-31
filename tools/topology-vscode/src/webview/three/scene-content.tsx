@@ -249,7 +249,7 @@ export function PulseBead({
     if (t >= 1) {
       mesh.visible = false;
       if (claimDelivered(edgeId, pulse.startTime)) {
-        vscode.postMessage({ type: "delivered", edge: edgeId });
+        vscode.postMessage({ type: "delivered", target: tgt.id, targetHandle: targetHandle ?? "" });
       }
       return;
     }
