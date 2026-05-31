@@ -84,11 +84,15 @@ export function GraphNode({
   selected,
   hovered,
   faded,
+  selectedId,
+  hoveredId,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
   hovered: boolean;
   faded: boolean;
+  selectedId?: string | null;
+  hoveredId?: string | null;
 }) {
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
@@ -153,20 +157,44 @@ export function GraphNode({
       {(node.data?.inputs ?? []).map((port) => {
         const dir = portDir(node, port.name, true);
         if (!dir) return null;
+        const portId = `${node.id}:in:${port.name}`;
+        const isSel = selectedId === portId;
+        const isHov = hoveredId === portId;
         return (
-          <mesh key={`in:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]}>
+          <mesh
+            key={`in:${port.name}`}
+            position={[dir.x * r, dir.y * r, dir.z * r]}
+            scale={isSel ? 1.5 : isHov ? 1.3 : 1}
+            userData={{ portId, nodeId: node.id, portName: port.name, isInput: true, port: true }}
+          >
             <sphereGeometry args={[4, 8, 8]} />
-            <meshStandardMaterial color={strokeColor} />
+            <meshStandardMaterial
+              color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
+              emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
+              emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
+            />
           </mesh>
         );
       })}
       {(node.data?.outputs ?? []).map((port) => {
         const dir = portDir(node, port.name, false);
         if (!dir) return null;
+        const portId = `${node.id}:out:${port.name}`;
+        const isSel = selectedId === portId;
+        const isHov = hoveredId === portId;
         return (
-          <mesh key={`out:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]}>
+          <mesh
+            key={`out:${port.name}`}
+            position={[dir.x * r, dir.y * r, dir.z * r]}
+            scale={isSel ? 1.5 : isHov ? 1.3 : 1}
+            userData={{ portId, nodeId: node.id, portName: port.name, isInput: false, port: true }}
+          >
             <sphereGeometry args={[4, 8, 8]} />
-            <meshStandardMaterial color={strokeColor} />
+            <meshStandardMaterial
+              color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
+              emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
+              emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
+            />
           </mesh>
         );
       })}
@@ -519,9 +547,16 @@ export function RaycasterHelper({
 
       if (opts?.nodesOnly) {
         // Iterate all hits to find the first node that isn't excluded.
+        // A port sphere hit resolves to its node (via userData.nodeId).
         for (const hit of hits) {
           const hitObj = hit.object as THREE.Mesh;
           if (hitObj.userData?.edgeId) continue; // skip edges
+          if (hitObj.userData?.port) {
+            // Port sphere — resolve to its owning node.
+            const nId = hitObj.userData.nodeId as string;
+            if (opts.excludeId && nId === opts.excludeId) continue;
+            return nId;
+          }
           const hitPoint = hitObj.parent;
           if (!hitPoint) continue;
           for (const n of nodes) {
@@ -538,20 +573,22 @@ export function RaycasterHelper({
         return null;
       }
 
-      // Check if the hit mesh is an edge tube (carries userData.edgeId).
-      const hitObj = hits[0].object as THREE.Mesh;
-      if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
-      // Walk up to find a group that has a matching node position.
-      const hitPoint = hitObj.parent;
-      if (!hitPoint) return null;
-      // Match the group position to a node world pos.
-      for (const n of nodes) {
-        const wp = nodeWorldPos(n);
-        if (
-          Math.abs(hitPoint.position.x - wp.x) < 1 &&
-          Math.abs(hitPoint.position.y - wp.y) < 1
-        ) {
-          return n.id;
+      // Default path: scan hits nearest-first; port sphere → portId, edge → edgeId, node body → nodeId.
+      for (const hit of hits) {
+        const hitObj = hit.object as THREE.Mesh;
+        if (hitObj.userData?.portId) return hitObj.userData.portId as string;
+        if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
+        // Attempt parent-group → node match.
+        const hitPoint = hitObj.parent;
+        if (!hitPoint) continue;
+        for (const n of nodes) {
+          const wp = nodeWorldPos(n);
+          if (
+            Math.abs(hitPoint.position.x - wp.x) < 1 &&
+            Math.abs(hitPoint.position.y - wp.y) < 1
+          ) {
+            return n.id;
+          }
         }
       }
       return null;
@@ -644,6 +681,8 @@ export function Scene({
           selected={n.id === selectedId}
           hovered={n.id === hoveredId}
           faded={!!n.data?.faded}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
         />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
