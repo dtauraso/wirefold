@@ -233,23 +233,36 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: 
       return new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
     })();
 
-    // Trim the tube to the portion outside each node's sphere radius.
-    // The full center-to-center curve is kept for latency/pulse math (pump.ts / store.ts);
-    // here we only clip the *rendered* tube so it appears to emerge from the sphere surface.
-    const TUBE_SAMPLE_COUNT = 32;
+    // Compute the visible t-range [t0, t1] on the original center-to-center quadratic
+    // so the rendered tube starts/ends exactly at each sphere's surface — no filtering,
+    // no CatmullRom detour; every sampled point lies on the original Bezier.
     const srcCenter = nodeWorldPos(src);
     const tgtCenter = nodeWorldPos(tgt);
     const srcR = nodeRadius(src);
     const tgtR = nodeRadius(tgt);
-    const allPts = _curve.getPoints(TUBE_SAMPLE_COUNT);
-    const trimmedPts = allPts.filter(
-      (pt) => pt.distanceTo(srcCenter) >= srcR && pt.distanceTo(tgtCenter) >= tgtR
-    );
-    // If trimming leaves fewer than 2 points (nodes overlap), fall back to the full curve.
-    const tubeCurve: THREE.Curve<THREE.Vector3> =
-      trimmedPts.length >= 2
-        ? new THREE.CatmullRomCurve3(trimmedPts)
-        : _curve;
+
+    const T_STEP = 0.005;
+    // t0: first t from 0 where curve exits the source sphere
+    let t0 = 0;
+    for (let t = 0; t <= 1; t += T_STEP) {
+      if (_curve.getPoint(t).distanceTo(srcCenter) >= srcR) { t0 = t; break; }
+    }
+    // t1: last t from 1 where curve exits the target sphere
+    let t1 = 1;
+    for (let t = 1; t >= 0; t -= T_STEP) {
+      if (_curve.getPoint(t).distanceTo(tgtCenter) >= tgtR) { t1 = t; break; }
+    }
+    // Guard: overlapping nodes — fall back to full range
+    if (t0 >= t1) { t0 = 0; t1 = 1; }
+
+    // Sample the ORIGINAL quadratic over [t0, t1] — geometry never goes inside a sphere.
+    const TUBE_RENDER_SAMPLES = 24;
+    const visiblePts: THREE.Vector3[] = [];
+    for (let i = 0; i <= TUBE_RENDER_SAMPLES; i++) {
+      const t = t0 + (t1 - t0) * (i / TUBE_RENDER_SAMPLES);
+      visiblePts.push(_curve.getPoint(t));
+    }
+    const tubeCurve = new THREE.CatmullRomCurve3(visiblePts);
 
     const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 16, 1.5, 6, false);
     // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
