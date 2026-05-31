@@ -71,6 +71,57 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return new THREE.Vector3(x, y, 0);
 }
 
+// ---------------------------------------------------------------------------
+// Port geometry
+// ---------------------------------------------------------------------------
+
+const SLOT_PCT = [25, 50, 75] as const;
+
+/**
+ * Unit direction (z=0 plane) from node center toward the given port's position,
+ * derived from side/slot like the 2D handle layout. Returns null if port not found.
+ */
+export function portDir(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
+  const list = (isInput ? node.data?.inputs : node.data?.outputs) ?? [];
+  const idx = list.findIndex((p) => p.name === portName);
+  if (idx < 0) return null;
+  const port = list[idx];
+  const side = port.side ?? (isInput ? "left" : "right");
+  // ports sharing this resolved side, in list order:
+  const sameSide = list.filter((p) => (p.side ?? (isInput ? "left" : "right")) === side);
+  const onSideIdx = sameSide.findIndex((p) => p === port);
+  const pct = port.slot !== undefined ? SLOT_PCT[port.slot] : ((onSideIdx + 1) * 100) / (sameSide.length + 1);
+  const w = node.data?.width ?? 110, h = node.data?.height ?? 60;
+  // local border point offset from center (y-up): pct measured from top for left/right, from left for top/bottom
+  let bx = 0, by = 0;
+  if (side === "left")        { bx = -w / 2; by = h * (0.5 - pct / 100); }
+  else if (side === "right")  { bx =  w / 2; by = h * (0.5 - pct / 100); }
+  else if (side === "top")    { by =  h / 2; bx = w * (pct / 100 - 0.5); }
+  else                        { by = -h / 2; bx = w * (pct / 100 - 0.5); } // bottom
+  const dir = new THREE.Vector3(bx, by, 0);
+  if (dir.lengthSq() === 0) {
+    // exact center fallback: cardinal by side
+    if (side === "left")       dir.set(-1, 0, 0);
+    else if (side === "right") dir.set( 1, 0, 0);
+    else if (side === "top")   dir.set( 0, 1, 0);
+    else                       dir.set( 0,-1, 0);
+  }
+  return dir.normalize();
+}
+
+/**
+ * World-space port position on the node sphere surface, or node center if no port.
+ * Uses the sphere surface point in the direction of the port, so endpoints sit
+ * on the sphere rather than at the center.
+ */
+export function portWorldPos(node: RFNode<NodeData>, portName: string | null | undefined, isInput: boolean): THREE.Vector3 {
+  const center = nodeWorldPos(node);
+  if (!portName) return center;
+  const dir = portDir(node, portName, isInput);
+  if (!dir) return center;
+  return center.clone().add(dir.multiplyScalar(nodeRadius(node)));
+}
+
 /** World position for the top of the node sphere (center.y + radius). */
 export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   const center = nodeWorldPos(node);
@@ -86,6 +137,27 @@ export function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
   if (nodes.length === 0) return new THREE.Vector3(0, 0, 0);
   const { minX, maxX, minY, maxY } = boundingBox(nodes);
   return new THREE.Vector3((minX + maxX) / 2, -(minY + maxY) / 2, 0);
+}
+
+/**
+ * Build the port-to-port QuadraticBezierCurve3 for an edge.
+ * p0 is on the source OUTPUT port sphere surface, p2 is on the target INPUT port sphere surface.
+ * Used by both SingleEdgeTube and PulseBead so the bead travels the identical visible curve.
+ */
+export function buildPortCurve(
+  src: RFNode<NodeData>,
+  tgt: RFNode<NodeData>,
+  sourceHandle: string | null | undefined,
+  targetHandle: string | null | undefined,
+): THREE.QuadraticBezierCurve3 {
+  const p0 = portWorldPos(src, sourceHandle, false); // source OUTPUT port
+  const p2 = portWorldPos(tgt, targetHandle, true);  // target INPUT port
+  const mid = p0.clone().add(p2).multiplyScalar(0.5);
+  const edgeDir = p2.clone().sub(p0).normalize();
+  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+  const span = p0.distanceTo(p2);
+  const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
+  return new THREE.QuadraticBezierCurve3(p0, p1, p2);
 }
 
 // ---------------------------------------------------------------------------

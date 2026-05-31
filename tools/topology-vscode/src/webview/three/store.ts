@@ -120,7 +120,9 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   createEdge(sourceId, sourceHandleIn, targetId, targetHandleIn) {
     const { nodes, edges } = get();
     const result = buildEdge(nodes, edges, sourceId, sourceHandleIn, targetId, targetHandleIn);
-    if (!result) return null;
+    if (!result) {
+      return null;
+    }
     const nextEdges = [...edges, result.newEdge];
     set({ edges: nextEdges });
     // Populate curve store for the new edge synchronously.

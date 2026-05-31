@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap, claimDelivered, getCurve } from "./pulse-state";
+import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../state/run-status";
 import {
@@ -18,8 +18,10 @@ import {
   nodeWorldPos,
   nodeTopWorldPos,
   ndcToPixel,
+  portDir,
+  portWorldPos,
+  buildPortCurve,
 } from "./geometry-helpers";
-import { CURVE_PARAM_BULGE_FACTOR } from "../../schema/curve-params";
 import type { PickOptions } from "./interaction-controls";
 
 // ---------------------------------------------------------------------------
@@ -82,11 +84,15 @@ export function GraphNode({
   selected,
   hovered,
   faded,
+  selectedId,
+  hoveredId,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
   hovered: boolean;
   faded: boolean;
+  selectedId?: string | null;
+  hoveredId?: string | null;
 }) {
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
@@ -126,7 +132,7 @@ export function GraphNode({
           opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
-      <mesh>
+      <mesh userData={{ nodeId: node.id, ring: true }}>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
           key={faded ? "faded" : "solid"}
@@ -137,7 +143,7 @@ export function GraphNode({
           opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
-      <mesh>
+      <mesh raycast={() => null}>
         <sphereGeometry args={[r * 1.45, 16, 16]} />
         <meshBasicMaterial
           color="#ff5a00"
@@ -147,6 +153,51 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
+      {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
+      {(node.data?.inputs ?? []).map((port) => {
+        const dir = portDir(node, port.name, true);
+        if (!dir) return null;
+        const portId = `${node.id}:in:${port.name}`;
+        const isSel = selectedId === portId;
+        const isHov = hoveredId === portId;
+        return (
+          <mesh
+            key={`in:${port.name}`}
+            position={[dir.x * r, dir.y * r, dir.z * r]}
+            scale={isSel ? 1.5 : isHov ? 1.3 : 1}
+            userData={{ portId, nodeId: node.id, portName: port.name, isInput: true, port: true }}
+          >
+            <sphereGeometry args={[4, 8, 8]} />
+            <meshStandardMaterial
+              color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
+              emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
+              emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
+            />
+          </mesh>
+        );
+      })}
+      {(node.data?.outputs ?? []).map((port) => {
+        const dir = portDir(node, port.name, false);
+        if (!dir) return null;
+        const portId = `${node.id}:out:${port.name}`;
+        const isSel = selectedId === portId;
+        const isHov = hoveredId === portId;
+        return (
+          <mesh
+            key={`out:${port.name}`}
+            position={[dir.x * r, dir.y * r, dir.z * r]}
+            scale={isSel ? 1.5 : isHov ? 1.3 : 1}
+            userData={{ portId, nodeId: node.id, portName: port.name, isInput: false, port: true }}
+          >
+            <sphereGeometry args={[4, 8, 8]} />
+            <meshStandardMaterial
+              color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
+              emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
+              emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
+            />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
@@ -164,15 +215,23 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere that travels along the edge curve at the current pulse t.
+// PulseBead: a bright sphere that travels along the port-to-port edge curve at the current pulse t.
 // Duration is substrate-supplied (pulse.simLatencyMs); no speed constant needed.
-// Driven by useFrame reading getPulseMap() and getCurve() imperatively (no React
-// context needed). The curve is read from the non-React curve store so it updates
-// atomically with position changes in the same drag tick (no React-commit lag).
+// Driven by useFrame reading getPulseMap() imperatively (no React context needed).
+// The curve is rebuilt each frame from src/tgt/handles via buildPortCurve so it tracks
+// node moves in the same drag tick — identical curve to SingleEdgeTube.
 export function PulseBead({
   edgeId,
+  src,
+  tgt,
+  sourceHandle,
+  targetHandle,
 }: {
   edgeId: string;
+  src: RFNode<NodeData>;
+  tgt: RFNode<NodeData>;
+  sourceHandle: string | null | undefined;
+  targetHandle: string | null | undefined;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -184,11 +243,7 @@ export function PulseBead({
       mesh.visible = false;
       return;
     }
-    const curve = getCurve(edgeId);
-    if (!curve) {
-      mesh.visible = false;
-      return;
-    }
+    const curve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
     const duration = pulse.simLatencyMs;
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
@@ -215,75 +270,17 @@ export function PulseBead({
   );
 }
 
-export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean }) {
+export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle, targetHandle }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean; sourceHandle?: string | null; targetHandle?: string | null }) {
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
-  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
+  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}:${sourceHandle ?? ""}:${targetHandle ?? ""}`;
   const { tubeGeo, haloGeo } = useMemo(() => {
-    // Build tube geometry from the curve store (already populated synchronously
-    // by moveNode / load / createEdge). Fall back to constructing locally if the
-    // store entry is somehow absent (e.g. on first mount before load completes).
-    const _curve = getCurve(edgeId) ?? (() => {
-      const _p0 = surfacePoint(src, tgt);
-      const _p2 = surfacePoint(tgt, src);
-      const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
-      const edgeDir = _p2.clone().sub(_p0).normalize();
-      const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-      const span = _p0.distanceTo(_p2);
-      const _p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
-      return new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
-    })();
+    // Port-to-port curve via shared helper — identical curve to what PulseBead samples.
+    const portCurve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
 
-    // Compute the visible t-range [t0, t1] on the original center-to-center quadratic
-    // so the rendered tube starts/ends exactly at each sphere's surface — no filtering,
-    // no CatmullRom detour; every sampled point lies on the original Bezier.
-    const srcCenter = nodeWorldPos(src);
-    const tgtCenter = nodeWorldPos(tgt);
-    const srcR = nodeRadius(src);
-    const tgtR = nodeRadius(tgt);
-
-    const T_STEP = 0.005;
-    // t0: find bracket [tPrev, tCur] where curve exits source sphere, then interpolate exact crossing
-    let t0 = 0;
-    {
-      let tPrev = 0;
-      let distPrev = _curve.getPoint(0).distanceTo(srcCenter);
-      for (let t = T_STEP; t <= 1; t += T_STEP) {
-        const distCur = _curve.getPoint(t).distanceTo(srcCenter);
-        if (distCur >= srcR) {
-          const dDiff = distCur - distPrev;
-          t0 = dDiff === 0 ? t : tPrev + (srcR - distPrev) / dDiff * T_STEP;
-          break;
-        }
-        tPrev = t;
-        distPrev = distCur;
-      }
-    }
-    // t1: find bracket [tCur, tPrev] where curve exits target sphere scanning from t=1, then interpolate
-    let t1 = 1;
-    {
-      let tPrev = 1;
-      let distPrev = _curve.getPoint(1).distanceTo(tgtCenter);
-      for (let t = 1 - T_STEP; t >= 0; t -= T_STEP) {
-        const distCur = _curve.getPoint(t).distanceTo(tgtCenter);
-        if (distCur >= tgtR) {
-          const dDiff = distCur - distPrev;
-          t1 = dDiff === 0 ? t : tPrev + (tgtR - distPrev) / dDiff * (-T_STEP);
-          break;
-        }
-        tPrev = t;
-        distPrev = distCur;
-      }
-    }
-    // Guard: overlapping nodes — fall back to full range
-    if (t0 >= t1) { t0 = 0; t1 = 1; }
-
-    // Sample the ORIGINAL quadratic over [t0, t1] — geometry never goes inside a sphere.
-    const TUBE_RENDER_SAMPLES = 24;
-    const visiblePts: THREE.Vector3[] = [];
-    for (let i = 0; i <= TUBE_RENDER_SAMPLES; i++) {
-      const t = t0 + (t1 - t0) * (i / TUBE_RENDER_SAMPLES);
-      visiblePts.push(_curve.getPoint(t));
-    }
+    // Sample the port-to-port bezier directly — endpoints are already on sphere surfaces,
+    // so no t0/t1 surface-trim needed.
+    const TUBE_RENDER_SAMPLES = 25;
+    const visiblePts = portCurve.getPoints(TUBE_RENDER_SAMPLES);
     const tubeCurve = new THREE.CatmullRomCurve3(visiblePts);
 
     const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 16, 1.5, 6, false);
@@ -319,7 +316,7 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: 
         />
       </mesh>
       {/* Pulse bead: stronger highlight traveling source → target */}
-      {!faded && <PulseBead edgeId={edgeId} />}
+      {!faded && <PulseBead edgeId={edgeId} src={src} tgt={tgt} sourceHandle={sourceHandle} targetHandle={targetHandle} />}
     </>
   );
 }
@@ -339,7 +336,7 @@ export function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} sourceHandle={e.sourceHandle ?? e.data?.sourceHandle ?? null} targetHandle={e.targetHandle ?? e.data?.targetHandle ?? null} />;
       })}
     </>
   );
@@ -538,11 +535,38 @@ export function RaycasterHelper({
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
 
+      if (opts?.ringOnly) {
+        for (const hit of hits) {
+          const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.ring === true) {
+            return (hitObj.userData.nodeId as string) ?? null;
+          }
+        }
+        return null;
+      }
+
+      if (opts?.portOnly) {
+        for (const hit of hits) {
+          const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.portId) {
+            return hitObj.userData.portId as string;
+          }
+        }
+        return null;
+      }
+
       if (opts?.nodesOnly) {
         // Iterate all hits to find the first node that isn't excluded.
+        // A port sphere hit resolves to its node (via userData.nodeId).
         for (const hit of hits) {
           const hitObj = hit.object as THREE.Mesh;
           if (hitObj.userData?.edgeId) continue; // skip edges
+          if (hitObj.userData?.port) {
+            // Port sphere — resolve to its owning node.
+            const nId = hitObj.userData.nodeId as string;
+            if (opts.excludeId && nId === opts.excludeId) continue;
+            return nId;
+          }
           const hitPoint = hitObj.parent;
           if (!hitPoint) continue;
           for (const n of nodes) {
@@ -559,22 +583,47 @@ export function RaycasterHelper({
         return null;
       }
 
-      // Check if the hit mesh is an edge tube (carries userData.edgeId).
-      const hitObj = hits[0].object as THREE.Mesh;
-      if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
-      // Walk up to find a group that has a matching node position.
-      const hitPoint = hitObj.parent;
-      if (!hitPoint) return null;
-      // Match the group position to a node world pos.
-      for (const n of nodes) {
-        const wp = nodeWorldPos(n);
-        if (
-          Math.abs(hitPoint.position.x - wp.x) < 1 &&
-          Math.abs(hitPoint.position.y - wp.y) < 1
-        ) {
-          return n.id;
+      // Default path: scan ALL hits nearest-first, capture nearest of each category.
+      const PORT_HIT_TOL = 8;
+      let portHit: { id: string; dist: number } | null = null;
+      let edgeHit: { id: string; dist: number } | null = null;
+      let nodeHit: { id: string; dist: number } | null = null;
+
+      for (const hit of hits) {
+        const hitObj = hit.object as THREE.Mesh;
+        if (!portHit && hitObj.userData?.portId) {
+          portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
+          continue;
+        }
+        if (!edgeHit && hitObj.userData?.edgeId) {
+          edgeHit = { id: hitObj.userData.edgeId as string, dist: hit.distance };
+          continue;
+        }
+        if (!nodeHit) {
+          const hitPoint = hitObj.parent;
+          if (!hitPoint) continue;
+          for (const n of nodes) {
+            const wp = nodeWorldPos(n);
+            if (
+              Math.abs(hitPoint.position.x - wp.x) < 1 &&
+              Math.abs(hitPoint.position.y - wp.y) < 1
+            ) {
+              nodeHit = { id: n.id, dist: hit.distance };
+              break;
+            }
+          }
         }
       }
+
+      // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
+      if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
+        return portHit.id;
+      }
+      if (edgeHit && nodeHit) {
+        return edgeHit.dist <= nodeHit.dist ? edgeHit.id : nodeHit.id;
+      }
+      if (edgeHit) return edgeHit.id;
+      if (nodeHit) return nodeHit.id;
       return null;
     };
   }, [camera, scene, nodes]);
@@ -665,6 +714,8 @@ export function Scene({
           selected={n.id === selectedId}
           hovered={n.id === hoveredId}
           faded={!!n.data?.faded}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
         />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />

@@ -43,7 +43,10 @@ export function buildEdge(
     dstDef?.inputs.length ? dstDef.inputs : (dstRF.data?.inputs ?? []);
 
   const sourceHandle = sourceHandleIn ?? srcOutputs[0]?.name ?? null;
-  const targetHandle = targetHandleIn ?? dstInputs[0]?.name ?? null;
+  const firstFree = targetHandleIn === null
+    ? dstInputs.find((p) => !edges.some((e) => e.target === targetId && e.targetHandle === p.name && !e.data?.faded))
+    : undefined;
+  const targetHandle = targetHandleIn ?? firstFree?.name ?? null;
 
   if (!sourceHandle || !targetHandle) {
     console.warn(
@@ -54,7 +57,7 @@ export function buildEdge(
     return null;
   }
 
-  if (edges.some((e) => e.target === targetId && e.targetHandle === targetHandle)) {
+  if (edges.some((e) => e.target === targetId && e.targetHandle === targetHandle && !e.data?.faded)) {
     console.warn(
       `[createEdge] Can't connect: input "${targetHandle}" on node "${targetId}" is already wired. ` +
       `Disconnect the existing edge first.`,

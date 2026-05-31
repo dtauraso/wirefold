@@ -41,7 +41,7 @@ const MOVE_SLOP_PX = 6;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging" | "rotating";
+  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring";
   // Pointer-down snapshot
   downX: number;
   downY: number;
@@ -49,6 +49,8 @@ export interface ControlState {
   // Previous pointer position (updated during rotating)
   prevX: number;
   prevY: number;
+  // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
+  emptyDown: boolean;
   // Arcball pivot: captured once at gesture start (world space)
   arcballPivot: THREE.Vector3;
   // Two-cylinder gesture-start snapshot (anchored, world-fixed axes)
@@ -64,6 +66,8 @@ export interface ControlState {
 export interface PickOptions {
   excludeId?: string;
   nodesOnly?: boolean;
+  ringOnly?: boolean;
+  portOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +88,7 @@ export function useInteractionControls(
     phase: "idle",
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
+    emptyDown: false,
     arcballPivot: new THREE.Vector3(0, 0, 0),
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
@@ -97,6 +102,9 @@ export function useInteractionControls(
     nodeCenterAtStart: THREE.Vector3;
     rfPosAtStart: { x: number; y: number };
   } | null>(null);
+
+  // Wiring state: set when pointer-down lands on a port sphere.
+  const wiringRef = useRef<{ nodeId: string; portName: string; isInput: boolean } | null>(null);
 
   // Throttle node-move IPC: one message per animation frame during drag.
   const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number } | null>(null);
@@ -139,6 +147,19 @@ export function useInteractionControls(
     [cameraRef],
   );
 
+  // ------ helpers ------
+
+  /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
+  function parsePortId(pid: string): { nodeId: string; isInput: boolean; portName: string } {
+    const i = pid.indexOf(":");
+    const nodeId = pid.slice(0, i);
+    const rest = pid.slice(i + 1);
+    const j = rest.indexOf(":");
+    const dir = rest.slice(0, j);
+    const portName = rest.slice(j + 1);
+    return { nodeId, isInput: dir === "in", portName };
+  }
+
   // ------ pointer event handlers ------
 
   const onPointerDown = useCallback(
@@ -150,14 +171,27 @@ export function useInteractionControls(
       s.prevX = e.clientX;
       s.prevY = e.clientY;
       s.phase = "pending";
+      s.emptyDown = false;
 
-      // Clear previous node-drag state.
+      // Clear previous drag/wiring state.
       nodeDragRef.current = null;
+      wiringRef.current = null;
 
       // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+
+      // Check for port hit → start port-to-port wiring.
+      const portHit = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
+      if (portHit !== null) {
+        wiringRef.current = parsePortId(portHit);
+        s.phase = "pending";
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        return;
+      }
+
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
+      s.emptyDown = (hitId === null);
 
       if (hitId !== null) {
         // Node hit: record drag origin for node-drag phase.
@@ -210,9 +244,11 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        if (nodeDragRef.current) {
+        if (wiringRef.current) {
+          s.phase = "wiring";
+        } else if (nodeDragRef.current) {
           s.phase = "dragging";
-        } else {
+        } else if (s.emptyDown) {
           // Empty-space drag: start arcball rotation.
           s.phase = "rotating";
         }
@@ -270,21 +306,33 @@ export function useInteractionControls(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const s = state.current;
 
-      // Node drag completed: check for drag-to-wire, else persist position.
-      if (s.phase === "dragging" && nodeDragRef.current) {
-        const nd = nodeDragRef.current;
+      // Wiring completed: if dropped on a port, create an edge.
+      // Edge creation runs for both "wiring" (full drag) and "pending" (short drag under MOVE_SLOP_PX).
+      if (wiringRef.current !== null && (s.phase === "wiring" || s.phase === "pending")) {
+        const src = wiringRef.current;
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-        const sourceId = nd.nodeId;
-        const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: sourceId, nodesOnly: true }) ?? null;
-        if (targetId !== null && targetId !== sourceId) {
-          // WIRE: revert the source node to its start position, then create the edge.
-          onMoveNode(sourceId, nd.rfPosAtStart.x, nd.rfPosAtStart.y);
-          storeCreateEdge(sourceId, null, targetId, null);
-          nodeDragRef.current = null;
-          s.phase = "idle";
-          return;
+        const targetPortId = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
+        if (targetPortId !== null) {
+          const tgt = parsePortId(targetPortId);
+          if (tgt.nodeId !== src.nodeId) {
+            if (!src.isInput && tgt.isInput) {
+              storeCreateEdge(src.nodeId, src.portName, tgt.nodeId, tgt.portName);
+            } else if (src.isInput && !tgt.isInput) {
+              storeCreateEdge(tgt.nodeId, tgt.portName, src.nodeId, src.portName);
+            }
+            // else: both same direction → skip
+          }
         }
+        wiringRef.current = null;
+        s.phase = "idle";
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+        return;
+      }
+
+      // Node drag completed: persist position.
+      if (s.phase === "dragging" && nodeDragRef.current) {
+        const nd = nodeDragRef.current;
         // Normal move: persist position.
         const node = useThreeStore.getState().nodes.find((n) => n.id === nd.nodeId);
         if (node) {
