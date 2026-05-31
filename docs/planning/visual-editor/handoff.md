@@ -7,24 +7,23 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-30 — pan-only square-on camera on branch task/xy-pan-camera)
+## State at handoff (2026-05-30 — pan-only square-on camera + pinch-zoom merged to main)
 
-- **Active branch:** `task/xy-pan-camera`. Pan-only camera committed (commit `feat(camera): pan-only square-on camera`); not yet merged to main.
-- Working tree: `topology.json` modified (pre-existing, untouched this session).
+- **Active branch:** `main`. In sync with origin/main at merge commit `bda401e1`. No task branch in flight. Branch `task/xy-pan-camera` merged and deleted (local + remote).
+- Working tree: `topology.json` modified (pre-existing, untouched across this session and the prior pan-camera session; still unstaged).
 - Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js), `go build ./... && go test ./...` all pass.
 
-### What this session did
+### What merged (merge bda401e1 — branch task/xy-pan-camera, deleted)
 
-**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted local + remote):** simplified the top-of-node billboard to two static lines and moved per-instance state into an HTML overlay; ripped out all pseudocode plumbing.
+- Two-finger trackpad scroll pans the camera in world x/y (`interaction-controls.ts` `onWheelNative`).
+- One-finger arcball rotation and dwell→PanPad removed; RollSlider/PanPad dead code deleted.
+- Camera locked square-on: saved tilt quaternion no longer restored on load (`scene-content.tsx` `CameraRefBridge`); Home button re-levels to look straight at z=0 plane (`camera-ui.tsx` `HomeButton`).
+- Pinch-to-zoom (wheel+ctrlKey → dolly) retained but **FLAGGED FOR REWORK** in the audit (slug `pinch-zoom`): on the square-on camera it should be a straight z-axis zoom toward cursor/plane; feel/speed unverified.
+- Audit: `xy-drag` = working/verified; obsolete `arcball-rotation` + `gesture-activation-model` records and detail pages removed; new `pinch-zoom` record added (needs-rework).
 
-- Top billboard pill now shows two static lines: `label/id + kind`. No sublabel, no double-click inline-edit gesture.
-- New HTML-overlay pill centered on each node sphere shows per-instance VALUE: Input renders its `init` array; ChainInhibitor renders `state.held`; other kinds render nothing. Uses the existing in-house HTML projection pattern (`tools/topology-vscode/src/webview/three/node-override-text.ts`).
-- In-node overlay pill background is `rgba(0,0,0,0.35)` so it matches the top billboard perceptually over the sphere background.
-- drei `<Billboard><Text>` was tried for the overlay and rejected per user request; reverted in favor of the existing HTML projection. No new medium dependency adopted.
-- Pseudo plumbing fully removed: `cmd/pseudo/main.go`, `tools/pseudo/*` (chaininhibitor/input/readgate + tests), the `pseudo`/`hasPseudo` extension IPC in `handle-message.ts`, the `hasPseudo` SPEC field across all `nodes/*/SPEC.md` + `SPEC-FORMAT.md`, and the `pseudo` and `sublabel` fields across spec/view types (`node-defs.ts`/codegen, viewer-state, `EdgeData`). The `inline-edit.ts` module, `beginEditSublabel`, sublabel store actions, and the transient error-banner slot all gone. Net: -3408 lines, +98 lines (one new helper).
-- Audit board updated (commit `373c7f7b`): removed `billboarded-node-labels` (replaced by name+kind + overlay) and `sublabel-inline-edit` (gesture and pseudo plumbing both gone).
+### Prior merge context (still relevant)
 
-Supersedes the prior `task/billboard-inline-edit` work (merge `1e9097c0`): double-click sublabel edit and pseudo-validation IPC are both gone.
+**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified the top-of-node billboard to two static lines and moved per-instance state into an HTML overlay; ripped out all pseudocode plumbing. Net: -3408 lines, +98 lines. Audit board updated (commit `373c7f7b`).
 
 ### Actionable shortlist from the audit board
 
@@ -36,7 +35,7 @@ The audit site index at `docs/planning/visual-editor/feature-audit/index.html` l
 
 ### Next-task candidates (friction-driven)
 
-1. Merge `task/xy-pan-camera` to main: run `tools/strip-branch-local-docs.sh task/xy-pan-camera` first (no branch-local planning docs were added this session, so the strip is a no-op), then merge.
+1. **`pinch-zoom` rework** — square-on camera needs straight z-axis zoom toward cursor/plane; feel/speed unverified; audit record `pinch-zoom` flagged needs-rework.
 2. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
 3. Pre-existing test failures (parked from prior session — investigate before the next task branch).
 
@@ -52,7 +51,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. Camera is pan-only square-on; arcball rotation and dwell-pan removed (task/xy-pan-camera).
+1. Camera is pan-only square-on (merged). Pinch-zoom dolly needs rework — should be straight z-axis zoom toward cursor.
 2. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
 3. **Pre-existing test failures** — parked; investigate before next task branch.
 4. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
@@ -62,6 +61,9 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 ### Key files
 
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`. Top-of-node billboard renders the two-line `label/id + kind` pill; in-node value overlay is delegated to `node-override-text.ts`.
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — `onWheelNative`: two-finger scroll → world x/y pan; ctrlKey branch → dolly (pinch-zoom, needs rework).
+- `tools/topology-vscode/src/webview/three/scene-content.tsx` — `CameraRefBridge`: square-on lock, saved tilt quaternion no longer restored on load.
+- `tools/topology-vscode/src/webview/three/camera-ui.tsx` — `HomeButton`: re-levels camera to look straight at z=0 plane.
 - `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay pill for per-instance values (Input `init`, ChainInhibitor `state.held`); other kinds render nothing. Uses the existing screen-projection pattern, not drei.
 - `tools/topology-vscode/src/webview/three/store.ts` — thin Zustand store; fade in `fade-actions.ts`, edge creation in `edge-creation.ts`.
 - `tools/topology-vscode/src/webview/three/fade.ts` — `computeFade` fixpoint (render-mask only).
