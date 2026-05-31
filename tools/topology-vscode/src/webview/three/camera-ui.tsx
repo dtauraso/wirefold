@@ -1,10 +1,10 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// RollSlider, DollyButtons, PanPad — no scene/substrate logic.
+// DollyButtons, GlobalLabelsToggle, HomeButton — no scene/substrate logic.
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { sceneCenter, worldPerPixel, nodeWorldPos, nodeRadius } from "./geometry-helpers";
+import { sceneCenter, nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -20,70 +20,8 @@ function commitCamera(cam: THREE.PerspectiveCamera) {
 }
 
 // ---------------------------------------------------------------------------
-// Widgets: Roll slider, Dolly buttons, Pan pad
+// Widgets: Dolly buttons, Home button, Global labels toggle
 // ---------------------------------------------------------------------------
-
-/** ROLL SLIDER: vertical slider (range -π..π) that rolls camera about its view axis. */
-export function RollSlider({ cameraRef }: { cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null> }) {
-  const [rollDeg, setRollDeg] = useState(0);
-  const prevRoll = useRef(0);
-
-  const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const cam = cameraRef.current;
-    if (!cam) return;
-    const newDeg = parseFloat(e.target.value);
-    const delta = newDeg - prevRoll.current;
-    prevRoll.current = newDeg;
-    setRollDeg(newDeg);
-
-    // Roll camera about its forward (z) axis (local -z = forward; roll about it).
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-    const q = new THREE.Quaternion().setFromAxisAngle(forward, (delta * Math.PI) / 180);
-    cam.quaternion.premultiply(q);
-    // Commit on each step; scheduleViewSave debounces the actual write.
-    commitCamera(cam);
-  }, [cameraRef]);
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        right: 12,
-        top: "50%",
-        transform: "translateY(-50%)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 4,
-        background: "rgba(0,0,0,0.55)",
-        borderRadius: 8,
-        padding: "8px 6px",
-        pointerEvents: "auto",
-        zIndex: 20,
-        userSelect: "none",
-      }}
-    >
-      <span style={{ color: "#aaa", fontSize: 9, fontFamily: "monospace" }}>ROLL</span>
-      <input
-        type="range"
-        min={-180}
-        max={180}
-        step={1}
-        value={rollDeg}
-        onChange={onChange}
-        style={{
-          writingMode: "vertical-lr",
-          direction: "rtl",
-          width: 20,
-          height: 120,
-          cursor: "pointer",
-          accentColor: "#4af",
-        }}
-      />
-      <span style={{ color: "#aaa", fontSize: 9, fontFamily: "monospace" }}>{rollDeg}°</span>
-    </div>
-  );
-}
 
 /** DOLLY BUTTONS: hold ^/v to dolly in/out. Positive direction = toward scene (z decreases). */
 export function DollyButtons({
@@ -201,9 +139,13 @@ export function HomeButton({
     const dist = (Math.max(sizeX / aspect, sizeY) / 2) / Math.tan(fovRad / 2) + sizeZ / 2;
     const paddedDist = dist * 1.2;
 
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-    const newPos = center.clone().addScaledVector(forward, -paddedDist);
+    // Reset to a square-on view: place the camera straight in front of the
+    // plane (along +z) and level its orientation. This clears any leftover
+    // tilt/roll so panning slides the plane uniformly (no parallax swivel).
+    const newPos = new THREE.Vector3(center.x, center.y, center.z + paddedDist);
     cam.position.copy(newPos);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(center);
     commitCamera(cam);
   }, [cameraRef, nodesRef, aspect]);
 
@@ -271,79 +213,3 @@ export function GlobalLabelsToggle({
   );
 }
 
-/** PAN PAD: small floating pad that appears on dwell; drag to pan the camera. */
-export function PanPad({
-  origin,
-  cameraRef,
-  canvasSize,
-}: {
-  origin: { x: number; y: number };
-  cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
-  canvasSize: { w: number; h: number };
-}) {
-  const startPos = useRef({ x: 0, y: 0 });
-  const camStartPos = useRef(new THREE.Vector3());
-  const dragging = useRef(false);
-
-  const onPadPointerDown = useCallback((e: React.PointerEvent) => {
-    e.stopPropagation();
-    dragging.current = true;
-    startPos.current = { x: e.clientX, y: e.clientY };
-    camStartPos.current = cameraRef.current?.position.clone() ?? new THREE.Vector3();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }, [cameraRef]);
-
-  const onPadPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    e.stopPropagation();
-    const cam = cameraRef.current;
-    if (!cam) return;
-    const dx = e.clientX - startPos.current.x;
-    const dy = e.clientY - startPos.current.y;
-    // worldPerPixel uses true perpendicular distance — correct after rotation.
-    const wpp = worldPerPixel(cam, canvasSize.h);
-    const rightDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
-    const upDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
-    cam.position.copy(camStartPos.current)
-      .addScaledVector(rightDir, -dx * wpp)
-      .addScaledVector(upDir, dy * wpp);
-  }, [cameraRef, canvasSize]);
-
-  const onPadPointerUp = useCallback((e: React.PointerEvent) => {
-    e.stopPropagation();
-    dragging.current = false;
-    // Commit final camera position after the pan gesture ends.
-    if (cameraRef.current) commitCamera(cameraRef.current);
-  }, [cameraRef]);
-
-  const PAD_SIZE = 64;
-  return (
-    <div
-      onPointerDown={onPadPointerDown}
-      onPointerMove={onPadPointerMove}
-      onPointerUp={onPadPointerUp}
-      style={{
-        position: "absolute",
-        left: origin.x - PAD_SIZE / 2,
-        top: origin.y - PAD_SIZE / 2,
-        width: PAD_SIZE,
-        height: PAD_SIZE,
-        background: "rgba(80,120,200,0.35)",
-        border: "1.5px solid rgba(100,160,255,0.7)",
-        borderRadius: "50%",
-        cursor: "grab",
-        pointerEvents: "auto",
-        zIndex: 30,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "rgba(200,220,255,0.8)",
-        fontSize: 10,
-        fontFamily: "monospace",
-        userSelect: "none",
-      }}
-    >
-      PAN
-    </div>
-  );
-}
