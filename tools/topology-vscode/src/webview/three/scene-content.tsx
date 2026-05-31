@@ -573,24 +573,47 @@ export function RaycasterHelper({
         return null;
       }
 
-      // Default path: scan hits nearest-first; port sphere → portId, edge → edgeId, node body → nodeId.
+      // Default path: scan ALL hits nearest-first, capture nearest of each category.
+      const PORT_HIT_TOL = 8;
+      let portHit: { id: string; dist: number } | null = null;
+      let edgeHit: { id: string; dist: number } | null = null;
+      let nodeHit: { id: string; dist: number } | null = null;
+
       for (const hit of hits) {
         const hitObj = hit.object as THREE.Mesh;
-        if (hitObj.userData?.portId) return hitObj.userData.portId as string;
-        if (hitObj.userData?.edgeId) return hitObj.userData.edgeId as string;
-        // Attempt parent-group → node match.
-        const hitPoint = hitObj.parent;
-        if (!hitPoint) continue;
-        for (const n of nodes) {
-          const wp = nodeWorldPos(n);
-          if (
-            Math.abs(hitPoint.position.x - wp.x) < 1 &&
-            Math.abs(hitPoint.position.y - wp.y) < 1
-          ) {
-            return n.id;
+        if (!portHit && hitObj.userData?.portId) {
+          portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
+          continue;
+        }
+        if (!edgeHit && hitObj.userData?.edgeId) {
+          edgeHit = { id: hitObj.userData.edgeId as string, dist: hit.distance };
+          continue;
+        }
+        if (!nodeHit) {
+          const hitPoint = hitObj.parent;
+          if (!hitPoint) continue;
+          for (const n of nodes) {
+            const wp = nodeWorldPos(n);
+            if (
+              Math.abs(hitPoint.position.x - wp.x) < 1 &&
+              Math.abs(hitPoint.position.y - wp.y) < 1
+            ) {
+              nodeHit = { id: n.id, dist: hit.distance };
+              break;
+            }
           }
         }
       }
+
+      // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
+      if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
+        return portHit.id;
+      }
+      if (edgeHit && nodeHit) {
+        return edgeHit.dist <= nodeHit.dist ? edgeHit.id : nodeHit.id;
+      }
+      if (edgeHit) return edgeHit.id;
+      if (nodeHit) return nodeHit.id;
       return null;
     };
   }, [camera, scene, nodes]);
