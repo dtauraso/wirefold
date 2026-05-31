@@ -45,6 +45,7 @@
   let activeTab = "All";
   let activeStatuses = new Set(STATUSES);
   let sortState = 0; // index into SORT_STATES
+  let collapsedSections = new Set();
 
   function badgeClass(status) {
     return "badge badge-" + status;
@@ -117,30 +118,43 @@
       }
     });
 
+    let renderedCount = 0;
+
     groupOrder.forEach(cat => {
       const items = groups[cat];
       if (items.length === 0) return;
+      const collapsed = collapsedSections.has(cat);
       const header = document.createElement("h2");
       header.className = "section-head";
-      header.textContent = cat;
+      header.innerHTML =
+        '<span class="chevron">' + (collapsed ? "▸" : "▾") + '</span>' +
+        escHtml(cat) +
+        ' <span class="section-count">(' + items.length + ')</span>';
+      header.onclick = () => {
+        if (collapsedSections.has(cat)) { collapsedSections.delete(cat); } else { collapsedSections.add(cat); }
+        render();
+      };
       el.appendChild(header);
-      items.forEach(f => {
-        const card = document.createElement("div");
-        card.className = "card";
-        card.innerHTML =
-          '<div class="card-title"><a href="features/' + f.slug + '.html">' + escHtml(f.name) + '</a></div>' +
-          '<div class="card-meta">' +
-            '<span class="' + badgeClass(f.status) + '">' + escHtml(f.status) + '</span>' +
-            '<span class="badge badge-cat">' + escHtml(f.category) + '</span>' +
-            '<span class="badge badge-weight-' + f.cross_cut_weight + '">cross-cut: ' + f.cross_cut_weight + '</span>' +
-          '</div>' +
-          '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>';
-        el.appendChild(card);
-      });
+      if (!collapsed) {
+        items.forEach(f => {
+          renderedCount++;
+          const card = document.createElement("div");
+          card.className = "card";
+          card.innerHTML =
+            '<div class="card-title"><a href="features/' + f.slug + '.html">' + escHtml(f.name) + '</a></div>' +
+            '<div class="card-meta">' +
+              '<span class="' + badgeClass(f.status) + '">' + escHtml(f.status) + '</span>' +
+              '<span class="badge badge-cat">' + escHtml(f.category) + '</span>' +
+              '<span class="badge badge-weight-' + f.cross_cut_weight + '">cross-cut: ' + f.cross_cut_weight + '</span>' +
+            '</div>' +
+            '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>';
+          el.appendChild(card);
+        });
+      }
     });
 
     document.getElementById("meta").textContent =
-      "Re-audited 2026-05-28 · " + data.length + " features · " + (cats.length - 1) + " categories · " + shown + " shown";
+      "Re-audited 2026-05-28 · " + data.length + " features · " + (cats.length - 1) + " categories · " + renderedCount + " shown";
   }
 
   function escHtml(s) {

@@ -106,8 +106,11 @@ header .meta { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 }
 
 /* Section headers in grouped card view */
-.section-head { font-size: 15px; font-weight: 700; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 28px; margin-bottom: 10px; }
+.section-head { font-size: 15px; font-weight: 700; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 28px; margin-bottom: 10px; cursor: pointer; user-select: none; }
+.section-head:hover { color: var(--accent); }
 .cards > .section-head:first-child { margin-top: 4px; }
+.chevron { display: inline-block; width: 1.1em; color: var(--text-muted); font-style: normal; }
+.section-count { font-size: 12px; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
 
 /* Detail page */
 .detail { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
