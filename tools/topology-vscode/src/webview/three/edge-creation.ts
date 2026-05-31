@@ -43,7 +43,10 @@ export function buildEdge(
     dstDef?.inputs.length ? dstDef.inputs : (dstRF.data?.inputs ?? []);
 
   const sourceHandle = sourceHandleIn ?? srcOutputs[0]?.name ?? null;
-  const targetHandle = targetHandleIn ?? dstInputs[0]?.name ?? null;
+  const firstFree = targetHandleIn === null
+    ? dstInputs.find((p) => !edges.some((e) => e.target === targetId && e.targetHandle === p.name))
+    : undefined;
+  const targetHandle = targetHandleIn ?? firstFree?.name ?? null;
 
   if (!sourceHandle || !targetHandle) {
     console.warn(
