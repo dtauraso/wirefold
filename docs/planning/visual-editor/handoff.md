@@ -9,7 +9,7 @@ read this file first (no chat history needed) and proceed.
 
 ## State at handoff (2026-05-30 — arcball/two-cylinder camera rotation merged to main)
 
-- **Active branch:** `main` (latest). No task branch in flight.
+- **Active branch:** `main` HEAD `68c4da40` (Merge task/arcball-rework). No task branch in flight.
 - Working tree: `topology.json` modified (pre-existing, unrelated; not staged).
 - Build/test gate: baseline is green — `go test ./...` all pass; `npx tsc --noEmit` clean.
 
