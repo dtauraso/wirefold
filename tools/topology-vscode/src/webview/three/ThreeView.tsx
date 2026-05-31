@@ -46,6 +46,7 @@ export function ThreeView() {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const captureRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
 
   // Keep refs in sync with state.
@@ -90,7 +91,7 @@ export function ThreeView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, edges, toggleFade]);
 
-  const { onPointerDown, onPointerMove, onPointerUp, onWheel } = useInteractionControls(
+  const { onPointerDown, onPointerMove, onPointerUp, onWheelNative } = useInteractionControls(
     cameraRef,
     canvasSize,
     pickRequest,
@@ -100,6 +101,16 @@ export function ThreeView() {
     storeMoveNode,
     storeCreateEdge,
   );
+
+  // Bind wheel listener as non-passive so e.preventDefault() actually works.
+  // React's synthetic onWheel is passive — preventDefault silently no-ops there,
+  // which lets horizontal two-finger drags trigger browser back-nav.
+  useEffect(() => {
+    const el = captureRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+  }, [onWheelNative]);
 
   // Hover tracking: lightweight raycast on pointer-move to update hoveredId.
   const hoverRafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
@@ -164,12 +175,12 @@ export function ThreeView() {
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
       {/* Canvas + gesture capture layer */}
       <div
+        ref={captureRef}
         style={{ position: "absolute", inset: 0, touchAction: "none" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMoveWithHover}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerLeave}
-        onWheel={onWheel}
       >
         <Canvas
           camera={{ fov: 50, near: 0.1, far: 20000, position: [0, 0, 500] }}

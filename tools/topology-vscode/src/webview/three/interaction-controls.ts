@@ -406,22 +406,38 @@ export function useInteractionControls(
     [cameraRef, flushNodeMove, nodesRef, onMoveNode, onPanPadActive, onSelect, pickRequest, storeCreateEdge],
   );
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
+  // Exposed so ThreeView can attach a non-passive native listener.
+  const onWheelNative = useCallback(
+    (e: WheelEvent) => {
       const cam = cameraRef.current;
       if (!cam) return;
-      // Dolly along view direction. Positive deltaY = scroll-down = zoom out.
-      const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion);
-      // Use distance from camera to scene center (correct after rotation).
-      const center = sceneCenter(nodesRef.current);
-      const dist = cam.position.distanceTo(center);
-      const speed = 0.001 * Math.max(dist, 10);
-      cam.position.addScaledVector(dir, e.deltaY * speed);
+      // Prevent browser scroll / back-nav gestures (requires non-passive listener).
+      e.preventDefault();
+
+      if (e.ctrlKey) {
+        // Pinch gesture → dolly along view direction.
+        // Positive deltaY = pinch-close = zoom out.
+        const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion);
+        const center = sceneCenter(nodesRef.current);
+        const dist = cam.position.distanceTo(center);
+        const speed = 0.001 * Math.max(dist, 10);
+        cam.position.addScaledVector(dir, e.deltaY * speed);
+      } else {
+        // Two-finger drag → pan. Match Pan Pad sign convention:
+        //   dragging right (positive deltaX) moves camera right → scene shifts left.
+        //   dragging down  (positive deltaY) moves camera down  → scene shifts up.
+        const wpp = worldPerPixel(cam, canvasSize.h);
+        const rightDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+        const upDir = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+        cam.position
+          .addScaledVector(rightDir, e.deltaX * wpp)
+          .addScaledVector(upDir, -e.deltaY * wpp);
+      }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, nodesRef],
+    [cameraRef, canvasSize.h, nodesRef],
   );
 
-  return { onPointerDown, onPointerMove, onPointerUp, onWheel };
+  return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
 }
