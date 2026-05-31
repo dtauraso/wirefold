@@ -154,7 +154,7 @@ export function GraphNode({
         const dir = portDir(node, port.name, true);
         if (!dir) return null;
         return (
-          <mesh key={`in:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]} raycast={() => null}>
+          <mesh key={`in:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]}>
             <sphereGeometry args={[4, 8, 8]} />
             <meshStandardMaterial color={strokeColor} />
           </mesh>
@@ -164,7 +164,7 @@ export function GraphNode({
         const dir = portDir(node, port.name, false);
         if (!dir) return null;
         return (
-          <mesh key={`out:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]} raycast={() => null}>
+          <mesh key={`out:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]}>
             <sphereGeometry args={[4, 8, 8]} />
             <meshStandardMaterial color={strokeColor} />
           </mesh>
