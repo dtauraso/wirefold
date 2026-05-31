@@ -5,7 +5,7 @@
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos, pixelToNDC, worldPerPixel } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC } from "./geometry-helpers";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
@@ -41,14 +41,20 @@ const MOVE_SLOP_PX = 6;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging";
+  phase: "idle" | "pending" | "dragging" | "rotating";
   // Pointer-down snapshot
   downX: number;
   downY: number;
   downTime: number;
-  // Previous pointer position (unused after arcball removal; kept for future use)
+  // Previous pointer position (updated during rotating)
   prevX: number;
   prevY: number;
+  // Arcball pivot: captured once at gesture start (world space)
+  arcballPivot: THREE.Vector3;
+  // Two-cylinder gesture-start snapshot (anchored, world-fixed axes)
+  arcStartOffset: THREE.Vector3; // cam.position - pivot at gesture start
+  arcStartUp: THREE.Vector3;     // cam.up at gesture start
+  arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
 }
 
 // ---------------------------------------------------------------------------
@@ -72,11 +78,16 @@ export function useInteractionControls(
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
   onMoveNode: (id: string, x: number, y: number) => void,
   storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
+  selectedIdRef: React.MutableRefObject<string | null>,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
+    arcballPivot: new THREE.Vector3(0, 0, 0),
+    arcStartOffset: new THREE.Vector3(),
+    arcStartUp: new THREE.Vector3(0, 1, 0),
+    arcStartQuat: new THREE.Quaternion(),
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -160,12 +171,33 @@ export function useInteractionControls(
             rfPosAtStart: { x: node.position.x, y: node.position.y },
           };
         }
+      } else {
+        // Empty-space pointerdown: capture arcball pivot once.
+        const selId = selectedIdRef.current;
+        const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
+        if (selNode) {
+          s.arcballPivot = nodeWorldPos(selNode);
+        } else {
+          // No selection: pivot on the point at screen center projected to the z=0 plane,
+          // so the view stays framed instead of swinging around an off-screen world origin.
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const centerOnPlane = unprojectToPlane(cx, cy, rect);
+          s.arcballPivot = centerOnPlane ? centerOnPlane.clone() : new THREE.Vector3(0, 0, 0);
+        }
+        // Snapshot camera state for the anchored two-cylinder rotation.
+        const cam0 = cameraRef.current;
+        if (cam0) {
+          cam0.updateMatrixWorld(true);
+          s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
+          s.arcStartUp = cam0.up.clone();
+          s.arcStartQuat = cam0.quaternion.clone();
+        }
       }
-      // Empty-space pointerdown: no rotation, no dwell timer — just capture.
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [nodesRef, pickRequest, unprojectToPlane],
+    [cameraRef, nodesRef, pickRequest, unprojectToPlane],
   );
 
   const onPointerMove = useCallback(
@@ -178,11 +210,12 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        // Transition to drag only when a node was hit; empty-space move does nothing.
         if (nodeDragRef.current) {
           s.phase = "dragging";
+        } else {
+          // Empty-space drag: start arcball rotation.
+          s.phase = "rotating";
         }
-        // Empty-space drag: stay in "pending" — no arcball.
       }
 
       if (s.phase === "dragging" && nodeDragRef.current) {
@@ -206,8 +239,31 @@ export function useInteractionControls(
         s.prevX = e.clientX;
         s.prevY = e.clientY;
       }
+
+      if (s.phase === "rotating") {
+        const cam = cameraRef.current;
+        if (cam) {
+          const pivot = s.arcballPivot;
+          const ROT_SPEED = 0.005;
+          // Two cylinders: both rotation axes lie in the node's plane (z=0) through
+          // the pivot. Horizontal drag rotates about world Y, vertical drag about
+          // world X. Decoupled, world-fixed axes; anchored to total drag from the
+          // down-point so a closed loop returns to start (no accumulation).
+          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> world Y
+          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> world X
+          const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angX);
+          const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
+          const rot = qy.clone().multiply(qx);
+          const rotInv = rot.clone().invert();
+          cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
+          cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
+          cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
+          cam.updateMatrixWorld(true);
+          commitCamera(cam);
+        }
+      }
     },
-    [nodesRef, onMoveNode, scheduleNodeMove, unprojectToPlane],
+    [cameraRef, nodesRef, onMoveNode, scheduleNodeMove, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -248,6 +304,13 @@ export function useInteractionControls(
         return;
       }
 
+      // Arcball rotation completed: reset state without triggering select.
+      if (s.phase === "rotating") {
+        nodeDragRef.current = null;
+        s.phase = "idle";
+        return;
+      }
+
       nodeDragRef.current = null;
 
       if (s.phase === "pending") {
@@ -278,24 +341,36 @@ export function useInteractionControls(
       e.preventDefault();
 
       if (e.ctrlKey) {
-        // Pinch-to-zoom: multiplicative dolly on height above the z=0 plane.
-        // Exponential so a step feels uniform at every scale (industry standard).
-        // Base is the single speed knob; >1 deltaY (pinch out) zooms out.
+        // Pinch-to-zoom toward the cursor: multiplicatively scale the camera's
+        // distance to the world point under the cursor on the z=0 plane, keeping
+        // that point fixed on screen. Exponential (uniform per step). >1 deltaY
+        // (pinch out) zooms out. Works at any tilt and stays consistent with the
+        // arcball, which also anchors on a plane point.
         const ZOOM_BASE = 1.01;
-        const factor = Math.pow(ZOOM_BASE, e.deltaY);
-        const minHeight = 5; // never cross/touch the plane
-        cam.position.z = Math.max(minHeight, cam.position.z * factor);
+        let factor = Math.pow(ZOOM_BASE, e.deltaY);
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const target = unprojectToPlane(e.clientX, e.clientY, rect);
+        if (target) {
+          const minHeight = 5; // never cross/touch the plane
+          if (cam.position.z * factor < minHeight) factor = minHeight / cam.position.z;
+          cam.position.sub(target).multiplyScalar(factor).add(target);
+        }
       } else {
-        // Camera is locked square-on (looking straight down -z toward the z=0 plane,
-        // up = +y). Pan directly in world x/y — no matrix-column extraction needed.
-        const wpp = worldPerPixel(cam, canvasSize.h);
-        cam.position.x += e.deltaX * wpp;
-        cam.position.y -= e.deltaY * wpp;
+        // Two-finger scroll pans along the z=0 plane: translate the camera by the
+        // world-space vector between the plane point under the cursor and the point
+        // under cursor+scroll-delta. Stays in the plane, tilt-aware (equals the old
+        // direct x/y pan when square-on).
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const a = unprojectToPlane(e.clientX, e.clientY, rect);
+        const b = unprojectToPlane(e.clientX + e.deltaX, e.clientY + e.deltaY, rect);
+        if (a && b) {
+          cam.position.add(b.sub(a));
+        }
       }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, canvasSize.h, nodesRef],
+    [cameraRef, nodesRef, unprojectToPlane],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
