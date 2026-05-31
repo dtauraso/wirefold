@@ -1,11 +1,10 @@
 // ThreeView — 3D replica of the RF graph with interaction grammar:
 //   - PerspectiveCamera (parallax + depth cues)
 //   - Click → raycast pick/select
-//   - Drag → arcball rotation (pivot at picked 3D point or scene center)
-//   - Scroll → dolly along view axis
+//   - Node drag → move node on z=0 plane; drop on another node → create edge
+//   - Two-finger scroll → pan; pinch → dolly along view axis
 //   - Roll slider widget (screen-plane camera roll)
 //   - Dolly buttons (hold-to-dolly)
-//   - Pan pad (200ms dwell over empty canvas → draggable pad)
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
@@ -14,7 +13,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { RollSlider, DollyButtons, PanPad, GlobalLabelsToggle, HomeButton } from "./camera-ui";
+import { DollyButtons, GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
@@ -36,7 +35,6 @@ export function ThreeView() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
-  const [panPadOrigin, setPanPadOrigin] = useState<{ x: number; y: number } | null>(null);
   const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
     () => viewerState.labelsGlobalHidden ?? false,
   );
@@ -96,7 +94,6 @@ export function ThreeView() {
     canvasSize,
     pickRequest,
     setSelectedId,
-    setPanPadOrigin,
     nodesRef,
     storeMoveNode,
     storeCreateEdge,
@@ -331,19 +328,10 @@ export function ThreeView() {
       })}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
-      <RollSlider cameraRef={cameraRef} />
       <DollyButtons cameraRef={cameraRef} nodesRef={nodesRef} />
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
 
-      {/* Pan pad — shown on dwell */}
-      {panPadOrigin && (
-        <PanPad
-          origin={panPadOrigin}
-          cameraRef={cameraRef}
-          canvasSize={canvasSize}
-        />
-      )}
     </div>
   );
 }

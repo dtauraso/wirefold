@@ -62,6 +62,7 @@ export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeD
     const zForW = gw / 2 / aspect / Math.tan(fovRad / 2);
     const z = Math.max(zForH, zForW) + 50;
     persp.position.set(cx, cy, z);
+    persp.up.set(0, 1, 0);
     persp.lookAt(cx, cy, 0);
     persp.near = 0.1;
     persp.far = 20000;
@@ -306,15 +307,17 @@ export function CameraRefBridge({
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera;
     cameraRef.current = cam;
-    // Restore saved 3D camera state when available.
+    // Restore saved position but NEVER apply a saved quaternion — the camera is
+    // permanently locked square-on (looking straight down -z toward the z=0 plane).
     // NOTE: initialCamera3d is a dependency so that if load() populates
     // viewerState.camera3d after the first mount (which happens asynchronously
-    // on reload), the effect re-runs and the saved orientation is applied.
+    // on reload), the effect re-runs and the saved position is applied.
     if (initialCamera3d) {
       cam.position.set(...initialCamera3d.position);
-      cam.quaternion.set(...initialCamera3d.quaternion);
-      cam.updateMatrixWorld(true);
     }
+    cam.up.set(0, 1, 0);
+    cam.lookAt(cam.position.x, cam.position.y, 0);
+    cam.updateMatrixWorld(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera, cameraRef, initialCamera3d]);
   return null;

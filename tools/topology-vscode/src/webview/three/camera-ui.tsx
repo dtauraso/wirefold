@@ -201,9 +201,13 @@ export function HomeButton({
     const dist = (Math.max(sizeX / aspect, sizeY) / 2) / Math.tan(fovRad / 2) + sizeZ / 2;
     const paddedDist = dist * 1.2;
 
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-    const newPos = center.clone().addScaledVector(forward, -paddedDist);
+    // Reset to a square-on view: place the camera straight in front of the
+    // plane (along +z) and level its orientation. This clears any leftover
+    // tilt/roll so panning slides the plane uniformly (no parallax swivel).
+    const newPos = new THREE.Vector3(center.x, center.y, center.z + paddedDist);
     cam.position.copy(newPos);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(center);
     commitCamera(cam);
   }, [cameraRef, nodesRef, aspect]);
 
