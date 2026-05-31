@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap, claimDelivered, getCurve } from "./pulse-state";
+import { getPulseMap, claimDelivered } from "./pulse-state";
 import { vscode } from "../vscode-api";
 import { getPauseAdjustedNow } from "../state/run-status";
 import {
@@ -20,8 +20,8 @@ import {
   ndcToPixel,
   portDir,
   portWorldPos,
+  buildPortCurve,
 } from "./geometry-helpers";
-import { CURVE_PARAM_BULGE_FACTOR } from "../../schema/curve-params";
 import type { PickOptions } from "./interaction-controls";
 
 // ---------------------------------------------------------------------------
@@ -187,15 +187,23 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere that travels along the edge curve at the current pulse t.
+// PulseBead: a bright sphere that travels along the port-to-port edge curve at the current pulse t.
 // Duration is substrate-supplied (pulse.simLatencyMs); no speed constant needed.
-// Driven by useFrame reading getPulseMap() and getCurve() imperatively (no React
-// context needed). The curve is read from the non-React curve store so it updates
-// atomically with position changes in the same drag tick (no React-commit lag).
+// Driven by useFrame reading getPulseMap() imperatively (no React context needed).
+// The curve is rebuilt each frame from src/tgt/handles via buildPortCurve so it tracks
+// node moves in the same drag tick — identical curve to SingleEdgeTube.
 export function PulseBead({
   edgeId,
+  src,
+  tgt,
+  sourceHandle,
+  targetHandle,
 }: {
   edgeId: string;
+  src: RFNode<NodeData>;
+  tgt: RFNode<NodeData>;
+  sourceHandle: string | null | undefined;
+  targetHandle: string | null | undefined;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -207,11 +215,7 @@ export function PulseBead({
       mesh.visible = false;
       return;
     }
-    const curve = getCurve(edgeId);
-    if (!curve) {
-      mesh.visible = false;
-      return;
-    }
+    const curve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
     const duration = pulse.simLatencyMs;
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
@@ -242,19 +246,8 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
   const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}:${sourceHandle ?? ""}:${targetHandle ?? ""}`;
   const { tubeGeo, haloGeo } = useMemo(() => {
-    // Port-to-port endpoints: p0 is on the source output port sphere surface,
-    // p2 is on the target input port sphere surface.
-    // portWorldPos falls back to node center when handle is null/undefined/not found.
-    const p0 = portWorldPos(src, sourceHandle, false); // source uses OUTPUT port
-    const p2 = portWorldPos(tgt, targetHandle, true);  // target uses INPUT port
-
-    // Build quadratic bezier from port endpoints with bulge perpendicular to chord.
-    const mid = p0.clone().add(p2).multiplyScalar(0.5);
-    const edgeDir = p2.clone().sub(p0).normalize();
-    const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-    const span = p0.distanceTo(p2);
-    const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
-    const portCurve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
+    // Port-to-port curve via shared helper — identical curve to what PulseBead samples.
+    const portCurve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
 
     // Sample the port-to-port bezier directly — endpoints are already on sphere surfaces,
     // so no t0/t1 surface-trim needed.
@@ -295,7 +288,7 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle
         />
       </mesh>
       {/* Pulse bead: stronger highlight traveling source → target */}
-      {!faded && <PulseBead edgeId={edgeId} />}
+      {!faded && <PulseBead edgeId={edgeId} src={src} tgt={tgt} sourceHandle={sourceHandle} targetHandle={targetHandle} />}
     </>
   );
 }

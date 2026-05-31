@@ -139,6 +139,27 @@ export function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
   return new THREE.Vector3((minX + maxX) / 2, -(minY + maxY) / 2, 0);
 }
 
+/**
+ * Build the port-to-port QuadraticBezierCurve3 for an edge.
+ * p0 is on the source OUTPUT port sphere surface, p2 is on the target INPUT port sphere surface.
+ * Used by both SingleEdgeTube and PulseBead so the bead travels the identical visible curve.
+ */
+export function buildPortCurve(
+  src: RFNode<NodeData>,
+  tgt: RFNode<NodeData>,
+  sourceHandle: string | null | undefined,
+  targetHandle: string | null | undefined,
+): THREE.QuadraticBezierCurve3 {
+  const p0 = portWorldPos(src, sourceHandle, false); // source OUTPUT port
+  const p2 = portWorldPos(tgt, targetHandle, true);  // target INPUT port
+  const mid = p0.clone().add(p2).multiplyScalar(0.5);
+  const edgeDir = p2.clone().sub(p0).normalize();
+  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+  const span = p0.distanceTo(p2);
+  const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
+  return new THREE.QuadraticBezierCurve3(p0, p1, p2);
+}
+
 // ---------------------------------------------------------------------------
 // Pulse geometry
 // ---------------------------------------------------------------------------
