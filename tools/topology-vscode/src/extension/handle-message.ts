@@ -125,6 +125,10 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "fade":
       runner.writeStdin(JSON.stringify({ type: "fade", edges: msg.edges }));
       return;
+    case "deleteEdge":
+      await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "deleteEdge-forward", target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+      runner.writeStdin(JSON.stringify({ type: "deleteEdge", target: msg.target, targetHandle: msg.targetHandle }));
+      return;
     case "node-move":
       runner.writeStdin(JSON.stringify({ type: "node-move", nodeId: msg.nodeId, x: msg.x, y: msg.y, z: msg.z ?? 0 }));
       return;

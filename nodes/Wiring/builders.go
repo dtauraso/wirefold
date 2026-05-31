@@ -52,8 +52,10 @@ type PortBindings struct {
 	single           map[string]chan int
 	multi            map[string][]chan int
 	singlePaced      map[string]*PacedWire
+	singleRule       map[string]SendRule   // per-port send rule for singlePaced
 	multiPaced       map[string][]*PacedWire
 	multiPacedHandle map[string][]string // per-element source handle for multiPaced
+	multiRule        map[string][]SendRule // per-element send rule for multiPaced
 }
 
 func newPortBindings() PortBindings {
@@ -61,14 +63,22 @@ func newPortBindings() PortBindings {
 		single:           map[string]chan int{},
 		multi:            map[string][]chan int{},
 		singlePaced:      map[string]*PacedWire{},
+		singleRule:       map[string]SendRule{},
 		multiPaced:       map[string][]*PacedWire{},
 		multiPacedHandle: map[string][]string{},
+		multiRule:        map[string][]SendRule{},
 	}
 }
 
 func (pb *PortBindings) SetSingle(name string, ch chan int) { pb.single[name] = ch }
 
 func (pb *PortBindings) SetSinglePaced(name string, pw *PacedWire) { pb.singlePaced[name] = pw }
+
+// SetSinglePacedRule binds a single paced output with its per-edge send rule.
+func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule SendRule) {
+	pb.singlePaced[name] = pw
+	pb.singleRule[name] = rule
+}
 
 func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 	pb.multi[name] = append(pb.multi[name], ch)
@@ -77,13 +87,15 @@ func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 func (pb *PortBindings) AppendMultiPaced(name string, pw *PacedWire) {
 	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
 	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], name)
+	pb.multiRule[name] = append(pb.multiRule[name], RuleConsumeGated)
 }
 
 // AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
-// source handle (e.g. "ToNext0") so trace events carry the indexed name.
-func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire) {
+// source handle (e.g. "ToNext0") and the per-edge send rule.
+func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire, rule SendRule) {
 	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
 	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], handle)
+	pb.multiRule[name] = append(pb.multiRule[name], rule)
 }
 
 func (pb *PortBindings) In(name string) <-chan int {
@@ -193,7 +205,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			}
 		case PortOut:
 			if pw := pb.singlePaced[port.Name]; pw != nil {
-				f.Set(reflect.ValueOf(NewOutPaced(pw, ctx, name, port.Name, tr)))
+				f.Set(reflect.ValueOf(NewOutPaced(pw, ctx, name, port.Name, tr, pb.singleRule[port.Name])))
 			} else {
 				ch := pb.Out(port.Name)
 				f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: port.Name, trace: tr}))
@@ -201,13 +213,18 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		case PortOutMulti:
 			if pws := pb.multiPaced[port.Name]; len(pws) > 0 {
 				handles := pb.multiPacedHandle[port.Name]
+				rules := pb.multiRule[port.Name]
 				outs := make(OutMulti, len(pws))
 				for i, pw := range pws {
 					handle := port.Name
 					if i < len(handles) {
 						handle = handles[i]
 					}
-					outs[i] = NewOutPaced(pw, ctx, name, handle, tr)
+					var rule SendRule
+					if i < len(rules) {
+						rule = rules[i]
+					}
+					outs[i] = NewOutPaced(pw, ctx, name, handle, tr, rule)
 				}
 				f.Set(reflect.ValueOf(outs))
 			} else {

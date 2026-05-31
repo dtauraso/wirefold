@@ -137,6 +137,19 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
 
   deleteEdge(id) {
     const { edges } = get();
+    const edge = edges.find((ed) => ed.id === id);
+    // Tell Go to drop this wire's in-flight pulse and free its parked sender,
+    // keyed by the destination slot identity (target + targetHandle).
+    if (edge) {
+      postLog("deleteEdge-post", { edgeId: id, target: edge.target, targetHandle: edge.targetHandle ?? "", found: true });
+      vscode.postMessage({
+        type: "deleteEdge",
+        target: edge.target,
+        targetHandle: edge.targetHandle ?? "",
+      });
+    } else {
+      postLog("deleteEdge-post", { edgeId: id, found: false });
+    }
     const nextEdges = edges.filter((ed) => ed.id !== id);
     set({ edges: nextEdges });
     clearPulse(id);

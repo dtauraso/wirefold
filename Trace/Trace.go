@@ -172,6 +172,41 @@ func (t *Trace) Slot(nodeId, port, phase string, value int, hasValue bool) {
 	t.ch <- Event{Kind: KindSlot, Node: nodeId, Port: port, SlotPhase: phase, Value: value, hasValue: hasValue}
 }
 
+// Breadcrumb writes a free-form diagnostic line directly to the sink
+// (if any) in real time. It is logging-only: breadcrumbs are NOT added
+// to the buffered event slice, do NOT receive a Step ordinal, and are
+// outside the closed trace vocabulary used for replay/parity. The line
+// shape is {"src":"go","kind":"breadcrumb","label":...,"node":...,
+// "port":...,"value":...} with empty/zero fields omitted, so the TS
+// relay can route it to go.jsonl alongside real trace events.
+//
+// Used to trace one-off control events (e.g. edge delete / wire reset)
+// that have no place in the recv/fire/send/slot/done lifecycle.
+func (t *Trace) Breadcrumb(label, node, port, value string) {
+	if t == nil || t.sink == nil {
+		return
+	}
+	b, err := marshalBreadcrumb(label, node, port, value)
+	if err != nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, _ = t.sink.Write(b)
+	_, _ = t.sink.Write([]byte{'\n'})
+}
+
+func marshalBreadcrumb(label, node, port, value string) ([]byte, error) {
+	type breadcrumb struct {
+		Kind  string `json:"kind"`
+		Label string `json:"label"`
+		Node  string `json:"node,omitempty"`
+		Port  string `json:"port,omitempty"`
+		Value string `json:"value,omitempty"`
+	}
+	return json.Marshal(breadcrumb{Kind: "breadcrumb", Label: label, Node: node, Port: port, Value: value})
+}
+
 // Close stops the drain goroutine. Call after every node's Update
 // has returned (sync.WaitGroup.Wait in main). Idempotent.
 func (t *Trace) Close() {

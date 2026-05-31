@@ -157,7 +157,23 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 				if !found {
 					continue
 				}
-				pw.NotifyDelivered()
+				pw.NotifyDelivered(ctx) //nolint:errcheck // ErrCanceled is handled by loop exit
+			case "deleteEdge":
+				if msg.Target == "" || msg.TargetHandle == "" {
+					continue
+				}
+				tr.Breadcrumb("deleteEdge-recv", msg.Target, msg.TargetHandle, "")
+				destKey := msg.Target + "." + msg.TargetHandle
+				pw, found := slotReg[destKey]
+				if !found {
+					tr.Breadcrumb("deleteEdge-notfound", msg.Target, msg.TargetHandle, destKey)
+					continue
+				}
+				// "reset" breadcrumb emitted here (not from PacedWire.Reset, which has
+				// no Trace reference) carrying the wire's authoritative slot identity.
+				tr.Breadcrumb("reset", pw.Target, pw.TargetHandle, "")
+				tr.Breadcrumb("deleteEdge-reset", msg.Target, msg.TargetHandle, destKey)
+				pw.Reset()
 			case "fade":
 				// Build a set of faded edge ids for O(1) lookup.
 				faded := make(map[string]bool, len(msg.Edges))

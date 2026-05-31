@@ -23,6 +23,11 @@ func (n *Node) Update(ctx context.Context) {
 		}
 		n.Fire()
 		if n.ToReadGate.TrySend(n.Init[i%len(n.Init)]) {
+			if n.ToReadGate.Gated() {
+				if !n.ToReadGate.WaitConsumed() {
+					return
+				}
+			}
 			i++
 			if !n.Repeat && i >= len(n.Init) {
 				return

@@ -62,6 +62,7 @@ type specEdge struct {
 	MidpointOffset float64 `json:"midpointOffset" wire:"prop,optional,tsType:number"`
 	ArrowStyle     string  `json:"arrowStyle"     wire:"prop,optional,tsType:ArrowStyle"`
 	Concurrent     *bool   `json:"concurrent"     wire:"prop,optional,tsType:boolean"`
+	SendRule       string  `json:"sendRule"       wire:"prop,optional,tsType:SendRule"`
 	Kind           string  `json:"kind"           wire:"prop,required,tsType:EdgeKind"`
 	Source         string  `json:"source"`
 	SourceHandle   string  `json:"sourceHandle"`
@@ -194,6 +195,9 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
 	outboundHandle := map[string]map[string][]string{}
+	// outboundRule: source node id → port name → []SendRule (same order as outbound).
+	// Per-edge send rule read from the spec; defaults to consumeGated when absent.
+	outboundRule := map[string]map[string][]SendRule{}
 	for _, e := range spec.Edges {
 		if inbound[e.Target] == nil {
 			inbound[e.Target] = map[string]string{}
@@ -204,13 +208,21 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 		if outboundHandle[e.Source] == nil {
 			outboundHandle[e.Source] = map[string][]string{}
 		}
+		if outboundRule[e.Source] == nil {
+			outboundRule[e.Source] = map[string][]SendRule{}
+		}
 		inbound[e.Target][e.TargetHandle] = e.Target + "." + e.TargetHandle
 		srcKey := e.SourceHandle
 		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source]); isMulti {
 			srcKey = base
 		}
+		rule := SendRule(e.SendRule)
+		if rule == "" {
+			rule = RuleConsumeGated
+		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
 		outboundHandle[e.Source][srcKey] = append(outboundHandle[e.Source][srcKey], e.SourceHandle)
+		outboundRule[e.Source][srcKey] = append(outboundRule[e.Source][srcKey], rule)
 	}
 
 	// Build each node.
@@ -233,19 +245,28 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 				if len(labels) > 0 {
 					// Look up wire by destination of the first outbound edge.
 					// For fan-in, the destination port owns the wire.
-					pb.SetSinglePaced(port.Name, edgeWire[labels[0]])
+					rule := RuleConsumeGated
+					if rules := outboundRule[n.ID][port.Name]; len(rules) > 0 {
+						rule = rules[0]
+					}
+					pb.SetSinglePacedRule(port.Name, edgeWire[labels[0]], rule)
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
 			case PortOutMulti:
 				labels := outbound[n.ID][port.Name]
 				handles := outboundHandle[n.ID][port.Name]
+				rules := outboundRule[n.ID][port.Name]
 				for i, lbl := range labels {
 					handle := port.Name
 					if i < len(handles) {
 						handle = handles[i]
 					}
-					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl])
+					rule := RuleConsumeGated
+					if i < len(rules) {
+						rule = rules[i]
+					}
+					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}

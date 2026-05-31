@@ -1,6 +1,6 @@
 // Parsers for Node, Edge, NodeSpec, SpecSegment.
 
-import { EDGE_KINDS } from "./types";
+import { EDGE_KINDS, SEND_RULES } from "./types";
 import type { Port } from "./types";
 import type {
   Edge,
@@ -127,11 +127,15 @@ export function parseEdge(v: unknown, path: string): Edge {
     arrowStyle: opt(o.arrowStyle, (x) =>
       oneOf(x, ["filled", "open"] as const, `${path}.arrowStyle`),
     ),
+    // sendRule: optional SendRule enum — per-edge send policy (consumeGated default)
+    sendRule: opt(o.sendRule, (x) =>
+      oneOf(x, SEND_RULES, `${path}.sendRule`),
+    ),
     data: o.data,
   };
   // Loop over WIRE_PROPS for simple scalar types (string, number, boolean).
   for (const [key, def] of Object.entries(WIRE_PROPS)) {
-    if (key === "kind" || key === "arrowStyle") continue; // handled explicitly above
+    if (key === "kind" || key === "arrowStyle" || key === "sendRule") continue; // handled explicitly above
     const val = o[key];
     if (def.required) {
       if (def.tsType === "string") edge[key] = str(val, `${path}.${key}`);

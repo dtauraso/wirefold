@@ -27,6 +27,20 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
   return undefined;
 }
 
+// tryParseBreadcrumb recognizes the Go Trace.Breadcrumb line shape
+// ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only and
+// carry no step ordinal, so tryParseTraceEvent rejects them.
+function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
+  if (!line.startsWith("{")) return undefined;
+  try {
+    const obj = JSON.parse(line);
+    if (typeof obj === "object" && obj !== null && obj.kind === "breadcrumb") {
+      return obj as Record<string, unknown>;
+    }
+  } catch { /* not JSON */ }
+  return undefined;
+}
+
 export class BuildAndRunRunner {
   private proc: cp.ChildProcess | undefined;
   // Explicit cancel flag — distinguishing cancellation by signal name races
@@ -126,6 +140,18 @@ export class BuildAndRunRunner {
     while ((nl = this.stdoutBuf.indexOf("\n")) !== -1) {
       const line = this.stdoutBuf.slice(0, nl);
       this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
+      // Breadcrumb lines (logging-only; no step ordinal, outside the closed
+      // trace vocabulary) are relayed to go.jsonl but never dispatched to the
+      // pump — the pump's assertNever would throw on an unknown kind.
+      const crumb = tryParseBreadcrumb(line);
+      if (crumb) {
+        if (this.probeFile) {
+          try {
+            fs.appendFileSync(this.probeFile, JSON.stringify({ ts_ms: Date.now(), src: "go", ...crumb }) + "\n", "utf8");
+          } catch { /* swallow */ }
+        }
+        continue;
+      }
       const ev = tryParseTraceEvent(line);
       if (ev && this.onTraceEvent) {
         const _evNode = 'node' in ev ? ev.node : ('nodeId' in ev ? (ev as { nodeId?: string }).nodeId : undefined);

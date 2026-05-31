@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap, claimDelivered } from "./pulse-state";
+import { getPulseMap, claimDelivered, lastDeliveredAt } from "./pulse-state";
 import { vscode } from "../vscode-api";
 import { postLog } from "../log/post";
 import { getPauseAdjustedNow } from "../state/run-status";
@@ -249,12 +249,19 @@ export function PulseBead({
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
       mesh.visible = false;
+      // Capture the prior claim before claiming, so we can report WHY a claim
+      // failed: already-claimed-for-this-startTime (duplicate RAF tick at t>=1)
+      // vs. claimed-for-a-different-startTime (stale pulse instance).
+      const priorClaim = lastDeliveredAt(edgeId);
       const claimed = claimDelivered(edgeId, pulse.startTime);
+      const claimReason = claimed
+        ? "first-claim"
+        : (priorClaim === pulse.startTime ? "already-claimed-this-startTime" : "claimed-other-startTime");
       // Use Go-authoritative slot identity from pulse data; fall back to React
       // prop only if the pulse carries empty strings (old binary compat).
       const resolvedTarget = (pulse.target !== "") ? pulse.target : tgt.id;
       const resolvedHandle = (pulse.targetHandle !== "") ? pulse.targetHandle : (targetHandle ?? "");
-      postLog("pulse-deliver", { edgeId, target: pulse.target, targetHandle: pulse.targetHandle, propHandle: targetHandle ?? null, startTime: pulse.startTime, claimed, resolvedTarget, resolvedHandle, posted: claimed && !!resolvedHandle });
+      postLog("pulse-deliver", { edgeId, target: pulse.target, targetHandle: pulse.targetHandle, propHandle: targetHandle ?? null, startTime: pulse.startTime, claimed, claimReason, priorClaim: priorClaim ?? null, resolvedHandleMissing: !resolvedHandle, resolvedTarget, resolvedHandle, posted: claimed && !!resolvedHandle });
       if (claimed) {
         if (resolvedHandle) {
           vscode.postMessage({ type: "delivered", target: resolvedTarget, targetHandle: resolvedHandle });
