@@ -66,6 +66,10 @@ header .meta { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 .card-title a:hover { color: var(--accent); }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .card-proposal { font-size: 12px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-deps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.deps-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.dep-pill { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px; font-size: 12px; color: var(--text-muted); text-decoration: none; }
+.dep-pill:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
 
 /* Badges */
 .badge { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }

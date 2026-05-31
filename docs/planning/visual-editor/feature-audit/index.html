@@ -25,6 +25,7 @@
 <script>
 (function() {
   const data = window.AUDIT_DATA;
+  const slugToName = Object.fromEntries(data.map(d => [d.slug, d.name]));
 
   const STATUSES = ["working","untested","restore-parity","half-wired","accepted-for-build","proposal","dead-code"];
   const STATUS_LABELS = {
@@ -147,7 +148,12 @@
               '<span class="badge badge-cat">' + escHtml(f.category) + '</span>' +
               '<span class="badge badge-weight-' + f.cross_cut_weight + '">cross-cut: ' + f.cross_cut_weight + '</span>' +
             '</div>' +
-            '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>';
+            '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>' +
+            (f.depends_on && f.depends_on.length > 0
+              ? '<div class="card-deps"><span class="deps-label">depends on:</span>' +
+                f.depends_on.map(slug => '<a class="dep-pill" href="features/' + slug + '.html">' + escHtml(slugToName[slug] || slug) + '</a>').join('') +
+                '</div>'
+              : '');
           el.appendChild(card);
         });
       }
