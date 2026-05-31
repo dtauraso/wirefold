@@ -137,7 +137,7 @@ export function GraphNode({
           opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
-      <mesh>
+      <mesh raycast={() => null}>
         <sphereGeometry args={[r * 1.45, 16, 16]} />
         <meshBasicMaterial
           color="#ff5a00"

@@ -10,6 +10,7 @@ import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
+import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -166,6 +167,7 @@ export function useInteractionControls(
 
       // Check for ring hit on the selected node → start wiring.
       const ringHit = pickRequest.current?.(ndcX, ndcY, { ringOnly: true }) ?? null;
+      postLog("wire-ringpick", { ringHit: ringHit ?? undefined, selectedId: selectedIdRef.current ?? undefined, hitId: hitId ?? undefined });
       if (ringHit !== null && ringHit === selectedIdRef.current) {
         wiringRef.current = { sourceId: ringHit };
         s.phase = "pending";
