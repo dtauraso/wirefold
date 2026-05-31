@@ -307,14 +307,22 @@ export function CameraRefBridge({
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera;
     cameraRef.current = cam;
-    // Restore saved position but NEVER apply a saved quaternion — the camera is
-    // permanently locked square-on (looking straight down -z toward the z=0 plane).
+    // Restore saved camera state. If a quaternion is saved, apply it (preserves
+    // any arcball rotation). If no quaternion is saved (fresh/default), fall back
+    // to the square-on lock (looking straight down -z toward the z=0 plane).
     // NOTE: initialCamera3d is a dependency so that if load() populates
     // viewerState.camera3d after the first mount (which happens asynchronously
     // on reload), the effect re-runs and the saved position is applied.
     if (initialCamera3d) {
       cam.position.set(...initialCamera3d.position);
+      if (initialCamera3d.quaternion) {
+        const [qx, qy, qz, qw] = initialCamera3d.quaternion;
+        cam.quaternion.set(qx, qy, qz, qw);
+        cam.updateMatrixWorld(true);
+        return;
+      }
     }
+    // No saved quaternion: default square-on orientation.
     cam.up.set(0, 1, 0);
     cam.lookAt(cam.position.x, cam.position.y, 0);
     cam.updateMatrixWorld(true);

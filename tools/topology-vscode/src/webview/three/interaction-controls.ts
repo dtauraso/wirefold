@@ -41,14 +41,25 @@ const MOVE_SLOP_PX = 6;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging";
+  phase: "idle" | "pending" | "dragging" | "rotating";
   // Pointer-down snapshot
   downX: number;
   downY: number;
   downTime: number;
-  // Previous pointer position (unused after arcball removal; kept for future use)
+  // Previous pointer position (updated during rotating)
   prevX: number;
   prevY: number;
+  // Arcball pivot: captured once at gesture start (world space)
+  arcballPivot: THREE.Vector3;
+  // Arcball gesture-start snapshot (anchored Shoemake arcball)
+  arcStartOffset: THREE.Vector3; // cam.position - pivot at gesture start
+  arcStartUp: THREE.Vector3;     // cam.up at gesture start
+  arcRight: THREE.Vector3;       // start camera basis: world right (col 0)
+  arcUp: THREE.Vector3;          // start camera basis: world up (col 1)
+  arcFwd: THREE.Vector3;         // start camera basis: world forward toward viewer (col 2)
+  arcCx: number;                 // ball screen center x (px)
+  arcCy: number;                 // ball screen center y (px)
+  arcRadius: number;             // ball screen radius (px)
 }
 
 // ---------------------------------------------------------------------------
@@ -72,11 +83,19 @@ export function useInteractionControls(
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
   onMoveNode: (id: string, x: number, y: number) => void,
   storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
+  selectedIdRef: React.MutableRefObject<string | null>,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
+    arcballPivot: new THREE.Vector3(0, 0, 0),
+    arcStartOffset: new THREE.Vector3(),
+    arcStartUp: new THREE.Vector3(0, 1, 0),
+    arcRight: new THREE.Vector3(1, 0, 0),
+    arcUp: new THREE.Vector3(0, 1, 0),
+    arcFwd: new THREE.Vector3(0, 0, 1),
+    arcCx: 0, arcCy: 0, arcRadius: 1,
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -160,12 +179,38 @@ export function useInteractionControls(
             rfPosAtStart: { x: node.position.x, y: node.position.y },
           };
         }
+      } else {
+        // Empty-space pointerdown: capture arcball pivot once.
+        const selId = selectedIdRef.current;
+        const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
+        if (selNode) {
+          s.arcballPivot = nodeWorldPos(selNode);
+        } else {
+          // No selection: pivot on the point at screen center projected to the z=0 plane,
+          // so the view stays framed instead of swinging around an off-screen world origin.
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const centerOnPlane = unprojectToPlane(cx, cy, rect);
+          s.arcballPivot = centerOnPlane ? centerOnPlane.clone() : new THREE.Vector3(0, 0, 0);
+        }
+        // Snapshot camera state + screen-ball params for the anchored arcball.
+        const cam0 = cameraRef.current;
+        if (cam0) {
+          cam0.updateMatrixWorld(true);
+          s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
+          s.arcStartUp = cam0.up.clone();
+          s.arcRight = new THREE.Vector3().setFromMatrixColumn(cam0.matrixWorld, 0).normalize();
+          s.arcUp = new THREE.Vector3().setFromMatrixColumn(cam0.matrixWorld, 1).normalize();
+          s.arcFwd = new THREE.Vector3().setFromMatrixColumn(cam0.matrixWorld, 2).normalize();
+        }
+        s.arcCx = rect.left + rect.width / 2;
+        s.arcCy = rect.top + rect.height / 2;
+        s.arcRadius = Math.min(rect.width, rect.height) / 2;
       }
-      // Empty-space pointerdown: no rotation, no dwell timer — just capture.
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [nodesRef, pickRequest, unprojectToPlane],
+    [cameraRef, nodesRef, pickRequest, unprojectToPlane],
   );
 
   const onPointerMove = useCallback(
@@ -178,11 +223,12 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        // Transition to drag only when a node was hit; empty-space move does nothing.
         if (nodeDragRef.current) {
           s.phase = "dragging";
+        } else {
+          // Empty-space drag: start arcball rotation.
+          s.phase = "rotating";
         }
-        // Empty-space drag: stay in "pending" — no arcball.
       }
 
       if (s.phase === "dragging" && nodeDragRef.current) {
@@ -206,8 +252,43 @@ export function useInteractionControls(
         s.prevX = e.clientX;
         s.prevY = e.clientY;
       }
+
+      if (s.phase === "rotating") {
+        const cam = cameraRef.current;
+        if (cam) {
+          const pivot = s.arcballPivot;
+          // Map a screen pixel onto the virtual ball, expressed in world space via
+          // the gesture-start camera basis. Anchored to the down-point, so moving in
+          // a closed loop returns to identity — no roll accumulation (Shoemake arcball).
+          const toBall = (px: number, py: number) => {
+            const x = (px - s.arcCx) / s.arcRadius;
+            const y = (s.arcCy - py) / s.arcRadius; // flip: screen y down -> ball y up
+            const d2 = x * x + y * y;
+            let bx = x, by = y, bz = 0;
+            if (d2 <= 1) {
+              bz = Math.sqrt(1 - d2);
+            } else {
+              const inv = 1 / Math.sqrt(d2);
+              bx = x * inv; by = y * inv; bz = 0;
+            }
+            return new THREE.Vector3()
+              .addScaledVector(s.arcRight, bx)
+              .addScaledVector(s.arcUp, by)
+              .addScaledVector(s.arcFwd, bz);
+          };
+          const v0 = toBall(s.downX, s.downY);
+          const v1 = toBall(e.clientX, e.clientY);
+          const q = new THREE.Quaternion().setFromUnitVectors(v0, v1);
+          const qInv = q.clone().invert();
+          cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(qInv));
+          cam.up.copy(s.arcStartUp.clone().applyQuaternion(qInv));
+          cam.lookAt(pivot);
+          cam.updateMatrixWorld(true);
+          commitCamera(cam);
+        }
+      }
     },
-    [nodesRef, onMoveNode, scheduleNodeMove, unprojectToPlane],
+    [cameraRef, nodesRef, onMoveNode, scheduleNodeMove, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -243,6 +324,13 @@ export function useInteractionControls(
           rafPending.current = false;
           flushNodeMove(node.id, node.position.x, node.position.y);
         }
+        nodeDragRef.current = null;
+        s.phase = "idle";
+        return;
+      }
+
+      // Arcball rotation completed: reset state without triggering select.
+      if (s.phase === "rotating") {
         nodeDragRef.current = null;
         s.phase = "idle";
         return;

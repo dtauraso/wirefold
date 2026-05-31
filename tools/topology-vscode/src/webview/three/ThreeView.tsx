@@ -40,6 +40,8 @@ export function ThreeView() {
   );
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
+  // Ref mirror of selectedId — read in interaction-controls to find arcball pivot.
+  const selectedIdRef = useRef<string | null>(selectedId);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
@@ -51,6 +53,9 @@ export function ThreeView() {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   // Observe container size
   useEffect(() => {
@@ -97,6 +102,7 @@ export function ThreeView() {
     nodesRef,
     storeMoveNode,
     storeCreateEdge,
+    selectedIdRef,
   );
 
   // Bind wheel listener as non-passive so e.preventDefault() actually works.
