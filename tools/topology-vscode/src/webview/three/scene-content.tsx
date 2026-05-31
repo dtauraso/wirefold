@@ -242,15 +242,37 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: 
     const tgtR = nodeRadius(tgt);
 
     const T_STEP = 0.005;
-    // t0: first t from 0 where curve exits the source sphere
+    // t0: find bracket [tPrev, tCur] where curve exits source sphere, then interpolate exact crossing
     let t0 = 0;
-    for (let t = 0; t <= 1; t += T_STEP) {
-      if (_curve.getPoint(t).distanceTo(srcCenter) >= srcR) { t0 = t; break; }
+    {
+      let tPrev = 0;
+      let distPrev = _curve.getPoint(0).distanceTo(srcCenter);
+      for (let t = T_STEP; t <= 1; t += T_STEP) {
+        const distCur = _curve.getPoint(t).distanceTo(srcCenter);
+        if (distCur >= srcR) {
+          const dDiff = distCur - distPrev;
+          t0 = dDiff === 0 ? t : tPrev + (srcR - distPrev) / dDiff * T_STEP;
+          break;
+        }
+        tPrev = t;
+        distPrev = distCur;
+      }
     }
-    // t1: last t from 1 where curve exits the target sphere
+    // t1: find bracket [tCur, tPrev] where curve exits target sphere scanning from t=1, then interpolate
     let t1 = 1;
-    for (let t = 1; t >= 0; t -= T_STEP) {
-      if (_curve.getPoint(t).distanceTo(tgtCenter) >= tgtR) { t1 = t; break; }
+    {
+      let tPrev = 1;
+      let distPrev = _curve.getPoint(1).distanceTo(tgtCenter);
+      for (let t = 1 - T_STEP; t >= 0; t -= T_STEP) {
+        const distCur = _curve.getPoint(t).distanceTo(tgtCenter);
+        if (distCur >= tgtR) {
+          const dDiff = distCur - distPrev;
+          t1 = dDiff === 0 ? t : tPrev + (tgtR - distPrev) / dDiff * (-T_STEP);
+          break;
+        }
+        tPrev = t;
+        distPrev = distCur;
+      }
     }
     // Guard: overlapping nodes — fall back to full range
     if (t0 >= t1) { t0 = 0; t1 = 1; }
