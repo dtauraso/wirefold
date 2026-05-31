@@ -5,7 +5,7 @@
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos, pixelToNDC, worldPerPixel } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC } from "./geometry-helpers";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
@@ -51,15 +51,10 @@ export interface ControlState {
   prevY: number;
   // Arcball pivot: captured once at gesture start (world space)
   arcballPivot: THREE.Vector3;
-  // Arcball gesture-start snapshot (anchored Shoemake arcball)
+  // Two-cylinder gesture-start snapshot (anchored, world-fixed axes)
   arcStartOffset: THREE.Vector3; // cam.position - pivot at gesture start
   arcStartUp: THREE.Vector3;     // cam.up at gesture start
-  arcRight: THREE.Vector3;       // start camera basis: world right (col 0)
-  arcUp: THREE.Vector3;          // start camera basis: world up (col 1)
-  arcFwd: THREE.Vector3;         // start camera basis: world forward toward viewer (col 2)
-  arcCx: number;                 // ball screen center x (px)
-  arcCy: number;                 // ball screen center y (px)
-  arcRadius: number;             // ball screen radius (px)
+  arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
 }
 
 // ---------------------------------------------------------------------------
@@ -92,10 +87,7 @@ export function useInteractionControls(
     arcballPivot: new THREE.Vector3(0, 0, 0),
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
-    arcRight: new THREE.Vector3(1, 0, 0),
-    arcUp: new THREE.Vector3(0, 1, 0),
-    arcFwd: new THREE.Vector3(0, 0, 1),
-    arcCx: 0, arcCy: 0, arcRadius: 1,
+    arcStartQuat: new THREE.Quaternion(),
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -193,19 +185,14 @@ export function useInteractionControls(
           const centerOnPlane = unprojectToPlane(cx, cy, rect);
           s.arcballPivot = centerOnPlane ? centerOnPlane.clone() : new THREE.Vector3(0, 0, 0);
         }
-        // Snapshot camera state + screen-ball params for the anchored arcball.
+        // Snapshot camera state for the anchored two-cylinder rotation.
         const cam0 = cameraRef.current;
         if (cam0) {
           cam0.updateMatrixWorld(true);
           s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
           s.arcStartUp = cam0.up.clone();
-          s.arcRight = new THREE.Vector3().setFromMatrixColumn(cam0.matrixWorld, 0).normalize();
-          s.arcUp = new THREE.Vector3().setFromMatrixColumn(cam0.matrixWorld, 1).normalize();
-          s.arcFwd = new THREE.Vector3().setFromMatrixColumn(cam0.matrixWorld, 2).normalize();
+          s.arcStartQuat = cam0.quaternion.clone();
         }
-        s.arcCx = rect.left + rect.width / 2;
-        s.arcCy = rect.top + rect.height / 2;
-        s.arcRadius = Math.min(rect.width, rect.height) / 2;
       }
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
@@ -257,32 +244,20 @@ export function useInteractionControls(
         const cam = cameraRef.current;
         if (cam) {
           const pivot = s.arcballPivot;
-          // Map a screen pixel onto the virtual ball, expressed in world space via
-          // the gesture-start camera basis. Anchored to the down-point, so moving in
-          // a closed loop returns to identity — no roll accumulation (Shoemake arcball).
-          const toBall = (px: number, py: number) => {
-            const x = (px - s.arcCx) / s.arcRadius;
-            const y = (s.arcCy - py) / s.arcRadius; // flip: screen y down -> ball y up
-            const d2 = x * x + y * y;
-            let bx = x, by = y, bz = 0;
-            if (d2 <= 1) {
-              bz = Math.sqrt(1 - d2);
-            } else {
-              const inv = 1 / Math.sqrt(d2);
-              bx = x * inv; by = y * inv; bz = 0;
-            }
-            return new THREE.Vector3()
-              .addScaledVector(s.arcRight, bx)
-              .addScaledVector(s.arcUp, by)
-              .addScaledVector(s.arcFwd, bz);
-          };
-          const v0 = toBall(s.downX, s.downY);
-          const v1 = toBall(e.clientX, e.clientY);
-          const q = new THREE.Quaternion().setFromUnitVectors(v0, v1);
-          const qInv = q.clone().invert();
-          cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(qInv));
-          cam.up.copy(s.arcStartUp.clone().applyQuaternion(qInv));
-          cam.lookAt(pivot);
+          const ROT_SPEED = 0.005;
+          // Two cylinders: both rotation axes lie in the node's plane (z=0) through
+          // the pivot. Horizontal drag rotates about world Y, vertical drag about
+          // world X. Decoupled, world-fixed axes; anchored to total drag from the
+          // down-point so a closed loop returns to start (no accumulation).
+          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> world Y
+          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> world X
+          const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angX);
+          const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
+          const rot = qy.clone().multiply(qx);
+          const rotInv = rot.clone().invert();
+          cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
+          cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
+          cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
           cam.updateMatrixWorld(true);
           commitCamera(cam);
         }
@@ -366,24 +341,36 @@ export function useInteractionControls(
       e.preventDefault();
 
       if (e.ctrlKey) {
-        // Pinch-to-zoom: multiplicative dolly on height above the z=0 plane.
-        // Exponential so a step feels uniform at every scale (industry standard).
-        // Base is the single speed knob; >1 deltaY (pinch out) zooms out.
+        // Pinch-to-zoom toward the cursor: multiplicatively scale the camera's
+        // distance to the world point under the cursor on the z=0 plane, keeping
+        // that point fixed on screen. Exponential (uniform per step). >1 deltaY
+        // (pinch out) zooms out. Works at any tilt and stays consistent with the
+        // arcball, which also anchors on a plane point.
         const ZOOM_BASE = 1.01;
-        const factor = Math.pow(ZOOM_BASE, e.deltaY);
-        const minHeight = 5; // never cross/touch the plane
-        cam.position.z = Math.max(minHeight, cam.position.z * factor);
+        let factor = Math.pow(ZOOM_BASE, e.deltaY);
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const target = unprojectToPlane(e.clientX, e.clientY, rect);
+        if (target) {
+          const minHeight = 5; // never cross/touch the plane
+          if (cam.position.z * factor < minHeight) factor = minHeight / cam.position.z;
+          cam.position.sub(target).multiplyScalar(factor).add(target);
+        }
       } else {
-        // Camera is locked square-on (looking straight down -z toward the z=0 plane,
-        // up = +y). Pan directly in world x/y — no matrix-column extraction needed.
-        const wpp = worldPerPixel(cam, canvasSize.h);
-        cam.position.x += e.deltaX * wpp;
-        cam.position.y -= e.deltaY * wpp;
+        // Two-finger scroll pans along the z=0 plane: translate the camera by the
+        // world-space vector between the plane point under the cursor and the point
+        // under cursor+scroll-delta. Stays in the plane, tilt-aware (equals the old
+        // direct x/y pan when square-on).
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const a = unprojectToPlane(e.clientX, e.clientY, rect);
+        const b = unprojectToPlane(e.clientX + e.deltaX, e.clientY + e.deltaY, rect);
+        if (a && b) {
+          cam.position.add(b.sub(a));
+        }
       }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, canvasSize.h, nodesRef],
+    [cameraRef, nodesRef, unprojectToPlane],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
