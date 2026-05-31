@@ -50,6 +50,8 @@ export interface ControlState {
   // Previous pointer position (updated during rotating)
   prevX: number;
   prevY: number;
+  // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
+  emptyDown: boolean;
   // Arcball pivot: captured once at gesture start (world space)
   arcballPivot: THREE.Vector3;
   // Two-cylinder gesture-start snapshot (anchored, world-fixed axes)
@@ -86,6 +88,7 @@ export function useInteractionControls(
     phase: "idle",
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
+    emptyDown: false,
     arcballPivot: new THREE.Vector3(0, 0, 0),
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
@@ -155,6 +158,7 @@ export function useInteractionControls(
       s.prevX = e.clientX;
       s.prevY = e.clientY;
       s.phase = "pending";
+      s.emptyDown = false;
 
       // Clear previous drag/wiring state.
       nodeDragRef.current = null;
@@ -164,6 +168,7 @@ export function useInteractionControls(
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
+      s.emptyDown = (hitId === null);
 
       // Check for ring hit on the selected node → start wiring.
       const ringHit = pickRequest.current?.(ndcX, ndcY, { ringOnly: true }) ?? null;
@@ -174,6 +179,8 @@ export function useInteractionControls(
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         return;
       }
+
+      postLog("wire-down", { hitId: hitId ?? undefined, emptyDown: s.emptyDown, isNode: hitId !== null && nodesRef.current.some((n) => n.id === hitId) });
 
       if (hitId !== null) {
         // Node hit: record drag origin for node-drag phase.
@@ -230,7 +237,7 @@ export function useInteractionControls(
           s.phase = "wiring";
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
-        } else {
+        } else if (s.emptyDown) {
           // Empty-space drag: start arcball rotation.
           s.phase = "rotating";
         }
