@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-29 — name+kind billboard + in-node value overlays merged, pseudo removed)
+## State at handoff (2026-05-30 — arcball-camera-controls split into arcball-rotation / xy-drag / gesture-activation-model; xy-drag is the active focus)
 
 - **Active branch:** `main`. Local + origin/main in sync after merge `98584a6f`.
 - Working tree: `topology.json` modified (pre-existing, untouched this session).
@@ -28,17 +28,20 @@ Supersedes the prior `task/billboard-inline-edit` work (merge `1e9097c0`): doubl
 
 ### Actionable shortlist from the audit board
 
-The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features. Three flagged as needs-work / unverified:
+The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features. The former `arcball-camera-controls` entry was split into three:
 
-- **`arcball-camera-controls`** — REWORK. Rotation has an issue; click-to-activate for XY drag may be the wrong activation model. Per CLAUDE.md `interaction-control-is-substance` rule, this is substance, not a medium choice.
-- **`validation-flag-colors`** — code reads correctly, UNCHECKED (user has not hands-on verified).
-- **`two-click-edge-creation`** — code reads correctly, UNCHECKED (user has not hands-on verified).
+- **`xy-drag`** — ACTIVE (current focus). Node-move on the z=0 plane + dwell-then-drag Pan Pad camera pan. This is what's being worked on now.
+- **`arcball-rotation`** — REWORK. Virtual-sphere camera rotation has an issue; needs concrete repro before branching. Substance, not a medium choice (CLAUDE.md `interaction-control-is-substance`).
+- **`gesture-activation-model`** — REWORK. Single empty-space pointer-down overloaded three ways (immediate=rotate, dwell=pan, node-hit=move); disambiguation model is suspect.
+- **`validation-flag-colors`** — code reads correctly, UNCHECKED (not hands-on verified).
+- **`two-click-edge-creation`** — code reads correctly, UNCHECKED (not hands-on verified).
 
 ### Next-task candidates (friction-driven)
 
-1. Redesign `arcball-camera-controls` rotation/activation (needs concrete repro before branching).
-2. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
-3. Pre-existing test failures (parked from prior session — investigate before the next task branch).
+1. **`xy-drag` (ACTIVE)** — current focus; node-move + camera-pan XY translation in `interaction-controls.ts`.
+2. Redesign `arcball-rotation` rotation and `gesture-activation-model` (needs concrete repro before branching).
+3. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
+4. Pre-existing test failures (parked from prior session — investigate before the next task branch).
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
@@ -52,7 +55,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. **`arcball-camera-controls`** — rotation issue; activation model uncertain (see audit board).
+1. **Camera/drag gestures** (former `arcball-camera-controls`, now split): `xy-drag` is the active focus; `arcball-rotation` has a rotation issue; `gesture-activation-model` overloads one pointer-down three ways. See audit board.
 2. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
 3. **Pre-existing test failures** — parked; investigate before next task branch.
 4. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
