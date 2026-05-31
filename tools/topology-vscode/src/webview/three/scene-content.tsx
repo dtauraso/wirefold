@@ -18,6 +18,8 @@ import {
   nodeWorldPos,
   nodeTopWorldPos,
   ndcToPixel,
+  portDir,
+  portWorldPos,
 } from "./geometry-helpers";
 import { CURVE_PARAM_BULGE_FACTOR } from "../../schema/curve-params";
 import type { PickOptions } from "./interaction-controls";
@@ -147,6 +149,27 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
+      {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
+      {(node.data?.inputs ?? []).map((port) => {
+        const dir = portDir(node, port.name, true);
+        if (!dir) return null;
+        return (
+          <mesh key={`in:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]} raycast={() => null}>
+            <sphereGeometry args={[4, 8, 8]} />
+            <meshStandardMaterial color={strokeColor} />
+          </mesh>
+        );
+      })}
+      {(node.data?.outputs ?? []).map((port) => {
+        const dir = portDir(node, port.name, false);
+        if (!dir) return null;
+        return (
+          <mesh key={`out:${port.name}`} position={[dir.x * r, dir.y * r, dir.z * r]} raycast={() => null}>
+            <sphereGeometry args={[4, 8, 8]} />
+            <meshStandardMaterial color={strokeColor} />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
@@ -215,75 +238,28 @@ export function PulseBead({
   );
 }
 
-export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean }) {
+export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle, targetHandle }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean; sourceHandle?: string | null; targetHandle?: string | null }) {
   // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
-  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}`;
+  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}:${sourceHandle ?? ""}:${targetHandle ?? ""}`;
   const { tubeGeo, haloGeo } = useMemo(() => {
-    // Build tube geometry from the curve store (already populated synchronously
-    // by moveNode / load / createEdge). Fall back to constructing locally if the
-    // store entry is somehow absent (e.g. on first mount before load completes).
-    const _curve = getCurve(edgeId) ?? (() => {
-      const _p0 = surfacePoint(src, tgt);
-      const _p2 = surfacePoint(tgt, src);
-      const mid = _p0.clone().add(_p2).multiplyScalar(0.5);
-      const edgeDir = _p2.clone().sub(_p0).normalize();
-      const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-      const span = _p0.distanceTo(_p2);
-      const _p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
-      return new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
-    })();
+    // Port-to-port endpoints: p0 is on the source output port sphere surface,
+    // p2 is on the target input port sphere surface.
+    // portWorldPos falls back to node center when handle is null/undefined/not found.
+    const p0 = portWorldPos(src, sourceHandle, false); // source uses OUTPUT port
+    const p2 = portWorldPos(tgt, targetHandle, true);  // target uses INPUT port
 
-    // Compute the visible t-range [t0, t1] on the original center-to-center quadratic
-    // so the rendered tube starts/ends exactly at each sphere's surface — no filtering,
-    // no CatmullRom detour; every sampled point lies on the original Bezier.
-    const srcCenter = nodeWorldPos(src);
-    const tgtCenter = nodeWorldPos(tgt);
-    const srcR = nodeRadius(src);
-    const tgtR = nodeRadius(tgt);
+    // Build quadratic bezier from port endpoints with bulge perpendicular to chord.
+    const mid = p0.clone().add(p2).multiplyScalar(0.5);
+    const edgeDir = p2.clone().sub(p0).normalize();
+    const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
+    const span = p0.distanceTo(p2);
+    const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
+    const portCurve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
 
-    const T_STEP = 0.005;
-    // t0: find bracket [tPrev, tCur] where curve exits source sphere, then interpolate exact crossing
-    let t0 = 0;
-    {
-      let tPrev = 0;
-      let distPrev = _curve.getPoint(0).distanceTo(srcCenter);
-      for (let t = T_STEP; t <= 1; t += T_STEP) {
-        const distCur = _curve.getPoint(t).distanceTo(srcCenter);
-        if (distCur >= srcR) {
-          const dDiff = distCur - distPrev;
-          t0 = dDiff === 0 ? t : tPrev + (srcR - distPrev) / dDiff * T_STEP;
-          break;
-        }
-        tPrev = t;
-        distPrev = distCur;
-      }
-    }
-    // t1: find bracket [tCur, tPrev] where curve exits target sphere scanning from t=1, then interpolate
-    let t1 = 1;
-    {
-      let tPrev = 1;
-      let distPrev = _curve.getPoint(1).distanceTo(tgtCenter);
-      for (let t = 1 - T_STEP; t >= 0; t -= T_STEP) {
-        const distCur = _curve.getPoint(t).distanceTo(tgtCenter);
-        if (distCur >= tgtR) {
-          const dDiff = distCur - distPrev;
-          t1 = dDiff === 0 ? t : tPrev + (tgtR - distPrev) / dDiff * (-T_STEP);
-          break;
-        }
-        tPrev = t;
-        distPrev = distCur;
-      }
-    }
-    // Guard: overlapping nodes — fall back to full range
-    if (t0 >= t1) { t0 = 0; t1 = 1; }
-
-    // Sample the ORIGINAL quadratic over [t0, t1] — geometry never goes inside a sphere.
-    const TUBE_RENDER_SAMPLES = 24;
-    const visiblePts: THREE.Vector3[] = [];
-    for (let i = 0; i <= TUBE_RENDER_SAMPLES; i++) {
-      const t = t0 + (t1 - t0) * (i / TUBE_RENDER_SAMPLES);
-      visiblePts.push(_curve.getPoint(t));
-    }
+    // Sample the port-to-port bezier directly — endpoints are already on sphere surfaces,
+    // so no t0/t1 surface-trim needed.
+    const TUBE_RENDER_SAMPLES = 25;
+    const visiblePts = portCurve.getPoints(TUBE_RENDER_SAMPLES);
     const tubeCurve = new THREE.CatmullRomCurve3(visiblePts);
 
     const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 16, 1.5, 6, false);
@@ -339,7 +315,7 @@ export function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} sourceHandle={e.sourceHandle ?? e.data?.sourceHandle ?? null} targetHandle={e.targetHandle ?? e.data?.targetHandle ?? null} />;
       })}
     </>
   );
