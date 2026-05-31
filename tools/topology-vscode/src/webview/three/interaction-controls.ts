@@ -289,24 +289,21 @@ export function useInteractionControls(
       const s = state.current;
 
       // Wiring completed: if dropped on a node, create an edge.
-      if (s.phase === "wiring" || (s.phase === "pending" && wiringRef.current !== null)) {
-        postLog("wire-up", { phase: s.phase, hasWiring: !!wiringRef.current, sourceId: wiringRef.current?.sourceId });
-        if (s.phase === "wiring" && wiringRef.current) {
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-          const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: wiringRef.current.sourceId, nodesOnly: true }) ?? null;
-          postLog("wire-up-target", { sourceId: wiringRef.current.sourceId, targetId });
-          if (targetId !== null && targetId !== wiringRef.current.sourceId) {
-            storeCreateEdge(wiringRef.current.sourceId, null, targetId, null);
-          }
+      // Edge creation runs for both "wiring" (full drag) and "pending" (short drag under MOVE_SLOP_PX).
+      if (wiringRef.current !== null && (s.phase === "wiring" || s.phase === "pending")) {
+        const sourceId = wiringRef.current.sourceId;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+        const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: sourceId, nodesOnly: true }) ?? null;
+        postLog("wire-up", { phase: s.phase, hasWiring: true, sourceId });
+        postLog("wire-up-target", { sourceId, targetId });
+        if (targetId !== null && targetId !== sourceId) {
+          storeCreateEdge(sourceId, null, targetId, null);
         }
-        // pending+wiring (click on ring without drag): fall through to normal click/select path.
         wiringRef.current = null;
-        if (s.phase === "wiring") {
-          s.phase = "idle";
-          (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
-          return;
-        }
+        s.phase = "idle";
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+        return;
       }
 
       // Node drag completed: persist position.
