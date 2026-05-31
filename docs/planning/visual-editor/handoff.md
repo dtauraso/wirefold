@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-30 — arcball-camera-controls split into arcball-rotation / xy-drag / gesture-activation-model; xy-drag is the active focus)
+## State at handoff (2026-05-30 — pan-only square-on camera on branch task/xy-pan-camera)
 
-- **Active branch:** `main`. Local + origin/main in sync after merge `98584a6f`.
+- **Active branch:** `task/xy-pan-camera`. Pan-only camera committed (commit `feat(camera): pan-only square-on camera`); not yet merged to main.
 - Working tree: `topology.json` modified (pre-existing, untouched this session).
 - Build/test gate verified at merge: `tsc --noEmit` clean, `npm run build` clean (1.1 MB webview.js), `go build ./... && go test ./...` all pass.
 
@@ -28,11 +28,9 @@ Supersedes the prior `task/billboard-inline-edit` work (merge `1e9097c0`): doubl
 
 ### Actionable shortlist from the audit board
 
-The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features. The former `arcball-camera-controls` entry was split into three:
+The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features.
 
-- **`xy-drag`** — ACTIVE (current focus). Node-move on the z=0 plane + dwell-then-drag Pan Pad camera pan. This is what's being worked on now.
-- **`arcball-rotation`** — REWORK. Virtual-sphere camera rotation has an issue; needs concrete repro before branching. Substance, not a medium choice (CLAUDE.md `interaction-control-is-substance`).
-- **`gesture-activation-model`** — REWORK. Single empty-space pointer-down overloaded three ways (immediate=rotate, dwell=pan, node-hit=move); disambiguation model is suspect.
+- **`xy-drag`** — DONE / VERIFIED. Two-finger trackpad scroll pans camera in world x/y; camera square-on, never tilts. Arcball rotation and dwell-pan removed.
 - **`validation-flag-colors`** — code reads correctly, UNCHECKED (not hands-on verified).
 - **`two-click-edge-creation`** — code reads correctly, UNCHECKED (not hands-on verified).
 
