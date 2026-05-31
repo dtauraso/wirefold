@@ -32,12 +32,9 @@ The audit site index at `docs/planning/visual-editor/feature-audit/index.html` l
 
 - **`xy-drag`** — DONE / VERIFIED. Two-finger trackpad scroll pans camera in world x/y; camera square-on, never tilts.
 - **`pinch-zoom`** — DONE / VERIFIED. Multiplicative exponential zoom, ZOOM_BASE=1.01, square-on screen-centered. Reversal lag is native macOS gesture-ramp; left as-is by design.
-- **`validation-flag-colors`** — code reads correctly, UNCHECKED (not hands-on verified).
-- **`two-click-edge-creation`** — code reads correctly, UNCHECKED (not hands-on verified).
-
 ### Next-task candidates (friction-driven)
 
-1. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
+1. **Arcball rotation** — reintroduce arcball camera rotation. It was removed in the `task/xy-pan-camera` merge (`bda401e1`) when the camera was locked square-on; revisit bringing rotation back. See `interaction-controls.ts` and `scene-content.tsx` (`CameraRefBridge` square-on lock).
 2. Pre-existing test failures are RESOLVED — the parked parseSpec failures were the stale tests dropped this session; baseline is now green.
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
@@ -52,10 +49,9 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
-2. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
-5. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
-6. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
+1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
+2. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
+3. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
 
 ### Key files
 
