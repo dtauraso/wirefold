@@ -168,7 +168,7 @@ export function useInteractionControls(
       // Check for ring hit on the selected node → start wiring.
       const ringHit = pickRequest.current?.(ndcX, ndcY, { ringOnly: true }) ?? null;
       postLog("wire-ringpick", { ringHit: ringHit ?? undefined, selectedId: selectedIdRef.current ?? undefined, hitId: hitId ?? undefined });
-      if (ringHit !== null && ringHit === selectedIdRef.current) {
+      if (ringHit !== null) {
         wiringRef.current = { sourceId: ringHit };
         s.phase = "pending";
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
