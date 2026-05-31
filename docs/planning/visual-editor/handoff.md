@@ -36,10 +36,9 @@ The audit site index at `docs/planning/visual-editor/feature-audit/index.html` l
 
 ### Next-task candidates (friction-driven)
 
-1. **`xy-drag` (ACTIVE)** — current focus; node-move + camera-pan XY translation in `interaction-controls.ts`.
-2. Redesign `arcball-rotation` rotation and `gesture-activation-model` (needs concrete repro before branching).
-3. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
-4. Pre-existing test failures (parked from prior session — investigate before the next task branch).
+1. Merge `task/xy-pan-camera` to main: run `tools/strip-branch-local-docs.sh task/xy-pan-camera` first (no branch-local planning docs were added this session, so the strip is a no-op), then merge.
+2. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
+3. Pre-existing test failures (parked from prior session — investigate before the next task branch).
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
@@ -53,7 +52,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. **Camera/drag gestures** (former `arcball-camera-controls`, now split): `xy-drag` is the active focus; `arcball-rotation` has a rotation issue; `gesture-activation-model` overloads one pointer-down three ways. See audit board.
+1. Camera is pan-only square-on; arcball rotation and dwell-pan removed (task/xy-pan-camera).
 2. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
 3. **Pre-existing test failures** — parked; investigate before next task branch.
 4. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.

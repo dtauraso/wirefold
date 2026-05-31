@@ -5,7 +5,7 @@
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos, pixelToNDC, worldPerPixel } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, sceneCenter, worldPerPixel } from "./geometry-helpers";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
@@ -277,15 +277,24 @@ export function useInteractionControls(
       // Prevent browser scroll / back-nav gestures (requires non-passive listener).
       e.preventDefault();
 
-      // Camera is locked square-on (looking straight down -z toward the z=0 plane,
-      // up = +y). Pan directly in world x/y — no matrix-column extraction needed.
-      const wpp = worldPerPixel(cam, canvasSize.h);
-      cam.position.x += e.deltaX * wpp;
-      cam.position.y -= e.deltaY * wpp;
+      if (e.ctrlKey) {
+        // Pinch-to-zoom: dolly along view direction (matches dolly buttons).
+        const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion);
+        const center = sceneCenter(nodesRef.current);
+        const dist = cam.position.distanceTo(center);
+        const speed = 0.001 * Math.max(dist, 10);
+        cam.position.addScaledVector(dir, e.deltaY * speed);
+      } else {
+        // Camera is locked square-on (looking straight down -z toward the z=0 plane,
+        // up = +y). Pan directly in world x/y — no matrix-column extraction needed.
+        const wpp = worldPerPixel(cam, canvasSize.h);
+        cam.position.x += e.deltaX * wpp;
+        cam.position.y -= e.deltaY * wpp;
+      }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, canvasSize.h],
+    [cameraRef, canvasSize.h, nodesRef],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
