@@ -27,10 +27,7 @@ read this file first (no chat history needed) and proceed.
 
 ### Next-task candidates (friction-driven)
 
-1. **z-spin (modifier+drag)** — parked; trackpad rotate not delivered in Chromium webview; modifier+drag deferred.
-2. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
-3. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
-4. **Cross-cut refactors (remaining)** — view-save-on-settle (Medium), per-kind spec↔flow adapters (preemptive), explicit viewer-state derivation.
+Outstanding editor features are tracked on the audit board at `docs/planning/visual-editor/feature-audit/index.html` (12 features with status columns). Pick friction-driven from there. The one cross-cut item not on the board: per-kind spec↔flow adapters / explicit viewer-state derivation / view-save-on-settle (view-save-on-settle also appears on the board as half-wired).
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
@@ -44,10 +41,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 
 ### KNOWN ISSUES
 
-1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
-2. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
-3. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
-4. **z-spin (modifier+drag)** — third rotation axis; trackpad rotate unavailable in Chromium webview; modifier+drag variant parked.
+1. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
 
 ### Key files
 
