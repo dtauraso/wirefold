@@ -50,6 +50,8 @@ export interface ThreeStoreState {
   saveSpec: () => void;
   /** Toggle fade on a node or edge. Recomputes fixpoint and emits updated faded-edge set to host. */
   toggleFade: (target: { kind: "node" | "edge"; id: string }) => void;
+  /** Remove an edge by id from the spec and persist. */
+  deleteEdge: (id: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +133,14 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     if (srcNode && tgtNode) setCurve(result.id, buildEdgeCurve(srcNode, tgtNode));
     scheduleSave();
     return result.id;
+  },
+
+  deleteEdge(id) {
+    const { edges } = get();
+    const nextEdges = edges.filter((ed) => ed.id !== id);
+    set({ edges: nextEdges });
+    clearPulse(id);
+    scheduleSave();
   },
 
   moveNode(id, x, y) {
