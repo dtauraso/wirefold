@@ -545,6 +545,16 @@ export function RaycasterHelper({
         return null;
       }
 
+      if (opts?.portOnly) {
+        for (const hit of hits) {
+          const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.portId) {
+            return hitObj.userData.portId as string;
+          }
+        }
+        return null;
+      }
+
       if (opts?.nodesOnly) {
         // Iterate all hits to find the first node that isn't excluded.
         // A port sphere hit resolves to its node (via userData.nodeId).

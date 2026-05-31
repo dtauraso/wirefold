@@ -68,6 +68,7 @@ export interface PickOptions {
   excludeId?: string;
   nodesOnly?: boolean;
   ringOnly?: boolean;
+  portOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,8 +104,8 @@ export function useInteractionControls(
     rfPosAtStart: { x: number; y: number };
   } | null>(null);
 
-  // Wiring state: set when pointer-down lands on the torus ring of the selected node.
-  const wiringRef = useRef<{ sourceId: string } | null>(null);
+  // Wiring state: set when pointer-down lands on a port sphere.
+  const wiringRef = useRef<{ nodeId: string; portName: string; isInput: boolean } | null>(null);
 
   // Throttle node-move IPC: one message per animation frame during drag.
   const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number } | null>(null);
@@ -147,6 +148,19 @@ export function useInteractionControls(
     [cameraRef],
   );
 
+  // ------ helpers ------
+
+  /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
+  function parsePortId(pid: string): { nodeId: string; isInput: boolean; portName: string } {
+    const i = pid.indexOf(":");
+    const nodeId = pid.slice(0, i);
+    const rest = pid.slice(i + 1);
+    const j = rest.indexOf(":");
+    const dir = rest.slice(0, j);
+    const portName = rest.slice(j + 1);
+    return { nodeId, isInput: dir === "in", portName };
+  }
+
   // ------ pointer event handlers ------
 
   const onPointerDown = useCallback(
@@ -167,18 +181,19 @@ export function useInteractionControls(
       // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-      const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
-      s.emptyDown = (hitId === null);
 
-      // Check for ring hit on the selected node → start wiring.
-      const ringHit = pickRequest.current?.(ndcX, ndcY, { ringOnly: true }) ?? null;
-      postLog("wire-ringpick", { ringHit: ringHit ?? undefined, selectedId: selectedIdRef.current ?? undefined, hitId: hitId ?? undefined });
-      if (ringHit !== null) {
-        wiringRef.current = { sourceId: ringHit };
+      // Check for port hit → start port-to-port wiring.
+      const portHit = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
+      postLog("wire-port-down", { portHit: portHit ?? undefined });
+      if (portHit !== null) {
+        wiringRef.current = parsePortId(portHit);
         s.phase = "pending";
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         return;
       }
+
+      const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
+      s.emptyDown = (hitId === null);
 
       postLog("wire-down", { hitId: hitId ?? undefined, emptyDown: s.emptyDown, isNode: hitId !== null && nodesRef.current.some((n) => n.id === hitId) });
 
@@ -295,17 +310,24 @@ export function useInteractionControls(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const s = state.current;
 
-      // Wiring completed: if dropped on a node, create an edge.
+      // Wiring completed: if dropped on a port, create an edge.
       // Edge creation runs for both "wiring" (full drag) and "pending" (short drag under MOVE_SLOP_PX).
       if (wiringRef.current !== null && (s.phase === "wiring" || s.phase === "pending")) {
-        const sourceId = wiringRef.current.sourceId;
+        const src = wiringRef.current;
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-        const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: sourceId, nodesOnly: true }) ?? null;
-        postLog("wire-up", { phase: s.phase, hasWiring: true, sourceId });
-        postLog("wire-up-target", { sourceId, targetId });
-        if (targetId !== null && targetId !== sourceId) {
-          storeCreateEdge(sourceId, null, targetId, null);
+        const targetPortId = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
+        postLog("wire-port-up", { source: src, targetPortId: targetPortId ?? undefined });
+        if (targetPortId !== null) {
+          const tgt = parsePortId(targetPortId);
+          if (tgt.nodeId !== src.nodeId) {
+            if (!src.isInput && tgt.isInput) {
+              storeCreateEdge(src.nodeId, src.portName, tgt.nodeId, tgt.portName);
+            } else if (src.isInput && !tgt.isInput) {
+              storeCreateEdge(tgt.nodeId, tgt.portName, src.nodeId, src.portName);
+            }
+            // else: both same direction → skip
+          }
         }
         wiringRef.current = null;
         s.phase = "idle";
