@@ -232,9 +232,28 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected }: { edgeId: 
       const _p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
       return new THREE.QuadraticBezierCurve3(_p0, _p1, _p2);
     })();
-    const _tubeGeo = new THREE.TubeGeometry(_curve, 16, 1.5, 6, false);
+
+    // Trim the tube to the portion outside each node's sphere radius.
+    // The full center-to-center curve is kept for latency/pulse math (pump.ts / store.ts);
+    // here we only clip the *rendered* tube so it appears to emerge from the sphere surface.
+    const TUBE_SAMPLE_COUNT = 32;
+    const srcCenter = nodeWorldPos(src);
+    const tgtCenter = nodeWorldPos(tgt);
+    const srcR = nodeRadius(src);
+    const tgtR = nodeRadius(tgt);
+    const allPts = _curve.getPoints(TUBE_SAMPLE_COUNT);
+    const trimmedPts = allPts.filter(
+      (pt) => pt.distanceTo(srcCenter) >= srcR && pt.distanceTo(tgtCenter) >= tgtR
+    );
+    // If trimming leaves fewer than 2 points (nodes overlap), fall back to the full curve.
+    const tubeCurve: THREE.Curve<THREE.Vector3> =
+      trimmedPts.length >= 2
+        ? new THREE.CatmullRomCurve3(trimmedPts)
+        : _curve;
+
+    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 16, 1.5, 6, false);
     // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
-    const _haloGeo = new THREE.TubeGeometry(_curve, 16, 5, 6, false);
+    const _haloGeo = new THREE.TubeGeometry(tubeCurve, 16, 5, 6, false);
     return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p0key]);
