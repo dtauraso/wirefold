@@ -145,6 +145,30 @@ export function computeToggleFade(
     const edge = edges.find((e) => e.id === id);
     const isFaded = !!edge?.data?.faded;
     if (isFaded) {
+      // Block un-fade if another live (unfaded) edge already occupies the same
+      // target input slot.
+      if (edge) {
+        const edgeTgtHandle = edge.targetHandle ?? edge.data?.targetHandle;
+        const occupied = edges.some(
+          (o) =>
+            o.id !== edge.id &&
+            o.target === edge.target &&
+            (o.targetHandle ?? o.data?.targetHandle) === edgeTgtHandle &&
+            !o.data?.faded,
+        );
+        if (occupied) {
+          // Slot is taken — leave this edge faded, return unchanged state.
+          return {
+            nextFadedNodes,
+            nextFadedEdges,
+            nextNodes: nodes,
+            nextEdges: edges,
+            nextFadeEdgeOrder: fadeEdgeOrder,
+            newlyFadedEdgeIds: new Set<string>(),
+            fadedEdges: new Set(edges.filter((e) => !!(e.data?.faded)).map((e) => e.id)),
+          };
+        }
+      }
       nextFadedEdges.delete(id);
       // Also unfade any nodes this edge connects to, so an auto-faded
       // endpoint doesn't immediately re-fade the edge via Rule 1.
