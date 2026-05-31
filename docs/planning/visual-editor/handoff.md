@@ -7,41 +7,36 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-30 — multiplicative pinch-zoom merged to main)
+## State at handoff (2026-05-30 — arcball/two-cylinder camera rotation merged to main)
 
-- **Active branch:** `main` at `31a46dca`. No task branch in flight.
-- Both `task/pinch-zoom-rework` and `task/drop-stale-parsespec-tests` merged and deleted (local + remote).
+- **Active branch:** `main` (latest). No task branch in flight.
 - Working tree: `topology.json` modified (pre-existing, unrelated; not staged).
-- Build/test gate: baseline is green — stale parseSpec tests dropped in `task/drop-stale-parsespec-tests`; `go test ./...` all pass.
+- Build/test gate: baseline is green — `go test ./...` all pass; `npx tsc --noEmit` clean.
 
 ### What merged this session
 
-- **`task/drop-stale-parsespec-tests`** — dropped two stale `parseSpec` tests (timing/legend meta fields removed in `93e46efc`); baseline now green.
-- **`task/pinch-zoom-rework`** (merge commit `31a46dca`) — reworked pinch-zoom to multiplicative exponential zoom on camera height above the z=0 plane. Single knob `ZOOM_BASE=1.01`. Camera stays square-on and screen-centered. VERIFIED live by user.
-  - Reversal-direction lag investigated with runtime traces: confirmed native macOS trackpad gesture-ramp (silent event gap + velocity ramp). Momentum-tail and pan-misrouting hypotheses both disproven. Left as native by design — no mitigation added.
+- **`task/arcball-rework`** — camera rotation on single empty-space drag, implemented as two decoupled in-plane cylinders (horizontal->world Y, vertical->world X) pivoting on the selected node (else screen-center on z=0 plane); rigid rotation keeps the pivot pixel-fixed; tilt persists across reload. Pinch-zoom reworked to zoom-to-cursor and xy pan made tilt-aware so all three gestures are consistent at any tilt. z-spin (third axis) considered and declined: trackpad rotate gestures aren't delivered in the Chromium/VS Code webview, and modifier+drag was deferred. Also dropped xy-drag & pinch-zoom audit entries earlier and the arcball entry is now status=working. VERIFIED live by user.
 
 ### Prior merge context (still relevant)
 
-**Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y; arcball rotation and dwell→PanPad removed; camera locked square-on.
+**Merge `31a46dca` from `task/pinch-zoom-rework` (deleted):** reworked pinch-zoom to multiplicative exponential zoom on camera height above z=0 plane. Single knob `ZOOM_BASE=1.01`. Now superseded by zoom-to-cursor from `task/arcball-rework`.
+
+**Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y; arcball rotation and dwell→PanPad removed; camera locked square-on. Now superseded by tilt-aware pan from `task/arcball-rework`.
 
 **Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified the top-of-node billboard to two static lines and moved per-instance state into an HTML overlay; ripped out all pseudocode plumbing. Net: -3408 lines, +98 lines. Audit board updated (commit `373c7f7b`).
 
-### Actionable shortlist from the audit board
-
-The audit site index at `docs/planning/visual-editor/feature-audit/index.html` lists the remaining features.
-
-- **`xy-drag`** — DONE / VERIFIED. Two-finger trackpad scroll pans camera in world x/y; camera square-on, never tilts.
-- **`pinch-zoom`** — DONE / VERIFIED. Multiplicative exponential zoom, ZOOM_BASE=1.01, square-on screen-centered. Reversal lag is native macOS gesture-ramp; left as-is by design.
 ### Next-task candidates (friction-driven)
 
-1. **Arcball rotation** — reintroduce arcball camera rotation. It was removed in the `task/xy-pan-camera` merge (`bda401e1`) when the camera was locked square-on; revisit bringing rotation back. See `interaction-controls.ts` and `scene-content.tsx` (`CameraRefBridge` square-on lock).
-2. Pre-existing test failures are RESOLVED — the parked parseSpec failures were the stale tests dropped this session; baseline is now green.
+1. **z-spin (modifier+drag)** — parked; trackpad rotate not delivered in Chromium webview; modifier+drag deferred.
+2. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
+3. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
+4. **Cross-cut refactors (remaining)** — view-save-on-settle (Medium), per-kind spec↔flow adapters (preemptive), explicit viewer-state derivation.
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
 Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
 
-### Build / test gate (last verified 2026-05-30)
+### Build / test gate (last verified 2026-05-30 post arcball-rework merge)
 
 - `go build ./... && go test ./...` — all pass.
 - `npx tsc --noEmit` — clean.
@@ -52,12 +47,13 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 1. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
 2. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
 3. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
+4. **z-spin (modifier+drag)** — third rotation axis; trackpad rotate unavailable in Chromium webview; modifier+drag variant parked.
 
 ### Key files
 
 - `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`. Top-of-node billboard renders the two-line `label/id + kind` pill; in-node value overlay is delegated to `node-override-text.ts`.
-- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — `onWheelNative`: two-finger scroll → world x/y pan; ctrlKey branch → multiplicative exponential zoom on height above z=0 plane (ZOOM_BASE=1.01).
-- `tools/topology-vscode/src/webview/three/scene-content.tsx` — `CameraRefBridge`: square-on lock, saved tilt quaternion no longer restored on load.
+- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — `onPointerDown` captures the rotation pivot+snapshot; `onPointerMove` `"rotating"` phase runs the two-cylinder rotation; `onWheelNative` ctrl branch = zoom-to-cursor, else branch = tilt-aware plane-unproject pan.
+- `tools/topology-vscode/src/webview/three/scene-content.tsx` — `CameraRefBridge`: tilt now persists across reload (saved quaternion restored).
 - `tools/topology-vscode/src/webview/three/camera-ui.tsx` — `HomeButton`: re-levels camera to look straight at z=0 plane.
 - `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay pill for per-instance values (Input `init`, ChainInhibitor `state.held`); other kinds render nothing. Uses the existing screen-projection pattern, not drei.
 - `tools/topology-vscode/src/webview/three/store.ts` — thin Zustand store; fade in `fade-actions.ts`, edge creation in `edge-creation.ts`.
