@@ -41,7 +41,7 @@ const MOVE_SLOP_PX = 6;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging" | "rotating";
+  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring";
   // Pointer-down snapshot
   downX: number;
   downY: number;
@@ -64,6 +64,7 @@ export interface ControlState {
 export interface PickOptions {
   excludeId?: string;
   nodesOnly?: boolean;
+  ringOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +98,9 @@ export function useInteractionControls(
     nodeCenterAtStart: THREE.Vector3;
     rfPosAtStart: { x: number; y: number };
   } | null>(null);
+
+  // Wiring state: set when pointer-down lands on the torus ring of the selected node.
+  const wiringRef = useRef<{ sourceId: string } | null>(null);
 
   // Throttle node-move IPC: one message per animation frame during drag.
   const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number } | null>(null);
@@ -151,13 +155,23 @@ export function useInteractionControls(
       s.prevY = e.clientY;
       s.phase = "pending";
 
-      // Clear previous node-drag state.
+      // Clear previous drag/wiring state.
       nodeDragRef.current = null;
+      wiringRef.current = null;
 
       // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
+
+      // Check for ring hit on the selected node → start wiring.
+      const ringHit = pickRequest.current?.(ndcX, ndcY, { ringOnly: true }) ?? null;
+      if (ringHit !== null && ringHit === selectedIdRef.current) {
+        wiringRef.current = { sourceId: ringHit };
+        s.phase = "pending";
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        return;
+      }
 
       if (hitId !== null) {
         // Node hit: record drag origin for node-drag phase.
@@ -210,7 +224,9 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        if (nodeDragRef.current) {
+        if (wiringRef.current) {
+          s.phase = "wiring";
+        } else if (nodeDragRef.current) {
           s.phase = "dragging";
         } else {
           // Empty-space drag: start arcball rotation.
@@ -270,21 +286,28 @@ export function useInteractionControls(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const s = state.current;
 
-      // Node drag completed: check for drag-to-wire, else persist position.
-      if (s.phase === "dragging" && nodeDragRef.current) {
-        const nd = nodeDragRef.current;
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-        const sourceId = nd.nodeId;
-        const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: sourceId, nodesOnly: true }) ?? null;
-        if (targetId !== null && targetId !== sourceId) {
-          // WIRE: revert the source node to its start position, then create the edge.
-          onMoveNode(sourceId, nd.rfPosAtStart.x, nd.rfPosAtStart.y);
-          storeCreateEdge(sourceId, null, targetId, null);
-          nodeDragRef.current = null;
+      // Wiring completed: if dropped on a node, create an edge.
+      if (s.phase === "wiring" || (s.phase === "pending" && wiringRef.current !== null)) {
+        if (s.phase === "wiring" && wiringRef.current) {
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+          const targetId = pickRequest.current?.(ndcX, ndcY, { excludeId: wiringRef.current.sourceId, nodesOnly: true }) ?? null;
+          if (targetId !== null && targetId !== wiringRef.current.sourceId) {
+            storeCreateEdge(wiringRef.current.sourceId, null, targetId, null);
+          }
+        }
+        // pending+wiring (click on ring without drag): fall through to normal click/select path.
+        wiringRef.current = null;
+        if (s.phase === "wiring") {
           s.phase = "idle";
+          (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
           return;
         }
+      }
+
+      // Node drag completed: persist position.
+      if (s.phase === "dragging" && nodeDragRef.current) {
+        const nd = nodeDragRef.current;
         // Normal move: persist position.
         const node = useThreeStore.getState().nodes.find((n) => n.id === nd.nodeId);
         if (node) {

@@ -126,7 +126,7 @@ export function GraphNode({
           opacity={faded ? fadeOpacity : 1}
         />
       </mesh>
-      <mesh>
+      <mesh userData={{ nodeId: node.id, ring: true }}>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
           key={faded ? "faded" : "solid"}
@@ -537,6 +537,16 @@ export function RaycasterHelper({
       });
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
+
+      if (opts?.ringOnly) {
+        for (const hit of hits) {
+          const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.ring === true) {
+            return (hitObj.userData.nodeId as string) ?? null;
+          }
+        }
+        return null;
+      }
 
       if (opts?.nodesOnly) {
         // Iterate all hits to find the first node that isn't excluded.
