@@ -7,26 +7,22 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-30 — pinch-zoom reworked to multiplicative, verified)
+## State at handoff (2026-05-30 — multiplicative pinch-zoom merged to main)
 
-- **Active branch:** `task/pinch-zoom-rework`. In flight; not yet merged to main.
+- **Active branch:** `main` at `31a46dca`. No task branch in flight.
+- Both `task/pinch-zoom-rework` and `task/drop-stale-parsespec-tests` merged and deleted (local + remote).
 - Working tree: `topology.json` modified (pre-existing, unrelated; not staged).
-- Build/test gate: `tsc --noEmit` clean, `npm run build` clean, `go build ./... && go test ./...` all pass.
+- Build/test gate: baseline is green — stale parseSpec tests dropped in `task/drop-stale-parsespec-tests`; `go test ./...` all pass.
 
-### What landed on this branch
+### What merged this session
 
-- **Pinch-zoom reworked** (`interaction-controls.ts` `onWheelNative` ctrlKey branch): replaced additive view-direction dolly with multiplicative exponential zoom on camera height above the z=0 plane. Single knob `ZOOM_BASE=1.01`. Camera stays square-on and screen-centered.
-- Reversal-direction lag investigated with runtime traces: confirmed to be native macOS trackpad gesture-ramp behavior (silent event gap + velocity ramp). Momentum-tail and pan-misrouting hypotheses both disproven. Left as native by design — no app mitigation added.
-- Audit: `pinch-zoom` record updated to `working` / `VERIFIED`.
-- Stale parseSpec tests were dropped and merged (main is past that; no action needed here).
+- **`task/drop-stale-parsespec-tests`** — dropped two stale `parseSpec` tests (timing/legend meta fields removed in `93e46efc`); baseline now green.
+- **`task/pinch-zoom-rework`** (merge commit `31a46dca`) — reworked pinch-zoom to multiplicative exponential zoom on camera height above the z=0 plane. Single knob `ZOOM_BASE=1.01`. Camera stays square-on and screen-centered. VERIFIED live by user.
+  - Reversal-direction lag investigated with runtime traces: confirmed native macOS trackpad gesture-ramp (silent event gap + velocity ramp). Momentum-tail and pan-misrouting hypotheses both disproven. Left as native by design — no mitigation added.
 
 ### Prior merge context (still relevant)
 
 **Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y; arcball rotation and dwell→PanPad removed; camera locked square-on.
-
-**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified top-of-node billboard; ripped out pseudocode plumbing. Net: -3408 lines, +98 lines.
-
-### Prior merge context (still relevant)
 
 **Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified the top-of-node billboard to two static lines and moved per-instance state into an HTML overlay; ripped out all pseudocode plumbing. Net: -3408 lines, +98 lines. Audit board updated (commit `373c7f7b`).
 
@@ -42,13 +38,13 @@ The audit site index at `docs/planning/visual-editor/feature-audit/index.html` l
 ### Next-task candidates (friction-driven)
 
 1. Hands-on verify `validation-flag-colors` and `two-click-edge-creation` in the live editor.
-2. Pre-existing test failures (parked from prior session — investigate before the next task branch).
+2. Pre-existing test failures are RESOLVED — the parked parseSpec failures were the stale tests dropped this session; baseline is now green.
 
 ### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
 
 Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
 
-### Build / test gate (last verified 2026-05-29)
+### Build / test gate (last verified 2026-05-30)
 
 - `go build ./... && go test ./...` — all pass.
 - `npx tsc --noEmit` — clean.
@@ -57,8 +53,7 @@ Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows f
 ### KNOWN ISSUES
 
 1. **`validation-flag-colors`** and **`two-click-edge-creation`** — untested in live editor.
-3. **Pre-existing test failures** — parked; investigate before next task branch.
-4. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
+2. **Drag-to-wire** — port-targeted edge creation by dragging from a port handle; parked.
 5. **Port-incompat wiring** — no visual guard when connecting incompatible port types; parked.
 6. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
 
