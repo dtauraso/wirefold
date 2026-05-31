@@ -104,21 +104,41 @@
     const el = document.getElementById("cards");
     el.innerHTML = "";
     let shown = 0;
-    sortedData().forEach(f => {
-      const visible = cardVisible(f);
-      if (visible) shown++;
-      const card = document.createElement("div");
-      card.className = "card" + (visible ? "" : " hidden");
-      card.innerHTML =
-        '<div class="card-title"><a href="features/' + f.slug + '.html">' + escHtml(f.name) + '</a></div>' +
-        '<div class="card-meta">' +
-          '<span class="' + badgeClass(f.status) + '">' + escHtml(f.status) + '</span>' +
-          '<span class="badge badge-cat">' + escHtml(f.category) + '</span>' +
-          '<span class="badge badge-weight-' + f.cross_cut_weight + '">cross-cut: ' + f.cross_cut_weight + '</span>' +
-        '</div>' +
-        '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>';
-      el.appendChild(card);
+
+    // Group visible cards by category, preserving cats order (skip "All")
+    const sorted = sortedData();
+    const groupOrder = cats.filter(c => c !== "All");
+    const groups = {};
+    groupOrder.forEach(c => { groups[c] = []; });
+    sorted.forEach(f => {
+      if (cardVisible(f)) {
+        shown++;
+        groups[f.category].push(f);
+      }
     });
+
+    groupOrder.forEach(cat => {
+      const items = groups[cat];
+      if (items.length === 0) return;
+      const header = document.createElement("h2");
+      header.className = "section-head";
+      header.textContent = cat;
+      el.appendChild(header);
+      items.forEach(f => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML =
+          '<div class="card-title"><a href="features/' + f.slug + '.html">' + escHtml(f.name) + '</a></div>' +
+          '<div class="card-meta">' +
+            '<span class="' + badgeClass(f.status) + '">' + escHtml(f.status) + '</span>' +
+            '<span class="badge badge-cat">' + escHtml(f.category) + '</span>' +
+            '<span class="badge badge-weight-' + f.cross_cut_weight + '">cross-cut: ' + f.cross_cut_weight + '</span>' +
+          '</div>' +
+          '<div class="card-proposal">' + escHtml(proposalSnippet(f.reduction_proposal)) + '</div>';
+        el.appendChild(card);
+      });
+    });
+
     document.getElementById("meta").textContent =
       "Re-audited 2026-05-28 · " + data.length + " features · " + (cats.length - 1) + " categories · " + shown + " shown";
   }
