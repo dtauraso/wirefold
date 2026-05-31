@@ -15,15 +15,11 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Point on the sphere surface of `node` facing toward `other`.
- * Matches the surfacePoint() logic in scene-content.tsx — kept in sync.
+ * Returns the center of `node` in world space.
+ * `other` is accepted but ignored — kept for API symmetry with scene-content.tsx (kept in sync).
  */
-function surfacePointForNodes(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Vector3 {
-  const origin = nodeWorldPos(node);
-  const target = nodeWorldPos(other);
-  const r = nodeRadius(node);
-  const dir = target.clone().sub(origin).normalize();
-  return origin.clone().addScaledVector(dir, r);
+function surfacePointForNodes(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.Vector3 {
+  return nodeWorldPos(node);
 }
 
 /**

@@ -156,13 +156,12 @@ export function GraphNode({
 // Exit/entry points: point on each node's sphere surface facing the other node.
 // ---------------------------------------------------------------------------
 
-/** Point on the sphere surface of `node` facing toward `other`. */
-function surfacePoint(node: RFNode<NodeData>, other: RFNode<NodeData>): THREE.Vector3 {
-  const origin = nodeWorldPos(node);
-  const target = nodeWorldPos(other);
-  const r = nodeRadius(node);
-  const dir = target.clone().sub(origin).normalize();
-  return origin.clone().addScaledVector(dir, r);
+/**
+ * Returns the center of `node` in world space.
+ * `other` is accepted but ignored — kept for API symmetry with geometry-helpers.ts (kept in sync).
+ */
+function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.Vector3 {
+  return nodeWorldPos(node);
 }
 
 // PulseBead: a bright sphere that travels along the edge curve at the current pulse t.
