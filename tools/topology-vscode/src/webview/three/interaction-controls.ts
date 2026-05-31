@@ -10,7 +10,6 @@ import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
-import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -184,7 +183,6 @@ export function useInteractionControls(
 
       // Check for port hit → start port-to-port wiring.
       const portHit = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
-      postLog("wire-port-down", { portHit: portHit ?? undefined });
       if (portHit !== null) {
         wiringRef.current = parsePortId(portHit);
         s.phase = "pending";
@@ -194,8 +192,6 @@ export function useInteractionControls(
 
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
       s.emptyDown = (hitId === null);
-
-      postLog("wire-down", { hitId: hitId ?? undefined, emptyDown: s.emptyDown, isNode: hitId !== null && nodesRef.current.some((n) => n.id === hitId) });
 
       if (hitId !== null) {
         // Node hit: record drag origin for node-drag phase.
@@ -317,7 +313,6 @@ export function useInteractionControls(
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
         const targetPortId = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
-        postLog("wire-port-up", { source: src, targetPortId: targetPortId ?? undefined });
         if (targetPortId !== null) {
           const tgt = parsePortId(targetPortId);
           if (tgt.nodeId !== src.nodeId) {
