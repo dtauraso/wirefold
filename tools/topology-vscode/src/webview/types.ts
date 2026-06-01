@@ -65,9 +65,7 @@ export interface NodeData {
   // 3D depth coordinate. Defaults to 0 when absent (exact 2D replica).
   z?: number;
   state?: Record<string, StateValue>;
-  /** Set when a required inbound edge is missing; causes the node to render with a red border. */
-  validationError?: string;
-  /** Viewer-only fade mask. Faded nodes render muted; their incident edges draw no pulse. */
+/** Viewer-only fade mask. Faded nodes render muted; their incident edges draw no pulse. */
   faded?: boolean;
 
   // --- Runtime trace fields (Phase 4) ---
