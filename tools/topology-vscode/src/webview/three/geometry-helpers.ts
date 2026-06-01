@@ -8,6 +8,10 @@ import {
   CURVE_PARAM_MIN_ARC_LENGTH,
   CURVE_PARAM_BULGE_FACTOR,
   CURVE_PARAM_BEZIER_SAMPLE_COUNT,
+  CURVE_PARAM_NODE_RADIUS_DIVISOR,
+  CURVE_PARAM_SLOT_PCT0,
+  CURVE_PARAM_SLOT_PCT1,
+  CURVE_PARAM_SLOT_PCT2,
 } from "../../schema/curve-params";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +51,7 @@ export function buildEdgeCurve(
 
 /** Node sphere radius from node dimensions. */
 export function nodeRadius(node: RFNode<NodeData>): number {
-  return Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / 4;
+  return Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
 }
 
 export function boundingBox(nodes: RFNode<NodeData>[]) {
@@ -75,7 +79,7 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
 // Port geometry
 // ---------------------------------------------------------------------------
 
-const SLOT_PCT = [25, 50, 75] as const;
+const SLOT_PCT = [CURVE_PARAM_SLOT_PCT0, CURVE_PARAM_SLOT_PCT1, CURVE_PARAM_SLOT_PCT2] as const;
 
 /**
  * Unit direction (z=0 plane) from node center toward the given port's position,
