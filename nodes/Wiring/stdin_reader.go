@@ -39,6 +39,15 @@ type NodeMoveRegistry struct {
 	edgeNodes map[string]EdgeEndpoints
 	// nodeEdges: nodeId → list of edgeIds that touch this node (immutable after construction)
 	nodeEdges map[string][]string
+	// edgeOut: edgeId → source *Out for that edge, indexed by "source.sourceHandle".
+	// Populated by SetEdgeOuts after node construction. Used by node-move to write
+	// the affected edge's own per-edge travel-time onto its source Out.
+	edgeOut map[string]*Out
+	// destWire: destKey ("target.targetHandle") → dest *PacedWire, for recomputing
+	// MaxIncomingSimLatencyMs across all edges feeding a port on node-move.
+	destWire map[string]*PacedWire
+	// destEdges: destKey → edgeIds feeding that destination port.
+	destEdges map[string][]string
 }
 
 // NewNodeMoveRegistry allocates and initialises a NodeMoveRegistry.
@@ -46,9 +55,12 @@ type NodeMoveRegistry struct {
 // edgeNodes maps each edge label to its source/target node IDs and handles.
 func NewNodeMoveRegistry(geoms map[string]nodeGeom, edgeNodes map[string]EdgeEndpoints) *NodeMoveRegistry {
 	nodeEdges := map[string][]string{}
+	destEdges := map[string][]string{}
 	for edgeId, ep := range edgeNodes {
 		nodeEdges[ep.Source] = append(nodeEdges[ep.Source], edgeId)
 		nodeEdges[ep.Target] = append(nodeEdges[ep.Target], edgeId)
+		destKey := ep.Target + "." + ep.TargetHandle
+		destEdges[destKey] = append(destEdges[destKey], edgeId)
 	}
 	// Defensively copy geoms.
 	g := make(map[string]nodeGeom, len(geoms))
@@ -57,45 +69,90 @@ func NewNodeMoveRegistry(geoms map[string]nodeGeom, edgeNodes map[string]EdgeEnd
 		geoms:     g,
 		edgeNodes: edgeNodes,
 		nodeEdges: nodeEdges,
+		edgeOut:   map[string]*Out{},
+		destWire:  map[string]*PacedWire{},
+		destEdges: destEdges,
 	}
 }
 
-// updateNodeAndGetAffected moves nodeId to (x, y, z) and returns a slice of
-// (edgeId, newSimLatencyMs) pairs for all edges that touch this node.
-// Returns nil if nodeId is unknown.
-func (nmr *NodeMoveRegistry) updateNodeAndGetAffected(nodeId string, x, y, z float64) []struct {
-	edgeId       string
-	simLatencyMs float64
-} {
+// SetEdgeOuts wires the per-edge source Outs (indexed by "source.sourceHandle"
+// in outSink) and the destination wires (slotReg, keyed by "target.targetHandle")
+// into the registry so node-move can update per-edge travel-time and recompute
+// each affected port's MaxIncomingSimLatencyMs. Call once after node construction.
+func (nmr *NodeMoveRegistry) SetEdgeOuts(outSink map[string]*Out, slotReg SlotRegistry) {
+	nmr.mu.Lock()
+	defer nmr.mu.Unlock()
+	for edgeId, ep := range nmr.edgeNodes {
+		if o, ok := outSink[ep.Source+"."+ep.SourceHandle]; ok {
+			nmr.edgeOut[edgeId] = o
+		}
+		destKey := ep.Target + "." + ep.TargetHandle
+		if pw, ok := slotReg[destKey]; ok {
+			nmr.destWire[destKey] = pw
+		}
+	}
+}
+
+// applyNodeMove moves nodeId to (x, y, z) and updates travel-time for every edge
+// that touches it: each affected edge's own per-edge ArcLength/SimLatencyMs is
+// written onto its source Out, and every destination port reached by an affected
+// edge has its MaxIncomingSimLatencyMs recomputed as max over ALL edges feeding
+// it (not just the moved ones). No-op if nodeId is unknown.
+func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 	nmr.mu.Lock()
 	defer nmr.mu.Unlock()
 	g, ok := nmr.geoms[nodeId]
 	if !ok {
-		return nil
+		return
 	}
 	g.Pos = vec3{X: x, Y: y, Z: z}
 	nmr.geoms[nodeId] = g
 
 	edgeIds := nmr.nodeEdges[nodeId]
 	if len(edgeIds) == 0 {
-		return nil
+		return
 	}
-	result := make([]struct {
-		edgeId       string
-		simLatencyMs float64
-	}, 0, len(edgeIds))
-	for _, eid := range edgeIds {
+
+	// arcLenOf computes the current port-to-port arc length for an edge.
+	arcLenOf := func(eid string) float64 {
 		ep := nmr.edgeNodes[eid]
-		arcLen := arcLengthBetweenPorts(
+		return arcLengthBetweenPorts(
 			nmr.geoms[ep.Source], ep.SourceHandle,
 			nmr.geoms[ep.Target], ep.TargetHandle,
 		)
-		result = append(result, struct {
-			edgeId       string
-			simLatencyMs float64
-		}{edgeId: eid, simLatencyMs: arcLen / PulseSpeedWuPerMs})
 	}
-	return result
+
+	// 1. Update the affected edges' source Outs (per-edge travel-time).
+	//    Track the distinct destination ports they feed for step 2.
+	touchedDest := map[string]bool{}
+	for _, eid := range edgeIds {
+		arc := arcLenOf(eid)
+		lat := arc / PulseSpeedWuPerMs
+		if o := nmr.edgeOut[eid]; o != nil {
+			o.ArcLength = arc
+			o.SimLatencyMs = lat
+		}
+		ep := nmr.edgeNodes[eid]
+		touchedDest[ep.Target+"."+ep.TargetHandle] = true
+	}
+
+	// 2. Recompute each touched dest port's MaxIncomingSimLatencyMs over ALL its
+	//    feeding edges (some may be unaffected by this move).
+	for destKey := range touchedDest {
+		pw := nmr.destWire[destKey]
+		if pw == nil {
+			continue
+		}
+		var maxLat float64
+		for _, eid := range nmr.destEdges[destKey] {
+			if lat := arcLenOf(eid) / PulseSpeedWuPerMs; lat > maxLat {
+				maxLat = lat
+			}
+		}
+		pw.mu.Lock()
+		pw.MaxIncomingSimLatencyMs = maxLat
+		pw.mu.Unlock()
+	}
 }
 
 
@@ -202,16 +259,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 				if nmr == nil || msg.NodeId == "" {
 					continue
 				}
-				affected := nmr.updateNodeAndGetAffected(msg.NodeId, msg.X, msg.Y, msg.Z)
-				for _, a := range affected {
-					// Update the wire geometry in the registry.
-					if pw, ok := reg[a.edgeId]; ok {
-						pw.mu.Lock()
-						pw.SimLatencyMs = a.simLatencyMs
-						pw.ArcLength = a.simLatencyMs * PulseSpeedWuPerMs
-						pw.mu.Unlock()
-					}
-				}
+				nmr.applyNodeMove(msg.NodeId, msg.X, msg.Y, msg.Z)
 			}
 		}
 	}
