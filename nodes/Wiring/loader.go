@@ -181,19 +181,32 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 	destWire := map[string]*PacedWire{}
 	edgeWire := WireRegistry{}
 	edgeEndpoints := map[string]EdgeEndpoints{}
+	// edgeArc / edgeLatency carry each edge's OWN travel-time (per-edge geometry),
+	// distinct from the dest wire's MaxIncomingSimLatencyMs aggregate. Keyed by
+	// edge label; consumed below when binding the source Out.
+	edgeArc := map[string]float64{}
+	edgeLatency := map[string]float64{}
 	for _, e := range spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
+		// Per-edge arc length / latency from this edge's own port-to-port geometry.
+		arcLength := arcLengthBetweenPorts(
+			nodeGeoms[e.Source], e.SourceHandle,
+			nodeGeoms[e.Target], e.TargetHandle,
+		)
+		simLatencyMs := arcLength / PulseSpeedWuPerMs
+		edgeArc[e.Label] = arcLength
+		edgeLatency[e.Label] = simLatencyMs
 		pw, exists := destWire[destKey]
 		if !exists {
-			arcLength := arcLengthBetweenPorts(
-				nodeGeoms[e.Source], e.SourceHandle,
-				nodeGeoms[e.Target], e.TargetHandle,
-			)
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
 			pw.Trace = tr
 			destWire[destKey] = pw
+		} else if simLatencyMs > pw.MaxIncomingSimLatencyMs {
+			// Fan-in: raise the per-port window aggregate to the max over all
+			// edges feeding this destination port.
+			pw.MaxIncomingSimLatencyMs = simLatencyMs
 		}
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
@@ -284,11 +297,14 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 		return rule
 	}
 
-	// Build each node.
+	// Build each node. outSink collects every paced source Out keyed by
+	// "node.handle" so node-move can update per-edge travel-time on the Out.
+	outSink := map[string]*Out{}
 	nodes := make([]Node, 0, len(spec.Nodes))
 	for _, n := range spec.Nodes {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
+		pb.outSink = outSink
 
 		for _, port := range bind.Ports {
 			switch port.Dir {
@@ -306,7 +322,8 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 					// For fan-in, the destination port owns the wire.
 					// Send rule is node-owned, keyed by this output port name.
 					rule := nodeSendRule(n, port.Name)
-					pb.SetSinglePacedRule(port.Name, edgeWire[labels[0]], rule)
+					lbl := labels[0]
+					pb.SetSinglePacedRule(port.Name, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl])
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
@@ -321,7 +338,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 					// Per-port (per fan-out element): the rule is keyed by the
 					// concrete output port name (sourceHandle, e.g. "ToNext0").
 					rule := nodeSendRule(n, handle)
-					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule)
+					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl])
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}
@@ -333,6 +350,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 		}
 		nodes = append(nodes, nd)
 	}
+
+	// Index per-edge source Outs and dest wires into the move registry so
+	// node-move can update per-edge travel-time and the per-port window aggregate.
+	nmr.SetEdgeOuts(outSink, SlotRegistry(destWire))
 
 	return nodes, SlotRegistry(destWire), edgeWire, nmr, nil
 }
