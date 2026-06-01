@@ -10,8 +10,8 @@ branch: task/timing-window
 Neuron-like coincidence detection: a multi-input node should fire only when its required inputs arrive close together in time. Inputs that don't complete a valid combination within a window are flushed (cleared) — preventing stray/partial signals from accumulating and from blocking upstream sources. This handles the **permanent-delete** case: an input that genuinely never arrives (an edge removed for good) so the gate flushes a partial combination after `W` instead of piling up beads. (The delete+re-add freeze is a *separate* receive bug fixed on the prerequisite branch `task/wire-delete-pulse`, not here.)
 
 ## Model
-- **Universal rule — every node with input edges.** Every node that has at least one input edge applies the timing-window rule uniformly. The rule is stored per-node in `node.data` (same ownership as send rules); `W` is derived from that node's current input wires.
-- **Core rule:** a node collects one pulse from each of its input edges. If ALL of them arrive within window `W` of the first arrival (`t0`) → ALL inputs are **kept** (the combination is accepted; the node fires). If `W` elapses with any input still missing → ALL inputs are **removed** (discarded via `Done` without firing); the node resets and waits for the next first-arrival. Single-input nodes trivially keep their one pulse; the rule is the same uniform rule everywhere.
+- **Window iff ≥2 input edges.** The timing-window rule applies only to nodes with two or more input edges — coincidence detection is only meaningful across multiple inputs. A node with a single input edge has **no window**: it receives normally with a blocking `Recv`, today's behavior. The rule is stored per-node in `node.data` (same ownership as send rules); `W` is derived from that node's current input wires.
+- **Core rule:** a windowed node (≥2 input edges) collects one pulse from each of its input edges. If ALL of them arrive within window `W` of the first arrival (`t0`) → ALL inputs are **kept** (the combination is accepted; the node fires). If `W` elapses with any input still missing → ALL inputs are **removed** (discarded via `Done` without firing); the node resets and waits for the next first-arrival.
 - **`W` is derived, not stored.** Recomputed from the node's current input edges every time an input edge's length changes (node moved, edge reconnected, midpoint dragged): `W = 1.5 × max(simLatencyMs over the node's current input wires)`, where each wire's `simLatencyMs = bezier arcLength / 0.08 WU-per-ms` (uniform pulse speed). The per-node value is therefore a snapshot of current geometry — if geometry changes, `W` changes automatically.
 - The window **opens when the node's first required input arrives** (`t0`).
 - Consequence: a windowed node **always releases its inputs** (fire or timeout), so upstream sources never block indefinitely and beads never pile up at a dead/slow gate.
@@ -28,8 +28,8 @@ Alternatives: **sim-time ms** (consistent with `simLatencyMs`, but requires plum
 - **Holding semantics:** a polled-but-not-yet-fired input is *held* (received; slot stays full until `Done`). On clear, `Done` drains it.
 
 ## Scope / first step
-- Implement on **`inhibitRight0`** first (the AND-gate that motivated this). The rule is universal, but `inhibitRight0` is the first node to be wired up.
-- All other input-having nodes (`readGate1`, `i0`, `i1`, and all future nodes with inputs) apply the same rule; implementation order does not change the rule's universality.
+- Implement on **`inhibitRight0`** first (the AND-gate that motivated this; 2 input edges → has window).
+- Nodes with ≥2 input edges also get the window: `readGate1` (3 inputs, W = 2950 ms), `inhibitRight0` (2 inputs, W = 2650 ms). Nodes with 1 input edge (`i0`, `i1`) have no window and keep blocking `Recv`.
 
 ## Open questions
 - Clock units (see above).

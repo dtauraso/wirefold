@@ -97,8 +97,8 @@
 
   <!-- OVERVIEW -->
   <div id="overview" class="panel active">
-    <p>Every node with input edges applies the timing-window rule uniformly: a node collects one pulse from each of its input edges. If all of them arrive within window <code>W</code> of the first arrival, the combination is accepted and the node fires. If <code>W</code> elapses with any input still missing, all held inputs are discarded (via <code>Done</code>) without firing, and the node resets to wait for the next first-arrival.</p>
-    <p>The timing window opens when the <strong>first input arrives</strong> (<code>t0</code>). Single-input nodes trivially satisfy the rule (their one pulse is always "all of them"). The rule is the same everywhere.</p>
+    <p>The timing-window rule applies to nodes with <strong>two or more input edges</strong> — coincidence detection is only meaningful across multiple inputs. A node with a single input edge has no window and receives normally (blocking <code>Recv</code>). A windowed node (≥2 input edges) collects one pulse from each of its input edges. If all of them arrive within window <code>W</code> of the first arrival, the combination is accepted and the node fires. If <code>W</code> elapses with any input still missing, all held inputs are discarded (via <code>Done</code>) without firing, and the node resets to wait for the next first-arrival.</p>
+    <p>The timing window opens when the <strong>first input arrives</strong> (<code>t0</code>).</p>
     <p>This directly solves the <strong>permanent-delete</strong> case: an input edge removed for good means that input will never arrive, so the gate would block forever. With a timing window it times out after <code>W</code>, clears, and lets the ring keep running — no pile-up, no stall.</p>
     <p><code>W</code> is derived per-node from current input-edge geometry (<code>W = 1.5 × max(simLatencyMs)</code> over current input wires) and stored in <code>node.data</code>. It is recomputed automatically whenever an input edge's length changes.</p>
   </div>
@@ -183,19 +183,19 @@
   <!-- RULES -->
   <div id="rules" class="panel">
     <ul>
-      <li><strong>Universal rule — every node with input edges.</strong> Every node that has at least one input edge applies the timing-window rule uniformly. The rule is stored per-node in <code>node.data</code> (same ownership as send rules).</li>
-      <li><strong>Core rule:</strong> a node collects one pulse from each of its input edges. If ALL of them arrive within window <code>W</code> of the first arrival (<code>t0</code>) → ALL inputs are <strong>kept</strong> (the combination is accepted; the node fires). If <code>W</code> elapses with any input still missing → ALL inputs are <strong>removed</strong> (discarded via <code>Done</code> without firing); the node resets and waits for the next first-arrival. Single-input nodes trivially keep their one pulse — the rule is the same uniform rule everywhere.</li>
+      <li><strong>Window iff ≥2 input edges.</strong> The timing-window rule applies only to nodes with two or more input edges. A node with a single input edge has no window — it receives normally with a blocking <code>Recv</code>. The rule is stored per-node in <code>node.data</code> (same ownership as send rules).</li>
+      <li><strong>Core rule:</strong> a windowed node (≥2 input edges) collects one pulse from each of its input edges. If ALL of them arrive within window <code>W</code> of the first arrival (<code>t0</code>) → ALL inputs are <strong>kept</strong> (the combination is accepted; the node fires). If <code>W</code> elapses with any input still missing → ALL inputs are <strong>removed</strong> (discarded via <code>Done</code> without firing); the node resets and waits for the next first-arrival.</li>
       <li><strong>Window opens at <code>t0</code></strong> — the wall-clock moment the first input arrives. <code>W</code> is real elapsed wall-clock time measured at the node.</li>
       <li><strong>W is derived, not stored</strong> — recomputed from the node's current input edges on every input-edge-length change (move, reconnect, midpoint drag): <code>W = 1.5 × max(simLatencyMs)</code> over current input wires, where <code>simLatencyMs = arcLength ÷ 0.08 WU/ms</code>. The value is a geometry snapshot, not fixed config.</li>
       <li><strong>Clear semantics</strong> — call <code>Done</code> on each held input's <code>In</code> port (drains the upstream wire so a <code>consumeGated</code> source's <code>WaitConsumed</code> returns). No <code>Fire()</code>. Emit a <code>window-clear</code> trace breadcrumb for observability.</li>
     </ul>
-    <p style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted);"><strong>Implementation note</strong> — windowed nodes use a non-blocking poll primitive (<code>PollRecv() (value, ok)</code> on <code>PacedWire</code>/<code>Out</code>) instead of a parking <code>Recv</code>, with a <code>select</code>-timeout or short sleep between iterations to avoid busy-spin. <code>inhibitRight0</code> is the first node wired up; the rule is universal across all input-having nodes.</p>
+    <p style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted);"><strong>Implementation note</strong> — windowed nodes use a non-blocking poll primitive (<code>PollRecv() (value, ok)</code> on <code>PacedWire</code>/<code>Out</code>) instead of a parking <code>Recv</code>, with a <code>select</code>-timeout or short sleep between iterations to avoid busy-spin. Single-input nodes keep their existing blocking <code>Recv</code> unchanged. <code>inhibitRight0</code> is the first windowed node wired up.</p>
 
   </div>
 
   <!-- WINDOWS -->
   <div id="windows" class="panel">
-    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem;"><strong>W is not a fixed config value.</strong> It is recomputed from the node's current input edges whenever any input edge length changes (node moved, edge reconnected, midpoint dragged): <code>W = 1.5 × longest current input edge travel time</code>, where travel time = bezier arcLength ÷ 0.08 WU/ms (uniform pulse speed). The values below are a <em>snapshot at the current geometry</em> — they change automatically if geometry changes. Every listed node applies the timing-window rule: if all inputs arrive within W, they are kept and the node fires; if W elapses with any missing, all held inputs are discarded and the node resets.</p>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem;"><strong>W is not a fixed config value.</strong> It is recomputed from the node's current input edges whenever any input edge length changes (node moved, edge reconnected, midpoint dragged): <code>W = 1.5 × longest current input edge travel time</code>, where travel time = bezier arcLength ÷ 0.08 WU/ms (uniform pulse speed). The values below are a <em>snapshot at the current geometry</em> — they change automatically if geometry changes. This table lists only nodes <strong>with a window (≥2 input edges)</strong>. Single-input nodes (<code>i0</code>, <code>i1</code>) are excluded — they have no window and receive normally.</p>
     <table style="width:100%;border-collapse:collapse;margin-top:0.25rem;">
       <thead>
         <tr style="background:var(--code-bg);">
@@ -209,16 +209,6 @@
           <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>readGate1</code></td>
           <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">ReadGate</td>
           <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">2950 ms</td>
-        </tr>
-        <tr>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>i0</code></td>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">ChainInhibitor</td>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">3200 ms</td>
-        </tr>
-        <tr>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>i1</code></td>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">ChainInhibitor</td>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">1000 ms</td>
         </tr>
         <tr>
           <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>inhibitRight0</code></td>
