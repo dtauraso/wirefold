@@ -7,78 +7,77 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-05-31 — task/delete-edge in flight)
+## State at handoff (2026-06-01 — task/delete-edge merged to main)
 
-- **Active branch:** `task/delete-edge` (branched from `main` HEAD `05f9222e`).
-- Working tree: `topology.json` modified + `.claude/scheduled_tasks.lock` untracked (both pre-existing/unrelated; not staged).
-- Build/test gate: last verified 2026-05-31 at `f3e179f6` — all gates green (see Build/test gate section below).
+- **Active branch:** `task/timing-window` (branched from `main` after the
+  `task/delete-edge` merge).
+- `task/delete-edge` is **merged to main** and deleted (local + remote).
+- Build/test gate: green at merge (`go build ./... && go test ./...`, `npx tsc --noEmit` clean).
 
-### What's on this branch (task/delete-edge)
+### What landed on task/delete-edge (merged)
 
-In order:
+- **Per-edge, node-owned send rules.** Send rules now live on the node
+  (`node.data.sendRules`), not the wire. Two rules:
+  - `consumeGated` — source blocks until the bead is consumed (default backpressure).
+  - `fireAndForget` — non-blocking; drops the bead if the destination is busy.
+  - `i0.ToNext1` uses `fireAndForget` so deleting that side-gate input keeps the ring alive.
+- **PacedWire is pure transport.** Ops: `WaitConsumed` / `Reset` /
+  `Delete` / `Restore`. `Delete` sets a deleted flag so the source stops
+  placing beads (no pile-up at a dead gate); `Restore` re-enables it.
+- **Substrate messages `deleteEdge` + `addEdge`** wired through
+  `messages.ts` → `handle-message.ts` → `store.ts`; delete persistently
+  silences the wire, add restores it.
+- **Delete-path trace breadcrumbs** added.
+- **MODEL.md amended** to node-owned send rules (rules are a property of
+  the node, not the wire).
 
-- `dfa37bf5` — delete-edge feature: select edge + Delete/Backspace removes it. Works.
-- `a6f5d04e` — slot-keyed delivery ack.
-- `f3e179f6` — Go-authoritative slot stamped into the send trace.
-- `17aa67a3` — targetHandle round-trip guard.
-- `89334b4d` — pulse-deliver debug breadcrumb — **REMOVE before merge**.
+### KNOWN ISSUE (prominent — drives next branch)
 
-An intermittent stall after delete+re-add remains; it is superseded by the wire-in-flight backpressure model change (next task).
+**Delete + re-add freezes the destination AND-gate.** A receiver parked
+in `PacedWire.Recv` is orphaned when `Reset` swaps its `slotReadyCh`:
+the parked goroutine holds a reference to the old channel and never
+wakes. This is a blocking-receive structural problem, not a knob to
+tune. It is intended to be subsumed by the timing-window receive
+rewrite below (non-blocking polling has no parked receiver to orphan).
 
-### Next task
+### Next task — task/timing-window (SPEC FIRST)
 
-Implement the wire-in-flight backpressure model per [docs/planning/visual-editor/wire-inflight-backpressure.md](wire-inflight-backpressure.md). This is a substrate model change that amends MODEL.md (source observes wire in-flight, wire owns the one-bead bit); David confirmed the model 2026-05-31.
+Implement a per-node **timing-window (coincidence-detection) rule**:
 
-### Prior merge context (still relevant)
+- `node.data` carries a `window` (duration).
+- The node **polls its inputs non-blockingly** instead of parking in a
+  blocking `Recv`.
+- On the **first** input arrival, the node **opens the window**.
+- If **all** required inputs land within the window → **fire**.
+- If the window expires with inputs missing → **clear** the held inputs
+  (Done-without-fire) and reset; no fire.
+- This rewrites the receive path from blocking `Recv` to non-blocking
+  polling and **subsumes the orphaned-Recv freeze** (no parked receiver
+  exists to be orphaned by a `slotReadyCh` swap).
 
-**Merge `05f9222e` from `task/edge-surface-rendering` (deleted):** edge tubes now start at the node sphere SURFACE instead of the node center. Curve is still center-to-center (latency/pulse-bead math unchanged). Tube trimmed to [t0,t1] range outside each node's `nodeRadius`, surface crossing found by linear interpolation. PulseBead deliberately left traveling the full center-to-center curve — timing is center-based by design. Edge tube WIDTH fixed constant 1.5. Commits: `6818a3e8`, `93a03fca`, `a1ab11b8`, `4a460a02`, merge `05f9222e`.
-
-**Merge `68c4da40` from `task/arcball-rework` (deleted):** camera rotation on single empty-space drag, two decoupled in-plane cylinders (horizontal->world Y, vertical->world X) pivoting on selected node; tilt persists across reload. Pinch-zoom reworked to zoom-to-cursor; xy pan made tilt-aware. VERIFIED live by user.
-
-**Merge `31a46dca` from `task/pinch-zoom-rework` (deleted):** multiplicative exponential zoom on camera height. Superseded by zoom-to-cursor from `task/arcball-rework`.
-
-**Merge `bda401e1` from `task/xy-pan-camera` (deleted):** two-finger scroll pans camera in world x/y. Superseded by tilt-aware pan from `task/arcball-rework`.
-
-**Merge `98584a6f` from `task/billboard-name-kind-only` (deleted):** simplified top-of-node billboard to two static lines; ripped out all pseudocode plumbing. Net: -3408 lines, +98 lines.
-
-### Next-task candidates after task/delete-edge (friction-driven)
-
-Outstanding editor features are tracked on the audit board at `docs/planning/visual-editor/feature-audit/index.html` (12 features with status columns). Pick friction-driven from there. The one cross-cut item not on the board: per-kind spec↔flow adapters / explicit viewer-state derivation / view-save-on-settle.
-
-### Historical context — pulse-substrate-transport (merged 2026-05-28, commit range `0572704a`–`2662baa4`)
-
-Substrate-owned pulse transport timing landed end-to-end: `simLatencyMs` flows from Go `PacedWire` → `send` trace event → `pump.ts` → `PulseBead`; latency-live drag working with same-frame TS-local recompute; curve is derived non-React store state; curve constants codegen'd from `curve_params.go` via `gen-node-defs`; visible px/ms genuinely uniform across all wires; TS→Go relationship strictly one-way.
-
-### Build / test gate (last verified 2026-05-31 at f3e179f6 — all green)
-
-- `go build ./... && go test ./...` — all pass.
-- `npx tsc --noEmit` — clean.
-- `npm run build` — `out/webview.js` refreshed (1.1 MB).
-
-### KNOWN ISSUES
-
-1. **Cross-cut refactors (remaining)** — (a) per-kind spec↔flow adapters to isolate blast radius in `spec-to-flow.ts` (preemptive — only 4 kinds, no per-kind switch today); (b) explicit viewer-state derivation from spec (6 of 8 fields genuinely independent; main hazard is the `spec-to-flow.ts:41–45` round-trip invariant — pin with a test, not a refactor). view-save-on-settle is Medium (3→2 file gain).
+**Write the SPEC FIRST** (amends MODEL.md) and get David's confirmation
+before any implementation. Do not write code ahead of the spec.
 
 ### Key files
 
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator; render in `scene-content.tsx`, interaction in `interaction-controls.ts`, camera widgets in `camera-ui.tsx`, math in `geometry-helpers.ts`. Top-of-node billboard renders the two-line `label/id + kind` pill; in-node value overlay is delegated to `node-override-text.ts`.
-- `tools/topology-vscode/src/webview/three/interaction-controls.ts` — `onPointerDown` captures the rotation pivot+snapshot; `onPointerMove` `"rotating"` phase runs the two-cylinder rotation; `onWheelNative` ctrl branch = zoom-to-cursor, else branch = tilt-aware plane-unproject pan.
-- `tools/topology-vscode/src/webview/three/scene-content.tsx` — `CameraRefBridge`: tilt now persists across reload (saved quaternion restored). `SingleEdgeTube`: surface-trim `useMemo` computes t0/t1 by linear interpolation between bracketing curve samples at each node's `nodeRadius`.
-- `tools/topology-vscode/src/webview/three/camera-ui.tsx` — `HomeButton`: re-levels camera to look straight at z=0 plane.
-- `tools/topology-vscode/src/webview/three/node-override-text.ts` — HTML-projected in-node overlay pill for per-instance values (Input `init`, ChainInhibitor `state.held`); other kinds render nothing. Uses the existing screen-projection pattern, not drei.
-- `tools/topology-vscode/src/webview/three/store.ts` — thin Zustand store; fade in `fade-actions.ts`, edge creation in `edge-creation.ts`.
-- `tools/topology-vscode/src/webview/three/fade.ts` — `computeFade` fixpoint (render-mask only).
-- `tools/topology-vscode/src/schema/node-defs.ts` — generated node defs (spec layer; `pseudo`/`sublabel` fields removed); `src/schema/parse-spec.ts` — `requiredInputDiagnostics` (editor-diagnostic only).
-- `tools/topology-vscode/src/webview/three/geometry-helpers.ts` — `surfacePointForNodes` returns node center (curve is center-to-center); `nodeRadius` formula: `min(w,h)/4`.
-- `nodes/Wiring/paced_wire.go` — `ArcLength`, `SimLatencyMs`, `PulseSpeedWuPerMs`; `faded` flag + `SetFaded` + `Send` gate.
-- `nodes/Wiring/stdin_reader.go` — `NodeMoveRegistry`; node-move IPC → `PacedWire.ArcLength`/`SimLatencyMs` recompute (silent; no trace event emitted back).
-- `nodes/Wiring/loader.go` — threads node positions into wire construction for initial `arcLength`.
-- `nodes/input/node.go` — Input node (also serves bootstrap role).
-- `docs/planning/visual-editor/feature-audit/index.html` — audit board (13 features after billboarded-labels + sublabel-inline-edit removal).
+- `nodes/Wiring/paced_wire.go` — pure transport: `WaitConsumed` / `Reset` / `Delete` / `Restore`. The blocking `Recv` here is what the timing-window rewrite replaces.
+- `nodes/Wiring/paced_wire_test.go` — transport tests; extend for window polling.
+- `nodes/Wiring/stdin_reader.go` — node-move IPC; also touched by the i0 fireAndForget wiring.
+- `nodes/Wiring/loader.go` — threads node positions + send rules into wire/node construction.
+- `tools/topology-vscode/src/messages.ts` — `deleteEdge` / `addEdge` message types.
+- `tools/topology-vscode/src/extension/handle-message.ts` — dispatch for the new messages.
+- `tools/topology-vscode/src/webview/three/store.ts` — store wiring for delete/add.
+- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator (render in `scene-content.tsx`, interaction in `interaction-controls.ts`).
+- `docs/planning/visual-editor/feature-audit/index.html` — friction-driven feature board.
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Fade did not change the model: it is a start-gate on `Send`, no new `PacedWire` op, slot-phase/AND-gate/backpressure untouched. `pump.ts` stays render-only. The billboard / in-node overlay changes are pure render — no substrate touch. Edge-surface trimming is purely visual (geometry only); the center-to-center curve and all timing math are unchanged. **The wire-in-flight backpressure spec (next task) amends MODEL.md — see [wire-inflight-backpressure.md](wire-inflight-backpressure.md).**
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). As of
+task/delete-edge, **send rules are node-owned** (`node.data.sendRules`:
+`consumeGated` / `fireAndForget`), and `PacedWire` is pure transport
+(`WaitConsumed` / `Reset` / `Delete` / `Restore`). `pump.ts` stays
+render-only. The timing-window rule (next task) amends MODEL.md again:
+non-blocking input polling + coincidence-detection window.
 
 ## Dev-loop
 
