@@ -221,6 +221,27 @@ func (o *Out) TryEmit(v int) bool {
 	}
 }
 
+// InFlight reports whether a bead is currently traversing the underlying wire.
+// Returns false in chan mode (no wire geometry / no in-flight concept).
+// Nil-safe; returns false for a nil Out.
+func (o *Out) InFlight() bool {
+	if o == nil || o.pw == nil {
+		return false
+	}
+	return o.pw.InFlight()
+}
+
+// Occupied reports whether the underlying wire is non-empty: either a bead is
+// in flight or a delivered pulse is parked in the slot (hasSend=true, not yet
+// consumed). Returns false in chan mode (no wire geometry / no slot concept).
+// Nil-safe; returns false for a nil Out.
+func (o *Out) Occupied() bool {
+	if o == nil || o.pw == nil {
+		return false
+	}
+	return o.pw.Occupied()
+}
+
 // WaitConsumed blocks until the consumer calls Done on the value placed by the
 // most recent TrySend, or until the port's context is canceled. Returns true on
 // consumption, false on cancel or error. In chan mode (unit tests), returns true

@@ -22,6 +22,21 @@ func (in *Node) Update(ctx context.Context) {
 		default:
 		}
 
+		// Hold: if any output wire still has a bead in flight or holding an
+		// unconsumed pulse, park until it clears — do not consume the input
+		// pulse yet. This prevents drops when output transit time exceeds the
+		// loop's input rate.
+		anyOccupied := false
+		for _, out := range in.ToNext {
+			if out.Occupied() {
+				anyOccupied = true
+				break
+			}
+		}
+		if anyOccupied {
+			continue
+		}
+
 		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
 			in.Fire()
 			in.FromPrevChainInhibitorNode.Done()
