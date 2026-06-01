@@ -7,42 +7,44 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-01 — task/wire-delete-pulse merged to main)
+## State at handoff (2026-06-01 — timing window implemented on both multi-input gates)
 
-- **Active branch:** `task/timing-window` (now merged up to current `main`, which includes the `task/wire-delete-pulse` merge).
-- `task/wire-delete-pulse` is **merged to main** and deleted (local + remote).
-- Build/test gate: green at merge (`go build ./... && go test -count=1 ./...`, `npx tsc --noEmit` clean).
+- **Active branch:** `task/timing-window` (built on `main` HEAD `c09fcd6a`, which already includes the merged `task/wire-delete-pulse` deleted-wire pulse removal).
+- Build/test gate currently GREEN: `go build ./...`, `go test -count=1 ./...`, `-race` on touched packages all pass. `npx tsc --noEmit` not affected (no TS changed).
 
-### What landed on task/wire-delete-pulse (merged)
+### What landed on this branch
 
-- **Deleted wire drops its pulse.** `PacedWire.Delete` clears the wire's pulse state via `resetLocked` (zeroes `pending`/`slot`, sets `hasSend=false`), so a deleted wire carries no pulse and no node receives it. Verified from `.probe/go.jsonl`: a `wire_delete_drop_pulse had_pulse=true` line for inhibitRight0/FromLeft had NO subsequent `wire_recv` for that port.
-- **`NotifyDelivered` deleted-guard.** Early return when the wire is deleted, so a late in-flight delivery cannot set `hasSend`. (Defensive; not exercised in the verification run — `notify_on_deleted_wire_ignored=0`.)
-- **Verification breadcrumbs** added (via `Trace.Breadcrumb`, keyed by destination node+port): `wire_delete_drop_pulse` (in Delete, before clear), `notify_on_deleted_wire_ignored` (in the guard), `wire_recv` (in ports.go TryRecv on a real receive).
-- **DELIBERATELY NOT done:** the `slotReadyCh`→cond receiver rewrite was reverted to keep this branch scoped to pulse-removal only. See next section.
+- **Spec + HTML page** for the timing window: `docs/planning/visual-editor/timing-window.md` and a tabbed, diagram-led `docs/planning/visual-editor/timing-window.html` (Overview / Diagram / Rules / Windows / Tests). Styled to match the feature-audit palette.
+- **The rule (final):** a node with **≥2 input edges** runs a timing window. `t0` = first input received. If ALL inputs arrive within `W` → all kept, node fires. If `W` elapses with any missing → all inputs removed (`Done` each held input, drains upstream so `consumeGated` sources release), no fire, reset, wait for next first-arrival. Single-input nodes have NO window (plain blocking `Recv`). `W` is **derived, not stored**: `W = 1.5 × max(simLatencyMs over the node's current input wires)`, `simLatencyMs = bezier arcLength / 0.08 WU-per-ms`, recomputed per check so geometry changes are reflected.
+- **Code:**
+  - `nodes/Wiring/paced_wire.go` — `PacedWire.PollRecv() (value, ok)`: non-blocking, returns `ok=false` immediately when nothing pending; on a hit returns the value WITHOUT clearing the slot (consumer must `Done`), identical consume/`WaitConsumed` contract to `Recv`.
+  - `nodes/Wiring/ports.go` — `In.PollRecv()`, `In.SimLatencyMs()` (surfaces `pw.SimLatencyMs`), `In.Breadcrumb()`.
+  - `nodes/inhibitrightgate/node.go` — window loop on the 2-input gate (`FromLeft`/`FromRight`). Reference implementation. `windowMs()`, `clear()`, `window_clear` breadcrumb, `select`+`time.After` park.
+  - `nodes/readgate/node.go` — same window loop on ReadGate's 2 inputs (`FromInput`←in08, `FromChainInhibitor`←i1; both required). `windowMs()` mirrored, not shared (distinct named ports).
+  - Tests: `paced_wire_test.go` (PollRecv empty + consume contract), `inhibitrightgate/firing_rule_test.go` and `readgate/firing_rule_test.go` (window FIRE + CLEAR).
 
-### NEXT task on this branch — task/timing-window
+### Windowed nodes + their derived W (current geometry snapshot)
 
-Spec: [timing-window.md](timing-window.md). Read it first; spec-first, no code ahead of confirmation.
+| Node | Kind | Inputs | W |
+|---|---|---|---|
+| `readGate1` | ReadGate | 2 (in08, i1) | 2950 ms |
+| `inhibitRight0` | InhibitRightGate | 2 (i1, i0) | 2650 ms |
 
-Two things remain, in order:
-1. **The freeze is NOT fixed yet.** A receiver parked in `PacedWire.Recv` is still orphaned when `Reset`/`Delete` swaps its `slotReadyCh` (the parked goroutine holds the old channel and never wakes on re-add). The pulse-removal merge did not touch the receiver path. The robust-receive rewrite (wait on the durable `hasSend`/cond condition, broadcast on Delete/Reset/Restore/deliver/Done, remove `slotReadyCh`) is the timing-window branch's job.
-2. **Coincidence detection** layered on top: the permanent-delete case (an input that genuinely never arrives, so the gate flushes a partial combination after window `W`). Non-blocking poll receive drives the window timer.
+### OPEN ITEMS / NEXT
 
-### Key files
-
-- `nodes/Wiring/paced_wire.go` — `Recv`/`slotReadyCh` is what the receive rewrite replaces; pulse-removal in `Delete`/`resetLocked` and the `NotifyDelivered` guard already landed.
-- `nodes/Wiring/paced_wire_test.go` — add parked-`Recv`-survives-`Reset`/`Delete` cases (select-with-timeout so a hang fails fast).
-- `docs/planning/visual-editor/timing-window.md` — this branch's spec.
+1. **LIVE verification still pending (primary next step).** Unit tests run in chan-mode where `SimLatencyMs()` returns 0 (→ W=0), so they prove the FIRE/CLEAR logic but not a real timed window. Drive the editor: clear `.probe/*.jsonl`, reload, run, then **permanently delete an `inhibitRight0` (or `readGate1`) input edge** and confirm from `.probe/go.jsonl`: a `window_clear` breadcrumb appears for that node/port and the ring keeps running (no stall, no bead pile-up). That is the real payoff of this branch.
+2. **Doc/topology discrepancy to reconcile.** `timing-window.md` / the HTML table earlier said `readGate1` has 3 inputs (in08, bootstrap_rg, i1); the ReadGate code has only 2 input ports (in08, i1) — `bootstrap_rg` is not a wired ReadGate input. The W value (2950, longest input = i1) is unaffected, but the input-count wording should be corrected to 2.
+3. **The delete+re-add freeze for SINGLE-input / blocking receivers is still latent.** Windowed gates now use non-blocking `PollRecv` so they no longer park on `slotReadyCh` and cannot be orphaned. But single-input nodes still use blocking `Recv`; if a delete+re-add freeze ever resurfaces there, the durable-cond `Recv` rewrite (deferred on `task/wire-delete-pulse`) is the fix.
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Send rules are node-owned (`node.data.sendRules`: `consumeGated` / `fireAndForget`) and `PacedWire` is pure transport (`WaitConsumed` / `Reset` / `Delete` / `Restore`). `pump.ts` stays render-only.
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Send rules are node-owned (`node.data.sendRules`: `consumeGated` / `fireAndForget`); `PacedWire` is pure transport (`PollRecv` / `Recv` / `WaitConsumed` / `Reset` / `Delete` / `Restore`). `pump.ts` stays render-only.
 
 ## Dev-loop
 
 After TS edit: `npm run build` from `tools/topology-vscode/`.
-After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
-To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs (`go.jsonl` breadcrumbs: `wire_delete_drop_pulse`, `wire_recv`).
+After Go change: `go build ./...` from repo root, `go test ./nodes/...`.
+To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect `go.jsonl` breadcrumbs (`window_clear`, `wire_delete_drop_pulse`, `wire_recv`).
 
 Check: `go test ./...`. All guard scripts run via the Stop hook (`scripts/stop-checks.sh`). Bash approval guard runs via PreToolUse.
 
