@@ -114,7 +114,7 @@ export function GraphNode({
           key={faded ? "faded" : "solid"}
           color={fillColor}
           emissive={emissiveFill}
-          emissiveIntensity={flagged ? 0.4 : 0}
+          emissiveIntensity={0}
           transparent={faded}
           opacity={faded ? fadeOpacity : 1}
         />
@@ -125,7 +125,7 @@ export function GraphNode({
           key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}
-          emissiveIntensity={flagged ? 0.5 : 0}
+          emissiveIntensity={0}
           transparent={faded}
           opacity={faded ? fadeOpacity : 1}
         />
