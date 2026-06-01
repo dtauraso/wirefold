@@ -32,11 +32,6 @@ import type { PickOptions } from "./interaction-controls";
 /** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
 export const NEAREST_N = 8;
 
-/** Validation flag colors. */
-export const FLAG_FILL = "#c62828";
-export const FLAG_RING = "#ff5252";
-export const FLAG_LABEL_BG = "rgba(198,40,40,0.85)";
-
 // ---------------------------------------------------------------------------
 // Camera fitter: perspective camera framed head-on to show graph flat at z=0.
 // Fits once, but waits until nodes are actually non-empty (not just on mount).
@@ -97,27 +92,18 @@ export function GraphNode({
 }) {
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
-  const flagged = !!node.data?.validationError;
-
-  const fillHex = flagged ? FLAG_FILL : (node.data?.fill ?? "#ffffff");
-  const strokeHex = flagged ? FLAG_RING
-    : selected ? "#ffcc00"
+  const fillHex = node.data?.fill ?? "#ffffff";
+  const strokeHex = selected ? "#ffcc00"
     : hovered ? "#aaddff"
     : (node.data?.stroke ?? "#888888");
 
   // Memoize THREE.Color objects to avoid allocating on every render.
   const fillColor = useMemo(() => new THREE.Color(fillHex), [fillHex]);
   const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
-  const emissiveFill = useMemo(
-    () => flagged ? new THREE.Color(FLAG_FILL) : new THREE.Color(0x000000),
-    [flagged],
-  );
-  const emissiveStroke = useMemo(
-    () => flagged ? new THREE.Color(FLAG_RING) : new THREE.Color(0x000000),
-    [flagged],
-  );
+  const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
+  const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
-  const torusThick = (selected || hovered || flagged) ? r * 0.14 : r * 0.08;
+  const torusThick = (selected || hovered) ? r * 0.14 : r * 0.08;
   const fadeOpacity = 0.25;
 
   return (

@@ -16,7 +16,7 @@ import { pixelToNDC } from "./geometry-helpers";
 import { DollyButtons, GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
-import { Scene, computeOcclusionCounts, FLAG_LABEL_BG, FLAG_RING } from "./scene-content";
+import { Scene, computeOcclusionCounts } from "./scene-content";
 import { nodeOverrideText } from "./node-override-text";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
@@ -225,15 +225,7 @@ export function ThreeView() {
         const isSelected = n.id === selectedId;
         const isNearest = nearestNIds.has(n.id);
         if (!isHovered && !isSelected && !isNearest) return null;
-        const flagged = !!n.data?.validationError;
-        const pillStyle: React.CSSProperties = flagged
-          ? {
-              background: FLAG_LABEL_BG,
-              border: "1px solid #ff5252",
-              borderRadius: 4,
-              padding: "3px 6px",
-            }
-          : {
+        const pillStyle: React.CSSProperties = {
               background: "rgba(0,0,0,0.55)",
               border: "none",
               borderRadius: 4,
@@ -249,7 +241,7 @@ export function ThreeView() {
               transform: "translate(-50%, -100%)",
               fontSize: 11,
               fontFamily: "monospace",
-              color: flagged ? "#fff" : "#e0e0e0",
+              color: "#e0e0e0",
               pointerEvents: "none",
               lineHeight: 1.25,
               textAlign: "center",
@@ -305,15 +297,7 @@ export function ThreeView() {
         if (!pos) return null;
         const text = nodeOverrideText(n);
         if (!text) return null;
-        const flagged = !!n.data?.validationError;
-        const overrideOverlayPill: React.CSSProperties = flagged
-          ? {
-              background: FLAG_LABEL_BG,
-              border: "1px solid #ff5252",
-              borderRadius: 4,
-              padding: "3px 6px",
-            }
-          : {
+        const overrideOverlayPill: React.CSSProperties = {
               background: "rgba(0,0,0,0.35)",
               border: "none",
               borderRadius: 4,
@@ -329,7 +313,7 @@ export function ThreeView() {
               transform: "translate(-50%, -50%)",
               fontSize: 9,
               fontFamily: "monospace",
-              color: flagged ? "#fff" : "#e0e0e0",
+              color: "#e0e0e0",
               pointerEvents: "none",
               lineHeight: 1.25,
               textAlign: "center",

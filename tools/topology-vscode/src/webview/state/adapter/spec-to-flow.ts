@@ -1,5 +1,5 @@
 import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
-import { NODE_TYPES, type Node as SpecNode, type Spec, requiredInputDiagnostics } from "../../../schema";
+import { NODE_TYPES, type Node as SpecNode, type Spec } from "../../../schema";
 import type { ViewerState } from "../viewer/types";
 import {
   buildEdges,
@@ -11,8 +11,6 @@ export function specToFlow(
   vs: Pick<ViewerState, "nodes" | "edges"> = {},
   lastSelectionIds: string[] = [],
 ): { nodes: RFNode<NodeData>[]; edges: RFEdge<EdgeData>[] } {
-  const invalid = requiredInputDiagnostics(spec);
-
   const memberNodes: RFNode<NodeData>[] = spec.nodes
     .map((n) => {
     const def = NODE_TYPES[n.type];
@@ -50,7 +48,6 @@ export function specToFlow(
         nodeData: n.data,
         initState: n.state,
         index: n.index,
-        validationError: invalid.get(n.id),
       },
     };
   });
