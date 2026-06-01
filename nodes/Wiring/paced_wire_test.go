@@ -55,6 +55,65 @@ func TestSendRecvInstantDelivery(t *testing.T) {
 	pw.Done() // clears slot
 }
 
+// TestPollRecvEmpty: PollRecv returns (nil,false) immediately when no value is
+// present, and does not block.
+func TestPollRecvEmpty(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	done := make(chan struct{})
+	go func() {
+		v, ok := pw.PollRecv()
+		if ok || v != nil {
+			t.Errorf("PollRecv on empty: got (%v,%v), want (nil,false)", v, ok)
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("PollRecv blocked on empty slot")
+	}
+}
+
+// TestPollRecvPresentConsumeContract: after delivery, PollRecv returns the value
+// with ok=true and leaves the slot full (a repeat poll still sees it) until Done.
+// This matches Recv's consume contract: PollRecv reads, Done acknowledges.
+func TestPollRecvPresentConsumeContract(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	ctx := context.Background()
+
+	if err := pw.Send(ctx, 7); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	pw.NotifyDelivered(ctx)
+
+	v, ok := pw.PollRecv()
+	if !ok || v != 7 {
+		t.Fatalf("PollRecv: got (%v,%v), want (7,true)", v, ok)
+	}
+	// Slot stays full until Done (consume contract): a repeat poll still sees it.
+	if v2, ok2 := pw.PollRecv(); !ok2 || v2 != 7 {
+		t.Fatalf("PollRecv before Done: got (%v,%v), want (7,true)", v2, ok2)
+	}
+
+	// WaitConsumed must return once Done is called (consume-gated source releases).
+	consumed := make(chan error, 1)
+	go func() { consumed <- pw.WaitConsumed(ctx) }()
+	pw.Done()
+	select {
+	case err := <-consumed:
+		if err != nil {
+			t.Fatalf("WaitConsumed: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("WaitConsumed did not return after Done")
+	}
+
+	// After Done the slot is empty again.
+	if v3, ok3 := pw.PollRecv(); ok3 || v3 != nil {
+		t.Fatalf("PollRecv after Done: got (%v,%v), want (nil,false)", v3, ok3)
+	}
+}
+
 // TestSendGatedOnInFlight: Send returns once the bead is placed (inFlight=true).
 // A SECOND Send blocks until NotifyDelivered clears inFlight (delivers into
 // an empty slot), NOT until Done is called.
