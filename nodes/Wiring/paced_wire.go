@@ -389,6 +389,15 @@ func (pw *PacedWire) InFlight() bool {
 	return pw.inFlight
 }
 
+// Occupied reports whether the wire is non-empty: either a bead is in flight
+// (inFlight=true) or a delivered pulse is parked in the slot waiting to be
+// consumed (hasSend=true). Returns true if either condition holds.
+func (pw *PacedWire) Occupied() bool {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	return pw.inFlight || pw.hasSend
+}
+
 // watchCtx starts a goroutine that broadcasts on pw.cond when ctx is done.
 // The caller must close the returned channel when done to stop the goroutine.
 func (pw *PacedWire) watchCtx(ctx context.Context) chan struct{} {
