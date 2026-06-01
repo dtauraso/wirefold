@@ -46,7 +46,7 @@ type PortSpec struct {
 
 // PortBindings holds resolved channels or PacedWires keyed by port name.
 // For PortOutMulti ports, use AppendMulti / OutSlice.
-// Paced variants (SetSinglePaced / AppendMultiPaced) take precedence over
+// Paced variants (SetSinglePaced / AppendMultiPacedWithHandle) take precedence over
 // chan variants when both are set; in practice the loader uses only one mode.
 type PortBindings struct {
 	single           map[string]chan int
@@ -97,14 +97,6 @@ func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule Send
 
 func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 	pb.multi[name] = append(pb.multi[name], ch)
-}
-
-func (pb *PortBindings) AppendMultiPaced(name string, pw *PacedWire) {
-	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
-	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], name)
-	pb.multiRule[name] = append(pb.multiRule[name], RuleConsumeGated)
-	pb.multiArc[name] = append(pb.multiArc[name], pw.MaxIncomingSimLatencyMs*PulseSpeedWuPerMs)
-	pb.multiLatency[name] = append(pb.multiLatency[name], pw.MaxIncomingSimLatencyMs)
 }
 
 // AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
