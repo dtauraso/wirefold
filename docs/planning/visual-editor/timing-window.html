@@ -91,6 +91,7 @@
     <button class="tab-btn active" data-tab="overview">Overview</button>
     <button class="tab-btn" data-tab="diagram">Diagram</button>
     <button class="tab-btn" data-tab="rules">Rules</button>
+    <button class="tab-btn" data-tab="windows">Windows</button>
     <button class="tab-btn" data-tab="tests">Tests</button>
   </nav>
 
@@ -190,17 +191,48 @@
       <li><strong>Clock units</strong> — real elapsed wall-clock time measured at the node (the gap between <code>NotifyDelivered</code>-driven arrivals). Default <code>W</code> to a small multiple of current <code>simLatencyMs</code> (~2500–3300 ms per wire).</li>
     </ul>
 
-    <table style="width:100%;border-collapse:collapse;margin-top:1.25rem;">
+  </div>
+
+  <!-- WINDOWS -->
+  <div id="windows" class="panel">
+    <table style="width:100%;border-collapse:collapse;margin-top:0.25rem;">
       <thead>
         <tr style="background:var(--code-bg);">
           <th style="text-align:left;padding:0.5rem 0.75rem;border:1px solid var(--border);font-weight:600;">Node</th>
+          <th style="text-align:left;padding:0.5rem 0.75rem;border:1px solid var(--border);font-weight:600;">Kind</th>
           <th style="text-align:left;padding:0.5rem 0.75rem;border:1px solid var(--border);font-weight:600;">Timing window (W)</th>
         </tr>
       </thead>
       <tbody>
         <tr>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>in08</code></td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">Input</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">—</td>
+        </tr>
+        <tr>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>bootstrap_rg</code></td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">Input</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">—</td>
+        </tr>
+        <tr>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>readGate1</code></td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">ReadGate</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">—</td>
+        </tr>
+        <tr>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>i0</code></td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">ChainInhibitor</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">—</td>
+        </tr>
+        <tr>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>i1</code></td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">ChainInhibitor</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">—</td>
+        </tr>
+        <tr>
           <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>inhibitRight0</code></td>
-          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">TBD — small multiple of <code>simLatencyMs</code> (~2500–3300 ms/wire)</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);">InhibitRightGate</td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">TBD</td>
         </tr>
       </tbody>
     </table>
