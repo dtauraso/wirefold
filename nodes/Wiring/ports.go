@@ -221,6 +221,16 @@ func (o *Out) TryEmit(v int) bool {
 	}
 }
 
+// InFlight reports whether a bead is currently traversing the underlying wire.
+// Returns false in chan mode (no wire geometry / no in-flight concept).
+// Nil-safe; returns false for a nil Out.
+func (o *Out) InFlight() bool {
+	if o == nil || o.pw == nil {
+		return false
+	}
+	return o.pw.InFlight()
+}
+
 // WaitConsumed blocks until the consumer calls Done on the value placed by the
 // most recent TrySend, or until the port's context is canceled. Returns true on
 // consumption, false on cancel or error. In chan mode (unit tests), returns true
