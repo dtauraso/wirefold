@@ -19,8 +19,10 @@ export type WebviewToHostMsg =
   | { type: "resume" }
   | { type: "stop" }
   | { type: "webview-log"; entry: string }
-  | { type: "delivered"; edge: string }
+  | { type: "delivered"; target: string; targetHandle: string }
   | { type: "fade"; edges: string[] }
+  | { type: "deleteEdge"; target: string; targetHandle: string }
+  | { type: "addEdge"; target: string; targetHandle: string }
   | { type: "node-move"; nodeId: string; x: number; y: number; z?: number };
 
 // Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
@@ -42,7 +44,7 @@ export type SlotEvent = {
 
 export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
-  | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number }
+  | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
   | { step: number; kind: "done"; node: string; port: string }
   | SlotEvent;
 
@@ -54,7 +56,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered", "fade", "node-move",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered", "fade", "deleteEdge", "addEdge", "node-move",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
@@ -79,7 +81,9 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "delivered":
-      return typeof m.edge === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "deleteEdge":
+    case "addEdge":
+      return typeof m.target === "string" && typeof m.targetHandle === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "node-move":
       return typeof m.nodeId === "string" && typeof m.x === "number" && typeof m.y === "number"
         ? (m as unknown as WebviewToHostMsg)

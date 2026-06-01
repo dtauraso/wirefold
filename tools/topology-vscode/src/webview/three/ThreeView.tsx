@@ -30,6 +30,7 @@ export function ThreeView() {
   const edges = useThreeStore((s) => s.edges);
   const storeMoveNode = useThreeStore((s) => s.moveNode);
   const storeCreateEdge = useThreeStore((s) => s.createEdge);
+  const storeDeleteEdge = useThreeStore((s) => s.deleteEdge);
   const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -89,10 +90,19 @@ export function ThreeView() {
         const isEdge = edges.some((ed) => ed.id === selectedId);
         toggleFade({ kind: isEdge ? "edge" : "node", id: selectedId });
       }
+      // Delete / Backspace: remove the selected edge (nodes/ports ignored).
+      if ((e.key === "Delete" || e.key === "Backspace") && !mod && selectedId) {
+        const isEdge = edges.some((ed) => ed.id === selectedId);
+        if (isEdge) {
+          e.preventDefault();
+          storeDeleteEdge(selectedId);
+          setSelectedId(null);
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, edges, toggleFade]);
+  }, [selectedId, edges, toggleFade, storeDeleteEdge]);
 
   const { onPointerDown, onPointerMove, onPointerUp, onWheelNative } = useInteractionControls(
     cameraRef,

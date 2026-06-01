@@ -13,6 +13,7 @@
 
 import * as THREE from "three";
 import { getPauseAdjustedNow } from "../state/run-status";
+import { postLog } from "../log/post";
 
 export interface PulseData {
   value: number;
@@ -54,6 +55,13 @@ export function claimDelivered(edgeId: string, startTime: number): boolean {
   return true;
 }
 
+/** The startTime we last posted "delivered" for on this edge, or undefined.
+ *  Lets the delivery site report WHY a claim failed (already-claimed-for-this
+ *  startTime vs. no prior claim). */
+export function lastDeliveredAt(edgeId: string): number | undefined {
+  return _deliveredAt.get(edgeId);
+}
+
 /** Overwrite an existing in-flight pulse with an explicit startTime.
  *  Used by the node-move handler in store.ts to preserve the bead's visual
  *  progress fraction when wire geometry changes during a node drag. */
@@ -67,10 +75,17 @@ export function patchPulse(edgeId: string, simLatencyMs: number, startTime: numb
 }
 
 export function clearPulse(edgeId: string) {
-  if (!_current.has(edgeId)) return;
+  const keysBefore = [..._current.keys()];
+  if (!_current.has(edgeId)) {
+    // Asked to clear a bead that isn't in-flight — log so a delete capture
+    // shows we did NOT drop a bead (and which keys were present instead).
+    postLog("clearPulse", { edgeId, removed: false, keysBefore });
+    return;
+  }
   const next = new Map(_current);
   next.delete(edgeId);
   _current = next;
+  postLog("clearPulse", { edgeId, removed: true, keysBefore, keysAfter: [...next.keys()] });
   _setter?.(next);
 }
 

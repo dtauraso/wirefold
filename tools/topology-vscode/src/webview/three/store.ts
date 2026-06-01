@@ -50,6 +50,8 @@ export interface ThreeStoreState {
   saveSpec: () => void;
   /** Toggle fade on a node or edge. Recomputes fixpoint and emits updated faded-edge set to host. */
   toggleFade: (target: { kind: "node" | "edge"; id: string }) => void;
+  /** Remove an edge by id from the spec and persist. */
+  deleteEdge: (id: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,8 +131,36 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const srcNode = nodes.find((n) => n.id === sourceId);
     const tgtNode = nodes.find((n) => n.id === targetId);
     if (srcNode && tgtNode) setCurve(result.id, buildEdgeCurve(srcNode, tgtNode));
+    // Tell Go to un-silence this wire so it carries pulses again (mirrors deleteEdge).
+    postLog("addEdge-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
+    vscode.postMessage({
+      type: "addEdge",
+      target: result.newEdge.target,
+      targetHandle: result.newEdge.targetHandle ?? "",
+    });
     scheduleSave();
     return result.id;
+  },
+
+  deleteEdge(id) {
+    const { edges } = get();
+    const edge = edges.find((ed) => ed.id === id);
+    // Tell Go to drop this wire's in-flight pulse and free its parked sender,
+    // keyed by the destination slot identity (target + targetHandle).
+    if (edge) {
+      postLog("deleteEdge-post", { edgeId: id, target: edge.target, targetHandle: edge.targetHandle ?? "", found: true });
+      vscode.postMessage({
+        type: "deleteEdge",
+        target: edge.target,
+        targetHandle: edge.targetHandle ?? "",
+      });
+    } else {
+      postLog("deleteEdge-post", { edgeId: id, found: false });
+    }
+    const nextEdges = edges.filter((ed) => ed.id !== id);
+    set({ edges: nextEdges });
+    clearPulse(id);
+    scheduleSave();
   },
 
   moveNode(id, x, y) {

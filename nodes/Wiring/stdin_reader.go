@@ -1,7 +1,7 @@
 // stdin_reader.go — reads JSON-line messages from stdin and dispatches them.
 //
 // Supported message shapes:
-//   {"type":"delivered","edge":"<edge-label>"}
+//   {"type":"delivered","target":"<node-id>","targetHandle":"<port-name>"}
 //   {"type":"fade","edges":["<edge-id>", ...]}
 //   {"type":"node-move","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
 //
@@ -99,22 +99,29 @@ func (nmr *NodeMoveRegistry) updateNodeAndGetAffected(nodeId string, x, y, z flo
 
 
 type stdinMsg struct {
-	Type   string   `json:"type"`
-	Edge   string   `json:"edge"`
-	Edges  []string `json:"edges"`
-	NodeId string   `json:"nodeId"`
-	X      float64  `json:"x"`
-	Y      float64  `json:"y"`
-	Z      float64  `json:"z"`
+	Type         string   `json:"type"`
+	Target       string   `json:"target"`
+	TargetHandle string   `json:"targetHandle"`
+	Edges        []string `json:"edges"`
+	NodeId       string   `json:"nodeId"`
+	X            float64  `json:"x"`
+	Y            float64  `json:"y"`
+	Z            float64  `json:"z"`
 }
 
-// RunStdinReader reads JSON lines from r, dispatching messages
-// to the WireRegistry. Returns when ctx is done or r reaches EOF.
+// SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
+// It is the stable, slot-keyed identity used for delivery acks.
+type SlotRegistry map[string]*PacedWire
+
+// RunStdinReader reads JSON lines from r, dispatching messages.
+// Returns when ctx is done or r reaches EOF.
 // Call in a goroutine alongside the node run loop.
 //
+// slotReg is keyed by "target.targetHandle" and used for delivery acks.
+// reg is keyed by edge label and used for fade/node-move operations.
 // nmr may be nil; if non-nil, node-move messages update wire geometry.
 // tr is retained for future use but no longer used by the node-move handler.
-func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry, nmr *NodeMoveRegistry, tr *T.Trace) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg WireRegistry, nmr *NodeMoveRegistry, tr *T.Trace) {
 	sc := bufio.NewScanner(r)
 	done := ctx.Done()
 	lineCh := make(chan string, 8)
@@ -142,14 +149,44 @@ func RunStdinReader(ctx context.Context, r io.Reader, reg WireRegistry, nmr *Nod
 			}
 			switch msg.Type {
 			case "delivered":
-				if msg.Edge == "" {
+				if msg.Target == "" || msg.TargetHandle == "" {
 					continue
 				}
-				pw, found := reg[msg.Edge]
+				destKey := msg.Target + "." + msg.TargetHandle
+				pw, found := slotReg[destKey]
 				if !found {
 					continue
 				}
-				pw.NotifyDelivered()
+				pw.NotifyDelivered(ctx) //nolint:errcheck // ErrCanceled is handled by loop exit
+			case "deleteEdge":
+				if msg.Target == "" || msg.TargetHandle == "" {
+					continue
+				}
+				tr.Breadcrumb("deleteEdge-recv", msg.Target, msg.TargetHandle, "")
+				destKey := msg.Target + "." + msg.TargetHandle
+				pw, found := slotReg[destKey]
+				if !found {
+					tr.Breadcrumb("deleteEdge-notfound", msg.Target, msg.TargetHandle, destKey)
+					continue
+				}
+				// "delete" breadcrumb emitted here (not from PacedWire.Delete, which has
+				// no Trace reference) carrying the wire's authoritative slot identity.
+				tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, "")
+				tr.Breadcrumb("deleteEdge-delete", msg.Target, msg.TargetHandle, destKey)
+				pw.Delete()
+			case "addEdge":
+				if msg.Target == "" || msg.TargetHandle == "" {
+					continue
+				}
+				tr.Breadcrumb("addEdge-recv", msg.Target, msg.TargetHandle, "")
+				destKey := msg.Target + "." + msg.TargetHandle
+				pw, found := slotReg[destKey]
+				if !found {
+					tr.Breadcrumb("addEdge-notfound", msg.Target, msg.TargetHandle, destKey)
+					continue
+				}
+				tr.Breadcrumb("addEdge-restore", pw.Target, pw.TargetHandle, "")
+				pw.Restore()
 			case "fade":
 				// Build a set of faded edge ids for O(1) lookup.
 				faded := make(map[string]bool, len(msg.Edges))

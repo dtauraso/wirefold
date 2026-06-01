@@ -7,11 +7,38 @@ or anything that schedules/orders work. If your
 reasoning slips into banned vocabulary (below), you are in the wrong
 frame. Stop, re-read this file, and re-derive from the model.
 
-The pivot from earlier substrate versions: a wire no longer owns a
-parked slot. The wire is transient — it carries a value to the
-destination and becomes empty on arrival. The slot lives on the
-destination node in Go. Source nodes observe destination slot phase
-directly, not through wire phase.
+The pivot from earlier substrate versions: backpressure is NOT enforced
+by the wire. `PacedWire` is pure transport — it holds one in-flight bead
+at a time, reports `inFlight` (cleared on delivery), delivers
+non-blockingly (deferring into the slot via `Done` when the slot is
+full), exposes `WaitConsumed` (fires when the destination calls `Done`),
+and has `Reset()` to drop a bead and free a parked sender when an edge is
+deleted. It applies NO send policy of its own.
+
+Each SOURCE NODE owns its send rule and applies it PER OUTGOING PORT in
+its `Update` loop. Two rules exist: `consumeGated` (after sending, the
+node waits via `WaitConsumed` for the destination to consume — the
+default) and `fireAndForget` (NON-BLOCKING: the node places the bead only
+if the wire is free, and if the wire is busy/in-flight it DROPS the send
+and moves on — it never blocks and never waits for consume).
+`consumeGated` uses the blocking `Send` + `WaitConsumed`; `fireAndForget`
+uses `PacedWire.TryPlace` / `Out.TryEmit`. The rule lives on the SOURCE
+NODE, keyed by its outgoing port name, at `node.data.sendRules` (a map:
+output-port-name → rule). The EDGE carries no rule. The loader reads
+`node.data.sendRules[portName]` onto each source `Out` (default
+`consumeGated`); the node branches on `out.Gated()`. One node may use
+different rules on different outgoing ports, and the rule survives edge
+deletion because it lives on the node, not the edge. The slot lives
+in Go (`PacedWire.slot`/`hasSend`); the wire's in-flight staging area
+(`PacedWire.pending`/`inFlight`) is separate from the slot.
+(Amended 2026-05-31: the wire no longer enforces backpressure, and the
+send rule is node-owned per output port — NOT a per-edge spec field.
+Prior text said "the source observes its own wire's in-flight bit", "a
+full destination slot keeps the bead on the wire, so the source stays
+blocked", and described `sendRule` as "a per-edge spec field (top-level
+on the edge)" — those are all superseded. Send policy now lives in each
+source node, keyed by outgoing port via `node.data.sendRules`, and
+`fireAndForget` is non-blocking via `TryPlace`/`TryEmit`.)
 
 ## What this network computes
 
@@ -58,9 +85,11 @@ nodes observe no new input state and produce nothing.
 
 There is no global round, tick, or simultaneity layer. The substrate
 does not count rounds, observe round-close, or align activity to a
-shared clock. Coordination between nodes happens through destination
-slot phases, read directly by source nodes — never through a shared
-time concept. Any reasoning that treats activity as a sequence of
+shared clock. Coordination between nodes happens through each source
+node's per-output-port send rule (`consumeGated` waits via `WaitConsumed`;
+`fireAndForget` is non-blocking and drops the send if the wire is busy),
+not through a shared time concept and not
+through any backpressure enforced by the wire. Any reasoning that treats activity as a sequence of
 globally-aligned rounds is drift; re-derive from local rules over
 slots and wires.
 
@@ -113,45 +142,75 @@ One `PacedWire` (`nodes/Wiring/paced_wire.go`) is allocated per destination
 input port. All senders converging on that port share the single wire; fan-in
 is correct by construction.
 
-**Three Go operations on `PacedWire`:**
+**Go operations on `PacedWire`:**
 
-- **`Send`** (paced_wire.go:39) — blocks until slot is empty, writes value into
-  slot, then blocks again until `Done` is called. Send does not return on visual
-  delivery; it stays blocked for the full receiver lifetime.
-- **`Recv`** (paced_wire.go:78) — blocks until `NotifyDelivered` fires, then
-  returns the value. Slot is NOT cleared; sender stays blocked.
-- **`Done`** (paced_wire.go:114) — receiver signals it has finished with the
-  value. Clears the slot, broadcasts on the cond, unblocking the next `Send`.
+- **`Send`** — blocks while `inFlight` is true (wire occupied by a prior
+  bead not yet delivered), then places value into the staging area
+  (`pending`), sets `inFlight=true`, and returns. It does not wait for
+  Done and does not observe `hasSend`. This is transport occupancy, not a
+  send policy: the source node, not the wire, decides whether to wait for
+  consumption (see `WaitConsumed` below).
+- **`WaitConsumed`** — blocks until the destination calls `Done` on the
+  most recent bead, or ctx is canceled. The source node calls this only
+  when its per-output-port rule is `consumeGated`; `fireAndForget` skips it
+  (it uses `TryPlace`/`TryEmit` and never reaches `WaitConsumed`).
+- **`Reset`** — drops any bead in flight and frees a parked sender. Called
+  when an edge is deleted so the wire returns to a fresh `inFlight=false`
+  state and the source's `Send`/`WaitConsumed` unblocks.
+- **`Recv`** — blocks until `slotReadyCh` is closed (i.e. NotifyDelivered
+  delivered into the slot), then returns the value. Slot is NOT cleared;
+  caller must call Done.
+- **`Done`** — receiver signals it has finished with the value. Clears the
+  slot (`hasSend=false`), creates a fresh `slotReadyCh` for the next delivery
+  cycle, and broadcasts so a waiting `NotifyDelivered` can proceed.
 
-**`NotifyDelivered`** (paced_wire.go:129) is called by the TS layer (via the
-extension bridge → stdin reader) when the pulse animation completes. It closes
-`deliveryCh`, which unblocks `Recv`. This is the only cross-boundary signal in
-the lifecycle.
+**`NotifyDelivered`** is called by the TS layer (via the extension bridge →
+stdin reader) when the pulse animation completes. It waits until the
+destination slot is empty (`!hasSend`), moves `pending→slot`, sets
+`hasSend=true`, clears `inFlight=false`, and closes `slotReadyCh` to unblock
+`Recv`. If the slot is still full, it keeps waiting — this is what keeps
+`inFlight=true` and blocks the source. This is the only cross-boundary signal
+in the lifecycle.
 
 **Four slot phases and their transition triggers:**
 
 ```
-empty  ──Send fills──▶  filled(v)  ──NotifyDelivered──▶  (Recv unblocked, slot still filled)  ──Done──▶  empty
+[wire empty]  ──Send places bead──▶  [inFlight=true]  ──NotifyDelivered (when slot empty)──▶  [slot filled, inFlight=false]  ──Done──▶  [wire empty]
 ```
 
-1. `empty` → `filled(v)`: `Send` claims the slot (paced_wire.go:57–64). Go emits
-   `{"kind":"slot","phase":"filled"}` (Trace/Trace.go:147).
-2. `filled(v)` → Recv unblocked: `NotifyDelivered` closes `deliveryCh`
-   (paced_wire.go:129–137); pump posts it from the `"done"` animation callback
-   (pump.ts handles `"done"` — see `PUMP_DONE_HANDLER` in pump.ts — clears pulse; the extension host sends
+1. `inFlight=false` → `inFlight=true`: `Send` places value into `pending`,
+   sets `inFlight=true`. Go emits `{"kind":"slot","phase":"filled"}` via
+   Trace/Trace.go (send event triggers the visual pulse animation).
+2. Slot `empty` → `filled(v)`: `NotifyDelivered` moves `pending→slot`,
+   sets `hasSend=true`, clears `inFlight`, closes `slotReadyCh` to unblock
+   `Recv`. Pump posts it from the `"done"` animation callback (see
+   `PUMP_DONE_HANDLER` in pump.ts — clears pulse; extension host sends
    `notifyDelivered` to stdin).
-3. Recv returns value, slot still `filled(v)` — no phase change. Receiver uses
-   the value and calls `Done`.
-4. `filled(v)` → `empty`: `Done` clears slot and unblocks `Send`
-   (paced_wire.go:114–125). Go emits `{"kind":"slot","phase":"empty"}`.
+3. Recv returns value, slot still `filled(v)` — no phase change. Receiver
+   uses the value and calls `Done`.
+4. `filled(v)` → `empty`: `Done` clears slot, resets `slotReadyCh`. Go emits
+   `{"kind":"slot","phase":"empty"}`.
 
 **Cross-boundary contract:**
 
-- Go blocks `Send` until the TS layer acknowledges animation completion via
-  `NotifyDelivered`. This is the backpressure mechanism: Go cannot overrun the
-  visual layer.
-- TS never sets slot state directly. It only sends `notifyDelivered` (unblocks
-  `Recv`) and renders the slot badges from `"slot"` trace events.
+- The wire enforces no send policy. `Send` only waits for the wire to be
+  clear (`inFlight=false`) before placing the next bead; `inFlight` clears
+  when `NotifyDelivered` delivers into an empty slot (deferring through
+  `Done` if the slot is full). Whether the source pauses after sending is
+  the SOURCE NODE's decision, keyed by outgoing port via
+  `node.data.sendRules`: `consumeGated` calls `WaitConsumed` (waits for the
+  destination's `Done`); `fireAndForget` is non-blocking — it uses
+  `TryPlace`/`TryEmit`, placing the bead only if the wire is free and
+  dropping the send otherwise. The default is `consumeGated`. The rule is
+  node-owned (per output port), not edge-carried, so it survives edge
+  deletion.
+- **Edge delete.** The editor posts a `deleteEdge` message
+  (target + targetHandle) to the substrate, which calls `Reset()` on that
+  wire: it drops the in-flight bead and frees a parked sender so the source
+  unblocks. (Known limitation: re-adding an edge sends nothing to the
+  substrate today — the live graph is not rebuilt on add.)
+- TS never sets slot state directly. It only sends `notifyDelivered` (triggers
+  `NotifyDelivered` in Go) and renders slot badges from `"slot"` trace events.
 - `pump.ts` `"slot"` branch (see `PUMP_SLOT_HANDLER` in pump.ts) writes `slots[port]` into RF node
   data. `GenericNode.tsx` (line 142) reads `slotEntry.phase === "filled"` to
   render the slot badge; held-value badges (line 144–145) persist from `"send"`

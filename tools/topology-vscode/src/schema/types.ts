@@ -34,3 +34,5 @@ export type Port = {
 };
 export type StateValue = string | number;
 export type ArrowStyle = "filled" | "open";
+export type SendRule = "consumeGated" | "fireAndForget";
+export const SEND_RULES: readonly SendRule[] = ["consumeGated", "fireAndForget"];

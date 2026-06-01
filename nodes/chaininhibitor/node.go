@@ -30,7 +30,13 @@ func (in *Node) Update(ctx context.Context) {
 				wg.Add(1)
 				go func(o *Wiring.Out) {
 					defer wg.Done()
-					o.TrySend(in.Held)
+					if o.Gated() {
+						if o.TrySend(in.Held) {
+							o.WaitConsumed()
+						}
+					} else {
+						o.TryEmit(in.Held)
+					}
 				}(out)
 			}
 			wg.Wait()

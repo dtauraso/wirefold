@@ -53,6 +53,10 @@ type NodeData struct {
 	Init      []int          `json:"init,omitempty"`
 	Repeat    bool           `json:"repeat,omitempty"`
 	State map[string]int `json:"state,omitempty"` // field-seeding: struct fields via wire:"data.state"
+	// SendRules is the node-owned per-output-port send policy, keyed by output
+	// port name (the sourceHandle, e.g. "ToNext0"). Absent ports default to
+	// consumeGated. The send rule belongs to the SOURCE NODE, not the edge.
+	SendRules map[string]string `json:"sendRules,omitempty"`
 }
 
 // specEdge mirrors the JSON edge shape.
@@ -81,10 +85,9 @@ type topoSpec struct {
 	View  topoView   `json:"view"`
 }
 
-// WireRegistry maps edge label → *PacedWire. The stdin-reader goroutine uses
-// this to call NotifyDelivered when the webview reports animation complete.
-// Each entry points to the wire owned by the destination port; multiple edges
-// sharing a destination port map to the same *PacedWire.
+// WireRegistry maps edge label → *PacedWire. Used for fade/node-move operations
+// where lookup by edge label is needed. Each entry points to the wire owned by
+// the destination port; multiple edges sharing a destination port map to the same *PacedWire.
 type WireRegistry map[string]*PacedWire
 
 // ForEach calls fn for every (edgeID, wire) pair in the registry.
@@ -95,19 +98,20 @@ func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
 }
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
-// WireRegistry keyed by edge label, and a NodeMoveRegistry for live position
+// SlotRegistry (keyed by "target.targetHandle" for delivery acks), a WireRegistry
+// (keyed by edge label for fade/node-move), and a NodeMoveRegistry for live position
 // updates (used by the stdin reader to handle node-move messages).
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, WireRegistry, *NodeMoveRegistry, error) {
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, SlotRegistry, WireRegistry, *NodeMoveRegistry, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
 	}
 	var spec topoSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		return nil, nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
 	}
 	if err := validateSpec(&spec); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// Populate Position on each specNode from view.nodes.
@@ -136,6 +140,8 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		if !exists {
 			arcLength := arcLengthBetween(nodePos[e.Source], nodePos[e.Target])
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
+			pw.Target = e.Target
+			pw.TargetHandle = e.TargetHandle
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
@@ -211,6 +217,21 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 		outboundHandle[e.Source][srcKey] = append(outboundHandle[e.Source][srcKey], e.SourceHandle)
 	}
 
+	// nodeSendRule looks up the node-owned per-output-port send rule for the
+	// given node id and output port name (sourceHandle). The rule lives on the
+	// SOURCE NODE's data.sendRules map, keyed by output port name. Ports not
+	// listed default to consumeGated.
+	nodeSendRule := func(n specNode, port string) SendRule {
+		if n.Data == nil || n.Data.SendRules == nil {
+			return RuleConsumeGated
+		}
+		rule := SendRule(n.Data.SendRules[port])
+		if rule == "" {
+			return RuleConsumeGated
+		}
+		return rule
+	}
+
 	// Build each node.
 	nodes := make([]Node, 0, len(spec.Nodes))
 	for _, n := range spec.Nodes {
@@ -231,7 +252,9 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 				if len(labels) > 0 {
 					// Look up wire by destination of the first outbound edge.
 					// For fan-in, the destination port owns the wire.
-					pb.SetSinglePaced(port.Name, edgeWire[labels[0]])
+					// Send rule is node-owned, keyed by this output port name.
+					rule := nodeSendRule(n, port.Name)
+					pb.SetSinglePacedRule(port.Name, edgeWire[labels[0]], rule)
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
@@ -243,7 +266,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 					if i < len(handles) {
 						handle = handles[i]
 					}
-					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl])
+					// Per-port (per fan-out element): the rule is keyed by the
+					// concrete output port name (sourceHandle, e.g. "ToNext0").
+					rule := nodeSendRule(n, handle)
+					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}
@@ -251,10 +277,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Wi
 
 		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
+			return nil, nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
 		nodes = append(nodes, nd)
 	}
 
-	return nodes, edgeWire, nmr, nil
+	return nodes, SlotRegistry(destWire), edgeWire, nmr, nil
 }

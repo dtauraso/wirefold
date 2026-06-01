@@ -120,10 +120,18 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       await appendWebviewLog(msg.entry, document.uri);
       return;
     case "delivered":
-      runner.writeStdin(JSON.stringify({ type: "delivered", edge: msg.edge }));
+      runner.writeStdin(JSON.stringify({ type: "delivered", target: msg.target, targetHandle: msg.targetHandle }));
       return;
     case "fade":
       runner.writeStdin(JSON.stringify({ type: "fade", edges: msg.edges }));
+      return;
+    case "deleteEdge":
+      await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "deleteEdge-forward", target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+      runner.writeStdin(JSON.stringify({ type: "deleteEdge", target: msg.target, targetHandle: msg.targetHandle }));
+      return;
+    case "addEdge":
+      await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "addEdge-forward", target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+      runner.writeStdin(JSON.stringify({ type: "addEdge", target: msg.target, targetHandle: msg.targetHandle }));
       return;
     case "node-move":
       runner.writeStdin(JSON.stringify({ type: "node-move", nodeId: msg.nodeId, x: msg.x, y: msg.y, z: msg.z ?? 0 }));

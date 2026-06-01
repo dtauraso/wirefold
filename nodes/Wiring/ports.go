@@ -72,6 +72,18 @@ func (i *In) TryRecv() (int, bool) {
 	}
 }
 
+// SendRule names the per-edge send policy applied by the source node after a
+// successful TrySend. The wire stays dumb transport; the node consults the rule.
+type SendRule string
+
+const (
+	// RuleConsumeGated: after sending, the node waits for the destination to
+	// consume the value (WaitConsumed). This is the default behavior.
+	RuleConsumeGated SendRule = "consumeGated"
+	// RuleFireAndForget: the node sends and does NOT wait for consumption.
+	RuleFireAndForget SendRule = "fireAndForget"
+)
+
 // Out is a typed output port.
 type Out struct {
 	// chan mode
@@ -83,6 +95,18 @@ type Out struct {
 	node  string
 	port  string
 	trace *T.Trace
+	// Rule is the per-edge send policy applied by the source node after a
+	// successful TrySend. Empty string defaults to consumeGated (see Gated).
+	Rule SendRule
+}
+
+// Gated reports whether the source node should wait for consumption after a
+// successful send. Nil-safe; the zero value (empty Rule) is gated.
+func (o *Out) Gated() bool {
+	if o == nil {
+		return true
+	}
+	return o.Rule != RuleFireAndForget
 }
 
 // TrySend in chan mode: non-blocking select. In paced mode: blocks until
@@ -96,7 +120,7 @@ func (o *Out) TrySend(v int) bool {
 		// webview sees it, animates, posts "delivered", and unblocks Send.
 		// Emitting after Send returns causes a deadlock: the webview never
 		// receives the event, never posts delivered, and Send never returns.
-		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs)
+		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		if err := o.pw.Send(o.ctx, v); err != nil {
 			return false
 		}
@@ -114,6 +138,48 @@ func (o *Out) TrySend(v int) bool {
 	}
 }
 
+// TryEmit is the fire-and-forget send: it places the bead non-blockingly and
+// drops it (returns false) if the wire is busy. On a successful placement it
+// emits the SendWire trace (so the pump animates it) and returns true. A dropped
+// bead produces NO trace — the placement happens first, the trace only on success.
+func (o *Out) TryEmit(v int) bool {
+	if o == nil {
+		return false
+	}
+	if o.pw != nil {
+		if !o.pw.TryPlace(v) {
+			return false
+		}
+		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		return true
+	}
+	if o.ch == nil {
+		return false
+	}
+	select {
+	case o.ch <- v:
+		o.trace.Send(o.node, o.port, v)
+		return true
+	default:
+		return false
+	}
+}
+
+// WaitConsumed blocks until the consumer calls Done on the value placed by the
+// most recent TrySend, or until the port's context is canceled. Returns true on
+// consumption, false on cancel or error. In chan mode (unit tests), returns true
+// immediately (no consume-gate concept).
+func (o *Out) WaitConsumed() bool {
+	if o == nil {
+		return false
+	}
+	if o.pw != nil {
+		return o.pw.WaitConsumed(o.ctx) == nil
+	}
+	// chan mode: no consume-gate; caller may proceed.
+	return true
+}
+
 // OutMulti is a fanout port: a slice of Outs sharing one logical name.
 type OutMulti []*Out
 
@@ -124,7 +190,7 @@ func NewIn(ch <-chan int, node, port string, tr *T.Trace) *In {
 }
 
 func NewOut(ch chan<- int, node, port string, tr *T.Trace) *Out {
-	return &Out{ch: ch, node: node, port: port, trace: tr}
+	return &Out{ch: ch, node: node, port: port, trace: tr, Rule: RuleConsumeGated}
 }
 
 // NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode.
@@ -132,6 +198,9 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace) *Out {
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule) *Out {
+	if rule == "" {
+		rule = RuleConsumeGated
+	}
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule}
 }

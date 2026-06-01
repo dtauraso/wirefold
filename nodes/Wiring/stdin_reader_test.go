@@ -1,7 +1,8 @@
 // stdin_reader_test.go — contract test for RunStdinReader.
 //
 // Verifies that a "delivered" JSON line on stdin calls NotifyDelivered on the
-// matching PacedWire, unblocking Recv; Send unblocks after Done is called.
+// matching PacedWire (keyed by slot = target+"."+targetHandle), unblocking Recv;
+// Send unblocks after Done is called.
 
 package Wiring
 
@@ -15,14 +16,15 @@ import (
 
 func TestRunStdinReaderDelivered(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
-	reg := WireRegistry{"e1": pw}
+	slotReg := SlotRegistry{"nodeA.in": pw}
+	reg := WireRegistry{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Feed one "delivered" message then close.
 	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, reg, nil, nil)
+	go RunStdinReader(ctx, r, slotReg, reg, nil, nil)
 
 	// Send a value on pw in the background; it will block until delivered.
 	sendErr := make(chan error, 1)
@@ -34,7 +36,7 @@ func TestRunStdinReaderDelivered(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Write the delivered message — unblocks Recv (visual delivery).
-	io.WriteString(w, `{"type":"delivered","edge":"e1"}`+"\n")
+	io.WriteString(w, `{"type":"delivered","target":"nodeA","targetHandle":"in"}`+"\n")
 	time.Sleep(10 * time.Millisecond)
 
 	// Recv the value, then call Done — Done unblocks Send.
@@ -56,11 +58,12 @@ func TestRunStdinReaderDelivered(t *testing.T) {
 }
 
 func TestRunStdinReaderUnknownEdgeIgnored(t *testing.T) {
+	slotReg := SlotRegistry{}
 	reg := WireRegistry{}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	// Unknown edge label → no panic, reader exits cleanly on ctx cancel.
-	r := strings.NewReader(`{"type":"delivered","edge":"unknown"}` + "\n")
-	RunStdinReader(ctx, r, reg, nil, nil) // should return without hanging
+	// Unknown slot → no panic, reader exits cleanly on ctx cancel.
+	r := strings.NewReader(`{"type":"delivered","target":"unknown","targetHandle":"in"}` + "\n")
+	RunStdinReader(ctx, r, slotReg, reg, nil, nil) // should return without hanging
 }

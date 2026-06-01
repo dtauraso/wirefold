@@ -51,6 +51,9 @@
       "data": {
         "state": {
           "held": 0
+        },
+        "sendRules": {
+          "ToNext1": "fireAndForget"
         }
       },
       "inputs": [
@@ -82,6 +85,9 @@
       "data": {
         "state": {
           "held": 0
+        },
+        "sendRules": {
+          "ToNext0": "fireAndForget"
         }
       },
       "inputs": [
@@ -188,19 +194,6 @@
       }
     },
     {
-      "id": "i0ToInhibitRight0",
-      "source": "i0",
-      "sourceHandle": "ToNext1",
-      "target": "inhibitRight0",
-      "targetHandle": "FromLeft",
-      "kind": "inhibit-in",
-      "label": "i0ToInhibitRight0",
-      "midpointOffset": 0,
-      "data": {
-        "slots": 1
-      }
-    },
-    {
       "id": "i1ToInhibitRight0",
       "source": "i1",
       "sourceHandle": "ToNext0",
@@ -238,6 +231,15 @@
       "data": {
         "slots": 1
       }
+    },
+    {
+      "id": "i0.ToNext1->inhibitRight0.FromLeft",
+      "source": "i0",
+      "sourceHandle": "ToNext1",
+      "target": "inhibitRight0",
+      "targetHandle": "FromLeft",
+      "kind": "any",
+      "label": "i0ToNext1ToInhibitRight0FromLeft"
     }
   ],
   "view": {
@@ -246,37 +248,50 @@
       "y": -322.2169225578915,
       "zoom": 1.1470637621457274
     },
-    "folds": [],
+    "camera3d": {
+      "position": [
+        332.5716880527999,
+        -361.42779280702536,
+        261.8579148345214
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
     "nodes": {
       "in08": {
         "x": 24.92901835550599,
-        "y": 317.7639238573262,
-        "sublabel": "Input"
+        "y": 317.7639238573262
       },
       "readGate1": {
-        "x": 225.273654398372,
-        "y": 300.1652600524147,
-        "sublabel": "AND"
+        "x": 169.4975592339979,
+        "y": 335.0874607508783
       },
       "i0": {
-        "x": 646.1693204908323,
-        "y": 241.06598073719593
+        "x": 339.52556707001804,
+        "y": 302.0002660174585
       },
       "i1": {
-        "x": 643.32216015854,
-        "y": 342.962576198407,
-        "sublabel": "ChainInhibitor"
+        "x": 326.944267331482,
+        "y": 355.6387781369589
       },
       "inhibitRight0": {
-        "x": 456.30532675279215,
-        "y": 306.70043988751576,
-        "sublabel": "INHIBIT(L=1,R=0)"
+        "x": 224.94881430607853,
+        "y": 332.8178651399859
       },
       "bootstrap_rg": {
         "x": 23.624234203946486,
-        "y": 424.676127470855,
-        "sublabel": "Bootstrap"
+        "y": 424.676127470855
       }
-    }
+    },
+    "directlyFadedNodes": [],
+    "directlyFadedEdges": [
+      "readGate1.ToChainInhibitor->inhibitRight0.FromLeft",
+      "i0ToInhibitRight0"
+    ],
+    "fadeEdgeOrder": []
   }
 }

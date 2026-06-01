@@ -43,7 +43,15 @@ func (g *Node) Update(ctx context.Context) {
 			g.FromChainInhibitor.Done()
 			g.HasValue = false
 			g.HasChainInhibitor = false
-			g.ToChainInhibitor.TrySend(g.Value)
+			if g.ToChainInhibitor.Gated() {
+				if g.ToChainInhibitor.TrySend(g.Value) {
+					if !g.ToChainInhibitor.WaitConsumed() {
+						return
+					}
+				}
+			} else {
+				g.ToChainInhibitor.TryEmit(g.Value)
+			}
 		}
 	}
 }

@@ -58,6 +58,10 @@ type Event struct {
 	// so the TS layer derives arrival from emitTime + simLatencyMs instead.
 	ArcLength    float64 `json:"arcLength,omitempty"`
 	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
+	// Destination slot identity — authoritative from Go. Set on send events backed
+	// by a PacedWire so the TS layer never derives targetHandle from edge data.
+	Target       string  `json:"target,omitempty"`
+	TargetHandle string  `json:"targetHandle,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -138,13 +142,14 @@ func (t *Trace) Send(node, port string, value int) {
 }
 
 // SendWire emits a send event like Send, additionally carrying the wire geometry
-// fields (arcLength in world-units, simLatencyMs in milliseconds) from the
-// outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
-func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64) {
+// fields (arcLength in world-units, simLatencyMs in milliseconds) and the
+// authoritative destination slot identity (target node id, targetHandle port name)
+// from the outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
+func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64, target, targetHandle string) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
@@ -165,6 +170,41 @@ func (t *Trace) Slot(nodeId, port, phase string, value int, hasValue bool) {
 		return
 	}
 	t.ch <- Event{Kind: KindSlot, Node: nodeId, Port: port, SlotPhase: phase, Value: value, hasValue: hasValue}
+}
+
+// Breadcrumb writes a free-form diagnostic line directly to the sink
+// (if any) in real time. It is logging-only: breadcrumbs are NOT added
+// to the buffered event slice, do NOT receive a Step ordinal, and are
+// outside the closed trace vocabulary used for replay/parity. The line
+// shape is {"src":"go","kind":"breadcrumb","label":...,"node":...,
+// "port":...,"value":...} with empty/zero fields omitted, so the TS
+// relay can route it to go.jsonl alongside real trace events.
+//
+// Used to trace one-off control events (e.g. edge delete / wire reset)
+// that have no place in the recv/fire/send/slot/done lifecycle.
+func (t *Trace) Breadcrumb(label, node, port, value string) {
+	if t == nil || t.sink == nil {
+		return
+	}
+	b, err := marshalBreadcrumb(label, node, port, value)
+	if err != nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, _ = t.sink.Write(b)
+	_, _ = t.sink.Write([]byte{'\n'})
+}
+
+func marshalBreadcrumb(label, node, port, value string) ([]byte, error) {
+	type breadcrumb struct {
+		Kind  string `json:"kind"`
+		Label string `json:"label"`
+		Node  string `json:"node,omitempty"`
+		Port  string `json:"port,omitempty"`
+		Value string `json:"value,omitempty"`
+	}
+	return json.Marshal(breadcrumb{Kind: "breadcrumb", Label: label, Node: node, Port: port, Value: value})
 }
 
 // Close stops the drain goroutine. Call after every node's Update
@@ -276,6 +316,8 @@ func marshalEvent(e Event) ([]byte, error) {
 		Value        int     `json:"value"`
 		ArcLength    float64 `json:"arcLength,omitempty"`
 		SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
+		Target       string  `json:"target,omitempty"`
+		TargetHandle string  `json:"targetHandle,omitempty"`
 	}
 	type fire struct {
 		Step int    `json:"step"`
@@ -308,7 +350,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
 	case KindSend:
 		if e.ArcLength != 0 || e.SimLatencyMs != 0 {
-			return json.Marshal(sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs})
+			return json.Marshal(sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs, Target: e.Target, TargetHandle: e.TargetHandle})
 		}
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	case KindDone:
