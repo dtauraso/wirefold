@@ -11,6 +11,7 @@ Neuron-like coincidence detection: a multi-input node should fire only when its 
 
 ## Model
 - **Per-node rule, different per node**, stored in `node.data` (same ownership pattern as the send rule). A node may have a timing window `W`. **Absent = no window = wait indefinitely** (today's behavior).
+- **`W` is derived, not stored.** It is recomputed from the node's current input edges every time an input edge's length changes (node moved, edge reconnected, midpoint dragged): `W = 1.5 × max(simLatencyMs over the node's current input wires)`, where each wire's `simLatencyMs = bezier arcLength / 0.08 WU-per-ms` (uniform pulse speed). The per-node value is therefore a snapshot of current geometry — if geometry changes, `W` changes automatically.
 - The window **opens when the node's first required input arrives**.
 - If **all** required inputs arrive within `W` of the opening → the node **fires** (consumes/Done all inputs), as today.
 - If `W` elapses with any required input still missing → the node **clears**: `Done` (drain) every *held* input **without firing**, reset its has-input flags and the window, and wait for the next first-arrival.

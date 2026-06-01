@@ -189,13 +189,14 @@
       <li><strong>Window loop</strong> — on first input present, record <code>t0</code> (wall-clock). Each iteration: if all inputs present → fire (<code>Done</code> all); else if <code>now − t0 &gt; W</code> → clear (<code>Done</code> each held input, reset <code>HasX</code> flags + window). Use <code>select</code> with a short timeout between polls to avoid busy-spin.</li>
       <li><strong>Clear semantics</strong> — call <code>Done</code> on each held input's <code>In</code> port (drains the upstream wire so a <code>consumeGated</code> source's <code>WaitConsumed</code> returns). No <code>Fire()</code>. Emit a <code>window-clear</code> trace breadcrumb for observability.</li>
       <li><strong>Clock units</strong> — real elapsed wall-clock time measured at the node (the gap between <code>NotifyDelivered</code>-driven arrivals). Default <code>W</code> to a small multiple of current <code>simLatencyMs</code> (~2500–3300 ms per wire).</li>
+      <li><strong>W is derived, not stored</strong> — recomputed from the node's current input edges on every input-edge-length change (move, reconnect, midpoint drag): <code>W = 1.5 × max(simLatencyMs)</code> over current input wires, where <code>simLatencyMs = arcLength ÷ 0.08 WU/ms</code>. The value is a geometry snapshot, not fixed config.</li>
     </ul>
 
   </div>
 
   <!-- WINDOWS -->
   <div id="windows" class="panel">
-    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem;">W ≈ 1.5 × the node's longest incoming edge travel time (travel = edge length ÷ 0.08 WU/ms, uniform pulse speed). Only <code>inhibitRight0</code> currently uses its window for coincidence detection; the others are reference values.</p>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem;"><strong>W is not a fixed config value.</strong> It is recomputed from the node's current input edges whenever any input edge length changes (node moved, edge reconnected, midpoint dragged): <code>W = 1.5 × longest current input edge travel time</code>, where travel time = bezier arcLength ÷ 0.08 WU/ms (uniform pulse speed). The values below are a <em>snapshot at the current geometry</em> — they change automatically if geometry changes. Only <code>inhibitRight0</code> currently uses its window for coincidence detection; the others are reference values.</p>
     <table style="width:100%;border-collapse:collapse;margin-top:0.25rem;">
       <thead>
         <tr style="background:var(--code-bg);">
