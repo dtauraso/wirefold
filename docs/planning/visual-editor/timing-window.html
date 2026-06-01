@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timing-Window Spec</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: #f5f5f0;
+    color: #1a1a1a;
+    padding: 2rem 1rem 4rem;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .meta { font-size: 0.78rem; color: #888; }
+  nav { display: flex; gap: 0; border-bottom: 2px solid #d0cfc8; margin-bottom: 1.75rem; }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #666;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .tab-btn:hover { color: #333; }
+  .tab-btn.active { color: #2c6fbd; border-bottom-color: #2c6fbd; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  p { margin-bottom: 0.85rem; }
+  ul { padding-left: 1.4rem; margin-bottom: 0.85rem; }
+  li { margin-bottom: 0.4rem; }
+  code, .mono {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 0.84em;
+    background: #e8e7e0;
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+  }
+  .diagram-wrap {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 1.25rem;
+    display: flex;
+    justify-content: center;
+  }
+  svg text { font-family: "SF Mono", "Fira Code", "Consolas", monospace; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Timing-Window (Coincidence-Detection) Rule</h1>
+    <div class="meta">branch: task/timing-window &nbsp;·&nbsp; docs/planning/visual-editor/timing-window.md</div>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="diagram">Diagram</button>
+    <button class="tab-btn" data-tab="rules">Rules</button>
+    <button class="tab-btn" data-tab="tests">Tests</button>
+  </nav>
+
+  <!-- OVERVIEW -->
+  <div id="overview" class="panel active">
+    <p>A multi-input node should fire only when its required inputs arrive <em>close together in time</em>. Without a timing window, a partial set of inputs accumulates indefinitely — stalling upstream sources and piling up beads at a gate that may never complete.</p>
+    <p>The timing window opens when the <strong>first required input arrives</strong> (<code>t0</code>). If all required inputs arrive within window <code>W</code>, the node fires normally. If <code>W</code> elapses with any input still missing, the node <strong>clears</strong>: it calls <code>Done</code> on every held input (draining upstream wires) without firing, then resets its flags and waits for the next first-arrival.</p>
+    <p>This directly solves the <strong>permanent-delete</strong> case: an input edge removed for good means that input will never arrive, so the gate would block forever. With a timing window it times out after <code>W</code>, clears, and lets the ring keep running — no pile-up, no stall.</p>
+    <p><code>W</code> is a per-node value stored in <code>node.data</code> (same ownership as send rules). Absent means <em>no window</em> — wait indefinitely, which is today's unchanged behavior for non-windowed nodes.</p>
+  </div>
+
+  <!-- DIAGRAM -->
+  <div id="diagram" class="panel">
+    <div class="diagram-wrap">
+      <svg width="780" height="310" viewBox="0 0 780 310" aria-label="Timing-window timeline diagram">
+        <!-- Timeline axis -->
+        <line x1="60" y1="200" x2="720" y2="200" stroke="#555" stroke-width="1.5"/>
+        <!-- Arrow head on axis -->
+        <polygon points="720,196 730,200 720,204" fill="#555"/>
+        <text x="735" y="204" font-size="12" fill="#555">time</text>
+
+        <!-- t0 marker -->
+        <line x1="180" y1="185" x2="180" y2="215" stroke="#555" stroke-width="1.5"/>
+        <text x="173" y="180" font-size="11" fill="#555">t0</text>
+
+        <!-- Window bracket – FIRE scenario (top) -->
+        <!-- W bracket -->
+        <line x1="180" y1="110" x2="460" y2="110" stroke="#2c6fbd" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <line x1="180" y1="105" x2="180" y2="115" stroke="#2c6fbd" stroke-width="1.5"/>
+        <line x1="460" y1="105" x2="460" y2="115" stroke="#2c6fbd" stroke-width="1.5"/>
+        <text x="295" y="105" font-size="12" fill="#2c6fbd" text-anchor="middle">W</text>
+
+        <!-- Input A arrives at t0 (FIRE path) -->
+        <line x1="180" y1="140" x2="180" y2="198" stroke="#4a9a4a" stroke-width="2"/>
+        <polygon points="176,198 184,198 180,205" fill="#4a9a4a"/>
+        <text x="180" y="133" font-size="11" fill="#4a9a4a" text-anchor="middle">input A</text>
+
+        <!-- Input B arrives at t0+delta, inside W (FIRE path) -->
+        <line x1="340" y1="140" x2="340" y2="198" stroke="#4a9a4a" stroke-width="2"/>
+        <polygon points="336,198 344,198 340,205" fill="#4a9a4a"/>
+        <text x="340" y="133" font-size="11" fill="#4a9a4a" text-anchor="middle">input B</text>
+
+        <!-- FIRE label -->
+        <rect x="400" y="148" width="64" height="26" rx="4" fill="#4a9a4a"/>
+        <text x="432" y="165" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">FIRE</text>
+        <!-- dashed line from B to FIRE -->
+        <line x1="355" y1="162" x2="398" y2="162" stroke="#4a9a4a" stroke-width="1.2" stroke-dasharray="4,3"/>
+
+        <!-- Divider between two scenarios -->
+        <line x1="60" y1="220" x2="720" y2="220" stroke="#ccc" stroke-width="1" stroke-dasharray="4,4"/>
+
+        <!-- CLEAR scenario (bottom) -->
+        <!-- W bracket (clear) -->
+        <line x1="180" y1="260" x2="560" y2="260" stroke="#b85c00" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <line x1="180" y1="255" x2="180" y2="265" stroke="#b85c00" stroke-width="1.5"/>
+        <line x1="560" y1="255" x2="560" y2="265" stroke="#b85c00" stroke-width="1.5"/>
+        <text x="368" y="255" font-size="12" fill="#b85c00" text-anchor="middle">W</text>
+
+        <!-- Input A arrives (CLEAR path) -->
+        <line x1="180" y1="235" x2="180" y2="298" stroke="#4a9a4a" stroke-width="2"/>
+        <polygon points="176,298 184,298 180,305" fill="#4a9a4a"/>
+        <text x="180" y="230" font-size="11" fill="#4a9a4a" text-anchor="middle">input A</text>
+
+        <!-- Input B missing (CLEAR path) -->
+        <line x1="460" y1="240" x2="460" y2="298" stroke="#bbb" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="460" y="235" font-size="11" fill="#aaa" text-anchor="middle">B missing</text>
+
+        <!-- W elapses marker -->
+        <line x1="560" y1="235" x2="560" y2="298" stroke="#b85c00" stroke-width="1.5"/>
+
+        <!-- CLEAR label -->
+        <rect x="575" y="260" width="68" height="26" rx="4" fill="#b85c00"/>
+        <text x="609" y="277" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">CLEAR</text>
+
+        <!-- Done label -->
+        <text x="609" y="298" font-size="10" fill="#b85c00" text-anchor="middle">Done(A), reset</text>
+
+        <!-- Scenario labels on left -->
+        <text x="55" y="162" font-size="11" fill="#4a9a4a" text-anchor="end">all present</text>
+        <text x="55" y="275" font-size="11" fill="#b85c00" text-anchor="end">timeout</text>
+      </svg>
+    </div>
+    <p style="margin-top:1rem; font-size:0.82rem; color:#666;">
+      Top path: both inputs arrive inside <code>W</code> → <strong>FIRE</strong> (Done all, consume/send).
+      Bottom path: input B never arrives, <code>W</code> elapses → <strong>CLEAR</strong> (<code>Done</code> drains held input A, no fire, flags reset).
+    </p>
+  </div>
+
+  <!-- RULES -->
+  <div id="rules" class="panel">
+    <ul>
+      <li><strong>Per-node rule in <code>node.data</code></strong> — same ownership as send rules (<code>consumeGated</code> / <code>fireAndForget</code>). Absent ⇒ no window ⇒ blocking <code>Recv</code>, unchanged behavior.</li>
+      <li><strong>First implementation target: <code>inhibitRight0</code></strong> (the AND-gate that motivated this). <code>readGate</code> stays windowless (ring lockstep requires indefinite wait).</li>
+      <li><strong>Non-blocking poll</strong> — add <code class="mono">PollRecv() (value, ok)</code> to <code>PacedWire</code>/<code>Out</code>; returns <code>ok=false</code> immediately when <code>hasSend</code> is false. Windowed nodes poll each input per iteration instead of parking on a blocking <code>Recv</code>.</li>
+      <li><strong>Window loop</strong> — on first input present, record <code>t0</code> (wall-clock). Each iteration: if all inputs present → fire (<code>Done</code> all); else if <code>now − t0 &gt; W</code> → clear (<code>Done</code> each held input, reset <code>HasX</code> flags + window). Use <code>select</code> with a short timeout between polls to avoid busy-spin.</li>
+      <li><strong>Clear semantics</strong> — call <code>Done</code> on each held input's <code>In</code> port (drains the upstream wire so a <code>consumeGated</code> source's <code>WaitConsumed</code> returns). No <code>Fire()</code>. Emit a <code>window-clear</code> trace breadcrumb for observability.</li>
+      <li><strong>Clock units</strong> — real elapsed wall-clock time measured at the node (the gap between <code>NotifyDelivered</code>-driven arrivals). Default <code>W</code> to a small multiple of current <code>simLatencyMs</code> (~2500–3300 ms per wire).</li>
+    </ul>
+  </div>
+
+  <!-- TESTS -->
+  <div id="tests" class="panel">
+    <ul>
+      <li><strong>Unit — single input, no second within W → CLEAR</strong>: windowed node receives input A; B never arrives; after <code>W</code> elapses, <code>Done</code> is called on A, no fire occurs, flags reset.</li>
+      <li><strong>Unit — both inputs within W → FIRE</strong>: windowed node receives A then B inside <code>W</code>; fires normally (both consumed/Done), no timeout.</li>
+      <li><strong>Live — permanent edge delete</strong>: permanently delete an <code>inhibitRight0</code> input edge; gate times out after <code>W</code>, clears its held input, ring keeps running — no pile-up, no stall.</li>
+      <li><strong>Out-of-scope (prerequisite branch)</strong>: delete + re-add freeze/resume is verified on <code>task/wire-delete-pulse</code>, not here.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab-btn');
+  const panels = document.querySelectorAll('.panel');
+  tabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      tabs.forEach(b => b.classList.toggle('active', b === btn));
+      panels.forEach(p => p.classList.toggle('active', p.id === target));
+    });
+  });
+</script>
+</body>
+</html>
