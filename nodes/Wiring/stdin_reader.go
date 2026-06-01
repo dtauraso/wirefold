@@ -123,7 +123,7 @@ func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 	}
 
 	// 1. Update the affected edges' source Outs (per-edge travel-time).
-	//    Track the distinct destination ports they feed for step 2.
+	//    Track the distinct destination ports they feed for the aggregate recompute below.
 	touchedDest := map[string]bool{}
 	for _, eid := range edgeIds {
 		arc := arcLenOf(eid)
