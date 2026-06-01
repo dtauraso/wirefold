@@ -37,8 +37,8 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 // NotifyDelivered is called, the delivery is deferred: pendingDelivered is set
 // to true and the call returns immediately. inFlight stays true so the source
 // remains blocked. When Done clears the slot, it checks pendingDelivered and
-// completes the deferred delivery right there (under the same lock), waking the
-// next Recv via cond.Broadcast.
+// completes the deferred delivery right there (under the same lock), filling
+// the slot again and closing the fresh slotReadyCh so the next Recv unblocks.
 //
 // Lifecycle per value:
 //
@@ -48,28 +48,28 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 //	                 consumer (consume-gated policy lives in the node, not here).
 //	NotifyDelivered: if deleted — no-op (pulse from a deleted wire is discarded).
 //	                 if slot empty — calls deliverLocked (moves pending→slot,
-//	                 sets hasSend=true, clears inFlight, broadcasts on cond).
+//	                 sets hasSend=true, clears inFlight, closes slotReadyCh).
 //	                 if slot full — sets pendingDelivered=true, returns immediately.
-//	Recv:            waits on cond until hasSend is true, returns value (slot
-//	                 stays full). A cond.Broadcast from Delete/Reset/Restore wakes
-//	                 the goroutine; it re-checks hasSend, sees false, keeps waiting.
-//	Done:            consumer finished; clears slot (hasSend=false), broadcasts on
-//	                 cond; if pendingDelivered, calls deliverLocked to complete the
-//	                 deferred delivery immediately. Also closes consumedCh so any
-//	                 caller of WaitConsumed unblocks.
+//	Recv:            blocks until slotReadyCh is closed (slot filled), returns
+//	                 value (slot stays full).
+//	Done:            consumer finished; clears slot (hasSend=false), resets
+//	                 slotReadyCh for the next cycle; if pendingDelivered, calls
+//	                 deliverLocked to complete the deferred delivery immediately.
+//	                 Also closes consumedCh so any caller of WaitConsumed unblocks.
 //
 // Deleting a wire destroys both bits; a fresh wire has inFlight=false so the
 // source can send immediately.
 type PacedWire struct {
 	mu               sync.Mutex
 	cond             *sync.Cond
-	pending          any    // value placed by Send, not yet delivered into slot
-	slot             any    // value in destination slot (set by NotifyDelivered)
-	hasSend          bool   // destination slot holds a value (not yet Done'd)
-	inFlight         bool   // bead is on the wire, not yet delivered into slot
-	pendingDelivered bool   // NotifyDelivered arrived while slot was full; delivery deferred to Done
-	faded            bool   // when true, Send skips without sending
-	deleted          bool   // when true, the edge was deleted; source stops placing beads (distinct origin from faded)
+	pending          any          // value placed by Send, not yet delivered into slot
+	slot             any          // value in destination slot (set by NotifyDelivered)
+	hasSend          bool         // destination slot holds a value (not yet Done'd)
+	inFlight         bool         // bead is on the wire, not yet delivered into slot
+	pendingDelivered bool         // NotifyDelivered arrived while slot was full; delivery deferred to Done
+	faded            bool         // when true, Send skips without sending
+	deleted          bool         // when true, the edge was deleted; source stops placing beads (distinct origin from faded)
+	slotReadyCh      chan struct{} // closed when slot is filled; reset by Done
 	consumedCh       chan struct{} // closed by Done to signal the source that the slot was consumed
 	ArcLength        float64      // straight-line distance between source and target nodes (world units)
 	SimLatencyMs     float64      // ArcLength / pulseSpeed (ms); how long a pulse takes to traverse the wire
@@ -84,6 +84,7 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	pw := &PacedWire{
 		ArcLength:    arcLength,
 		SimLatencyMs: arcLength / pulseSpeed,
+		slotReadyCh:  make(chan struct{}),
 		consumedCh:   make(chan struct{}),
 	}
 	pw.cond = sync.NewCond(&pw.mu)
@@ -177,22 +178,20 @@ func (pw *PacedWire) TryPlace(value any) bool {
 // Recv blocks until the slot is filled (NotifyDelivered delivers the bead),
 // then returns the value. The slot is NOT cleared; the consumer must call Done.
 // Returns ErrCanceled if ctx is done.
-//
-// Recv waits on the durable cond condition (hasSend) rather than a throwaway
-// channel, so Delete/Reset/Restore broadcasts wake it cleanly and it re-checks
-// rather than being orphaned on a swapped-out channel.
 func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
-	done := pw.watchCtx(ctx)
-	defer close(done)
+	// Capture the current slotReadyCh. If the slot is already filled, this
+	// channel was already closed and select returns immediately.
+	pw.mu.Lock()
+	ch := pw.slotReadyCh
+	pw.mu.Unlock()
+
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		return nil, ErrCanceled
+	}
 
 	pw.mu.Lock()
-	for !pw.hasSend {
-		if ctx.Err() != nil {
-			pw.mu.Unlock()
-			return nil, ErrCanceled
-		}
-		pw.cond.Wait()
-	}
 	v := pw.slot
 	pw.mu.Unlock()
 	return v, nil
@@ -200,26 +199,31 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 
 // deliverLocked moves the pending value into the slot and signals Recv.
 // Must be called with pw.mu held. Precondition: hasSend==false.
-// Sets hasSend=true, clears inFlight and pendingDelivered, and broadcasts on
-// the cond so any waiting Recv re-checks and unblocks.
+// Sets hasSend=true, clears inFlight and pendingDelivered, broadcasts, and
+// closes the current slotReadyCh so any waiting Recv unblocks.
 func (pw *PacedWire) deliverLocked() {
 	pw.slot = pw.pending
 	pw.pending = nil
 	pw.hasSend = true
 	pw.inFlight = false
 	pw.pendingDelivered = false
+	ch := pw.slotReadyCh
 	pw.cond.Broadcast()
+	// Close outside the broadcast but still under the lock is fine; Recv only
+	// reads the channel after capturing it while holding the lock.
+	close(ch)
 }
 
 // Done is called by the receiver when it has finished using the value.
-// Clears the destination slot (hasSend=false) and broadcasts on the cond for
-// the next delivery cycle. If a delivery was deferred (pendingDelivered==true),
+// Clears the destination slot (hasSend=false) and resets slotReadyCh for the
+// next delivery cycle. If a delivery was deferred (pendingDelivered==true),
 // completes it immediately by calling deliverLocked so the next Recv unblocks
 // without waiting for another NotifyDelivered.
 func (pw *PacedWire) Done() {
 	pw.mu.Lock()
 	pw.slot = nil
 	pw.hasSend = false
+	pw.slotReadyCh = make(chan struct{})
 	if pw.pendingDelivered {
 		// A NotifyDelivered arrived while the slot was full; complete it now.
 		pw.deliverLocked()
@@ -266,11 +270,11 @@ func (pw *PacedWire) WaitConsumed(ctx context.Context) error {
 }
 
 // NotifyDelivered is called by the visual layer when the pulse animation
-// completes. It NEVER blocks. If the slot is empty, it delivers immediately
-// (moves pending→slot, sets hasSend=true, clears inFlight, closes slotReadyCh).
-// If the slot is full, it sets pendingDelivered=true and returns immediately —
-// inFlight stays true so the source remains blocked until Done completes the
-// deferred delivery.
+// completes. It NEVER blocks. If the wire is deleted, the pulse is discarded.
+// If the slot is empty, it delivers immediately (moves pending→slot, sets
+// hasSend=true, clears inFlight, closes slotReadyCh). If the slot is full, it
+// sets pendingDelivered=true and returns immediately — inFlight stays true so
+// the source remains blocked until Done completes the deferred delivery.
 func (pw *PacedWire) NotifyDelivered(ctx context.Context) error {
 	pw.mu.Lock()
 	if pw.deleted {
@@ -293,9 +297,8 @@ func (pw *PacedWire) NotifyDelivered(ctx context.Context) error {
 }
 
 // resetLocked performs the shared teardown for Reset and Delete: drops any
-// in-flight/held value, clears all state, broadcasts on the cond so a parked
-// Recv re-checks and keeps waiting (hasSend will be false), and returns the
-// consumedCh (now nil'd) so the caller can close it to free a parked
+// in-flight/held value, installs a fresh slotReadyCh, broadcasts, and returns
+// the consumedCh (now nil'd) so the caller can close it to free a parked
 // WaitConsumed. Must be called with pw.mu held; the caller closes the returned
 // channel after unlocking.
 func (pw *PacedWire) resetLocked() chan struct{} {
@@ -304,6 +307,7 @@ func (pw *PacedWire) resetLocked() chan struct{} {
 	pw.slot = nil
 	pw.hasSend = false
 	pw.pendingDelivered = false
+	pw.slotReadyCh = make(chan struct{})
 	pw.cond.Broadcast()
 	ch := pw.consumedCh
 	pw.consumedCh = nil

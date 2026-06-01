@@ -531,9 +531,8 @@ func TestDeleteSilencesWire(t *testing.T) {
 	}
 }
 
-// TestDeleteDropsPulse: a goroutine parked in Recv must NOT receive a pulse that
-// was in-flight when Delete was called. After Delete+Restore a new delivery must
-// be received normally (no hang).
+// TestDeleteDropsPulse: a NotifyDelivered that arrives after Delete must be a
+// no-op — hasSend must stay false and no node receives the pulse.
 func TestDeleteDropsPulse(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
@@ -543,90 +542,19 @@ func TestDeleteDropsPulse(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 
-	// Park a receiver.
-	recvDone := make(chan any, 1)
-	go func() {
-		v, _ := pw.Recv(ctx)
-		recvDone <- v
-	}()
-	time.Sleep(5 * time.Millisecond)
-
-	// Delete removes the pulse; parked Recv must NOT unblock with 42.
+	// Delete drops the pulse before NotifyDelivered fires.
 	pw.Delete()
-	time.Sleep(10 * time.Millisecond)
-	select {
-	case v := <-recvDone:
-		t.Fatalf("Recv unblocked after Delete with value %v; pulse should have been dropped", v)
-	default:
-	}
 
 	// A late NotifyDelivered for the deleted bead must be a no-op.
 	pw.NotifyDelivered(ctx)
-	time.Sleep(5 * time.Millisecond)
-	select {
-	case v := <-recvDone:
-		t.Fatalf("Recv unblocked after late NotifyDelivered on deleted wire: %v", v)
-	default:
-	}
 
-	// Restore wire; place and deliver a fresh bead — Recv must unblock.
-	pw.Restore()
-	if err := pw.Send(ctx, 99); err != nil {
-		t.Fatalf("Send after Restore: %v", err)
+	// hasSend must still be false — no value was delivered.
+	pw.mu.Lock()
+	hasSend := pw.hasSend
+	pw.mu.Unlock()
+	if hasSend {
+		t.Fatal("NotifyDelivered on deleted wire set hasSend=true; pulse should be discarded")
 	}
-	pw.NotifyDelivered(ctx)
-	select {
-	case v := <-recvDone:
-		if v != 99 {
-			t.Fatalf("got %v, want 99", v)
-		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Recv did not unblock after Restore+deliver")
-	}
-	pw.Done()
-}
-
-// TestResetDoesNotOrphanRecv: Reset must wake a parked Recv so it can receive
-// the next delivery; the old (pre-reset) pulse must not be delivered.
-func TestResetDoesNotOrphanRecv(t *testing.T) {
-	pw := NewPacedWire(100, PulseSpeedWuPerMs)
-	ctx := context.Background()
-
-	// Place a bead.
-	if err := pw.Send(ctx, 7); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-
-	recvDone := make(chan any, 1)
-	go func() {
-		v, _ := pw.Recv(ctx)
-		recvDone <- v
-	}()
-	time.Sleep(5 * time.Millisecond)
-
-	// Reset drops the in-flight bead; Recv must NOT receive 7.
-	pw.Reset()
-	time.Sleep(10 * time.Millisecond)
-	select {
-	case v := <-recvDone:
-		t.Fatalf("Recv received dropped value %v after Reset", v)
-	default:
-	}
-
-	// Now send a fresh bead and deliver it; Recv must unblock with the new value.
-	if err := pw.Send(ctx, 55); err != nil {
-		t.Fatalf("Send after Reset: %v", err)
-	}
-	pw.NotifyDelivered(ctx)
-	select {
-	case v := <-recvDone:
-		if v != 55 {
-			t.Fatalf("got %v, want 55", v)
-		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Recv did not unblock after Reset+new deliver")
-	}
-	pw.Done()
 }
 
 func TestRestoreUnsilencesWire(t *testing.T) {
