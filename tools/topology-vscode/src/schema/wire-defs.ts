@@ -10,7 +10,6 @@ export interface WirePropDef {
 
 export const WIRE_PROPS: Record<string, WirePropDef> = {
   label:       { tsType: "string",    required: false },
-  midpointOffset: { tsType: "number",    required: false },
   arrowStyle:  { tsType: "ArrowStyle", required: false },
   concurrent:  { tsType: "boolean",   required: false },
   kind:        { tsType: "EdgeKind",  required: true },
@@ -21,7 +20,6 @@ export type WirePropName = keyof typeof WIRE_PROPS;
 // Derived from WIRE_PROPS — do not hand-edit. Consumed by Edge and EdgeData.
 export type WireProps = {
   label?: string;
-  midpointOffset?: number;
   arrowStyle?: ArrowStyle;
   concurrent?: boolean;
   kind: EdgeKind;
