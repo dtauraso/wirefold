@@ -7,87 +7,42 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-01 — task/delete-edge merged to main)
+## State at handoff (2026-06-01 — task/wire-delete-pulse merged to main)
 
-- **Active branch:** `task/timing-window` (branched from `main` HEAD `c0eaee65`,
-  after the `task/delete-edge` merge).
-- `task/delete-edge` is **merged to main** and deleted (local + remote).
-- Build/test gate: green at merge (`go build ./... && go test ./...`, `npx tsc --noEmit` clean).
+- **Active branch:** `task/timing-window` (now merged up to current `main`, which includes the `task/wire-delete-pulse` merge).
+- `task/wire-delete-pulse` is **merged to main** and deleted (local + remote).
+- Build/test gate: green at merge (`go build ./... && go test -count=1 ./...`, `npx tsc --noEmit` clean).
 
-### What landed on task/delete-edge (merged)
+### What landed on task/wire-delete-pulse (merged)
 
-- **Per-edge, node-owned send rules.** Send rules now live on the node
-  (`node.data.sendRules`), not the wire. Two rules:
-  - `consumeGated` — source blocks until the bead is consumed (default backpressure).
-  - `fireAndForget` — non-blocking; drops the bead if the destination is busy.
-  - `i0.ToNext1` uses `fireAndForget` so deleting that side-gate input keeps the ring alive.
-- **PacedWire is pure transport.** Ops: `WaitConsumed` / `Reset` /
-  `Delete` / `Restore`. `Delete` sets a deleted flag so the source stops
-  placing beads (no pile-up at a dead gate); `Restore` re-enables it.
-- **Substrate messages `deleteEdge` + `addEdge`** wired through
-  `messages.ts` → `handle-message.ts` → `store.ts`; delete persistently
-  silences the wire, add restores it.
-- **Delete-path trace breadcrumbs** added.
-- **MODEL.md amended** to node-owned send rules (rules are a property of
-  the node, not the wire).
+- **Deleted wire drops its pulse.** `PacedWire.Delete` clears the wire's pulse state via `resetLocked` (zeroes `pending`/`slot`, sets `hasSend=false`), so a deleted wire carries no pulse and no node receives it. Verified from `.probe/go.jsonl`: a `wire_delete_drop_pulse had_pulse=true` line for inhibitRight0/FromLeft had NO subsequent `wire_recv` for that port.
+- **`NotifyDelivered` deleted-guard.** Early return when the wire is deleted, so a late in-flight delivery cannot set `hasSend`. (Defensive; not exercised in the verification run — `notify_on_deleted_wire_ignored=0`.)
+- **Verification breadcrumbs** added (via `Trace.Breadcrumb`, keyed by destination node+port): `wire_delete_drop_pulse` (in Delete, before clear), `notify_on_deleted_wire_ignored` (in the guard), `wire_recv` (in ports.go TryRecv on a real receive).
+- **DELIBERATELY NOT done:** the `slotReadyCh`→cond receiver rewrite was reverted to keep this branch scoped to pulse-removal only. See next section.
 
-### KNOWN ISSUE (prominent — drives next branch)
+### NEXT task on this branch — task/timing-window
 
-**Delete + re-add freezes the destination AND-gate.** A receiver parked
-in `PacedWire.Recv` is orphaned when `Reset` swaps its `slotReadyCh`:
-the parked goroutine holds a reference to the old channel and never
-wakes. This is a blocking-receive structural problem, not a knob to
-tune. It is intended to be subsumed by the timing-window receive
-rewrite below (non-blocking polling has no parked receiver to orphan).
+Spec: [timing-window.md](timing-window.md). Read it first; spec-first, no code ahead of confirmation.
 
-### Next task — task/timing-window (SPEC WRITTEN — implement next)
-
-The per-node **timing-window (coincidence-detection) rule** SPEC is
-written at
-[docs/planning/visual-editor/timing-window.md](timing-window.md).
-**Read it first** — it is the next thing to implement. In short:
-
-- `node.data` carries a `window` (duration); absent = wait indefinitely.
-- The node **polls its inputs non-blockingly** instead of parking in a
-  blocking `Recv`.
-- On the **first** input arrival, the node **opens the window**.
-- If **all** required inputs land within the window → **fire**.
-- If the window expires with inputs missing → **clear** the held inputs
-  (Done-without-fire) and reset; no fire.
-- This rewrites the receive path from blocking `Recv` to non-blocking
-  polling and **subsumes the orphaned-Recv freeze** (see KNOWN ISSUE).
-
-**KEY OPEN DECISION: clock units** — real wall-clock time measured at
-the node (recommended), sim-time ms, or discrete ticks. See the spec's
-Clock section; confirm with David before implementing.
+Two things remain, in order:
+1. **The freeze is NOT fixed yet.** A receiver parked in `PacedWire.Recv` is still orphaned when `Reset`/`Delete` swaps its `slotReadyCh` (the parked goroutine holds the old channel and never wakes on re-add). The pulse-removal merge did not touch the receiver path. The robust-receive rewrite (wait on the durable `hasSend`/cond condition, broadcast on Delete/Reset/Restore/deliver/Done, remove `slotReadyCh`) is the timing-window branch's job.
+2. **Coincidence detection** layered on top: the permanent-delete case (an input that genuinely never arrives, so the gate flushes a partial combination after window `W`). Non-blocking poll receive drives the window timer.
 
 ### Key files
 
-- `nodes/Wiring/paced_wire.go` — pure transport: `WaitConsumed` / `Reset` / `Delete` / `Restore`. The blocking `Recv` here is what the timing-window rewrite replaces.
-- `nodes/Wiring/paced_wire_test.go` — transport tests; extend for window polling.
-- `nodes/Wiring/stdin_reader.go` — node-move IPC; also touched by the i0 fireAndForget wiring.
-- `nodes/Wiring/loader.go` — threads node positions + send rules into wire/node construction.
-- `tools/topology-vscode/src/messages.ts` — `deleteEdge` / `addEdge` message types.
-- `tools/topology-vscode/src/extension/handle-message.ts` — dispatch for the new messages.
-- `tools/topology-vscode/src/webview/three/store.ts` — store wiring for delete/add.
-- `tools/topology-vscode/src/webview/three/ThreeView.tsx` — orchestrator (render in `scene-content.tsx`, interaction in `interaction-controls.ts`).
-- `docs/planning/visual-editor/feature-audit/index.html` — friction-driven feature board.
+- `nodes/Wiring/paced_wire.go` — `Recv`/`slotReadyCh` is what the receive rewrite replaces; pulse-removal in `Delete`/`resetLocked` and the `NotifyDelivered` guard already landed.
+- `nodes/Wiring/paced_wire_test.go` — add parked-`Recv`-survives-`Reset`/`Delete` cases (select-with-timeout so a hang fails fast).
+- `docs/planning/visual-editor/timing-window.md` — this branch's spec.
 
 ### Substrate model contract (stable)
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). As of
-task/delete-edge, **send rules are node-owned** (`node.data.sendRules`:
-`consumeGated` / `fireAndForget`), and `PacedWire` is pure transport
-(`WaitConsumed` / `Reset` / `Delete` / `Restore`). `pump.ts` stays
-render-only. The timing-window rule (next task) amends MODEL.md again:
-non-blocking input polling + coincidence-detection window.
+See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). Send rules are node-owned (`node.data.sendRules`: `consumeGated` / `fireAndForget`) and `PacedWire` is pure transport (`WaitConsumed` / `Reset` / `Delete` / `Restore`). `pump.ts` stays render-only.
 
 ## Dev-loop
 
 After TS edit: `npm run build` from `tools/topology-vscode/`.
 After Go change: `go build ./...` from repo root, `go test ./nodes/Wiring/...`.
-Fade unit tests: `cd tools/topology-vscode && npx vitest run test/fade.test.ts`.
-To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs.
+To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect logs (`go.jsonl` breadcrumbs: `wire_delete_drop_pulse`, `wire_recv`).
 
 Check: `go test ./...`. All guard scripts run via the Stop hook (`scripts/stop-checks.sh`). Bash approval guard runs via PreToolUse.
 

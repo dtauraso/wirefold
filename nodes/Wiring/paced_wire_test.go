@@ -531,6 +531,32 @@ func TestDeleteSilencesWire(t *testing.T) {
 	}
 }
 
+// TestDeleteDropsPulse: a NotifyDelivered that arrives after Delete must be a
+// no-op — hasSend must stay false and no node receives the pulse.
+func TestDeleteDropsPulse(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	ctx := context.Background()
+
+	// Place a bead (inFlight=true).
+	if err := pw.Send(ctx, 42); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	// Delete drops the pulse before NotifyDelivered fires.
+	pw.Delete()
+
+	// A late NotifyDelivered for the deleted bead must be a no-op.
+	pw.NotifyDelivered(ctx)
+
+	// hasSend must still be false — no value was delivered.
+	pw.mu.Lock()
+	hasSend := pw.hasSend
+	pw.mu.Unlock()
+	if hasSend {
+		t.Fatal("NotifyDelivered on deleted wire set hasSend=true; pulse should be discarded")
+	}
+}
+
 func TestRestoreUnsilencesWire(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	ctx := context.Background()
