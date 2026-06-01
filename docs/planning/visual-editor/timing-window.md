@@ -29,7 +29,7 @@ Alternatives: **sim-time ms** (consistent with `simLatencyMs`, but requires plum
 
 ## Scope / first step
 - Implement on **`inhibitRight0`** first (the AND-gate that motivated this; 2 input edges → has window).
-- Nodes with ≥2 input edges also get the window: `readGate1` (3 inputs, W = 2950 ms), `inhibitRight0` (2 inputs, W = 2650 ms). Nodes with 1 input edge (`i0`, `i1`) have no window and keep blocking `Recv`.
+- Nodes with ≥2 input edges also get the window: `readGate1` (2 inputs: in08, i1; W = 2950 ms), `inhibitRight0` (2 inputs, W = 2650 ms). Nodes with 1 input edge (`i0`, `i1`) have no window and keep blocking `Recv`.
 
 ## Open questions
 - Clock units (see above).
