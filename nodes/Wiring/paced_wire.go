@@ -3,7 +3,10 @@ package Wiring
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs for call sites that
@@ -46,7 +49,8 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 //	                 sets inFlight=true, returns. After Send, the source may
 //	                 call WaitConsumed to wait until Done is called by the
 //	                 consumer (consume-gated policy lives in the node, not here).
-//	NotifyDelivered: if slot empty — calls deliverLocked (moves pending→slot,
+//	NotifyDelivered: if deleted — no-op (pulse from a deleted wire is discarded).
+//	                 if slot empty — calls deliverLocked (moves pending→slot,
 //	                 sets hasSend=true, clears inFlight, closes slotReadyCh).
 //	                 if slot full — sets pendingDelivered=true, returns immediately.
 //	Recv:            blocks until slotReadyCh is closed (slot filled), returns
@@ -74,6 +78,7 @@ type PacedWire struct {
 	SimLatencyMs     float64      // ArcLength / pulseSpeed (ms); how long a pulse takes to traverse the wire
 	Target           string       // destination node id — authoritative slot identity (set by loader)
 	TargetHandle     string       // destination input-port name — authoritative slot identity (set by loader)
+	Trace            *T.Trace     // injected by loader; used for breadcrumb diagnostics only
 }
 
 // NewPacedWire creates an empty PacedWire with geometry-derived timing.
@@ -269,13 +274,21 @@ func (pw *PacedWire) WaitConsumed(ctx context.Context) error {
 }
 
 // NotifyDelivered is called by the visual layer when the pulse animation
-// completes. It NEVER blocks. If the slot is empty, it delivers immediately
-// (moves pending→slot, sets hasSend=true, clears inFlight, closes slotReadyCh).
-// If the slot is full, it sets pendingDelivered=true and returns immediately —
-// inFlight stays true so the source remains blocked until Done completes the
-// deferred delivery.
+// completes. It NEVER blocks. If the wire is deleted, the pulse is discarded.
+// If the slot is empty, it delivers immediately (moves pending→slot, sets
+// hasSend=true, clears inFlight, closes slotReadyCh). If the slot is full, it
+// sets pendingDelivered=true and returns immediately — inFlight stays true so
+// the source remains blocked until Done completes the deferred delivery.
 func (pw *PacedWire) NotifyDelivered(ctx context.Context) error {
 	pw.mu.Lock()
+	if pw.deleted {
+		// Wire was deleted: discard the pulse. A late NotifyDelivered for a bead
+		// that was in-flight when Delete was called must NOT set hasSend — no node
+		// is allowed to receive a pulse from a removed wire.
+		pw.Trace.Breadcrumb("notify_on_deleted_wire_ignored", pw.Target, pw.TargetHandle, "")
+		pw.mu.Unlock()
+		return nil
+	}
 	if pw.hasSend {
 		// Slot full: defer delivery to Done.
 		pw.pendingDelivered = true
@@ -325,6 +338,12 @@ func (pw *PacedWire) Reset() {
 func (pw *PacedWire) Delete() {
 	pw.mu.Lock()
 	pw.deleted = true
+	// Capture pulse state BEFORE resetLocked zeroes them; log breadcrumb while
+	// still under the lock so the snapshot is coherent.
+	hadPulse := pw.inFlight || pw.hasSend
+	pw.Trace.Breadcrumb("wire_delete_drop_pulse",
+		pw.Target, pw.TargetHandle,
+		fmt.Sprintf("had_pulse=%v inFlight=%v hasSend=%v", hadPulse, pw.inFlight, pw.hasSend))
 	ch := pw.resetLocked()
 	pw.mu.Unlock()
 

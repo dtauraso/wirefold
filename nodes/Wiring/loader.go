@@ -142,6 +142,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
+			pw.Trace = tr
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
