@@ -74,22 +74,28 @@ type PacedWire struct {
 	deleted          bool         // when true, the edge was deleted; source stops placing beads (distinct origin from faded)
 	slotReadyCh      chan struct{} // closed when slot is filled; reset by Done
 	consumedCh       chan struct{} // closed by Done to signal the source that the slot was consumed
-	ArcLength        float64      // straight-line distance between source and target nodes (world units)
-	SimLatencyMs     float64      // ArcLength / pulseSpeed (ms); how long a pulse takes to traverse the wire
+	// MaxIncomingSimLatencyMs is the per-port aggregate max(SimLatencyMs) over
+	// every edge feeding this destination port. It is NOT the travel-time of any
+	// one bead — per-edge travel-time lives on the source Out. This aggregate is
+	// read only by In.SimLatencyMs() to derive a windowed node's coincidence
+	// window W. Set at load and recomputed on node-move. Guarded by mu.
+	MaxIncomingSimLatencyMs float64
 	Target           string       // destination node id — authoritative slot identity (set by loader)
 	TargetHandle     string       // destination input-port name — authoritative slot identity (set by loader)
 	Trace            *T.Trace     // injected by loader; used for breadcrumb diagnostics only
 }
 
-// NewPacedWire creates an empty PacedWire with geometry-derived timing.
-// arcLength is the straight-line distance between source and target (world units).
-// pulseSpeed is in world-units per millisecond (use PulseSpeedWuPerMs).
+// NewPacedWire creates an empty PacedWire. arcLength is the straight-line
+// distance between source and target (world units); pulseSpeed is in world-units
+// per millisecond (use PulseSpeedWuPerMs). The derived latency seeds
+// MaxIncomingSimLatencyMs (the per-port window aggregate); the loader raises it
+// as further edges bind to this destination port. Per-bead travel-time is NOT
+// stored here — it lives on the source Out.
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	pw := &PacedWire{
-		ArcLength:    arcLength,
-		SimLatencyMs: arcLength / pulseSpeed,
-		slotReadyCh:  make(chan struct{}),
-		consumedCh:   make(chan struct{}),
+		MaxIncomingSimLatencyMs: arcLength / pulseSpeed,
+		slotReadyCh:             make(chan struct{}),
+		consumedCh:              make(chan struct{}),
 	}
 	pw.cond = sync.NewCond(&pw.mu)
 	return pw

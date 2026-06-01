@@ -112,7 +112,7 @@ func (i *In) SimLatencyMs() float64 {
 	if i == nil || i.pw == nil {
 		return 0
 	}
-	return i.pw.SimLatencyMs
+	return i.pw.MaxIncomingSimLatencyMs
 }
 
 // Breadcrumb emits a trace breadcrumb on the input port's wire identity (target
@@ -151,6 +151,12 @@ type Out struct {
 	node  string
 	port  string
 	trace *T.Trace
+	// ArcLength / SimLatencyMs are this edge's own travel-time, computed from
+	// this edge's port-to-port geometry. Travel-time is per-edge (the length of
+	// this specific drawn curve); SendWire logs these so each bead animates at
+	// its own speed even when multiple edges fan into one destination port.
+	ArcLength    float64
+	SimLatencyMs float64
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
@@ -176,7 +182,7 @@ func (o *Out) TrySend(v int) bool {
 		// webview sees it, animates, posts "delivered", and unblocks Send.
 		// Emitting after Send returns causes a deadlock: the webview never
 		// receives the event, never posts delivered, and Send never returns.
-		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		if err := o.pw.Send(o.ctx, v); err != nil {
 			return false
 		}
@@ -206,7 +212,7 @@ func (o *Out) TryEmit(v int) bool {
 		if !o.pw.TryPlace(v) {
 			return false
 		}
-		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		return true
 	}
 	if o.ch == nil {
@@ -275,9 +281,9 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule}
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
 }
