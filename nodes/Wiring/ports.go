@@ -74,6 +74,60 @@ func (i *In) TryRecv() (int, bool) {
 	}
 }
 
+// PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
+// calls pw.PollRecv (returns immediately with ok=false when no value is present,
+// without parking) and, on success, emits the same trace events as TryRecv but
+// does NOT clear the slot (the consumer must call Done). In chan mode it does a
+// non-blocking select, identical to TryRecv's default branch.
+func (i *In) PollRecv() (int, bool) {
+	if i == nil {
+		return 0, false
+	}
+	if i.pw != nil {
+		v, ok := i.pw.PollRecv()
+		if !ok {
+			return 0, false
+		}
+		n, _ := v.(int)
+		i.trace.Recv(i.node, i.port, n)
+		i.trace.Breadcrumb("wire_recv", i.pw.Target, i.pw.TargetHandle, fmt.Sprintf("%d", n))
+		return n, true
+	}
+	if i.ch == nil {
+		return 0, false
+	}
+	select {
+	case v := <-i.ch:
+		i.trace.Recv(i.node, i.port, v)
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+// SimLatencyMs reports the input wire's traversal latency in milliseconds
+// (arcLength / pulseSpeed), or 0 in chan mode (no wire geometry). Windowed nodes
+// use this to derive their coincidence window W from current geometry.
+func (i *In) SimLatencyMs() float64 {
+	if i == nil || i.pw == nil {
+		return 0
+	}
+	return i.pw.SimLatencyMs
+}
+
+// Breadcrumb emits a trace breadcrumb on the input port's wire identity (target
+// node + handle). Used by windowed nodes for the window_clear breadcrumb.
+func (i *In) Breadcrumb(event, detail string) {
+	if i == nil || i.trace == nil {
+		return
+	}
+	node, port := i.node, i.port
+	if i.pw != nil {
+		node, port = i.pw.Target, i.pw.TargetHandle
+	}
+	i.trace.Breadcrumb(event, node, port, detail)
+}
+
 // SendRule names the per-edge send policy applied by the source node after a
 // successful TrySend. The wire stays dumb transport; the node consults the rule.
 type SendRule string

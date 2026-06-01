@@ -201,6 +201,21 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 	return v, nil
 }
 
+// PollRecv is the non-blocking variant of Recv. It returns (value, true) if the
+// destination slot is currently filled (hasSend), without blocking; otherwise it
+// returns (nil, false) immediately. Like Recv, a successful poll does NOT clear
+// the slot — the consumer must call Done to acknowledge consumption (same
+// consume/Done/WaitConsumed contract as Recv). This lets a windowed node check
+// each input without parking so it can drive its window timer.
+func (pw *PacedWire) PollRecv() (any, bool) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	if !pw.hasSend {
+		return nil, false
+	}
+	return pw.slot, true
+}
+
 // deliverLocked moves the pending value into the slot and signals Recv.
 // Must be called with pw.mu held. Precondition: hasSend==false.
 // Sets hasSend=true, clears inFlight and pendingDelivered, broadcasts, and

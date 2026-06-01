@@ -84,3 +84,133 @@ func TestNoFireWithoutInhibitor(t *testing.T) {
 	default:
 	}
 }
+
+// newInputWire builds a paced input wire whose arcLength sets its SimLatencyMs,
+// so W = 1.5 * max(SimLatencyMs) is controllable per test.
+func newInputWire(arcLength float64, tr *T.Trace, target, handle string) *Wiring.PacedWire {
+	pw := Wiring.NewPacedWire(arcLength, Wiring.PulseSpeedWuPerMs)
+	pw.Target = target
+	pw.TargetHandle = handle
+	pw.Trace = tr
+	return pw
+}
+
+func send(t *testing.T, pw *Wiring.PacedWire, v int) {
+	t.Helper()
+	ctx := context.Background()
+	if err := pw.Send(ctx, v); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	pw.NotifyDelivered(ctx)
+}
+
+// TestWindowFire: both inputs delivered within W → node fires once, both consumed,
+// and the FromInput value is forwarded on ToChainInhibitor.
+func TestWindowFire(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
+
+	// arcLength 100 → SimLatencyMs = 100/0.08 = 1250ms → W = 1.5*1250 = 1875ms.
+	input := newInputWire(100, tr, "rg", "FromInput")
+	ci := newInputWire(100, tr, "rg", "FromChainInhibitor")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	fired := make(chan struct{}, 4)
+	toCI := make(chan int, 4)
+	node := &Node{
+		Fire:               func() { fired <- struct{}{} },
+		FromInput:          Wiring.NewInPaced(input, ctx, "rg", "FromInput", tr),
+		FromChainInhibitor: Wiring.NewInPaced(ci, ctx, "rg", "FromChainInhibitor", tr),
+		ToChainInhibitor:   Wiring.NewOut(toCI, "rg", "ToChainInhibitor", tr),
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+
+	send(t, input, 42)
+	send(t, ci, 1)
+
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		cancel()
+		wg.Wait()
+		t.Fatal("node did not fire when both inputs arrived within W")
+	}
+
+	got := recv(t, toCI)
+	cancel()
+	wg.Wait()
+
+	if got != 42 {
+		t.Fatalf("expected forwarded value 42, got %d", got)
+	}
+
+	// Both wires consumed (slot empty): a fresh poll sees nothing.
+	if _, ok := input.PollRecv(); ok {
+		t.Fatal("input wire not consumed after fire")
+	}
+	if _, ok := ci.PollRecv(); ok {
+		t.Fatal("chain-inhibitor wire not consumed after fire")
+	}
+}
+
+// TestWindowClear: only one required input arrives → after W the held input is
+// Done'd (drained), no fire, flags reset; a subsequent fresh pair fires.
+func TestWindowClear(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
+
+	// arcLength 8 → SimLatencyMs = 8/0.08 = 100ms → W = 150ms (fast clear).
+	input := newInputWire(8, tr, "rg", "FromInput")
+	ci := newInputWire(8, tr, "rg", "FromChainInhibitor")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	fired := make(chan struct{}, 4)
+	toCI := make(chan int, 4)
+	node := &Node{
+		Fire:               func() { fired <- struct{}{} },
+		FromInput:          Wiring.NewInPaced(input, ctx, "rg", "FromInput", tr),
+		FromChainInhibitor: Wiring.NewInPaced(ci, ctx, "rg", "FromChainInhibitor", tr),
+		ToChainInhibitor:   Wiring.NewOut(toCI, "rg", "ToChainInhibitor", tr),
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+
+	// Only the value input arrives; the chain-inhibitor never does.
+	send(t, input, 7)
+	consumed := make(chan struct{}, 1)
+	go func() { input.WaitConsumed(ctx); consumed <- struct{}{} }()
+
+	select {
+	case <-fired:
+		t.Fatal("node fired with only one input present")
+	case <-consumed:
+		// held input was Done'd by the window clear
+	case <-time.After(1 * time.Second):
+		t.Fatal("window did not clear the held input within W")
+	}
+
+	// No fire and no emission happened.
+	select {
+	case <-fired:
+		t.Fatal("node fired after clear")
+	default:
+	}
+	select {
+	case v := <-toCI:
+		t.Fatalf("unexpected emission %d after clear", v)
+	default:
+	}
+
+	// A subsequent fresh pair fires normally (flags reset).
+	send(t, input, 9)
+	send(t, ci, 1)
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("node did not fire on a fresh pair after clear")
+	}
+}
