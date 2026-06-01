@@ -189,6 +189,21 @@
       <li><strong>Clear semantics</strong> — call <code>Done</code> on each held input's <code>In</code> port (drains the upstream wire so a <code>consumeGated</code> source's <code>WaitConsumed</code> returns). No <code>Fire()</code>. Emit a <code>window-clear</code> trace breadcrumb for observability.</li>
       <li><strong>Clock units</strong> — real elapsed wall-clock time measured at the node (the gap between <code>NotifyDelivered</code>-driven arrivals). Default <code>W</code> to a small multiple of current <code>simLatencyMs</code> (~2500–3300 ms per wire).</li>
     </ul>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:1.25rem;">
+      <thead>
+        <tr style="background:var(--code-bg);">
+          <th style="text-align:left;padding:0.5rem 0.75rem;border:1px solid var(--border);font-weight:600;">Node</th>
+          <th style="text-align:left;padding:0.5rem 0.75rem;border:1px solid var(--border);font-weight:600;">Timing window (W)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);"><code>inhibitRight0</code></td>
+          <td style="padding:0.45rem 0.75rem;border:1px solid var(--border);color:var(--text-muted);">TBD — small multiple of <code>simLatencyMs</code> (~2500–3300 ms/wire)</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 
   <!-- TESTS -->
