@@ -541,7 +541,7 @@ func TestTryPlaceDropsWhenInFlight(t *testing.T) {
 // is busy is dropped (false) without overwriting.
 func TestTryEmitFireAndForget(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
-	o := NewOutPaced(pw, context.Background(), "n", "p", T.New(16), RuleFireAndForget)
+	o := NewOutPaced(pw, context.Background(), "n", "p", T.New(16), RuleFireAndForget, 100, 100/PulseSpeedWuPerMs)
 
 	if !o.TryEmit(7) {
 		t.Fatal("first TryEmit: expected true")
