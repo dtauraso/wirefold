@@ -86,3 +86,5 @@ tools/topology-vscode/gen-node-defs
 
 # macOS
 .DS_Store
+
+.claude/scheduled_tasks.lock
