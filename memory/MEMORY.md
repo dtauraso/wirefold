@@ -9,6 +9,7 @@ These rarely change; skim once per session and apply throughout.
 - [feedback_branch_cleanup.md](feedback_branch_cleanup.md) — Delete task branches locally and on remote once merged into main, without re-asking
 - [feedback_memory_location.md](feedback_memory_location.md) — Save memory files only to repo `memory/`; skip the local Claude memory dir for this project
 - [feedback_bash_cwd_persistence.md](feedback_bash_cwd_persistence.md) — Bash cwd persists across calls; use absolute paths for destructive ops
+- [feedback_feature_audit_two_layers.md](feedback_feature_audit_two_layers.md) — Feature-audit removals need both data.js and the hand-authored features/<slug>.html page; rendered page caches data.js
 
 ## Active (project/substrate state — may go stale, re-verify against code)
 
