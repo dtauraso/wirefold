@@ -67,6 +67,7 @@ type PacedWire struct {
 	inFlight         bool         // bead is on the wire, not yet delivered into slot
 	pendingDelivered bool         // NotifyDelivered arrived while slot was full; delivery deferred to Done
 	faded            bool         // when true, Send skips without sending
+	deleted          bool         // when true, the edge was deleted; source stops placing beads (distinct origin from faded)
 	slotReadyCh      chan struct{} // closed when slot is filled; reset by Done
 	consumedCh       chan struct{} // closed by Done to signal the source that the slot was consumed
 	ArcLength        float64      // straight-line distance between source and target nodes (world units)
@@ -105,9 +106,14 @@ func (pw *PacedWire) SetFaded(v bool) {
 // bead not yet delivered into its destination slot). It does NOT wait on Done
 // and does NOT observe the destination slot directly.
 func (pw *PacedWire) Send(ctx context.Context, value any) error {
-	// Fade gate: skip benignly when the wire is faded.
+	// Fade/delete gate: skip benignly when the wire is faded or deleted.
 	pw.mu.Lock()
 	if pw.faded {
+		pw.mu.Unlock()
+		return nil
+	}
+	if pw.deleted {
+		// Edge deleted: place no bead, do not block.
 		pw.mu.Unlock()
 		return nil
 	}
@@ -147,6 +153,11 @@ func (pw *PacedWire) Send(ctx context.Context, value any) error {
 func (pw *PacedWire) TryPlace(value any) bool {
 	pw.mu.Lock()
 	if pw.faded {
+		pw.mu.Unlock()
+		return false
+	}
+	if pw.deleted {
+		// Edge deleted: drop, place nothing.
 		pw.mu.Unlock()
 		return false
 	}
@@ -238,6 +249,11 @@ func (pw *PacedWire) Done() {
 // for the consumer to finish — the policy lives in the node loop, not the wire.
 func (pw *PacedWire) WaitConsumed(ctx context.Context) error {
 	pw.mu.Lock()
+	if pw.deleted {
+		// Edge deleted: never park a gated source on a dead wire.
+		pw.mu.Unlock()
+		return nil
+	}
 	ch := pw.consumedCh
 	pw.mu.Unlock()
 
@@ -272,10 +288,12 @@ func (pw *PacedWire) NotifyDelivered(ctx context.Context) error {
 	return nil
 }
 
-// Reset drops any in-flight/held value and frees a parked sender; used when an
-// edge is deleted in the editor.
-func (pw *PacedWire) Reset() {
-	pw.mu.Lock()
+// resetLocked performs the shared teardown for Reset and Delete: drops any
+// in-flight/held value, installs a fresh slotReadyCh, broadcasts, and returns
+// the consumedCh (now nil'd) so the caller can close it to free a parked
+// WaitConsumed. Must be called with pw.mu held; the caller closes the returned
+// channel after unlocking.
+func (pw *PacedWire) resetLocked() chan struct{} {
 	pw.inFlight = false
 	pw.pending = nil
 	pw.slot = nil
@@ -283,9 +301,45 @@ func (pw *PacedWire) Reset() {
 	pw.pendingDelivered = false
 	pw.slotReadyCh = make(chan struct{})
 	pw.cond.Broadcast()
-	// Release any source parked in WaitConsumed.
 	ch := pw.consumedCh
 	pw.consumedCh = nil
+	return ch
+}
+
+// Reset drops any in-flight/held value and frees a parked sender; used when an
+// edge is deleted in the editor.
+func (pw *PacedWire) Reset() {
+	pw.mu.Lock()
+	ch := pw.resetLocked()
+	pw.mu.Unlock()
+
+	if ch != nil {
+		close(ch)
+	}
+}
+
+// Delete persistently silences the wire: sets deleted=true so the source stops
+// placing beads, then performs the shared Reset teardown to drop the in-flight
+// value and free any parked WaitConsumed. Currently one-way — no restore
+// message exists yet.
+func (pw *PacedWire) Delete() {
+	pw.mu.Lock()
+	pw.deleted = true
+	ch := pw.resetLocked()
+	pw.mu.Unlock()
+
+	if ch != nil {
+		close(ch)
+	}
+}
+
+// Restore clears the deleted flag set by Delete so the wire carries pulses
+// again (edge re-added in the editor). It runs the shared resetLocked teardown
+// so the wire starts clean and the source resumes placing beads.
+func (pw *PacedWire) Restore() {
+	pw.mu.Lock()
+	pw.deleted = false
+	ch := pw.resetLocked()
 	pw.mu.Unlock()
 
 	if ch != nil {

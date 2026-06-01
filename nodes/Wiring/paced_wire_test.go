@@ -496,3 +496,64 @@ func TestTryEmitFireAndForget(t *testing.T) {
 	}
 	pw.mu.Unlock()
 }
+
+// TestDeleteSilencesWire: after Delete(), Send places no bead (inFlight stays
+// false), TryPlace drops, and WaitConsumed returns immediately. Verifies the
+// edge-deletion gate persistently silences the source.
+func TestDeleteSilencesWire(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	ctx := context.Background()
+
+	pw.Delete()
+
+	if err := pw.Send(ctx, 1); err != nil {
+		t.Fatalf("Send after Delete: got err %v, want nil", err)
+	}
+	if pw.InFlight() {
+		t.Fatalf("Send after Delete placed a bead: inFlight=true, want false")
+	}
+	if pw.TryPlace(2) {
+		t.Fatalf("TryPlace after Delete: got true, want false (dropped)")
+	}
+	if pw.InFlight() {
+		t.Fatalf("TryPlace after Delete placed a bead: inFlight=true, want false")
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- pw.WaitConsumed(ctx) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("WaitConsumed after Delete: got err %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("WaitConsumed after Delete did not return immediately")
+	}
+}
+
+func TestRestoreUnsilencesWire(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	ctx := context.Background()
+
+	pw.Delete()
+	pw.Restore()
+
+	if err := pw.Send(ctx, 1); err != nil {
+		t.Fatalf("Send after Restore: got err %v, want nil", err)
+	}
+	if !pw.InFlight() {
+		t.Fatalf("Send after Restore did not place a bead: inFlight=false, want true")
+	}
+
+	// Drain and verify TryPlace works on a fresh restored wire too.
+	pw.Done()
+	pw2 := NewPacedWire(100, PulseSpeedWuPerMs)
+	pw2.Delete()
+	pw2.Restore()
+	if !pw2.TryPlace(2) {
+		t.Fatalf("TryPlace after Restore: got false, want true")
+	}
+	if !pw2.InFlight() {
+		t.Fatalf("TryPlace after Restore did not place a bead: inFlight=false, want true")
+	}
+}

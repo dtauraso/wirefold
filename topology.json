@@ -51,6 +51,9 @@
       "data": {
         "state": {
           "held": 0
+        },
+        "sendRules": {
+          "ToNext1": "fireAndForget"
         }
       },
       "inputs": [
@@ -228,6 +231,15 @@
       "data": {
         "slots": 1
       }
+    },
+    {
+      "id": "i0.ToNext1->inhibitRight0.FromLeft",
+      "source": "i0",
+      "sourceHandle": "ToNext1",
+      "target": "inhibitRight0",
+      "targetHandle": "FromLeft",
+      "kind": "any",
+      "label": "i0ToNext1ToInhibitRight0FromLeft"
     }
   ],
   "view": {
@@ -259,12 +271,12 @@
         "y": 335.0874607508783
       },
       "i0": {
-        "x": 419.43674858884464,
-        "y": 287.6972500231954
+        "x": 339.52556707001804,
+        "y": 302.0002660174585
       },
       "i1": {
-        "x": 412.2254105226183,
-        "y": 343.60377082015617
+        "x": 326.944267331482,
+        "y": 355.6387781369589
       },
       "inhibitRight0": {
         "x": 224.94881430607853,

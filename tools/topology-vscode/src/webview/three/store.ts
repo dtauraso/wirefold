@@ -131,6 +131,13 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const srcNode = nodes.find((n) => n.id === sourceId);
     const tgtNode = nodes.find((n) => n.id === targetId);
     if (srcNode && tgtNode) setCurve(result.id, buildEdgeCurve(srcNode, tgtNode));
+    // Tell Go to un-silence this wire so it carries pulses again (mirrors deleteEdge).
+    postLog("addEdge-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
+    vscode.postMessage({
+      type: "addEdge",
+      target: result.newEdge.target,
+      targetHandle: result.newEdge.targetHandle ?? "",
+    });
     scheduleSave();
     return result.id;
   },

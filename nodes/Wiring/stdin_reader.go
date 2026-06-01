@@ -169,11 +169,24 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 					tr.Breadcrumb("deleteEdge-notfound", msg.Target, msg.TargetHandle, destKey)
 					continue
 				}
-				// "reset" breadcrumb emitted here (not from PacedWire.Reset, which has
+				// "delete" breadcrumb emitted here (not from PacedWire.Delete, which has
 				// no Trace reference) carrying the wire's authoritative slot identity.
-				tr.Breadcrumb("reset", pw.Target, pw.TargetHandle, "")
-				tr.Breadcrumb("deleteEdge-reset", msg.Target, msg.TargetHandle, destKey)
-				pw.Reset()
+				tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, "")
+				tr.Breadcrumb("deleteEdge-delete", msg.Target, msg.TargetHandle, destKey)
+				pw.Delete()
+			case "addEdge":
+				if msg.Target == "" || msg.TargetHandle == "" {
+					continue
+				}
+				tr.Breadcrumb("addEdge-recv", msg.Target, msg.TargetHandle, "")
+				destKey := msg.Target + "." + msg.TargetHandle
+				pw, found := slotReg[destKey]
+				if !found {
+					tr.Breadcrumb("addEdge-notfound", msg.Target, msg.TargetHandle, destKey)
+					continue
+				}
+				tr.Breadcrumb("addEdge-restore", pw.Target, pw.TargetHandle, "")
+				pw.Restore()
 			case "fade":
 				// Build a set of faded edge ids for O(1) lookup.
 				faded := make(map[string]bool, len(msg.Edges))
