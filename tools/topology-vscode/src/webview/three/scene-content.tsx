@@ -22,6 +22,7 @@ import {
   portDir,
   portWorldPos,
   buildPortCurve,
+  arcLengthToSimLatencyMs,
 } from "./geometry-helpers";
 import type { PickOptions } from "./interaction-controls";
 
@@ -235,6 +236,7 @@ export function PulseBead({
   targetHandle: string | null | undefined;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
+  const lastProbedStartTime = useRef<number | null>(null);
 
   useFrame(() => {
     const pulse = getPulseMap().get(edgeId);
@@ -245,6 +247,18 @@ export function PulseBead({
       return;
     }
     const curve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
+    if (lastProbedStartTime.current !== pulse.startTime) {
+      lastProbedStartTime.current = pulse.startTime;
+      const drawnLen = curve.getLength();
+      const budgetMs = pulse.simLatencyMs;
+      postLog("pulse_speed_probe", {
+        edgeId,
+        drawnLen,
+        budgetMs,
+        impliedBudgetMs: arcLengthToSimLatencyMs(drawnLen),
+        apparentSpeed: drawnLen / budgetMs,
+      });
+    }
     const duration = pulse.simLatencyMs;
     const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
     if (t >= 1) {
