@@ -21,22 +21,20 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// NodePosition holds the 3-D position of a node (world units, same as specPosition).
-type NodePosition struct {
-	X, Y, Z float64
-}
-
-// EdgeEndpoints identifies the source and target node IDs for one edge.
+// EdgeEndpoints identifies the source and target node IDs (and the port handles)
+// for one edge. Handles are needed to recompute the port-to-port arc length.
 type EdgeEndpoints struct {
-	Source string
-	Target string
+	Source       string
+	Target       string
+	SourceHandle string
+	TargetHandle string
 }
 
 // NodeMoveRegistry carries the extra state needed to handle node-move messages.
 // It is built by the loader alongside the WireRegistry and passed to RunStdinReader.
 type NodeMoveRegistry struct {
-	mu        sync.Mutex
-	positions map[string]NodePosition // nodeId → current position (mutable)
+	mu    sync.Mutex
+	geoms map[string]nodeGeom // nodeId → current geometry (position is mutable)
 	// edgeNodes: edgeId → endpoints (immutable after construction)
 	edgeNodes map[string]EdgeEndpoints
 	// nodeEdges: nodeId → list of edgeIds that touch this node (immutable after construction)
@@ -44,19 +42,19 @@ type NodeMoveRegistry struct {
 }
 
 // NewNodeMoveRegistry allocates and initialises a NodeMoveRegistry.
-// positions is a snapshot of per-node positions at load time.
-// edgeNodes maps each edge label to its source/target node IDs.
-func NewNodeMoveRegistry(positions map[string]NodePosition, edgeNodes map[string]EdgeEndpoints) *NodeMoveRegistry {
+// geoms is a snapshot of per-node geometry (kind/dims/ports/position) at load time.
+// edgeNodes maps each edge label to its source/target node IDs and handles.
+func NewNodeMoveRegistry(geoms map[string]nodeGeom, edgeNodes map[string]EdgeEndpoints) *NodeMoveRegistry {
 	nodeEdges := map[string][]string{}
 	for edgeId, ep := range edgeNodes {
 		nodeEdges[ep.Source] = append(nodeEdges[ep.Source], edgeId)
 		nodeEdges[ep.Target] = append(nodeEdges[ep.Target], edgeId)
 	}
-	// Defensively copy positions.
-	pos := make(map[string]NodePosition, len(positions))
-	maps.Copy(pos, positions)
+	// Defensively copy geoms.
+	g := make(map[string]nodeGeom, len(geoms))
+	maps.Copy(g, geoms)
 	return &NodeMoveRegistry{
-		positions: pos,
+		geoms:     g,
 		edgeNodes: edgeNodes,
 		nodeEdges: nodeEdges,
 	}
@@ -71,10 +69,12 @@ func (nmr *NodeMoveRegistry) updateNodeAndGetAffected(nodeId string, x, y, z flo
 } {
 	nmr.mu.Lock()
 	defer nmr.mu.Unlock()
-	if _, ok := nmr.positions[nodeId]; !ok {
+	g, ok := nmr.geoms[nodeId]
+	if !ok {
 		return nil
 	}
-	nmr.positions[nodeId] = NodePosition{X: x, Y: y, Z: z}
+	g.Pos = vec3{X: x, Y: y, Z: z}
+	nmr.geoms[nodeId] = g
 
 	edgeIds := nmr.nodeEdges[nodeId]
 	if len(edgeIds) == 0 {
@@ -86,9 +86,10 @@ func (nmr *NodeMoveRegistry) updateNodeAndGetAffected(nodeId string, x, y, z flo
 	}, 0, len(edgeIds))
 	for _, eid := range edgeIds {
 		ep := nmr.edgeNodes[eid]
-		src := nmr.positions[ep.Source]
-		tgt := nmr.positions[ep.Target]
-		arcLen := BezierArcLength(src.X, src.Y, tgt.X, tgt.Y, CurveParamBulgeFactor, CurveParamBezierSampleCount)
+		arcLen := arcLengthBetweenPorts(
+			nmr.geoms[ep.Source], ep.SourceHandle,
+			nmr.geoms[ep.Target], ep.TargetHandle,
+		)
 		result = append(result, struct {
 			edgeId       string
 			simLatencyMs float64

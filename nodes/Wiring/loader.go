@@ -25,13 +25,6 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// arcLengthBetween returns the Bezier arc length between two node positions.
-// Uses CurveParamBulgeFactor and CurveParamBezierSampleCount from curve_params.go
-// so the result matches what TS renders and what rfArcLength computes.
-func arcLengthBetween(a, b specPosition) float64 {
-	return BezierArcLength(a.X, a.Y, b.X, b.Y, CurveParamBulgeFactor, CurveParamBezierSampleCount)
-}
-
 // specPosition is the 3-D canvas position of a node as stored in view.nodes.
 type specPosition struct {
 	X float64 `json:"x"`
@@ -39,13 +32,63 @@ type specPosition struct {
 	Z float64 `json:"z"` // optional; defaults to 0 when absent
 }
 
+// specPort mirrors the per-node inputs/outputs entries in topology.json.
+// Side/Slot drive port placement; they mirror Port.side / Port.slot in
+// tools/topology-vscode/src/schema/types.ts. Slot is a pointer so an absent
+// slot (auto-spacing) is distinguishable from slot 0.
+type specPort struct {
+	Name string `json:"name"`
+	Side string `json:"side,omitempty"`
+	Slot *int   `json:"slot,omitempty"`
+}
+
 // specNode mirrors the JSON node shape.
 type specNode struct {
-	ID       string    `json:"id"`
-	Type     string    `json:"type"`
-	Index    *int      `json:"index,omitempty"`
-	Data     *NodeData `json:"data,omitempty"`
+	ID       string     `json:"id"`
+	Type     string     `json:"type"`
+	Index    *int       `json:"index,omitempty"`
+	Data     *NodeData  `json:"data,omitempty"`
+	Inputs   []specPort `json:"inputs,omitempty"`
+	Outputs  []specPort `json:"outputs,omitempty"`
 	Position specPosition // populated from view.nodes after JSON parse
+}
+
+// toNodeGeom builds the geometry descriptor for arc-length computation,
+// resolving the port lists from the spec node (falling back to the kind's
+// registry ports with default sides when the spec omits inputs/outputs).
+func (n specNode) toNodeGeom() nodeGeom {
+	g := nodeGeom{Kind: n.Type, Pos: vec3{X: n.Position.X, Y: n.Position.Y, Z: n.Position.Z}}
+	g.Inputs = specPortsToGeom(n.Inputs)
+	g.Outputs = specPortsToGeom(n.Outputs)
+	// Fallback to registry ports when the spec omits the lists (keeps geometry
+	// well-defined for hand-written topologies that rely on default placement).
+	if len(g.Inputs) == 0 || len(g.Outputs) == 0 {
+		if bind, ok := Registry[n.Type]; ok {
+			if len(g.Inputs) == 0 {
+				for _, p := range bind.Ports {
+					if p.Dir == PortIn {
+						g.Inputs = append(g.Inputs, portGeom{Name: p.Name})
+					}
+				}
+			}
+			if len(g.Outputs) == 0 {
+				for _, p := range bind.Ports {
+					if p.Dir == PortOut || p.Dir == PortOutMulti {
+						g.Outputs = append(g.Outputs, portGeom{Name: p.Name})
+					}
+				}
+			}
+		}
+	}
+	return g
+}
+
+func specPortsToGeom(ports []specPort) []portGeom {
+	out := make([]portGeom, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, portGeom{Name: p.Name, Side: p.Side, Slot: p.Slot})
+	}
+	return out
 }
 
 // NodeData mirrors the JSON data block on a node.
@@ -121,16 +164,20 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 		}
 	}
 
-	// Build id→position map for arc-length computation at wire construction.
+	// Build id→position and id→geometry maps for arc-length computation at wire
+	// construction. nodeGeom carries kind/dims/port side+slot so the Go arc
+	// length mirrors buildPortCurve (3-D port-to-port) exactly.
 	nodePos := map[string]specPosition{}
+	nodeGeoms := map[string]nodeGeom{}
 	for _, n := range spec.Nodes {
 		nodePos[n.ID] = n.Position
+		nodeGeoms[n.ID] = n.toNodeGeom()
 	}
 
 	// Allocate one *PacedWire per destination port (fan-in safe).
 	// destWire: "destNode.destPort" → *PacedWire (owned by the destination).
 	// edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
-	// edgeEndpoints: edge label → source/target node IDs (for NodeMoveRegistry).
+	// edgeEndpoints: edge label → source/target node IDs + handles (for NodeMoveRegistry).
 	destWire := map[string]*PacedWire{}
 	edgeWire := WireRegistry{}
 	edgeEndpoints := map[string]EdgeEndpoints{}
@@ -138,7 +185,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 		destKey := e.Target + "." + e.TargetHandle
 		pw, exists := destWire[destKey]
 		if !exists {
-			arcLength := arcLengthBetween(nodePos[e.Source], nodePos[e.Target])
+			arcLength := arcLengthBetweenPorts(
+				nodeGeoms[e.Source], e.SourceHandle,
+				nodeGeoms[e.Target], e.TargetHandle,
+			)
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
@@ -146,15 +196,16 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
-		edgeEndpoints[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target}
+		edgeEndpoints[e.Label] = EdgeEndpoints{
+			Source: e.Source, Target: e.Target,
+			SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle,
+		}
 	}
 
-	// Build NodeMoveRegistry from initial positions and edge endpoints.
-	nmrPositions := make(map[string]NodePosition, len(nodePos))
-	for id, p := range nodePos {
-		nmrPositions[id] = NodePosition{X: p.X, Y: p.Y, Z: p.Z}
-	}
-	nmr := NewNodeMoveRegistry(nmrPositions, edgeEndpoints)
+	// Build NodeMoveRegistry from initial geometry and edge endpoints. The
+	// registry recomputes port-to-port arc length on node-move, so it needs the
+	// full per-node geometry (kind/dims/ports), not just position.
+	nmr := NewNodeMoveRegistry(nodeGeoms, edgeEndpoints)
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}
