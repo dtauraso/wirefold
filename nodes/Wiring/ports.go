@@ -138,6 +138,33 @@ func (o *Out) TrySend(v int) bool {
 	}
 }
 
+// TryEmit is the fire-and-forget send: it places the bead non-blockingly and
+// drops it (returns false) if the wire is busy. On a successful placement it
+// emits the SendWire trace (so the pump animates it) and returns true. A dropped
+// bead produces NO trace — the placement happens first, the trace only on success.
+func (o *Out) TryEmit(v int) bool {
+	if o == nil {
+		return false
+	}
+	if o.pw != nil {
+		if !o.pw.TryPlace(v) {
+			return false
+		}
+		o.trace.SendWire(o.node, o.port, v, o.pw.ArcLength, o.pw.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		return true
+	}
+	if o.ch == nil {
+		return false
+	}
+	select {
+	case o.ch <- v:
+		o.trace.Send(o.node, o.port, v)
+		return true
+	default:
+		return false
+	}
+}
+
 // WaitConsumed blocks until the consumer calls Done on the value placed by the
 // most recent TrySend, or until the port's context is canceled. Returns true on
 // consumption, false on cancel or error. In chan mode (unit tests), returns true

@@ -49,12 +49,14 @@ func (g *Node) Update(ctx context.Context) {
 			g.FromRight.Done()
 			g.HasLeft = false
 			g.HasRight = false
-			if g.ToPassed.TrySend(result) {
-				if g.ToPassed.Gated() {
+			if g.ToPassed.Gated() {
+				if g.ToPassed.TrySend(result) {
 					if !g.ToPassed.WaitConsumed() {
 						return
 					}
 				}
+			} else {
+				g.ToPassed.TryEmit(result)
 			}
 		}
 	}

@@ -82,6 +82,9 @@
       "data": {
         "state": {
           "held": 0
+        },
+        "sendRules": {
+          "ToNext0": "fireAndForget"
         }
       },
       "inputs": [
@@ -194,7 +197,6 @@
       "target": "inhibitRight0",
       "targetHandle": "FromRight",
       "kind": "inhibit-in",
-      "sendRule": "fireAndForget",
       "label": "i1ToInhibitRight0",
       "data": {
         "slots": 1

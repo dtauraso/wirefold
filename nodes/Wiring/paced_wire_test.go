@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // TestSendRecvInstantDelivery: happy-path send→deliver→recv→done.
@@ -440,4 +442,57 @@ func TestRecvUnblocksOnDelivery(t *testing.T) {
 
 	// Done not yet called — Recv already returned, slot still held.
 	pw.Done()
+}
+
+// TestTryPlaceDropsWhenInFlight: with inFlight already set, TryPlace returns
+// false and does not touch pending/inFlight; with the wire clear, it returns
+// true and sets inFlight.
+func TestTryPlaceDropsWhenInFlight(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+
+	// Clear wire: TryPlace succeeds and sets inFlight.
+	if !pw.TryPlace(1) {
+		t.Fatal("TryPlace on clear wire: expected true")
+	}
+	if !pw.InFlight() {
+		t.Fatal("TryPlace should set inFlight")
+	}
+	pw.mu.Lock()
+	if pw.pending != 1 {
+		t.Fatalf("pending: got %v want 1", pw.pending)
+	}
+	pw.mu.Unlock()
+
+	// Busy wire: TryPlace drops and leaves pending/inFlight unchanged.
+	if pw.TryPlace(2) {
+		t.Fatal("TryPlace on busy wire: expected false (dropped)")
+	}
+	pw.mu.Lock()
+	if pw.pending != 1 {
+		t.Fatalf("dropped TryPlace overwrote pending: got %v want 1", pw.pending)
+	}
+	if !pw.inFlight {
+		t.Fatal("dropped TryPlace cleared inFlight")
+	}
+	pw.mu.Unlock()
+}
+
+// TestTryEmitFireAndForget: an Out with RuleFireAndForget uses TryPlace
+// semantics — first emit places the bead (true), a second emit while the wire
+// is busy is dropped (false) without overwriting.
+func TestTryEmitFireAndForget(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	o := NewOutPaced(pw, context.Background(), "n", "p", T.New(16), RuleFireAndForget)
+
+	if !o.TryEmit(7) {
+		t.Fatal("first TryEmit: expected true")
+	}
+	if o.TryEmit(8) {
+		t.Fatal("second TryEmit on busy wire: expected false (dropped)")
+	}
+	pw.mu.Lock()
+	if pw.pending != 7 {
+		t.Fatalf("dropped TryEmit overwrote pending: got %v want 7", pw.pending)
+	}
+	pw.mu.Unlock()
 }

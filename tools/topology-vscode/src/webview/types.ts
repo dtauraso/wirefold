@@ -2,7 +2,7 @@
 // These mirror Spec.Node / Spec.Edge fields plus viewer-only and adapter fields.
 // Consumers still read from Zustand; this file is schema-only.
 
-import type { Port, StateValue } from "../schema/types";
+import type { Port, SendRule, StateValue } from "../schema/types";
 import type { NodeSpec } from "../schema/types-graph";
 import type { WireProps } from "../schema/wire-defs";
 import { ANIMATION_FIELDS } from "./three/animation-fields";
@@ -49,6 +49,14 @@ export interface NodeData {
   outputs: Port[];
   /** Spec-side Go field seeds (data.state in JSON). Distinct from viewer state below. */
   initState?: Record<string, number>;
+  /**
+   * Node-owned per-output-port send policy, keyed by output port name (the
+   * sourceHandle, e.g. "ToNext0"). Lives at node.data.sendRules in the spec and
+   * is carried verbatim through nodeData on round-trip (no editor UI yet).
+   * Absent ports default to consumeGated. The send rule belongs to the SOURCE
+   * NODE, not the edge.
+   */
+  sendRules?: Record<string, SendRule>;
 
 
   // --- Viewer-only fields (from NodeView / store) ---

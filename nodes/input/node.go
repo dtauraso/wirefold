@@ -22,12 +22,19 @@ func (n *Node) Update(ctx context.Context) {
 			return
 		}
 		n.Fire()
-		if n.ToReadGate.TrySend(n.Init[i%len(n.Init)]) {
-			if n.ToReadGate.Gated() {
+		if n.ToReadGate.Gated() {
+			if n.ToReadGate.TrySend(n.Init[i%len(n.Init)]) {
 				if !n.ToReadGate.WaitConsumed() {
 					return
 				}
+				i++
+				if !n.Repeat && i >= len(n.Init) {
+					return
+				}
 			}
+		} else {
+			// fire-and-forget: advance unconditionally after TryEmit (no wait).
+			n.ToReadGate.TryEmit(n.Init[i%len(n.Init)])
 			i++
 			if !n.Repeat && i >= len(n.Init) {
 				return

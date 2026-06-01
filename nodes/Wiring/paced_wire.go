@@ -140,6 +140,29 @@ func (pw *PacedWire) Send(ctx context.Context, value any) error {
 	return nil
 }
 
+// TryPlace is the non-blocking placement used by the fire-and-forget send rule.
+// It never blocks and never overwrites an in-flight bead: if the wire is faded
+// or already in-flight, it returns false (the send is dropped). Otherwise it
+// places the bead exactly like Send's placement block and returns true.
+func (pw *PacedWire) TryPlace(value any) bool {
+	pw.mu.Lock()
+	if pw.faded {
+		pw.mu.Unlock()
+		return false
+	}
+	if pw.inFlight {
+		// Wire busy: drop the bead. Do NOT block, do NOT overwrite.
+		pw.mu.Unlock()
+		return false
+	}
+	pw.pending = value
+	pw.inFlight = true
+	pw.consumedCh = make(chan struct{})
+	pw.cond.Broadcast()
+	pw.mu.Unlock()
+	return true
+}
+
 // Recv blocks until the slot is filled (NotifyDelivered delivers the bead),
 // then returns the value. The slot is NOT cleared; the consumer must call Done.
 // Returns ErrCanceled if ctx is done.
