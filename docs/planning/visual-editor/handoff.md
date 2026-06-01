@@ -9,8 +9,8 @@ read this file first (no chat history needed) and proceed.
 
 ## State at handoff (2026-06-01 — task/delete-edge merged to main)
 
-- **Active branch:** `task/timing-window` (branched from `main` after the
-  `task/delete-edge` merge).
+- **Active branch:** `task/timing-window` (branched from `main` HEAD `c0eaee65`,
+  after the `task/delete-edge` merge).
 - `task/delete-edge` is **merged to main** and deleted (local + remote).
 - Build/test gate: green at merge (`go build ./... && go test ./...`, `npx tsc --noEmit` clean).
 
@@ -40,11 +40,14 @@ wakes. This is a blocking-receive structural problem, not a knob to
 tune. It is intended to be subsumed by the timing-window receive
 rewrite below (non-blocking polling has no parked receiver to orphan).
 
-### Next task — task/timing-window (SPEC FIRST)
+### Next task — task/timing-window (SPEC WRITTEN — implement next)
 
-Implement a per-node **timing-window (coincidence-detection) rule**:
+The per-node **timing-window (coincidence-detection) rule** SPEC is
+written at
+[docs/planning/visual-editor/timing-window.md](timing-window.md).
+**Read it first** — it is the next thing to implement. In short:
 
-- `node.data` carries a `window` (duration).
+- `node.data` carries a `window` (duration); absent = wait indefinitely.
 - The node **polls its inputs non-blockingly** instead of parking in a
   blocking `Recv`.
 - On the **first** input arrival, the node **opens the window**.
@@ -52,11 +55,11 @@ Implement a per-node **timing-window (coincidence-detection) rule**:
 - If the window expires with inputs missing → **clear** the held inputs
   (Done-without-fire) and reset; no fire.
 - This rewrites the receive path from blocking `Recv` to non-blocking
-  polling and **subsumes the orphaned-Recv freeze** (no parked receiver
-  exists to be orphaned by a `slotReadyCh` swap).
+  polling and **subsumes the orphaned-Recv freeze** (see KNOWN ISSUE).
 
-**Write the SPEC FIRST** (amends MODEL.md) and get David's confirmation
-before any implementation. Do not write code ahead of the spec.
+**KEY OPEN DECISION: clock units** — real wall-clock time measured at
+the node (recommended), sim-time ms, or discrete ticks. See the spec's
+Clock section; confirm with David before implementing.
 
 ### Key files
 
