@@ -97,10 +97,10 @@
 
   <!-- OVERVIEW -->
   <div id="overview" class="panel active">
-    <p>A multi-input node should fire only when its required inputs arrive <em>close together in time</em>. Without a timing window, a partial set of inputs accumulates indefinitely — stalling upstream sources and piling up beads at a gate that may never complete.</p>
-    <p>The timing window opens when the <strong>first required input arrives</strong> (<code>t0</code>). If all required inputs arrive within window <code>W</code>, the node fires normally. If <code>W</code> elapses with any input still missing, the node <strong>clears</strong>: it calls <code>Done</code> on every held input (draining upstream wires) without firing, then resets its flags and waits for the next first-arrival.</p>
+    <p>Every node with input edges applies the timing-window rule uniformly: a node collects one pulse from each of its input edges. If all of them arrive within window <code>W</code> of the first arrival, the combination is accepted and the node fires. If <code>W</code> elapses with any input still missing, all held inputs are discarded (via <code>Done</code>) without firing, and the node resets to wait for the next first-arrival.</p>
+    <p>The timing window opens when the <strong>first input arrives</strong> (<code>t0</code>). Single-input nodes trivially satisfy the rule (their one pulse is always "all of them"). The rule is the same everywhere.</p>
     <p>This directly solves the <strong>permanent-delete</strong> case: an input edge removed for good means that input will never arrive, so the gate would block forever. With a timing window it times out after <code>W</code>, clears, and lets the ring keep running — no pile-up, no stall.</p>
-    <p><code>W</code> is a per-node value stored in <code>node.data</code> (same ownership as send rules). Absent means <em>no window</em> — wait indefinitely, which is today's unchanged behavior for non-windowed nodes.</p>
+    <p><code>W</code> is derived per-node from current input-edge geometry (<code>W = 1.5 × max(simLatencyMs)</code> over current input wires) and stored in <code>node.data</code>. It is recomputed automatically whenever an input edge's length changes.</p>
   </div>
 
   <!-- DIAGRAM -->
@@ -183,20 +183,19 @@
   <!-- RULES -->
   <div id="rules" class="panel">
     <ul>
-      <li><strong>Per-node rule in <code>node.data</code></strong> — same ownership as send rules (<code>consumeGated</code> / <code>fireAndForget</code>). Absent ⇒ no window ⇒ blocking <code>Recv</code>, unchanged behavior.</li>
-      <li><strong>First implementation target: <code>inhibitRight0</code></strong> (the AND-gate that motivated this). <code>readGate</code> stays windowless (ring lockstep requires indefinite wait).</li>
-      <li><strong>Non-blocking poll</strong> — add <code class="mono">PollRecv() (value, ok)</code> to <code>PacedWire</code>/<code>Out</code>; returns <code>ok=false</code> immediately when <code>hasSend</code> is false. Windowed nodes poll each input per iteration instead of parking on a blocking <code>Recv</code>.</li>
-      <li><strong>Window loop</strong> — on first input present, record <code>t0</code> (wall-clock). Each iteration: if all inputs present → fire (<code>Done</code> all); else if <code>now − t0 &gt; W</code> → clear (<code>Done</code> each held input, reset <code>HasX</code> flags + window). Use <code>select</code> with a short timeout between polls to avoid busy-spin.</li>
-      <li><strong>Clear semantics</strong> — call <code>Done</code> on each held input's <code>In</code> port (drains the upstream wire so a <code>consumeGated</code> source's <code>WaitConsumed</code> returns). No <code>Fire()</code>. Emit a <code>window-clear</code> trace breadcrumb for observability.</li>
-      <li><strong>Clock units</strong> — real elapsed wall-clock time measured at the node (the gap between <code>NotifyDelivered</code>-driven arrivals). Default <code>W</code> to a small multiple of current <code>simLatencyMs</code> (~2500–3300 ms per wire).</li>
+      <li><strong>Universal rule — every node with input edges.</strong> Every node that has at least one input edge applies the timing-window rule uniformly. The rule is stored per-node in <code>node.data</code> (same ownership as send rules).</li>
+      <li><strong>Core rule:</strong> a node collects one pulse from each of its input edges. If ALL of them arrive within window <code>W</code> of the first arrival (<code>t0</code>) → ALL inputs are <strong>kept</strong> (the combination is accepted; the node fires). If <code>W</code> elapses with any input still missing → ALL inputs are <strong>removed</strong> (discarded via <code>Done</code> without firing); the node resets and waits for the next first-arrival. Single-input nodes trivially keep their one pulse — the rule is the same uniform rule everywhere.</li>
+      <li><strong>Window opens at <code>t0</code></strong> — the wall-clock moment the first input arrives. <code>W</code> is real elapsed wall-clock time measured at the node.</li>
       <li><strong>W is derived, not stored</strong> — recomputed from the node's current input edges on every input-edge-length change (move, reconnect, midpoint drag): <code>W = 1.5 × max(simLatencyMs)</code> over current input wires, where <code>simLatencyMs = arcLength ÷ 0.08 WU/ms</code>. The value is a geometry snapshot, not fixed config.</li>
+      <li><strong>Clear semantics</strong> — call <code>Done</code> on each held input's <code>In</code> port (drains the upstream wire so a <code>consumeGated</code> source's <code>WaitConsumed</code> returns). No <code>Fire()</code>. Emit a <code>window-clear</code> trace breadcrumb for observability.</li>
     </ul>
+    <p style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted);"><strong>Implementation note</strong> — windowed nodes use a non-blocking poll primitive (<code>PollRecv() (value, ok)</code> on <code>PacedWire</code>/<code>Out</code>) instead of a parking <code>Recv</code>, with a <code>select</code>-timeout or short sleep between iterations to avoid busy-spin. <code>inhibitRight0</code> is the first node wired up; the rule is universal across all input-having nodes.</p>
 
   </div>
 
   <!-- WINDOWS -->
   <div id="windows" class="panel">
-    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem;"><strong>W is not a fixed config value.</strong> It is recomputed from the node's current input edges whenever any input edge length changes (node moved, edge reconnected, midpoint dragged): <code>W = 1.5 × longest current input edge travel time</code>, where travel time = bezier arcLength ÷ 0.08 WU/ms (uniform pulse speed). The values below are a <em>snapshot at the current geometry</em> — they change automatically if geometry changes. Only <code>inhibitRight0</code> currently uses its window for coincidence detection; the others are reference values.</p>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem;"><strong>W is not a fixed config value.</strong> It is recomputed from the node's current input edges whenever any input edge length changes (node moved, edge reconnected, midpoint dragged): <code>W = 1.5 × longest current input edge travel time</code>, where travel time = bezier arcLength ÷ 0.08 WU/ms (uniform pulse speed). The values below are a <em>snapshot at the current geometry</em> — they change automatically if geometry changes. Every listed node applies the timing-window rule: if all inputs arrive within W, they are kept and the node fires; if W elapses with any missing, all held inputs are discarded and the node resets.</p>
     <table style="width:100%;border-collapse:collapse;margin-top:0.25rem;">
       <thead>
         <tr style="background:var(--code-bg);">

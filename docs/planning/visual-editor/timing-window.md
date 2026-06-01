@@ -10,11 +10,10 @@ branch: task/timing-window
 Neuron-like coincidence detection: a multi-input node should fire only when its required inputs arrive close together in time. Inputs that don't complete a valid combination within a window are flushed (cleared) — preventing stray/partial signals from accumulating and from blocking upstream sources. This handles the **permanent-delete** case: an input that genuinely never arrives (an edge removed for good) so the gate flushes a partial combination after `W` instead of piling up beads. (The delete+re-add freeze is a *separate* receive bug fixed on the prerequisite branch `task/wire-delete-pulse`, not here.)
 
 ## Model
-- **Per-node rule, different per node**, stored in `node.data` (same ownership pattern as the send rule). A node may have a timing window `W`. **Absent = no window = wait indefinitely** (today's behavior).
-- **`W` is derived, not stored.** It is recomputed from the node's current input edges every time an input edge's length changes (node moved, edge reconnected, midpoint dragged): `W = 1.5 × max(simLatencyMs over the node's current input wires)`, where each wire's `simLatencyMs = bezier arcLength / 0.08 WU-per-ms` (uniform pulse speed). The per-node value is therefore a snapshot of current geometry — if geometry changes, `W` changes automatically.
-- The window **opens when the node's first required input arrives**.
-- If **all** required inputs arrive within `W` of the opening → the node **fires** (consumes/Done all inputs), as today.
-- If `W` elapses with any required input still missing → the node **clears**: `Done` (drain) every *held* input **without firing**, reset its has-input flags and the window, and wait for the next first-arrival.
+- **Universal rule — every node with input edges.** Every node that has at least one input edge applies the timing-window rule uniformly. The rule is stored per-node in `node.data` (same ownership as send rules); `W` is derived from that node's current input wires.
+- **Core rule:** a node collects one pulse from each of its input edges. If ALL of them arrive within window `W` of the first arrival (`t0`) → ALL inputs are **kept** (the combination is accepted; the node fires). If `W` elapses with any input still missing → ALL inputs are **removed** (discarded via `Done` without firing); the node resets and waits for the next first-arrival. Single-input nodes trivially keep their one pulse; the rule is the same uniform rule everywhere.
+- **`W` is derived, not stored.** Recomputed from the node's current input edges every time an input edge's length changes (node moved, edge reconnected, midpoint dragged): `W = 1.5 × max(simLatencyMs over the node's current input wires)`, where each wire's `simLatencyMs = bezier arcLength / 0.08 WU-per-ms` (uniform pulse speed). The per-node value is therefore a snapshot of current geometry — if geometry changes, `W` changes automatically.
+- The window **opens when the node's first required input arrives** (`t0`).
 - Consequence: a windowed node **always releases its inputs** (fire or timeout), so upstream sources never block indefinitely and beads never pile up at a dead/slow gate.
 
 ## Clock — KEY DECISION (confirm before implementing)
@@ -29,13 +28,11 @@ Alternatives: **sim-time ms** (consistent with `simLatencyMs`, but requires plum
 - **Holding semantics:** a polled-but-not-yet-fired input is *held* (received; slot stays full until `Done`). On clear, `Done` drains it.
 
 ## Scope / first step
-- Implement on **`inhibitRight0`** first (the AND-gate that motivated this). Window value in `inhibitRight0`'s `node.data`.
-- `readGate` is also an AND-gate but likely wants **no window** (ring lockstep) — leave it windowless initially.
-- Non-windowed nodes: unchanged (blocking `Recv`).
+- Implement on **`inhibitRight0`** first (the AND-gate that motivated this). The rule is universal, but `inhibitRight0` is the first node to be wired up.
+- All other input-having nodes (`readGate1`, `i0`, `i1`, and all future nodes with inputs) apply the same rule; implementation order does not change the rule's universality.
 
 ## Open questions
 - Clock units (see above).
-- Default `W` and a sensible value for `inhibitRight0` given current `simLatencyMs` (~2500–3300 ms per wire) — `W` likely a small multiple of that.
 - Should clearing emit a trace breadcrumb (`window-clear`) for observability? Recommended: yes.
 - Interaction with `fireAndForget`: once gates self-clear on timeout, the `fireAndForget` side-gate sends (i0.ToNext1, i1.ToNext0) may be revertible to `consumeGated` (the timeout `Done` releases the source). Revisit after the window lands.
 
