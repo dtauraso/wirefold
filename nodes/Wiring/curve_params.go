@@ -35,6 +35,32 @@ const CurveParamBulgeFactor = 0.25
 // 64 segments gives < 0.01% error for typical bulge ratios (< 0.5).
 const CurveParamBezierSampleCount = 64
 
+// CurveParamNodeRadiusDivisor is the divisor applied to min(width,height)
+// to obtain the node sphere radius.  Matches nodeRadius in geometry-helpers.ts
+// (Math.min(width, height) / 4); port endpoints sit on this sphere surface.
+const CurveParamNodeRadiusDivisor = 4
+
+// CurveParamSlotPct0/1/2 are the percentage positions along a node side for
+// the three snap slots (0=25%, 1=50%, 2=75%).  Matches the SLOT_PCT table in
+// geometry-helpers.ts.  A port with no explicit slot is auto-spaced instead.
+const (
+	CurveParamSlotPct0 = 25
+	CurveParamSlotPct1 = 50
+	CurveParamSlotPct2 = 75
+)
+
+// slotPct returns the side-percentage for a snap slot index (0..2).
+func slotPct(slot int) float64 {
+	switch slot {
+	case 0:
+		return CurveParamSlotPct0
+	case 1:
+		return CurveParamSlotPct1
+	default:
+		return CurveParamSlotPct2
+	}
+}
+
 // BezierArcLength computes the arc length of a quadratic Bezier curve whose
 // endpoints are p0 and p2 in 2-D (x, y) using the given bulgeFactor and
 // number of samples.  The control point p1 is placed at the chord midpoint
@@ -85,6 +111,74 @@ func BezierArcLength(p0x, p0y, p2x, p2y, bulgeFactor float64, samples int) float
 		prevX, prevY = bx, by
 	}
 
+	if total < CurveParamMinArcLength {
+		return CurveParamMinArcLength
+	}
+	return total
+}
+
+// vec3 is a minimal 3-D vector used by the port-to-port curve math so the Go
+// arc length matches buildPortCurve in geometry-helpers.ts exactly.
+type vec3 struct{ X, Y, Z float64 }
+
+func (a vec3) sub(b vec3) vec3 { return vec3{a.X - b.X, a.Y - b.Y, a.Z - b.Z} }
+func (a vec3) add(b vec3) vec3 { return vec3{a.X + b.X, a.Y + b.Y, a.Z + b.Z} }
+func (a vec3) scale(s float64) vec3 {
+	return vec3{a.X * s, a.Y * s, a.Z * s}
+}
+func (a vec3) length() float64 {
+	return math.Sqrt(a.X*a.X + a.Y*a.Y + a.Z*a.Z)
+}
+func (a vec3) normalize() vec3 {
+	l := a.length()
+	if l == 0 {
+		return vec3{}
+	}
+	return vec3{a.X / l, a.Y / l, a.Z / l}
+}
+
+// cross returns a × b.
+func cross(a, b vec3) vec3 {
+	return vec3{
+		a.Y*b.Z - a.Z*b.Y,
+		a.Z*b.X - a.X*b.Z,
+		a.X*b.Y - a.Y*b.X,
+	}
+}
+
+// PortCurveArcLength computes the arc length of the quadratic Bezier curve that
+// runs from source-output port world position p0 to target-input port world
+// position p2, mirroring buildPortCurve in geometry-helpers.ts exactly:
+//   - mid   = (p0+p2)/2
+//   - dir   = normalize(p2-p0)
+//   - lift  = normalize((0,0,1) × dir)
+//   - span  = |p2-p0|
+//   - p1    = mid + lift * (span * bulgeFactor)
+//   - length integrated over `samples` segments of the 3-D quadratic Bezier
+//
+// Result is floored at CurveParamMinArcLength.
+func PortCurveArcLength(p0, p2 vec3, bulgeFactor float64, samples int) float64 {
+	mid := p0.add(p2).scale(0.5)
+	edgeDir := p2.sub(p0).normalize()
+	lift := cross(vec3{0, 0, 1}, edgeDir).normalize()
+	span := p2.sub(p0).length()
+	p1 := mid.add(lift.scale(span * bulgeFactor))
+
+	n := samples
+	if n < 1 {
+		n = 1
+	}
+	inv := 1.0 / float64(n)
+	prev := p0
+	total := 0.0
+	for i := 1; i <= n; i++ {
+		t := float64(i) * inv
+		u := 1.0 - t
+		// Quadratic Bezier: B(t) = u²·p0 + 2ut·p1 + t²·p2
+		b := p0.scale(u * u).add(p1.scale(2 * u * t)).add(p2.scale(t * t))
+		total += b.sub(prev).length()
+		prev = b
+	}
 	if total < CurveParamMinArcLength {
 		return CurveParamMinArcLength
 	}
