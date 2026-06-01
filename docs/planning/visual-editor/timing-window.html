@@ -5,20 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timing-Window Spec</title>
 <style>
+  :root {
+    --bg: #f5f5f7;
+    --card-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --border: #d2d2d7;
+    --accent: #0071e3;
+    --tab-active: #0071e3;
+    --code-bg: #e8e8ed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --card-bg: #2c2c2e;
+      --text: #f5f5f7;
+      --text-muted: #8e8e93;
+      --border: #3a3a3c;
+      --accent: #4da3ff;
+      --tab-active: #4da3ff;
+      --code-bg: #3a3a3c;
+    }
+  }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    background: #f5f5f0;
-    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
     padding: 2rem 1rem 4rem;
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 14px;
+    line-height: 1.5;
   }
   .page { max-width: 860px; margin: 0 auto; }
   header { margin-bottom: 1.5rem; }
   h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
-  .meta { font-size: 0.78rem; color: #888; }
-  nav { display: flex; gap: 0; border-bottom: 2px solid #d0cfc8; margin-bottom: 1.75rem; }
+  .meta { font-size: 0.78rem; color: var(--text-muted); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  nav { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 1.75rem; }
   .tab-btn {
     background: none;
     border: none;
@@ -27,12 +51,12 @@
     padding: 0.5rem 1.25rem;
     font-size: 0.9rem;
     font-weight: 500;
-    color: #666;
+    color: var(--text-muted);
     cursor: pointer;
     transition: color 0.12s, border-color 0.12s;
   }
-  .tab-btn:hover { color: #333; }
-  .tab-btn.active { color: #2c6fbd; border-bottom-color: #2c6fbd; }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--tab-active); border-bottom-color: var(--tab-active); }
   .panel { display: none; }
   .panel.active { display: block; }
   p { margin-bottom: 0.85rem; }
@@ -41,13 +65,13 @@
   code, .mono {
     font-family: "SF Mono", "Fira Code", "Consolas", monospace;
     font-size: 0.84em;
-    background: #e8e7e0;
+    background: var(--code-bg);
     border-radius: 3px;
     padding: 0.1em 0.35em;
   }
   .diagram-wrap {
-    background: #fff;
-    border: 1px solid #ddd;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 1.25rem;
     display: flex;
@@ -149,7 +173,7 @@
         <text x="55" y="275" font-size="11" fill="#b85c00" text-anchor="end">timeout</text>
       </svg>
     </div>
-    <p style="margin-top:1rem; font-size:0.82rem; color:#666;">
+    <p style="margin-top:1rem; font-size:0.82rem; color:var(--text-muted);">
       Top path: both inputs arrive inside <code>W</code> → <strong>FIRE</strong> (Done all, consume/send).
       Bottom path: input B never arrives, <code>W</code> elapses → <strong>CLEAR</strong> (<code>Done</code> drains held input A, no fire, flags reset).
     </p>
