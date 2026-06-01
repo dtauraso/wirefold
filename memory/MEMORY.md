@@ -44,3 +44,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_no_manufactured_shortcuts.md](feedback_no_manufactured_shortcuts.md) — Don't offer partial/local-patch variants as decision options when the model already prescribes the full path; subagent typing cost is not a tradeoff axis
 - [feedback_invariants_drive_design.md](feedback_invariants_drive_design.md) — Treat user-stated invariants as axioms that drive design and verify framing; simulate frame-by-frame, not just steady-state
 - [feedback_dont_invent_doctrine.md](feedback_dont_invent_doctrine.md) — Don't paraphrase a one-off note into a "rule" and cite the paraphrase as project doctrine; grep for the literal phrasing first
+- [feedback_tsc_verify_after_removal.md](feedback_tsc_verify_after_removal.md) — After deleting/refactoring webview TS, verify with `tsc --noEmit` too; esbuild (`npm run build`) skips type-checking and lets dangling refs reach runtime
