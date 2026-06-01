@@ -1,6 +1,6 @@
 ---
 name: Propose robust solutions that fit the model spec
-description: When a node's correctness depends on a wire being present, flag its absence in the editor (parseSpec diagnostic → red node); do not add a fatal validateSpec/parseSpec reject. Let precondition-gating keep the node inert.
+description: The editor does NOT visually flag missing required inputs (red node / parseSpec diagnostic removed 2026-06-01). The substrate does not reject graphs with missing required inputs. Precondition-gating keeps unfed nodes inert.
 type: feedback
 originSessionId: 96608f66-f9a2-47a3-bd1f-48841e9eb98a
 ---
@@ -17,20 +17,23 @@ of the graph runs; the unfed node just never fires. Enforce-by-reject made one
 incomplete node kill the entire graph load; precondition-gating already gives the
 desired "don't run it" behavior without removal.
 
+**UPDATED 2026-06-01** — the render-only validation-flag editor feature was removed
+(merge of task/remove-validation-flag). `requiredInputDiagnostics()` and all red-node
+rendering are deleted from the codebase.
+
 **Current rule:**
 
-- Missing required wire → **editor flag** (parseSpec diagnostic → visual red mark on
-  the node). The node stays in the graph, unremoved.
-- Pressing Run executes all non-flagged nodes; flagged nodes are inert (precondition
-  never satisfied).
+- Missing required wire → **no editor flag**. The node stays in the graph, unremoved,
+  and the editor does not mark it red or emit a parseSpec diagnostic.
+- Pressing Run executes all nodes; a node whose required slot never fills is naturally
+  inert (precondition-gating keeps it from firing).
 - Do **not** add a fatal `validateSpec`/`parseSpec` reject for a missing required wire.
-- Keep substrate lenient at load; push the "is this complete?" signal to the editor
-  surface.
+- The substrate remains lenient at load; there is no visual "is this complete?" signal
+  in the editor for missing required wires.
 
 **How to apply:** when designing a feature whose correctness depends on a wire being
-present, add a `parseSpec` diagnostic that marks the node red in the editor. Do not
-add a substrate-level reject. Trust precondition-gating to keep the unfed node inert
-at run time.
+present, do not add a `parseSpec` diagnostic or red-node rendering — that path is
+gone. Trust precondition-gating to keep the unfed node inert at run time.
 
 Related: [[feedback_substrate_vs_coordinator_bias]] (find the local signal, not a
 coordinator-shaped reject), [[feedback_derive_model_from_visual_spec]] (derive the
