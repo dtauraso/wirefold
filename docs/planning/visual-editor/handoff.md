@@ -22,7 +22,7 @@ read this file first (no chat history needed) and proceed.
 ### OPEN ITEMS / NEXT
 
 1. **No task in flight.** Next work is friction-driven from live editor use — drive the editor, narrate, log to session-log.md, and branch when a concrete change is identified.
-2. **InhibitRightGate window logic not independently verified.** The fan-in/feeder fixes resolved `inhibitRight0`'s starvation, but the gate's own coincidence fire/clear decisions were never validated against actual input alignment (only that it's no longer starved and the ring is live). Open thread if its timing behavior is ever in question.
+2. **InhibitRightGate window verified live (2026-06-01, closed).** Has direct unit coverage (`nodes/inhibitrightgate/firing_rule_test.go`: TestWindowFire / TestWindowClear) and a live editor run (12.1 s, 0 errors) showed inhibitRight0 fired 2× with 0 window_clears — inputs coincide within W in the real ring. Only caveat is sample size (2 fires); a longer run would strengthen confidence, but the qualitative signal is unambiguous.
 3. **Per-node dimensions seam.** Width/height are kind-uniform (codegen from SPEC.md), not serialized per-node. Go and TS both trace to SPEC.md but via different runtime tables. If per-node resizing ever lands, that's the seam to revisit (Go would need per-node dims, not kind dims).
 
 ### Substrate model contract (stable)

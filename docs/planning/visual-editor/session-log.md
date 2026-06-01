@@ -18,6 +18,22 @@ Append-only log of friction surfaced while driving the visual editor. Newest fir
 
 ---
 
+## 2026-06-01 — InhibitRightGate window verified live (no task branch)
+
+**Observation:** handoff open-item #2 asked whether InhibitRightGate's coincidence window had ever been validated against actual input alignment in the live ring, or whether the ring was merely "not starved."
+
+**Finding 1 — existing coverage understated:** the open-item wording was stale. InhibitRightGate already has direct unit coverage in `nodes/inhibitrightgate/firing_rule_test.go` (TestWindowFire / TestWindowClear). ReadGate's window (commit 48749fd) explicitly mirrors it. "Not independently verified" understated what was already in the test suite.
+
+**Finding 2 — ring cannot run headlessly:** `go run . -duration=20s` builds and starts but deadlocks after the first hop — only bootstrap_rg + in08 fire, then nothing. Cause: poll-and-hold delivery. A Send marks a bead inFlight; the value only enters the destination slot when NotifyDelivered fires, which is driven by the visual layer (webview pulse-completion → stdin reader). No editor = no delivered messages = ring stalls. By design, not a bug. To exercise the ring you need the live editor (.probe relay) or a headless delivery driver.
+
+**Finding 3 — live measurement:** cleared .probe, ran once in the editor. 12.1 s, 18 fires across 6 nodes, 0 errors. Per gate: inhibitRight0 = 2 fires / 0 window_clear; readGate1 = 4 fires / 0 window_clear. The gate's inputs genuinely coincide within W in the live ring — it is not surviving via lucky non-starvation. Caveat: small sample (2 fires / 12 s); a 60 s run would strengthen the ratio, but the qualitative signal (zero clears, zero errors) is unambiguous.
+
+**Decision:** log-only (no task branch). Open-item #2 resolved.
+
+**Outcome:** open-item #2 closed. Handoff updated.
+
+---
+
 <!-- source: session-log/2026-05-03-industry-standard-pattern-review-visual-editor.md -->
 
 ## 2026-05-03 — industry-standard-pattern review (visual editor)
