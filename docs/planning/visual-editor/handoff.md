@@ -34,6 +34,7 @@ See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). One `PacedWire` per dest
 After TS edit: `npm run build` from `tools/topology-vscode/`.
 After Go change: `go build ./...` from repo root, `go test ./nodes/...`. After any change to shared `CurveParam*` constants or SPEC.md `## View`, regenerate and run `tools/check-generated.sh`.
 To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect `go.jsonl` / `ts.jsonl` breadcrumbs.
+Note: the ring has no headless run — `go run .` builds but deadlocks after the first hop (only bootstrap_rg + in08 fire). Delivery is paced by the visual layer (webview pulse-completion → stdin reader → NotifyDelivered); no editor means no `delivered` messages and the ring stalls. Use the live editor to exercise it.
 
 Check: `go test ./...`. All guard scripts run via the Stop hook (`scripts/stop-checks.sh`). Bash approval guard runs via PreToolUse.
 
