@@ -90,10 +90,7 @@ func BezierArcLength(p0x, p0y, p2x, p2y, bulgeFactor float64, samples int) float
 	p1y := midY + perpY*bulgeFactor*chordLen
 
 	// Numerically integrate arc length by summing segment lengths.
-	n := samples
-	if n < 1 {
-		n = 1
-	}
+	n := max(samples, 1)
 	inv := 1.0 / float64(n)
 	// Start at t=0.
 	prevX := p0x
@@ -164,10 +161,7 @@ func PortCurveArcLength(p0, p2 vec3, bulgeFactor float64, samples int) float64 {
 	span := p2.sub(p0).length()
 	p1 := mid.add(lift.scale(span * bulgeFactor))
 
-	n := samples
-	if n < 1 {
-		n = 1
-	}
+	n := max(samples, 1)
 	inv := 1.0 / float64(n)
 	prev := p0
 	total := 0.0
