@@ -431,7 +431,7 @@
         <tr>
           <td>node loop</td>
           <td>one per node</td>
-          <td><ol><li>Poll its input slots (TryRecv) until its firing rule is satisfied.</li><li>Fire — emit a "fire" trace event.</li><li>Consume the input — clear its slot and send an ack to the source node over a dedicated <strong>ack edge</strong> (one per source node), so the source's step-4 check sees its wire as clear. <em style="color:var(--warn);">(Fix: today this rides the in-process consume/Done path; once Go owns the clock the nodes are decoupled and need an explicit ack edge.)</em></li><li>For each output port, send only if that wire has no pulse on it. Never drop a value — if the wire still carries a pulse, the send can't happen yet, so restart the loop and try again next round.</li><li>Loop. An Input node walks its init values (repeating if its repeat flag is set); a ChainInhibitor holds the received value and fans out to all its outputs in parallel.</li></ol></td>
+          <td><ol><li>Poll its input slots (TryRecv) until its firing rule is satisfied.</li><li>Fire — emit a "fire" trace event.</li><li>Consume the input — clear its slot and send an ack to the source node over a dedicated <strong>ack edge</strong> (one per source node), so the source's step-4 check sees its wire as clear.</li><li>For each output port, send only if that wire has no pulse on it. Never drop a value — if the wire still carries a pulse, the send can't happen yet, so restart the loop and try again next round.</li><li>Loop. An Input node walks its init values (repeating if its repeat flag is set); a ChainInhibitor holds the received value and fans out to all its outputs in parallel.</li></ol></td>
         </tr>
         <tr>
           <td>stdin reader</td>
