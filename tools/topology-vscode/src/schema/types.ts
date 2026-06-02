@@ -17,6 +17,8 @@ export const EDGE_KINDS: readonly EdgeKind[] = [
   "pointer", "and-out", "edge-connection", "inhibit-in", "any",
 ];
 
+export const DEFAULT_EDGE_KIND: EdgeKind = "signal";
+
 export type Port = {
   name: string;
   kind: EdgeKind;

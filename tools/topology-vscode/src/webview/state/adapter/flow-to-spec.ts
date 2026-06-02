@@ -8,6 +8,7 @@
 import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
 import type { Spec, Node as SpecNode, Edge as SpecEdge, Note } from "../../../schema";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
+import { DEFAULT_EDGE_KIND } from "../../../schema/types";
 import { TOPOLOGY_META_FIELDS } from "../../../schema/meta-field-defs";
 
 export function flowToSpec(
@@ -71,7 +72,7 @@ export function flowToSpec(
       sourceHandle,
       target: e.target,
       targetHandle,
-      kind: d?.kind ?? "signal",
+      kind: d?.kind ?? DEFAULT_EDGE_KIND,
     };
     // Copy optional wire props from EdgeData → SpecEdge by iterating WIRE_PROPS.
     // `kind` is excluded: it is required and already set above via fallback.
