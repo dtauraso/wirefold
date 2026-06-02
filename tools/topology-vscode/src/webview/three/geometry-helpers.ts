@@ -134,16 +134,6 @@ export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
 }
 
 /**
- * Scene center (centroid of node bounding box), used for dolly distance.
- * Falls back to origin when no nodes.
- */
-export function sceneCenter(nodes: RFNode<NodeData>[]): THREE.Vector3 {
-  if (nodes.length === 0) return new THREE.Vector3(0, 0, 0);
-  const { minX, maxX, minY, maxY } = boundingBox(nodes);
-  return new THREE.Vector3((minX + maxX) / 2, -(minY + maxY) / 2, 0);
-}
-
-/**
  * Build the port-to-port QuadraticBezierCurve3 for an edge.
  * p0 is on the source OUTPUT port sphere surface, p2 is on the target INPUT port sphere surface.
  * Used by both SingleEdgeTube and PulseBead so the bead travels the identical visible curve.

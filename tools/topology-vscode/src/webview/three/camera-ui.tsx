@@ -1,10 +1,10 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// DollyButtons, GlobalLabelsToggle, HomeButton — no scene/substrate logic.
+// GlobalLabelsToggle, HomeButton — no scene/substrate logic.
 
-import { useRef, useCallback } from "react";
+import { useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { sceneCenter, nodeWorldPos, nodeRadius } from "./geometry-helpers";
+import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -20,91 +20,8 @@ function commitCamera(cam: THREE.PerspectiveCamera) {
 }
 
 // ---------------------------------------------------------------------------
-// Widgets: Dolly buttons, Home button, Global labels toggle
+// Widgets: Home button, Global labels toggle
 // ---------------------------------------------------------------------------
-
-/** DOLLY BUTTONS: hold ^/v to dolly in/out. Positive direction = toward scene (z decreases). */
-export function DollyButtons({
-  cameraRef,
-  nodesRef,
-}: {
-  cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
-  nodesRef: React.MutableRefObject<RFNode<NodeData>[]>;
-}) {
-  const frameRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
-
-  const startDolly = useCallback((sign: number) => {
-    const tick = () => {
-      const cam = cameraRef.current;
-      if (!cam) return;
-      // sign = +1 → dolly toward scene (move camera in -z of its view)
-      const dir = new THREE.Vector3(0, 0, -sign).applyQuaternion(cam.quaternion);
-      // Use distance to scene center for correct speed after rotation.
-      const center = sceneCenter(nodesRef.current);
-      const dist = cam.position.distanceTo(center);
-      const speed = 0.008 * Math.max(dist, 10);
-      cam.position.addScaledVector(dir, speed);
-      frameRef.current = requestAnimationFrame(tick);
-    };
-    frameRef.current = requestAnimationFrame(tick);
-  }, [cameraRef, nodesRef]);
-
-  const stopDolly = useCallback(() => {
-    if (frameRef.current !== null) {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
-    // Commit final camera position after the dolly gesture ends.
-    if (cameraRef.current) commitCamera(cameraRef.current);
-  }, [cameraRef]);
-
-  const btnStyle: React.CSSProperties = {
-    width: 32,
-    height: 28,
-    cursor: "pointer",
-    background: "rgba(60,60,80,0.85)",
-    border: "1px solid #555",
-    borderRadius: 5,
-    color: "#ddd",
-    fontSize: 15,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    userSelect: "none",
-  };
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        right: 12,
-        bottom: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        pointerEvents: "auto",
-        zIndex: 20,
-      }}
-    >
-      {/* ^ = toward scene (dolly in) */}
-      <div
-        style={btnStyle}
-        onMouseDown={() => startDolly(1)}
-        onMouseUp={stopDolly}
-        onMouseLeave={stopDolly}
-        title="Dolly in"
-      >▲</div>
-      {/* v = away from scene (dolly out) */}
-      <div
-        style={btnStyle}
-        onMouseDown={() => startDolly(-1)}
-        onMouseUp={stopDolly}
-        onMouseLeave={stopDolly}
-        title="Dolly out"
-      >▼</div>
-    </div>
-  );
-}
 
 /** HOME BUTTON: reframes the camera to fit all nodes in view. */
 export function HomeButton({

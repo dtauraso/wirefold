@@ -4,7 +4,6 @@
 //   - Node drag → move node on z=0 plane; drop on another node → create edge
 //   - Two-finger scroll → pan; pinch → dolly along view axis
 //   - Roll slider widget (screen-plane camera roll)
-//   - Dolly buttons (hold-to-dolly)
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
@@ -13,7 +12,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { DollyButtons, GlobalLabelsToggle, HomeButton } from "./camera-ui";
+import { GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts } from "./scene-content";
@@ -328,7 +327,6 @@ export function ThreeView() {
       })}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
-      <DollyButtons cameraRef={cameraRef} nodesRef={nodesRef} />
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
 
