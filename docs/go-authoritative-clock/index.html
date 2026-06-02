@@ -777,6 +777,41 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
   <div class="panel" id="panel-verify" role="tabpanel">
     <h2>Verification and risks.</h2>
 
+    <div class="subheading">How to test</div>
+    <p>There are two test surfaces — the live editor (works at every phase) and, new from Phase 1 on, a headless Go test that runs the network with no editor attached. The single clearest signal the model works: the cascade runs to completion headlessly (today it deadlocks after the first hop), and the live editor shows the same pulse animation now driven by Go's stream.</p>
+
+    <div class="cards" style="flex-direction:column;margin-bottom:1.5rem;">
+      <div class="card">
+        <h3>Can it be tested in the editor?</h3>
+        <ul>
+          <li>Yes — at every phase. Load topology.json (click it → custom editor opens), Run, and watch pulses animate. The editor stays the integration test surface throughout.</li>
+          <li>New capability from Phase 1: a headless Go test. Because Go owns the clock and self-delivers, the cascade can run inside <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> with no TS. Today that deadlocks after the first hop because delivery waits on the visual layer — so "headless run completes" is itself the proof Phase 1 worked.</li>
+          <li>Inspection tool both ways: the .probe breadcrumb logs (go.jsonl / ts.jsonl). Clear them, Run, read them to see Go deliveries firing on Go's clock and TS applying the stream.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>What shows it worked — per phase</h3>
+        <ul>
+          <li><strong>Phase 1 (clock):</strong> <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> / a Go test completes the full cascade with no editor (previously impossible). go.jsonl shows deliveries firing on Go's clock timing (~inFlightTime apart), not on a TS message. Stronger check: freeze or detach the renderer — Go keeps delivering on schedule.</li>
+          <li><strong>Phase 2 (position stream):</strong> beads animate from Go's emitted positions with visual parity to before. probe shows position messages arriving; TS computes no positions (the deleted PulseBead/rfArcLength/moveNode math is gone). A Go test can assert positions are emitted ~16ms apart with monotonically increasing t and arrival at t=1.</li>
+          <li><strong>Phase 3 (geometry):</strong> drag a node in the editor — the wire re-curves and the in-flight bead re-derives remaining travel, all from Go's data. Proof TS no longer computes geometry: dragging stays correct after the local TS geometry math is removed. probe shows the geometry edit round-tripping through Go.</li>
+          <li><strong>Phase 4 (shading):</strong> appearance is unchanged at parity; changing a shading parameter in Go's data is reflected on screen. Proof: materials are driven by Go-supplied parameters, not TS constants.</li>
+          <li><strong>Phase 5 (bridge/CRUD):</strong> the notifyDelivered message is gone — grep confirms nothing sends it; all parity/guard scripts pass; save/load through VS Code still works end to end.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Reference / regression</h3>
+        <ul>
+          <li>Capture a visual reference run before Phase 2 (a short recording or screenshots of a cascade) and compare after each phase for parity — motion should look identical; only the source of the motion changed.</li>
+          <li>Add the headless cascade Go test as a permanent regression: it locks in that the substrate runs without the editor and never silently re-couples to it.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-bottom:1.5rem;">The litmus test for the whole effort: pull the editor away and Go still runs the network; reattach the editor and it draws exactly what Go is doing. If both hold, the clock and data truly moved to Go.</div>
+
     <div class="cards" style="flex-direction:column;">
       <div class="card">
         <h3>Green gate every phase</h3>
