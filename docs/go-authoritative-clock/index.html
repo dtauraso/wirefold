@@ -177,6 +177,9 @@
   .spec-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
   .spec-table td:first-child { font-family: var(--mono); font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--accent); }
   .spec-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; white-space: nowrap; color: var(--go-hue); }
+  .spec-table td ol { margin: 0; padding-left: 1.25rem; }
+  .spec-table td ol li { padding: 1px 0; line-height: 1.55; }
+  #panel-goroutines .spec-table td:last-child { min-width: 380px; }
 
   /* Cards */
   .cards {
@@ -329,6 +332,7 @@
   <div class="tabs" role="tablist">
     <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">Overview</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="division">Division</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
@@ -399,6 +403,54 @@
         </ul>
       </div>
     </div>
+  </div>
+
+  <!-- TAB: Goroutines -->
+  <div class="panel" id="panel-goroutines" role="tabpanel">
+    <h2>What each goroutine does.</h2>
+    <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes: each node is its own small loop running on its own goroutine, coordinating only through wires. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
+
+    <table class="spec-table">
+      <caption>The goroutines</caption>
+      <thead>
+        <tr>
+          <th>Goroutine</th>
+          <th>How many</th>
+          <th>Its job</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>main</td>
+          <td>one</td>
+          <td><ol><li>Parse flags and load the topology from topology.json.</li><li>Launch one goroutine per node (its Update loop).</li><li>Block, waiting for every node loop to finish — or for a shutdown signal (SIGINT/SIGTERM) or stdin EOF.</li><li>Once they exit, close and flush the trace stream.</li></ol></td>
+        </tr>
+        <tr>
+          <td>node loop</td>
+          <td>one per node</td>
+          <td><ol><li>Wait for values to arrive in its input slots.</li><li>Check its firing rule against what has arrived.</li><li>When the rule is satisfied, fire and compute its output.</li><li>Send the value out each output port, applying that port's send rule (gated or fire-and-forget).</li><li>Loop back and wait for the next inputs. This is where the actual work happens (node.Update).</li></ol></td>
+        </tr>
+        <tr>
+          <td>stdin reader</td>
+          <td>one</td>
+          <td><ol><li>Read the next line TS wrote to the pipe (stdin).</li><li>Parse it into a message (pause, resume, geometry edit, delivered).</li><li>Apply it — freeze/resume the clock, update geometry, or fill a slot.</li><li>Loop back and read again. It never stops reading — intake stays live even while the clock is paused.</li></ol></td>
+        </tr>
+        <tr>
+          <td>trace drain</td>
+          <td>one</td>
+          <td><ol><li>Receive the next trace event off the shared channel that every node loop writes to.</li><li>Stamp it with the next monotonic step number, so events have a total order.</li><li>Write it out as one JSONL line — the stream TS renders.</li><li>Loop back for the next event until the channel closes at shutdown.</li></ol></td>
+        </tr>
+        <tr>
+          <td>send helpers</td>
+          <td>one per blocking send (short-lived)</td>
+          <td><ol><li>Spawned when a node starts a blocking send and parks.</li><li>Wait on the cancellation context.</li><li>If the context is cancelled (shutdown), broadcast to wake any parked waiter so it isn't stuck forever.</li><li>Exit as soon as the send resolves — it is a one-shot helper, not a loop.</li></ol></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:1.25rem;">A wire (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span>) has no goroutine of its own. It is driven by the sender and receiver node loops through a shared lock and a condition variable — the slot and its backpressure live in the destination node, not in a separate wire thread.</div>
+
+    <div class="note" style="margin-top:0.75rem;">Where the clock change lands: in the target model each node loop also wakes about every 16&nbsp;ms to compute and emit its in-flight bead positions and to self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
   </div>
 
   <!-- TAB 3: The Bridge -->
@@ -671,6 +723,8 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="note" style="margin-top:1.25rem;">The dividing line is data vs. the GPU. Geometry (control points, arc length, wire path, node and port positions), animation (bead position along path, traversal progress, timing), and shading (materials, colors, glass and environment parameters) are all data — they belong in Go. Running the GPU and capturing human input stay in TS because they require the browser's WebGL context and DOM event loop. Input that produces geometry — a node drag — is captured in TS and sent to Go as a geometry edit, so Go remains the single source of authoritative data.</div>
+
+    <div class="note" style="margin-top:0.75rem;border-left-color:var(--warn);">Moving geometry into Go does <strong>not</strong> mean serializing it into <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.json</span>. The file holds only two things, the same as today: the substrate spec (nodes, ports, edges, send rules, slots) and the authored layout (the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">view</span> block — node x/y positions, camera pose, fade/label UI state). Everything Go now owns is <em>derived</em> from those inputs — port world-positions from node position + side, curve control points from endpoints + route, arc length from the curve, bead positions streamed at runtime. Go recomputes derived geometry at load (it already computes arc length there); persisting it would create a second source of truth that drifts. The file does not grow — a node drag writes back one changed x/y.</div>
   </div>
 
   <!-- TAB 8: Doc Updates -->
