@@ -1,6 +1,0 @@
-window.AUDIT_DATA = [
-{"slug":"multi-select","name":"Multi-select","category":"Node editing","status":"restore-parity","depends_on":[],"files":[],"cross_cut_weight":"Low","cross_cut_surfaces":[],"reduction_proposal":"no action — no stubs; restore when built.","verification":"VERIFIED","notes":"Absent from code; git-history only."},
-{"slug":"node-delete","name":"Node delete","category":"Node editing","status":"restore-parity","depends_on":[],"files":[],"cross_cut_weight":"Low","cross_cut_surfaces":[],"reduction_proposal":"no action — no stubs; restore when built.","verification":"VERIFIED","notes":"Absent from code; git-history only."},
-{"slug":"node-palette","name":"Node palette","category":"Node editing","status":"restore-parity","depends_on":[],"files":[],"cross_cut_weight":"Low","cross_cut_surfaces":[],"reduction_proposal":"no action — no stubs; restore when built.","verification":"VERIFIED","notes":"Absent from code; git-history only."},
-{"slug":"multi-node-alignment-guides","name":"Multi-node alignment guides","category":"Node editing","status":"accepted-for-build","depends_on":["multi-select"],"files":[],"cross_cut_weight":"Low","cross_cut_surfaces":[],"reduction_proposal":"no action — not present; gated behind multi-select restore.","verification":"VERIFIED","notes":"Generalizes single-node drag guides to multi-selection bounding box."},
-];
