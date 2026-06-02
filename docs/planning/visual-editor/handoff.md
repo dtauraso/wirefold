@@ -7,11 +7,15 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-01 — no task branch in flight; all merged to main)
+## State at handoff (2026-06-02 — task/spec-go-backend-ts-frontend, pushed)
 
-- Active branch: none. All task branches merged. `main` is current (commit a814ba60). Glass node-body rendering + init-value pulse beads (from `task/glass-node-only`) are on main — see "What is on main" item 1. Since that merge: housekeeping only — superseded `task/glass-node-surface` branch deleted (local + remote); `/gen-node-defs` build artifact added to root `.gitignore` (commit 422cc1f2) so it stops showing as untracked. No code/substrate changes; no task branch in flight; branches clean.
-- Build/test gate GREEN on `main`: `go build ./...`, `go test ./...`, webview `npx tsc --noEmit` + `npm run build`, `tools/check-generated.sh` (no diff), and `scripts/check-dead-doc-tokens.sh` all pass (green at last merge; nothing has changed since).
-- Uncommitted: only `topology.json` remains modified (editor scratch), deliberately untouched.
+- Active branch: `task/spec-go-backend-ts-frontend`, pushed to origin (tracking set). 6 commits, DOCS/SPEC ONLY — no Go, TS, or substrate code changed. Branch off `main` (was at a814ba60 / 7f223989).
+- Work this session: authored two self-contained HTML spec pages under `docs/` — `docs/clock-dialog/index.html` and `docs/go-authoritative-clock/index.html` (8-tab spec: Overview, Division, The Bridge, Clock Change, Contract, Play/Pause, TS → Go, Doc Updates). Dark theme, vanilla-JS tabs, inline SVG diagrams.
+- The spec defines a **Go-authoritative model** (NOT yet implemented — it is a target/proposal): Go backend holds ALL geometry, shading, and animation data — nodes, ports, edges (endpoints+curves), pulses, materials/glass/environment params — runs the clock, computes every bead position and emits a position stream. Node and wire loops sleep (~16ms) to set the report rate ONLY; bead speed stays `pulseSpeed` (uniform), arrival stays at `inFlightTime`. TS frontend runs the GPU to display Go's data and forwards editor geometry + animation updates (and pause/resume) back to Go, which updates its data accordingly. Bridge: geometry+shading+position data out; editor geometry+animation updates in.
+- This is a **substrate-model amendment**: it deletes `NotifyDelivered` as the delivery trigger (MODEL.md currently pins it as the only cross-boundary signal). NOT implemented yet — MODEL.md remains current for existing code; the spec is the target. The spec's "Doc Updates" tab lists the exact MODEL.md (Driver, Cross-boundary, Geometry/time, Editor-surface) and CLAUDE.md (pump description, bridge surface, drift rule) sections to change in the same commit as any future code.
+- Key finding (grounded in a webview inventory): the geometry/animation math the spec moves to Go ALREADY exists in TS, partly duplicated — `geometry-helpers.ts` `rfArcLength` mirrors Go's `BezierArcLength`; `store.ts` `moveNode` re-derives arc length + `simLatencyMs` in TS; `scene-content.tsx` `PulseBead` computes `t` + `curve.getPointAt(t)` per frame. So implementation is largely DELETING TS duplicates and consolidating into Go, not net-new math. This duplication is itself a current drift risk (two arc-length implementations that must agree).
+- Build/test gate: unchanged from main (no code touched this session).
+- Uncommitted: only `topology.json` (editor scratch), deliberately untouched. Note: the two HTML specs live under `docs/` (not `docs/planning/`), so they are NOT branch-local-stripped and will ride a merge.
 
 ### What is on main (recent work, newest first)
 
@@ -30,9 +34,10 @@ The re-audit (re-running the SAME audit after the fix) caught that the F1 fix wa
 
 ### OPEN ITEMS / NEXT
 
-1. **No task in flight.** Friction-driven from here. (Housekeeping: `/gen-node-defs` build artifact is now gitignored at the repo root — commit 422cc1f2 — so it no longer shows as untracked.)
-2. **`task/partial-feature-audit` starting.** New audit branch to inventory other partially-done features across the codebase — findings-only pass, no fixes on that branch.
-3. **`session-log.md`** still has dead React-Flow line references (app.tsx, AnimatedEdge.tsx) — left intentionally; it's a dated historical snapshot, rewriting it would falsify the record.
+1. **Decide the spec branch's fate.** Either merge `task/spec-go-backend-ts-frontend` to main (specs ride along), or keep it as a pushed planning reference. No code depends on it.
+2. **If implementing the Go-authoritative model:** first concrete step is to make Go compute arc length and elapse `inFlightTime` itself, calling its own delivery — replacing the `NotifyDelivered`-from-TS trigger. Then move bead-position computation + position-stream emit into Go (node/wire loops sleep ~16ms for report rate), and reduce TS to plotting the stream + capturing input + forwarding editor geometry/animation updates. Update MODEL.md + CLAUDE.md (per the spec's Doc Updates tab) in the SAME commit as the code.
+3. Carry-over: `task/partial-feature-audit` (inventory partially-done features, findings-only) was noted as starting in the prior handoff — status unknown / not this session.
+4. `session-log.md` still has dated React-Flow line refs — left intentionally as historical record.
 
 ### Substrate model contract (stable)
 
