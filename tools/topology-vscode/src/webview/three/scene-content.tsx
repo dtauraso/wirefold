@@ -71,21 +71,21 @@ function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
     for (let i = 0; i < count; i++) {
       const y = posAttr.getY(i);
       const t = Math.max(0, Math.min(1, (y / 50 + 1) / 2)); // 0 bottom → 1 top
-      // top: #c0d8ff (soft blue), bottom: #ffe0c0 (warm cream)
-      colors[i * 3 + 0] = 0.75 + (1.0 - 0.75) * (1 - t); // r
-      colors[i * 3 + 1] = 0.85 + (0.88 - 0.85) * (1 - t); // g
-      colors[i * 3 + 2] = 1.0 + (0.75 - 1.0) * (1 - t);  // b
+      // top: #c8c4bc (mid neutral, close to bottom — no bright hot-spot), bottom: #ffe0c0 (warm cream)
+      colors[i * 3 + 0] = 0.78 + (1.0 - 0.78) * (1 - t); // r
+      colors[i * 3 + 1] = 0.77 + (0.88 - 0.77) * (1 - t); // g
+      colors[i * 3 + 2] = 0.74 + (0.75 - 0.74) * (1 - t);  // b
     }
     skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     envScene.add(skyMesh);
 
     // Soft white fill light — bakes into env
-    const fill = new THREE.AmbientLight(0xffffff, 1.2);
+    const fill = new THREE.AmbientLight(0xffffff, 0.9);
     envScene.add(fill);
-    const key = new THREE.DirectionalLight(0xffeedd, 1.5);
+    const key = new THREE.DirectionalLight(0xffeedd, 0.45);
     key.position.set(1, 2, 1);
     envScene.add(key);
-    const rim = new THREE.DirectionalLight(0xaabbff, 0.6);
+    const rim = new THREE.DirectionalLight(0xaabbff, 0.3);
     rim.position.set(-2, 1, -1);
     envScene.add(rim);
 
@@ -196,7 +196,7 @@ export function GraphNode({
           roughness={0.12}
           ior={1.5}
           metalness={0}
-          clearcoat={0.4}
+          clearcoat={0}
           clearcoatRoughness={0.1}
           envMap={envTex ?? undefined}
           envMapIntensity={1.0}
