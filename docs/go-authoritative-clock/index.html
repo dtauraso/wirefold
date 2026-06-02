@@ -378,19 +378,21 @@
       <div class="card">
         <h3>Go — backend</h3>
         <ul>
-          <li>Holds all geometric data</li>
+          <li>Holds all geometry data — nodes, ports, edges (endpoints, curves), wires, pulses</li>
+          <li>Holds all shading data — materials, colors, glass and environment parameters</li>
           <li>Computes all animation values — arc length, positions, traversal progress, durations</li>
           <li>Computes every bead position and emits it to TS</li>
           <li>Runs the substrate (nodes, slots, wires, send rules)</li>
-          <li>Sends messages describing what to render</li>
+          <li>Sends messages describing what to render — geometry, shading, and position data</li>
         </ul>
       </div>
       <div class="card">
         <h3>TS — frontend</h3>
         <ul>
-          <li>Plots the positions Go sends — no interpolation, no animation math</li>
-          <li>Sends geometric edits from the editor (node drags) back to Go</li>
-          <li>No geometry math, no animation calculation, no clock — drawing only</li>
+          <li>Builds nothing on its own — takes geometry and shading data from Go and displays it</li>
+          <li>Runs the GPU: issues draw calls, manages the WebGL context, compiled shaders, and baked textures</li>
+          <li>Captures human input: camera/arcball/pan/pinch, pick/select, drag/wire</li>
+          <li>Sends editor geometry and animation updates to Go; Go updates its data accordingly — no geometry math, no animation calculation, no clock</li>
         </ul>
       </div>
     </div>
@@ -402,7 +404,7 @@
     <p>The whole boundary is two arrows. Nothing else crosses.</p>
 
     <div class="diagram">
-      <svg width="680" height="180" viewBox="0 0 680 180" xmlns="http://www.w3.org/2000/svg" aria-label="Bridge diagram: Go sends trace stream to TS; TS sends geometry edits to Go">
+      <svg width="680" height="180" viewBox="0 0 680 180" xmlns="http://www.w3.org/2000/svg" aria-label="Bridge diagram: Go sends trace stream to TS; TS sends editor geometry and animation updates to Go">
         <!-- Go box -->
         <rect x="20" y="40" width="200" height="100" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
         <text x="120" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#5ec4a0">GO</text>
@@ -419,7 +421,7 @@
 
         <!-- Bottom arrow: TS → GO (geometry edits) -->
         <line x1="458" y1="112" x2="222" y2="112" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
-        <text x="340" y="130" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#c07ef8">geometry edits from editor</text>
+        <text x="340" y="130" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#c07ef8">editor geometry + animation updates</text>
 
         <defs>
           <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
@@ -438,6 +440,10 @@
 
     <div class="note" style="margin-top:0.75rem;">
       Go computes every bead's position from its clock and path geometry and emits it. TS sets each sprite to the position it receives — no interpolation, no math on the frontend.
+    </div>
+
+    <div class="note" style="margin-top:0.75rem;">
+      TS sends editor geometry and animation updates to Go; Go updates its data accordingly. Go remains the single authoritative holder of all geometry and animation state.
     </div>
   </div>
 
@@ -587,65 +593,74 @@
   <div class="panel" id="panel-contract" role="tabpanel">
     <h2>The contract in one line.</h2>
 
-    <div class="contract-box">Go (backend) holds all geometry, runs the clock, and computes every bead position.
-TS (frontend) plots the position stream it receives and forwards editor geometry edits back to Go.
-The bridge is: position stream out, geometry edits in.</div>
+    <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
+TS (frontend) runs the GPU to display Go's data and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
+The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
 
     <div class="first-step-label">First concrete step</div>
     <div class="first-step">
-      <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding geometry edits back to Go.</p>
+      <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding editor geometry and animation updates to Go, which updates its data accordingly.</p>
     </div>
   </div>
 
   <!-- TAB 7: TS → Go -->
   <div class="panel" id="panel-tsgo" role="tabpanel">
     <h2>How much of TS converts to Go?</h2>
-    <p>Roughly two-thirds of what TS currently computes is pure math — bezier geometry, arc length, bead position along a path, traversal timing — and that math can move wholesale to Go as data Go produces and emits. The remaining third is irreducible to TS: GPU mesh construction, material and lighting setup, camera and pointer input, and the React/DOM editor chrome. The split is not arbitrary. Geometry and animation are computation; Go already owns computation. Drawing pixels and capturing human gestures cannot leave TS because they require the browser's WebGL context and the DOM event loop.</p>
+    <p>The dividing line is now <strong>data vs. the GPU</strong>. All geometry, animation, and shading are data — Go owns and emits them. TS only runs the GPU (issues draw calls, manages GPU-resident resources) and captures human input. Everything TS currently computes that is data — bezier geometry, arc length, bead positions, traversal timing, material parameters, color, glass settings, environment parameters — moves to Go as data Go produces and streams out. What cannot leave TS is whatever physically requires the browser's WebGL context or the DOM event loop.</p>
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--go-hue);">Converts to GEOMETRIC data Go computes</h3>
+        <h3 style="color:var(--go-hue);">Geometry data → Go</h3>
         <ul>
-          <li>Quadratic bezier control-point math — midpoint, perpendicular lift, bulge-factor offset — currently computed per-edge on every node move (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">buildPortCurve</code>, <code style="font-family:var(--mono);font-size:11px;">buildEdgeCurve</code>)</li>
-          <li>Arc length integration — 50-segment numeric approximation that mirrors Go's own <code style="font-family:var(--mono);font-size:11px;">BezierArcLength</code> — currently duplicated in TS and called on every drag tick (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">rfArcLength</code>)</li>
-          <li>Node world position — RF y-down to Three.js y-up coordinate transform, center offset from RF top-left origin (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">nodeWorldPos</code>)</li>
-          <li>Port surface positions — per-side, per-slot fraction along the node sphere surface, used to anchor wire endpoints (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">portDir</code>, <code style="font-family:var(--mono);font-size:11px;">portWorldPos</code>)</li>
-          <li>Simulated wire latency — arc length divided by the uniform pulse speed to produce <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code>, currently re-derived from TS arc length on every drag (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">arcLengthToSimLatencyMs</code>; store.ts: <code style="font-family:var(--mono);font-size:11px;">moveNode</code>)</li>
-          <li>Bounding box for camera fit — min/max over all node positions and dimensions (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">boundingBox</code>; scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">CameraFitter</code>)</li>
+          <li>Node sphere geometry — center position, radius, and the 3-D coordinates of every port position on the sphere surface; border ring geometry anchored to each node (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">nodeWorldPos</code>, <code style="font-family:var(--mono);font-size:11px;">portDir</code>, <code style="font-family:var(--mono);font-size:11px;">portWorldPos</code>)</li>
+          <li>Edge data — endpoints (source node/port → target node/port) and curve geometry (quadratic bezier control points: midpoint, perpendicular lift, bulge-factor offset); the full tube path TS uses to build <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code> is held and computed by Go (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">buildPortCurve</code>, <code style="font-family:var(--mono);font-size:11px;">buildEdgeCurve</code>)</li>
+          <li>Pulse / bead geometry — the 3-D path a bead rides, expressed as bezier control points Go already stores</li>
+          <li>Arc length — 50-segment numeric integration currently duplicated in TS; Go's own <code style="font-family:var(--mono);font-size:11px;">BezierArcLength</code> is the single source (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">rfArcLength</code>)</li>
+          <li>Node positions — world coordinates authoritative in Go; TS forwards drags to Go as geometry edits and receives updated positions back (store.ts: <code style="font-family:var(--mono);font-size:11px;">moveNode</code>)</li>
+          <li>Bounding box — min/max over all node positions and dimensions, used for camera fit; input positions are geometry Go holds (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">boundingBox</code>)</li>
         </ul>
       </div>
     </div>
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--go-hue);">Converts to ANIMATION data Go computes</h3>
+        <h3 style="color:var(--go-hue);">Animation data → Go</h3>
         <ul>
-          <li>Bead position along the path — <code style="font-family:var(--mono);font-size:11px;">curve.getPointAt(t)</code> evaluated every animation frame from <code style="font-family:var(--mono);font-size:11px;">elapsed / simLatencyMs</code>; Go already owns <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> and the clock (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">PulseBead useFrame</code>)</li>
-          <li>Traversal progress fraction — <code style="font-family:var(--mono);font-size:11px;">t = (now − startTime) / simLatencyMs</code>, clamped to [0, 1]; currently computed in TS using <code style="font-family:var(--mono);font-size:11px;">getPauseAdjustedNow()</code> (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">PulseBead useFrame</code>; pulse-state.ts: <code style="font-family:var(--mono);font-size:11px;">setPulse / patchPulse</code>)</li>
-          <li>Bead progress preservation on node drag — fractional t captured and re-anchored to new <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> so the bead does not jump when wire geometry changes (store.ts: <code style="font-family:var(--mono);font-size:11px;">moveNode</code>)</li>
-          <li>Delivery detection — TS decides when t ≥ 1 and posts <code style="font-family:var(--mono);font-size:11px;">delivered</code> to unblock Go; in the target model Go detects arrival itself from its own clock (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">PulseBead useFrame</code>; pulse-state.ts: <code style="font-family:var(--mono);font-size:11px;">claimDelivered</code>)</li>
-          <li>Pause-adjusted clock — <code style="font-family:var(--mono);font-size:11px;">getPauseAdjustedNow()</code> is a TS reimplementation of the concept of a pauseable clock; Go's clock already embodies this (state/run-status.ts, pulse-state.ts)</li>
-          <li>Label projection throttle — world positions projected to screen every 2 frames; this is a render concern but the input positions (node world coords) are geometry Go would own (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">LabelProjector</code>)</li>
+          <li>Bead position along the path — <code style="font-family:var(--mono);font-size:11px;">curve.getPointAt(t)</code> currently evaluated every frame in TS; Go emits the 3-D position directly and TS plots it (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">PulseBead useFrame</code>)</li>
+          <li>Traversal progress fraction — <code style="font-family:var(--mono);font-size:11px;">t = (now − startTime) / simLatencyMs</code>, clamped to [0, 1]; Go owns the clock and <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> so it computes and emits t (pulse-state.ts, scene-content.tsx)</li>
+          <li>Timing — <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> derived from arc length ÷ uniform pulse speed; delivery detection when elapsed reaches <code style="font-family:var(--mono);font-size:11px;">inFlightTime</code>; bead progress preservation across geometry edits (store.ts: <code style="font-family:var(--mono);font-size:11px;">moveNode</code>; pulse-state.ts: <code style="font-family:var(--mono);font-size:11px;">claimDelivered</code>)</li>
+          <li>Pause-adjusted clock — <code style="font-family:var(--mono);font-size:11px;">getPauseAdjustedNow()</code> is a TS re-implementation of a pauseable clock; Go's clock already embodies this (state/run-status.ts, pulse-state.ts)</li>
         </ul>
       </div>
     </div>
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--ts-hue);">Stays in TS (cannot / should not convert)</h3>
+        <h3 style="color:var(--go-hue);">Shading data → Go</h3>
         <ul>
-          <li>GPU mesh construction and draw — sphere, torus, and tube geometry objects; materials (meshPhysicalMaterial, meshStandardMaterial); WebGL renderer via @react-three/fiber Canvas (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">GraphNode</code>, <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code>, <code style="font-family:var(--mono);font-size:11px;">PulseBead</code>)</li>
-          <li>Procedural environment map — PMREM sky scene baked into a WebGL texture at startup; requires the WebGL context (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">ProceduralEnvProvider</code>)</li>
-          <li>Camera orientation and persistence — perspective camera state, arcball rotation, saved quaternion restore; camera is a renderer concept (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">CameraRefBridge</code>, <code style="font-family:var(--mono);font-size:11px;">CameraFitter</code>; interaction-controls.ts)</li>
-          <li>Pointer and wheel input capture — click discrimination, node drag (unproject to z=0 plane), port-to-port wiring gesture, two-finger pan, pinch-dolly; these are DOM events that must be consumed in TS (ThreeView.tsx; interaction-controls.ts: <code style="font-family:var(--mono);font-size:11px;">useInteractionControls</code>)</li>
-          <li>Raycast pick — THREE.Raycaster hit-testing scene meshes to identify the clicked node, port, or edge; requires the live WebGL scene (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">RaycasterHelper</code>)</li>
+          <li>Material / color / fill / stroke — <code style="font-family:var(--mono);font-size:11px;">node.data.fill</code> and <code style="font-family:var(--mono);font-size:11px;">node.data.stroke</code> keyed off <code style="font-family:var(--mono);font-size:11px;">NODE_DEFS</code>; the definition of what color a node is is data Go supplies</li>
+          <li>Glass / material parameters — roughness, metalness, transmission, ior, thickness, clearcoat, reflectivity, and any per-node overrides; Go holds the parameter set, TS feeds it into <code style="font-family:var(--mono);font-size:11px;">MeshPhysicalMaterial</code></li>
+          <li>Environment / lighting parameters — sky color, sun direction, ambient intensity, and any other parameters that define the scene's lighting; Go supplies the values, TS bakes them into the PMREM environment map on the GPU</li>
+          <li>Wire / tube appearance — tube radius, opacity, color; Go provides these per-edge so TS can configure <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code> without computing them</li>
+          <li>Pulse / bead appearance — bead size, color, emissive intensity; Go emits these alongside the bead position</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="cards" style="margin-top:1rem;">
+      <div class="card">
+        <h3 style="color:var(--ts-hue);">Stays in TS (GPU + input only)</h3>
+        <ul>
+          <li>Issuing the GPU draw calls — the actual WebGL / Three.js render: constructing sphere, torus, and tube geometry objects; calling <code style="font-family:var(--mono);font-size:11px;">renderer.render()</code>; managing the render loop via @react-three/fiber Canvas (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">GraphNode</code>, <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code>, <code style="font-family:var(--mono);font-size:11px;">PulseBead</code>)</li>
+          <li>GPU-resident resources that must live in the browser: the WebGL context itself; compiled shader programs; baked textures and environment maps. Go supplies the parameters (material values, environment parameters); TS bakes and binds them on the GPU (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">ProceduralEnvProvider</code>)</li>
+          <li>Human input capture: camera arcball / pan / pinch-dolly — DOM pointer and wheel events that must be consumed in TS (interaction-controls.ts: <code style="font-family:var(--mono);font-size:11px;">useInteractionControls</code>); raycast pick — THREE.Raycaster hit-testing the live GPU scene to identify clicked node, port, or edge (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">RaycasterHelper</code>); drag / wire — node drag is captured in TS and sent to Go as a geometry edit so Go stays authoritative; port-to-port wiring gesture captured in TS and forwarded to Go</li>
           <li>React / DOM editor chrome — label overlay divs, occlusion badges, in-node spec-override text, run button, camera-UI widgets; HTML rendering stays in the browser (ThreeView.tsx)</li>
           <li>Zustand store, spec parse, save lifecycle — editor state management, JSON parse/serialize, VS Code IPC for save; these are editor authoring concerns, not substrate computation (store.ts, save.ts, SaveLifecycle.tsx)</li>
         </ul>
       </div>
     </div>
 
-    <div class="note" style="margin-top:1.25rem;">The dividing line is computation vs. pixels-and-input. Geometry (control points, arc length, wire path, node and port positions) and animation (bead position along path, traversal progress, timing) are computation — they belong in Go. Drawing those results as GPU meshes and capturing pointer/wheel gestures stay in TS because they require the browser's WebGL context and DOM event loop. Input that produces geometry — a node drag — stays in TS as gesture capture but sends its result to Go as a position edit, so Go remains the single source of authoritative coordinates.</div>
+    <div class="note" style="margin-top:1.25rem;">The dividing line is data vs. the GPU. Geometry (control points, arc length, wire path, node and port positions), animation (bead position along path, traversal progress, timing), and shading (materials, colors, glass and environment parameters) are all data — they belong in Go. Running the GPU and capturing human input stay in TS because they require the browser's WebGL context and DOM event loop. Input that produces geometry — a node drag — is captured in TS and sent to Go as a geometry edit, so Go remains the single source of authoritative data.</div>
   </div>
 
   <!-- TAB 8: Doc Updates -->
@@ -658,7 +673,7 @@ The bridge is: position stream out, geometry edits in.</div>
         <h3>MODEL.md</h3>
         <ul>
           <li>Driver / Firing rule: delivery is no longer triggered by TS animation completion. Go's clock elapses inFlightTime and Go delivers to the slot itself.</li>
-          <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position stream out, geometry edits in (plus pause/resume).</li>
+          <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
           <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
           <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
         </ul>
