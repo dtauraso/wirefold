@@ -659,6 +659,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>Human input capture: camera arcball / pan / pinch-dolly — DOM pointer and wheel events that must be consumed in TS (interaction-controls.ts: <code style="font-family:var(--mono);font-size:11px;">useInteractionControls</code>); raycast pick — THREE.Raycaster hit-testing the live GPU scene to identify clicked node, port, or edge (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">RaycasterHelper</code>); drag / wire — node drag is captured in TS and sent to Go as a geometry edit so Go stays authoritative; port-to-port wiring gesture captured in TS and forwarded to Go</li>
           <li>React / DOM editor chrome — label overlay divs, occlusion badges, in-node spec-override text, run button, camera-UI widgets; HTML rendering stays in the browser (ThreeView.tsx)</li>
           <li>Zustand store, spec parse, save lifecycle — editor state management, JSON parse/serialize, VS Code IPC for save; these are editor authoring concerns, not substrate computation (store.ts, save.ts, SaveLifecycle.tsx)</li>
+          <li>No authoritative data store. TS holds no source-of-truth graph state — it applies Go's data to the scene. The per-frame loop reads imperative buffers fed by Go; the Zustand store is removed.</li>
         </ul>
       </div>
     </div>
@@ -735,6 +736,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <ul>
           <li><strong>Go:</strong> each loop wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (a new trace kind); deliver at t ≥ 1.</li>
           <li><strong>TS:</strong> pump.ts handles the new position message and sets the bead sprite to the received position. DELETE the TS position/timing math: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), the duplicated rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and store.ts moveNode's local re-derive of arc length + simLatencyMs. TS plots only.</li>
+          <li><strong>TS:</strong> Remove the authoritative Zustand store (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>): Go owns the data, so TS keeps no authoritative graph state. The per-frame path already bypasses React/Zustand by reading imperative stores (pulse-state.ts, edge-curve map); Go's position stream feeds that imperative path directly.</li>
           <li><strong>Exit:</strong> beads move from Go's stream; TS computes no positions; tsc + build green; visual parity with before. Run the trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
         </ul>
       </div>
@@ -744,6 +746,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <ul>
           <li><strong>Go:</strong> hold node positions, port positions, and edge data (endpoints source→target, curve control points) as authoritative state; compute curves in Go.</li>
           <li><strong>TS:</strong> send editor geometry edits to Go (node move, edge create/delete — partly exists via moveNode/deleteEdge IPC; extend to full geometry CRUD); render from the geometry Go streams back, computing none of it locally.</li>
+          <li><strong>TS:</strong> Any remaining structural state (which nodes/edges exist) is a passive render copy of what Go sent — not an authoritative store, holds no geometry logic. Zustand's data-owning/computing role (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">moveNode</span> arc-length re-derive, curve management, fade fixpoint) is deleted, not relocated to TS.</li>
           <li><strong>Exit:</strong> dragging a node updates Go's data, Go re-streams geometry + positions, TS renders without local geometry math.</li>
           <li><strong>Note:</strong> per the handoff caveat, edge RECONNECT (moving a wire's endpoint) is a substrate redesign, not a small edit — scope it separately; target-end move is delete+create, source-end needs a new rewire IPC verb.</li>
         </ul>
@@ -799,6 +802,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li><strong>Two arc-length implementations</strong> must agree until Phase 2 deletes the TS copy — until then a drift risk.</li>
           <li><strong>Bead speed vs report rate:</strong> confirm the sleep never affects speed — speed stays pulseSpeed, arrival stays inFlightTime, the sleep only changes how many waypoints are shown.</li>
           <li>Run an industry bug-class scan on the Phase 1–2 timing change before declaring it ready.</li>
+          <li><strong>Zustand store removal:</strong> after removing <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span> as authoritative, confirm nothing else silently relied on it as truth — grep its consumers; structural rendering must read from Go's data, not a local model.</li>
         </ul>
       </div>
     </div>
