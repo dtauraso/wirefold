@@ -1,6 +1,7 @@
 import type { RFEdge, RFNode, NodeData, EdgeData } from "../../types";
 import { NODE_TYPES, type Node as SpecNode, type Spec } from "../../../schema";
 import type { ViewerState } from "../viewer/types";
+import { NODE_DIM_FALLBACK } from "../node-dims";
 import {
   buildEdges,
   buildNoteNodes,
@@ -14,8 +15,8 @@ export function specToFlow(
   const memberNodes: RFNode<NodeData>[] = spec.nodes
     .map((n) => {
     const def = NODE_TYPES[n.type];
-    const width = def?.width ?? 110;
-    const height = def?.height ?? 60;
+    const width = def?.width ?? NODE_DIM_FALLBACK.width;
+    const height = def?.height ?? NODE_DIM_FALLBACK.height;
     const nv = vs.nodes?.[n.id];
     return {
       id: n.id,

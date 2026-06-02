@@ -117,15 +117,15 @@ render-only: it animates trace events received from Go.
 
 - **Go runtime** owns all slot state, firing rules, wire delivery, and
   backpressure. It emits trace events as JSON lines on stdout.
-- **`pump.ts`** (`tools/topology-vscode/src/webview/rf/pump.ts`) is the
+- **`pump.ts`** (`tools/topology-vscode/src/webview/three/pump.ts`) is the
   sole translator: it reads trace events from the extension bridge and
-  updates React Flow node/edge data so components can animate them.
-  Pump is the boundary — no slot-phase or backpressure logic may live
-  outside it on the TS side.
-- **Per-kind node components** (`rf/nodes/<Kind>Node.tsx`) render the
-  current RF node data as static React Flow custom nodes. They read
-  phase indicators from the data the pump has written; they own no
-  substrate state.
+  updates state stores (pulse-state, three/store) so the 3D renderer can
+  animate them. Pump is the boundary — no slot-phase or backpressure logic
+  may live outside it on the TS side.
+- **`GraphNode`** (in `tools/topology-vscode/src/webview/three/scene-content.tsx`)
+  renders all nodes generically as a sphere mesh + border ring, keyed off
+  `node.data.fill`/`node.data.stroke` from `NODE_DEFS`. There are no
+  per-kind component files.
 - **`SingleEdgeTube`** (in `tools/topology-vscode/src/webview/three/ThreeView.tsx`) renders wire
   animations driven by trace events written by the pump. It owns no
   delivery logic.
@@ -210,11 +210,12 @@ in the lifecycle.
   unblocks. (Known limitation: re-adding an edge sends nothing to the
   substrate today — the live graph is not rebuilt on add.)
 - TS never sets slot state directly. It only sends `notifyDelivered` (triggers
-  `NotifyDelivered` in Go) and renders slot badges from `"slot"` trace events.
-- `pump.ts` `"slot"` branch (see `PUMP_SLOT_HANDLER` in pump.ts) writes `slots[port]` into RF node
-  data. `GenericNode.tsx` (line 142) reads `slotEntry.phase === "filled"` to
-  render the slot badge; held-value badges (line 144–145) persist from `"send"`
-  events and are NOT cleared on `"done"`.
+  `NotifyDelivered` in Go); it does not render anything from `"slot"` trace events
+  (the `"slot"` case is a no-op — see below).
+- `pump.ts` `"slot"` case is a no-op `return` — it does not write any state.
+  `SlotEntry`/`SlotMap` exist only as type definitions in `messages.ts` and are
+  not consumed anywhere in the webview today. Slot-phase badges are not rendered;
+  held-value display comes from pulse-state, not from slot events.
 
 **Drift rule:** slot-phase transition logic outside `paced_wire.go` (Go) or
 `pump.ts` (TS) is drift — move it to one of those two files.

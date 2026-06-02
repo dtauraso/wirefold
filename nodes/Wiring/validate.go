@@ -107,6 +107,18 @@ func validateSpec(spec *topoSpec) error {
 
 	// (No required-inbound-edge check: a node with an unfed required port loads and stays inert by precondition-gating — the editor flags it visually instead.)
 
+	// Check 4: sendRules values must be recognised SendRule constants.
+	for _, n := range spec.Nodes {
+		if n.Data == nil || n.Data.SendRules == nil {
+			continue
+		}
+		for port, raw := range n.Data.SendRules {
+			if _, err := ParseSendRule(raw); err != nil {
+				errs = append(errs, fmt.Sprintf("node %q port %q: %v", n.ID, port, err))
+			}
+		}
+	}
+
 	// Check 5: required data.state keys must be present for each node kind.
 	for _, n := range spec.Nodes {
 		bind, ok := Registry[n.Type]

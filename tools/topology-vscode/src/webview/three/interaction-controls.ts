@@ -6,6 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import { nodeWorldPos, pixelToNDC } from "./geometry-helpers";
+import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
@@ -262,8 +263,8 @@ export function useInteractionControls(
         if (planePoint) {
           const node = nodesRef.current.find((n) => n.id === nd.nodeId);
           if (node) {
-            const w = node.data?.width ?? 110;
-            const h = node.data?.height ?? 60;
+            const w = node.data?.width ?? NODE_DIM_FALLBACK.width;
+            const h = node.data?.height ?? NODE_DIM_FALLBACK.height;
             const newCenterX = planePoint.x + (nd.nodeCenterAtStart.x - nd.planePointAtStart.x);
             const newCenterY = planePoint.y + (nd.nodeCenterAtStart.y - nd.planePointAtStart.y);
             const newPosX = newCenterX - w / 2;

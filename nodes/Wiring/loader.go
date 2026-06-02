@@ -289,8 +289,11 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 		if n.Data == nil || n.Data.SendRules == nil {
 			return RuleConsumeGated
 		}
-		rule := SendRule(n.Data.SendRules[port])
-		if rule == "" {
+		// ParseSendRule returns RuleConsumeGated for "" and errors for
+		// unrecognised values. validate.go rejects bad values before we
+		// reach here, so the error branch is defence-in-depth only.
+		rule, err := ParseSendRule(n.Data.SendRules[port])
+		if err != nil {
 			return RuleConsumeGated
 		}
 		return rule

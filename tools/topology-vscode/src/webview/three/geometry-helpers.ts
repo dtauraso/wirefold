@@ -3,6 +3,7 @@
 
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
+import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import {
   CURVE_PARAM_PULSE_SPEED_WU_PER_MS,
   CURVE_PARAM_MIN_ARC_LENGTH,
@@ -51,15 +52,15 @@ export function buildEdgeCurve(
 
 /** Node sphere radius from node dimensions. */
 export function nodeRadius(node: RFNode<NodeData>): number {
-  return Math.min((node.data?.width ?? 110), (node.data?.height ?? 60)) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
+  return Math.min((node.data?.width ?? NODE_DIM_FALLBACK.width), (node.data?.height ?? NODE_DIM_FALLBACK.height)) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
 }
 
 export function boundingBox(nodes: RFNode<NodeData>[]) {
   if (nodes.length === 0) return { minX: -200, maxX: 200, minY: -200, maxY: 200 };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const n of nodes) {
-    const w = (n.data?.width ?? 110) / 2;
-    const h = (n.data?.height ?? 60) / 2;
+    const w = (n.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
+    const h = (n.data?.height ?? NODE_DIM_FALLBACK.height) / 2;
     minX = Math.min(minX, n.position.x - w);
     maxX = Math.max(maxX, n.position.x + w);
     minY = Math.min(minY, n.position.y - h);
@@ -70,8 +71,8 @@ export function boundingBox(nodes: RFNode<NodeData>[]) {
 
 /** World position for a node center (RF y-down → Three y-up). */
 export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
-  const x = node.position.x + (node.data?.width ?? 110) / 2;
-  const y = -(node.position.y + (node.data?.height ?? 60) / 2);
+  const x = node.position.x + (node.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
+  const y = -(node.position.y + (node.data?.height ?? NODE_DIM_FALLBACK.height) / 2);
   return new THREE.Vector3(x, y, 0);
 }
 
@@ -95,7 +96,7 @@ export function portDir(node: RFNode<NodeData>, portName: string, isInput: boole
   const sameSide = list.filter((p) => (p.side ?? (isInput ? "left" : "right")) === side);
   const onSideIdx = sameSide.findIndex((p) => p === port);
   const pct = port.slot !== undefined ? SLOT_PCT[port.slot] : ((onSideIdx + 1) * 100) / (sameSide.length + 1);
-  const w = node.data?.width ?? 110, h = node.data?.height ?? 60;
+  const w = node.data?.width ?? NODE_DIM_FALLBACK.width, h = node.data?.height ?? NODE_DIM_FALLBACK.height;
   // local border point offset from center (y-up): pct measured from top for left/right, from left for top/bottom
   let bx = 0, by = 0;
   if (side === "left")        { bx = -w / 2; by = h * (0.5 - pct / 100); }
