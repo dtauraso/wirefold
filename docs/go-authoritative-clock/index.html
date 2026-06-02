@@ -438,6 +438,8 @@
     <h2>What each goroutine does.</h2>
     <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes: each node is its own small loop running on its own goroutine, coordinating only through wires. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
 
+    <div class="note" style="margin-bottom:1rem;"><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed); recomputed from live wire geometry, elapsed on Go's sim-clock.</div>
+
     <table class="spec-table">
       <caption>The goroutines</caption>
       <thead>
@@ -466,7 +468,7 @@
           <tr>
             <td>ReadGate loop</td>
             <td>one per ReadGate node</td>
-            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within W; if the window times out first, clear the partial arrival and restart.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on ToChainInhibitor only if that wire has no pulse; never drop — if it still carries a pulse, restart the loop and retry.</li></ol></td>
+            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within the coincidence window W (measured on Go's sim-clock). If W elapses with only one input present, clear the partial arrival — empty its slot and ack its source over the ack edge, releasing a consumeGated sender — then restart. A timeout sends nothing downstream; the lone input decays.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on ToChainInhibitor only if that wire has no pulse; never drop — if it still carries a pulse, restart the loop and retry.</li></ol></td>
           </tr>
           <tr>
             <td>ChainInhibitor loop</td>
