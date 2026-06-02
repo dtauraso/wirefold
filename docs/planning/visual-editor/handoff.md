@@ -9,13 +9,14 @@ read this file first (no chat history needed) and proceed.
 
 ## State at handoff (2026-06-01 — no task branch in flight; all merged to main)
 
-- Active branch: none. `main` is current (commit db71b499). This session: built a level-4 repo audit, then implemented and merged the fixes it surfaced.
+- Active branch: none. `main` is current (commit b40fff69). Latest session: merged `task/default-edge-kind-const` (DEFAULT_EDGE_KIND constant) to main.
 - Build/test gate GREEN on `main`: `go build ./...`, `go test ./nodes/...`, webview `npx tsc --noEmit` + `npm run build`, `tools/check-generated.sh` (no diff), and the new `scripts/check-dead-doc-tokens.sh` all pass.
 - Uncommitted: `topology.json` remains modified (editor scratch), deliberately untouched all session.
 
 ### What is on main (recent work, newest first)
 
-1. **Level-4 audit site.** `docs/level4-audit/index.html` — self-contained offline HTML report (horizontal tabs, inline SVG diagrams, 3 findings each with evidence + a proposed-solution block, a "what's healthy" page, leverage-ranked recs). Leverage axis = AI re-derivation cost.
+1. **DEFAULT_EDGE_KIND constant.** `flow-to-spec.ts:74` unguarded `"signal"` edge-kind literal is now `DEFAULT_EDGE_KIND` in `src/schema/types.ts` (typed as `EdgeKind`, validated against the `EDGE_KINDS` union at compile time); imported into `flow-to-spec.ts`. Merged from `task/default-edge-kind-const` (e46ebd17), merge commit b40fff69.
+2. **Level-4 audit site.** `docs/level4-audit/index.html` — self-contained offline HTML report (horizontal tabs, inline SVG diagrams, 3 findings each with evidence + a proposed-solution block, a "what's healthy" page, leverage-ranked recs). Leverage axis = AI re-derivation cost.
 2. **F1 — stale docs re-anchored.** CLAUDE.md + MODEL.md described the RETIRED React Flow architecture as current. Re-anchored to the live `three/` reality: node rendering is generic via `GraphNode` in `scene-content.tsx` (reads `node.data.fill`/`stroke` from `NODE_DEFS`); there are NO per-kind `<Kind>Node.tsx` files and no `rf/` dir; `NODE_DEFS` in `src/schema/node-defs.ts` is the single registry (no `registry.ts`); pump is at `webview/three/pump.ts`. Added `scripts/check-dead-doc-tokens.sh` (tokens: `rf/nodes`, `GenericNode`, `PUMP_SLOT_HANDLER`, `webview/schema/`, `webview/rf/`) wired into `scripts/stop-checks.sh` so these docs cannot silently rot again.
 3. **F2 — silent-failure duplication closed.** Extracted `NODE_DIM_FALLBACK = {width:110,height:60}` to `src/schema/node-dims.ts` (neutral layer; `src/webview/state/node-dims.ts` is now a re-export shim) and replaced all 110/60 literal fallbacks across spec-to-flow, geometry-helpers, interaction-controls, node-types. `node-override-text.ts` handled kind names ("Input","ChainInhibitor") are now a compile-checked subset of `NODE_DEFS` keys (renaming a kind breaks tsc instead of silently returning ""). Trace-kind exhaustiveness was already enforced via assertNever in pump.ts.
 4. **F3 — SendRule made structural.** Added `ParseSendRule(string) (SendRule, error)` in `nodes/Wiring/ports.go` and a parse-time rejection in `nodes/Wiring/validate.go` (Check 4): an invalid `data.sendRules` value is now REJECTED at load instead of silently degrading to consumeGated. loader.go uses ParseSendRule too. Tests in ports_test.go.
@@ -29,8 +30,7 @@ The re-audit (re-running the SAME audit after the fix) caught that the F1 fix wa
 
 1. **No task in flight.** Friction-driven from here.
 2. **Removing the slot trace event entirely is a DEFERRED substrate change, declined this session.** If ever wanted: remove `KindSlot` from `Trace/Trace.go` (and `TraceEventKinds`), regenerate `trace-kinds.ts`, drop the `SlotEvent` union member + pump no-op case + marshal-contract test entries, confirm `paced_wire.go` stops emitting. It's substrate (trace/observability protocol), not UI — frame it as its own single step.
-3. **Minor pre-existing:** edge-kind `"signal"` fallback in `src/webview/state/adapter/flow-to-spec.ts:74` is an unguarded string literal (could be a `DEFAULT_EDGE_KIND` constant validated against `EDGE_KINDS`). Not fixed.
-4. **`session-log.md`** still has dead React-Flow line references (app.tsx, AnimatedEdge.tsx) — left intentionally; it's a dated historical snapshot, rewriting it would falsify the record.
+3. **`session-log.md`** still has dead React-Flow line references (app.tsx, AnimatedEdge.tsx) — left intentionally; it's a dated historical snapshot, rewriting it would falsify the record.
 
 ### Substrate model contract (stable)
 
