@@ -226,6 +226,61 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
+      {/* Init pulses: render data.init values as small spheres inside the node body */}
+      {(() => {
+        // data.init lives in node.data.nodeData (the verbatim spec data blob)
+        const rawNodeData = node.data?.nodeData as Record<string, unknown> | undefined;
+        const init = rawNodeData?.["init"];
+        if (!Array.isArray(init) || init.length === 0) return null;
+        const n = init.length;
+        // Match pulse-bead radius (4), but scale down if the row doesn't fit within the node diameter.
+        // Layout: n spheres of radius pr with gap = pr * 0.3 between adjacent spheres.
+        // Total width = n * 2*pr + (n-1)*0.3*pr = pr * (2n + 0.3*(n-1))
+        // Constraint: total width ≤ 2*r  →  pr ≤ 2*r / (2n + 0.3*(n-1))
+        const PULSE_BEAD_R = 4;
+        const GAP_RATIO = 0.3; // gap = pr * GAP_RATIO
+        const fitFactor = 2 * r / (2 * n + GAP_RATIO * (n - 1));
+        const pr = Math.min(PULSE_BEAD_R, fitFactor);
+        const gap = pr * GAP_RATIO;
+        const totalWidth = n * 2 * pr + (n - 1) * gap;
+        const startX = -totalWidth / 2 + pr; // center of leftmost sphere
+        const zFront = r * 0.6; // in front of node body center, visible through glass
+        const fadeOpacityInner = 0.25;
+        return (init as number[]).map((val: number, idx: number) => {
+          const x = startX + idx * (2 * pr + gap);
+          const isGlass = val === 0;
+          return (
+            <mesh key={idx} position={[x, 0, zFront]} raycast={() => null}>
+              <sphereGeometry args={[pr, 8, 8]} />
+              {isGlass ? (
+                <meshPhysicalMaterial
+                  color="#ffffff"
+                  transmission={1.0}
+                  thickness={pr}
+                  roughness={0.12}
+                  ior={1.5}
+                  metalness={0}
+                  clearcoat={0.4}
+                  clearcoatRoughness={0.1}
+                  envMap={envTex ?? undefined}
+                  envMapIntensity={1.0}
+                  transparent
+                  opacity={faded ? fadeOpacityInner * 0.6 : 0.92}
+                  depthWrite={false}
+                />
+              ) : (
+                <meshStandardMaterial
+                  color="#ffffff"
+                  emissive={new THREE.Color(0xffffff)}
+                  emissiveIntensity={faded ? 0 : 2.5}
+                  transparent={faded}
+                  opacity={faded ? fadeOpacityInner : 1}
+                />
+              )}
+            </mesh>
+          );
+        });
+      })()}
       {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
       {(node.data?.inputs ?? []).map((port) => {
         const dir = portDir(node, port.name, true);
