@@ -41,9 +41,9 @@ func fixtureLines(t *testing.T) []string {
 
 func TestMarshalEventMatchesFixture(t *testing.T) {
 	events := []Event{
-		{Step: 0, Kind: KindRecv, Node: "A", Port: "in", Value: 1, hasValue: true},
+		{Step: 0, Kind: KindRecv, Node: "A", Port: "in", Value: 1},
 		{Step: 1, Kind: KindFire, Node: "A"},
-		{Step: 2, Kind: KindSend, Node: "A", Port: "out", Value: 1, hasValue: true},
+		{Step: 2, Kind: KindSend, Node: "A", Port: "out", Value: 1},
 		{Step: 3, Kind: KindDone, Node: "A", Port: "out"},
 	}
 

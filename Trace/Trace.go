@@ -44,8 +44,6 @@ type Event struct {
 	Node      string `json:"node"`
 	Port      string `json:"port,omitempty"`      // recv: input port; send: output port
 	Value     int    `json:"value,omitempty"`     // recv/send only
-	// hasValue distinguishes "value 0" from "no value" for send/recv events.
-	hasValue bool
 	// Wire geometry fields — populated on send events when the outgoing port
 	// is backed by a PacedWire. Zero values are omitted from JSON output.
 	// ArriveStep is omitted: the substrate has no global ms-per-step cadence,
@@ -114,7 +112,7 @@ func (t *Trace) Recv(node, port string, value int) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindRecv, Node: node, Port: port, Value: value, hasValue: true}
+	t.ch <- Event{Kind: KindRecv, Node: node, Port: port, Value: value}
 }
 
 // Fire emits a fire event for `node`. Called once per handler
@@ -132,7 +130,7 @@ func (t *Trace) Send(node, port string, value int) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value}
 }
 
 // SendWire emits a send event like Send, additionally carrying the wire geometry
@@ -143,7 +141,7 @@ func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs f
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
