@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Level-4 Audit · wirefold</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181c;
+    --border: #2a2a30;
+    --text: #e0e0e8;
+    --muted: #808090;
+    --accent: #7c9ef8;
+    --high: #e05252;
+    --high-bg: #2a1010;
+    --med: #d4a017;
+    --med-bg: #261e04;
+    --low: #888;
+    --low-bg: #1a1a1e;
+    --good: #3db87a;
+    --good-bg: #0a2018;
+    --mono: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  /* Horizontal tab bar */
+  nav {
+    flex-shrink: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0 12px;
+  }
+  nav .logo {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    padding: 10px 16px 10px 4px;
+    border-right: 1px solid var(--border);
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+  nav .logo span { color: var(--muted); display: inline; font-size: 10px; margin-left: 6px; }
+  nav button {
+    background: none;
+    border: none;
+    color: #c8c8d0;
+    font-family: var(--sans);
+    font-size: 12px;
+    text-align: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+  nav button:hover { color: #fff; background: rgba(124,158,248,0.10); }
+  nav button.active { color: #fff; border-bottom-color: var(--accent); background: rgba(124,158,248,0.14); }
+  /* Main */
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 40px;
+    max-width: 860px;
+  }
+  section { display: none; }
+  section.active { display: block; }
+  h1 { font-family: var(--mono); font-size: 22px; color: var(--text); margin-bottom: 6px; }
+  h2 { font-family: var(--mono); font-size: 16px; color: var(--accent); margin: 24px 0 10px; }
+  h3 { font-family: var(--mono); font-size: 13px; color: var(--muted); margin: 16px 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+  p { margin-bottom: 10px; color: var(--text); }
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #b0c8ff;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: #b0c8ff;
+    overflow-x: auto;
+    margin-bottom: 14px;
+  }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 4px;
+    letter-spacing: .06em;
+    margin-bottom: 12px;
+  }
+  .badge.HIGH { background: var(--high-bg); color: var(--high); border: 1px solid var(--high); }
+  .badge.MED  { background: var(--med-bg);  color: var(--med);  border: 1px solid var(--med); }
+  .badge.LOW  { background: var(--low-bg);  color: var(--low);  border: 1px solid var(--low); }
+  .badge.GOOD { background: var(--good-bg); color: var(--good); border: 1px solid var(--good); }
+  .summary {
+    font-size: 15px;
+    color: var(--text);
+    margin-bottom: 18px;
+    padding-left: 10px;
+    border-left: 3px solid var(--accent);
+  }
+  .evidence {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 18px;
+  }
+  .evidence h3 { margin-top: 0; }
+  .leverage {
+    background: rgba(124,158,248,0.07);
+    border: 1px solid rgba(124,158,248,0.2);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-top: 16px;
+    font-size: 13px;
+  }
+  .leverage strong { color: var(--accent); }
+  .proposed {
+    background: #081a0f;
+    border: 1px solid #1e4d2e;
+    border-left: 3px solid var(--good);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 18px;
+  }
+  .proposed h3 { margin-top: 0; color: var(--good); }
+  .proposed ul { padding-left: 20px; margin: 6px 0; }
+  .proposed li { margin-bottom: 6px; color: var(--text); }
+  .proposed li ul { margin-top: 4px; }
+  svg text { font-family: var(--sans); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th { background: var(--surface); font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); letter-spacing: .05em; text-transform: uppercase; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">wirefold<span>Level-4 Code Audit</span></div>
+  <button class="active" onclick="show('overview')">Overview</button>
+  <button onclick="show('leverage')">Leverage Model</button>
+  <button onclick="show('f1')">F1 · Stale Docs</button>
+  <button onclick="show('f2')">F2 · Silent Dup</button>
+  <button onclick="show('f3')">F3 · SendRule</button>
+  <button onclick="show('healthy')">What's Healthy</button>
+  <button onclick="show('recs')">Recommendations</button>
+</nav>
+
+<main>
+
+<!-- ───── OVERVIEW ───── -->
+<section id="overview" class="active">
+  <h1>Level-4 Audit</h1>
+  <p style="color:var(--muted);margin-bottom:20px;">wirefold · 2026-06-01</p>
+  <p>This audit examines the wirefold repo through a <strong>level-4 (Staff / model-correctness)</strong> lens. The optimization target is not lines of code or test coverage — it is <strong>AI re-derivation cost</strong>: every session where an AI agent must re-read stale docs, grep for constants, or discover silent failures from scratch burns tokens and produces drift.</p>
+
+  <h2>Leverage Metric</h2>
+  <p>Each finding is scored by:</p>
+  <pre>leverage = (token cost per hit) × (sessions that hit it) × (drift likelihood)</pre>
+  <p><strong>Token cost per hit</strong> — how many tokens are wasted when an AI encounters this. <strong>Sessions that hit it</strong> — how often (stale CLAUDE.md loads every single session). <strong>Drift likelihood</strong> — probability the AI acts on bad info vs. recovers via grep.</p>
+
+  <h2>Findings Ranked by Leverage</h2>
+  <svg width="740" height="240" viewBox="0 0 740 240" xmlns="http://www.w3.org/2000/svg">
+    <!-- background -->
+    <rect width="740" height="240" fill="#18181c" rx="8"/>
+    <!-- grid lines -->
+    <line x1="160" y1="20" x2="160" y2="200" stroke="#2a2a30" stroke-width="1"/>
+    <line x1="160" y1="200" x2="720" y2="200" stroke="#2a2a30" stroke-width="1"/>
+    <!-- y axis label -->
+    <text x="8" y="110" fill="#808090" font-size="11" transform="rotate(-90,8,110)">Leverage →</text>
+
+    <!-- bars -->
+    <!-- F1 Stale Docs HIGH leverage=100 -->
+    <rect x="164" y="40" width="530" height="28" fill="#e05252" rx="3" opacity="0.85"/>
+    <text x="172" y="59" fill="#15151a" font-size="12" text-anchor="start">F1 · Stale Docs (HIGH)</text>
+
+    <!-- F2 Silent Dup MED leverage=58 -->
+    <rect x="164" y="80" width="307" height="28" fill="#d4a017" rx="3" opacity="0.85"/>
+    <text x="172" y="99" fill="#15151a" font-size="12" text-anchor="start">F2 · Silent Dup (MED)</text>
+
+    <!-- F3 SendRule MED leverage=45 -->
+    <rect x="164" y="120" width="238" height="28" fill="#d4a017" rx="3" opacity="0.85"/>
+    <text x="172" y="139" fill="#15151a" font-size="12" text-anchor="start">F3 · SendRule (MED)</text>
+
+    <!-- Healthy -->
+    <rect x="164" y="160" width="130" height="28" fill="#3db87a" rx="3" opacity="0.85"/>
+    <text x="172" y="179" fill="#15151a" font-size="12" text-anchor="start">Healthy boundary</text>
+
+    <!-- axis labels -->
+    <text x="164" y="218" fill="#808090" font-size="10">0</text>
+    <text x="430" y="218" fill="#808090" font-size="10">50</text>
+    <text x="696" y="218" fill="#808090" font-size="10">100</text>
+  </svg>
+
+  <p style="margin-top:16px;">Finding 1 (stale docs) scores near-maximum because CLAUDE.md and MODEL.md load into context <em>every single AI session</em>, contain incorrect file paths, and actively instruct impossible actions.</p>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── LEVERAGE MODEL ───── -->
+<section id="leverage">
+  <h1>Leverage Model</h1>
+  <p>The <strong>level-4 lens</strong> asks: <em>is the model correct?</em> Not "does it compile?" (level 1) or "are modules well-bounded?" (level 3) — but "does the mental model encoded in the codebase match how the system actually works?"</p>
+  <p>For an AI-assisted project, a wrong model in context docs is worse than a wrong comment in code, because it is injected into every session's prompt window before any code is read.</p>
+
+  <h2>Seniority Ladder of Refactoring</h2>
+  <svg width="640" height="370" viewBox="0 0 640 370" xmlns="http://www.w3.org/2000/svg">
+    <rect width="640" height="370" fill="#18181c" rx="8"/>
+
+    <!-- rungs — bottom to top, level 1..6 -->
+    <!-- level 1 Junior -->
+    <rect x="40" y="290" width="560" height="42" fill="#1a1a24" rx="4" stroke="#2a2a30" stroke-width="1"/>
+    <text x="60" y="313" fill="#808090" font-size="12" font-weight="bold">1 · Junior</text>
+    <text x="200" y="313" fill="#606070" font-size="12">Lines, naming, dead code</text>
+
+    <!-- level 2 Mid -->
+    <rect x="60" y="238" width="520" height="42" fill="#1a1a24" rx="4" stroke="#2a2a30" stroke-width="1"/>
+    <text x="80" y="261" fill="#808090" font-size="12" font-weight="bold">2 · Mid</text>
+    <text x="200" y="261" fill="#606070" font-size="12">Modules, extract functions, DRY</text>
+
+    <!-- level 3 Senior -->
+    <rect x="80" y="186" width="480" height="42" fill="#1a1a24" rx="4" stroke="#2a2a30" stroke-width="1"/>
+    <text x="100" y="209" fill="#808090" font-size="12" font-weight="bold">3 · Senior</text>
+    <text x="200" y="209" fill="#606070" font-size="12">Boundaries, APIs, error handling</text>
+
+    <!-- level 4 Staff — HIGHLIGHTED -->
+    <rect x="100" y="134" width="440" height="42" fill="#0a1820" rx="4" stroke="#7c9ef8" stroke-width="2"/>
+    <text x="120" y="157" fill="#7c9ef8" font-size="13" font-weight="bold">4 · Staff ← YOU ARE HERE</text>
+    <text x="310" y="157" fill="#9ab8ff" font-size="12">Model correctness, context docs, drift</text>
+
+    <!-- level 5 -->
+    <rect x="120" y="82" width="400" height="42" fill="#1a1a24" rx="4" stroke="#2a2a30" stroke-width="1"/>
+    <text x="140" y="105" fill="#808090" font-size="12" font-weight="bold">5 · Principal</text>
+    <text x="260" y="105" fill="#606070" font-size="12">Which models deserve questioning?</text>
+
+    <!-- level 6 -->
+    <rect x="140" y="30" width="360" height="42" fill="#1a1a24" rx="4" stroke="#2a2a30" stroke-width="1"/>
+    <text x="160" y="53" fill="#808090" font-size="12" font-weight="bold">6 · Distinguished</text>
+    <text x="300" y="53" fill="#606070" font-size="12">Which problems deserve a system?</text>
+
+    <!-- vertical arrow on left -->
+    <line x1="24" y1="320" x2="24" y2="50" stroke="#2a2a30" stroke-width="1.5"/>
+    <polygon points="24,40 20,56 28,56" fill="#2a2a30"/>
+    <text x="14" y="200" fill="#808090" font-size="10" transform="rotate(-90,14,200)">abstraction →</text>
+  </svg>
+
+  <h2>Why AI Re-Derivation Is the Cost Axis</h2>
+  <p>Each session where an AI must re-derive a fact that was already known — because docs are wrong, constants aren't named, or invariants are runtime-only — costs real tokens and real money. Level-4 refactoring for AI-assisted projects means: <strong>encode the model correctly so the AI can read it once and stay correct</strong>, rather than re-grepping every session to recover ground truth.</p>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── FINDING 1 ───── -->
+<section id="f1">
+  <h1>Finding 1 — Stale Docs</h1>
+  <span class="badge HIGH">HIGH</span>
+  <p class="summary">CLAUDE.md and MODEL.md describe the retired React Flow architecture as current, and both load into AI context every session, actively misdirecting all future work.</p>
+
+  <div class="evidence">
+    <h3>Evidence</h3>
+    <p><strong>(a) CLAUDE.md — Substrate primitive landing rule</strong></p>
+    <p>Instructs AI to create:</p>
+    <pre>tools/topology-vscode/src/webview/rf/nodes/&lt;Kind&gt;Node.tsx</pre>
+    <p>and register in:</p>
+    <pre>tools/topology-vscode/src/webview/schema/registry.ts</pre>
+    <p>The <code>webview/rf/</code> directory does not exist — React Flow was retired; the render path is now <code>webview/three/</code>. The schema dir is <code>src/schema/</code>, not <code>webview/schema/</code>.</p>
+
+    <p style="margin-top:12px;"><strong>(b) MODEL.md §slot-phase</strong></p>
+    <p>Pins <code>PUMP_SLOT_HANDLER</code>, <code>slots[port]</code> writes, and <code>GenericNode.tsx:142</code> reading <code>slotEntry.phase</code>. None of these exist. The <code>pump.ts</code> <code>slot</code> case is a no-op <code>return</code>.</p>
+    <p>Referenced line: <code>pump.ts</code> slot case — verified no-op in current code.</p>
+  </div>
+
+  <div class="proposed">
+    <h3>Proposed solution</h3>
+    <ul>
+      <li>Re-anchor <code>CLAUDE.md</code> and <code>MODEL.md</code> to the current <code>three/</code> architecture in one pass:
+        <ul>
+          <li>In CLAUDE.md "Substrate primitive landing rule", replace the React-Flow path <code>tools/topology-vscode/src/webview/rf/nodes/&lt;Kind&gt;Node.tsx</code> and <code>webview/schema/registry.ts</code> with the real render path under <code>tools/topology-vscode/src/webview/three/</code> and the real schema dir <code>tools/topology-vscode/src/schema/</code>.</li>
+          <li>In MODEL.md §slot-phase, delete the dead <code>PUMP_SLOT_HANDLER</code>, <code>slots[port]</code> writes, and <code>GenericNode.tsx:142</code> description; replace with how <code>pump.ts</code>'s <code>slot</code> case is a no-op <code>return</code> and where slot phase actually renders today.</li>
+        </ul>
+      </li>
+      <li>Add a cheap guard so it can't silently rot again: a doc-lint step (greppable list of known-dead tokens like <code>rf/nodes</code>, <code>GenericNode</code>, <code>PUMP_SLOT_HANDLER</code>) wired into the Stop-hook / check scripts that fails when a dead token reappears in <code>CLAUDE.md</code> or <code>MODEL.md</code>.</li>
+      <li>Effort: small. Leverage: highest — these files load every session.</li>
+    </ul>
+  </div>
+
+  <h2>Failure Flow</h2>
+  <svg width="680" height="130" viewBox="0 0 680 130" xmlns="http://www.w3.org/2000/svg">
+    <rect width="680" height="130" fill="#18181c" rx="8"/>
+
+    <!-- Box 1 -->
+    <rect x="20" y="35" width="170" height="60" rx="5" fill="#2a1010" stroke="#e05252" stroke-width="1.5"/>
+    <text x="105" y="62" fill="#e05252" font-size="12" text-anchor="middle" font-weight="bold">CLAUDE.md / MODEL.md</text>
+    <text x="105" y="78" fill="#e05252" font-size="11" text-anchor="middle">loaded every session</text>
+
+    <!-- arrow -->
+    <line x1="192" y1="65" x2="232" y2="65" stroke="#808090" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="212" y="58" fill="#606070" font-size="10" text-anchor="middle">inject</text>
+
+    <!-- Box 2 -->
+    <rect x="234" y="35" width="150" height="60" rx="5" fill="#1a1a24" stroke="#2a2a30" stroke-width="1"/>
+    <text x="309" y="62" fill="#d0d0e0" font-size="12" text-anchor="middle">AI reads wrong</text>
+    <text x="309" y="78" fill="#d0d0e0" font-size="11" text-anchor="middle">rf/ paths as valid</text>
+
+    <!-- arrow -->
+    <line x1="386" y1="65" x2="426" y2="65" stroke="#808090" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="406" y="58" fill="#606070" font-size="10" text-anchor="middle">acts on it</text>
+
+    <!-- Box 3 -->
+    <rect x="428" y="35" width="230" height="60" rx="5" fill="#261004" stroke="#d4a017" stroke-width="1.5"/>
+    <text x="543" y="58" fill="#d4a017" font-size="12" text-anchor="middle">Creates phantom file</text>
+    <text x="543" y="74" fill="#d4a017" font-size="11" text-anchor="middle">or greps to recover (costly)</text>
+
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#808090"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <div class="leverage">
+    <strong>Leverage: MAXIMUM.</strong> CLAUDE.md loads into every session before any code is read. The wrong paths mean the AI's first concrete action (file creation or grep) is incorrect. Recovery cost: ~2k–8k tokens of grep + backtrack per session. Drift likelihood: near 1.0 — no code guards against these wrong instructions.
+  </div>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── FINDING 2 ───── -->
+<section id="f2">
+  <h1>Finding 2 — Silent-Failure Duplication</h1>
+  <span class="badge MED">MED</span>
+  <p class="summary">Three verify-grep hotspots that fail silently when the codebase drifts — new node kinds produce wrong output, layout regressions are invisible, and trace exhaustiveness is unchecked.</p>
+
+  <div class="evidence">
+    <h3>Evidence</h3>
+    <p><strong>(a) node-override-text.ts — hand-repeated kind names</strong></p>
+    <p>File hand-repeats node-kind strings (<code>"Input"</code>, <code>"ChainInhibitor"</code>, …) and field keys (<code>raw["init"]</code>, <code>state.held</code>) in a <code>switch</code> statement. No codegen, not referenced in <code>check-generated.sh</code>. Adding or renaming a kind returns empty string with no error.</p>
+
+    <p style="margin-top:12px;"><strong>(b) Default node dims — duplicated across 7 files</strong></p>
+    <p>The values <code>110</code> (width) and <code>60</code> (height) appear across at least 7 TypeScript files with no named constant. A layout change requires grep-and-replace with no compile-time guard.</p>
+
+    <p style="margin-top:12px;"><strong>(c) Trace-event kinds — re-typed as string literals</strong></p>
+    <p>Trace kinds (<code>recv</code>, <code>fire</code>, <code>send</code>, <code>slot</code>, <code>done</code>) are generated into <code>trace-kinds.ts</code> (protected by check-generated.sh) but re-typed as raw string literals in <code>pump.ts</code> and <code>messages.ts</code> with no exhaustiveness check. A new kind added to the generator is silently missed.</p>
+  </div>
+
+  <div class="proposed">
+    <h3>Proposed solution</h3>
+    <p>Three independent fixes:</p>
+    <ul>
+      <li><strong>node-override-text.ts:</strong> drive the kind names and field keys from the generated <code>NODE_DEFS</code> instead of a hand-written switch, OR add the file to <code>check-generated.sh</code> coverage with an exhaustiveness assertion keyed on <code>NODE_DEFS</code>, so a missing/renamed kind becomes a compile/check error instead of an empty string.</li>
+      <li><strong>Default dims 110/60:</strong> extract a single exported <code>NODE_DIM_FALLBACK = { width: 110, height: 60 }</code> constant and import it in all 7 sites; delete the inline literals.</li>
+      <li><strong>Trace kinds:</strong> add a TS exhaustiveness check in <code>pump.ts</code> — a <code>switch</code> over the generated <code>TRACE_EVENT_KINDS</code> union with a <code>default: assertNever(kind)</code> — so adding a Go trace kind that isn't handled fails <code>tsc</code>.</li>
+      <li>Effort: small–medium.</li>
+    </ul>
+  </div>
+
+  <h2>Source-of-Truth Diagram</h2>
+  <svg width="640" height="200" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="640" height="200" fill="#18181c" rx="8"/>
+
+    <!-- Source box -->
+    <rect x="20" y="70" width="140" height="60" rx="5" fill="#0a2018" stroke="#3db87a" stroke-width="1.5"/>
+    <text x="90" y="97" fill="#3db87a" font-size="12" text-anchor="middle" font-weight="bold">Source of Truth</text>
+    <text x="90" y="113" fill="#3db87a" font-size="11" text-anchor="middle">(codegen / schema)</text>
+
+    <!-- Good path -->
+    <line x1="162" y1="80" x2="240" y2="60" stroke="#3db87a" stroke-width="1.5" marker-end="url(#arrg)"/>
+    <rect x="242" y="38" width="160" height="44" rx="5" fill="#0a2018" stroke="#3db87a" stroke-width="1.5"/>
+    <text x="322" y="58" fill="#3db87a" font-size="12" text-anchor="middle">Generated ✓</text>
+    <text x="322" y="74" fill="#3db87a" font-size="11" text-anchor="middle">trace-kinds.ts (protected)</text>
+
+    <!-- Bad path -->
+    <line x1="162" y1="120" x2="240" y2="140" stroke="#e05252" stroke-width="1.5" marker-end="url(#arrr)"/>
+    <rect x="242" y="118" width="160" height="44" rx="5" fill="#2a1010" stroke="#e05252" stroke-width="1.5"/>
+    <text x="322" y="138" fill="#e05252" font-size="12" text-anchor="middle">Hand-copied ✗</text>
+    <text x="322" y="154" fill="#e05252" font-size="11" text-anchor="middle">node-override-text.ts</text>
+
+    <!-- Drift indicator for bad -->
+    <line x1="404" y1="140" x2="480" y2="140" stroke="#e05252" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrr)"/>
+    <rect x="482" y="118" width="140" height="44" rx="5" fill="#1a1010" stroke="#804040" stroke-width="1"/>
+    <text x="552" y="138" fill="#e05252" font-size="12" text-anchor="middle">Drift → silent</text>
+    <text x="552" y="154" fill="#e05252" font-size="11" text-anchor="middle">empty string, no error</text>
+
+    <defs>
+      <marker id="arrg" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#3db87a"/>
+      </marker>
+      <marker id="arrr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#e05252"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <div class="leverage">
+    <strong>Leverage: MED.</strong> Hits when adding/renaming node kinds or changing layout. Each hit costs 1k–3k tokens of grep-to-diagnose. Drift likelihood is moderate — happens on feature work, not every session.
+  </div>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── FINDING 3 ───── -->
+<section id="f3">
+  <h1>Finding 3 — SendRule Silent Degradation</h1>
+  <span class="badge MED">MED</span>
+  <p class="summary">Invalid SendRule values in topology.json (e.g., a lowercase typo) are not rejected at parse time — they silently flip send semantics to <code>consumeGated</code> with zero signal.</p>
+
+  <div class="evidence">
+    <h3>Evidence</h3>
+    <p><code>loader.go:288</code> — raw string cast into SendRule with no validation.</p>
+    <p><code>ports.go:171</code> — logic is <code>Rule != RuleFireAndForget</code>: anything unrecognized evaluates as <code>consumeGated</code>.</p>
+    <p>Example: <code>"fireandforget"</code> (missing camel case) in <code>topology.json</code> → silently treated as <code>consumeGated</code>. The node runs but blocks on slot fill instead of firing independently. No log, no error, no panic.</p>
+    <p>This is the only place in the substrate model where a convention (the exact string <code>"fireAndForget"</code>) is not enforced by structure.</p>
+  </div>
+
+  <div class="proposed">
+    <h3>Proposed solution</h3>
+    <ul>
+      <li>Add parse-time validation in <code>validate.go</code>: reject any <code>node.data.sendRules</code> value not in <code>{ "consumeGated", "fireAndForget" }</code> with a clear error, instead of the silent cast at <code>loader.go:288</code>.</li>
+      <li>Make it structural: give <code>SendRule</code> a <code>ParseSendRule(string) (SendRule, error)</code> constructor that is the ONLY way to build one, so <code>ports.go</code> can never fall through to the <code>consumeGated</code> default on an unrecognized string.</li>
+      <li>Effort: small. This converts the one model-as-convention gap into model-as-structure.</li>
+    </ul>
+  </div>
+
+  <h2>Failure Path</h2>
+  <svg width="680" height="120" viewBox="0 0 680 120" xmlns="http://www.w3.org/2000/svg">
+    <rect width="680" height="120" fill="#18181c" rx="8"/>
+
+    <rect x="16" y="30" width="130" height="50" rx="5" fill="#261004" stroke="#d4a017" stroke-width="1.5"/>
+    <text x="81" y="53" fill="#d4a017" font-size="12" text-anchor="middle">"fireandforget"</text>
+    <text x="81" y="69" fill="#d4a017" font-size="11" text-anchor="middle">typo in json</text>
+
+    <line x1="148" y1="55" x2="196" y2="55" stroke="#808090" stroke-width="1.5" marker-end="url(#arra)"/>
+
+    <rect x="198" y="30" width="160" height="50" rx="5" fill="#1a1a24" stroke="#2a2a30" stroke-width="1"/>
+    <text x="278" y="53" fill="#d0d0e0" font-size="12" text-anchor="middle">loader.go:288</text>
+    <text x="278" y="69" fill="#808090" font-size="11" text-anchor="middle">cast, no check</text>
+
+    <line x1="360" y1="55" x2="408" y2="55" stroke="#808090" stroke-width="1.5" marker-end="url(#arra)"/>
+
+    <rect x="410" y="30" width="180" height="50" rx="5" fill="#1a1a24" stroke="#2a2a30" stroke-width="1"/>
+    <text x="500" y="53" fill="#d0d0e0" font-size="12" text-anchor="middle">ports.go:171</text>
+    <text x="500" y="69" fill="#808090" font-size="11" text-anchor="middle">!= fireAndForget</text>
+
+    <line x1="592" y1="55" x2="634" y2="55" stroke="#e05252" stroke-width="1.5" marker-end="url(#arre)"/>
+
+    <rect x="636" y="30" width="28" height="50" rx="5" fill="#2a1010" stroke="#e05252" stroke-width="1.5"/>
+    <text x="650" y="60" fill="#e05252" font-size="20" text-anchor="middle">✗</text>
+
+    <text x="416" y="100" fill="#808090" font-size="10">silently gated — wrong semantics, no signal</text>
+
+    <defs>
+      <marker id="arra" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#808090"/>
+      </marker>
+      <marker id="arre" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#e05252"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <h2>Fix</h2>
+  <p>In <code>validate.go</code> (or as a dedicated parse step), validate SendRule strings against the allowlist <code>{consumeGated, fireAndForget}</code> and return an error for unrecognized values. This moves a runtime convention to a parse-time invariant — the correct shape for the substrate model.</p>
+
+  <div class="leverage">
+    <strong>Leverage: MED.</strong> Hits only when topology.json has SendRule values. But the failure is completely silent — a debugging session to diagnose wrong firing behavior can cost 5k–20k tokens. Drift likelihood: moderate (typos in JSON are common).
+  </div>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── HEALTHY ───── -->
+<section id="healthy">
+  <h1>What's Healthy</h1>
+  <span class="badge GOOD">GOOD</span>
+  <p class="summary">The Go↔TS substrate boundary is genuinely self-enforcing. The code defends its own model. It is the context docs <em>about</em> the code that rotted — the inverse of the usual worry.</p>
+
+  <h2>Verified Invariants</h2>
+  <table>
+    <tr><th>Invariant</th><th>Evidence</th></tr>
+    <tr>
+      <td>No slot-phase / backpressure / firing logic leaked into TS outside pump.ts</td>
+      <td>Grep across <code>webview/</code> confirms all such logic lives in Go substrate or pump.ts only</td>
+    </tr>
+    <tr>
+      <td>pump.ts is render-only</td>
+      <td>TS side only routes messages and renders pulses; no substrate decisions</td>
+    </tr>
+    <tr>
+      <td>Send rules live on Out struct, survive edge deletion</td>
+      <td>Structurally encoded — not a per-edge property</td>
+    </tr>
+    <tr>
+      <td>Per-edge latency separated from per-port W aggregate</td>
+      <td>Structural separation confirmed in types</td>
+    </tr>
+    <tr>
+      <td>No banned coordinator vocabulary in code</td>
+      <td>No <code>orchestrate</code>, <code>schedule</code>, <code>dispatch</code>, <code>await-all</code> patterns in substrate code</td>
+    </tr>
+  </table>
+
+  <h2>Key Insight</h2>
+  <p style="font-size:15px; padding: 14px; background: var(--good-bg); border: 1px solid var(--good); border-radius: 6px; color: var(--good);">
+    The <strong>code</strong> defends itself. It is the <strong>context documents about the code</strong> that rotted. This is the inverse of the usual worry — ordinarily, code drifts while docs stay correct. Here the substrate boundary held; CLAUDE.md and MODEL.md did not keep up with the RF→Three migration.
+  </p>
+
+  <h2>Boundary Diagram</h2>
+  <svg width="640" height="200" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="640" height="200" fill="#18181c" rx="8"/>
+
+    <!-- Go substrate -->
+    <rect x="20" y="30" width="260" height="140" rx="6" fill="#0a2018" stroke="#3db87a" stroke-width="1.5"/>
+    <text x="150" y="55" fill="#3db87a" font-size="13" text-anchor="middle" font-weight="bold">Go Substrate</text>
+    <text x="150" y="76" fill="#3db87a" font-size="11" text-anchor="middle">slot-phase · backpressure</text>
+    <text x="150" y="92" fill="#3db87a" font-size="11" text-anchor="middle">firing rules · send rules</text>
+    <text x="150" y="108" fill="#3db87a" font-size="11" text-anchor="middle">AND-gate · inhibitor chain</text>
+    <text x="150" y="130" fill="#3db87a" font-size="10" text-anchor="middle" opacity="0.7">✓ boundary intact</text>
+
+    <!-- TS side -->
+    <rect x="360" y="30" width="260" height="140" rx="6" fill="#0a1820" stroke="#7c9ef8" stroke-width="1.5"/>
+    <text x="490" y="55" fill="#7c9ef8" font-size="13" text-anchor="middle" font-weight="bold">TS / pump.ts</text>
+    <text x="490" y="76" fill="#7c9ef8" font-size="11" text-anchor="middle">render only</text>
+    <text x="490" y="92" fill="#7c9ef8" font-size="11" text-anchor="middle">pulse animation</text>
+    <text x="490" y="108" fill="#7c9ef8" font-size="11" text-anchor="middle">message routing</text>
+    <text x="490" y="130" fill="#7c9ef8" font-size="10" text-anchor="middle" opacity="0.7">✓ no substrate logic leaked</text>
+
+    <!-- arrow -->
+    <line x1="282" y1="100" x2="358" y2="100" stroke="#3db87a" stroke-width="1.5" marker-end="url(#arrf)"/>
+    <text x="320" y="92" fill="#3db87a" font-size="10" text-anchor="middle">IPC</text>
+
+    <defs>
+      <marker id="arrf" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#3db87a"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── RECOMMENDATIONS ───── -->
+<section id="recs">
+  <h1>Recommendations</h1>
+  <p>Ordered by leverage-per-dollar. Do these in order — each one reduces AI re-derivation cost for all subsequent sessions.</p>
+
+  <table>
+    <tr>
+      <th>#</th>
+      <th>Action</th>
+      <th>Severity</th>
+      <th>Why</th>
+      <th>Effort</th>
+    </tr>
+    <tr>
+      <td style="font-family:var(--mono);color:var(--muted);">1</td>
+      <td>Re-anchor <code>CLAUDE.md</code> + <code>MODEL.md</code> to the <code>three/</code> architecture. Remove all <code>rf/</code> path references, fix schema dir (<code>src/schema/</code> not <code>webview/schema/</code>), remove phantom slot-phase section from MODEL.md or update to reflect no-op.</td>
+      <td><span class="badge HIGH" style="margin:0">HIGH</span></td>
+      <td>Loaded every session. Wrong paths cause first action to fail. Highest leverage of any change in the repo.</td>
+      <td>Small</td>
+    </tr>
+    <tr>
+      <td style="font-family:var(--mono);color:var(--muted);">2</td>
+      <td>Guard or codegen <code>node-override-text.ts</code>. Either add it to <code>check-generated.sh</code> or generate the switch from the kind registry so new/renamed kinds are caught at build time.</td>
+      <td><span class="badge MED" style="margin:0">MED</span></td>
+      <td>Silent empty string on unknown kind; only discovered at runtime via visual inspection.</td>
+      <td>Small–Medium</td>
+    </tr>
+    <tr>
+      <td style="font-family:var(--mono);color:var(--muted);">3</td>
+      <td>Extract node default dims (<code>110</code>/<code>60</code>) into a single named constant shared across all 7 TS files that reference them.</td>
+      <td><span class="badge LOW" style="margin:0">LOW</span></td>
+      <td>Layout regressions require grep-and-replace; no compile guard. Low frequency but easy win.</td>
+      <td>Small</td>
+    </tr>
+    <tr>
+      <td style="font-family:var(--mono);color:var(--muted);">4</td>
+      <td>Add parse-time SendRule validation in <code>validate.go</code> against <code>{consumeGated, fireAndForget}</code>. Return an error for unrecognized strings.</td>
+      <td><span class="badge MED" style="margin:0">MED</span></td>
+      <td>Typo flips send semantics silently. Only the substrate model convention not yet enforced by structure.</td>
+      <td>Small</td>
+    </tr>
+    <tr>
+      <td style="font-family:var(--mono);color:var(--muted);">5</td>
+      <td>Add exhaustiveness check on trace-event kinds in <code>pump.ts</code> and <code>messages.ts</code> — reference the generated <code>trace-kinds.ts</code> type rather than re-typing string literals.</td>
+      <td><span class="badge LOW" style="margin:0">LOW</span></td>
+      <td>New trace kind added to generator is silently missed in TS handling. Low frequency, but the protected file is already doing the right thing.</td>
+      <td>Small</td>
+    </tr>
+  </table>
+
+  <h2>Expected Outcome</h2>
+  <p>Completing items 1–4 eliminates all HIGH and MED findings. AI sessions following these fixes will load correct context on first read, get compile errors on kind drift, get parse errors on SendRule typos, and spend zero tokens recovering from phantom path instructions.</p>
+
+  <footer>Level-4 audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+</main>
+
+<script>
+  function show(id) {
+    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    const buttons = document.querySelectorAll('nav button');
+    const ids = ['overview','leverage','f1','f2','f3','healthy','recs'];
+    const idx = ids.indexOf(id);
+    if (idx >= 0) buttons[idx].classList.add('active');
+  }
+</script>
+
+</body>
+</html>
