@@ -281,7 +281,7 @@ export function GraphNode({
           // value !== 0: solid black bead, no band.
           return (
             <mesh key={idx} position={[x, 0, zFront]} raycast={() => null} renderOrder={10}>
-              <sphereGeometry args={[pr, 8, 8]} />
+              <sphereGeometry args={[pr, 16, 16]} />
               <meshStandardMaterial
                 color="#000000"
                 emissiveIntensity={0}
