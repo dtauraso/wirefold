@@ -430,8 +430,13 @@
         </tr>
           <tr>
             <td>Input loop</td>
-            <td>one per Input node</td>
+            <td>one per data-source Input (e.g. in08)</td>
             <td><ol><li>No inputs — it is a source, driven by its init values.</li><li>Take the next init value (wrapping if its repeat flag is set).</li><li>Send it on ToReadGate only if that wire has no pulse on it; never drop — if the wire still carries a pulse, restart the loop and retry next round.</li><li>Advance to the next init value; stop when init is exhausted unless repeat is set.</li></ol></td>
+          </tr>
+          <tr>
+            <td>Bootstrap loop</td>
+            <td>one (bootstrap_rg)</td>
+            <td><ol><li>A one-shot Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false) whose only job is to seed the ring.</li><li>Send its single value 1 on ToReadGate into <code style="font-family:var(--mono);font-size:11px;">readGate1.FromChainInhibitor</code> — only if that wire has no pulse; never drop.</li><li>That seed lets ReadGate fire its first round before the ChainInhibitor feedback edge has produced anything.</li><li>repeat is false, so after the single send the loop exits and the node never fires again.</li></ol></td>
           </tr>
           <tr>
             <td>ReadGate loop</td>
