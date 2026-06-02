@@ -218,7 +218,7 @@ export function GraphNode({
           key={faded ? "faded" : "solid"}
           color={fillColor}
           transmission={1.0}
-          thickness={r}
+          thickness={0}
           roughness={0.12}
           ior={1.5}
           metalness={0}
