@@ -428,11 +428,26 @@
           <td>one</td>
           <td><ol><li>Parse the CLI flags — topology path, trace-output path, run duration.</li><li>Load topology.json via LoadTopology, which instantiates every node and builds the wires between them.</li><li>Create the trace with NewWithSink — this also starts the trace-drain goroutine.</li><li>Launch the stdin-reader goroutine; cancel the run context when stdin closes.</li><li>Launch one goroutine per node (node.Update) under a WaitGroup, then block on Wait().</li><li>When all node loops exit, close the trace (flushing the drain) and write the JSONL trace file.</li></ol></td>
         </tr>
-        <tr>
-          <td>node loop</td>
-          <td>one per node</td>
-          <td><ol><li>Poll its input slots (TryRecv) until its firing rule is satisfied.</li><li>Fire — emit a "fire" trace event.</li><li>Consume the input — clear its slot and send an ack to the source node over a dedicated <strong>ack edge</strong> (one per source node), so the source's step-4 check sees its wire as clear.</li><li>For each output port, send only if that wire has no pulse on it. Never drop a value — if the wire still carries a pulse, the send can't happen yet, so restart the loop and try again next round.</li><li>Loop. An Input node walks its init values (repeating if its repeat flag is set); a ChainInhibitor holds the received value and fans out to all its outputs in parallel.</li></ol></td>
-        </tr>
+          <tr>
+            <td>Input loop</td>
+            <td>one per Input node</td>
+            <td><ol><li>No inputs — it is a source, driven by its init values.</li><li>Take the next init value (wrapping if its repeat flag is set).</li><li>Send it on ToReadGate only if that wire has no pulse on it; never drop — if the wire still carries a pulse, restart the loop and retry next round.</li><li>Advance to the next init value; stop when init is exhausted unless repeat is set.</li></ol></td>
+          </tr>
+          <tr>
+            <td>ReadGate loop</td>
+            <td>one per ReadGate node</td>
+            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W.</li><li>Fire only when both arrive within W; if the window times out first, clear the partial arrival and restart.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on ToChainInhibitor only if that wire has no pulse; never drop — if it still carries a pulse, restart the loop and retry.</li></ol></td>
+          </tr>
+          <tr>
+            <td>ChainInhibitor loop</td>
+            <td>one per ChainInhibitor node</td>
+            <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — backpressure means it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and ack the source over its ack edge.</li><li>Fan out the held value to every ToNext output in parallel; each send goes only when that wire has no pulse, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
+          </tr>
+          <tr>
+            <td>InhibitRightGate loop</td>
+            <td>one per InhibitRightGate node</td>
+            <td><ol><li>Poll FromLeft and FromRight (non-blocking); on the first arrival, open a coincidence window W.</li><li>Fire only when both arrive within W; if it times out, clear the partial arrival and restart.</li><li>Compute result = 1 only if Left==1 and Right==0, otherwise 0.</li><li>Consume both inputs — clear their slots and ack each source over its ack edge.</li><li>Send result on ToPassed only if that wire has no pulse; never drop — otherwise restart the loop.</li></ol></td>
+          </tr>
         <tr>
           <td>stdin reader</td>
           <td>one</td>
