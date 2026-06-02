@@ -25,26 +25,13 @@ export type WebviewToHostMsg =
   | { type: "addEdge"; target: string; targetHandle: string }
   | { type: "node-move"; nodeId: string; x: number; y: number; z?: number };
 
-// Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","slot"}.
+// Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","done"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
 // when the Go side has resolved it (currently omitted — raw form only).
-// slot carries nodeId/port/phase and optionally value (filled only).
-export type SlotPhase = "filled" | "empty";
-
-export type SlotEvent = {
-  step: number;
-  kind: "slot";
-  nodeId: string;
-  port: string;
-  phase: SlotPhase;
-  value?: number;
-};
-
 export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
   | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
-  | { step: number; kind: "done"; node: string; port: string }
-  | SlotEvent;
+  | { step: number; kind: "done"; node: string; port: string };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string }
