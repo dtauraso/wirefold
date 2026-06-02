@@ -436,7 +436,7 @@
           <tr>
             <td>ReadGate loop</td>
             <td>one per ReadGate node</td>
-            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W.</li><li>Fire only when both arrive within W; if the window times out first, clear the partial arrival and restart.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on ToChainInhibitor only if that wire has no pulse; never drop — if it still carries a pulse, restart the loop and retry.</li></ol></td>
+            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within W; if the window times out first, clear the partial arrival and restart.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on ToChainInhibitor only if that wire has no pulse; never drop — if it still carries a pulse, restart the loop and retry.</li></ol></td>
           </tr>
           <tr>
             <td>ChainInhibitor loop</td>
