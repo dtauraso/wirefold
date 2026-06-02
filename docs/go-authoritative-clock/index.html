@@ -431,7 +431,7 @@
         <tr>
           <td>node loop</td>
           <td>one per node</td>
-          <td><ol><li>Poll its input slots (TryRecv) until its firing rule is satisfied.</li><li>Fire — emit a "fire" trace event.</li><li>Call Done on the consumed input to clear the slot, releasing backpressure upstream.</li><li>For each output port: if gated, TrySend then WaitConsumed (block until the receiver consumes); if fire-and-forget, TryEmit (drops if the wire is still busy).</li><li>Loop. An Input node walks its init values (repeating if its repeat flag is set); a ChainInhibitor holds the received value and fans out to all its outputs in parallel.</li></ol></td>
+          <td><ol><li>Poll its input slots (TryRecv) until its firing rule is satisfied.</li><li>Fire — emit a "fire" trace event.</li><li>Call Done on the consumed input to clear the slot, releasing backpressure upstream.</li><li>For each output port, send only if that wire has no pulse on it. Never drop a value — if the wire still carries a pulse, the send can't happen yet, so restart the loop and try again next round.</li><li>Loop. An Input node walks its init values (repeating if its repeat flag is set); a ChainInhibitor holds the received value and fans out to all its outputs in parallel.</li></ol></td>
         </tr>
         <tr>
           <td>stdin reader</td>
