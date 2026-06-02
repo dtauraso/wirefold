@@ -237,14 +237,14 @@ export function GraphNode({
         // Layout: n spheres of radius pr with gap = pr * 0.3 between adjacent spheres.
         // Total width = n * 2*pr + (n-1)*0.3*pr = pr * (2n + 0.3*(n-1))
         // Constraint: total width ≤ 2*r  →  pr ≤ 2*r / (2n + 0.3*(n-1))
-        const PULSE_BEAD_R = 2.5;
+        const PULSE_BEAD_R = 5;
         const GAP_RATIO = 0.3; // gap = pr * GAP_RATIO
         const fitFactor = 2 * r / (2 * n + GAP_RATIO * (n - 1));
         const pr = Math.min(PULSE_BEAD_R, fitFactor);
         const gap = pr * GAP_RATIO;
         const totalWidth = n * 2 * pr + (n - 1) * gap;
         const startX = -totalWidth / 2 + pr; // center of leftmost sphere
-        const zFront = 0; // align with torus equator plane (torus mesh at z=0, XY plane default)
+        const zFront = 0; // beads sit on the torus center plane
         const fadeOpacityInner = 0.25;
         return (init as number[]).map((val: number, idx: number) => {
           const x = startX + idx * (2 * pr + gap);
@@ -253,9 +253,10 @@ export function GraphNode({
             <mesh key={idx} position={[x, 0, zFront]} raycast={() => null}>
               <sphereGeometry args={[pr, 8, 8]} />
               {isGlass ? (
+                // value-0: white-tinted milky glass bead
                 <meshPhysicalMaterial
                   color="#ffffff"
-                  transmission={0.88}
+                  transmission={0.7}
                   thickness={0}
                   roughness={0.12}
                   ior={1.5}
@@ -265,14 +266,15 @@ export function GraphNode({
                   envMap={envTex ?? undefined}
                   envMapIntensity={1.0}
                   transparent
-                  opacity={faded ? fadeOpacityInner * 0.6 : 0.92}
+                  opacity={faded ? fadeOpacityInner * 0.6 : 0.95}
                   depthWrite={false}
                 />
               ) : (
+                // value-1: solid self-lit white bead, punches through glass body
                 <meshStandardMaterial
                   color="#ffffff"
-                  emissive={new THREE.Color(0x000000)}
-                  emissiveIntensity={0}
+                  emissive={new THREE.Color(0xffffff)}
+                  emissiveIntensity={faded ? 0 : 0.8}
                   transparent={faded}
                   opacity={faded ? fadeOpacityInner : 1}
                 />
