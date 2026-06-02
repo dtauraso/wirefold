@@ -123,15 +123,11 @@ export function parseEdge(v: unknown, path: string): Edge {
     targetHandle: str(o.targetHandle, `${path}.targetHandle`),
     // kind: required EdgeKind enum — kept explicit
     kind: oneOf(o.kind, EDGE_KINDS, `${path}.kind`),
-    // arrowStyle: optional ArrowStyle enum — kept explicit (no ARROW_STYLES constant)
-    arrowStyle: opt(o.arrowStyle, (x) =>
-      oneOf(x, ["filled", "open"] as const, `${path}.arrowStyle`),
-    ),
     data: o.data,
   };
   // Loop over WIRE_PROPS for simple scalar types (string, number, boolean).
   for (const [key, def] of Object.entries(WIRE_PROPS)) {
-    if (key === "kind" || key === "arrowStyle") continue; // handled explicitly above
+    if (key === "kind") continue; // handled explicitly above
     const val = o[key];
     if (def.required) {
       if (def.tsType === "string") edge[key] = str(val, `${path}.${key}`);
