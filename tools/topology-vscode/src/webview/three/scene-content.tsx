@@ -237,7 +237,7 @@ export function GraphNode({
         // Layout: n spheres of radius pr with gap = pr * 0.3 between adjacent spheres.
         // Total width = n * 2*pr + (n-1)*0.3*pr = pr * (2n + 0.3*(n-1))
         // Constraint: total width ≤ 2*r  →  pr ≤ 2*r / (2n + 0.3*(n-1))
-        const PULSE_BEAD_R = 4;
+        const PULSE_BEAD_R = 2.5;
         const GAP_RATIO = 0.3; // gap = pr * GAP_RATIO
         const fitFactor = 2 * r / (2 * n + GAP_RATIO * (n - 1));
         const pr = Math.min(PULSE_BEAD_R, fitFactor);
