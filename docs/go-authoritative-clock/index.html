@@ -453,7 +453,7 @@
         <tr>
           <td>main</td>
           <td>one</td>
-          <td><ol><li>Parse the CLI flags — topology path, trace-output path, run duration.</li><li>Load topology.json via LoadTopology, which instantiates every node and builds the wires between them.</li><li>Create the trace with NewWithSink — this also starts the trace-drain goroutine.</li><li>Launch the stdin-reader goroutine; cancel the run context when stdin closes.</li><li>Launch one goroutine per node (node.Update) under a WaitGroup, then block on Wait().</li><li>When all node loops exit, close the trace (flushing the drain) and write the JSONL trace file.</li></ol></td>
+          <td><ol><li>Parse the CLI flags — topology path, trace-output path, run duration.</li><li>Load topology.json via LoadTopology, which instantiates every node and builds the wires between them.</li><li>Create the trace with NewWithSink — this also starts the trace-drain goroutine.</li><li>Launch the stdin-reader goroutine; cancel the run context when stdin closes.</li><li>Launch one goroutine per node (node.Update) under a WaitGroup, then block on Wait().</li><li>When Wait() returns — every node loop has exited, so nothing can still emit — call tr.Close(): it closes the shared event channel; the trace-drain goroutine flushes the events still buffered there, stamping each with its Step ordinal, then signals done; and Close() blocks on that signal, so no event is dropped (and the close is panic-safe only because every producer already exited). Then, if the -trace flag was set, create that file and tr.WriteJSONL writes the complete, totally-ordered event buffer to it as one JSON object per line.</li></ol></td>
         </tr>
           <tr>
             <td>Input loop</td>
