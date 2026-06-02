@@ -733,6 +733,8 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             </ul>
           </li>
           <li><strong>Go:</strong> add a monotonic clock with a paused-time accumulator; on Send, stamp start time and compute inFlightTime = arcLength / pulseSpeed (Go already has BezierArcLength). The node/wire loop sleeps ~16ms; each wake checks elapsed ≥ inFlightTime and triggers delivery itself (calls the existing NotifyDelivered slot-fill path internally instead of waiting on a TS message). (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>, the source node Update loop.)</li>
+          <li>Go runs a continuous inbound reader on the pipe TS writes to (RunStdinReader on stdin). It is ALWAYS reading, independent of pause/play. Pause freezes the clock (bead motion + delivery); it does NOT freeze message intake — Go keeps receiving and acting on messages while paused.</li>
+          <li>Now that Go self-delivers, a deleteEdge races Go's own clock-driven delivery (not a TS message). The cancel must be atomic: delete and clock-delivery serialize on the wire's lock, and a reset/deleted wire must never deliver. Erase the in-flight pulse via Reset() before delivery can fire.</li>
           <li><strong>TS:</strong> none yet — TS keeps animating on its own this phase (a temporary cosmetic dual); delivery no longer depends on it.</li>
           <li><strong>Exit:</strong> headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> completes the cascade. Today it deadlocks after the first hop because delivery waits on the visual layer; after this phase it should run to completion with no editor. Add a Go test that runs a cascade with no TS attached.</li>
           <li><strong>Docs:</strong> draft the MODEL.md Driver + Cross-boundary changes.</li>
@@ -757,6 +759,13 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li><strong>TS:</strong> Any remaining structural state (which nodes/edges exist) is a passive render copy of what Go sent — not an authoritative store, holds no geometry logic. Zustand's data-owning/computing role (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">moveNode</span> arc-length re-derive, curve management, fade fixpoint) is deleted, not relocated to TS.</li>
           <li><strong>Exit:</strong> dragging a node updates Go's data, Go re-streams geometry + positions, TS renders without local geometry math.</li>
           <li><strong>Note:</strong> per the handoff caveat, edge RECONNECT (moving a wire's endpoint) is a substrate redesign, not a small edit — scope it separately; target-end move is delete+create, source-end needs a new rewire IPC verb.</li>
+          <li><strong>Delete edge with a pulse in flight:</strong>
+            <ul style="margin-top:0.4rem;margin-bottom:0.4rem;">
+              <li>TS can send deleteEdge while a pulse is still inside that edge, during pause or play. The message is fire-and-forget; TS does not wait for Go.</li>
+              <li>Go receives it and erases the edge AND drops the in-flight pulse (Reset) before the pulse reaches the destination slot — the pulse must never land on a deleted edge.</li>
+              <li>TS removes the bead from the scene on Go's echo (edge-gone / pulse-cancelled message), not on its own — Go is authoritative about whether the pulse delivered or was dropped.</li>
+            </ul>
+          </li>
         </ul>
       </div>
 
@@ -836,6 +845,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <ul>
           <li><strong>Phase 1</strong> — headless cascade run works (a Go test runs the network with no TS; previously impossible).</li>
           <li><strong>Pause/resume</strong> — verify the paused accumulator preserves each bead's progress across resume (a bead 40% across stays 40%, no teleport).</li>
+          <li><strong>Delete-edge-mid-flight test, both states:</strong> send deleteEdge while a bead is in flight, once while PLAYING and once while PAUSED. Assert the bead never reaches the destination slot, the edge and bead are gone, and no stray delivery fires. This proves Go reads inbound during pause and that delete atomically beats Go's clock-delivery.</li>
         </ul>
       </div>
 
