@@ -1,6 +1,4 @@
 {"step":0,"kind":"recv","node":"A","port":"in","value":1}
 {"step":1,"kind":"fire","node":"A"}
 {"step":2,"kind":"send","node":"A","port":"out","value":1}
-{"step":3,"kind":"slot","nodeId":"B","port":"in","phase":"filled","value":1}
-{"step":4,"kind":"slot","nodeId":"B","port":"in","phase":"empty"}
-{"step":5,"kind":"done","node":"A","port":"out"}
+{"step":3,"kind":"done","node":"A","port":"out"}

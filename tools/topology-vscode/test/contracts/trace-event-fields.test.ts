@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TraceEvent, SlotEvent } from "../../src/messages";
+import type { TraceEvent } from "../../src/messages";
 import { TRACE_EVENT_KINDS } from "../../src/webview/three/trace-kinds";
 
 const FIXTURE = join(__dirname, "../fixtures/trace-events.jsonl");
@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "slot", "done"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -73,23 +73,11 @@ describe("trace-event-fields contract", () => {
     expect(typeof asObj["value"]).toBe("number");
   });
 
-  it("slot(filled) event has step, kind, nodeId, port, phase, value", () => {
-    const e = events.find((ev) => ev.kind === "slot" && (ev as SlotEvent).phase === "filled") as SlotEvent;
+  it("done event has step, kind, node, port", () => {
+    const e = events.find((ev) => ev.kind === "done")!;
     expect(typeof e.step).toBe("number");
-    expect(e.kind).toBe("slot");
-    expect(typeof e.nodeId).toBe("string");
-    expect(typeof e.port).toBe("string");
-    expect(e.phase).toBe("filled");
-    expect(typeof e.value).toBe("number");
-  });
-
-  it("slot(empty) event has step, kind, nodeId, port, phase — no value", () => {
-    const e = events.find((ev) => ev.kind === "slot" && (ev as SlotEvent).phase === "empty") as SlotEvent;
-    expect(typeof e.step).toBe("number");
-    expect(e.kind).toBe("slot");
-    expect(typeof e.nodeId).toBe("string");
-    expect(typeof e.port).toBe("string");
-    expect(e.phase).toBe("empty");
-    expect(e.value).toBeUndefined();
+    expect(e.kind).toBe("done");
+    expect(typeof e.node).toBe("string");
+    expect(typeof (e as Extract<TraceEvent, { kind: "done" }> & { port?: string }).port).toBe("string");
   });
 });

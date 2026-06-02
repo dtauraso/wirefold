@@ -36,8 +36,6 @@ export function handleTraceEvent(event: TraceEvent): void {
   // Cast to the generated enum so tsc checks all branches are covered.
   const k = kind as TraceEventKind;
   switch (k) {
-    case "slot":
-      return;
     case "recv":
       return;
     case "fire":

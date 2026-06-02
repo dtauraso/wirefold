@@ -32,7 +32,6 @@ const (
 	KindRecv           = "recv"
 	KindFire           = "fire"
 	KindSend           = "send"
-	KindSlot           = "slot"
 	KindDone           = "done"
 )
 
@@ -40,17 +39,16 @@ const (
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindSlot, KindDone}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone}
 
 type Event struct {
 	Step      int    `json:"step"`
 	Kind      string `json:"kind"`
 	Node      string `json:"node"`
-	Port      string `json:"port,omitempty"`      // recv: input port; send: output port; slot: input port
+	Port      string `json:"port,omitempty"`      // recv: input port; send: output port
 	Edge      string `json:"edge,omitempty"`      // canonical send only; set by Resolve
-	SlotPhase string `json:"slotPhase,omitempty"` // slot only: "filled" | "empty"
-	Value     int    `json:"value,omitempty"`     // recv/send/slot(filled) only; fire and slot(empty) omit
-	// hasValue distinguishes "value 0" from "no value" for slot and send/recv events.
+	Value     int    `json:"value,omitempty"`     // recv/send only
+	// hasValue distinguishes "value 0" from "no value" for send/recv events.
 	hasValue bool
 	// Wire geometry fields — populated on send events when the outgoing port
 	// is backed by a PacedWire. Zero values are omitted from JSON output.
@@ -162,16 +160,6 @@ func (t *Trace) Done(node, port string) {
 	t.ch <- Event{Kind: KindDone, Node: node, Port: port}
 }
 
-// Slot emits a slot event recording that an input port has filled or emptied.
-// When phase="filled", value is the held value. When phase="empty", hasValue
-// should be false and value is ignored (omitted from JSON output).
-func (t *Trace) Slot(nodeId, port, phase string, value int, hasValue bool) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindSlot, Node: nodeId, Port: port, SlotPhase: phase, Value: value, hasValue: hasValue}
-}
-
 // Breadcrumb writes a free-form diagnostic line directly to the sink
 // (if any) in real time. It is logging-only: breadcrumbs are NOT added
 // to the buffered event slice, do NOT receive a Step ordinal, and are
@@ -181,7 +169,7 @@ func (t *Trace) Slot(nodeId, port, phase string, value int, hasValue bool) {
 // relay can route it to go.jsonl alongside real trace events.
 //
 // Used to trace one-off control events (e.g. edge delete / wire reset)
-// that have no place in the recv/fire/send/slot/done lifecycle.
+// that have no place in the recv/fire/send/done lifecycle.
 func (t *Trace) Breadcrumb(label, node, port, value string) {
 	if t == nil || t.sink == nil {
 		return
@@ -330,21 +318,6 @@ func marshalEvent(e Event) ([]byte, error) {
 		Node string `json:"node"`
 		Port string `json:"port"`
 	}
-	type slotFilled struct {
-		Step   int    `json:"step"`
-		Kind   string `json:"kind"`
-		NodeId string `json:"nodeId"`
-		Port   string `json:"port"`
-		Phase  string `json:"phase"`
-		Value  int    `json:"value"`
-	}
-	type slotEmpty struct {
-		Step   int    `json:"step"`
-		Kind   string `json:"kind"`
-		NodeId string `json:"nodeId"`
-		Port   string `json:"port"`
-		Phase  string `json:"phase"`
-	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
@@ -355,11 +328,6 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	case KindDone:
 		return json.Marshal(doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port})
-	case KindSlot:
-		if e.hasValue {
-			return json.Marshal(slotFilled{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase, Value: e.Value})
-		}
-		return json.Marshal(slotEmpty{Step: e.Step, Kind: e.Kind, NodeId: e.Node, Port: e.Port, Phase: e.SlotPhase})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}
