@@ -183,6 +183,10 @@
   #panel-goroutines .spec-table th:first-child, #panel-goroutines .spec-table td:first-child { width: 90px; white-space: normal; }
   #panel-goroutines .spec-table th:nth-child(2), #panel-goroutines .spec-table td:nth-child(2) { width: 95px; white-space: normal; }
   #panel-goroutines .spec-table td, #panel-goroutines .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
+  #panel-tscode .spec-table { table-layout: fixed; width: 100%; }
+  #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 135px; white-space: normal; }
+  #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 110px; white-space: normal; }
+  #panel-tscode .spec-table td, #panel-tscode .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
 
   /* Cards */
   .cards {
@@ -336,6 +340,7 @@
     <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">Overview</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="division">Division</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS code</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
@@ -484,6 +489,58 @@
     <div class="note" style="margin-top:1.25rem;">The last two rows are <strong>wires, not goroutines</strong>. A <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> and an ack edge hold state and carry pulses but run no goroutine of their own — the node loops above drive them through a shared lock and a condition variable, and the slot and its backpressure live in the destination node, not in a separate wire thread.</div>
 
     <div class="note" style="margin-top:0.75rem;">Where the clock change lands: in the target model each node loop also wakes about every 16&nbsp;ms to compute and emit its in-flight bead positions and to self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
+  </div>
+
+  <!-- TAB: TS code -->
+  <div class="panel" id="panel-tscode" role="tabpanel">
+    <h2>What the TS frontend runs.</h2>
+    <p>TS has no goroutines. Its work happens in a few execution contexts: the GPU render loop (driven by requestAnimationFrame inside the @react-three/fiber Canvas), an event-driven trace pump, the message receiver, the outbound IPC path, DOM input handlers, and the React/Zustand store. The render loop and input handlers must stay in TS — they need the WebGL context and the DOM event loop. Most of the data work migrates to Go; see the TS &rarr; Go tab.</p>
+
+    <table class="spec-table">
+      <caption>The TS execution contexts</caption>
+      <thead>
+        <tr><th>Context</th><th>When it runs</th><th>Its job</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Render loop · pulse</td>
+          <td>every frame (~60fps), one per in-flight bead</td>
+          <td><ol><li>Read the bead's pulse data imperatively from the pulse map (getPulseMap, pulse-state.ts).</li><li>Rebuild the edge curve from current node positions (buildPortCurve) so a mid-drag move tracks.</li><li>Compute progress t = (getPauseAdjustedNow() &minus; startTime) / simLatencyMs, clamped to [0,1].</li><li>Sample the curve at t (curve.getPointAt) and set the bead mesh position.</li><li>At t &ge; 1, claimDelivered once and post {type:"delivered"} to Go. <em style="color:var(--warn);">(Phase 2 deletes steps 2&ndash;5: Go emits the position and TS only plots it; delivery moves to Go's clock.)</em></li></ol></td>
+        </tr>
+        <tr>
+          <td>Render loop · overlays</td>
+          <td>every few frames (throttled)</td>
+          <td><ol><li>Project node world positions to screen for the HTML label overlay (LabelProjector).</li><li>Debounce the camera matrix and fire a settle callback once motion stops (CameraSettleDetector).</li><li>Track the nearest N nodes to the camera for occlusion/label decisions (NearestNTracker).</li><li>Screen-space and GPU-tied &mdash; stays in TS.</li></ol></td>
+        </tr>
+        <tr>
+          <td>Trace pump</td>
+          <td>event-driven (each Go trace event)</td>
+          <td><ol><li>handleTraceEvent switches on the event kind (pump.ts).</li><li><strong>send</strong> &rarr; match edges by source+sourceHandle and setPulse on each.</li><li><strong>done</strong> &rarr; match edges by target+targetHandle and clearPulse on each.</li><li><strong>fire / recv</strong> &rarr; no-op.</li></ol></td>
+        </tr>
+        <tr>
+          <td>Message receiver</td>
+          <td>event-driven (window "message")</td>
+          <td><ol><li>parseHostToWebview narrows the incoming message (main.tsx).</li><li><strong>trace-event</strong> &rarr; handleTraceEvent (the pump).</li><li><strong>load</strong> &rarr; store.load(text); <strong>run-status</strong> &rarr; set run state; <strong>flush</strong> &rarr; flush saves.</li><li>On startup, post {type:"ready"} back to the host.</li></ol></td>
+        </tr>
+        <tr>
+          <td>Outbound IPC</td>
+          <td>on user action / delivery</td>
+          <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Types out: delivered, deleteEdge, addEdge, fade, node-move.</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
+        </tr>
+        <tr>
+          <td>Input handlers</td>
+          <td>DOM pointer / wheel events</td>
+          <td><ol><li>pointer down: raycast-pick a port, node, or empty space; capture the drag/wiring origin (interaction-controls.ts).</li><li>pointer move: drag a node (&rarr; node-move IPC, rAF-throttled), preview a wire, or arcball-rotate the camera.</li><li>pointer up: complete wiring (createEdge), persist a node move, or reset.</li><li>wheel: ctrl = pinch-zoom toward cursor, else pan on the z=0 plane; commit camera.</li></ol></td>
+        </tr>
+        <tr>
+          <td>React / Zustand store</td>
+          <td>on state change</td>
+          <td><ol><li>Holds the authoritative nodes/edges/selection today (store.ts).</li><li>moveNode updates a node position and re-derives curve geometry + patches in-flight pulse timing.</li><li>createEdge / deleteEdge / toggleFade update state and post addEdge / deleteEdge / fade to Go.</li><li><em style="color:var(--warn);">(Phases 2&ndash;3 remove the authoritative store: Go owns the data; TS keeps only a passive render copy and computes no geometry.)</em></li></ol></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:1.25rem;">Stays in TS: the GPU render loop (draw calls, WebGL context), screen-space overlays, and DOM input capture &mdash; they need the browser. Moves to Go: bead positions, curve geometry, arc length, timing, and the authoritative store. The dividing line and the per-symbol migration list are in the <strong>TS &rarr; Go</strong> tab.</div>
   </div>
 
   <!-- TAB 3: The Bridge -->
