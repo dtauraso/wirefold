@@ -335,6 +335,9 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="playpause">Play / Pause</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgo">TS → Go</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="docs">Doc Updates</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="phases">Phases</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="verify">Verify</button>
   </div>
 
   <!-- TAB 1: Overview -->
@@ -689,6 +692,118 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="note" style="margin-top:1.25rem;">Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
+  </div>
+
+  <!-- TAB 9: Plan -->
+  <div class="panel" id="panel-plan" role="tabpanel">
+    <h2>Coding plan: clock first, then migrate data.</h2>
+    <p>The change is one model shift (Go owns the clock) plus a staged migration of data (positions, geometry, shading) from TS to Go. Each phase must leave the build green and the editor working. Order matters: do the clock first because it is the only step that unblocks the rest — it lets Go run and deliver without TS, and removes the timing dependency. Everything after it is incremental data migration that can land one piece at a time.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>The five phases at a glance</h3>
+        <ul>
+          <li><strong>1. Clock into Go</strong> — Go elapses inFlightTime and self-delivers; loops sleep ~16ms. Deletes the NotifyDelivered-from-TS delivery trigger. (The unblock.)</li>
+          <li><strong>2. Position stream</strong> — Go computes each bead position and emits it; TS plots; delete TS position/timing math.</li>
+          <li><strong>3. Geometry data into Go</strong> — nodes, ports, edges (endpoints + curves) become Go-owned; TS sends geometry edits.</li>
+          <li><strong>4. Shading data into Go</strong> — materials, colors, glass and environment parameters become Go data; TS applies them on the GPU.</li>
+          <li><strong>5. Bridge → CRUD + docs</strong> — reshape messages into plain CRUD, delete notifyDelivered, finalize MODEL.md + CLAUDE.md.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1rem;">Ordering principle — each phase ends green (go build/test, tsc, npm run build, all guard scripts). The clock phase is the keystone; the data phases are independent migrations after it.</div>
+  </div>
+
+  <!-- TAB 10: Phases -->
+  <div class="panel" id="panel-phases" role="tabpanel">
+    <h2>The five phases in detail.</h2>
+
+    <div class="cards" style="flex-direction:column;">
+      <div class="card">
+        <h3>Phase 1 · Clock into Go (the unblock)</h3>
+        <ul>
+          <li><strong>Go:</strong> add a monotonic clock with a paused-time accumulator; on Send, stamp start time and compute inFlightTime = arcLength / pulseSpeed (Go already has BezierArcLength). The node/wire loop sleeps ~16ms; each wake checks elapsed ≥ inFlightTime and triggers delivery itself (calls the existing NotifyDelivered slot-fill path internally instead of waiting on a TS message). (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>, the source node Update loop.)</li>
+          <li><strong>TS:</strong> none yet — TS keeps animating on its own this phase (a temporary cosmetic dual); delivery no longer depends on it.</li>
+          <li><strong>Exit:</strong> headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> completes the cascade. Today it deadlocks after the first hop because delivery waits on the visual layer; after this phase it should run to completion with no editor. Add a Go test that runs a cascade with no TS attached.</li>
+          <li><strong>Docs:</strong> draft the MODEL.md Driver + Cross-boundary changes.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Phase 2 · Position stream</h3>
+        <ul>
+          <li><strong>Go:</strong> each loop wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (a new trace kind); deliver at t ≥ 1.</li>
+          <li><strong>TS:</strong> pump.ts handles the new position message and sets the bead sprite to the received position. DELETE the TS position/timing math: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), the duplicated rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and store.ts moveNode's local re-derive of arc length + simLatencyMs. TS plots only.</li>
+          <li><strong>Exit:</strong> beads move from Go's stream; TS computes no positions; tsc + build green; visual parity with before. Run the trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Phase 3 · Geometry data into Go</h3>
+        <ul>
+          <li><strong>Go:</strong> hold node positions, port positions, and edge data (endpoints source→target, curve control points) as authoritative state; compute curves in Go.</li>
+          <li><strong>TS:</strong> send editor geometry edits to Go (node move, edge create/delete — partly exists via moveNode/deleteEdge IPC; extend to full geometry CRUD); render from the geometry Go streams back, computing none of it locally.</li>
+          <li><strong>Exit:</strong> dragging a node updates Go's data, Go re-streams geometry + positions, TS renders without local geometry math.</li>
+          <li><strong>Note:</strong> per the handoff caveat, edge RECONNECT (moving a wire's endpoint) is a substrate redesign, not a small edit — scope it separately; target-end move is delete+create, source-end needs a new rewire IPC verb.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Phase 4 · Shading data into Go</h3>
+        <ul>
+          <li><strong>Go:</strong> hold material/color/fill/stroke (already partly in NODE_DEFS data), glass/material parameters, and environment/lighting parameters as data.</li>
+          <li><strong>TS:</strong> receive shading parameters and apply them to GPU materials; bake the environment map on the GPU from Go-supplied parameters (the bake itself is a GPU op and stays in TS).</li>
+          <li><strong>Exit:</strong> appearance is driven entirely by Go data; TS only executes GPU material setup.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Phase 5 · Bridge → CRUD + docs</h3>
+        <ul>
+          <li>Reshape the bridge into plain CRUD: data stream out (geometry + shading + position); edits in (create/update/delete geometry + animation updates); pause/resume as a control signal.</li>
+          <li>Delete the notifyDelivered message and its Go stdin handler entirely.</li>
+          <li>Run message-kind parity (Go stdin_reader ↔ TS WEBVIEW_TO_HOST_TYPES), no-TS-timers, and slot-phase-boundary guards.</li>
+          <li>Finalize MODEL.md (Driver, Cross-boundary, Geometry/time, Editor-surface) and CLAUDE.md (pump description, bridge surface, drift rule) in this commit.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 11: Verify -->
+  <div class="panel" id="panel-verify" role="tabpanel">
+    <h2>Verification and risks.</h2>
+
+    <div class="cards" style="flex-direction:column;">
+      <div class="card">
+        <h3>Green gate every phase</h3>
+        <ul>
+          <li><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go build ./...</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test ./...</span></li>
+          <li>Webview <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npx tsc --noEmit</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npm run build</span></li>
+          <li>Guard scripts — check-substrate-vocabulary, check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>New milestones</h3>
+        <ul>
+          <li><strong>Phase 1</strong> — headless cascade run works (a Go test runs the network with no TS; previously impossible).</li>
+          <li><strong>Pause/resume</strong> — verify the paused accumulator preserves each bead's progress across resume (a bead 40% across stays 40%, no teleport).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Risks to watch</h3>
+        <ul>
+          <li><strong>Bandwidth/backpressure:</strong> the position stream is N beads × ~60/s over stdout; if the pipe fills, Go stalls on the write and TS re-paces Go. Watch for it; emit-on-change deduplication is the escape if needed (not a separate tick).</li>
+          <li><strong>Two arc-length implementations</strong> must agree until Phase 2 deletes the TS copy — until then a drift risk.</li>
+          <li><strong>Bead speed vs report rate:</strong> confirm the sleep never affects speed — speed stays pulseSpeed, arrival stays inFlightTime, the sleep only changes how many waypoints are shown.</li>
+          <li>Run an industry bug-class scan on the Phase 1–2 timing change before declaring it ready.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1rem;">This plan stays a proposal until Phase 1 lands; MODEL.md remains current for existing code until then.</div>
   </div>
 </div>
 
