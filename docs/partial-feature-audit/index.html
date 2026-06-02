@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Partial-Feature Audit · wirefold</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181c;
+    --border: #2a2a30;
+    --text: #e0e0e8;
+    --muted: #808090;
+    --accent: #7c9ef8;
+    --high: #e05252;
+    --high-bg: #2a1010;
+    --med: #d4a017;
+    --med-bg: #261e04;
+    --low: #888;
+    --low-bg: #1a1a1e;
+    --good: #3db87a;
+    --good-bg: #0a2018;
+    --inprog: #a78bfa;
+    --inprog-bg: #1a1228;
+    --mono: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  nav {
+    flex-shrink: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0 12px;
+  }
+  nav .logo {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    padding: 10px 16px 10px 4px;
+    border-right: 1px solid var(--border);
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+  nav .logo span { color: var(--muted); display: inline; font-size: 10px; margin-left: 6px; }
+  nav button {
+    background: none;
+    border: none;
+    color: #c8c8d0;
+    font-family: var(--sans);
+    font-size: 12px;
+    text-align: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  nav button:hover { color: #fff; background: rgba(124,158,248,0.10); }
+  nav button.active { color: #fff; border-bottom-color: var(--accent); background: rgba(124,158,248,0.14); }
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 40px;
+    max-width: 900px;
+  }
+  section { display: none; }
+  section.active { display: block; }
+  h1 { font-family: var(--mono); font-size: 22px; color: var(--text); margin-bottom: 6px; }
+  h2 { font-family: var(--mono); font-size: 16px; color: var(--accent); margin: 28px 0 12px; }
+  h3 { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 14px 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+  p { margin-bottom: 10px; color: var(--text); }
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #b0c8ff;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: #b0c8ff;
+    overflow-x: auto;
+    margin-bottom: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 4px;
+    letter-spacing: .06em;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .badge.dead      { background: var(--high-bg);    color: var(--high);    border: 1px solid var(--high); }
+  .badge.likely    { background: var(--med-bg);     color: var(--med);     border: 1px solid var(--med); }
+  .badge.inprog    { background: var(--inprog-bg);  color: var(--inprog);  border: 1px solid var(--inprog); }
+  .badge.go        { background: #0d1a12; color: #5ec96e; border: 1px solid #2a6040; font-size: 10px; }
+  .badge.ts        { background: #0d1220; color: #6ba3f7; border: 1px solid #1e3a6e; font-size: 10px; }
+  .badge.cross     { background: #1a1220; color: #c09af7; border: 1px solid #5a3a8e; font-size: 10px; }
+  .badge.healthy   { background: var(--good-bg);    color: var(--good);    border: 1px solid var(--good); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+  .card-title {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .card-desc { margin-bottom: 14px; }
+  .evidence-block {
+    background: #111115;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 5px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+  .evidence-block h3 { margin-top: 0; color: var(--accent); }
+  .action-block {
+    background: #081a0f;
+    border: 1px solid #1e4d2e;
+    border-left: 3px solid var(--good);
+    border-radius: 5px;
+    padding: 12px 14px;
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+  .action-block h3 { margin-top: 0; color: var(--good); }
+  .action-block ul { padding-left: 18px; margin: 6px 0; }
+  .action-block li { margin-bottom: 5px; color: var(--text); }
+  .bydesign-block {
+    background: var(--inprog-bg);
+    border: 1px solid #3b2a6e;
+    border-left: 3px solid var(--inprog);
+    border-radius: 5px;
+    padding: 12px 14px;
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+  .bydesign-block h3 { margin-top: 0; color: var(--inprog); }
+  .safe-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .summary-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; }
+  .summary-table th {
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .summary-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; }
+  .summary-table tr:last-child td { border-bottom: none; }
+  .healthy-list { list-style: none; padding: 0; }
+  .healthy-list li {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .healthy-list li:last-child { border-bottom: none; }
+  .healthy-list li strong { color: var(--text); }
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">wirefold<span>Partial-Feature Audit</span></div>
+  <button class="active" onclick="show('overview')">Overview</button>
+  <button onclick="show('dead')">Dead Code</button>
+  <button onclick="show('halfbuilt')">Half-Built Render</button>
+  <button onclick="show('orphaned')">Orphaned Schema</button>
+  <button onclick="show('clear')">Checked — Not Findings</button>
+</nav>
+
+<main>
+
+<!-- ───── OVERVIEW ───── -->
+<section id="overview" class="active">
+  <h1>Partial-Feature Audit</h1>
+  <p style="color:var(--muted);margin-bottom:20px;">wirefold · 2026-06-01 · hunt: orphaned plumbing from half-built / half-removed features</p>
+
+  <p>Hunt signature: dead emitters, no-op consumers, orphaned fixtures, half-removed render/UI,
+  codegen entries with no producer/consumer, unused exported symbols, stubs, one-sided IPC verbs.
+  Method: grep-first — each finding shows the definition <code>file:line</code> and a grep proof of
+  zero live producers/consumers (excluding the definition itself).</p>
+
+  <h2>Summary</h2>
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Finding</th>
+        <th>Layer</th>
+        <th>Confidence</th>
+        <th>Est. scope</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td>Canonical trace resolver (<code>Resolve</code>, <code>EdgeMap</code>, <code>BuildEdgeMap</code>, <code>WriteCanonicalJSONL</code>, <code>Event.Edge</code>)</td>
+        <td><span class="badge go">Go</span></td>
+        <td><span class="badge dead">DEAD</span></td>
+        <td>~120 LOC — delete <code>Trace/Resolve.go</code> + 2 funcs + 1 field</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>Event.hasValue</code> — set but never read</td>
+        <td><span class="badge go">Go</span></td>
+        <td><span class="badge dead">DEAD</span></td>
+        <td>~5 lines — remove field + 3 set sites</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>Wire props <code>arrowStyle</code> and <code>concurrent</code> — persisted, never rendered</td>
+        <td><span class="badge cross">cross</span></td>
+        <td><span class="badge likely">LIKELY-DEAD</span></td>
+        <td>Drop or finish threading into <code>SingleEdgeTube</code></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>NODE_DEFS fields with no consumer: <code>accent</code>, <code>defaultLabel</code>, <code>targets</code>, <code>sources</code>, <code>displays</code>/<code>DisplayKind</code>, <code>requiredInputs</code>, <code>defaultData</code></td>
+        <td><span class="badge ts">TS</span></td>
+        <td><span class="badge likely">LIKELY-DEAD</span></td>
+        <td>Trim generator + <code>NodeDef</code> type fields; some in-progress</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>pump.ts <code>recv</code>/<code>fire</code> no-op cases</td>
+        <td><span class="badge ts">TS</span></td>
+        <td><span class="badge inprog">BY-DESIGN</span></td>
+        <td>Keep — exhaustiveness only; not a removal candidate</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>Partial-feature audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── DEAD CODE ───── -->
+<section id="dead">
+  <h1>Dead Code (zero callers)</h1>
+  <p style="color:var(--muted);margin-bottom:24px;">Definitions that have no live producer or consumer anywhere in the repo.</p>
+
+  <!-- F1 -->
+  <div class="card">
+    <div class="card-title">
+      <span class="badge dead">DEAD</span>
+      <span class="badge go">Go</span>
+      F1 &mdash; Canonical / edge-keyed trace resolver
+    </div>
+    <p class="card-desc">
+      A whole "raw → canonical" trace pathway. Go nodes emit <code>send</code> events keyed by
+      <code>(node, port)</code>; this code was meant to rewrite them to be keyed by spec edge ID for
+      parity against a TS-simulator trace. The simulator it was meant to reconcile against
+      (<code>src/sim/trace.ts</code>) no longer exists.
+    </p>
+
+    <div class="evidence-block">
+      <h3>Definitions</h3>
+      <pre>Trace/Resolve.go:23   type EdgeMap
+Trace/Resolve.go:29   type EdgeLite
+Trace/Resolve.go:35   func BuildEdgeMap
+Trace/Resolve.go:51   func Resolve
+Trace/Trace.go:245    func WriteCanonicalJSONL
+Trace/Trace.go:344    func marshalCanonicalEvent
+Trace/Trace.go:49     Event.Edge  // json:"edge,omitempty" — "canonical send only; set by Resolve"
+messages.ts:33        TraceEvent send variant — optional  edge?: string</pre>
+    </div>
+
+    <div class="evidence-block">
+      <h3>Grep proof — zero live callers</h3>
+      <pre>grep -rn "Resolve(\|WriteCanonicalJSONL(\|BuildEdgeMap\|EdgeMap\|Canonical" \
+  --include="*.go" .
+→ matches ONLY Trace/Resolve.go, Trace/Trace.go, plus a word "Resolve" in
+  tools/gen-node-defs/main.go comment. Zero callers in main.go, nodes/, or _test.go.
+
+main.go:55 uses tr.WriteJSONL(f)  ← raw writer; canonical writer never invoked.
+
+Event.Edge set ONLY inside Resolve (Resolve.go:61 ce.Edge = edge).
+grep -rn "\.Edge =\|Edge:" → no other assignment.
+
+grep -rn "event\.edge\|\.edge" tools/topology-vscode/src → zero reads of TraceEvent.edge.
+pump.ts matches edges by source+sourceHandle, never by edge.
+
+ls tools/topology-vscode/src/sim → no such directory.
+grep -rn "historyToTrace" → zero results.</pre>
+    </div>
+
+    <div class="action-block">
+      <h3>Proposed action</h3>
+      <ul>
+        <li>Delete <code>Trace/Resolve.go</code> wholesale (~40 LOC).</li>
+        <li>Remove <code>WriteCanonicalJSONL</code> + <code>marshalCanonicalEvent</code> from <code>Trace/Trace.go</code> (~80 LOC).</li>
+        <li>Remove <code>Event.Edge</code> field from <code>Trace/Trace.go:49</code>.</li>
+        <li>Remove <code>edge?: string</code> from <code>TraceEvent</code> send variant in <code>messages.ts:33</code>.</li>
+      </ul>
+    </div>
+    <div class="safe-note">
+      Would removing it touch live code? No. The raw-form <code>marshal_contract_test.go</code> and
+      TS <code>trace-event-fields.test.ts</code> do NOT touch the canonical path; they stay green.
+      Confirm no out-of-repo replay tooling reads canonical JSONL before deletion.
+    </div>
+  </div>
+
+  <!-- F2 -->
+  <div class="card">
+    <div class="card-title">
+      <span class="badge dead">DEAD</span>
+      <span class="badge go">Go</span>
+      F2 &mdash; <code>Event.hasValue</code> — set but never read
+    </div>
+    <p class="card-desc">
+      <code>Trace/Trace.go:52</code> declares unexported <code>hasValue bool</code> with the comment
+      "distinguishes 'value 0' from 'no value' for send/recv events." The feature it documents was
+      never implemented — <code>marshalEvent</code> emits <code>Value</code> unconditionally with no
+      <code>if e.hasValue</code> guard anywhere.
+    </p>
+
+    <div class="evidence-block">
+      <h3>Definition</h3>
+      <pre>Trace/Trace.go:52   hasValue bool  // "distinguishes 'value 0' from 'no value'"</pre>
+    </div>
+
+    <div class="evidence-block">
+      <h3>Grep proof — set only, never read</h3>
+      <pre>grep -rn "hasValue" .
+→ SET at Trace.go:121 (Recv), :139 (Send), :150 (SendWire)
+→ SET in tests marshal_contract_test.go:44,46
+→ READ: NOWHERE
+
+marshalEvent (Trace.go:291) emits Value unconditionally.
+No "if e.hasValue" branch exists anywhere in the repo.</pre>
+    </div>
+
+    <div class="action-block">
+      <h3>Proposed action</h3>
+      <ul>
+        <li>Remove <code>hasValue bool</code> field from <code>Trace/Trace.go:52</code>.</li>
+        <li>Remove the three <code>hasValue: true</code> set sites in <code>Trace.go</code>.</li>
+        <li>Remove the two <code>hasValue: true</code> literals in <code>marshal_contract_test.go</code>.</li>
+      </ul>
+    </div>
+    <div class="safe-note">
+      Would removing it touch live code? Pure cleanup. The marshal contract test compares against the
+      fixture and does not assert on this field. Note: if the value-0-vs-absent distinction is
+      genuinely wanted, this is the dangling stub — flag for the substrate owner before silently deleting.
+    </div>
+  </div>
+
+  <footer>Partial-feature audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── HALF-BUILT RENDER ───── -->
+<section id="halfbuilt">
+  <h1>Half-Built Render (parsed, never rendered)</h1>
+  <p style="color:var(--muted);margin-bottom:24px;">Schema and persistence plumbing exists; render consumer was never built (or was removed).</p>
+
+  <!-- F3 -->
+  <div class="card">
+    <div class="card-title">
+      <span class="badge likely">LIKELY-DEAD</span>
+      <span class="badge cross">cross-layer</span>
+      F3 &mdash; Wire props <code>arrowStyle</code> and <code>concurrent</code>
+    </div>
+    <p class="card-desc">
+      <code>schema/wire-defs.ts</code> <code>WIRE_PROPS</code> declares <code>arrowStyle</code> and
+      <code>concurrent</code> (generated from <code>wire:"..."</code> tags in
+      <code>nodes/Wiring/loader.go</code>). They flow into <code>EdgeData</code>
+      (<code>webview/types.ts:87</code>) and round-trip through save/load via
+      <code>pickWireProps</code> and <code>flow-to-spec.ts</code>. No render consumer reads them.
+    </p>
+
+    <div class="evidence-block">
+      <h3>Definitions</h3>
+      <pre>schema/wire-defs.ts      WIRE_PROPS — arrowStyle, concurrent entries
+webview/types.ts:87      EdgeData carries the full WireProps union
+spec-to-flow-helpers.ts  pickWireProps round-trips both props through save/load
+nodes/Wiring/loader.go   wire:"..." struct tags generate the schema entries</pre>
+    </div>
+
+    <div class="evidence-block">
+      <h3>Grep proof — zero render consumers</h3>
+      <pre>grep -rn "arrowStyle\|concurrent" tools/topology-vscode/src/webview
+→ ZERO matches outside an unrelated log comment.
+
+No code in SingleEdgeTube / scene-content.tsx / geometry-helpers.ts reads them.
+They are parsed (parse-nodes-edges.ts), typed, and serialized — never drawn.
+
+Contrast: label (third optional wire prop) IS read at ThreeView.tsx:251
+and edge-creation.ts:88 → healthy.</pre>
+    </div>
+
+    <div class="action-block">
+      <h3>Proposed action (choose one)</h3>
+      <ul>
+        <li><strong>Finish:</strong> thread both into <code>SingleEdgeTube</code> per the CLAUDE.md "Wire props" landing rule — add to <code>WireProps</code> in <code>wire-defs.ts</code> and thread through in the same commit.</li>
+        <li><strong>Remove:</strong> drop from <code>WIRE_PROPS</code>, <code>WireProps</code>, the parser branch in <code>parse-nodes-edges.ts:127</code>, and the <code>wire:</code> tags in <code>loader.go</code> (cross-layer — must regen <code>wire-defs.ts</code> after).</li>
+      </ul>
+    </div>
+    <div class="safe-note">
+      Would removing it touch live code? Check <code>test/fixtures/specs/*</code> for any spec pinning
+      these props before removal (<code>edge-data-roundtrip.json</code> round-trips wire props generically).
+      No render path is affected.
+    </div>
+  </div>
+
+  <footer>Partial-feature audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── ORPHANED SCHEMA ───── -->
+<section id="orphaned">
+  <h1>Orphaned Schema Fields</h1>
+  <p style="color:var(--muted);margin-bottom:24px;">NODE_DEFS fields emitted by the code generator but read by zero consumers.</p>
+
+  <!-- F4 -->
+  <div class="card">
+    <div class="card-title">
+      <span class="badge likely">LIKELY-DEAD</span>
+      <span class="badge ts">TS</span>
+      F4 &mdash; NODE_DEFS fields with no consumer (7 fields)
+    </div>
+    <p class="card-desc">
+      <code>gen-node-defs</code> emits a rich <code>NodeDef</code> (<code>node-defs.ts:12</code>).
+      The only structural consumer, <code>defToTypeDef</code> in <code>node-types.ts:21</code>, reads
+      just <code>role, inputs, outputs, shape, fill||bg, stroke||border, width||minWidth, height</code>.
+      Seven generated fields have zero reads anywhere outside <code>node-defs.ts</code> itself.
+    </p>
+
+    <div class="evidence-block">
+      <h3>Fields with zero reads (grep -rEn across src, excluding node-defs.ts)</h3>
+      <pre>.accent        → 0 reads
+defaultLabel   → 0 reads
+.targets       → 0 reads
+.sources       → 0 reads
+displays / DisplayKind  → 0 reads
+requiredInputs → 0 reads
+defaultData    → 0 reads
+top-level isMulti on ports → 0 reads</pre>
+    </div>
+
+    <div class="evidence-block">
+      <h3>Confidence split by field</h3>
+      <pre>requiredInputs    → DEAD. Red-node diagnostic removed 2026-06-01
+                    (memory/feedback_enforce_required_inputs.md).
+                    requiredInputs in NODE_DEFS is the leftover codegen artifact.
+
+displays/DisplayKind  → LIKELY-DEAD. "queue"|"repeat"|"held" — same family as
+                        the removed slot-badge / held-value display work.
+
+defaultLabel, defaultData,
+targets, sources, accent  → AMBIGUOUS (in-progress vs dead).
+                             May be intended for an "add node" palette / port-accent
+                             rendering that isn't wired yet. Decide per field.</pre>
+    </div>
+
+    <div class="action-block">
+      <h3>Proposed action</h3>
+      <ul>
+        <li>Immediately remove <code>requiredInputs</code> from <code>NodeDef</code> type and <code>gen-node-defs/main.go</code> — confirmed dead.</li>
+        <li>Remove <code>displays</code>/<code>DisplayKind</code> after confirming no planned slot-display revival.</li>
+        <li>Decide <code>defaultLabel</code>, <code>defaultData</code>, <code>targets</code>, <code>sources</code>, <code>accent</code> against the "add node" palette roadmap before trimming.</li>
+        <li>Generator lives at <code>tools/gen-node-defs/main.go:49–69</code> — removal means editing the generator AND the <code>NodeDef</code> type, then regenerating.</li>
+      </ul>
+    </div>
+    <div class="safe-note">
+      Would removing it touch live code? <code>inputs</code>/<code>outputs</code> ARE consumed — keep those.
+      Confirm the "add node" / palette UI does not plan to read <code>defaultData</code>/<code>defaultLabel</code>
+      before trimming those two.
+    </div>
+  </div>
+
+  <footer>Partial-feature audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+<!-- ───── CHECKED NOT FINDINGS ───── -->
+<section id="clear">
+  <h1>Checked — Not Findings</h1>
+  <p style="color:var(--muted);margin-bottom:24px;">Items that look like the half-built signature but are healthy or by-design.</p>
+
+  <!-- F5 pump no-ops -->
+  <div class="card">
+    <div class="card-title">
+      <span class="badge inprog">BY-DESIGN</span>
+      <span class="badge ts">TS</span>
+      pump.ts <code>recv</code>/<code>fire</code> no-op cases
+    </div>
+    <p class="card-desc">
+      <code>pump.ts:39–42</code> has <code>case "recv": return;</code> and
+      <code>case "fire": return;</code>. These look like the slot-badge
+      <code>case "slot": return;</code> signature, but are by-design.
+    </p>
+    <div class="bydesign-block">
+      <h3>Why these are healthy</h3>
+      <p>Go genuinely emits <code>recv</code> and <code>fire</code> events — verified live producers:
+      <code>Trace.Recv</code>/<code>Trace.Fire</code> called from all four node packages and
+      <code>Wiring/builders.go:200</code>. The render layer intentionally visualizes only
+      <code>send</code>→pulse and <code>done</code>→clear. The exhaustiveness
+      <code>switch</code> over the generated <code>TRACE_EVENT_KINDS</code> requires a branch per kind.
+      Removing them would break the <code>assertNever</code> exhaustiveness contract and drop real
+      events on the floor.</p>
+    </div>
+    <div class="safe-note">Listed only so the next reader does not mistake them for the slot-badge pattern.</div>
+  </div>
+
+  <!-- Healthy confirmed-wired list -->
+  <div class="card">
+    <div class="card-title">
+      <span class="badge healthy">HEALTHY</span>
+      Confirmed fully-wired — do not re-investigate
+    </div>
+    <ul class="healthy-list">
+      <li>
+        <strong>Trace emitters Fire / Recv / Send / SendWire / Done / Breadcrumb</strong> —
+        all have live Go callers in <code>nodes/</code>. Grep <code>.Fire(</code>, <code>.Recv(</code>,
+        <code>.Send(</code>, <code>SendWire</code>, <code>.Done(</code>, <code>Breadcrumb</code> all
+        return production call sites, not just tests.
+      </li>
+      <li>
+        <strong>Trace kind vocabulary</strong> <code>recv/fire/send/done</code> —
+        Go <code>TraceEventKinds</code> (<code>Trace.go:42</code>) → generated <code>trace-kinds.ts</code> →
+        pump.ts exhaustiveness → TS <code>TraceEvent</code> union → fixture <code>trace-events.jsonl</code> →
+        <code>trace-event-fields.test.ts</code> all in sync (4 kinds, no orphan kind).
+      </li>
+      <li>
+        <strong>NODE_DEFS ↔ Go node packages</strong> — exactly 4 keys
+        (ChainInhibitor, InhibitRightGate, Input, ReadGate) match the 4 <code>nodes/&lt;Kind&gt;/</code>
+        dirs and <code>RUNTIME_IMPLEMENTED_KINDS</code>.
+      </li>
+      <li>
+        <strong>IPC verbs</strong> — every webview→host verb in <code>messages.ts</code>
+        <code>WEBVIEW_TO_HOST_TYPES</code> is handled in <code>handle-message.ts</code> dispatch.
+        Stdin verbs forwarded to Go (<code>delivered</code>, <code>fade</code>, <code>deleteEdge</code>,
+        <code>addEdge</code>, <code>node-move</code>) all have live handlers in
+        <code>stdin_reader.go:209–261</code>. <code>pause</code>/<code>resume</code>/<code>stop</code>/<code>run-cancel</code>
+        are runner-process controls correctly handled by the runner, not Go.
+      </li>
+      <li>
+        <strong><code>label</code> wire prop</strong> — rendered at
+        <code>ThreeView.tsx:251</code> and <code>edge-creation.ts:88</code>; healthy.
+      </li>
+      <li>
+        <strong><code>marshalEvent</code> raw form + contract tests</strong> — pinned and exercised;
+        the RAW path (<code>WriteJSONL</code> from <code>main.go:55</code>) is the live one.
+      </li>
+    </ul>
+  </div>
+
+  <footer>Partial-feature audit · wirefold · 2026-06-01 · static, offline-openable</footer>
+</section>
+
+</main>
+
+<script>
+function show(id) {
+  document.querySelectorAll('section').forEach(function(s) { s.classList.remove('active'); });
+  document.querySelectorAll('nav button').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+</script>
+</body>
+</html>
