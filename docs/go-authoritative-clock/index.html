@@ -333,6 +333,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="playpause">Play / Pause</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="docs">Doc Updates</button>
   </div>
 
   <!-- TAB 1: Overview -->
@@ -593,6 +594,34 @@ The bridge is: position stream out, geometry edits in.</div>
     <div class="first-step">
       <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding geometry edits back to Go.</p>
     </div>
+  </div>
+
+  <!-- TAB 7: Doc Updates -->
+  <div class="panel" id="panel-docs" role="tabpanel">
+    <h2>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
+    <p>This spec changes the substrate model. It deletes NotifyDelivered as the delivery trigger and moves the clock and all position computation into Go. The pinned docs must change in the same commit as the code, or the model and the implementation will disagree.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>MODEL.md</h3>
+        <ul>
+          <li>Driver / Firing rule: delivery is no longer triggered by TS animation completion. Go's clock elapses inFlightTime and Go delivers to the slot itself.</li>
+          <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position stream out, geometry edits in (plus pause/resume).</li>
+          <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
+          <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>CLAUDE.md</h3>
+        <ul>
+          <li>Substrate model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
+          <li>Bridge surface note: the Go to TS channel carries a per-bead position stream; TS to Go carries geometry edits and pause/resume.</li>
+          <li>Drift rule check: timing/pacing logic stays in Go; TS must not compute positions or interpolate.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1.25rem;">Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
   </div>
 </div>
 
