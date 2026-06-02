@@ -468,10 +468,20 @@
           <td>one per blocking send (short-lived)</td>
           <td><ol><li>Spawned by a gated send just before it parks on WaitConsumed.</li><li>select between the run context's Done channel and the send's own done channel.</li><li>If the context is cancelled (shutdown), cond.Broadcast to wake the parked sender so it never hangs.</li><li>Exit the moment the send completes — a one-shot helper, not a loop.</li></ol></td>
         </tr>
+        <tr>
+          <td>PacedWire</td>
+          <td>not a goroutine — one per destination input port</td>
+          <td><ol><li>Holds the single slot for its destination port and tracks the in-flight pulse on the wire.</li><li>Carries one pulse at a time from source to destination; while a pulse is in flight the wire is "not clear" — that is the backpressure a sender's send-check reads.</li><li>On delivery it moves the pulse into the slot; the destination node loop then consumes it.</li><li>It runs no goroutine of its own — the sender and receiver node loops drive it through a shared lock and condition variable. Slot and backpressure live in the destination node.</li></ol></td>
+        </tr>
+        <tr>
+          <td>ack edge</td>
+          <td>not a goroutine — one per source node</td>
+          <td><ol><li>A backward-signalling wire added for the Go-owns-the-clock model.</li><li>When a node consumes its input (node-loop step 3) it sends an ack to the source over this edge.</li><li>The source's send-check reads it to learn its outgoing wire is clear and it may send the next value.</li><li>Like any wire it is data, not a goroutine — it carries the consume-ack between decoupled nodes.</li></ol></td>
+        </tr>
       </tbody>
     </table>
 
-    <div class="note" style="margin-top:1.25rem;">A wire (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span>) has no goroutine of its own. It is driven by the sender and receiver node loops through a shared lock and a condition variable — the slot and its backpressure live in the destination node, not in a separate wire thread.</div>
+    <div class="note" style="margin-top:1.25rem;">The last two rows are <strong>wires, not goroutines</strong>. A <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> and an ack edge hold state and carry pulses but run no goroutine of their own — the node loops above drive them through a shared lock and a condition variable, and the slot and its backpressure live in the destination node, not in a separate wire thread.</div>
 
     <div class="note" style="margin-top:0.75rem;">Where the clock change lands: in the target model each node loop also wakes about every 16&nbsp;ms to compute and emit its in-flight bead positions and to self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
   </div>
