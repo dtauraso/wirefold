@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Go ↔ TS Pulse Dialog — how a bead travels a wire</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0e0e10;
+    --surface:  #18181c;
+    --border:   #2a2a30;
+    --text:     #e0e0e8;
+    --muted:    #808090;
+    --accent:   #7c9ef8;
+    --go-hue:   #5ec4a0;   /* teal — Go side */
+    --ts-hue:   #c07ef8;   /* purple — TS side */
+    --warn:     #d4a017;
+    --warn-bg:  #1e1800;
+    --good:     #3db87a;
+    --good-bg:  #0a2018;
+    --info:     #7c9ef8;
+    --info-bg:  #0d1628;
+    --mono: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 40px 24px 80px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+    margin-top: 40px;
+  }
+  /* Summary box */
+  .summary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 20px 0 36px;
+    font-size: 13.5px;
+  }
+  .summary strong { color: var(--accent); }
+  .summary code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(124,158,248,0.10);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #b0c8ff;
+  }
+  /* Diagram wrapper */
+  .diagram-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 28px 20px;
+    overflow-x: auto;
+    margin-bottom: 40px;
+  }
+  /* Function table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+  }
+  tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
+  tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(42,42,48,0.6);
+    vertical-align: top;
+  }
+  td.side-go  { color: var(--go-hue);  font-family: var(--mono); font-size: 12px; }
+  td.side-ts  { color: var(--ts-hue);  font-family: var(--mono); font-size: 12px; }
+  td.fn       { font-family: var(--mono); font-size: 12px; color: #e0e0e8; }
+  td.job      { color: var(--muted); font-size: 12.5px; }
+  td.loc      { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+  /* Callout boxes */
+  .callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+  .callout {
+    border-radius: 6px;
+    padding: 16px 18px;
+    font-size: 13px;
+  }
+  .callout.warn  { background: var(--warn-bg); border: 1px solid rgba(212,160,23,0.3); }
+  .callout.good  { background: var(--good-bg); border: 1px solid rgba(61,184,122,0.3); }
+  .callout.info  { background: var(--info-bg); border: 1px solid rgba(124,158,248,0.3); }
+  .callout h3 {
+    font-family: var(--mono);
+    font-size: 12px;
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+  .callout.warn h3 { color: var(--warn); }
+  .callout.good h3 { color: var(--good); }
+  .callout.info h3 { color: var(--info); }
+  .callout p { color: var(--muted); line-height: 1.55; }
+  .callout code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #c8d8ff;
+  }
+  /* Tab bar */
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+  .tab-btn {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 8px 20px 9px;
+    cursor: pointer;
+    border-radius: 5px 5px 0 0;
+    margin-bottom: -1px;
+    transition: color 0.12s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  /* Boundary-data page */
+  .bd-section { margin-top: 36px; }
+  .bd-section:first-child { margin-top: 0; }
+  .bd-lead {
+    font-size: 13.5px;
+    color: var(--muted);
+    margin-bottom: 28px;
+    line-height: 1.65;
+  }
+  .bd-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    margin-bottom: 10px;
+    margin-top: 24px;
+  }
+  .bd-sub.go  { color: var(--go-hue); }
+  .bd-sub.ts  { color: var(--ts-hue); }
+  .bd-sub.both { color: var(--accent); }
+  .bd-hinge {
+    background: var(--surface);
+    border: 1px solid rgba(124,158,248,0.3);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 13px 18px;
+    margin: 20px 0;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .bd-hinge code { font-family: var(--mono); font-size: 12px; background: rgba(124,158,248,0.10); padding: 1px 5px; border-radius: 3px; color: #b0c8ff; }
+  .bd-close {
+    background: var(--warn-bg);
+    border: 1px solid rgba(212,160,23,0.3);
+    border-left: 3px solid var(--warn);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-top: 32px;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .bd-close strong { color: var(--warn); }
+  .bd-close code { font-family: var(--mono); font-size: 12px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; color: #c8d8ff; }
+  /* Local state comparison table — 3 cols */
+  .local-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  .local-tbl thead th { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+  .local-tbl tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+  .local-tbl td { padding: 8px 10px; border-bottom: 1px solid rgba(42,42,48,0.5); vertical-align: top; }
+  .local-tbl td.concept { font-family: var(--mono); font-size: 12px; color: var(--text); white-space: nowrap; }
+  .local-tbl td.go-col  { color: var(--go-hue); font-size: 12px; }
+  .local-tbl td.ts-col  { color: var(--ts-hue); font-size: 12px; }
+  .local-tbl td.none    { color: #404050; font-style: italic; }
+  .local-tbl code { font-family: var(--mono); font-size: 11.5px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+  .cite { font-size: 10.5px; color: #505060; font-family: var(--mono); display: block; margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<h1>Go ↔ TS Pulse Dialog</h1>
+<p style="color:var(--muted);font-size:13px;margin-top:4px;margin-bottom:24px;">How a bead travels a wire — the 4-message synchronization protocol</p>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="showTab('dialog',this)">Dialog</button>
+  <button class="tab-btn" onclick="showTab('boundary',this)">Boundary data</button>
+</div>
+
+<div id="tab-dialog" class="tab-panel active">
+
+<div class="summary">
+  <strong>Key idea:</strong> there is <strong>no global clock</strong>.
+  <strong>Go</strong> decides <em>how long</em> a hop takes
+  (<code>simLatencyMs</code>, derived from wire geometry
+  <code>arcLength / pulseSpeed</code>).
+  <strong>TS</strong> decides <em>when</em> those milliseconds elapse
+  (animates the bead, and can freeze time on pause).
+  They synchronise via exactly <strong>4 messages</strong> per pulse.
+  Pausing TS halts the substrate because Go's
+  <code>Recv()</code> blocks until TS says "delivered."
+</div>
+
+<h2>Sequence diagram</h2>
+<div class="diagram-wrap">
+<!--
+  SVG sequence diagram.
+  Layout:
+    Lifeline Go:  x=160   (label centred at 160)
+    Lifeline TS:  x=620   (label centred at 620)
+    Vertical span: y=60 (header) → y=760 (footer)
+    Arrows at y = 130, 230, 340, 460, 570, 660
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 880 860"
+     width="880" height="860"
+     style="display:block;max-width:100%;font-family:'JetBrains Mono','Fira Mono',monospace;">
+
+  <!--
+    Layout:
+      Go lifeline:  x=180   left annotations: text-anchor="end" x≤100
+      TS lifeline:  x=600   right annotations: text-anchor="end" x≤870 (inside viewBox)
+      Arrow centre: x=390
+      Right annotations are placed with text-anchor="end" x=870 to stay within the viewBox.
+  -->
+
+  <defs>
+    <marker id="arrow-go" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#5ec4a0"/>
+    </marker>
+    <marker id="arrow-ts" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#c07ef8"/>
+    </marker>
+    <marker id="arrow-self" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#888"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="880" height="860" fill="#18181c" rx="6"/>
+
+  <!-- ── Lifeline headers ── -->
+  <!-- Go: centred at x=180 -->
+  <rect x="100" y="20" width="160" height="44" rx="5"
+        fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="180" y="38" text-anchor="middle" fill="#5ec4a0" font-size="13" font-weight="700">Go</text>
+  <text x="180" y="55" text-anchor="middle" fill="#3d8a70" font-size="10">(substrate)</text>
+
+  <!-- TS: centred at x=600 -->
+  <rect x="520" y="20" width="160" height="44" rx="5"
+        fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+  <text x="600" y="38" text-anchor="middle" fill="#c07ef8" font-size="13" font-weight="700">TS</text>
+  <text x="600" y="55" text-anchor="middle" fill="#8040b0" font-size="10">(webview)</text>
+
+  <!-- Lifeline verticals -->
+  <line x1="180" y1="64" x2="180" y2="830" stroke="#5ec4a0" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
+  <line x1="600" y1="64" x2="600" y2="830" stroke="#c07ef8" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
+
+  <!-- ══════════════════════════════════════════
+       MESSAGE ① — Go → TS : "send" trace event  y=120
+  ══════════════════════════════════════════ -->
+  <circle cx="180" cy="120" r="12" fill="#5ec4a0" opacity="0.15" stroke="#5ec4a0" stroke-width="1"/>
+  <text x="180" y="125" text-anchor="middle" fill="#5ec4a0" font-size="11" font-weight="700">①</text>
+  <line x1="192" y1="120" x2="588" y2="120"
+        stroke="#5ec4a0" stroke-width="1.8" marker-end="url(#arrow-go)"/>
+  <text x="390" y="112" text-anchor="middle" fill="#5ec4a0" font-size="11" font-weight="600">send trace event</text>
+  <text x="390" y="134" text-anchor="middle" fill="#3d8a70" font-size="10">{node, port, value, simLatencyMs, target, targetHandle}</text>
+  <!-- Go-side annotation (left of lifeline, anchored from lifeline to stay in-bounds) -->
+  <text x="10" y="155" text-anchor="start" fill="#3d7060" font-size="9.5" font-style="italic">Send() places bead on wire</text>
+  <text x="10" y="167" text-anchor="start" fill="#3d7060" font-size="9.5" font-style="italic">simLatencyMs = arcLength / pulseSpeed</text>
+
+  <!-- ══════════════════════════════════════════
+       MESSAGE ② — TS self: setPulse()  y=230
+  ══════════════════════════════════════════ -->
+  <circle cx="600" cy="230" r="12" fill="#c07ef8" opacity="0.12" stroke="#c07ef8" stroke-width="1"/>
+  <text x="600" y="235" text-anchor="middle" fill="#c07ef8" font-size="11" font-weight="700">②</text>
+  <!-- self-arrow loops right -->
+  <path d="M 608 222 C 650 222, 650 242, 608 242"
+        fill="none" stroke="#888" stroke-width="1.6" stroke-dasharray="4 3"
+        marker-end="url(#arrow-self)"/>
+  <!-- right-aligned annotations -->
+  <text x="870" y="229" text-anchor="end" fill="#a060e0" font-size="11" font-weight="600">setPulse()</text>
+  <text x="870" y="242" text-anchor="end" fill="#664488" font-size="10">stamps startTime</text>
+  <text x="870" y="261" text-anchor="end" fill="#553377" font-size="9.5" font-style="italic">pump.ts handleTraceEvent</text>
+  <text x="870" y="272" text-anchor="end" fill="#553377" font-size="9.5" font-style="italic">matches fan-out edges; anchors bead birth time</text>
+
+  <!-- ══════════════════════════════════════════
+       MESSAGE ③ — TS loop: useFrame  y=345
+  ══════════════════════════════════════════ -->
+  <circle cx="600" cy="345" r="12" fill="#c07ef8" opacity="0.12" stroke="#c07ef8" stroke-width="1"/>
+  <text x="600" y="350" text-anchor="middle" fill="#c07ef8" font-size="11" font-weight="700">③</text>
+  <!-- loop box -->
+  <rect x="618" y="330" width="72" height="30" rx="4"
+        fill="none" stroke="#888" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="654" y="342" text-anchor="middle" fill="#888" font-size="9.5">loop</text>
+  <text x="654" y="354" text-anchor="middle" fill="#888" font-size="9">useFrame</text>
+  <!-- right-aligned annotations -->
+  <text x="700" y="325" text-anchor="start" fill="#a060e0" font-size="11" font-weight="600">PulseBead useFrame</text>
+  <text x="700" y="354" text-anchor="start" fill="#664488" font-size="9">t = (now − startTime)</text>
+  <text x="700" y="365" text-anchor="start" fill="#664488" font-size="9">    / simLatencyMs</text>
+  <text x="700" y="376" text-anchor="start" fill="#553377" font-size="9" font-style="italic">animates bead 0→1 along wire;</text>
+  <text x="700" y="387" text-anchor="start" fill="#553377" font-size="9" font-style="italic">getPauseAdjustedNow() freezes it</text>
+
+  <!-- ══════════════════════════════════════════
+       MESSAGE ④ — TS → Go : "delivered"  y=460
+  ══════════════════════════════════════════ -->
+  <circle cx="600" cy="460" r="12" fill="#c07ef8" opacity="0.12" stroke="#c07ef8" stroke-width="1"/>
+  <text x="600" y="465" text-anchor="middle" fill="#c07ef8" font-size="11" font-weight="700">④</text>
+  <line x1="588" y1="460" x2="192" y2="460"
+        stroke="#c07ef8" stroke-width="1.8" marker-end="url(#arrow-ts)"/>
+  <text x="390" y="453" text-anchor="middle" fill="#c07ef8" font-size="11" font-weight="600">postMessage {type:"delivered", target, targetHandle}</text>
+  <text x="390" y="475" text-anchor="middle" fill="#7040a0" font-size="10">fires when t ≥ 1</text>
+  <!-- TS annotation right-aligned -->
+  <text x="870" y="490" text-anchor="end" fill="#553377" font-size="9.5" font-style="italic">claimDelivered() = exactly-once latch;</text>
+  <text x="870" y="501" text-anchor="end" fill="#553377" font-size="9.5" font-style="italic">only first frame at t≥1 posts</text>
+
+  <!-- ══════════════════════════════════════════
+       MESSAGE ⑤ — Go internal: NotifyDelivered  y=570
+  ══════════════════════════════════════════ -->
+  <circle cx="180" cy="570" r="12" fill="#5ec4a0" opacity="0.15" stroke="#5ec4a0" stroke-width="1"/>
+  <text x="180" y="575" text-anchor="middle" fill="#5ec4a0" font-size="11" font-weight="700">⑤</text>
+  <!-- self-arrow loops left -->
+  <path d="M 168 562 C 126 562, 126 582, 168 582"
+        fill="none" stroke="#888" stroke-width="1.6" stroke-dasharray="4 3"
+        marker-end="url(#arrow-self)"/>
+  <text x="220" y="565" text-anchor="start" fill="#3d8a70" font-size="11" font-weight="600">NotifyDelivered()</text>
+  <!-- Go branch annotations right of lifeline -->
+  <text x="220" y="582" text-anchor="start" fill="#3d7060" font-size="9.5" font-style="italic">deleted → discard</text>
+  <text x="220" y="593" text-anchor="start" fill="#3d7060" font-size="9.5" font-style="italic">hasSend → defer(pendingDelivered)</text>
+  <text x="220" y="604" text-anchor="start" fill="#3d7060" font-size="9.5" font-style="italic">else → deliverLocked() ← backpressure point</text>
+
+  <!-- ══════════════════════════════════════════
+       EPILOGUE — "done" arrow + clearPulse  y=700, 760
+  ══════════════════════════════════════════ -->
+  <line x1="192" y1="700" x2="588" y2="700"
+        stroke="#5ec4a0" stroke-width="1.8" stroke-dasharray="6 3"
+        marker-end="url(#arrow-go)"/>
+  <text x="390" y="692" text-anchor="middle" fill="#5ec4a0" font-size="11" font-weight="600">done trace event  (Go → TS)</text>
+  <text x="390" y="713" text-anchor="middle" fill="#3d7060" font-size="10">node consumed value; wire free</text>
+  <text x="10" y="726" text-anchor="start" fill="#3d7060" font-size="9.5" font-style="italic">emitted after slot released</text>
+
+  <!-- TS clearPulse self-arrow -->
+  <path d="M 608 750 C 650 750, 650 770, 608 770"
+        fill="none" stroke="#888" stroke-width="1.6" stroke-dasharray="4 3"
+        marker-end="url(#arrow-self)"/>
+  <text x="870" y="756" text-anchor="end" fill="#a060e0" font-size="11" font-weight="600">clearPulse()</text>
+  <text x="870" y="769" text-anchor="end" fill="#664488" font-size="10">removes bead from screen</text>
+  <text x="870" y="782" text-anchor="end" fill="#553377" font-size="9.5" font-style="italic">matches fan-in by target+targetHandle</text>
+
+  <!-- Footer rule -->
+  <line x1="40" y1="810" x2="840" y2="810" stroke="#2a2a30" stroke-width="1"/>
+  <text x="440" y="828" text-anchor="middle" fill="#3a3a44" font-size="10">4 messages per pulse: send → setPulse → delivered → done</text>
+
+</svg>
+</div>
+
+<h2>Function reference</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Side</th>
+      <th>Function</th>
+      <th>Job</th>
+      <th>Location</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="side-go">Go</td>
+      <td class="fn">PacedWire.Send</td>
+      <td class="job">Puts bead on wire, emits "send" trace event with <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">simLatencyMs</code></td>
+      <td class="loc">nodes/Wiring/paced_wire.go:119<br><span style="color:#505060">latency calc :94–96</span></td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">handleTraceEvent <span style="color:var(--muted);font-size:11px">(pump.ts)</span></td>
+      <td class="job">Translates trace events → animation state; fan-out match on "send", fan-in match on "done"</td>
+      <td class="loc">webview/three/pump.ts:34<br><span style="color:#505060">send :43–71 · done :74–89</span></td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">setPulse <span style="color:var(--muted);font-size:11px">(pulse-state.ts)</span></td>
+      <td class="job">Starts bead animation; stamps <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">startTime = getPauseAdjustedNow()</code></td>
+      <td class="loc">webview/three/pulse-state.ts:40–49</td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">PulseBead useFrame <span style="color:var(--muted);font-size:11px">(scene-content.tsx)</span></td>
+      <td class="job">Animates bead each frame; posts "delivered" exactly once when <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">t ≥ 1</code></td>
+      <td class="loc">webview/three/scene-content.tsx:373–409</td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">claimDelivered <span style="color:var(--muted);font-size:11px">(pulse-state.ts)</span></td>
+      <td class="job">Exactly-once latch — only the first frame at t ≥ 1 fires the "delivered" message</td>
+      <td class="loc">webview/three/pulse-state.ts:51–56</td>
+    </tr>
+    <tr>
+      <td class="side-go">Go</td>
+      <td class="fn">NotifyDelivered <span style="color:var(--muted);font-size:11px">(paced_wire.go)</span></td>
+      <td class="job">Receives "delivered"; fills slot or defers via <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">pendingDelivered</code> — the backpressure point</td>
+      <td class="loc">nodes/Wiring/paced_wire.go:303–329<br><span style="color:#505060">stdin dispatch nodes/Wiring/stdin_reader.go:208–218</span></td>
+    </tr>
+    <tr>
+      <td class="side-go">Go</td>
+      <td class="fn">Done → emits "done"</td>
+      <td class="job">Node consumed the value; wire slot released; "done" trace event sent to TS</td>
+      <td class="loc">nodes/Wiring/paced_wire.go:247</td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">clearPulse <span style="color:var(--muted);font-size:11px">(pulse-state.ts)</span></td>
+      <td class="job">Removes bead from screen on receipt of "done", matched by target + targetHandle</td>
+      <td class="loc">webview/three/pulse-state.ts:77–90</td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">patchPulse <span style="color:var(--muted);font-size:11px">(pulse-state.ts)</span></td>
+      <td class="job">On node drag, rewrites <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">simLatencyMs + startTime</code> so bead progress stays continuous</td>
+      <td class="loc">webview/three/pulse-state.ts:68–75</td>
+    </tr>
+    <tr>
+      <td class="side-ts">TS</td>
+      <td class="fn">PulseData <span style="color:var(--muted);font-size:11px">(pulse-state.ts)</span></td>
+      <td class="job">Type for in-flight bead state: <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">startTime</code>, <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">simLatencyMs</code>, delivery latch, bead key</td>
+      <td class="loc">webview/three/pulse-state.ts:18–25</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Why it works this way</h2>
+<div class="callouts">
+  <div class="callout warn">
+    <h3>Go owns duration, TS owns the timeline</h3>
+    <p>Go says "this hop takes 340 ms" (<code>simLatencyMs</code>). TS decides when those ms elapse — and can freeze them during pause via <code>getPauseAdjustedNow()</code>. No shared clock is needed; the two sides only agree on a duration, not a wall-clock moment.</p>
+  </div>
+  <div class="callout good">
+    <h3>Animation completion IS the delivery signal</h3>
+    <p>There is no countdown timer in Go. <code>Recv()</code> blocks on a channel that only unblocks when TS fires the "delivered" postMessage. That is why pausing TS halts substrate execution — Go literally cannot proceed until the animation finishes.</p>
+  </div>
+  <div class="callout info">
+    <h3>Two exactly-once guards</h3>
+    <p><code>claimDelivered()</code> on the TS side ensures only one frame posts the message, even if useFrame fires multiple times at t ≥ 1. <code>NotifyDelivered()</code> on the Go side handles the <code>deleted</code> and <code>hasSend</code> edge cases so a stale or racing delivery never double-fills a slot.</p>
+  </div>
+</div>
+
+</div><!-- /tab-dialog -->
+
+<div id="tab-boundary" class="tab-panel">
+
+  <p class="bd-lead">What actually crosses the Go↔TS boundary is small. Most state is LOCAL to one side. This tab separates the wire format from each side's private state.</p>
+
+  <!-- ── Section A ── -->
+  <h2 style="margin-top:0">What crosses the wire</h2>
+
+  <div class="bd-sub go">Go → TS &nbsp;(stdout, JSONL trace events)</div>
+  <table>
+    <thead><tr><th>Field (json tag)</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="fn">step</td><td class="job">Monotonic ordinal assigned in the Trace drain goroutine. Consumed by TS as <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">simStep</code> for display only.<span class="cite">Trace/Trace.go:45 — Event.Step</span></td></tr>
+      <tr><td class="fn">kind</td><td class="job">Discriminant: <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">recv</code> | <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">fire</code> | <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">send</code> | <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">done</code>. pump.ts silently ignores <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">recv</code> and <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">fire</code>.<span class="cite">Trace/Trace.go:46 — Event.Kind | messages.ts:32 TraceEvent union</span></td></tr>
+      <tr><td class="fn">node</td><td class="job">Node id (string) that fired/recv'd/sent/done'd.<span class="cite">Trace/Trace.go:47 — Event.Node</span></td></tr>
+      <tr><td class="fn">port</td><td class="job">Port name (omitempty). recv: input port; send: output port; done: input port being released.<span class="cite">Trace/Trace.go:48 — Event.Port</span></td></tr>
+      <tr><td class="fn">value</td><td class="job">Integer payload (omitempty). Present on recv and send events.<span class="cite">Trace/Trace.go:50 — Event.Value</span></td></tr>
+      <tr><td class="fn">arcLength</td><td class="job">World-unit length of this edge's port-to-port curve. Sent with <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">send</code> events from paced wires. Source: <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">Out.ArcLength</code>.<span class="cite">Trace/Trace.go:57 — Event.ArcLength | nodes/Wiring/ports.go:175</span></td></tr>
+      <tr><td class="fn">simLatencyMs</td><td class="job">Animation duration in milliseconds for this hop. Computed as <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">arcLength / pulseSpeed</code> and set on <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">Out.SimLatencyMs</code> at load time.<span class="cite">Trace/Trace.go:58 — Event.SimLatencyMs | nodes/Wiring/paced_wire.go:96</span></td></tr>
+      <tr><td class="fn">target</td><td class="job">Authoritative destination node id (from Go). Never derived by TS from edge data.<span class="cite">Trace/Trace.go:61 — Event.Target | messages.ts:33</span></td></tr>
+      <tr><td class="fn">targetHandle</td><td class="job">Authoritative destination port name (from Go). Paired with <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">target</code> to form the slot identity key.<span class="cite">Trace/Trace.go:62 — Event.TargetHandle | messages.ts:33</span></td></tr>
+      <tr><td class="fn">edge</td><td class="job">Canonical edge id (omitempty). Set by Resolve on send events; may be absent in raw form.<span class="cite">Trace/Trace.go:49 — Event.Edge</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="bd-hinge">
+    <strong style="color:var(--accent)">The hinge:</strong> <code>simLatencyMs</code> is the ONE quantity computed on the Go side (from wire geometry <code>arcLength / pulseSpeed</code>) and consumed on the TS side as animation duration — it is the hinge of the whole protocol.
+  </div>
+
+  <div class="bd-sub ts">TS → Go &nbsp;(stdin, one JSON object per message)</div>
+  <table>
+    <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="fn">type</td><td class="job">Message discriminant. For pulse delivery: <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">"delivered"</code>. Also: <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">"node-move"</code>, <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">"deleteEdge"</code>, <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">"addEdge"</code>, <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">"fade"</code>.<span class="cite">messages.ts:12–26 WebviewToHostMsg | nodes/Wiring/stdin_reader.go:4–6</span></td></tr>
+      <tr><td class="fn">target</td><td class="job"><em>delivered / deleteEdge / addEdge:</em> Destination node id — echoed back from the "send" event's <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">target</code> field.<span class="cite">messages.ts:22 | nodes/Wiring/stdin_reader.go:210</span></td></tr>
+      <tr><td class="fn">targetHandle</td><td class="job"><em>delivered / deleteEdge / addEdge:</em> Destination port name — echoed back from the "send" event's <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">targetHandle</code> field. Together with <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">target</code> forms the PacedWire lookup key.<span class="cite">messages.ts:22 | nodes/Wiring/stdin_reader.go:213</span></td></tr>
+      <tr><td class="fn">nodeId</td><td class="job"><em>node-move only:</em> The dragged node's id.<span class="cite">messages.ts:26 | nodes/Wiring/stdin_reader.go:6</span></td></tr>
+      <tr><td class="fn">x, y, z</td><td class="job"><em>node-move only:</em> New 3-D position in world units. Go uses these to recompute <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">Out.ArcLength</code> / <code style="font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px">Out.SimLatencyMs</code> for affected edges.<span class="cite">messages.ts:26 | nodes/Wiring/stdin_reader.go:6</span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ── Section B ── -->
+  <div class="bd-section">
+  <h2>What stays local (never crosses)</h2>
+
+  <table class="local-tbl">
+    <thead>
+      <tr>
+        <th>Concept</th>
+        <th style="color:var(--go-hue)">Go-side (private)</th>
+        <th style="color:var(--ts-hue)">TS-side (private)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="concept">Clock / time</td>
+        <td class="go-col">Per-node <code>time.Now()</code> / <code>t0</code> local capture; <code>pollInterval</code> polling in PacedWire</td>
+        <td class="ts-col"><code>getPauseAdjustedNow()</code>, <code>_pauseAccumulatedMs</code> / <code>_pauseStartedAt</code>, per-pulse <code>startTime</code><span class="cite">run-status.ts:19–29 | pulse-state.ts:46</span></td>
+      </tr>
+      <tr>
+        <td class="concept">Pause state</td>
+        <td class="go-col none">— (Go is never told about pause; it blocks on delivery)</td>
+        <td class="ts-col"><code>isPaused</code> flag tracked in run-status.ts; gates <code>_pauseStartedAt</code> accumulation<span class="cite">run-status.ts:41–50</span></td>
+      </tr>
+      <tr>
+        <td class="concept">Slot / backpressure</td>
+        <td class="go-col"><code>PacedWire.hasSend</code>, <code>pendingDelivered</code>, <code>deleted</code>, slot phase<span class="cite">nodes/Wiring/paced_wire.go:70–72</span></td>
+        <td class="ts-col none">— (TS has no slot model; it only posts "delivered" once per pulse)</td>
+      </tr>
+      <tr>
+        <td class="concept">Wire latency source</td>
+        <td class="go-col"><code>MaxIncomingSimLatencyMs</code> (per-port window aggregate), <code>Out.ArcLength</code> / <code>Out.SimLatencyMs</code> per edge<span class="cite">nodes/Wiring/paced_wire.go:82 | ports.go:175–176</span></td>
+        <td class="ts-col">Receives <code>simLatencyMs</code> scalar only; does not compute geometry<span class="cite">pulse-state.ts:23</span></td>
+      </tr>
+      <tr>
+        <td class="concept">Animation progress</td>
+        <td class="go-col none">— (Go has no concept of bead position)</td>
+        <td class="ts-col">Per-edge <code>t = (now − startTime) / simLatencyMs</code>, RAF frame loop in PulseBead useFrame<span class="cite">scene-content.tsx:381</span></td>
+      </tr>
+      <tr>
+        <td class="concept">Delivery dedup</td>
+        <td class="go-col"><code>NotifyDelivered</code>'s <code>deleted</code> / <code>hasSend</code> guards prevent double-fill<span class="cite">nodes/Wiring/paced_wire.go:211–234</span></td>
+        <td class="ts-col"><code>claimDelivered</code> map (<code>_deliveredAt</code>) ensures only the first frame at <code>t ≥ 1</code> posts<span class="cite">pulse-state.ts:34, 52–55</span></td>
+      </tr>
+      <tr>
+        <td class="concept">Firing decision / preconditions</td>
+        <td class="go-col">Node goroutine logic; precondition-gating keeps unfed nodes inert</td>
+        <td class="ts-col none">— (TS never participates in firing decisions)</td>
+      </tr>
+      <tr>
+        <td class="concept">Geometry / curve</td>
+        <td class="go-col">Only the scalar <code>arcLength</code> used for latency; Go has no 3-D curve</td>
+        <td class="ts-col"><code>buildPortCurve</code>, edge geometry rebuilt each frame from src/tgt/handles<span class="cite">geometry-helpers.ts:142 | scene-content.tsx:381</span></td>
+      </tr>
+      <tr>
+        <td class="concept">Monotonic ordinal</td>
+        <td class="go-col"><code>Step</code> assigned in Trace drain goroutine<span class="cite">Trace/Trace.go:45</span></td>
+        <td class="ts-col">Consumes as <code>simStep</code> — display only, not used for ordering<span class="cite">messages.ts:32–34</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="bd-close">
+    <strong>The asymmetry:</strong> Go is authoritative for slot identity (<code>target</code> / <code>targetHandle</code>) and duration (<code>simLatencyMs</code>); TS is authoritative for WHEN (timeline + pause). Neither shares its clock.
+  </div>
+
+  </div><!-- /bd-section -->
+
+</div><!-- /tab-boundary -->
+
+<script>
+function showTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Go-Authoritative Clock — Wirefold Design Spec</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0e0e10;
+    --surface:  #18181c;
+    --border:   #2a2a30;
+    --text:     #e0e0e8;
+    --muted:    #808090;
+    --accent:   #7c9ef8;
+    --go-hue:   #5ec4a0;
+    --ts-hue:   #c07ef8;
+    --warn:     #d4a017;
+    --warn-bg:  #1e1800;
+    --good:     #3db87a;
+    --good-bg:  #0a2018;
+    --info:     #7c9ef8;
+    --info-bg:  #0d1628;
+    --mono: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.65;
+    padding: 40px 24px 80px;
+  }
+
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  .page-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .page-subtitle {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 28px;
+    letter-spacing: -0.3px;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+
+  .tab-btn {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 8px 20px 9px;
+    cursor: pointer;
+    border-radius: 5px 5px 0 0;
+    margin-bottom: -1px;
+    transition: color 0.12s;
+    white-space: nowrap;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+
+  .tab-btn.active {
+    color: var(--accent);
+    background: var(--surface);
+    border-color: var(--border);
+  }
+
+  .panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    padding: 2.25rem 2.5rem;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .panel.active { display: block; }
+
+  /* Typography inside panels */
+  .panel h2 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 16px;
+    margin-top: 0;
+  }
+
+  .panel h3 {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+  }
+
+  .panel p {
+    color: var(--muted);
+    margin-bottom: 1.25rem;
+    max-width: 680px;
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+
+  .panel p:last-child { margin-bottom: 0; }
+
+  /* Table */
+  .spec-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1.25rem;
+    font-size: 13px;
+  }
+
+  .spec-table caption {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    caption-side: top;
+    padding-bottom: 0.4rem;
+  }
+
+  .spec-table th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+  }
+
+  .spec-table td {
+    padding: 8px 12px;
+    vertical-align: top;
+    border-bottom: 1px solid rgba(42,42,48,0.6);
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .spec-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
+  .spec-table td:first-child { font-family: var(--mono); font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--accent); }
+  .spec-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; white-space: nowrap; color: var(--go-hue); }
+
+  /* Cards */
+  .cards {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .card {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.4rem;
+    background: var(--bg);
+  }
+
+  .card h3 {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .card ul li {
+    font-size: 13px;
+    color: var(--muted);
+    padding: 0.3rem 0;
+    padding-left: 1rem;
+    position: relative;
+    line-height: 1.5;
+  }
+
+  .card ul li::before {
+    content: "–";
+    position: absolute;
+    left: 0;
+    color: var(--border);
+  }
+
+  /* SVG diagrams */
+  .diagram {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px 20px;
+    margin: 1.5rem 0 1rem;
+    display: flex;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .diagram svg {
+    display: block;
+  }
+
+  .note {
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.65rem 0.9rem;
+    margin-top: 0.25rem;
+    max-width: 620px;
+  }
+
+  /* Contract block */
+  .contract-box {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    background: var(--bg);
+    border: 1px solid rgba(124,158,248,0.3);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 1.1rem 1.3rem;
+    color: var(--text);
+    margin: 1.25rem 0 1.75rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .first-step-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.4rem;
+  }
+
+  .first-step {
+    font-size: 13.5px;
+    color: var(--muted);
+    border-left: 3px solid var(--go-hue);
+    padding-left: 0.85rem;
+    margin-top: 0.25rem;
+  }
+
+  /* Flow diagram stacked */
+  .flow-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    margin: 1.5rem 0 1.25rem;
+  }
+
+  .flow-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .subheading {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 1.5rem 0 0.5rem;
+  }
+
+  @media (max-width: 600px) {
+    .cards { flex-direction: column; }
+    .panel { padding: 1.5rem 1.25rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="page-title">Wirefold — Design Spec</div>
+  <div class="page-subtitle">Go Backend / TS Frontend</div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">Overview</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="division">Division</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
+  </div>
+
+  <!-- TAB 1: Overview -->
+  <div class="panel active" id="panel-overview" role="tabpanel">
+    <h2>Go is the backend. TS is the frontend.</h2>
+    <p>The system splits cleanly into a backend and a frontend. Go is the backend: it holds all geometric data and runs all the animation calculations — it owns what is happening and when. TS is the frontend: it renders the messages Go sends, and it sends geometric edits from the editor back to Go so the network updates.</p>
+
+    <table class="spec-table">
+      <caption>Where each property lives</caption>
+      <thead>
+        <tr>
+          <th>Property</th>
+          <th>Lives in</th>
+          <th>Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Concurrent</td>
+          <td>Go (backend)</td>
+          <td>Self-scheduling nodes, local rules over slots and wires. No global clock or round.</td>
+        </tr>
+        <tr>
+          <td>Geometric</td>
+          <td>Go (backend)</td>
+          <td>Holds all geometric data; computes arc length, positions, durations.</td>
+        </tr>
+        <tr>
+          <td>Animating</td>
+          <td>Go calculates, TS draws</td>
+          <td>Go computes all animation values (progress, timing); TS only renders the result.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TAB 2: Division -->
+  <div class="panel" id="panel-division" role="tabpanel">
+    <h2>Backend and frontend.</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>Go — backend</h3>
+        <ul>
+          <li>Holds all geometric data</li>
+          <li>Computes all animation values — arc length, positions, traversal progress, durations</li>
+          <li>Runs the substrate (nodes, slots, wires, send rules)</li>
+          <li>Sends messages describing what to render</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>TS — frontend</h3>
+        <ul>
+          <li>Renders the messages Go sends</li>
+          <li>Sends geometric edits from the editor (node drags) back to Go</li>
+          <li>No geometry math, no animation calculation, no clock — drawing only</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: The Bridge -->
+  <div class="panel" id="panel-bridge" role="tabpanel">
+    <h2>Trace out, geometry in.</h2>
+    <p>The whole boundary is two arrows. Nothing else crosses.</p>
+
+    <div class="diagram">
+      <svg width="680" height="180" viewBox="0 0 680 180" xmlns="http://www.w3.org/2000/svg" aria-label="Bridge diagram: Go sends trace stream to TS; TS sends geometry edits to Go">
+        <!-- Go box -->
+        <rect x="20" y="40" width="200" height="100" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+        <text x="120" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#5ec4a0">GO</text>
+        <text x="120" y="102" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">backend — geometry + animation calc</text>
+
+        <!-- TS box -->
+        <rect x="460" y="40" width="200" height="100" rx="10" ry="10" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+        <text x="560" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#c07ef8">TS</text>
+        <text x="560" y="102" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#8040b0">frontend — renderer</text>
+
+        <!-- Top arrow: GO → TS (trace stream) -->
+        <line x1="222" y1="68" x2="458" y2="68" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="340" y="58" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">messages (what to render, when)</text>
+
+        <!-- Bottom arrow: TS → GO (geometry edits) -->
+        <line x1="458" y1="112" x2="222" y2="112" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
+        <text x="340" y="130" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#c07ef8">geometry edits from editor</text>
+
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/>
+          </marker>
+          <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+
+    <div class="note">
+      This matches uniform pulse speed — speed is a shared constant; the only per-wire variation is arc length, which is geometry.
+    </div>
+  </div>
+
+  <!-- TAB 4: Clock Change -->
+  <div class="panel" id="panel-clock" role="tabpanel">
+    <h2>Go calculates the animation; TS only draws it.</h2>
+    <p>Go does all animation calculation — timing, progress, durations — and emits ready-to-render messages. TS draws them. The frontend never calculates animation; it renders frames Go describes. Today's inversion (TS pacing Go via NotifyDelivered) is what this design removes.</p>
+
+    <div class="flow-stack">
+      <div>
+        <div class="flow-label">Before</div>
+        <svg width="640" height="70" viewBox="0 0 640 70" xmlns="http://www.w3.org/2000/svg" aria-label="Before: TS animation completes drives NotifyDelivered which drives Go delivers to slot">
+          <!-- Box 1 -->
+          <rect x="0" y="14" width="178" height="38" rx="6" fill="#1e0e0e" stroke="#c07ef8" stroke-width="1.2"/>
+          <text x="89" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11.5" fill="#c07ef8" font-weight="600">TS calculates / drives</text>
+
+          <!-- Arrow 1 -->
+          <line x1="180" y1="33" x2="225" y2="33" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#ba1)"/>
+
+          <!-- Box 2 -->
+          <rect x="227" y="14" width="138" height="38" rx="6" fill="#1e0e0e" stroke="#c07ef8" stroke-width="1.2"/>
+          <text x="296" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11.5" fill="#c07ef8" font-weight="600">NotifyDelivered</text>
+
+          <!-- Arrow 2 -->
+          <line x1="367" y1="33" x2="412" y2="33" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#ba1)"/>
+
+          <!-- Box 3 -->
+          <rect x="414" y="14" width="178" height="38" rx="6" fill="#18181c" stroke="#2a2a30" stroke-width="1.2"/>
+          <text x="503" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11.5" fill="#808090" font-weight="600">Go delivers to slot</text>
+
+          <!-- TS drives label -->
+          <text x="200" y="62" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#8040b0">TS drives Go</text>
+
+          <defs>
+            <marker id="ba1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" fill="#c07ef8"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+
+      <div>
+        <div class="flow-label">After</div>
+        <svg width="640" height="70" viewBox="0 0 640 70" xmlns="http://www.w3.org/2000/svg" aria-label="After: Go elapses inFlightTime drives Go delivers to slot drives trace out drives TS animates to fit duration">
+          <!-- Box 1 -->
+          <rect x="0" y="14" width="170" height="38" rx="6" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.2"/>
+          <text x="85" y="32" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0" font-weight="600">Go calculates all</text>
+          <text x="85" y="46" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0" font-weight="600">animation values</text>
+
+          <!-- Arrow 1 -->
+          <line x1="172" y1="33" x2="210" y2="33" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aa1)"/>
+
+          <!-- Box 2 -->
+          <rect x="212" y="14" width="148" height="38" rx="6" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.2"/>
+          <text x="286" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0" font-weight="600">Go delivers to slot</text>
+
+          <!-- Arrow 2 -->
+          <line x1="362" y1="33" x2="400" y2="33" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aa1)"/>
+
+          <!-- Box 3 -->
+          <rect x="402" y="14" width="80" height="38" rx="6" fill="#18181c" stroke="#2a2a30" stroke-width="1.2"/>
+          <text x="442" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#808090" font-weight="600">trace out</text>
+
+          <!-- Arrow 3 -->
+          <line x1="484" y1="33" x2="520" y2="33" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aa1)"/>
+
+          <!-- Box 4 -->
+          <rect x="522" y="6" width="116" height="54" rx="6" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.2"/>
+          <text x="580" y="28" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10.5" fill="#c07ef8" font-weight="600">TS renders</text>
+          <text x="580" y="42" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10.5" fill="#c07ef8" font-weight="600">the result</text>
+
+          <!-- Go drives label -->
+          <text x="100" y="62" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">Go drives</text>
+
+          <defs>
+            <marker id="aa1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" fill="#5ec4a0"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+
+    <div class="subheading">Keeping them locked</div>
+    <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
+  </div>
+
+  <!-- TAB 5: Contract -->
+  <div class="panel" id="panel-contract" role="tabpanel">
+    <h2>The contract in one line.</h2>
+
+    <div class="contract-box">Go (backend) holds all geometric data and computes all animation values.
+TS (frontend) renders the messages Go sends and forwards editor geometry edits back to Go.
+The bridge is: messages out, geometry edits in.</div>
+
+    <div class="first-step-label">First concrete step</div>
+    <div class="first-step">
+      <p>Move all geometry data and animation calculation into Go so it produces ready-to-render messages; reduce TS to rendering those messages and forwarding editor geometry edits.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var btns = document.querySelectorAll('.tab-btn');
+    var panels = document.querySelectorAll('.panel');
+
+    btns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = btn.getAttribute('data-panel');
+
+        btns.forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        panels.forEach(function (p) { p.classList.remove('active'); });
+
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        document.getElementById('panel-' + target).classList.add('active');
+      });
+    });
+  })();
+</script>
+</body>
+</html>
