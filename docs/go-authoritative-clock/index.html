@@ -473,7 +473,7 @@
           <tr>
             <td>ChainInhibitor loop</td>
             <td>one per ChainInhibitor node</td>
-            <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — backpressure means it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and ack the source over its ack edge.</li><li>Fan out the held value to every ToNext output in parallel; each send goes only when that wire has no pulse, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
+            <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — backpressure means it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and ack the source over its ack edge.</li><li>Spawn one goroutine per ToNext port to fan out the held value concurrently; each send goes only when that wire has no pulse, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
           </tr>
           <tr>
             <td>InhibitRightGate loop</td>
