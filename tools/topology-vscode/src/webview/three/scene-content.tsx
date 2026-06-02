@@ -32,6 +32,13 @@ import type { PickOptions } from "./interaction-controls";
 /** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
 export const NEAREST_N = 8;
 
+// Init-pulse visual styles keyed by the raw init value emitted by the Go substrate.
+const INIT_PULSE_STYLES: Record<number, { fill: string; ring?: string }> = {
+  0: { fill: "#ffffff", ring: "#000000" },
+  1: { fill: "#000000", ring: "#000000" },
+};
+const DEFAULT_INIT_PULSE_STYLE: { fill: string; ring?: string } = { fill: "#888888", ring: "#000000" };
+
 // ---------------------------------------------------------------------------
 // Procedural environment map — offline, no CDN, no preset fetch.
 // Builds a PMREMGenerator env texture from a small gradient-sky scene and
@@ -249,56 +256,30 @@ export function GraphNode({
         const fadeOpacityInner = 0.25;
         return (init as number[]).map((val: number, idx: number) => {
           const x = startX + idx * (2 * pr + gap);
-          const isGlass = val === 0;
-          if (isGlass) {
-            // value-0: uniform white bead with a real black torus ring around
-            // it, mirroring the node body's border torus (default XY plane,
-            // no rotation) so the ring reads in the node's outline plane.
-            return (
-              <group key={idx} position={[x, 0, zFront]}>
-                <mesh raycast={() => null}>
-                  <sphereGeometry args={[pr, 16, 16]} />
-                  <meshStandardMaterial
-                    color="#ffffff"
-                    emissive={new THREE.Color(0x000000)}
-                    emissiveIntensity={0}
-                    transparent={faded}
-                    opacity={faded ? fadeOpacityInner : 1}
-                  />
-                </mesh>
-                <mesh raycast={() => null}>
-                  <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
-                  <meshStandardMaterial
-                    color="#000000"
-                    emissiveIntensity={0}
-                    transparent={faded}
-                    opacity={faded ? fadeOpacityInner : 1}
-                  />
-                </mesh>
-              </group>
-            );
-          }
-          // value !== 0: solid black bead with black torus ring.
+          // Map the raw init value to a visual style; Go keeps emitting raw 0/1.
+          const style = INIT_PULSE_STYLES[val] ?? DEFAULT_INIT_PULSE_STYLE;
           return (
             <group key={idx} position={[x, 0, zFront]}>
               <mesh raycast={() => null}>
                 <sphereGeometry args={[pr, 16, 16]} />
                 <meshStandardMaterial
-                  color="#000000"
+                  color={style.fill}
                   emissiveIntensity={0}
                   transparent={faded}
                   opacity={faded ? fadeOpacityInner : 1}
                 />
               </mesh>
-              <mesh raycast={() => null}>
-                <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
-                <meshStandardMaterial
-                  color="#000000"
-                  emissiveIntensity={0}
-                  transparent={faded}
-                  opacity={faded ? fadeOpacityInner : 1}
-                />
-              </mesh>
+              {style.ring !== undefined && (
+                <mesh raycast={() => null}>
+                  <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
+                  <meshStandardMaterial
+                    color={style.ring}
+                    emissiveIntensity={0}
+                    transparent={faded}
+                    opacity={faded ? fadeOpacityInner : 1}
+                  />
+                </mesh>
+              )}
             </group>
           );
         });
