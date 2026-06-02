@@ -7,9 +7,10 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-02 — task/spec-go-backend-ts-frontend, pushed, docs only)
+## State at handoff (2026-06-02 — task/spec-go-backend-ts-frontend, pushed, docs only; W defined + ReadGate step-2 clarified)
 
 - Active branch: `task/spec-go-backend-ts-frontend`, pushed to origin. DOCS/SPEC ONLY — no Go/TS/substrate code changed. Many commits this session refining the spec.
+- **Latest commit (this handoff, e1f1c26b, pushed):** ReadGate coincidence-window clarification — (1) a note above the Goroutines table DEFINING W: W = 1.5 × the gate's longest input-wire traversal time (traversal = arcLength ÷ pulseSpeed), recomputed from live wire geometry, elapsed on Go's sim-clock; (2) a rewrite of ReadGate loop step 2 — fire only when both inputs arrive within W on the sim-clock; on timeout, clear the partial arrival AND ack its source over its ack edge (releasing a consumeGated sender); a timeout sends nothing downstream and the lone input decays. The parallel **InhibitRightGate** loop row was NOT updated and still carries the old phrasing — see OPEN ITEMS #1.
 - Two HTML specs under `docs/`: `docs/clock-dialog/index.html` and `docs/go-authoritative-clock/index.html`. The latter is now a 13-tab spec: Overview, Division, **Goroutines**, **TS code**, The Bridge, Clock Change, Contract, Play/Pause, TS → Go, Doc Updates, Plan, Phases, Verify.
 - This session built out the **Goroutines** tab (after Division): a table of the actual execution units, each "Its job" cell enumerated as ordered steps, three columns (Context/How many/Its job) with `table-layout:fixed` so it stays inside its panel. Rows: `main`; the node loops split PER KIND — **Input loop** (data source, e.g. in08), **Bootstrap loop** (`bootstrap_rg`, one-shot `init:[1]`/`repeat:false` ring seed that feeds `readGate1.FromChainInhibitor` round 1, feedback edge `i1ToReadGate1` after), **ReadGate loop** (coincidence window W over FromInput + FromChainInhibitor), **ChainInhibitor loop** (waits all ToNext clear = backpressure, fans out), **InhibitRightGate loop** (window W, result=1 iff Left==1&&Right==0); then `stdin reader` (real cases: delivered→NotifyDelivered, deleteEdge/addEdge→Delete/Restore, fade, node-move), `trace drain`, short-lived per-send helpers; and two **wire rows marked "not a goroutine"** — `PacedWire` (one per destination port; slot + in-flight pulse + delivery; driven by node loops via lock+cond var) and `ack edge` (one per source node).
 - The node-loop steps describe the TARGET looping model (not current code): step 3 = consume input, clear slot, AND send an ack to the source over a dedicated **ack edge** (one per source node); step 4 = send only if the wire has no pulse on it, never drop, else restart the loop. This is the design fork: under Go-owns-the-clock the implicit `WaitConsumed` unpark becomes an explicit per-source ack edge the looping node reads as state. Lead framing: the concurrency IS the nodes; no global clock/scheduler goroutine.
@@ -43,11 +44,12 @@ The re-audit (re-running the SAME audit after the fix) caught that the F1 fix wa
 
 ### OPEN ITEMS / NEXT
 
-1. **Decide the spec branch's fate** — merge `task/spec-go-backend-ts-frontend` to main (specs ride along) or keep as a pushed planning reference. No code depends on it.
-2. **Scope gate on Phases 3–4** before any implementation — confirm geometry-into-Go and especially shading-into-Go are worth the cost/coupling, or trim the plan to Phase 1–2.
-3. **If implementing:** Phase 1 first concrete step = Go computes arc length (it already can) and elapses inFlightTime itself, delivering on its own clock (replacing the notifyDelivered trigger), proven by a HEADLESS Go test on the in08→readGate1 slice (today `go run .` deadlocks after the first hop). Park other topology items. Whether `NotifyDelivered` the function survives is decided here. Update MODEL.md + CLAUDE.md per the spec's Doc Updates tab in the SAME commit as code.
-4. Carry-over: `task/partial-feature-audit` (findings-only) noted as starting in a prior handoff — status unknown, not this session.
-5. `session-log.md` still has dated React-Flow refs — left intentionally as historical record.
+1. **InhibitRightGate step parity (most concrete next step)** — the InhibitRightGate loop row (Goroutines tab, ~line 479 of `docs/go-authoritative-clock/index.html`) still reads "if it times out, clear the partial arrival and restart." It is the OTHER windowed coincidence gate and carries the same gap ReadGate step 2 was just fixed for (commit e1f1c26b). Apply the parallel rewrite: fire only within W on Go's sim-clock; on timeout, clear the partial arrival AND ack its source over its ack edge (release a consumeGated sender); nothing sent downstream on a timeout. Mirror the ReadGate step-2 wording.
+2. **Decide the spec branch's fate** — merge `task/spec-go-backend-ts-frontend` to main (specs ride along) or keep as a pushed planning reference. No code depends on it. Left unmerged this session.
+3. **Scope gate on Phases 3–4** before any implementation — confirm geometry-into-Go and especially shading-into-Go are worth the cost/coupling, or trim the plan to Phase 1–2.
+4. **If implementing:** Phase 1 first concrete step = Go computes arc length (it already can) and elapses inFlightTime itself, delivering on its own clock (replacing the notifyDelivered trigger), proven by a HEADLESS Go test on the in08→readGate1 slice (today `go run .` deadlocks after the first hop). Park other topology items. Whether `NotifyDelivered` the function survives is decided here. Update MODEL.md + CLAUDE.md per the spec's Doc Updates tab in the SAME commit as code.
+5. Carry-over: `task/partial-feature-audit` (findings-only) noted as starting in a prior handoff — status unknown, not this session.
+6. `session-log.md` still has dated React-Flow refs — left intentionally as historical record.
 
 ### Substrate model contract (stable)
 
