@@ -9,9 +9,9 @@ read this file first (no chat history needed) and proceed.
 
 ## State at handoff (2026-06-01 — no task branch in flight; all merged to main)
 
-- Active branch: none. `main` is current (commit 251ffb5a). Latest session: added glass node-body rendering + init-value pulse beads to the 3D editor, merged from `task/glass-node-only` (merge commit 251ffb5a).
-- Build/test gate GREEN on `main`: `go build ./...`, `go test ./...`, webview `npx tsc --noEmit` + `npm run build`, `tools/check-generated.sh` (no diff), and `scripts/check-dead-doc-tokens.sh` all pass.
-- Uncommitted: `topology.json` remains modified (editor scratch), deliberately untouched all session.
+- Active branch: none. All task branches merged. `main` is current (commit a814ba60). Glass node-body rendering + init-value pulse beads (from `task/glass-node-only`) are on main — see "What is on main" item 1. Since that merge: housekeeping only — superseded `task/glass-node-surface` branch deleted (local + remote); `/gen-node-defs` build artifact added to root `.gitignore` (commit 422cc1f2) so it stops showing as untracked. No code/substrate changes; no task branch in flight; branches clean.
+- Build/test gate GREEN on `main`: `go build ./...`, `go test ./...`, webview `npx tsc --noEmit` + `npm run build`, `tools/check-generated.sh` (no diff), and `scripts/check-dead-doc-tokens.sh` all pass (green at last merge; nothing has changed since).
+- Uncommitted: only `topology.json` remains modified (editor scratch), deliberately untouched.
 
 ### What is on main (recent work, newest first)
 
@@ -30,7 +30,7 @@ The re-audit (re-running the SAME audit after the fix) caught that the F1 fix wa
 
 ### OPEN ITEMS / NEXT
 
-1. **No task in flight.** Friction-driven from here.
+1. **No task in flight.** Friction-driven from here. (Housekeeping: `/gen-node-defs` build artifact is now gitignored at the repo root — commit 422cc1f2 — so it no longer shows as untracked.)
 2. **`task/partial-feature-audit` starting.** New audit branch to inventory other partially-done features across the codebase — findings-only pass, no fixes on that branch.
 3. **`session-log.md`** still has dead React-Flow line references (app.tsx, AnimatedEdge.tsx) — left intentionally; it's a dated historical snapshot, rewriting it would falsify the record.
 
