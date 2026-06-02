@@ -378,6 +378,7 @@
         <ul>
           <li>Holds all geometric data</li>
           <li>Computes all animation values — arc length, positions, traversal progress, durations</li>
+          <li>Computes every bead position and emits it to TS</li>
           <li>Runs the substrate (nodes, slots, wires, send rules)</li>
           <li>Sends messages describing what to render</li>
         </ul>
@@ -385,7 +386,7 @@
       <div class="card">
         <h3>TS — frontend</h3>
         <ul>
-          <li>Renders the messages Go sends</li>
+          <li>Plots the positions Go sends — no interpolation, no animation math</li>
           <li>Sends geometric edits from the editor (node drags) back to Go</li>
           <li>No geometry math, no animation calculation, no clock — drawing only</li>
         </ul>
@@ -412,7 +413,7 @@
 
         <!-- Top arrow: GO → TS (trace stream) -->
         <line x1="222" y1="68" x2="458" y2="68" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arr)"/>
-        <text x="340" y="58" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">messages (what to render, when)</text>
+        <text x="340" y="58" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">position stream (per-bead x,y,z)</text>
 
         <!-- Bottom arrow: TS → GO (geometry edits) -->
         <line x1="458" y1="112" x2="222" y2="112" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
@@ -431,6 +432,10 @@
 
     <div class="note">
       This matches uniform pulse speed — speed is a shared constant; the only per-wire variation is arc length, which is geometry.
+    </div>
+
+    <div class="note" style="margin-top:0.75rem;">
+      Go computes every bead's position from its clock and path geometry and emits it. TS sets each sprite to the position it receives — no interpolation, no math on the frontend.
     </div>
   </div>
 
@@ -514,6 +519,31 @@
       </div>
     </div>
 
+    <div class="subheading">Go computes and emits each position directly</div>
+    <p>Each node's loop computes the bead's current position from the clock and the bead's path geometry (plain bezier math, no library) and emits a position message for it. Computing the next position IS the loop's work — there is no separate tick reading state at a fixed rate. When the bead reaches the end of its path (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">elapsed</span> reaches <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">inFlightTime</span>), Go delivers to the slot.</p>
+
+    <div class="cards" style="margin-top:0.5rem;">
+      <div class="card">
+        <ul>
+          <li>Position computation is part of the node's own loop — not a separate reader polling state at a fixed rate.</li>
+          <li>Pause freezes motion naturally: when the clock is paused, elapsed stops advancing, so the computed position is unchanged.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="subheading">Sleep paces the loop</div>
+    <p>The node loop and the wire loop sleep between iterations. The sleep sets how often a position is emitted; the clock still sets where the bead is. Start with a 16 ms sleep (about 60 emits per second), matching a typical display refresh. Each wake reads the clock, computes position = eval(path, elapsed / inFlightTime), emits, then sleeps again.</p>
+
+    <div class="cards" style="margin-top:0.5rem;">
+      <div class="card">
+        <ul>
+          <li>16 ms is the starting point — it matches a 60Hz display, which is the most a monitor can show. Emitting faster than the refresh is wasted.</li>
+          <li>The sleep sets report smoothness, not speed. The bead still arrives at exactly inFlightTime no matter the sleep — a longer sleep just shows fewer waypoints along the path.</li>
+          <li>Pause still freezes motion: while paused the clock stops advancing, so each wake computes the same position.</li>
+        </ul>
+      </div>
+    </div>
+
     <div class="subheading">Keeping them locked</div>
     <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
   </div>
@@ -555,13 +585,13 @@
   <div class="panel" id="panel-contract" role="tabpanel">
     <h2>The contract in one line.</h2>
 
-    <div class="contract-box">Go (backend) holds all geometric data and computes all animation values.
-TS (frontend) renders the messages Go sends and forwards editor geometry edits back to Go.
-The bridge is: messages out, geometry edits in.</div>
+    <div class="contract-box">Go (backend) holds all geometry, runs the clock, and computes every bead position.
+TS (frontend) plots the position stream it receives and forwards editor geometry edits back to Go.
+The bridge is: position stream out, geometry edits in.</div>
 
     <div class="first-step-label">First concrete step</div>
     <div class="first-step">
-      <p>Move all geometry data and animation calculation into Go so it produces ready-to-render messages; reduce TS to rendering those messages and forwarding editor geometry edits.</p>
+      <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding geometry edits back to Go.</p>
     </div>
   </div>
 </div>
