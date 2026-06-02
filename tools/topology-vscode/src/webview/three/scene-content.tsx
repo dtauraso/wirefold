@@ -260,8 +260,8 @@ export function GraphNode({
                   <sphereGeometry args={[pr, 16, 16]} />
                   <meshStandardMaterial
                     color="#ffffff"
-                    emissive={new THREE.Color(0xffffff)}
-                    emissiveIntensity={faded ? 0 : 0.5}
+                    emissive={new THREE.Color(0x000000)}
+                    emissiveIntensity={0}
                     transparent={faded}
                     opacity={faded ? fadeOpacityInner : 1}
                   />
