@@ -555,6 +555,9 @@
       </div>
     </div>
 
+    <div class="subheading">Human speed belongs to Go</div>
+    <p>Go runs the animation at a human-watchable pace — the bead moves at pulseSpeed and Go emits positions at the ~16ms report rate. TS sends CRUD edits only; the resulting update also plays at Go's human speed. TS never sets, drives, or accelerates timing — an edit's visible effect plays out on Go's clock, not instantly because TS sent it. Discrete cancellations (a delete) are immediate, but continuing motion stays human-paced: move a node mid-flight and the bead keeps traveling at human speed along the re-derived curve.</p>
+
     <div class="subheading">Keeping them locked</div>
     <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
   </div>
@@ -599,6 +602,8 @@
     <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
 TS (frontend) runs the GPU to display Go's data and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
 The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
+
+    <div class="note" style="margin-bottom:1.25rem;">Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
 
     <div class="first-step-label">First concrete step</div>
     <div class="first-step">
