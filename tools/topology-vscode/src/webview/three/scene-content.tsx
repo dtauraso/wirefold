@@ -3,7 +3,7 @@
 // CameraRefBridge, LabelProjector, CameraSettleDetector,
 // computeOcclusionCounts, RaycasterHelper, NearestNTracker, Scene.
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, createContext, useContext, useState } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
@@ -31,6 +31,83 @@ import type { PickOptions } from "./interaction-controls";
 
 /** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
 export const NEAREST_N = 8;
+
+// ---------------------------------------------------------------------------
+// Procedural environment map — offline, no CDN, no preset fetch.
+// Builds a PMREMGenerator env texture from a small gradient-sky scene and
+// makes it available ONLY as the envMap on the node-body meshPhysicalMaterial.
+// Does NOT assign scene.environment — edges, rings, and port spheres stay matte.
+// ---------------------------------------------------------------------------
+
+/** Context carrying the procedurally generated PMREM texture (or null before ready). */
+const EnvTexContext = createContext<THREE.Texture | null>(null);
+
+/**
+ * Generates a PMREM env texture once and provides it via EnvTexContext.
+ * No network requests — all geometry is inline. Does NOT touch scene.environment.
+ */
+function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
+  const { gl } = useThree();
+  const [envTex, setEnvTex] = useState<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    pmrem.compileEquirectangularShader();
+
+    // Build a tiny scene: gradient sky sphere, no textures.
+    const envScene = new THREE.Scene();
+
+    // Sky hemisphere — top blue-white, horizon warm cream
+    const skyGeo = new THREE.SphereGeometry(50, 16, 8);
+    const skyMat = new THREE.MeshBasicMaterial({
+      side: THREE.BackSide,
+      vertexColors: true,
+    });
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    // Tint vertices top→bottom: cool blue at top, warm grey at equator
+    const posAttr = skyGeo.attributes.position as THREE.BufferAttribute;
+    const count = posAttr.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const y = posAttr.getY(i);
+      const t = Math.max(0, Math.min(1, (y / 50 + 1) / 2)); // 0 bottom → 1 top
+      // top: #c0d8ff (soft blue), bottom: #ffe0c0 (warm cream)
+      colors[i * 3 + 0] = 0.75 + (1.0 - 0.75) * (1 - t); // r
+      colors[i * 3 + 1] = 0.85 + (0.88 - 0.85) * (1 - t); // g
+      colors[i * 3 + 2] = 1.0 + (0.75 - 1.0) * (1 - t);  // b
+    }
+    skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    envScene.add(skyMesh);
+
+    // Soft white fill light — bakes into env
+    const fill = new THREE.AmbientLight(0xffffff, 1.2);
+    envScene.add(fill);
+    const key = new THREE.DirectionalLight(0xffeedd, 1.5);
+    key.position.set(1, 2, 1);
+    envScene.add(key);
+    const rim = new THREE.DirectionalLight(0xaabbff, 0.6);
+    rim.position.set(-2, 1, -1);
+    envScene.add(rim);
+
+    const tex = pmrem.fromScene(envScene, 0.04).texture;
+    // Store in state — does NOT assign to scene.environment.
+    setEnvTex(tex);
+
+    return () => {
+      tex.dispose();
+      skyGeo.dispose();
+      skyMat.dispose();
+      pmrem.dispose();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <EnvTexContext.Provider value={envTex}>
+      {children}
+    </EnvTexContext.Provider>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Camera fitter: perspective camera framed head-on to show graph flat at z=0.
@@ -90,6 +167,7 @@ export function GraphNode({
   selectedId?: string | null;
   hoveredId?: string | null;
 }) {
+  const envTex = useContext(EnvTexContext);
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
   const fillHex = node.data?.fill ?? "#ffffff";
@@ -110,13 +188,21 @@ export function GraphNode({
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh>
         <sphereGeometry args={[r, 16, 16]} />
-        <meshStandardMaterial
+        <meshPhysicalMaterial
           key={faded ? "faded" : "solid"}
           color={fillColor}
-          emissive={emissiveFill}
-          emissiveIntensity={0}
-          transparent={faded}
-          opacity={faded ? fadeOpacity : 1}
+          transmission={1.0}
+          thickness={r}
+          roughness={0.12}
+          ior={1.5}
+          metalness={0}
+          clearcoat={0.4}
+          clearcoatRoughness={0.1}
+          envMap={envTex ?? undefined}
+          envMapIntensity={1.0}
+          transparent
+          opacity={faded ? fadeOpacity * 0.6 : 0.92}
+          depthWrite={false}
         />
       </mesh>
       <mesh userData={{ nodeId: node.id, ring: true }}>
@@ -700,7 +786,7 @@ export function Scene({
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const hasRestoredCamera = initialCamera3d !== undefined;
   return (
-    <>
+    <ProceduralEnvProvider>
       <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
       <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCamera3d} />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
@@ -721,6 +807,6 @@ export function Scene({
         />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
-    </>
+    </ProceduralEnvProvider>
   );
 }
