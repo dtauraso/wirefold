@@ -182,6 +182,8 @@
   #panel-goroutines .spec-table { table-layout: fixed; width: 100%; }
   #panel-goroutines .spec-table th:first-child, #panel-goroutines .spec-table td:first-child { width: 90px; white-space: normal; }
   #panel-goroutines .spec-table th:nth-child(2), #panel-goroutines .spec-table td:nth-child(2) { width: 95px; white-space: normal; }
+  #panel-goroutines .spec-table th:nth-child(4), #panel-goroutines .spec-table td:nth-child(4) { width: 200px; white-space: normal; }
+  #panel-goroutines .spec-table td:nth-child(4) { color: var(--text); border-left: 2px solid var(--warn); }
   #panel-goroutines .spec-table td, #panel-goroutines .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
 
   /* Cards */
@@ -420,6 +422,7 @@
           <th>Goroutine</th>
           <th>How many</th>
           <th>Its job</th>
+          <th>Fix</th>
         </tr>
       </thead>
       <tbody>
@@ -427,26 +430,31 @@
           <td>main</td>
           <td>one</td>
           <td><ol><li>Parse the CLI flags — topology path, trace-output path, run duration.</li><li>Load topology.json via LoadTopology, which instantiates every node and builds the wires between them.</li><li>Create the trace with NewWithSink — this also starts the trace-drain goroutine.</li><li>Launch the stdin-reader goroutine; cancel the run context when stdin closes.</li><li>Launch one goroutine per node (node.Update) under a WaitGroup, then block on Wait().</li><li>When all node loops exit, close the trace (flushing the drain) and write the JSONL trace file.</li></ol></td>
+          <td style="color:var(--muted);">—</td>
         </tr>
         <tr>
           <td>node loop</td>
           <td>one per node</td>
           <td><ol><li>Poll its input slots (TryRecv) until its firing rule is satisfied.</li><li>Fire — emit a "fire" trace event.</li><li>Call Done on the consumed input to clear the slot, releasing backpressure upstream.</li><li>For each output port: if gated, TrySend then WaitConsumed (block until the receiver consumes); if fire-and-forget, TryEmit (drops if the wire is still busy).</li><li>Loop. An Input node walks its init values (repeating if its repeat flag is set); a ChainInhibitor holds the received value and fans out to all its outputs in parallel.</li></ol></td>
+          <td>Step 3 (<code style="font-family:var(--mono);font-size:11px;">Done</code> → release backpressure) must be redone once Go owns the clock: the consume signal back to the sender needs its own <strong>ack edge</strong> — one ack edge per source node — to signal that source node, rather than riding the current consume/Done path.</td>
         </tr>
         <tr>
           <td>stdin reader</td>
           <td>one</td>
           <td><ol><li>Read the next line TS wrote to the pipe and JSON-parse it.</li><li><strong>delivered</strong> → look up the destination slot and call NotifyDelivered, filling it.</li><li><strong>deleteEdge</strong> / <strong>addEdge</strong> → look up the wire and Delete() or Restore() it.</li><li><strong>fade</strong> → set the faded flag on the matching wires; <strong>node-move</strong> → apply the new x/y/z to the node.</li><li>Loop, never stopping — intake stays live regardless of run state.</li></ol></td>
+          <td style="color:var(--muted);">—</td>
         </tr>
         <tr>
           <td>trace drain</td>
           <td>one</td>
           <td><ol><li>Receive the next event from the shared channel that every node loop writes to.</li><li>Assign it the next Step ordinal (the current event count) under a lock, giving all events a total order.</li><li>Append it to the in-memory event buffer.</li><li>If a sink is set, marshal the event to JSON and write it as one line.</li><li>Loop until the channel closes at shutdown, then signal done so main can finish.</li></ol></td>
+          <td style="color:var(--muted);">—</td>
         </tr>
         <tr>
           <td>send helpers</td>
           <td>one per blocking send (short-lived)</td>
           <td><ol><li>Spawned by a gated send just before it parks on WaitConsumed.</li><li>select between the run context's Done channel and the send's own done channel.</li><li>If the context is cancelled (shutdown), cond.Broadcast to wake the parked sender so it never hangs.</li><li>Exit the moment the send completes — a one-shot helper, not a loop.</li></ol></td>
+          <td style="color:var(--muted);">—</td>
         </tr>
       </tbody>
     </table>
