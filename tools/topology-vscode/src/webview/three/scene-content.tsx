@@ -3,7 +3,7 @@
 // CameraRefBridge, LabelProjector, CameraSettleDetector,
 // computeOcclusionCounts, RaycasterHelper, NearestNTracker, Scene.
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, createContext, useContext, useState } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
@@ -31,6 +31,114 @@ import type { PickOptions } from "./interaction-controls";
 
 /** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
 export const NEAREST_N = 8;
+
+type InitPulseBeadProps = { pr: number; faded: boolean; fadeOpacityInner: number };
+
+// Shared bead renderer: a sphere of `fill`, with an optional ring of `ring`.
+function StyledPulseBead({ pr, faded, fadeOpacityInner, fill, ring }: InitPulseBeadProps & { fill: string; ring?: string }) {
+  return (
+    <>
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[pr, 16, 16]} />
+        <meshStandardMaterial color={fill} emissiveIntensity={0} transparent={faded} opacity={faded ? fadeOpacityInner : 1} />
+      </mesh>
+      {ring !== undefined && (
+        <mesh raycast={() => null}>
+          <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
+          <meshStandardMaterial color={ring} emissiveIntensity={0} transparent={faded} opacity={faded ? fadeOpacityInner : 1} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+function WhiteRingPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#ffffff" ring="#000000" />; }
+function BlackRingPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#000000" ring="#000000" />; }
+function DefaultPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#888888" ring="#000000" />; }
+
+// Map each raw init value (Go emits 0/1) to the component that renders its bead.
+const INIT_PULSE_COMPONENTS: Record<number, React.FC<InitPulseBeadProps>> = {
+  0: WhiteRingPulseBead,
+  1: BlackRingPulseBead,
+};
+
+// ---------------------------------------------------------------------------
+// Procedural environment map — offline, no CDN, no preset fetch.
+// Builds a PMREMGenerator env texture from a small gradient-sky scene and
+// makes it available ONLY as the envMap on the node-body meshPhysicalMaterial.
+// Does NOT assign scene.environment — edges, rings, and port spheres stay matte.
+// ---------------------------------------------------------------------------
+
+/** Context carrying the procedurally generated PMREM texture (or null before ready). */
+const EnvTexContext = createContext<THREE.Texture | null>(null);
+
+
+/**
+ * Generates a PMREM env texture once and provides it via EnvTexContext.
+ * No network requests — all geometry is inline. Does NOT touch scene.environment.
+ */
+function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
+  const { gl } = useThree();
+  const [envTex, setEnvTex] = useState<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    pmrem.compileEquirectangularShader();
+
+    // Build a tiny scene: gradient sky sphere, no textures.
+    const envScene = new THREE.Scene();
+
+    // Sky hemisphere — top blue-white, horizon warm cream
+    const skyGeo = new THREE.SphereGeometry(50, 16, 8);
+    const skyMat = new THREE.MeshBasicMaterial({
+      side: THREE.BackSide,
+      vertexColors: true,
+    });
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    // Tint vertices top→bottom: cool blue at top, warm grey at equator
+    const posAttr = skyGeo.attributes.position as THREE.BufferAttribute;
+    const count = posAttr.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const y = posAttr.getY(i);
+      const t = Math.max(0, Math.min(1, (y / 50 + 1) / 2)); // 0 bottom → 1 top
+      // top: #c8c4bc (mid neutral, close to bottom — no bright hot-spot), bottom: #ffe0c0 (warm cream)
+      colors[i * 3 + 0] = 0.78 + (1.0 - 0.78) * (1 - t); // r
+      colors[i * 3 + 1] = 0.77 + (0.88 - 0.77) * (1 - t); // g
+      colors[i * 3 + 2] = 0.74 + (0.75 - 0.74) * (1 - t);  // b
+    }
+    skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    envScene.add(skyMesh);
+
+    // Soft white fill light — bakes into env
+    const fill = new THREE.AmbientLight(0xffffff, 0.9);
+    envScene.add(fill);
+    const key = new THREE.DirectionalLight(0xffeedd, 0.45);
+    key.position.set(1, 2, 1);
+    envScene.add(key);
+    const rim = new THREE.DirectionalLight(0xaabbff, 0.3);
+    rim.position.set(-2, 1, -1);
+    envScene.add(rim);
+
+    const tex = pmrem.fromScene(envScene, 0.04).texture;
+    // Store in state — does NOT assign to scene.environment.
+    setEnvTex(tex);
+
+    return () => {
+      tex.dispose();
+      skyGeo.dispose();
+      skyMat.dispose();
+      pmrem.dispose();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <EnvTexContext.Provider value={envTex}>
+      {children}
+    </EnvTexContext.Provider>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Camera fitter: perspective camera framed head-on to show graph flat at z=0.
@@ -90,6 +198,7 @@ export function GraphNode({
   selectedId?: string | null;
   hoveredId?: string | null;
 }) {
+  const envTex = useContext(EnvTexContext);
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
   const fillHex = node.data?.fill ?? "#ffffff";
@@ -110,13 +219,21 @@ export function GraphNode({
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh>
         <sphereGeometry args={[r, 16, 16]} />
-        <meshStandardMaterial
+        <meshPhysicalMaterial
           key={faded ? "faded" : "solid"}
           color={fillColor}
-          emissive={emissiveFill}
-          emissiveIntensity={0}
-          transparent={faded}
-          opacity={faded ? fadeOpacity : 1}
+          transmission={1.0}
+          thickness={0}
+          roughness={0.12}
+          ior={1.5}
+          metalness={0}
+          clearcoat={0}
+          clearcoatRoughness={0.1}
+          envMap={envTex ?? undefined}
+          envMapIntensity={1.0}
+          transparent
+          opacity={faded ? fadeOpacity * 0.6 : 0.92}
+          depthWrite={false}
         />
       </mesh>
       <mesh userData={{ nodeId: node.id, ring: true }}>
@@ -140,6 +257,37 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
+      {/* Init pulses: render data.init values as small spheres inside the node body */}
+      {(() => {
+        // data.init lives in node.data.nodeData (the verbatim spec data blob)
+        const rawNodeData = node.data?.nodeData as Record<string, unknown> | undefined;
+        const init = rawNodeData?.["init"];
+        if (!Array.isArray(init) || init.length === 0) return null;
+        const n = init.length;
+        // Match pulse-bead radius (4), but scale down if the row doesn't fit within the node diameter.
+        // Layout: n spheres of radius pr with gap = pr * 0.3 between adjacent spheres.
+        // Total width = n * 2*pr + (n-1)*0.3*pr = pr * (2n + 0.3*(n-1))
+        // Constraint: total width ≤ 2*r  →  pr ≤ 2*r / (2n + 0.3*(n-1))
+        const PULSE_BEAD_R = 5;
+        const GAP_RATIO = 0.3; // gap = pr * GAP_RATIO
+        const fitFactor = 2 * r / (2 * n + GAP_RATIO * (n - 1));
+        const pr = Math.min(PULSE_BEAD_R, fitFactor);
+        const gap = pr * GAP_RATIO;
+        const totalWidth = n * 2 * pr + (n - 1) * gap;
+        const startX = -totalWidth / 2 + pr; // center of leftmost sphere
+        const zFront = 0; // beads sit on the torus center plane
+        const fadeOpacityInner = 0.25;
+        return (init as number[]).map((val: number, idx: number) => {
+          const x = startX + idx * (2 * pr + gap);
+          // Map the raw init value to its bead component; Go keeps emitting raw 0/1.
+          const Bead = INIT_PULSE_COMPONENTS[val] ?? DefaultPulseBead;
+          return (
+            <group key={idx} position={[x, 0, zFront]}>
+              <Bead pr={pr} faded={faded} fadeOpacityInner={fadeOpacityInner} />
+            </group>
+          );
+        });
+      })()}
       {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
       {(node.data?.inputs ?? []).map((port) => {
         const dir = portDir(node, port.name, true);
@@ -700,7 +848,7 @@ export function Scene({
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const hasRestoredCamera = initialCamera3d !== undefined;
   return (
-    <>
+    <ProceduralEnvProvider>
       <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
       <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCamera3d} />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
@@ -721,6 +869,6 @@ export function Scene({
         />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
-    </>
+    </ProceduralEnvProvider>
   );
 }
