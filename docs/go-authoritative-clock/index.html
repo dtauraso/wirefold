@@ -373,7 +373,7 @@
 
   <!-- TAB 1: Overview -->
   <div class="panel active" id="panel-overview" role="tabpanel">
-    <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging.</div>
+    <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
     <h2>Go is the backend. TS is the frontend.</h2>
     <p>The system splits cleanly into a backend and a frontend. Go is the backend: it holds all geometric data and runs all the animation calculations — it owns what is happening and when. TS is the frontend: it renders the messages Go sends, and it sends geometric edits from the editor back to Go so the network updates.</p>
 
@@ -867,7 +867,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
   <!-- TAB 9: Plan -->
   <div class="panel" id="panel-plan" role="tabpanel">
-    <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging.</div>
+    <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
     <h2>Coding plan: clock first, then migrate data.</h2>
     <p>The change is one model shift (Go owns the clock) plus a staged migration of data (positions, geometry, shading) from TS to Go. Each phase must leave the build green and the editor working. Order matters: do the clock first because it is the only step that unblocks the rest — it lets Go run and deliver without TS, and removes the timing dependency. Everything after it is incremental data migration that can land one piece at a time.</p>
 
