@@ -278,28 +278,17 @@ export function GraphNode({
               </group>
             );
           }
-          // value !== 0: solid black bead with the same black torus ring.
+          // value !== 0: solid black bead.
           return (
-            <group key={idx} position={[x, 0, zFront]}>
-              <mesh raycast={() => null}>
-                <sphereGeometry args={[pr, 16, 16]} />
-                <meshStandardMaterial
-                  color="#000000"
-                  emissiveIntensity={0}
-                  transparent={faded}
-                  opacity={faded ? fadeOpacityInner : 1}
-                />
-              </mesh>
-              <mesh raycast={() => null}>
-                <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
-                <meshStandardMaterial
-                  color="#000000"
-                  emissiveIntensity={0}
-                  transparent={faded}
-                  opacity={faded ? fadeOpacityInner : 1}
-                />
-              </mesh>
-            </group>
+            <mesh key={idx} position={[x, 0, zFront]} raycast={() => null}>
+              <sphereGeometry args={[pr, 16, 16]} />
+              <meshStandardMaterial
+                color="#000000"
+                emissiveIntensity={0}
+                transparent={faded}
+                opacity={faded ? fadeOpacityInner : 1}
+              />
+            </mesh>
           );
         });
       })()}
