@@ -764,6 +764,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
               <li>TS can send deleteEdge while a pulse is still inside that edge, during pause or play. The message is fire-and-forget; TS does not wait for Go.</li>
               <li>Go receives it and erases the edge AND drops the in-flight pulse (Reset) before the pulse reaches the destination slot — the pulse must never land on a deleted edge.</li>
               <li>TS removes the bead from the scene on Go's echo (edge-gone / pulse-cancelled message), not on its own — Go is authoritative about whether the pulse delivered or was dropped.</li>
+              <li>The existing <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> handler (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">stdin_reader.go</span> → Reset only) must be REWRITTEN: it was built for TS-triggered delivery and only drops the bead + frees a parked sender. It now must atomically cancel Go's clock-driven self-delivery (deleted wire never delivers) AND emit a pulse-cancelled echo so TS removes the bead. Reset alone is no longer sufficient.</li>
             </ul>
           </li>
         </ul>
@@ -786,6 +787,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>Run message-kind parity (Go stdin_reader ↔ TS WEBVIEW_TO_HOST_TYPES), no-TS-timers, and slot-phase-boundary guards.</li>
           <li>Finalize MODEL.md (Driver, Cross-boundary, Geometry/time, Editor-surface) and CLAUDE.md (pump description, bridge surface, drift rule) in this commit.</li>
           <li>No await / no Promises on the TS→Go path. TS communication to Go is fire-and-forget: write a message to the pipe Go reads (stdin) and return immediately. TS never awaits a Go response and never blocks on Go. Inbound data from Go is handled as separate independent messages (write to buffer, return). No request/response, no promise chains gating other work.</li>
+          <li>Fold <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> into the generic CRUD edit path — remove it as a bespoke verb. Edge deletion becomes a delete edit like any other geometry change; the clock-cancel + pulse-cancelled echo from Phase 3 ride along. One CRUD shape, not per-operation verbs.</li>
         </ul>
       </div>
     </div>
@@ -858,6 +860,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>Run an industry bug-class scan on the Phase 1–2 timing change before declaring it ready.</li>
           <li><strong>Zustand store removal:</strong> after removing <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span> as authoritative, confirm nothing else silently relied on it as truth — grep its consumers; structural rendering must read from Go's data, not a local model.</li>
           <li><strong>Guard the TS→Go path against await/Promises:</strong> no <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">await</span> on a send-to-Go, no request/response. Consider extending the existing no-TS-timers guard to also reject awaiting the bridge. A blocking TS→Go call reintroduces event-loop coordination — the exact thing this avoids.</li>
+          <li><strong>deleteEdge rewrite:</strong> confirm the new path cancels clock-delivery atomically and emits the pulse-cancelled echo; grep old <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> call sites so nothing still relies on the Reset-only behavior. Removing the bespoke verb must not orphan any sender still using it.</li>
         </ul>
       </div>
     </div>
