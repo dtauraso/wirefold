@@ -69,6 +69,8 @@ tools/topology-vscode/test-results/
 /topogend
 # go build output if accidentally run from the tools/topology-vscode dir
 tools/topology-vscode/gen-node-defs
+# compiled gen-node-defs binary (build artifact); source is tools/gen-node-defs/
+/gen-node-defs
 
 # Local working notes / scratch
 /notes/
