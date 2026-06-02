@@ -332,6 +332,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="playpause">Play / Pause</button>
   </div>
 
   <!-- TAB 1: Overview -->
@@ -515,6 +516,39 @@
 
     <div class="subheading">Keeping them locked</div>
     <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
+  </div>
+
+  <!-- TAB 6: Play / Pause -->
+  <div class="panel" id="panel-playpause" role="tabpanel">
+    <h2>Play / Pause: the button is in TS, the clock is in Go.</h2>
+    <p>Pause and resume act on Go's single clock. TS does not hold time — it holds a button. TS sends a pause or resume message to Go; Go's clock halts or runs. The frontend never owns any time.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Pause</h3>
+        <ul>
+          <li>TS sends "pause"</li>
+          <li>Go freezes its clock</li>
+          <li>In-flight beads stop progressing</li>
+          <li>No new firing (no wire completes)</li>
+          <li>Editor shows last known state</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Resume</h3>
+        <ul>
+          <li>TS sends "resume"</li>
+          <li>Go's clock advances from where it left off</li>
+          <li>In-flight traversal continues</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="subheading">Freeze means stop accumulating</div>
+    <p>"Freeze the clock" must mean stop accumulating elapsed time — not diff wall-clock on resume. Pause records how far each in-flight bead had elapsed; resume continues from there. A bead that was 40% across is still 40% across on resume. (If you just diffed <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">time.Now()</span> on resume, beads would jump forward by the pause duration and deliver instantly.) Implement as a monotonic clock with a paused accumulator so elapsed-while-paused is zero.</p>
+
+    <div class="subheading">Why the gate lives in Go</div>
+    <p>Play/pause is substance, not a TS animation control — it halts the system's clock. If TS paused by stopping its own render loop while Go kept running, Go's clock would race ahead and the frontend would be out of sync on resume. So the button is in TS; the clock it controls is in Go. This fits the bridge: messages out (Go's timeline, including "paused"), control and geometry edits in.</p>
   </div>
 
   <!-- TAB 5: Contract -->
