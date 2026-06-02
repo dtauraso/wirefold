@@ -32,12 +32,35 @@ import type { PickOptions } from "./interaction-controls";
 /** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
 export const NEAREST_N = 8;
 
-// Init-pulse visual styles keyed by the raw init value emitted by the Go substrate.
-const INIT_PULSE_STYLES: Record<number, { fill: string; ring?: string }> = {
-  0: { fill: "#ffffff", ring: "#000000" },
-  1: { fill: "#000000", ring: "#000000" },
+type InitPulseBeadProps = { pr: number; faded: boolean; fadeOpacityInner: number };
+
+// Shared bead renderer: a sphere of `fill`, with an optional ring of `ring`.
+function StyledPulseBead({ pr, faded, fadeOpacityInner, fill, ring }: InitPulseBeadProps & { fill: string; ring?: string }) {
+  return (
+    <>
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[pr, 16, 16]} />
+        <meshStandardMaterial color={fill} emissiveIntensity={0} transparent={faded} opacity={faded ? fadeOpacityInner : 1} />
+      </mesh>
+      {ring !== undefined && (
+        <mesh raycast={() => null}>
+          <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
+          <meshStandardMaterial color={ring} emissiveIntensity={0} transparent={faded} opacity={faded ? fadeOpacityInner : 1} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+function WhiteRingPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#ffffff" ring="#000000" />; }
+function BlackRingPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#000000" ring="#000000" />; }
+function DefaultPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#888888" ring="#000000" />; }
+
+// Map each raw init value (Go emits 0/1) to the component that renders its bead.
+const INIT_PULSE_COMPONENTS: Record<number, React.FC<InitPulseBeadProps>> = {
+  0: WhiteRingPulseBead,
+  1: BlackRingPulseBead,
 };
-const DEFAULT_INIT_PULSE_STYLE: { fill: string; ring?: string } = { fill: "#888888", ring: "#000000" };
 
 // ---------------------------------------------------------------------------
 // Procedural environment map — offline, no CDN, no preset fetch.
@@ -256,30 +279,11 @@ export function GraphNode({
         const fadeOpacityInner = 0.25;
         return (init as number[]).map((val: number, idx: number) => {
           const x = startX + idx * (2 * pr + gap);
-          // Map the raw init value to a visual style; Go keeps emitting raw 0/1.
-          const style = INIT_PULSE_STYLES[val] ?? DEFAULT_INIT_PULSE_STYLE;
+          // Map the raw init value to its bead component; Go keeps emitting raw 0/1.
+          const Bead = INIT_PULSE_COMPONENTS[val] ?? DefaultPulseBead;
           return (
             <group key={idx} position={[x, 0, zFront]}>
-              <mesh raycast={() => null}>
-                <sphereGeometry args={[pr, 16, 16]} />
-                <meshStandardMaterial
-                  color={style.fill}
-                  emissiveIntensity={0}
-                  transparent={faded}
-                  opacity={faded ? fadeOpacityInner : 1}
-                />
-              </mesh>
-              {style.ring !== undefined && (
-                <mesh raycast={() => null}>
-                  <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
-                  <meshStandardMaterial
-                    color={style.ring}
-                    emissiveIntensity={0}
-                    transparent={faded}
-                    opacity={faded ? fadeOpacityInner : 1}
-                  />
-                </mesh>
-              )}
+              <Bead pr={pr} faded={faded} fadeOpacityInner={fadeOpacityInner} />
             </group>
           );
         });
