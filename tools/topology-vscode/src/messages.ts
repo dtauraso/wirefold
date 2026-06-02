@@ -26,11 +26,10 @@ export type WebviewToHostMsg =
   | { type: "node-move"; nodeId: string; x: number; y: number; z?: number };
 
 // Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","done"}.
-// recv/send carry port+value; fire carries only node; send also carries edge
-// when the Go side has resolved it (currently omitted — raw form only).
+// recv/send carry port+value; fire carries only node.
 export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
-  | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
+  | { step: number; kind: "send"; node: string; port?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
   | { step: number; kind: "done"; node: string; port: string };
 
 export type HostToWebviewMsg =
