@@ -255,9 +255,9 @@ export function GraphNode({
               {isGlass ? (
                 <meshPhysicalMaterial
                   color="#ffffff"
-                  transmission={1.0}
+                  transmission={0.95}
                   thickness={0}
-                  roughness={0.12}
+                  roughness={0.55}
                   ior={1.5}
                   metalness={0}
                   clearcoat={0.4}
