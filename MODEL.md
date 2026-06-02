@@ -2,7 +2,7 @@
 
 Read this before changing anything in the **Go substrate** (`nodes/`,
 `nodes/Wiring/paced_wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump**
-(`tools/topology-vscode/src/webview/rf/pump.ts`),
+(`tools/topology-vscode/src/webview/three/pump.ts`),
 or anything that schedules/orders work. If your
 reasoning slips into banned vocabulary (below), you are in the wrong
 frame. Stop, re-read this file, and re-derive from the model.
@@ -213,9 +213,8 @@ in the lifecycle.
   `NotifyDelivered` in Go); it does not render anything from `"slot"` trace events
   (the `"slot"` case is a no-op — see below).
 - `pump.ts` `"slot"` case is a no-op `return` — it does not write any state.
-  `SlotEntry`/`SlotMap` exist only as type definitions in `messages.ts` and are
-  not consumed anywhere in the webview today. Slot-phase badges are not rendered;
-  held-value display comes from pulse-state, not from slot events.
+  There is no slot badge and no `SlotEntry`/`SlotMap` type. Held-value display
+  comes from pulse-state, not from slot events.
 
 **Drift rule:** slot-phase transition logic outside `paced_wire.go` (Go) or
 `pump.ts` (TS) is drift — move it to one of those two files.

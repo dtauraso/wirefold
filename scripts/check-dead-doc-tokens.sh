@@ -12,6 +12,7 @@ DEAD_TOKENS=(
   "GenericNode"
   "PUMP_SLOT_HANDLER"
   "webview/schema/"
+  "webview/rf/"
 )
 
 fail=0
