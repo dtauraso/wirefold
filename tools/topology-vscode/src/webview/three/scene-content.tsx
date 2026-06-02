@@ -42,30 +42,6 @@ export const NEAREST_N = 8;
 /** Context carrying the procedurally generated PMREM texture (or null before ready). */
 const EnvTexContext = createContext<THREE.Texture | null>(null);
 
-// ---------------------------------------------------------------------------
-// Init-pulse equator-band texture (value-0 white bead).
-// A 64x64 white canvas with one centered horizontal black stripe (~12% tall).
-// Mapped onto a sphere, the stripe sits at latitude v=0.5 (the equator), so the
-// bead's surface reads white at the poles and black around its middle. Created
-// ONCE as a module-level singleton; never disposed (lives for the app's life).
-// ---------------------------------------------------------------------------
-let _bandTex: THREE.CanvasTexture | null = null;
-function getBandTexture(): THREE.CanvasTexture {
-  if (_bandTex) return _bandTex;
-  const size = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, size, size);
-  const stripeH = Math.round(size * 0.12);
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, Math.round((size - stripeH) / 2), size, stripeH);
-  _bandTex = new THREE.CanvasTexture(canvas);
-  _bandTex.needsUpdate = true;
-  return _bandTex;
-}
 
 /**
  * Generates a PMREM env texture once and provides it via EnvTexContext.
@@ -205,7 +181,6 @@ export function GraphNode({
   const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
   const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
   const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
-  const bandTex = useMemo(() => getBandTexture(), []);
 
   const torusThick = (selected || hovered) ? r * 0.14 : r * 0.08;
   const fadeOpacity = 0.25;
@@ -276,27 +251,31 @@ export function GraphNode({
           const x = startX + idx * (2 * pr + gap);
           const isGlass = val === 0;
           if (isGlass) {
-            // value-0: solid white bead whose painted surface carries a thin
-            // black equator band, rotated so the band lands in the node's
-            // torus plane (XY @ z=0) and reads as a ring around the outline.
+            // value-0: uniform white bead with a real black torus ring around
+            // it, mirroring the node body's border torus (default XY plane,
+            // no rotation) so the ring reads in the node's outline plane.
             return (
-              <mesh
-                key={idx}
-                position={[x, 0, zFront]}
-                rotation={[Math.PI / 2, 0, 0]}
-                raycast={() => null}
-                renderOrder={0}
-              >
-                <sphereGeometry args={[pr, 16, 16]} />
-                <meshStandardMaterial
-                  map={bandTex}
-                  emissiveMap={bandTex}
-                  emissive={new THREE.Color(0xffffff)}
-                  emissiveIntensity={faded ? 0 : 0.5}
-                  transparent={faded}
-                  opacity={faded ? fadeOpacityInner : 1}
-                />
-              </mesh>
+              <group key={idx} position={[x, 0, zFront]}>
+                <mesh raycast={() => null}>
+                  <sphereGeometry args={[pr, 16, 16]} />
+                  <meshStandardMaterial
+                    color="#ffffff"
+                    emissive={new THREE.Color(0xffffff)}
+                    emissiveIntensity={faded ? 0 : 0.5}
+                    transparent={faded}
+                    opacity={faded ? fadeOpacityInner : 1}
+                  />
+                </mesh>
+                <mesh raycast={() => null}>
+                  <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
+                  <meshStandardMaterial
+                    color="#000000"
+                    emissiveIntensity={0}
+                    transparent={faded}
+                    opacity={faded ? fadeOpacityInner : 1}
+                  />
+                </mesh>
+              </group>
             );
           }
           // value !== 0: solid black bead, no band.
