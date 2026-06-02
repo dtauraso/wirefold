@@ -244,7 +244,7 @@ export function GraphNode({
         const gap = pr * GAP_RATIO;
         const totalWidth = n * 2 * pr + (n - 1) * gap;
         const startX = -totalWidth / 2 + pr; // center of leftmost sphere
-        const zFront = r * 0.6; // in front of node body center, visible through glass
+        const zFront = 0; // align with torus equator plane (torus mesh at z=0, XY plane default)
         const fadeOpacityInner = 0.25;
         return (init as number[]).map((val: number, idx: number) => {
           const x = startX + idx * (2 * pr + gap);
