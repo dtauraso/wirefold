@@ -30,8 +30,6 @@ export type WebviewToHostMsg =
 // when the Go side has resolved it (currently omitted — raw form only).
 // slot carries nodeId/port/phase and optionally value (filled only).
 export type SlotPhase = "filled" | "empty";
-export type SlotEntry = { phase: "filled"; value: number } | { phase: "empty" };
-export type SlotMap = Record<string, SlotEntry>;
 
 export type SlotEvent = {
   step: number;

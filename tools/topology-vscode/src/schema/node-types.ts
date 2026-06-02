@@ -11,6 +11,7 @@
 
 import type { NodeTypeDef } from "./types-graph";
 import { NODE_DEFS } from "./node-defs";
+import { NODE_DIM_FALLBACK } from "./node-dims";
 
 // Re-export RUNTIME_IMPLEMENTED_KINDS from generated source.
 export { RUNTIME_IMPLEMENTED_KINDS } from "./node-defs";
@@ -27,8 +28,8 @@ function defToTypeDef(key: string): NodeTypeDef | undefined {
     shape: (d.shape ?? "rect") as NodeTypeDef["shape"],
     fill: d.fill ?? d.bg,
     stroke: d.stroke ?? d.border,
-    width: d.width ?? d.minWidth ?? 110,
-    height: d.height ?? 60,
+    width: d.width ?? d.minWidth ?? NODE_DIM_FALLBACK.width,
+    height: d.height ?? NODE_DIM_FALLBACK.height,
   };
 }
 
@@ -36,5 +37,5 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
   ...Object.fromEntries(
     Object.keys(NODE_DEFS).map((k) => [k, defToTypeDef(k)!]),
   ),
-  Generic: { role: "generic", inputs: [], outputs: [], shape: "rect", fill: "#ffffff", stroke: "#888", width: 110, height: 60 },
+  Generic: { role: "generic", inputs: [], outputs: [], shape: "rect", fill: "#ffffff", stroke: "#888", width: NODE_DIM_FALLBACK.width, height: NODE_DIM_FALLBACK.height },
 };

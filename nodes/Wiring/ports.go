@@ -140,6 +140,23 @@ const (
 	RuleFireAndForget SendRule = "fireAndForget"
 )
 
+// ParseSendRule converts a raw string into a SendRule.
+// An empty string returns RuleConsumeGated (preserving the default-when-absent
+// behavior). Any string that is not a recognised constant returns an error.
+func ParseSendRule(s string) (SendRule, error) {
+	switch s {
+	case "":
+		return RuleConsumeGated, nil
+	case string(RuleConsumeGated):
+		return RuleConsumeGated, nil
+	case string(RuleFireAndForget):
+		return RuleFireAndForget, nil
+	default:
+		return RuleConsumeGated, fmt.Errorf("invalid sendRule %q: must be one of %q, %q",
+			s, RuleConsumeGated, RuleFireAndForget)
+	}
+}
+
 // Out is a typed output port.
 type Out struct {
 	// chan mode

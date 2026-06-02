@@ -62,6 +62,11 @@ for chk in check-substrate-vocabulary check-trace-kind-parity check-no-ts-timers
   fi
 done
 
+if ! chk_out=$(bash "scripts/check-dead-doc-tokens.sh" 2>&1); then
+  out+="check-dead-doc-tokens failed:\n$chk_out\n\n"
+  fail=1
+fi
+
 if [ $fail -ne 0 ]; then
   python3 -c "
 import json, sys
