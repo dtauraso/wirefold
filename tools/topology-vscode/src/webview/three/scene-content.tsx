@@ -270,7 +270,7 @@ export function GraphNode({
                 />
               ) : (
                 <meshStandardMaterial
-                  color="#000000"
+                  color="#ffffff"
                   emissive={new THREE.Color(0x000000)}
                   emissiveIntensity={0}
                   transparent={faded}
