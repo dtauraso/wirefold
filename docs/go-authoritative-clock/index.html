@@ -660,6 +660,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>React / DOM editor chrome — label overlay divs, occlusion badges, in-node spec-override text, run button, camera-UI widgets; HTML rendering stays in the browser (ThreeView.tsx)</li>
           <li>Zustand store, spec parse, save lifecycle — editor state management, JSON parse/serialize, VS Code IPC for save; these are editor authoring concerns, not substrate computation (store.ts, save.ts, SaveLifecycle.tsx)</li>
           <li>No authoritative data store. TS holds no source-of-truth graph state — it applies Go's data to the scene. The per-frame loop reads imperative buffers fed by Go; the Zustand store is removed.</li>
+          <li>Sends to Go are fire-and-forget messages on the pipe — no await, no Promise, no waiting for a reply. Optimistic local apply covers responsiveness (e.g. a drag moves on screen immediately); Go's echo reconciles.</li>
         </ul>
       </div>
     </div>
@@ -775,6 +776,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>Delete the notifyDelivered message and its Go stdin handler entirely.</li>
           <li>Run message-kind parity (Go stdin_reader ↔ TS WEBVIEW_TO_HOST_TYPES), no-TS-timers, and slot-phase-boundary guards.</li>
           <li>Finalize MODEL.md (Driver, Cross-boundary, Geometry/time, Editor-surface) and CLAUDE.md (pump description, bridge surface, drift rule) in this commit.</li>
+          <li>No await / no Promises on the TS→Go path. TS communication to Go is fire-and-forget: write a message to the pipe Go reads (stdin) and return immediately. TS never awaits a Go response and never blocks on Go. Inbound data from Go is handled as separate independent messages (write to buffer, return). No request/response, no promise chains gating other work.</li>
         </ul>
       </div>
     </div>
@@ -845,6 +847,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li><strong>Bead speed vs report rate:</strong> confirm the sleep never affects speed — speed stays pulseSpeed, arrival stays inFlightTime, the sleep only changes how many waypoints are shown.</li>
           <li>Run an industry bug-class scan on the Phase 1–2 timing change before declaring it ready.</li>
           <li><strong>Zustand store removal:</strong> after removing <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span> as authoritative, confirm nothing else silently relied on it as truth — grep its consumers; structural rendering must read from Go's data, not a local model.</li>
+          <li><strong>Guard the TS→Go path against await/Promises:</strong> no <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">await</span> on a send-to-Go, no request/response. Consider extending the existing no-TS-timers guard to also reject awaiting the bridge. A blocking TS→Go call reintroduces event-loop coordination — the exact thing this avoids.</li>
         </ul>
       </div>
     </div>
