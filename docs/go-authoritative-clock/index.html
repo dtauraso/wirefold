@@ -497,8 +497,8 @@
         </tr>
         <tr>
           <td>ack edge</td>
-          <td>not a goroutine — one per source node</td>
-          <td><ol><li>A backward-signalling wire added for the Go-owns-the-clock model.</li><li>When a node consumes its input (node-loop step 3) it sends an ack to the source over this edge.</li><li>The source's send-check reads it to learn its outgoing wire is clear and it may send the next value.</li><li>Like any wire it is data, not a goroutine — it carries the consume-ack between decoupled nodes.</li></ol></td>
+          <td>goroutine — one per source node</td>
+          <td><ol><li>Poll its inbound channel for a consume-ack a destination node sent when it consumed its input (node-loop step 3).</li><li>Put the ack on the channel connecting it to the source node, so the source's send-check learns its outgoing wire is clear and it may send the next value.</li></ol></td>
         </tr>
       </tbody>
     </table>
