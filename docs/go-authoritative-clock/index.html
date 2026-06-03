@@ -436,7 +436,7 @@
   <!-- TAB: Goroutines -->
   <div class="panel" id="panel-goroutines" role="tabpanel">
     <h2>What each goroutine does.</h2>
-    <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes: each node is its own small loop running on its own goroutine, coordinating only through wires. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
+    <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes and the wires: each node — and each wire — is its own small loop on its own goroutine, coordinating only through channels. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
 
     <div class="note" style="margin-bottom:1rem;"><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's sim-clock.</div>
 
