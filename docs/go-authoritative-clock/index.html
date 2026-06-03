@@ -837,7 +837,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
   <!-- TAB 8: Doc Updates -->
   <div class="panel" id="panel-docs" role="tabpanel">
     <h2>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
-    <p>This spec changes the substrate model. It deletes NotifyDelivered as the delivery trigger and moves the clock and all position computation into Go. The pinned docs must change in the same commit as the code, or the model and the implementation will disagree.</p>
+    <p>This spec changes the substrate model. It deletes NotifyDelivered as the delivery trigger, moves the clock and all position computation into Go, and makes each wire its own goroutine. The pinned docs must change in the same commit as the code, or the model and the implementation will disagree.</p>
 
     <div class="cards">
       <div class="card">
@@ -847,6 +847,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
           <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
           <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
+          <li>Slot phase lifecycle / PacedWire: the passive lock+cond monitor is gone — PacedWire and the ack edge become goroutines that transport beads over channels (poll inbound → traverse on the sim-clock and emit position → put on the outbound channel), and the ack edge carries the consume-ack back as its own backward bead. Blocking Send, WaitConsumed, the cond var, and the per-send unpark helper are deleted; send policy stays node-owned (consumeGated / fireAndForget on node.data.sendRules), the wires apply no policy. "The wire is not a goroutine" is no longer true.</li>
         </ul>
       </div>
       <div class="card">
