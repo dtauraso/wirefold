@@ -608,7 +608,7 @@
 <!-- TAB: TS graph -->
 <div class="panel" id="panel-tsgraph" role="tabpanel">
   <h2>The TS frontend, wired.</h2>
-  <p>Two lanes, both touching Go. <strong>Render (top):</strong> Go emits a position stream; TS plots it &mdash; pump &rarr; render loop &rarr; screen, no math. <strong>Edit (bottom):</strong> user input &rarr; store &rarr; outbound IPC, sent to Go as CRUD + pause/resume. TS computes no geometry and no timing.</p>
+  <p>Two lanes, both touching Go. <strong>Render (top):</strong> Go emits a position stream; TS plots it &mdash; pump &rarr; render loop &rarr; screen, no math. <strong>Edit (bottom):</strong> user input &rarr; outbound IPC, sent to Go as CRUD + pause/resume. TS computes no geometry and no timing.</p>
   <div class="diagram">
     <svg width="720" height="300" viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" aria-label="TS frontend: Go emits a position stream that TS plots (trace pump to render loop to screen); user input flows back through input handlers, store, and outbound IPC as CRUD plus pause/resume to Go.">
       <line x1="120" y1="102" x2="230" y2="102" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aG)"/>
@@ -616,8 +616,8 @@
       <line x1="358" y1="102" x2="410" y2="102" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aP)"/>
       <line x1="538" y1="102" x2="590" y2="102" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aP)"/>
       <text x="564" y="94" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#c07ef8">draw</text>
-      <line x1="590" y1="206" x2="538" y2="206" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
-      <line x1="410" y1="206" x2="358" y2="206" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
+      <line x1="590" y1="206" x2="358" y2="206" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
+      <text x="474" y="198" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#d4a017">edits</text>
       <line x1="230" y1="206" x2="120" y2="206" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
       <text x="175" y="198" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#d4a017">CRUD + pause/resume</text>
       <line x1="645" y1="130" x2="645" y2="178" stroke="#808090" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#aM)"/>
@@ -637,9 +637,6 @@
       <rect x="590" y="178" width="106" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
       <text x="643" y="202" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" font-weight="700" fill="#d4a017">Input</text>
       <text x="643" y="219" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">pointer&middot;wheel</text>
-      <rect x="410" y="178" width="128" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
-      <text x="474" y="202" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#d4a017">Store</text>
-      <text x="474" y="219" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">passive copy</text>
       <rect x="230" y="178" width="128" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
       <text x="294" y="202" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#d4a017">Outbound IPC</text>
       <text x="294" y="219" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">writeStdin</text>
@@ -652,7 +649,7 @@
     </svg>
   </div>
   <div class="note"><strong>Legend.</strong> Green = Go (the boundary); purple = the GPU render path; amber = the edit/CRUD path; grey = the screen. Arrows are messages; the dashed one is the human closing the loop.</div>
-  <div class="note" style="margin-top:0.75rem;">Everything TS owns is render and input. The data &mdash; positions, geometry, timing, the authoritative store &mdash; lives in Go; TS keeps only a passive copy. See the <strong>TS code</strong> tab for the per-context detail.</div>
+  <div class="note" style="margin-top:0.75rem;">Everything TS owns is render and input. The data &mdash; positions, geometry, timing, the authoritative store &mdash; lives in Go; TS keeps only a passive copy, read by the renderer and off the edit path. See the <strong>TS code</strong> tab for the per-context detail.</div>
 </div>
 
   <!-- TAB 3: The Bridge -->
