@@ -498,7 +498,7 @@
         <tr>
           <td>ack edge</td>
           <td>goroutine — one per source node</td>
-          <td><ol><li>Poll its inbound channel for a consume-ack a destination node sent when it consumed its input (node-loop step 3).</li><li>Put the ack on the channel connecting it to the source node, so the source's send-check learns its outgoing wire is clear and it may send the next value.</li></ol></td>
+          <td><ol><li>Poll its inbound channel for a consume-ack a destination node sent when it consumed its input (node-loop step 3).</li><li>Mark the edge in-flight and elapse the traversal — inFlightTime = arcLength ÷ pulseSpeed on Go's sim-clock — advancing the bead backward (destination → source) and emitting its position each report (~16ms) for the renderer to draw.</li><li>On traversal-complete, put the ack on the channel connecting it to the source node, so the source's send-check learns its outgoing wire is clear and it may send the next value.</li></ol></td>
         </tr>
       </tbody>
     </table>
