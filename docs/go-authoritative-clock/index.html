@@ -491,11 +491,6 @@
           <td><ol><li>Receive the next event from the shared channel that every node loop writes to.</li><li>Assign it the next Step ordinal (the current event count) under a lock, giving all events a total order.</li><li>Append it to the in-memory event buffer.</li><li>If a sink is set, marshal the event to JSON and write it as one line.</li><li>Loop until the channel closes at shutdown, then signal done so main can finish.</li></ol></td>
         </tr>
         <tr>
-          <td>send helpers</td>
-          <td>one per blocking send (short-lived)</td>
-          <td><ol><li>Spawned by a gated send just before it parks on WaitConsumed.</li><li>select between the run context's Done channel and the send's own done channel.</li><li>If the context is cancelled (shutdown), cond.Broadcast to wake the parked sender so it never hangs.</li><li>Exit the moment the send completes — a one-shot helper, not a loop.</li></ol></td>
-        </tr>
-        <tr>
           <td>PacedWire</td>
           <td>goroutine — one per destination input port</td>
           <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's sim-clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li></ol></td>
