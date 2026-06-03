@@ -608,33 +608,28 @@
 <!-- TAB: TS graph -->
 <div class="panel" id="panel-tsgraph" role="tabpanel">
   <h2>The TS frontend, wired.</h2>
-  <p>Two lanes, both touching Go. <strong>Render (top):</strong> Go emits a position stream; the pump feeds it to the render loop, which draws the beads to the screen &mdash; no math. <strong>Edit (bottom):</strong> user input &rarr; outbound IPC, sent to Go as CRUD + pause/resume. TS computes no geometry and no timing.</p>
+  <p>Two pipes to Go &mdash; nothing else crosses. <strong>In (trace pump):</strong> Go emits a position stream; the pump feeds the render loop, which draws the beads to the screen, no math. <strong>Out (writeStdin):</strong> what the user does &mdash; CRUD, pause/resume, raw pointer/wheel &mdash; all go straight to Go through the write. There's no separate input stage, and TS computes no geometry.</p>
   <div class="diagram">
-<svg width="560" height="300" viewBox="0 0 560 300" xmlns="http://www.w3.org/2000/svg" aria-label="TS frontend: Go emits a position stream; the trace pump and render loop draw it to the screen. User input flows back through input handlers and outbound IPC as CRUD plus pause/resume to Go; the user connects the render loop to input.">
-  <line x1="120" y1="102" x2="230" y2="102" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aG)"/>
-  <text x="175" y="94" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5ec4a0">position stream</text>
-  <line x1="358" y1="102" x2="410" y2="102" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aP)"/>
-  <line x1="410" y1="206" x2="358" y2="206" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
-  <text x="384" y="198" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#d4a017">edits</text>
-  <line x1="230" y1="206" x2="120" y2="206" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
-  <text x="175" y="198" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#d4a017">CRUD + pause/resume</text>
-  <line x1="474" y1="130" x2="474" y2="178" stroke="#808090" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#aM)"/>
-  <text x="490" y="157" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#808090">user</text>
-  <rect x="24" y="70" width="96" height="160" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="72" y="146" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#5ec4a0">GO</text>
-  <text x="72" y="164" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">backend</text>
-  <rect x="230" y="74" width="128" height="56" rx="9" ry="9" fill="#0d1628" stroke="#7c9ef8" stroke-width="1.5"/>
-  <text x="294" y="98" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#7c9ef8">Trace pump</text>
-  <text x="294" y="115" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">setPulse(pos)</text>
-  <rect x="410" y="74" width="128" height="56" rx="9" ry="9" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
-  <text x="474" y="98" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">Render loop</text>
-  <text x="474" y="115" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#8040b0">draw beads to screen</text>
-  <rect x="230" y="178" width="128" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
-  <text x="294" y="202" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#d4a017">Outbound IPC</text>
-  <text x="294" y="219" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">writeStdin</text>
-  <rect x="410" y="178" width="128" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
-  <text x="474" y="202" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#d4a017">Input</text>
-  <text x="474" y="219" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">pointer&middot;wheel</text>
+<svg width="560" height="240" viewBox="0 0 560 240" xmlns="http://www.w3.org/2000/svg" aria-label="TS frontend: two pipes to Go. The trace pump feeds Go's position stream to the render loop, which draws beads to the screen. The user sees the render and acts; the outbound IPC (writeStdin) sends CRUD, pause/resume, and pointer/wheel to Go.">
+  <line x1="120" y1="78" x2="210" y2="78" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aG)"/>
+  <text x="165" y="70" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5ec4a0">position stream</text>
+  <line x1="340" y1="78" x2="400" y2="78" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aP)"/>
+  <line x1="470" y1="106" x2="470" y2="140" stroke="#808090" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#aM)"/>
+  <text x="485" y="127" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#808090">user</text>
+  <line x1="400" y1="168" x2="120" y2="168" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
+  <text x="262" y="160" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#d4a017">CRUD &middot; pause/resume &middot; pointer/wheel</text>
+  <rect x="24" y="46" width="96" height="150" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="72" y="116" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#5ec4a0">GO</text>
+  <text x="72" y="134" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">backend</text>
+  <rect x="210" y="50" width="130" height="56" rx="9" ry="9" fill="#0d1628" stroke="#7c9ef8" stroke-width="1.5"/>
+  <text x="275" y="74" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#7c9ef8">Trace pump</text>
+  <text x="275" y="91" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">setPulse(pos)</text>
+  <rect x="400" y="50" width="140" height="56" rx="9" ry="9" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+  <text x="470" y="74" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">Render loop</text>
+  <text x="470" y="91" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#8040b0">draw beads to screen</text>
+  <rect x="400" y="140" width="140" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
+  <text x="470" y="164" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#d4a017">Outbound IPC</text>
+  <text x="470" y="181" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">writeStdin</text>
   <defs>
     <marker id="aG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
     <marker id="aP" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/></marker>
@@ -643,8 +638,8 @@
   </defs>
 </svg>
   </div>
-  <div class="note"><strong>Legend.</strong> Green = Go (the boundary); purple = the render path; amber = the edit/CRUD path. Arrows are messages; the dashed <strong>user</strong> arrow is the human &mdash; they see what the render loop draws and act through input, connecting the two lanes.</div>
-  <div class="note" style="margin-top:0.75rem;">Everything TS owns is render and input. The data &mdash; positions, geometry, timing, the authoritative store &mdash; lives in Go; TS keeps only a passive copy, read by the renderer and off the edit path. See the <strong>TS code</strong> tab for the per-context detail.</div>
+  <div class="note"><strong>Legend.</strong> Green = Go; blue = the trace pump (Go&rarr;TS, in); purple = the render path; amber = the write (TS&rarr;Go, out). Those two pipes are all that cross. The dashed <strong>user</strong> arrow is the human &mdash; they see what the render loop draws, and what they do is written to Go.</div>
+  <div class="note" style="margin-top:0.75rem;">TS only renders Go's stream and forwards the user's actions. The data &mdash; positions, geometry, timing, the authoritative store &mdash; lives in Go; TS keeps just a passive copy for the renderer.</div>
 </div>
 
   <!-- TAB 3: The Bridge -->
