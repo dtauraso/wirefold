@@ -514,39 +514,40 @@
     <h2>The goroutines, wired.</h2>
     <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel; an <strong>ack-edge goroutine</strong> carries the consume back. Nodes and wires are all goroutines &mdash; they touch only through channels.</p>
     <div class="diagram">
-      <svg width="720" height="280" viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="Goroutines execution unit: a source node loop sends a bead over a channel to a PacedWire goroutine, which delivers it to the destination node loop; the destination's consume is carried back by an ack-edge goroutine to the source.">
-        <line x1="174" y1="77" x2="281" y2="77" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
-        <text x="227" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">send</text>
-        <line x1="439" y1="77" x2="546" y2="77" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
-        <text x="492" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">deliver</text>
-        <path d="M621,110 L621,223 L439,223" fill="none" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
-        <text x="532" y="216" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">consume</text>
-        <path d="M281,223 L99,223 L99,111" fill="none" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
-        <text x="190" y="216" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">ack</text>
-        <rect x="24" y="44" width="150" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-        <text x="99" y="78" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">Input loop</text>
-        <text x="99" y="96" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
-        <rect x="281" y="44" width="158" height="66" rx="10" ry="10" fill="#13241f" stroke="#5ec4a0" stroke-width="2"/>
-        <text x="360" y="68" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">PacedWire</text>
-        <text x="360" y="83" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d8a70">goroutine</text>
-        <line x1="306" y1="98" x2="414" y2="98" stroke="#2f6b57" stroke-width="1"/>
-        <circle cx="378" cy="98" r="3.5" fill="#5ec4a0"/>
-        <text x="420" y="101" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">&#9654;</text>
-        <rect x="546" y="44" width="150" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-        <text x="621" y="78" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ReadGate loop</text>
-        <text x="621" y="96" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">readGate1</text>
-        <rect x="281" y="190" width="158" height="66" rx="10" ry="10" fill="#13241f" stroke="#5ec4a0" stroke-width="2"/>
-        <text x="360" y="214" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">ack edge</text>
-        <text x="360" y="229" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d8a70">goroutine</text>
-        <line x1="306" y1="244" x2="414" y2="244" stroke="#2f6b57" stroke-width="1"/>
-        <circle cx="342" cy="244" r="3.5" fill="#5ec4a0"/>
-        <text x="290" y="247" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">&#9664;</text>
-        <defs>
-          <marker id="arrG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
-        </defs>
-      </svg>
+<svg width="720" height="280" viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="Goroutines execution unit: a source node loop sends a bead over a channel to a PacedWire goroutine, which delivers it to the destination node loop; the destination's consume is carried back by an ack-edge goroutine to the source.">
+  <line x1="174" y1="77" x2="281" y2="77" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="227" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">send</text>
+  <line x1="439" y1="77" x2="546" y2="77" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="492" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">deliver</text>
+  <path d="M621,110 L621,223 L439,223" fill="none" stroke="#d4a017" stroke-width="1.5" marker-end="url(#arrA)"/>
+  <text x="532" y="216" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#d4a017">consume</text>
+  <path d="M281,223 L99,223 L99,111" fill="none" stroke="#d4a017" stroke-width="1.5" marker-end="url(#arrA)"/>
+  <text x="190" y="216" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#d4a017">ack</text>
+  <rect x="24" y="44" width="150" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="99" y="78" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">Input loop</text>
+  <text x="99" y="96" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
+  <rect x="546" y="44" width="150" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="621" y="78" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ReadGate loop</text>
+  <text x="621" y="96" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">readGate1</text>
+  <rect x="281" y="44" width="158" height="66" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
+  <text x="360" y="68" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
+  <text x="360" y="83" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
+  <line x1="306" y1="98" x2="414" y2="98" stroke="#3a5290" stroke-width="1"/>
+  <circle cx="378" cy="98" r="3.5" fill="#7c9ef8"/>
+  <text x="420" y="101" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">&#9654;</text>
+  <rect x="281" y="190" width="158" height="66" rx="10" ry="10" fill="#1e1800" stroke="#d4a017" stroke-width="2"/>
+  <text x="360" y="214" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#d4a017">ack edge</text>
+  <text x="360" y="229" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">goroutine</text>
+  <line x1="306" y1="244" x2="414" y2="244" stroke="#6a5510" stroke-width="1"/>
+  <circle cx="342" cy="244" r="3.5" fill="#d4a017"/>
+  <text x="290" y="247" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#d4a017">&#9664;</text>
+  <defs>
+    <marker id="arrB" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#7c9ef8"/></marker>
+    <marker id="arrA" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#d4a017"/></marker>
+  </defs>
+</svg>
     </div>
-    <div class="note"><strong>Legend.</strong> Plain box = a node-loop goroutine. Box with a bead track = a wire goroutine (PacedWire forward, ack edge backward). Arrow = a channel. The forward bead is paced (arcLength &divide; pulseSpeed on the sim-clock); the ack bead runs the same path backward.</div>
+    <div class="note"><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward); amber = the ack edge (backward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on the sim-clock); the ack bead runs the same path back.</div>
     <div class="note" style="margin-top:0.75rem;"><strong>The ring tiles this unit.</strong> in08 + the bootstrap seed &rarr; readGate1 &rarr; chainInhibitor &rarr; (feedback) readGate1, with InhibitRightGate wired the same way &mdash; every edge is a PacedWire + ack-edge pair.</div>
     <div class="note" style="margin-top:0.75rem;"><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
   </div>
