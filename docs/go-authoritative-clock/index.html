@@ -508,7 +508,7 @@
       </tbody>
     </table>
 
-    <div class="note" style="margin-top:1.25rem;">The last two rows are <strong>wires, not goroutines</strong>. A <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> and an ack edge hold state and carry pulses but run no goroutine of their own — the node loops above drive them through a shared lock and a condition variable, and the slot and its backpressure live in the destination node, not in a separate wire thread.</div>
+    <div class="note" style="margin-top:1.25rem;">Of the last two rows, <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is now a goroutine — its own wire loop (see its row above). The ack edge remains data, not a goroutine: a backward-signalling wire carrying the consume-ack between decoupled nodes.</div>
 
     <div class="note" style="margin-top:0.75rem;">Where the clock change lands: in the target model each node loop also wakes about every 16&nbsp;ms to compute and emit its in-flight bead positions and to self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
   </div>
