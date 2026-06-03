@@ -511,7 +511,7 @@
   <!-- TAB: TS code -->
   <div class="panel" id="panel-tscode" role="tabpanel">
     <h2>What the TS frontend runs.</h2>
-    <p>TS has no goroutines. Its work happens in a few execution contexts: the GPU render loop (driven by requestAnimationFrame inside the @react-three/fiber Canvas), an event-driven trace pump, the message receiver, the outbound IPC path, DOM input handlers, and the React/Zustand store. The render loop and input handlers must stay in TS — they need the WebGL context and the DOM event loop. Most of the data work migrates to Go; see the TS &rarr; Go tab.</p>
+    <p>TS has no goroutines, and with the data work in Go its job reduces to two things: render the stream Go emits (bead positions, geometry) and send CRUD + pause/resume back. Its work happens in a few execution contexts: the GPU render loop (driven by requestAnimationFrame inside the @react-three/fiber Canvas), an event-driven trace pump, the message receiver, the outbound IPC path, DOM input handlers, and the React/Zustand store. The render loop and input handlers must stay in TS &mdash; they need the WebGL context and the DOM event loop; the data work migrates to Go (see the TS &rarr; Go tab).</p>
 
     <table class="spec-table">
       <caption>The TS execution contexts</caption>
@@ -522,7 +522,7 @@
         <tr>
           <td>Render loop · pulse</td>
           <td>every frame (~60fps), one per in-flight bead</td>
-          <td><ol><li>Read the bead's pulse data imperatively from the pulse map (getPulseMap, pulse-state.ts).</li><li>Rebuild the edge curve from current node positions (buildPortCurve) so a mid-drag move tracks.</li><li>Compute progress t = (getPauseAdjustedNow() &minus; startTime) / simLatencyMs, clamped to [0,1].</li><li>Sample the curve at t (curve.getPointAt) and set the bead mesh position.</li><li>At t &ge; 1, claimDelivered once and post {type:"delivered"} to Go. <em style="color:var(--warn);">(Phase 2 deletes steps 2&ndash;5: Go emits the position and TS only plots it; delivery moves to Go's clock.)</em></li></ol></td>
+          <td><ol><li>Read each in-flight bead's current position from the stream Go emits (the pulse map, pulse-state.ts).</li><li>Set the bead mesh position to that point.</li><li>No curve rebuild, no progress t, no curve sampling &mdash; Go computes every position; no delivered post &mdash; Go times its own delivery.</li></ol></td>
         </tr>
         <tr>
           <td>Render loop · overlays</td>
@@ -541,8 +541,8 @@
         </tr>
         <tr>
           <td>Outbound IPC</td>
-          <td>on user action / delivery</td>
-          <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Types out: delivered, deleteEdge, addEdge, fade, node-move.</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
+          <td>on user action</td>
+          <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Types out are CRUD + control: deleteEdge, addEdge, fade, node-move, pause/resume &mdash; geometry and animation edits, never delivery or timing.</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
         </tr>
         <tr>
           <td>Input handlers</td>
@@ -552,7 +552,7 @@
         <tr>
           <td>React / Zustand store</td>
           <td>on state change</td>
-          <td><ol><li>Holds the authoritative nodes/edges/selection today (store.ts).</li><li>moveNode updates a node position and re-derives curve geometry + patches in-flight pulse timing.</li><li>createEdge / deleteEdge / toggleFade update state and post addEdge / deleteEdge / fade to Go.</li><li><em style="color:var(--warn);">(Phases 2&ndash;3 remove the authoritative store: Go owns the data; TS keeps only a passive render copy and computes no geometry.)</em></li></ol></td>
+          <td><ol><li>Keeps a passive render copy of nodes/edges/selection (store.ts); Go owns the authoritative data.</li><li>moveNode updates a node position locally and posts node-move; it derives no curve geometry and patches no pulse timing &mdash; Go does that.</li><li>createEdge / deleteEdge / toggleFade apply optimistically and post addEdge / deleteEdge / fade to Go.</li></ol></td>
         </tr>
       </tbody>
     </table>
