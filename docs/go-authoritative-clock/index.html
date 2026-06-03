@@ -371,6 +371,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="phases">Phases</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="verify">Verify</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="issues">Inconsistencies</button>
   </div>
 
   <!-- TAB 1: Overview -->
@@ -1144,6 +1145,25 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="note" style="margin-top:1rem;">This plan stays a proposal until Phase 1 lands; MODEL.md remains current for existing code until then.</div>
+  </div>
+
+  <!-- TAB: Inconsistencies -->
+  <div class="panel" id="panel-issues" role="tabpanel">
+    <h2>Inconsistencies to resolve.</h2>
+    <p>A cross-tab audit. The wire-as-goroutine redesign updated some tabs (Goroutines, TS code, Doc Updates, the three diagrams) but not others, so the contradictions cluster at those seams. Tags: <span style="color:var(--good);font-weight:700;">FIX READY</span> = unambiguous; <span style="color:var(--warn);font-weight:700;">DECIDE</span> = needs a model call; <span style="color:var(--info);font-weight:700;">SEAM</span> = known migration-tab lag; <span style="color:var(--muted);font-weight:700;">MINOR</span> = under-specified, not a contradiction.</p>
+    <div class="note" style="border-left:3px solid var(--good);">
+      <span style="color:var(--good);font-weight:700;">1 &middot; FIX READY</span> &mdash; <strong>The ack-edge note contradicts its own row.</strong> The Goroutines-tab note under the table still says "the ack edge remains data, not a goroutine," but the ack-edge row above (and the Doc-Updates MODEL.md bullet) now describe it as a goroutine that paces a backward bead and emits positions. Stale from flipping the ack edge to a goroutine after that note was written. <em>Fix:</em> update the note to call the ack edge a goroutine &mdash; the backward-paced mirror of PacedWire.
+    </div>
+    <div class="note" style="border-left:3px solid var(--warn);margin-top:0.75rem;">
+      <span style="color:var(--warn);font-weight:700;">2 &middot; DECIDE</span> &mdash; <strong>Is pointer/wheel sent to Go, or consumed in TS?</strong> The TS-graph diagram says TS writes "CRUD &middot; pause/resume &middot; pointer/wheel" to Go. But the TS-code Input-handlers row, the TS-code Outbound-IPC row, the Bridge relay diagram, and the TS &rarr; Go tab all say raw pointer/wheel is consumed <em>in</em> TS (camera arcball/pan/pinch, raycast pick, drag-gesture capture) and only the geometry <em>result</em> (node-move, addEdge) is sent. <em>Decide:</em> if Go receives raw input, propagate pointer/wheel to those four places and rewrite the input story; otherwise drop "pointer/wheel" from the TS-graph label.
+    </div>
+    <div class="note" style="border-left:3px solid var(--info);margin-top:0.75rem;">
+      <span style="color:var(--info);font-weight:700;">3 &middot; SEAM</span> &mdash; <strong>The migration tabs still credit the node loop / NotifyDelivered.</strong> Phases, Plan, and Clock Change attribute delivery and position-emission to the <em>node</em> loop and say Go "calls the existing NotifyDelivered slot-fill path internally," while the updated Goroutines / Doc Updates / diagrams say the <em>wire</em> loop times its own delivery and "puts the bead on the channel" (no NotifyDelivered, no slot on the wire). e.g. Clock Change: "each node's loop computes the bead's current position." <em>Reconcile:</em> point these tabs at the wire-goroutine target, or mark the NotifyDelivered reuse explicitly as a Phase-1 stepping-stone, not the end state.
+    </div>
+    <div class="note" style="border-left:3px solid var(--muted);margin-top:0.75rem;">
+      <span style="color:var(--muted);font-weight:700;">4 &middot; MINOR</span> &mdash; <strong>Node "slot" vs wire "channel."</strong> Nodes still "consume / clear their slots," but the wire now "puts the bead on the channel connecting it to the destination node." How a bead on the inbound channel becomes the node's filled slot isn't spelled out. Under-specified, not a contradiction. <em>Later:</em> spell out the node-side channel&rarr;slot receive when the node loops get a full rewrite.
+    </div>
+    <div class="note" style="margin-top:1.25rem;"><strong>Verified consistent</strong> across all tabs: clock ownership (Go), position computation (Go), wire pacing (sim-clock &mdash; the ~16 ms sleep is report rate only, not speed), and play/pause. No conflicts there.</div>
   </div>
 </div>
 
