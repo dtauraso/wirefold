@@ -702,6 +702,34 @@
     <div class="note" style="margin-top:0.75rem;">
       TS sends editor geometry and animation updates to Go; Go updates its data accordingly. Go remains the single authoritative holder of all geometry and animation state.
     </div>
+
+<p style="margin-top:1.5rem;"><strong>The actual path.</strong> Conceptually two arrows; concretely the VS Code extension host relays them between Go's stdio and the webview.</p>
+  <div class="diagram">
+    <svg width="720" height="220" viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" aria-label="The actual Go-TS relay: Go's stdout position stream is relayed by the VS Code extension host via postMessage to the TS webview; the webview's CRUD and pause/resume go back via postMessage and the extension's writeStdin to Go's stdin.">
+      <text x="360" y="42" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">position stream (per-bead x,y,z)</text>
+      <text x="360" y="57" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d8a70">stdout &rarr; postMessage</text>
+      <line x1="174" y1="95" x2="285" y2="95" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#brG)"/>
+      <line x1="435" y1="95" x2="546" y2="95" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#brG)"/>
+      <line x1="546" y1="140" x2="435" y2="140" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#brP)"/>
+      <line x1="285" y1="140" x2="174" y2="140" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#brP)"/>
+      <text x="360" y="190" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#c07ef8">deleteEdge &middot; addEdge &middot; fade &middot; node-move &middot; pause/resume</text>
+      <text x="360" y="205" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#8040b0">postMessage &rarr; stdin (writeStdin)</text>
+      <rect x="24" y="72" width="150" height="90" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+      <text x="99" y="112" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">GO process</text>
+      <text x="99" y="132" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">stdio</text>
+      <rect x="285" y="72" width="150" height="90" rx="10" ry="10" fill="#161618" stroke="#808090" stroke-width="1.5"/>
+      <text x="360" y="108" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#a0a0b0">extension host</text>
+      <text x="360" y="128" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#808090">relay &middot; VS Code</text>
+      <rect x="546" y="72" width="150" height="90" rx="10" ry="10" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+      <text x="621" y="112" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#c07ef8">TS webview</text>
+      <text x="621" y="132" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#8040b0">renderer</text>
+      <defs>
+        <marker id="brG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
+        <marker id="brP" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <div class="note">Fire-and-forget both ways &mdash; no request/response. Go &rarr; TS is the position stream over stdout, relayed by postMessage; TS &rarr; Go is CRUD + pause/resume via postMessage, written to Go's stdin. The extension host only relays &mdash; it holds no state.</div>
   </div>
 
   <!-- TAB 4: Clock Change -->
