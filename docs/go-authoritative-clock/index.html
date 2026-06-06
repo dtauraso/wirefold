@@ -183,6 +183,14 @@
   #panel-goroutines .spec-table th:first-child, #panel-goroutines .spec-table td:first-child { width: 90px; white-space: normal; }
   #panel-goroutines .spec-table th:nth-child(2), #panel-goroutines .spec-table td:nth-child(2) { width: 95px; white-space: normal; }
   #panel-goroutines .spec-table td, #panel-goroutines .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
+  #panel-goroutines table#goroutines-table{width:800px;table-layout:fixed;border-collapse:collapse;}
+  #panel-goroutines table#goroutines-table th,
+  #panel-goroutines table#goroutines-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
+  #panel-goroutines table#goroutines-table th:nth-child(1),#panel-goroutines table#goroutines-table td:nth-child(1),
+  #panel-goroutines table#goroutines-table th:nth-child(2),#panel-goroutines table#goroutines-table td:nth-child(2){width:1.8ch;padding-left:2px;padding-right:2px;}
+  #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:16ch;}
+  #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:9ch;}
+  #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:64ch;}
   #panel-tscode .spec-table { table-layout: fixed; width: 100%; }
   #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 135px; white-space: normal; }
   #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 110px; white-space: normal; }
@@ -346,6 +354,10 @@
 
   td.enum, th.enum, td.chk, th.chk { width: 2.2ch; text-align: center; color: var(--muted); white-space: nowrap; }
 
+  .chk-btn{background:none;border:none;cursor:pointer;font:inherit;color:var(--muted);padding:1px 4px;border-radius:3px;line-height:1;}
+  .chk-btn:hover{background:rgba(255,255,255,.08);}
+  .chk-btn.checked{color:var(--good);}
+
   @media (max-width: 600px) {
     .cards { flex-direction: column; }
     .panel { padding: 1.5rem 1.25rem; }
@@ -396,21 +408,21 @@
       <tbody>
         <tr>
           <td class="enum">1</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Concurrent</td>
           <td>Go (backend)</td>
           <td>Self-scheduling nodes, local rules over slots and wires. No global clock or round.</td>
         </tr>
         <tr>
           <td class="enum">2</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Geometric</td>
           <td>Go (backend)</td>
           <td>Holds all geometric data; computes arc length, positions, durations.</td>
         </tr>
         <tr>
           <td class="enum">3</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Animating</td>
           <td>Go calculates, TS draws</td>
           <td>Go computes all animation values (progress, timing); TS only renders the result.</td>
@@ -453,7 +465,7 @@
 
     <div class="note" style="margin-bottom:1rem;"><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's sim-clock.</div>
 
-    <table class="spec-table">
+    <table class="spec-table" id="goroutines-table">
       <caption>The goroutines</caption>
       <thead>
         <tr>
@@ -467,63 +479,63 @@
       <tbody>
         <tr>
           <td class="enum">1</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>main</td>
           <td>one</td>
           <td><ol><li>Parse the CLI flags — topology path, trace-output path, run duration.</li><li>Load topology.json via LoadTopology, which instantiates every node, builds the wires, and derives the full geometry — each port's world position from its node's position and side, each edge's curve control points from its endpoints and route, each arc length from the curve. This initial geometry is the first thing emitted to TS so the frontend can draw the scene.</li><li>Create the trace with NewWithSink — this also starts the trace-drain goroutine.</li><li>Launch the stdin-reader goroutine; cancel the run context when stdin closes.</li><li>Launch one goroutine per node (node.Update) under a WaitGroup, then block on Wait().</li><li>After Wait() returns, tr.Close() closes the event channel so the trace-drain goroutine flushes its buffer and signals done; then, if -trace was set, tr.WriteJSONL writes those buffered events to the file as JSONL.</li></ol></td>
         </tr>
           <tr>
             <td class="enum">2</td>
-            <td class="chk">☐</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
             <td><ol><li>No inputs — it is a source, driven by its init values.</li><li>Take the next init value (wrapping if its repeat flag is set).</li><li>Send it on the channel to the ToReadGate wire, but only once its ack edge shows that wire clear; never drop — if the prior bead isn't consumed yet, restart the loop and retry next round.</li><li>Advance to the next init value; stop when init is exhausted unless repeat is set.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">3</td>
-            <td class="chk">☐</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Bootstrap loop</td>
             <td>one (bootstrap_rg)</td>
             <td><ol><li>A one-shot Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false) whose only job is to seed the ring.</li><li>Send its single value 1 on the channel to the ToReadGate wire into <code style="font-family:var(--mono);font-size:11px;">readGate1.FromChainInhibitor</code> — only once its ack edge shows that wire clear; never drop.</li><li>That seed lets ReadGate fire its first round before the ChainInhibitor feedback edge has produced anything.</li><li>repeat is false, so after the single send the loop exits and the node never fires again.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">4</td>
-            <td class="chk">☐</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>ReadGate loop</td>
             <td>one per ReadGate node</td>
             <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within the coincidence window W (measured on Go's sim-clock). If W elapses with only one input present, clear the partial arrival — empty its slot and ack its source over the ack edge, releasing a consumeGated sender — then restart. A timeout sends nothing downstream; the lone input decays.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on the channel to the ToChainInhibitor wire, only once its ack edge shows that wire clear; never drop — if the prior bead isn't consumed yet, restart the loop and retry.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">5</td>
-            <td class="chk">☐</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>ChainInhibitor loop</td>
             <td>one per ChainInhibitor node</td>
             <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and ack the source over its ack edge.</li><li>Spawn one goroutine per ToNext port to fan out the held value concurrently; each sends the value on the channel to its wire, only once the ack edge shows that wire clear, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">6</td>
-            <td class="chk">☐</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>InhibitRightGate loop</td>
             <td>one per InhibitRightGate node</td>
             <td><ol><li>Poll FromLeft and FromRight (non-blocking); on the first arrival, open a coincidence window W.</li><li>Fire only when both arrive within W; if it times out, clear the partial arrival and restart.</li><li>Compute result = 1 only if Left==1 and Right==0, otherwise 0.</li><li>Consume both inputs — clear their slots and ack each source over its ack edge.</li><li>Send result on the channel to the ToPassed wire, only once its ack edge shows that wire clear; never drop — otherwise restart the loop.</li></ol></td>
           </tr>
         <tr>
           <td class="enum">7</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>stdin reader</td>
           <td>one</td>
           <td><ol><li>Read the next line TS wrote to the pipe and JSON-parse it.</li><li><strong>deleteEdge</strong> / <strong>addEdge</strong> → look up the wire and Delete() or Restore() it; addEdge derives the new edge's curve + arc length. Emit the geometry change to TS.</li><li><strong>fade</strong> → set the faded flag on the matching wires; <strong>node-move</strong> → apply the new x/y/z, then re-derive the moved node's port positions and the curve + arc length of each incident edge, and emit the updated geometry to TS.</li><li>Loop, never stopping — intake stays live regardless of run state.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">8</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>trace drain</td>
           <td>one</td>
           <td><ol><li>Receive the next event from the shared channel that every node loop writes to.</li><li>Assign it the next Step ordinal (the current event count) under a lock, giving all events a total order.</li><li>Append it to the in-memory event buffer.</li><li>If a sink is set, marshal the event to JSON and write it as one line.</li><li>Loop until the channel closes at shutdown, then signal done so main can finish.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">9</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire</td>
           <td>goroutine — one per destination input port</td>
           <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's sim-clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li></ol></td>
@@ -593,49 +605,49 @@
       <tbody>
         <tr>
           <td class="enum">1</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Render loop · pulse</td>
           <td>every frame (~60fps), one per in-flight bead</td>
           <td><ol><li>Read each in-flight bead's current position from the stream Go emits (the pulse map, pulse-state.ts).</li><li>Set the bead mesh position to that point.</li><li>No curve rebuild, no progress t, no curve sampling &mdash; Go computes every position; no delivered post &mdash; Go times its own delivery.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">2</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Render loop · overlays</td>
           <td>every few frames (throttled)</td>
           <td><ol><li>Project node world positions to screen for the HTML label overlay (LabelProjector).</li><li>Debounce the camera matrix and fire a settle callback once motion stops (CameraSettleDetector).</li><li>Track the nearest N nodes to the camera for occlusion/label decisions (NearestNTracker).</li><li>Screen-space and GPU-tied &mdash; stays in TS.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">3</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Trace pump</td>
           <td>event-driven (each Go trace event)</td>
           <td><ol><li>handleTraceEvent switches on the event kind (pump.ts).</li><li><strong>send</strong> &rarr; match edges by source+sourceHandle and setPulse on each.</li><li><strong>done</strong> &rarr; match edges by target+targetHandle and clearPulse on each.</li><li><strong>fire / recv</strong> &rarr; no-op.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">4</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Message receiver</td>
           <td>event-driven (window "message")</td>
           <td><ol><li>parseHostToWebview narrows the incoming message (main.tsx).</li><li><strong>trace-event</strong> &rarr; handleTraceEvent (the pump).</li><li><strong>load</strong> &rarr; store.load(text); <strong>run-status</strong> &rarr; set run state; <strong>flush</strong> &rarr; flush saves.</li><li>On startup, post {type:"ready"} back to the host.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">5</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Outbound IPC</td>
           <td>on user action</td>
           <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Types out are CRUD + control + raw input: deleteEdge, addEdge, fade, node-move, pause/resume, plus forwarded pointer/wheel events &mdash; geometry, animation edits, and input signals, never delivery or timing.</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">6</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Input handlers</td>
           <td>DOM pointer / wheel events</td>
           <td><ol><li>pointer down: raycast-pick a port, node, or empty space; capture the drag/wiring origin (interaction-controls.ts).</li><li>pointer move: drag a node (&rarr; node-move IPC, rAF-throttled), preview a wire, or arcball-rotate the camera.</li><li>pointer up: complete wiring (createEdge), persist a node move, or reset.</li><li>wheel/pointer: capture the raw DOM event and forward it to Go; Go interprets it (ctrl = pinch-zoom toward cursor, else pan on the z=0 plane) and owns + commits the camera.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">7</td>
-          <td class="chk">☐</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>React / Zustand store</td>
           <td>on state change</td>
           <td><ol><li>Keeps a passive render copy of nodes/edges/selection (store.ts); Go owns the authoritative data.</li><li>moveNode updates a node position locally and posts node-move; it derives no curve geometry and patches no pulse timing &mdash; Go does that.</li><li>createEdge / deleteEdge / toggleFade apply optimistically and post addEdge / deleteEdge / fade to Go.</li></ol></td>
@@ -1237,6 +1249,21 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       });
     });
   })();
+
+  function chkKey(btn){const p=btn.closest('.panel'); const pid=p?p.id:'nopanel'; const r=btn.closest('tr'); const n=r&&r.querySelector('.enum')?r.querySelector('.enum').textContent.trim():''; return pid+'#'+n;}
+  function saveChk(){const s={}; document.querySelectorAll('.chk-btn').forEach(b=>{if(b.classList.contains('checked'))s[chkKey(b)]=1;}); try{localStorage.setItem('chk-go-clock',JSON.stringify(s));}catch(e){}}
+  function restoreChk(){let s={}; try{s=JSON.parse(localStorage.getItem('chk-go-clock')||'{}');}catch(e){} document.querySelectorAll('.chk-btn').forEach(b=>{const on=!!s[chkKey(b)]; b.classList.toggle('checked',on); b.textContent=on?'☑':'☐'; b.setAttribute('aria-pressed',on?'true':'false');});}
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target;
+    if (!btn || !btn.classList || !btn.classList.contains('chk-btn')) return;
+    var checked = btn.classList.toggle('checked');
+    btn.textContent = checked ? '☑' : '☐';
+    btn.setAttribute('aria-pressed', checked ? 'true' : 'false');
+    saveChk();
+  });
+
+  window.addEventListener('DOMContentLoaded', restoreChk);
 </script>
 </body>
 </html>
