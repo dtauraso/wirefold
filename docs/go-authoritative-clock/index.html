@@ -420,7 +420,7 @@
           <li>Holds all shading data — materials, colors, glass and environment parameters</li>
           <li>Computes all animation values — arc length, positions, traversal progress, durations</li>
           <li>Computes every bead position and emits it to TS</li>
-          <li>Runs the substrate (nodes, slots, wires, send rules)</li>
+          <li>Runs the Go network (nodes, wires, send rules)</li>
           <li>Sends messages describing what to render — geometry, shading, and position data</li>
         </ul>
       </div>
@@ -476,7 +476,7 @@
           <tr>
             <td>ChainInhibitor loop</td>
             <td>one per ChainInhibitor node</td>
-            <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — backpressure means it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and ack the source over its ack edge.</li><li>Spawn one goroutine per ToNext port to fan out the held value concurrently; each sends the value on the channel to its wire, only once the ack edge shows that wire clear, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
+            <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and ack the source over its ack edge.</li><li>Spawn one goroutine per ToNext port to fan out the held value concurrently; each sends the value on the channel to its wire, only once the ack edge shows that wire clear, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
           </tr>
           <tr>
             <td>InhibitRightGate loop</td>
@@ -934,7 +934,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>GPU-resident resources that must live in the browser: the WebGL context itself; compiled shader programs; baked textures and environment maps. Go supplies the parameters (material values, environment parameters); TS bakes and binds them on the GPU (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">ProceduralEnvProvider</code>)</li>
           <li>Human input capture: camera arcball / pan / pinch-dolly — DOM pointer and wheel events forwarded to Go as signals; Go owns the camera (interaction-controls.ts: <code style="font-family:var(--mono);font-size:11px;">useInteractionControls</code>); raycast pick — THREE.Raycaster hit-testing the live GPU scene to identify clicked node, port, or edge (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">RaycasterHelper</code>); drag / wire — node drag is captured in TS and sent to Go as a geometry edit so Go stays authoritative; port-to-port wiring gesture captured in TS and forwarded to Go</li>
           <li>React / DOM editor chrome — label overlay divs, occlusion badges, in-node spec-override text, run button, camera-UI widgets; HTML rendering stays in the browser (ThreeView.tsx)</li>
-          <li>Zustand store, spec parse, save lifecycle — editor state management, JSON parse/serialize, VS Code IPC for save; these are editor authoring concerns, not substrate computation (store.ts, save.ts, SaveLifecycle.tsx)</li>
+          <li>Zustand store, spec parse, save lifecycle — editor state management, JSON parse/serialize, VS Code IPC for save; these are editor authoring concerns, not Go-network computation (store.ts, save.ts, SaveLifecycle.tsx)</li>
           <li>No authoritative data store. TS holds no source-of-truth graph state — it applies Go's data to the scene. The per-frame loop reads imperative buffers fed by Go; the Zustand store is removed.</li>
           <li>Sends to Go are fire-and-forget messages on the pipe — no await, no Promise, no waiting for a reply. Optimistic local apply covers responsiveness (e.g. a drag moves on screen immediately); Go's echo reconciles.</li>
         </ul>
@@ -943,7 +943,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
     <div class="note" style="margin-top:1.25rem;">The dividing line is data vs. the GPU. Geometry (control points, arc length, wire path, node and port positions), animation (bead position along path, traversal progress, timing), and shading (materials, colors, glass and environment parameters) are all data — they belong in Go. Running the GPU and capturing human input stay in TS because they require the browser's WebGL context and DOM event loop. Input that produces geometry — a node drag — is captured in TS and sent to Go as a geometry edit, so Go remains the single source of authoritative data.</div>
 
-    <div class="note" style="margin-top:0.75rem;border-left-color:var(--warn);">Moving geometry into Go does <strong>not</strong> mean serializing it into <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.json</span>. The file holds only two things, the same as today: the substrate spec (nodes, ports, edges, send rules, slots) and the authored layout (the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">view</span> block — node x/y positions, camera pose, fade/label UI state). Everything Go now owns is <em>derived</em> from those inputs — port world-positions from node position + side, curve control points from endpoints + route, arc length from the curve, bead positions streamed at runtime. Go recomputes derived geometry at load (it already computes arc length there); persisting it would create a second source of truth that drifts. The file does not grow — a node drag writes back one changed x/y.</div>
+    <div class="note" style="margin-top:0.75rem;border-left-color:var(--warn);">Moving geometry into Go does <strong>not</strong> mean serializing it into <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.json</span>. The file holds only two things, the same as today: the network spec (nodes, ports, edges, send rules) and the authored layout (the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">view</span> block — node x/y positions, camera pose, fade/label UI state). Everything Go now owns is <em>derived</em> from those inputs — port world-positions from node position + side, curve control points from endpoints + route, arc length from the curve, bead positions streamed at runtime. Go recomputes derived geometry at load (it already computes arc length there); persisting it would create a second source of truth that drifts. The file does not grow — a node drag writes back one changed x/y.</div>
   </div>
 
   <!-- TAB 8: Doc Updates -->
@@ -1038,7 +1038,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li><strong>TS:</strong> send editor geometry edits to Go (node move, edge create/delete — partly exists via moveNode/deleteEdge IPC; extend to full geometry CRUD); render from the geometry Go streams back, computing none of it locally.</li>
           <li><strong>TS:</strong> Any remaining structural state (which nodes/edges exist) is a passive render copy of what Go sent — not an authoritative store, holds no geometry logic. Zustand's data-owning/computing role (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">moveNode</span> arc-length re-derive, curve management, fade fixpoint) is deleted, not relocated to TS.</li>
           <li><strong>Exit:</strong> dragging a node updates Go's data, Go re-streams geometry + positions, TS renders without local geometry math.</li>
-          <li><strong>Note:</strong> per the handoff caveat, edge RECONNECT (moving a wire's endpoint) is a substrate redesign, not a small edit — scope it separately; target-end move is delete+create, source-end needs a new rewire IPC verb.</li>
+          <li><strong>Note:</strong> per the handoff caveat, edge RECONNECT (moving a wire's endpoint) is a network redesign, not a small edit — scope it separately; target-end move is delete+create, source-end needs a new rewire IPC verb.</li>
           <li><strong>Delete edge with a pulse in flight:</strong>
             <ul style="margin-top:0.4rem;margin-bottom:0.4rem;">
               <li>TS can send deleteEdge while a pulse is still inside that edge, during pause or play. The message is fire-and-forget; TS does not wait for Go.</li>
@@ -1105,7 +1105,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <h3>Reference / regression</h3>
         <ul>
           <li>Capture a visual reference run before Phase 2 (a short recording or screenshots of a cascade) and compare after each phase for parity — motion should look identical; only the source of the motion changed.</li>
-          <li>Add the headless cascade Go test as a permanent regression: it locks in that the substrate runs without the editor and never silently re-couples to it.</li>
+          <li>Add the headless cascade Go test as a permanent regression: it locks in that the Go network runs without the editor and never silently re-couples to it.</li>
         </ul>
       </div>
     </div>
@@ -1118,7 +1118,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <ul>
           <li><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go build ./...</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test ./...</span></li>
           <li>Webview <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npx tsc --noEmit</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npm run build</span></li>
-          <li>Guard scripts — check-substrate-vocabulary, check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary</li>
+          <li>Guard scripts — check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary</li>
         </ul>
       </div>
 

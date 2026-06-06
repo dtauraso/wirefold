@@ -1,23 +1,21 @@
 # CLAUDE.md
 
-## Substrate model — read first
+## Model — read first
 
-Before changing anything in the **Go substrate** (`nodes/`, `nodes/Wiring/paced_wire.go`,
+Before changing anything in the **Go network** (`nodes/`, `nodes/Wiring/paced_wire.go`,
 `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump** (`tools/topology-vscode/src/webview/three/pump.ts`),
-read [MODEL.md](MODEL.md). It pins the substrate model and the banned
-vocabulary that signals drift. If your reasoning uses banned
-vocabulary, you are in the wrong frame — stop and re-derive from the
-model. Do not propose multi-step plans with options for substrate/wire
-work; state the next single concrete step and wait.
+read [MODEL.md](MODEL.md). It pins the model. Do not propose multi-step
+plans with options for network/wire work; state the next single concrete
+step and wait.
 
-## Core concepts and backpressure
+## Core concepts and send gating
 
-Both live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
-partition nodes, AND-gate tree, lateral inhibition, slot-in-node
-backpressure, and round-close stepping. The "Substrate model"
-pointer at the top of this file is the only entry point you need.
+These live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
+partition nodes, AND-gate tree, lateral inhibition, and ack-wire send
+gating (`consumeGated`/`fireAndForget`, node-owned per output port). The
+"Model" pointer at the top of this file is the only entry point you need.
 
-## Substrate primitive landing rule (narrowed)
+## Primitive landing rule (narrowed)
 
 **Node kinds:** adding a kind requires three things in the same commit:
 1. Add an entry to `NODE_DEFS` in `tools/topology-vscode/src/schema/node-defs.ts`
@@ -36,8 +34,9 @@ the store into `SingleEdgeTube` via `GraphEdges` in
 added to `WireProps` in `wire-defs.ts` and threaded through `SingleEdgeTube` in the
 same commit it is used; otherwise the editor path is silently incomplete.
 
-**Drift rule:** if TS code outside `pump.ts` starts accumulating slot-phase,
-backpressure, or firing-rule logic, that is drift — those belong in Go.
+**Drift rule:** if TS code outside `pump.ts` starts accumulating
+send-gating, traversal-timing, or firing-rule logic, that is drift —
+those belong in Go.
 
 ## Node kinds
 
@@ -74,7 +73,7 @@ docs, and the auto-memory dir, costing tokens and time.
 - **Cost markers:** only record a `($N.NN)` cost marker on a commit (or bundle of commits) when the work was sized at **≥$5 expected** beforehand. Sub-$5 work lands without a marker. Bundle small commits into ≥$5 chunks for marker purposes. Pre-v0 sub-$5 markers stay as historical record but are no longer the convention.
 - **Branch hygiene:** task-named branches (`task/<short-kebab-description>`) that merge to `main` quickly. Avoid long-lived feature branches like the v0 `visual-editor` pattern.
 - Channel names encode which two nodes are connected — preserve this convention.
-- **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the substrate that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise substrate was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
+- **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the Go network that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise execution model was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
 
 ## Planning docs are branch-local
 
