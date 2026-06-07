@@ -357,6 +357,8 @@
   .chk-btn{background:none;border:none;cursor:pointer;font:inherit;color:var(--muted);padding:1px 4px;border-radius:3px;line-height:1;}
   .chk-btn:hover{background:rgba(255,255,255,.08);}
   .chk-btn.checked{color:var(--good);}
+  .chk-btn.heading-chk{display:inline-block;vertical-align:middle;margin-right:4px;font-size:1em;}
+  .chk-btn.diagram-chk{display:block;margin-bottom:6px;font-size:12px;}
 
   @media (max-width: 600px) {
     .cards { flex-direction: column; }
@@ -391,7 +393,7 @@
   <!-- TAB 1: Overview -->
   <div class="panel active" id="panel-overview" role="tabpanel">
     <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
-    <h2>Go is the backend. TS is the frontend.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="overview:h2">☐</button>Go is the backend. TS is the frontend.</h2>
     <p>The system splits cleanly into a backend and a frontend. Go is the backend: it holds all geometric data and runs all the animation calculations — it owns what is happening and when. TS is the frontend: it renders the messages Go sends, and it sends geometric edits from the editor back to Go so the network updates.</p>
 
     <table class="spec-table">
@@ -433,10 +435,10 @@
 
   <!-- TAB 2: Division -->
   <div class="panel" id="panel-division" role="tabpanel">
-    <h2>Backend and frontend.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:h2">☐</button>Backend and frontend.</h2>
     <div class="cards">
       <div class="card">
-        <h3>Go — backend</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:card1">☐</button>Go — backend</h3>
         <ul>
           <li>Holds all geometry data — nodes, ports, edges (endpoints, curves), wires, pulses</li>
           <li>Holds all shading data — materials, colors, glass and environment parameters</li>
@@ -447,7 +449,7 @@
         </ul>
       </div>
       <div class="card">
-        <h3>TS — frontend</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:card2">☐</button>TS — frontend</h3>
         <ul>
           <li>Builds nothing on its own — takes geometry and shading data from Go and displays it</li>
           <li>Runs the GPU: issues draw calls, manages the WebGL context, compiled shaders, and baked textures</li>
@@ -460,10 +462,10 @@
 
   <!-- TAB: Goroutines -->
   <div class="panel" id="panel-goroutines" role="tabpanel">
-    <h2>What each goroutine does.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:h2">☐</button>What each goroutine does.</h2>
     <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes and the wires: each node — and each wire — is its own small loop on its own goroutine, coordinating only through channels. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
 
-    <div class="note" style="margin-bottom:1rem;"><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's sim-clock.</div>
+    <div class="note" style="margin-bottom:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note4">☐</button><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's sim-clock.</div>
 
     <table class="spec-table" id="goroutines-table">
       <caption>The goroutines</caption>
@@ -543,17 +545,18 @@
       </tbody>
     </table>
 
-    <div class="note" style="margin-top:1.25rem;"><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is the only wire goroutine kind. The ack edge is a PacedWire running in the reverse direction — it paces a backward bead carrying the consume-ack between decoupled nodes and emits its positions.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note1">☐</button><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is the only wire goroutine kind. The ack edge is a PacedWire running in the reverse direction — it paces a backward bead carrying the consume-ack between decoupled nodes and emits its positions.</div>
 
-    <div class="note" style="margin-top:0.75rem;">Where the clock change lands: in the target model each wire loop (PacedWire and the ack edge) wakes about every 16&nbsp;ms to advance its bead, emit the bead's position, and self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
-    <div class="note" style="margin-top:0.75rem;"><strong>Geometry is Go's; TS only draws it.</strong> Beyond the per-bead position stream, the static geometry — node and port world-positions, edge curve control points, arc lengths — is derived in Go at load (the main row above) and re-derived on each edit (node-move, addEdge), then emitted to TS over the same out-stream. TS plots all of it and computes none.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note2">☐</button>Where the clock change lands: in the target model each wire loop (PacedWire and the ack edge) wakes about every 16&nbsp;ms to advance its bead, emit the bead's position, and self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note3">☐</button><strong>Geometry is Go's; TS only draws it.</strong> Beyond the per-bead position stream, the static geometry — node and port world-positions, edge curve control points, arc lengths — is derived in Go at load (the main row above) and re-derived on each edit (node-move, addEdge), then emitted to TS over the same out-stream. TS plots all of it and computes none.</div>
   </div>
 
   <!-- TAB: Goroutine graph -->
   <div class="panel" id="panel-goroutinegraph" role="tabpanel">
-    <h2>The goroutines, wired.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:h2">☐</button>The goroutines, wired.</h2>
     <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel; an <strong>ack-edge goroutine</strong> carries the consume back. Nodes and wires are all goroutines &mdash; they touch only through channels.</p>
     <div class="diagram">
+<button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="goroutinegraph:svg1">☐</button>
 <svg width="720" height="280" viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="Goroutines execution unit: a source node loop sends a bead over a channel to a PacedWire goroutine, which delivers it to the destination node loop; the destination's consume is carried back by an ack-edge goroutine to the source.">
   <line x1="174" y1="77" x2="281" y2="77" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
   <text x="227" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">send</text>
@@ -587,14 +590,14 @@
   </defs>
 </svg>
     </div>
-    <div class="note"><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward); amber = the ack edge (backward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on the sim-clock); the ack bead runs the same path back.</div>
-    <div class="note" style="margin-top:0.75rem;"><strong>The ring tiles this unit.</strong> in08 + the bootstrap seed &rarr; readGate1 &rarr; chainInhibitor &rarr; (feedback) readGate1, with InhibitRightGate wired the same way &mdash; every edge is a PacedWire + ack-edge pair.</div>
-    <div class="note" style="margin-top:0.75rem;"><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
+    <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward); amber = the ack edge (backward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on the sim-clock); the ack bead runs the same path back.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>The ring tiles this unit.</strong> in08 + the bootstrap seed &rarr; readGate1 &rarr; chainInhibitor &rarr; (feedback) readGate1, with InhibitRightGate wired the same way &mdash; every edge is a PacedWire + ack-edge pair.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note3">☐</button><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
   </div>
 
   <!-- TAB: TS code -->
   <div class="panel" id="panel-tscode" role="tabpanel">
-    <h2>What the TS frontend runs.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:h2">☐</button>What the TS frontend runs.</h2>
     <p>TS has no goroutines, and with the data work in Go its job reduces to two things: render the stream Go emits (bead positions, geometry) and send CRUD + pause/resume back. Its work happens in a few execution contexts: the GPU render loop (driven by requestAnimationFrame inside the @react-three/fiber Canvas), an event-driven trace pump, the message receiver, the outbound IPC path, DOM input handlers, and the React/Zustand store. The render loop and input handlers must stay in TS &mdash; they need the WebGL context and the DOM event loop; the data work migrates to Go (see the TS &rarr; Go tab).</p>
 
     <table class="spec-table">
@@ -655,14 +658,15 @@
       </tbody>
     </table>
 
-    <div class="note" style="margin-top:1.25rem;">Stays in TS: the GPU render loop (draw calls, WebGL context), screen-space overlays, and DOM input capture &mdash; they need the browser. Moves to Go: bead positions, curve geometry, arc length, timing, and the authoritative store. The dividing line and the per-symbol migration list are in the <strong>TS &rarr; Go</strong> tab.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:note1">☐</button>Stays in TS: the GPU render loop (draw calls, WebGL context), screen-space overlays, and DOM input capture &mdash; they need the browser. Moves to Go: bead positions, curve geometry, arc length, timing, and the authoritative store. The dividing line and the per-symbol migration list are in the <strong>TS &rarr; Go</strong> tab.</div>
   </div>
 
 <!-- TAB: TS graph -->
 <div class="panel" id="panel-tsgraph" role="tabpanel">
-  <h2>The TS frontend, wired.</h2>
+  <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:h2">☐</button>The TS frontend, wired.</h2>
   <p>Two pipes to Go &mdash; nothing else crosses. <strong>In (trace pump):</strong> Go emits a position stream; the pump feeds the render loop, which draws the beads to the screen, no math. <strong>Out (writeStdin):</strong> what the user does &mdash; CRUD, pause/resume, raw pointer/wheel &mdash; all go straight to Go through the write. There's no separate input stage, and TS computes no geometry.</p>
   <div class="diagram">
+<button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="tsgraph:svg1">☐</button>
 <svg width="560" height="240" viewBox="0 0 560 240" xmlns="http://www.w3.org/2000/svg" aria-label="TS frontend: two pipes to Go. The trace pump feeds Go's position stream to the render loop, which draws beads to the screen. The user sees the render and acts; the outbound IPC (writeStdin) sends CRUD, pause/resume, and pointer/wheel to Go.">
   <line x1="120" y1="78" x2="210" y2="78" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aG)"/>
   <text x="165" y="70" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5ec4a0">position stream</text>
@@ -691,16 +695,17 @@
   </defs>
 </svg>
   </div>
-  <div class="note"><strong>Legend.</strong> Green = Go; blue = the trace pump (Go&rarr;TS, in); purple = the render path; amber = the write (TS&rarr;Go, out). Those two pipes are all that cross. The dashed <strong>user</strong> arrow is the human &mdash; they see what the render loop draws, and what they do is written to Go.</div>
-  <div class="note" style="margin-top:0.75rem;">TS only renders Go's stream and forwards the user's actions. The data &mdash; positions, geometry, timing, the authoritative store &mdash; lives in Go; TS keeps just a passive copy for the renderer.</div>
+  <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:note1">☐</button><strong>Legend.</strong> Green = Go; blue = the trace pump (Go&rarr;TS, in); purple = the render path; amber = the write (TS&rarr;Go, out). Those two pipes are all that cross. The dashed <strong>user</strong> arrow is the human &mdash; they see what the render loop draws, and what they do is written to Go.</div>
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:note2">☐</button>TS only renders Go's stream and forwards the user's actions. The data &mdash; positions, geometry, timing, the authoritative store &mdash; lives in Go; TS keeps just a passive copy for the renderer.</div>
 </div>
 
   <!-- TAB 3: The Bridge -->
   <div class="panel" id="panel-bridge" role="tabpanel">
-    <h2>Trace out, geometry in.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:h2">☐</button>Trace out, geometry in.</h2>
     <p>The whole boundary is two arrows. Nothing else crosses.</p>
 
     <div class="diagram">
+      <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="bridge:svg1">☐</button>
       <svg width="680" height="180" viewBox="0 0 680 180" xmlns="http://www.w3.org/2000/svg" aria-label="Bridge diagram: Go sends trace stream to TS; TS sends editor geometry and animation updates to Go">
         <!-- Go box -->
         <rect x="20" y="40" width="200" height="100" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
@@ -732,19 +737,20 @@
     </div>
 
     <div class="note">
-      This matches uniform pulse speed — speed is a shared constant; the only per-wire variation is arc length, which is geometry.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note1">☐</button>This matches uniform pulse speed — speed is a shared constant; the only per-wire variation is arc length, which is geometry.
     </div>
 
     <div class="note" style="margin-top:0.75rem;">
-      Go computes every bead's position from its clock and path geometry and emits it. TS sets each sprite to the position it receives — no interpolation, no math on the frontend.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note2">☐</button>Go computes every bead's position from its clock and path geometry and emits it. TS sets each sprite to the position it receives — no interpolation, no math on the frontend.
     </div>
 
     <div class="note" style="margin-top:0.75rem;">
-      TS sends editor geometry and animation updates to Go; Go updates its data accordingly. Go remains the single authoritative holder of all geometry and animation state.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note3">☐</button>TS sends editor geometry and animation updates to Go; Go updates its data accordingly. Go remains the single authoritative holder of all geometry and animation state.
     </div>
 
 <p style="margin-top:1.5rem;"><strong>The actual path.</strong> Conceptually two arrows; concretely the VS Code extension host relays them between Go's stdio and the webview.</p>
   <div class="diagram">
+    <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="bridge:svg2">☐</button>
     <svg width="720" height="220" viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" aria-label="The actual Go-TS relay: Go's stdout position stream is relayed by the VS Code extension host via postMessage to the TS webview; the webview's CRUD and pause/resume go back via postMessage and the extension's writeStdin to Go's stdin.">
       <text x="360" y="42" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">position stream (per-bead x,y,z)</text>
       <text x="360" y="57" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d8a70">stdout &rarr; postMessage</text>
@@ -769,17 +775,18 @@
       </defs>
     </svg>
   </div>
-  <div class="note">Fire-and-forget both ways &mdash; no request/response. Go &rarr; TS is the position stream over stdout, relayed by postMessage; TS &rarr; Go is CRUD + pause/resume via postMessage, written to Go's stdin. The extension host only relays &mdash; it holds no state.</div>
+  <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note4">☐</button>Fire-and-forget both ways &mdash; no request/response. Go &rarr; TS is the position stream over stdout, relayed by postMessage; TS &rarr; Go is CRUD + pause/resume via postMessage, written to Go's stdin. The extension host only relays &mdash; it holds no state.</div>
   </div>
 
   <!-- TAB 4: Clock Change -->
   <div class="panel" id="panel-clock" role="tabpanel">
-    <h2>Go calculates the animation; TS only draws it.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:h2-go-calculates">☐</button>Go calculates the animation; TS only draws it.</h2>
     <p>Go does all animation calculation — timing, progress, durations — and emits ready-to-render messages. TS draws them. The frontend never calculates animation; it renders frames Go describes. Today's inversion (TS pacing Go via NotifyDelivered) is what this design removes.</p>
 
     <div class="flow-stack">
       <div>
         <div class="flow-label">Before</div>
+        <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="panel-clock:svg1-before">☐</button>
         <svg width="640" height="70" viewBox="0 0 640 70" xmlns="http://www.w3.org/2000/svg" aria-label="Before: TS animation completes drives NotifyDelivered which drives Go delivers to slot">
           <!-- Box 1 -->
           <rect x="0" y="14" width="178" height="38" rx="6" fill="#1e0e0e" stroke="#c07ef8" stroke-width="1.2"/>
@@ -812,6 +819,7 @@
 
       <div>
         <div class="flow-label">After</div>
+        <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="panel-clock:svg2-after">☐</button>
         <svg width="640" height="70" viewBox="0 0 640 70" xmlns="http://www.w3.org/2000/svg" aria-label="After: Go elapses inFlightTime drives Go delivers to slot drives trace out drives TS animates to fit duration">
           <!-- Box 1 -->
           <rect x="0" y="14" width="170" height="38" rx="6" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.2"/>
@@ -852,7 +860,7 @@
       </div>
     </div>
 
-    <div class="subheading">Go computes and emits each position directly</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-go-computes-position">☐</button>Go computes and emits each position directly</div>
     <p>Each wire's loop computes its bead's current position from the clock and the bead's path geometry (plain bezier math, no library) and emits a position message for it. Computing the next position IS the loop's work — there is no separate reader polling state at a fixed rate. When the bead reaches the end of its path (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">elapsed</span> reaches <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">inFlightTime</span>), the wire puts the bead on the channel to the destination node.</p>
 
     <div class="cards" style="margin-top:0.5rem;">
@@ -864,7 +872,7 @@
       </div>
     </div>
 
-    <div class="subheading">Sleep paces the loop</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-sleep-paces-loop">☐</button>Sleep paces the loop</div>
     <p>The node loop and the wire loop sleep between iterations. The sleep sets how often a position is emitted; the clock still sets where the bead is. Start with a 16 ms sleep (about 60 emits per second), matching a typical display refresh. Each wake reads the clock, computes position = eval(path, elapsed / inFlightTime), emits, then sleeps again.</p>
 
     <div class="cards" style="margin-top:0.5rem;">
@@ -877,21 +885,21 @@
       </div>
     </div>
 
-    <div class="subheading">Human speed belongs to Go</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-human-speed">☐</button>Human speed belongs to Go</div>
     <p>Go runs the animation at a human-watchable pace — the bead moves at pulseSpeed and Go emits positions at the ~16ms report rate. TS sends CRUD edits only; the resulting update also plays at Go's human speed. TS never sets, drives, or accelerates timing — an edit's visible effect plays out on Go's clock, not instantly because TS sent it. Discrete cancellations (a delete) are immediate, but continuing motion stays human-paced: move a node mid-flight and the bead keeps traveling at human speed along the re-derived curve.</p>
 
-    <div class="subheading">Keeping them locked</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-keeping-locked">☐</button>Keeping them locked</div>
     <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
   </div>
 
   <!-- TAB 6: Play / Pause -->
   <div class="panel" id="panel-playpause" role="tabpanel">
-    <h2>Play / Pause: the button is in TS, the clock is in Go.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:h2">☐</button>Play / Pause: the button is in TS, the clock is in Go.</h2>
     <p>Pause and resume act on Go's single clock. TS does not hold time — it holds a button. TS sends a pause or resume message to Go; Go's clock halts or runs. The frontend never owns any time.</p>
 
     <div class="cards">
       <div class="card">
-        <h3>Pause</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:card1">☐</button>Pause</h3>
         <ul>
           <li>TS sends "pause"</li>
           <li>Go freezes its clock</li>
@@ -901,7 +909,7 @@
         </ul>
       </div>
       <div class="card">
-        <h3>Resume</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:card2">☐</button>Resume</h3>
         <ul>
           <li>TS sends "resume"</li>
           <li>Go's clock advances from where it left off</li>
@@ -910,22 +918,22 @@
       </div>
     </div>
 
-    <div class="subheading">Freeze means stop accumulating</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub1">☐</button>Freeze means stop accumulating</div>
     <p>"Freeze the clock" must mean stop accumulating elapsed time — not diff wall-clock on resume. Pause records how far each in-flight bead had elapsed; resume continues from there. A bead that was 40% across is still 40% across on resume. (If you just diffed <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">time.Now()</span> on resume, beads would jump forward by the pause duration and deliver instantly.) Implement as a monotonic clock with a paused accumulator so elapsed-while-paused is zero.</p>
 
-    <div class="subheading">Why the gate lives in Go</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub2">☐</button>Why the gate lives in Go</div>
     <p>Play/pause is substance, not a TS animation control — it halts the system's clock. If TS paused by stopping its own render loop while Go kept running, Go's clock would race ahead and the frontend would be out of sync on resume. So the button is in TS; the clock it controls is in Go. This fits the bridge: messages out (Go's timeline, including "paused"), control and geometry edits in.</p>
   </div>
 
   <!-- TAB 5: Contract -->
   <div class="panel" id="panel-contract" role="tabpanel">
-    <h2>The contract in one line.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:h2">☐</button>The contract in one line.</h2>
 
     <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
 TS (frontend) runs the GPU to display Go's data and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
 The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
 
-    <div class="note" style="margin-bottom:1.25rem;">Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
+    <div class="note" style="margin-bottom:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:note1">☐</button>Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
 
     <div class="first-step-label">First concrete step</div>
     <div class="first-step">
@@ -935,12 +943,12 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
   <!-- TAB 7: TS → Go -->
   <div class="panel" id="panel-tsgo" role="tabpanel">
-    <h2>How much of TS converts to Go?</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:h2">☐</button>How much of TS converts to Go?</h2>
     <p>The dividing line is now <strong>data vs. the GPU</strong>. All geometry, animation, and shading are data — Go owns and emits them. TS only runs the GPU (issues draw calls, manages GPU-resident resources) and captures human input. Everything TS currently computes that is data — bezier geometry, arc length, bead positions, traversal timing, material parameters, color, glass settings, environment parameters — moves to Go as data Go produces and streams out. What cannot leave TS is whatever physically requires the browser's WebGL context or the DOM event loop.</p>
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--go-hue);">Geometry data → Go</h3>
+        <h3 style="color:var(--go-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card1">☐</button>Geometry data → Go</h3>
         <ul>
           <li>Node sphere geometry — center position, radius, and the 3-D coordinates of every port position on the sphere surface; border ring geometry anchored to each node (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">nodeWorldPos</code>, <code style="font-family:var(--mono);font-size:11px;">portDir</code>, <code style="font-family:var(--mono);font-size:11px;">portWorldPos</code>)</li>
           <li>Edge data — endpoints (source node/port → target node/port) and curve geometry (quadratic bezier control points: midpoint, perpendicular lift, bulge-factor offset); the full tube path TS uses to build <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code> is held and computed by Go (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">buildPortCurve</code>, <code style="font-family:var(--mono);font-size:11px;">buildEdgeCurve</code>)</li>
@@ -954,7 +962,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--go-hue);">Animation data → Go</h3>
+        <h3 style="color:var(--go-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card2">☐</button>Animation data → Go</h3>
         <ul>
           <li>Bead position along the path — <code style="font-family:var(--mono);font-size:11px;">curve.getPointAt(t)</code> currently evaluated every frame in TS; Go emits the 3-D position directly and TS plots it (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">PulseBead useFrame</code>)</li>
           <li>Traversal progress fraction — <code style="font-family:var(--mono);font-size:11px;">t = (now − startTime) / simLatencyMs</code>, clamped to [0, 1]; Go owns the clock and <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> so it computes and emits t (pulse-state.ts, scene-content.tsx)</li>
@@ -966,7 +974,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--go-hue);">Shading data → Go</h3>
+        <h3 style="color:var(--go-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card3">☐</button>Shading data → Go</h3>
         <ul>
           <li>Material / color / fill / stroke — <code style="font-family:var(--mono);font-size:11px;">node.data.fill</code> and <code style="font-family:var(--mono);font-size:11px;">node.data.stroke</code> keyed off <code style="font-family:var(--mono);font-size:11px;">NODE_DEFS</code>; the definition of what color a node is is data Go supplies</li>
           <li>Glass / material parameters — roughness, metalness, transmission, ior, thickness, clearcoat, reflectivity, and any per-node overrides; Go holds the parameter set, TS feeds it into <code style="font-family:var(--mono);font-size:11px;">MeshPhysicalMaterial</code></li>
@@ -979,7 +987,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
-        <h3 style="color:var(--ts-hue);">Stays in TS (GPU + input only)</h3>
+        <h3 style="color:var(--ts-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card4">☐</button>Stays in TS (GPU + input only)</h3>
         <ul>
           <li>Issuing the GPU draw calls — the actual WebGL / Three.js render: constructing sphere, torus, and tube geometry objects; calling <code style="font-family:var(--mono);font-size:11px;">renderer.render()</code>; managing the render loop via @react-three/fiber Canvas (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">GraphNode</code>, <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code>, <code style="font-family:var(--mono);font-size:11px;">PulseBead</code>)</li>
           <li>GPU-resident resources that must live in the browser: the WebGL context itself; compiled shader programs; baked textures and environment maps. Go supplies the parameters (material values, environment parameters); TS bakes and binds them on the GPU (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">ProceduralEnvProvider</code>)</li>
@@ -992,19 +1000,19 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
     </div>
 
-    <div class="note" style="margin-top:1.25rem;">The dividing line is data vs. the GPU. Geometry (control points, arc length, wire path, node and port positions), animation (bead position along path, traversal progress, timing), and shading (materials, colors, glass and environment parameters) are all data — they belong in Go. Running the GPU and capturing human input stay in TS because they require the browser's WebGL context and DOM event loop. Input that produces geometry — a node drag — is captured in TS and sent to Go as a geometry edit, so Go remains the single source of authoritative data.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:note1">☐</button>The dividing line is data vs. the GPU. Geometry (control points, arc length, wire path, node and port positions), animation (bead position along path, traversal progress, timing), and shading (materials, colors, glass and environment parameters) are all data — they belong in Go. Running the GPU and capturing human input stay in TS because they require the browser's WebGL context and DOM event loop. Input that produces geometry — a node drag — is captured in TS and sent to Go as a geometry edit, so Go remains the single source of authoritative data.</div>
 
-    <div class="note" style="margin-top:0.75rem;border-left-color:var(--warn);">Moving geometry into Go does <strong>not</strong> mean serializing it into <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.json</span>. The file holds only two things, the same as today: the network spec (nodes, ports, edges, send rules) and the authored layout (the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">view</span> block — node x/y positions, camera pose, fade/label UI state). Everything Go now owns is <em>derived</em> from those inputs — port world-positions from node position + side, curve control points from endpoints + route, arc length from the curve, bead positions streamed at runtime. Go recomputes derived geometry at load (it already computes arc length there); persisting it would create a second source of truth that drifts. The file does not grow — a node drag writes back one changed x/y.</div>
+    <div class="note" style="margin-top:0.75rem;border-left-color:var(--warn);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:note2">☐</button>Moving geometry into Go does <strong>not</strong> mean serializing it into <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.json</span>. The file holds only two things, the same as today: the network spec (nodes, ports, edges, send rules) and the authored layout (the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">view</span> block — node x/y positions, camera pose, fade/label UI state). Everything Go now owns is <em>derived</em> from those inputs — port world-positions from node position + side, curve control points from endpoints + route, arc length from the curve, bead positions streamed at runtime. Go recomputes derived geometry at load (it already computes arc length there); persisting it would create a second source of truth that drifts. The file does not grow — a node drag writes back one changed x/y.</div>
   </div>
 
   <!-- TAB 8: Doc Updates -->
   <div class="panel" id="panel-docs" role="tabpanel">
-    <h2>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:h2">☐</button>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
     <p>This spec changes the substrate model. It deletes NotifyDelivered as the delivery trigger, moves the clock and all position computation into Go, and makes each wire its own goroutine. The pinned docs must change in the same commit as the code, or the model and the implementation will disagree.</p>
 
     <div class="cards">
       <div class="card">
-        <h3>MODEL.md</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card1">☐</button>MODEL.md</h3>
         <ul>
           <li>Driver / Firing rule: delivery is no longer triggered by TS animation completion. Go's clock elapses inFlightTime and Go delivers to the slot itself.</li>
           <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
@@ -1014,7 +1022,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         </ul>
       </div>
       <div class="card">
-        <h3>CLAUDE.md</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card2">☐</button>CLAUDE.md</h3>
         <ul>
           <li>Substrate model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
           <li>Bridge surface note: the Go to TS channel carries a per-bead position stream; TS to Go carries geometry edits and pause/resume.</li>
@@ -1023,18 +1031,18 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
     </div>
 
-    <div class="note" style="margin-top:1.25rem;">Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
   </div>
 
   <!-- TAB 9: Plan -->
   <div class="panel" id="panel-plan" role="tabpanel">
     <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
-    <h2>Coding plan: clock first, then migrate data.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:h2">☐</button>Coding plan: clock first, then migrate data.</h2>
     <p>The change is one model shift (Go owns the clock) plus a staged migration of data (positions, geometry, shading) from TS to Go. Each phase must leave the build green and the editor working. Order matters: do the clock first because it is the only step that unblocks the rest — it lets Go run and deliver without TS, and removes the timing dependency. Everything after it is incremental data migration that can land one piece at a time.</p>
 
     <div class="cards">
       <div class="card">
-        <h3>The five phases at a glance</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:card1">☐</button>The five phases at a glance</h3>
         <ul>
           <li><strong>1. Clock into Go</strong> — each wire goroutine elapses inFlightTime on Go's clock and delivers by putting the bead on the destination channel; wire loops sleep ~16ms. Deletes the NotifyDelivered-from-TS delivery trigger. (The unblock.)</li>
           <li><strong>2. Position stream</strong> — Go computes each bead position and emits it; TS plots; delete TS position/timing math.</li>
@@ -1045,16 +1053,16 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
     </div>
 
-    <div class="note" style="margin-top:1rem;">Ordering principle — each phase ends green (go build/test, tsc, npm run build, all guard scripts). The clock phase is the keystone; the data phases are independent migrations after it.</div>
+    <div class="note" style="margin-top:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:note1">☐</button>Ordering principle — each phase ends green (go build/test, tsc, npm run build, all guard scripts). The clock phase is the keystone; the data phases are independent migrations after it.</div>
   </div>
 
   <!-- TAB 10: Phases -->
   <div class="panel" id="panel-phases" role="tabpanel">
-    <h2>The five phases in detail.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:h2">☐</button>The five phases in detail.</h2>
 
     <div class="cards" style="flex-direction:column;">
       <div class="card">
-        <h3>Phase 1 · Clock into Go (the unblock)</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card1">☐</button>Phase 1 · Clock into Go (the unblock)</h3>
         <ul>
           <li><strong>Scope (minimal slice):</strong>
             <ul style="margin-top:0.4rem;margin-bottom:0.4rem;">
@@ -1073,7 +1081,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>Phase 2 · Position stream</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card2">☐</button>Phase 2 · Position stream</h3>
         <ul>
           <li><strong>Go:</strong> each loop wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (a new trace kind); deliver at t ≥ 1.</li>
           <li><strong>TS:</strong> pump.ts handles the new position message and sets the bead sprite to the received position. DELETE the TS position/timing math: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), the duplicated rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and store.ts moveNode's local re-derive of arc length + simLatencyMs. TS plots only.</li>
@@ -1083,7 +1091,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>Phase 3 · Geometry data into Go</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card3">☐</button>Phase 3 · Geometry data into Go</h3>
         <ul>
           <li><strong>Go:</strong> hold node positions, port positions, and edge data (endpoints source→target, curve control points) as authoritative state; compute curves in Go.</li>
           <li><strong>TS:</strong> send editor geometry edits to Go (node move, edge create/delete — partly exists via moveNode/deleteEdge IPC; extend to full geometry CRUD); render from the geometry Go streams back, computing none of it locally.</li>
@@ -1102,7 +1110,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>Phase 4 · Shading data into Go</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card4">☐</button>Phase 4 · Shading data into Go</h3>
         <ul>
           <li><strong>Go:</strong> hold material/color/fill/stroke (already partly in NODE_DEFS data), glass/material parameters, and environment/lighting parameters as data.</li>
           <li><strong>TS:</strong> receive shading parameters and apply them to GPU materials; bake the environment map on the GPU from Go-supplied parameters (the bake itself is a GPU op and stays in TS).</li>
@@ -1111,7 +1119,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>Phase 5 · Bridge → CRUD + docs</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card5">☐</button>Phase 5 · Bridge → CRUD + docs</h3>
         <ul>
           <li>Reshape the bridge into plain CRUD: data stream out (geometry + shading + position); edits in (create/update/delete geometry + animation updates); pause/resume as a control signal.</li>
           <li>Delete the notifyDelivered message and its Go stdin handler entirely.</li>
@@ -1126,14 +1134,14 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
   <!-- TAB 11: Verify -->
   <div class="panel" id="panel-verify" role="tabpanel">
-    <h2>Verification and risks.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:h2">☐</button>Verification and risks.</h2>
 
-    <div class="subheading">How to test</div>
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:sub1">☐</button>How to test</div>
     <p>There are two test surfaces — the live editor (works at every phase) and, new from Phase 1 on, a headless Go test that runs the network with no editor attached. The single clearest signal the model works: the cascade runs to completion headlessly (today it deadlocks after the first hop), and the live editor shows the same pulse animation now driven by Go's stream.</p>
 
     <div class="cards" style="flex-direction:column;margin-bottom:1.5rem;">
       <div class="card">
-        <h3>Can it be tested in the editor?</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card1">☐</button>Can it be tested in the editor?</h3>
         <ul>
           <li>Yes — at every phase. Load topology.json (click it → custom editor opens), Run, and watch pulses animate. The editor stays the integration test surface throughout.</li>
           <li>New capability from Phase 1: a headless Go test. Because Go owns the clock and self-delivers, the cascade can run inside <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> with no TS. Today that deadlocks after the first hop because delivery waits on the visual layer — so "headless run completes" is itself the proof Phase 1 worked.</li>
@@ -1142,7 +1150,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>What shows it worked — per phase</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card2">☐</button>What shows it worked — per phase</h3>
         <ul>
           <li><strong>Phase 1 (clock):</strong> <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> / a Go test completes the full cascade with no editor (previously impossible). go.jsonl shows deliveries firing on Go's clock timing (~inFlightTime apart), not on a TS message. Stronger check: freeze or detach the renderer — Go keeps delivering on schedule.</li>
           <li><strong>Phase 2 (position stream):</strong> beads animate from Go's emitted positions with visual parity to before. probe shows position messages arriving; TS computes no positions (the deleted PulseBead/rfArcLength/moveNode math is gone). A Go test can assert positions are emitted ~16ms apart with monotonically increasing t and arrival at t=1.</li>
@@ -1153,7 +1161,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>Reference / regression</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card3">☐</button>Reference / regression</h3>
         <ul>
           <li>Capture a visual reference run before Phase 2 (a short recording or screenshots of a cascade) and compare after each phase for parity — motion should look identical; only the source of the motion changed.</li>
           <li>Add the headless cascade Go test as a permanent regression: it locks in that the Go network runs without the editor and never silently re-couples to it.</li>
@@ -1161,11 +1169,11 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
     </div>
 
-    <div class="note" style="margin-bottom:1.5rem;">The litmus test for the whole effort: pull the editor away and Go still runs the network; reattach the editor and it draws exactly what Go is doing. If both hold, the clock and data truly moved to Go.</div>
+    <div class="note" style="margin-bottom:1.5rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:note1">☐</button>The litmus test for the whole effort: pull the editor away and Go still runs the network; reattach the editor and it draws exactly what Go is doing. If both hold, the clock and data truly moved to Go.</div>
 
     <div class="cards" style="flex-direction:column;">
       <div class="card">
-        <h3>Green gate every phase</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card4">☐</button>Green gate every phase</h3>
         <ul>
           <li><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go build ./...</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test ./...</span></li>
           <li>Webview <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npx tsc --noEmit</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npm run build</span></li>
@@ -1174,7 +1182,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>New milestones</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card5">☐</button>New milestones</h3>
         <ul>
           <li><strong>Phase 1</strong> — headless cascade run works (a Go test runs the network with no TS; previously impossible).</li>
           <li><strong>Pause/resume</strong> — verify the paused accumulator preserves each bead's progress across resume (a bead 40% across stays 40%, no teleport).</li>
@@ -1183,7 +1191,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
 
       <div class="card">
-        <h3>Risks to watch</h3>
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card6">☐</button>Risks to watch</h3>
         <ul>
           <li><strong>Bandwidth/backpressure:</strong> the position stream is N beads × ~60/s over stdout; if the pipe fills, Go stalls on the write and TS re-paces Go. Watch for it; emit-on-change deduplication is the escape if needed (not a separate tick).</li>
           <li><strong>Two arc-length implementations</strong> must agree until Phase 2 deletes the TS copy — until then a drift risk.</li>
@@ -1201,30 +1209,30 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
   <!-- TAB: Inconsistencies -->
   <div class="panel" id="panel-issues" role="tabpanel">
-    <h2>Inconsistencies to resolve.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:h2">☐</button>Inconsistencies to resolve.</h2>
     <p>A cross-tab audit. The wire-as-goroutine redesign updated some tabs (Goroutines, TS code, Doc Updates, the three diagrams) but not others, so the contradictions cluster at those seams. Tags: <span style="color:var(--good);font-weight:700;">FIX READY</span> = unambiguous; <span style="color:var(--warn);font-weight:700;">DECIDE</span> = needs a model call; <span style="color:var(--info);font-weight:700;">SEAM</span> = known migration-tab lag; <span style="color:var(--muted);font-weight:700;">MINOR</span> = under-specified, not a contradiction; <span style="color:var(--good);font-weight:700;">RESOLVED</span> = decided (reconcile edits may follow).</p>
     <div class="note" style="border-left:3px solid var(--good);">
-      <span style="color:var(--good);font-weight:700;">1 &middot; RESOLVED &rarr; ack edge is a goroutine</span> &mdash; <strong>The ack-edge note contradicts its own row.</strong> The Goroutines-tab note under the table still says "the ack edge remains data, not a goroutine," but the ack-edge row above (and the Doc-Updates MODEL.md bullet) now describe it as a goroutine that paces a backward bead and emits positions. Stale from flipping the ack edge to a goroutine after that note was written. <em>Fix:</em> update the note to call the ack edge a goroutine &mdash; the backward-paced mirror of PacedWire. <em>Resolution:</em> the line-509 note was updated to call the ack edge a goroutine (the backward-paced mirror of PacedWire); contradiction gone.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note1">☐</button><span style="color:var(--good);font-weight:700;">1 &middot; RESOLVED &rarr; ack edge is a goroutine</span> &mdash; <strong>The ack-edge note contradicts its own row.</strong> The Goroutines-tab note under the table still says "the ack edge remains data, not a goroutine," but the ack-edge row above (and the Doc-Updates MODEL.md bullet) now describe it as a goroutine that paces a backward bead and emits positions. Stale from flipping the ack edge to a goroutine after that note was written. <em>Fix:</em> update the note to call the ack edge a goroutine &mdash; the backward-paced mirror of PacedWire. <em>Resolution:</em> the line-509 note was updated to call the ack edge a goroutine (the backward-paced mirror of PacedWire); contradiction gone.
     </div>
     <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
-      <span style="color:var(--good);font-weight:700;">2 &middot; RESOLVED &rarr; all input to Go</span> &mdash; <strong>Pointer/wheel and camera both go to Go; no carve-out.</strong> Decided: <em>all</em> input — editing gestures, drag, wiring, and camera orbit/pan/zoom — is forwarded to Go as signals. Go owns the scene <em>and</em> the camera <em>and</em> the editor affordances (the node menu's data, the drag-preview icon) and streams back what TS draws. Why no exception: it is all one local machine, so a round-trip is a few ms (postMessage + a pipe write + a trivial Go update), well inside a 16 ms frame &mdash; no perceptible lag, so no local-apply and no special-casing the camera. The earlier "live-gesture vs committed" and "camera is special" splits both collapse. So the TS-graph "pointer/wheel" label is correct. <em>Reconciled:</em> the four spots &mdash; Input-handlers row, Outbound-IPC row, Bridge relay diagram, and TS &rarr; Go tab &mdash; now say input is forwarded to Go; Go owns the camera.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note2">☐</button><span style="color:var(--good);font-weight:700;">2 &middot; RESOLVED &rarr; all input to Go</span> &mdash; <strong>Pointer/wheel and camera both go to Go; no carve-out.</strong> Decided: <em>all</em> input — editing gestures, drag, wiring, and camera orbit/pan/zoom — is forwarded to Go as signals. Go owns the scene <em>and</em> the camera <em>and</em> the editor affordances (the node menu's data, the drag-preview icon) and streams back what TS draws. Why no exception: it is all one local machine, so a round-trip is a few ms (postMessage + a pipe write + a trivial Go update), well inside a 16 ms frame &mdash; no perceptible lag, so no local-apply and no special-casing the camera. The earlier "live-gesture vs committed" and "camera is special" splits both collapse. So the TS-graph "pointer/wheel" label is correct. <em>Reconciled:</em> the four spots &mdash; Input-handlers row, Outbound-IPC row, Bridge relay diagram, and TS &rarr; Go tab &mdash; now say input is forwarded to Go; Go owns the camera.
     </div>
     <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
-      <span style="color:var(--good);font-weight:700;">3 &middot; RESOLVED &rarr; migration tabs point at the wire-goroutine target</span> &mdash; <strong>The migration tabs still credit the node loop / NotifyDelivered.</strong> Phases, Plan, and Clock Change attribute delivery and position-emission to the <em>node</em> loop and say Go "calls the existing NotifyDelivered slot-fill path internally," while the updated Goroutines / Doc Updates / diagrams say the <em>wire</em> loop times its own delivery and "puts the bead on the channel" (no NotifyDelivered, no slot on the wire). e.g. Clock Change: "each node's loop computes the bead's current position." <em>Reconcile:</em> point these tabs at the wire-goroutine target, or mark the NotifyDelivered reuse explicitly as a Phase-1 stepping-stone, not the end state. <em>Resolution:</em> the migration tabs (Phases, Plan, Clock Change) were rewritten to the wire-goroutine target &mdash; the PacedWire loop times its own traversal and delivers by putting the bead on the destination channel, and position-emission is the wire loop's work. The NotifyDelivered reuse was dropped rather than kept as a stepping-stone (deep B: the wire delivers via channel from the start). No phase changed count or order, because none existed solely to reuse-then-delete NotifyDelivered &mdash; the change is a mechanism swap inside Phase 1 (wire-channel delivery, no internal slot-fill reuse); Phase 5 still deletes the TS&rarr;Go <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">notifyDelivered</span> message and its now-dead stdin handler.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note3">☐</button><span style="color:var(--good);font-weight:700;">3 &middot; RESOLVED &rarr; migration tabs point at the wire-goroutine target</span> &mdash; <strong>The migration tabs still credit the node loop / NotifyDelivered.</strong> Phases, Plan, and Clock Change attribute delivery and position-emission to the <em>node</em> loop and say Go "calls the existing NotifyDelivered slot-fill path internally," while the updated Goroutines / Doc Updates / diagrams say the <em>wire</em> loop times its own delivery and "puts the bead on the channel" (no NotifyDelivered, no slot on the wire). e.g. Clock Change: "each node's loop computes the bead's current position." <em>Reconcile:</em> point these tabs at the wire-goroutine target, or mark the NotifyDelivered reuse explicitly as a Phase-1 stepping-stone, not the end state. <em>Resolution:</em> the migration tabs (Phases, Plan, Clock Change) were rewritten to the wire-goroutine target &mdash; the PacedWire loop times its own traversal and delivers by putting the bead on the destination channel, and position-emission is the wire loop's work. The NotifyDelivered reuse was dropped rather than kept as a stepping-stone (deep B: the wire delivers via channel from the start). No phase changed count or order, because none existed solely to reuse-then-delete NotifyDelivered &mdash; the change is a mechanism swap inside Phase 1 (wire-channel delivery, no internal slot-fill reuse); Phase 5 still deletes the TS&rarr;Go <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">notifyDelivered</span> message and its now-dead stdin handler.
     </div>
     <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
-      <span style="color:var(--good);font-weight:700;">4 &middot; RESOLVED &rarr; slot dissolved into node-local held state</span> &mdash; <strong>Node "slot" vs wire "channel."</strong> Nodes still "consume / clear their slots," but the wire now "puts the bead on the channel connecting it to the destination node," and the channel&rarr;slot gap was never spelled out. Was MINOR/deferred. <em>Resolution:</em> the session redesign removed the slot &mdash; MODEL.md now has the node receive beads off its input channel(s) into <strong>node-local held state</strong> and fire on its rule, with no slot at all. So the channel&rarr;slot gap this finding described no longer exists: there is nothing between the inbound channel and a "filled slot" because there is no slot &mdash; the node holds what it reads. The remaining work is purely vocabulary cleanup in the tabs that still say "slot," tracked as the OPEN findings below.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note4">☐</button><span style="color:var(--good);font-weight:700;">4 &middot; RESOLVED &rarr; slot dissolved into node-local held state</span> &mdash; <strong>Node "slot" vs wire "channel."</strong> Nodes still "consume / clear their slots," but the wire now "puts the bead on the channel connecting it to the destination node," and the channel&rarr;slot gap was never spelled out. Was MINOR/deferred. <em>Resolution:</em> the session redesign removed the slot &mdash; MODEL.md now has the node receive beads off its input channel(s) into <strong>node-local held state</strong> and fire on its rule, with no slot at all. So the channel&rarr;slot gap this finding described no longer exists: there is nothing between the inbound channel and a "filled slot" because there is no slot &mdash; the node holds what it reads. The remaining work is purely vocabulary cleanup in the tabs that still say "slot," tracked as the OPEN findings below.
     </div>
     <div class="note" style="border-left:3px solid var(--info);margin-top:0.75rem;">
-      <span style="color:var(--info);font-weight:700;">5 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Goroutines tab node loops still hold a "slot."</strong> The redesign retired the slot, but the node-loop rows in the Goroutines tab still describe firing as clearing a slot. <em>Spec says:</em> ReadGate "empty its slot" / "consume both inputs &mdash; clear their slots" (L474); ChainInhibitor "consume it &mdash; clear its slot" (L479); InhibitRightGate "Consume both inputs &mdash; clear their slots" (L484). <em>MODEL.md says:</em> there is no slot &mdash; a node receives beads off its input channel(s) into <strong>node-local held state</strong> and fires on its rule; firing consumes <em>held state</em>, not a slot. <em>Fix:</em> reword these rows to "clear the held input / drop the held bead" (held-state vocabulary), keeping the ack-edge gating as-is &mdash; only "slot" is wrong. <em>Refers to:</em> L474, L479, L484.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note5">☐</button><span style="color:var(--info);font-weight:700;">5 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Goroutines tab node loops still hold a "slot."</strong> The redesign retired the slot, but the node-loop rows in the Goroutines tab still describe firing as clearing a slot. <em>Spec says:</em> ReadGate "empty its slot" / "consume both inputs &mdash; clear their slots" (L474); ChainInhibitor "consume it &mdash; clear its slot" (L479); InhibitRightGate "Consume both inputs &mdash; clear their slots" (L484). <em>MODEL.md says:</em> there is no slot &mdash; a node receives beads off its input channel(s) into <strong>node-local held state</strong> and fires on its rule; firing consumes <em>held state</em>, not a slot. <em>Fix:</em> reword these rows to "clear the held input / drop the held bead" (held-state vocabulary), keeping the ack-edge gating as-is &mdash; only "slot" is wrong. <em>Refers to:</em> L474, L479, L484.
     </div>
     <div class="note" style="border-left:3px solid var(--info);margin-top:0.75rem;">
-      <span style="color:var(--info);font-weight:700;">6 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Concept "Lives in" table credits "slots."</strong> <em>Spec says:</em> the Concept tab's Concurrent row reads "Self-scheduling nodes, local rules over slots and wires. No global clock or round." (L396). <em>MODEL.md says:</em> nodes coordinate through <strong>held state</strong> and wires/channels; there is no slot. <em>Fix:</em> "local rules over held state and wires." <em>Refers to:</em> L396.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note6">☐</button><span style="color:var(--info);font-weight:700;">6 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Concept "Lives in" table credits "slots."</strong> <em>Spec says:</em> the Concept tab's Concurrent row reads "Self-scheduling nodes, local rules over slots and wires. No global clock or round." (L396). <em>MODEL.md says:</em> nodes coordinate through <strong>held state</strong> and wires/channels; there is no slot. <em>Fix:</em> "local rules over held state and wires." <em>Refers to:</em> L396.
     </div>
     <div class="note" style="border-left:3px solid var(--info);margin-top:0.75rem;">
-      <span style="color:var(--info);font-weight:700;">7 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Clock-Change "After" diagram still delivers "to slot."</strong> The Before/After boxes describe the <em>target</em> in their After half, and the After box (plus its aria-label) still says delivery lands in a slot. <em>Spec says:</em> "Go delivers to slot" in the After SVG box (L775) and the After aria-label (L764). <em>MODEL.md says:</em> the wire puts the bead on the <strong>channel</strong> to the destination node, which receives it into node-local held state &mdash; there is no slot to deliver into. (The matching prose at L805 already says "puts the bead on the channel to the destination node"; only the diagram lags.) <em>Fix:</em> change the After box + aria-label to "Go delivers on channel" (the Before box at L749 stays "to slot" &mdash; it depicts the old model). <em>Refers to:</em> L764, L775.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note7">☐</button><span style="color:var(--info);font-weight:700;">7 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Clock-Change "After" diagram still delivers "to slot."</strong> The Before/After boxes describe the <em>target</em> in their After half, and the After box (plus its aria-label) still says delivery lands in a slot. <em>Spec says:</em> "Go delivers to slot" in the After SVG box (L775) and the After aria-label (L764). <em>MODEL.md says:</em> the wire puts the bead on the <strong>channel</strong> to the destination node, which receives it into node-local held state &mdash; there is no slot to deliver into. (The matching prose at L805 already says "puts the bead on the channel to the destination node"; only the diagram lags.) <em>Fix:</em> change the After box + aria-label to "Go delivers on channel" (the Before box at L749 stays "to slot" &mdash; it depicts the old model). <em>Refers to:</em> L764, L775.
     </div>
-    <div class="note" style="margin-top:1.25rem;"><strong>Mostly consistent, three open items.</strong> Verified consistent across all tabs: clock ownership (Go), position computation (Go), wire pacing (sim-clock &mdash; the ~16 ms sleep is report rate only, not speed), and play/pause &mdash; no conflicts there. What's left after this session's redesign is the residual <strong>"slot"</strong> vocabulary in target-model descriptions: findings #5 (Goroutines node loops), #6 (Concept table), and #7 (Clock-Change After diagram). Each is a one-line reword to node-local held state / channel delivery; migration-tab "Before" references to the old slot model are intentional and stay.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Mostly consistent, three open items.</strong> Verified consistent across all tabs: clock ownership (Go), position computation (Go), wire pacing (sim-clock &mdash; the ~16 ms sleep is report rate only, not speed), and play/pause &mdash; no conflicts there. What's left after this session's redesign is the residual <strong>"slot"</strong> vocabulary in target-model descriptions: findings #5 (Goroutines node loops), #6 (Concept table), and #7 (Clock-Change After diagram). Each is a one-line reword to node-local held state / channel delivery; migration-tab "Before" references to the old slot model are intentional and stay.</div>
   </div>
 </div>
 
@@ -1250,7 +1258,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     });
   })();
 
-  function chkKey(btn){const p=btn.closest('.panel'); const pid=p?p.id:'nopanel'; const r=btn.closest('tr'); const n=r&&r.querySelector('.enum')?r.querySelector('.enum').textContent.trim():''; return pid+'#'+n;}
+  function chkKey(btn){if(btn.dataset.chk)return btn.dataset.chk; const p=btn.closest('.panel'); const pid=p?p.id:'nopanel'; const r=btn.closest('tr'); const n=r&&r.querySelector('.enum')?r.querySelector('.enum').textContent.trim():''; return pid+'#'+n;}
   function saveChk(){const s={}; document.querySelectorAll('.chk-btn').forEach(b=>{if(b.classList.contains('checked'))s[chkKey(b)]=1;}); try{localStorage.setItem('chk-go-clock',JSON.stringify(s));}catch(e){}}
   function restoreChk(){let s={}; try{s=JSON.parse(localStorage.getItem('chk-go-clock')||'{}');}catch(e){} document.querySelectorAll('.chk-btn').forEach(b=>{const on=!!s[chkKey(b)]; b.classList.toggle('checked',on); b.textContent=on?'☑':'☐'; b.setAttribute('aria-pressed',on?'true':'false');});}
 
