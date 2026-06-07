@@ -437,6 +437,13 @@
           <td>Go calculates, TS draws</td>
           <td>Go computes all animation values (progress, timing); TS only renders the result.</td>
         </tr>
+        <tr>
+          <td class="enum">4</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Clock (sim-time = monotonic time while playing)</td>
+          <td>Go (backend)</td>
+          <td>Read locally by each wire goroutine; no shared tick; the play/pause gate is its only global aspect.</td>
+        </tr>
       </tbody>
     </table>
   </div>
