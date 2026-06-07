@@ -457,6 +457,7 @@
         <ul>
           <li>Holds all geometry data — nodes, ports, edges (endpoints, curves), wires, pulses</li>
           <li>Holds all shading data — materials, colors, glass and environment parameters</li>
+          <li>Reads the one clock — the system monotonic clock; all timing is arithmetic on its deltas (pulseSpeed scaling for bead advancement, inFlightTime = arcLength / pulseSpeed); the play/pause gate stops the arithmetic, not the clock</li>
           <li>Computes all animation values — arc length, positions, traversal progress, durations</li>
           <li>Computes every bead position and emits it to TS</li>
           <li>Runs the Go network (nodes, wires, send rules)</li>
