@@ -62,32 +62,30 @@ renderer is told where the bead is, not asked when it has arrived.
   reads that one channel and accumulates received beads in node-local
   state. Distinct inputs are distinct channels.
 
-## Send gating (ack wire)
+## Send gating
 
-A source places a bead on a forward wire only when the matching **ack
-wire** has delivered an "ok". An "ok" is itself a backward bead — a
-consume-ack — that travels its own ack wire from the destination back to
-the source. A **seed** grants the first ok so the source can start.
+A source places a bead on a forward wire only when that wire is **clear**.
+The PacedWire owns its clear/busy state: placing a bead makes the wire
+busy; the wire becomes clear again when the destination node has consumed
+the delivered bead. There is no separate signaling entity in the network —
+the wire's state is the gate.
 
 Two send rules exist, node-owned, per output port, at
 `node.data.sendRules` (a map: output-port-name → rule):
 
-- **`consumeGated`** (default) — after sending, the source waits for the
-  ack wire's ok before sending the next bead.
-- **`fireAndForget`** — the source sends without waiting; if it cannot
-  place the bead, it drops the send and moves on.
+- **`consumeGated`** (default) — the source sends only when the wire is
+  clear; if it is busy, the source holds the bead and tries again on its
+  next loop pass. Nothing is dropped.
+- **`fireAndForget`** — the source sends if the wire is clear; if it is
+  busy, the source drops the send and moves on.
 
 The rule lives on the source node, keyed by outgoing port name. The wire
 carries no rule. One node may use different rules on different outgoing
 ports, and the rule survives edge deletion because it lives on the node,
-not the edge.
+not the edge. A wire starts clear, so the first send needs no bootstrap.
 
-> **Needs confirmation.** The exact ack-bead protocol (the "ok" payload,
-> whether one ack wire pairs one forward wire, how the ack wire is
-> declared in the topology) and the seed/bootstrap mechanism (where the
-> first ok originates, its shape in `node.data`) are stated here at the
-> level the new model fixes; the wire-level details are not yet pinned in
-> code.
+> **Needs confirmation.** The shape of the consume signal — how the
+> destination node marks the wire clear — is not yet pinned in code.
 
 > **Needs confirmation.** How a node times a firing window (whether a
 > firing rule may span a duration, or fires purely on held-state
@@ -113,7 +111,7 @@ global gate halts or resumes wire animation. There is no central walker.
 There is no global round, tick, or simultaneity layer. The network does
 not count rounds or align activity to a shared clock. Coordination
 between nodes happens through each source node's per-output-port send
-rule and the ack wires — not through a shared time concept. Any
+rule and the wires' clear/busy state — not through a shared time concept. Any
 reasoning that treats activity as a sequence of globally-aligned rounds
 is drift; re-derive from local rules over channels and wires.
 
@@ -162,7 +160,7 @@ move it back into Go.
 
 - bead, in-flight, held (node-local) state
 - channel, input port, output port, fan-in
-- ack wire, ok, consume-ack, seed
+- wire clear, wire busy
 - send rule, `consumeGated`, `fireAndForget`, `node.data.sendRules`
 - arc length, pulse speed, in-flight traversal time (the one permitted
   duration)

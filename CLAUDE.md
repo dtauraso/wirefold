@@ -11,8 +11,9 @@ step and wait.
 ## Core concepts and send gating
 
 These live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
-partition nodes, AND-gate tree, lateral inhibition, and ack-wire send
-gating (`consumeGated`/`fireAndForget`, node-owned per output port). The
+partition nodes, AND-gate tree, lateral inhibition, and send gating
+(`consumeGated`/`fireAndForget`, node-owned per output port; the wire's
+clear/busy state is the gate). The
 "Model" pointer at the top of this file is the only entry point you need.
 
 ## Primitive landing rule (narrowed)
