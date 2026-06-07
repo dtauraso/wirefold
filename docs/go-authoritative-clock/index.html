@@ -191,6 +191,14 @@
   #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:16ch;}
   #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:9ch;}
   #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:64ch;}
+  #panel-tscode table#tscode-table{width:800px;table-layout:fixed;border-collapse:collapse;}
+  #panel-tscode table#tscode-table th,
+  #panel-tscode table#tscode-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
+  #panel-tscode table#tscode-table th:nth-child(1),#panel-tscode table#tscode-table td:nth-child(1),
+  #panel-tscode table#tscode-table th:nth-child(2),#panel-tscode table#tscode-table td:nth-child(2){width:1.8ch;padding-left:2px;padding-right:2px;}
+  #panel-tscode table#tscode-table th:nth-child(3),#panel-tscode table#tscode-table td:nth-child(3){width:22ch;}
+  #panel-tscode table#tscode-table th:nth-child(4),#panel-tscode table#tscode-table td:nth-child(4){width:14ch;}
+  #panel-tscode table#tscode-table th:nth-child(5),#panel-tscode table#tscode-table td:nth-child(5){width:57ch;}
   #panel-tscode .spec-table { table-layout: fixed; width: 100%; }
   #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 135px; white-space: normal; }
   #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 110px; white-space: normal; }
@@ -600,7 +608,7 @@
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:h2">☐</button>What the TS frontend runs.</h2>
     <p>TS has no goroutines, and with the data work in Go its job reduces to two things: render the stream Go emits (bead positions, geometry) and send CRUD + pause/resume back. Its work happens in a few execution contexts: the GPU render loop (driven by requestAnimationFrame inside the @react-three/fiber Canvas), an event-driven trace pump, the message receiver, the outbound IPC path, DOM input handlers, and the React/Zustand store. The render loop and input handlers must stay in TS &mdash; they need the WebGL context and the DOM event loop; the data work migrates to Go (see the TS &rarr; Go tab).</p>
 
-    <table class="spec-table">
+    <table class="spec-table" id="tscode-table">
       <caption>The TS execution contexts</caption>
       <thead>
         <tr><th class="enum">#</th><th class="chk">✓</th><th>Context</th><th>When it runs</th><th>Its job</th></tr>
