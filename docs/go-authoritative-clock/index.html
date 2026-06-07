@@ -533,9 +533,9 @@
         <tr>
           <td class="enum">6</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-          <td>PacedWire</td>
+          <td>PacedWire loop</td>
           <td>goroutine — one per destination input port</td>
-          <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li></ol></td>
+          <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li><li>Return to polling the inbound channel for the next bead; restart the loop.</li></ol></td>
         </tr>
       </tbody>
     </table>
