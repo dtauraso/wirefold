@@ -440,9 +440,9 @@
         <tr>
           <td class="enum">4</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-          <td>Clock (sim-time = monotonic time while playing)</td>
+          <td>Clock (the system monotonic clock Go reads)</td>
           <td>Go (backend)</td>
-          <td>Read locally by each wire goroutine; no shared tick; the play/pause gate is its only global aspect.</td>
+          <td>One clock; wires scale its deltas by pulseSpeed to human speed; the gate stops the arithmetic, not the clock; no shared tick.</td>
         </tr>
       </tbody>
     </table>
@@ -480,7 +480,7 @@
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:h2">☐</button>What each goroutine does.</h2>
     <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes and the wires: each node — and each wire — is its own small loop on its own goroutine, coordinating only through channels. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
 
-    <div class="note" style="margin-bottom:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note4">☐</button><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's sim-clock.</div>
+    <div class="note" style="margin-bottom:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note4">☐</button><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's clock.</div>
 
     <table class="spec-table" id="goroutines-table">
       <caption>The goroutines</caption>
@@ -520,7 +520,7 @@
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>ReadGate loop</td>
             <td>one per ReadGate node</td>
-            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within the coincidence window W (measured on Go's sim-clock). If W elapses with only one input present, clear the partial arrival — empty its slot and ack its source over the ack edge, releasing a consumeGated sender — then restart. A timeout sends nothing downstream; the lone input decays.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on the channel to the ToChainInhibitor wire, only once its ack edge shows that wire clear; never drop — if the prior bead isn't consumed yet, restart the loop and retry.</li></ol></td>
+            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within the coincidence window W (measured on Go's clock). If W elapses with only one input present, clear the partial arrival — empty its slot and ack its source over the ack edge, releasing a consumeGated sender — then restart. A timeout sends nothing downstream; the lone input decays.</li><li>On fire, consume both inputs — clear their slots and ack each source over its ack edge so each source's send-check sees its wire clear.</li><li>Send the value on the channel to the ToChainInhibitor wire, only once its ack edge shows that wire clear; never drop — if the prior bead isn't consumed yet, restart the loop and retry.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">5</td>
@@ -555,7 +555,7 @@
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire</td>
           <td>goroutine — one per destination input port</td>
-          <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's sim-clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li></ol></td>
+          <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li></ol></td>
         </tr>
       </tbody>
     </table>
@@ -605,7 +605,7 @@
   </defs>
 </svg>
     </div>
-    <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward); amber = the ack edge (backward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on the sim-clock); the ack bead runs the same path back.</div>
+    <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward); amber = the ack edge (backward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on Go's clock); the ack bead runs the same path back.</div>
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>The ring tiles this unit.</strong> in08 + the bootstrap seed &rarr; readGate1 &rarr; chainInhibitor &rarr; (feedback) readGate1, with InhibitRightGate wired the same way &mdash; every edge is a PacedWire + ack-edge pair.</div>
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note3">☐</button><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
   </div>
@@ -1032,7 +1032,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
           <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
           <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
-          <li>Slot phase lifecycle / PacedWire: the passive lock+cond monitor is gone — PacedWire and the ack edge become goroutines that transport beads over channels (poll inbound → traverse on the sim-clock and emit position → put on the outbound channel), and the ack edge carries the consume-ack back as its own backward bead. Blocking Send, WaitConsumed, the cond var, and the per-send unpark helper are deleted; send policy stays node-owned (consumeGated / fireAndForget on node.data.sendRules), the wires apply no policy. "The wire is not a goroutine" is no longer true.</li>
+          <li>Slot phase lifecycle / PacedWire: the passive lock+cond monitor is gone — PacedWire and the ack edge become goroutines that transport beads over channels (poll inbound → traverse on Go's clock and emit position → put on the outbound channel), and the ack edge carries the consume-ack back as its own backward bead. Blocking Send, WaitConsumed, the cond var, and the per-send unpark helper are deleted; send policy stays node-owned (consumeGated / fireAndForget on node.data.sendRules), the wires apply no policy. "The wire is not a goroutine" is no longer true.</li>
         </ul>
       </div>
       <div class="card">

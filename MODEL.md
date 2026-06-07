@@ -36,15 +36,7 @@ the network itself is the nodes-and-wires Go runtime.
   fires. There is no slot — node-local held state replaces it.
 - **Channel.** A Go channel connecting a source to a wire, or a wire to a
   destination node. One input port is one channel.
-- **Clock.** Go's monotonic runtime time filtered through the global
-  play/pause gate — sim-time is wall time that elapses while the gate is
-  open. Not a component: no clock goroutine, no tick channel, no round
-  counter. Each wire goroutine reads it locally to elapse
-  `inFlightTime = arcLength / pulseSpeed` and advance distance-covered;
-  distance-covered is the durable state, and remaining time is re-derived
-  from it. Nodes do not read the clock — firing is predicate-gated on held
-  state (see the firing-window "Needs confirmation"). The ~16 ms position
-  emit is a render cadence, not the clock.
+- **Clock.** The system monotonic clock Go reads — there is exactly one clock. All other timing is arithmetic in code on its readings: each wire converts clock deltas into bead advancement (`distanceCovered += pulseSpeed × Δ`), scaling traversal to human-visible speed; `inFlightTime = arcLength / pulseSpeed` is derived, not a second timer. The play/pause gate stops the arithmetic, not the clock. Nodes do not read the clock — firing is predicate-gated on held state. The ~16 ms position emit is a render cadence, not a clock.
 
 ## Wire lifecycle
 
@@ -174,7 +166,7 @@ move it back into Go.
 - send rule, `consumeGated`, `fireAndForget`, `node.data.sendRules`
 - arc length, pulse speed, in-flight traversal time (the one permitted
   duration)
-- clock, sim-time (monotonic time while playing)
+- clock (the one system monotonic clock Go reads)
 - node receives, node holds, node fires, wire advances, wire delivers,
   wire emits position
 - halt, resume, global gate
