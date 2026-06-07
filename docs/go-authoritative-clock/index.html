@@ -1176,7 +1176,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card6">☐</button>Risks to watch</h3>
         <ul>
-          <li><strong>Bandwidth/backpressure:</strong> the position stream is N beads × ~60/s over stdout; if the pipe fills, Go stalls on the write and TS re-paces Go. Watch for it; emit-on-change deduplication is the escape if needed (not a separate tick).</li>
+          <li><strong>Bandwidth / busy stdout pipe:</strong> the position stream is N beads × ~60/s over stdout; if the pipe fills, Go stalls on the write (hold-and-retry on its next loop pass — no drop) and TS re-paces Go. Watch for it; emit-on-change deduplication is the escape if needed (not a separate tick).</li>
           <li><strong>Two arc-length implementations</strong> must agree until Phase 2 deletes the TS copy — until then a drift risk.</li>
           <li><strong>Bead speed vs report rate:</strong> confirm the sleep never affects speed — speed stays pulseSpeed, arrival stays inFlightTime, the sleep only changes how many waypoints are shown.</li>
           <li>Run an industry bug-class scan on the Phase 1–2 timing change before declaring it ready.</li>
