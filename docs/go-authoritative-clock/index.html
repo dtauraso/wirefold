@@ -500,7 +500,7 @@
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
-            <td><ol><li>No inputs — it is a source, driven by its init values.</li><li>Take the next init value (wrapping if its repeat flag is set).</li><li>If the PacedWire of edge in08ToReadGate1 — the wire from this node's ToReadGate output port to readGate1's FromInput input port — is clear, send the bead on its inbound channel. If it is busy (the prior bead is not yet consumed), never drop the bead: restart the loop and try the send again on the next pass.</li><li>Advance to the next init value; stop when init is exhausted unless repeat is set.</li></ol></td>
+            <td><ol><li>No inputs — it is a source, driven by its init values.</li><li>Take the next init value (wrapping if its repeat flag is set).</li><li>Check the PacedWire of edge in08ToReadGate1 — the wire from this node's ToReadGate output port to readGate1's FromInput input port.</li><li>If the wire is clear: send the bead on the wire's inbound channel.</li><li>Else (the wire is busy — the prior bead is not yet consumed): keep the bead, never drop it; restart the loop and try the send again on the next pass.</li><li>Advance to the next init value; stop when init is exhausted unless repeat is set.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">2</td>
