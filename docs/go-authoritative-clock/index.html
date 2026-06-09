@@ -481,8 +481,6 @@
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:h2">☐</button>What each goroutine does.</h2>
     <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes and the wires: each node — and each wire — is its own small loop on its own goroutine, coordinating only through channels. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
 
-    <div class="note" style="margin-bottom:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note4">☐</button><strong>W (coincidence window):</strong> how long a windowed gate (ReadGate, InhibitRightGate) holds an early-arriving input while waiting for its partner. W&nbsp;=&nbsp;1.5&nbsp;&times;&nbsp;the gate's longest input-wire traversal time (traversal time&nbsp;=&nbsp;arcLength&nbsp;&divide;&nbsp;pulseSpeed, in&nbsp;<strong>milliseconds (ms)</strong>); recomputed from live wire geometry, elapsed on Go's clock.</div>
-
     <table class="spec-table" id="goroutines-table">
       <caption>The goroutines</caption>
       <thead>
@@ -500,38 +498,17 @@
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
-            <td><ol><li>Hold a read head at init index i (the current input item).</li><li>Wait for a signal from another node to check the current input — in08 may not advance the read head, or send, without it.</li><li>On the signal: send one bead of Init[i] to readGate1's FromInput port — one bead, one time.</li><li>Advance the read head to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat), then wait for the next signal.</li></ol></td>
+            <td><ol><li>Hold a read head at init index i (the current input item).</li><li>Wait for a signal from another node to check the current input — in08 may not advance the read head, or send, without it.</li><li>Advance the read head to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat), then wait for the next signal.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">2</td>
-            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-            <td>Bootstrap loop</td>
-            <td>one (bootstrap_rg)</td>
-            <td><ol><li>A one-shot Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false) whose only job is to seed the ring.</li><li>Send its single value 1 on the channel to the ToReadGate wire into <code style="font-family:var(--mono);font-size:11px;">readGate1.FromChainInhibitor</code> — only once the PacedWire for that output is clear; never drop.</li><li>That seed lets ReadGate fire its first round before the ChainInhibitor feedback edge has produced anything.</li><li>repeat is false, so after the single send the loop exits and the node never fires again.</li></ol></td>
-          </tr>
-          <tr>
-            <td class="enum">3</td>
-            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-            <td>ReadGate loop</td>
-            <td>one per ReadGate node</td>
-            <td><ol><li>Poll FromInput and FromChainInhibitor (non-blocking); on the first arrival, open a coincidence window W. On the first round FromChainInhibitor is supplied by the bootstrap Input node (<code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, init:[1], repeat:false); on every round after, it comes from the ChainInhibitor feedback edge (<code style="font-family:var(--mono);font-size:11px;">i1ToReadGate1</code>).</li><li>Fire only when both arrive within the coincidence window W (measured on Go's clock). If W elapses with only one input present, clear the partial arrival — empty its slot and mark the delivering wire clear, releasing a consumeGated sender — then restart. A timeout sends nothing downstream; the lone input decays.</li><li>On fire, consume both inputs — clear their slots and mark each delivering wire clear so each source's send-check sees its wire clear.</li><li>Send the value on the channel to the ToChainInhibitor wire, only once the PacedWire for that output is clear; never drop — if the prior bead is not yet consumed, restart the loop and try the send again on the next pass.</li></ol></td>
-          </tr>
-          <tr>
-            <td class="enum">4</td>
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>ChainInhibitor loop</td>
             <td>one per ChainInhibitor node</td>
             <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and mark the delivering wire clear.</li><li>Spawn one goroutine per ToNext port to fan out the held value concurrently; each sends the value on the channel to its wire, only once the PacedWire for that output is clear, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
           </tr>
-          <tr>
-            <td class="enum">5</td>
-            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-            <td>InhibitRightGate loop</td>
-            <td>one per InhibitRightGate node</td>
-            <td><ol><li>Poll FromLeft and FromRight (non-blocking); on the first arrival, open a coincidence window W.</li><li>Fire only when both arrive within W; if it times out, clear the partial arrival and restart.</li><li>Compute result = 1 only if Left==1 and Right==0, otherwise 0.</li><li>Consume both inputs — clear their slots and mark each delivering wire clear.</li><li>Send result on the channel to the ToPassed wire, only once the PacedWire for that output is clear; never drop — if the prior bead is not yet consumed, restart the loop and try the send again on the next pass.</li></ol></td>
-          </tr>
         <tr>
-          <td class="enum">6</td>
+          <td class="enum">3</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire loop</td>
           <td>goroutine — one per destination input port</td>
@@ -552,30 +529,36 @@
     <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel and holds clear/busy state; the destination's consume marks it clear. Nodes and wires are all goroutines &mdash; they touch only through channels.</p>
     <div class="diagram">
 <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="goroutinegraph:svg1">☐</button>
-<svg width="720" height="160" viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg" aria-label="Goroutines execution unit: a source node loop sends a bead over a channel to a PacedWire goroutine, which delivers it to the destination node loop; the PacedWire owns clear/busy state and the destination's consume marks it clear.">
-  <line x1="174" y1="77" x2="281" y2="77" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
-  <text x="227" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">send</text>
-  <line x1="439" y1="77" x2="546" y2="77" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
-  <text x="492" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">deliver</text>
-  <rect x="24" y="44" width="150" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="99" y="78" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">Input loop</text>
-  <text x="99" y="96" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
-  <rect x="546" y="44" width="150" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="621" y="78" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ReadGate loop</text>
-  <text x="621" y="96" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">readGate1</text>
-  <rect x="281" y="44" width="158" height="66" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
-  <text x="360" y="68" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
-  <text x="360" y="83" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
-  <line x1="306" y1="98" x2="414" y2="98" stroke="#3a5290" stroke-width="1"/>
-  <circle cx="378" cy="98" r="3.5" fill="#7c9ef8"/>
-  <text x="420" y="101" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">&#9654;</text>
+<svg width="760" height="210" viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" aria-label="The active subgraph as goroutine loops. A wired unit at top: ChainInhibitor loop i0 sends a bead over a channel to a PacedWire goroutine, which delivers it to ChainInhibitor loop i1; the PacedWire owns clear/busy state and i1's consume marks it clear. Below, disconnected: Input loop in08 is an active source whose only wired output is inactive in this config, so it has no active downstream.">
+  <line x1="184" y1="63" x2="291" y2="63" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="237" y="55" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">send</text>
+  <line x1="449" y1="63" x2="556" y2="63" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="502" y="55" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">deliver</text>
+  <rect x="24" y="30" width="160" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="104" y="64" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
+  <text x="104" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i0</text>
+  <rect x="576" y="30" width="160" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="656" y="64" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
+  <text x="656" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i1</text>
+  <rect x="291" y="30" width="158" height="66" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
+  <text x="370" y="54" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
+  <text x="370" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
+  <line x1="316" y1="84" x2="424" y2="84" stroke="#3a5290" stroke-width="1"/>
+  <circle cx="388" cy="84" r="3.5" fill="#7c9ef8"/>
+  <text x="430" y="87" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">&#9654;</text>
+  <rect x="24" y="140" width="200" height="56" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="124" y="166" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">Input loop</text>
+  <text x="124" y="184" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
+  <text x="240" y="160" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#6a6a78">active source &mdash;</text>
+  <text x="240" y="174" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#6a6a78">its only wired output is inactive</text>
+  <text x="240" y="188" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#6a6a78">in this config (no active downstream)</text>
   <defs>
     <marker id="arrB" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#7c9ef8"/></marker>
   </defs>
 </svg>
     </div>
     <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on Go's clock); the PacedWire owns clear/busy state and the destination's consume marks it clear.</div>
-    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>The ring tiles this unit.</strong> in08 + the bootstrap seed &rarr; readGate1 &rarr; chainInhibitor &rarr; (feedback) readGate1, with InhibitRightGate wired the same way &mdash; every edge is one PacedWire.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>The active subgraph, as loops.</strong> The wired unit at top is the i0 &rarr; i1 ChainInhibitor edge &mdash; one PacedWire. in08 is a separate active source: its only wired output is inactive in this config, so it sits disconnected with no active downstream. Every active edge is one PacedWire.</div>
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note3">☐</button><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
   </div>
 
@@ -1207,7 +1190,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note4">☐</button><span style="color:var(--good);font-weight:700;">4 &middot; RESOLVED &rarr; slot dissolved into node-local held state</span> &mdash; <strong>Node "slot" vs wire "channel."</strong> Nodes still "consume / clear their slots," but the wire now "puts the bead on the channel connecting it to the destination node," and the channel&rarr;slot gap was never spelled out. Was MINOR/deferred. <em>Resolution:</em> the session redesign removed the slot &mdash; MODEL.md now has the node receive beads off its input channel(s) into <strong>node-local held state</strong> and fire on its rule, with no slot at all. So the channel&rarr;slot gap this finding described no longer exists: there is nothing between the inbound channel and a "filled slot" because there is no slot &mdash; the node holds what it reads. The remaining work is purely vocabulary cleanup in the tabs that still say "slot," tracked as the OPEN findings below.
     </div>
     <div class="note" style="border-left:3px solid var(--info);margin-top:0.75rem;">
-      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note5">☐</button><span style="color:var(--info);font-weight:700;">5 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Goroutines tab node loops still hold a "slot."</strong> The redesign retired the slot, but the node-loop rows in the Goroutines tab still describe firing as clearing a slot. <em>Spec says:</em> ReadGate "empty its slot" / "consume both inputs &mdash; clear their slots" (L474); ChainInhibitor "consume it &mdash; clear its slot" (L479); InhibitRightGate "Consume both inputs &mdash; clear their slots" (L484). <em>MODEL.md says:</em> there is no slot &mdash; a node receives beads off its input channel(s) into <strong>node-local held state</strong> and fires on its rule; firing consumes <em>held state</em>, not a slot. <em>Fix:</em> reword these rows to "clear the held input / drop the held bead" (held-state vocabulary); send gating is wire-owned clear/busy state &mdash; only "slot" is wrong. <em>Refers to:</em> L474, L479, L484.
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note5">☐</button><span style="color:var(--info);font-weight:700;">5 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Goroutines tab ChainInhibitor loop still holds a "slot."</strong> The redesign retired the slot, but the surviving ChainInhibitor row in the Goroutines tab still describes firing as clearing a slot. <em>Spec says:</em> ChainInhibitor "consume it &mdash; clear its slot." <em>MODEL.md says:</em> there is no slot &mdash; a node receives beads off its input channel(s) into <strong>node-local held state</strong> and fires on its rule; firing consumes <em>held state</em>, not a slot. <em>Fix:</em> reword the row to "clear the held input / drop the held bead" (held-state vocabulary); send gating is wire-owned clear/busy state &mdash; only "slot" is wrong. <em>Scope note:</em> the ReadGate and InhibitRightGate slot references this finding used to track were removed when those rows were dropped (2026-06-08 active-set reduction), so #5 now applies to the ChainInhibitor row alone.
     </div>
     <div class="note" style="border-left:3px solid var(--info);margin-top:0.75rem;">
       <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note6">☐</button><span style="color:var(--info);font-weight:700;">6 &middot; OPEN / UNRESOLVED</span> &mdash; <strong>Concept "Lives in" table credits "slots."</strong> <em>Spec says:</em> the Concept tab's Concurrent row reads "Self-scheduling nodes, local rules over slots and wires. No global clock or round." (L396). <em>MODEL.md says:</em> nodes coordinate through <strong>held state</strong> and wires/channels; there is no slot. <em>Fix:</em> "local rules over held state and wires." <em>Refers to:</em> L396.
@@ -1218,7 +1201,10 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
       <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note9">☐</button><span style="color:var(--good);font-weight:700;">2026-06-07 &mdash; ack concept removed from the model.</span> The ack edge/wire, the "ok" bead, consume-ack, and seed/bootstrap were removed from MODEL.md, CLAUDE.md, spec doc (all live-model surfaces), and handoff.md in one commit. Send gating is now wire-owned clear/busy state: the PacedWire marks itself busy on receive, and the destination's consume marks it clear. No separate backward signaling entity exists in the network. Finding #1 above is SUPERSEDED by this decision. "Ack" may appear in this tracker only, in past tense, as historical record.
     </div>
-    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Mostly consistent, three open items.</strong> Verified consistent across all tabs: clock ownership (Go), position computation (Go), wire pacing (sim-clock &mdash; the ~16 ms sleep is report rate only, not speed), and play/pause &mdash; no conflicts there. What's left after this session's redesign is the residual <strong>"slot"</strong> vocabulary in target-model descriptions: findings #5 (Goroutines node loops), #6 (Concept table), and #7 (Clock-Change After diagram). Each is a one-line reword to node-local held state / channel delivery; migration-tab "Before" references to the old slot model are intentional and stay.</div>
+    <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note10">☐</button><span style="color:var(--good);font-weight:700;">2026-06-08 &mdash; active set reduced to in08 + i0 + i1 (edge i0&rarr;i1).</span> <code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, <code style="font-family:var(--mono);font-size:11px;">readGate1</code>, and <code style="font-family:var(--mono);font-size:11px;">inhibitRight0</code> moved to <code style="font-family:var(--mono);font-size:11px;">topology.inactive.json</code>. The spec was trimmed to the active nodes: the Goroutines tab dropped the Bootstrap, ReadGate, and InhibitRightGate rows (survivors renumbered 1 Input / 2 ChainInhibitor / 3 PacedWire); the in08 Input row lost its readGate send step; the W (coincidence window) note was removed (its only subjects were ReadGate and InhibitRightGate; ChainInhibitor does not use W); and the Goroutine-graph diagram + its "tiles" note were reworked to the active subgraph &mdash; the i0&rarr;i1 ChainInhibitor edge plus in08 as a disconnected active source. The active subgraph is honestly disconnected: in08's only wired output (to readGate1) is now inactive, and i0&rarr;i1 is a separate active chain. <em>Note (in08 row):</em> step 2 still says in08 "may not advance the read head, or send, without it" &mdash; it now references a send with no send step in the row (the send step was the deleted readGate step); left verbatim per scope. General-mechanism spots that merely <em>illustrate</em> with an inactive node were left intact and flagged, not gutted: the Phase 1 scope (in08 &rarr; readGate1 migration slice), the Clock-Change Before/After diagrams, and the Overview "where each property lives" table.
+    </div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Mostly consistent, three open items.</strong> Verified consistent across all tabs: clock ownership (Go), position computation (Go), wire pacing (sim-clock &mdash; the ~16 ms sleep is report rate only, not speed), and play/pause &mdash; no conflicts there. What's left after this session's redesign is the residual <strong>"slot"</strong> vocabulary in target-model descriptions: findings #5 (Goroutines ChainInhibitor loop), #6 (Concept table), and #7 (Clock-Change After diagram). Each is a one-line reword to node-local held state / channel delivery; migration-tab "Before" references to the old slot model are intentional and stay.</div>
   </div>
 </div>
 
