@@ -384,8 +384,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="playpause">Play / Pause</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgo">TS → Go</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="docs">Doc Updates</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
@@ -921,10 +920,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-keeping-locked">☐</button>Keeping them locked</div>
     <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
-  </div>
 
-  <!-- TAB 6: Play / Pause -->
-  <div class="panel" id="panel-playpause" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:h2">☐</button>Play / Pause: the button is in TS, the clock is in Go.</h2>
     <p>Pause and resume act on Go's single clock. TS does not hold time — it holds a button. TS sends a pause or resume message to Go; Go's clock halts or runs. The frontend never owns any time.</p>
 
