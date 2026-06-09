@@ -419,9 +419,9 @@
         <tr>
           <td class="enum">2</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-          <td>Geometric + shading</td>
+          <td>Geometric</td>
           <td>Go (backend)</td>
-          <td>Holds all geometric data (nodes, ports, edges — endpoints and curves, wires, pulses); computes arc length, positions, durations. Also holds all shading data — materials, colors, glass and environment parameters. Runs the Go network (nodes, wires).</td>
+          <td>Holds all geometric data (nodes, ports, edges — endpoints and curves, wires, pulses); computes arc length, positions, durations.</td>
         </tr>
         <tr>
           <td class="enum">3</td>
@@ -440,9 +440,9 @@
         <tr>
           <td class="enum">5</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-          <td>Viewpoint + GPU + input</td>
+          <td>Viewpoint</td>
           <td>TS (frontend)</td>
-          <td>How the diagram is viewed, not what it is &mdash; camera, orbit/pan/zoom, world&rarr;screen projection, and raycast-picking live with the GPU render in TS (three.js). Go owns the diagram; TS owns the viewpoint. Runs the GPU: issues draw calls, manages WebGL context, compiled shaders, and baked textures. Captures human input: camera/arcball/pan/pinch handled locally; pick/select and drag/wire sent to Go carrying the picked Go id.</td>
+          <td>How the diagram is viewed, not what it is &mdash; camera, orbit/pan/zoom, world&rarr;screen projection, raycast-picking, GPU render &mdash; in TS (three.js). Go owns the diagram; TS owns how it's viewed.</td>
         </tr>
       </tbody>
     </table>
@@ -511,8 +511,8 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
     <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note1">☐</button><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is the only wire goroutine kind. It owns no clear/busy state and applies no send policy: a source places a bead whenever its own rule says to, and the wire may carry more than one bead at once.</div>
 
-    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note2">☐</button>Where the clock change lands: in the target model each wire loop (PacedWire) wakes about every 16&nbsp;ms to advance its bead, emit the bead's position, and self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
-    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note3">☐</button><strong>Geometry is Go's; TS captures edits and draws.</strong> Beyond the per-bead position stream, the static geometry — node and port world-positions, edge curve control points, arc lengths — is derived in Go at load and re-derived on each edit. The edit messages (node-move, addEdge) originate in TS and are sent to Go; Go runs the calculations and sends the new 3D data back to TS over the same out-stream the bead positions ride. TS plots all of it and computes none.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note2">☐</button>In the target model each PacedWire wakes ~16&nbsp;ms, advances its bead, emits the position, and self-delivers when elapsed reaches inFlightTime.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note3">☐</button><strong>Geometry is Go's; TS captures edits and draws.</strong> Static geometry (control points, arc length, world positions) is derived in Go at load and on each edit; edit messages originate in TS, Go computes and returns 3D data; TS plots, computes none.</div>
 
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:h2">☐</button>The goroutines, wired.</h2>
     <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel, holding no clear/busy state &mdash; the source places a bead whenever its rule says to, and the wire may carry more than one at once. Nodes and wires are all goroutines &mdash; they touch only through channels.</p>
@@ -595,7 +595,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
   <!-- TAB: TS code -->
   <div class="panel" id="panel-tscode" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:h2">☐</button>What the TS frontend runs.</h2>
-    <p>TS has no goroutines, and with the data work in Go its job reduces to two things: render the stream Go emits (bead positions, geometry) and send CRUD + pause/resume back. Its work happens in a few execution contexts: the GPU render loop (driven by requestAnimationFrame inside the @react-three/fiber Canvas), an event-driven trace pump, the message receiver, the outbound IPC path, DOM input handlers, and the React/Zustand store. The render loop and input handlers must stay in TS &mdash; they need the WebGL context and the DOM event loop; the data work migrates to Go (see the TS &rarr; Go tab).</p>
+    <p>TS has no goroutines; its job is to render the stream Go emits and send CRUD + pause/resume back. Its execution contexts are below; the data work is Go's (see the TS &rarr; Go tab).</p>
 
     <table class="spec-table" id="tscode-table">
       <caption>The TS execution contexts</caption>
@@ -864,7 +864,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-go-computes-position">☐</button>Go computes and emits each position directly</div>
-    <p>Each wire's loop computes its bead's current position from the clock and the bead's path geometry (plain bezier math, no library) and emits a position message for it. Computing the next position IS the loop's work — there is no separate reader polling state at a fixed rate. When the bead reaches the end of its path (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">elapsed</span> reaches <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">inFlightTime</span>), the wire puts the bead on the channel to the destination node.</p>
+    <p>Each wire's loop computes its bead's current position from the clock and path geometry (bezier math) and emits it; when <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">elapsed</span> reaches <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">inFlightTime</span>, the wire puts the bead on the destination channel.</p>
 
     <div class="cards" style="margin-top:0.5rem;">
       <div class="card">
@@ -876,7 +876,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-sleep-paces-loop">☐</button>Sleep paces the loop</div>
-    <p>The node loop and the wire loop sleep between iterations. The sleep sets how often a position is emitted; the clock still sets where the bead is. Start with a 16 ms sleep (about 60 emits per second), matching a typical display refresh. Each wake reads the clock, computes position = eval(path, elapsed / inFlightTime), emits, then sleeps again.</p>
+    <p>The ~16 ms sleep is the report rate (matching a 60Hz display), not bead speed — speed stays pulseSpeed, arrival stays at inFlightTime regardless of sleep duration.</p>
 
     <div class="cards" style="margin-top:0.5rem;">
       <div class="card">
@@ -889,10 +889,10 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-human-speed">☐</button>Human speed belongs to Go</div>
-    <p>Go runs the animation at a human-watchable pace — the bead moves at pulseSpeed and Go emits positions at the ~16ms report rate. TS sends CRUD edits only; the resulting update also plays at Go's human speed. TS never sets, drives, or accelerates timing — an edit's visible effect plays out on Go's clock, not instantly because TS sent it. Discrete cancellations (a delete) are immediate, but continuing motion stays human-paced: move a node mid-flight and the bead keeps traveling at human speed along the re-derived curve.</p>
+    <p>pulseSpeed sets the human-watchable pace; Go emits positions at the ~16ms report rate; TS sends CRUD edits only and never drives timing.</p>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-keeping-locked">☐</button>Keeping them locked</div>
-    <p>Go is the single source of all animation values. TS renders exactly what Go sends, so there is nothing to keep in sync — the frontend has no independent animation state.</p>
+    <p>Go is the single source of all animation values; TS renders exactly what Go sends, so there is nothing to keep in sync.</p>
 
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:h2">☐</button>Play / Pause: the button is in TS, the clock is in Go.</h2>
     <p>Pause and resume act on Go's single clock. TS does not hold time — it holds a button. TS sends a pause or resume message to Go; Go's clock halts or runs. The frontend never owns any time.</p>
@@ -1097,18 +1097,11 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card1">☐</button>Phase 1 · Clock into Go (the unblock)</h3>
         <ul>
-          <li><strong>Scope (minimal slice):</strong>
-            <ul style="margin-top:0.4rem;margin-bottom:0.4rem;">
-              <li>Active net: <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">in08</span> (Input), <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0</span> (ChainInhibitor), <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i1</span> (ChainInhibitor), and the active edge <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span>. The in08↔i0 handshake wires (Init[i] forward, 1/0 signal back) are the pending addition for this phase. Inactive nodes/edges remain in <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.inactive.json</span>, not deleted.</li>
-              <li>Phase 1's goal is clock-first: Go's clock drives each delivery on the active wire (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span>) instead of waiting on a TS "delivered" message. The PacedWire loop on that edge times its own traversal and delivers by putting the bead on the destination channel — no TS round-trip required.</li>
-              <li>Exit criterion: headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> runs the cascade to completion with no editor attached. Today it deadlocks because delivery waits on the visual layer; after this phase the Go test exits cleanly.</li>
-            </ul>
-          </li>
-          <li><strong>Go:</strong> add a monotonic clock with a paused-time accumulator; on Send, stamp start time and compute inFlightTime = arcLength / pulseSpeed (Go already has BezierArcLength). The wire goroutine sleeps ~16ms; each wake checks elapsed ≥ inFlightTime and, on traversal-complete, delivers by putting the bead on the channel to the destination node — the wire times its own delivery, with no wait on a TS message. (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>, the PacedWire loop.)</li>
-          <li>Go runs a continuous inbound reader on the pipe TS writes to (RunStdinReader on stdin). It is ALWAYS reading, independent of pause/play. Pause freezes the clock (bead motion + delivery); it does NOT freeze message intake — Go keeps receiving and acting on messages while paused.</li>
-          <li>Now that the wire times its own delivery, a deleteEdge races the wire's clock-driven delivery (not a TS message). The cancel must be atomic: delete and clock-delivery serialize on the wire's lock, and a reset/deleted wire must never deliver. Erase the in-flight pulse via Reset() before delivery can fire.</li>
-          <li><strong>TS:</strong> none yet — TS keeps animating on its own this phase (a temporary cosmetic dual); delivery no longer depends on it.</li>
-          <li><strong>Exit:</strong> headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> completes the cascade. Today it deadlocks after the first hop because delivery waits on the visual layer; after this phase it should run to completion with no editor attached. The Go test exercises the active net (in08 / i0 / i1 via i0→i1) with no TS attached.</li>
+          <li><strong>Scope:</strong> active net <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">in08</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i1</span> and the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span> edge; inactive nodes/edges stay in <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.inactive.json</span>.</li>
+          <li><strong>Goal:</strong> clock first — Go's clock drives delivery on <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span>; no TS round-trip required.</li>
+          <li><strong>Go:</strong> add a monotonic clock with a paused-time accumulator; on Send stamp start time and compute inFlightTime = arcLength / pulseSpeed (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">BezierArcLength</span> already exists). Wire goroutine sleeps ~16ms; each wake checks elapsed ≥ inFlightTime and delivers by putting the bead on the destination channel — no TS message. (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>.) RunStdinReader reads continuously — pause freezes the clock, not message intake. deleteEdge cancels atomically via Reset() before clock-delivery can fire.</li>
+          <li><strong>TS:</strong> none yet — keeps animating on its own (temporary cosmetic dual); delivery no longer depends on it.</li>
+          <li><strong>Exit:</strong> headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> runs the active net (in08 / i0 / i1) to completion with no editor attached (today it deadlocks after the first hop).</li>
           <li><strong>Docs:</strong> draft the MODEL.md Driver + Cross-boundary changes.</li>
         </ul>
       </div>
@@ -1116,50 +1109,43 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card2">☐</button>Phase 2 · Position stream</h3>
         <ul>
-          <li><strong>Go:</strong> each loop wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (a new trace kind); deliver at t ≥ 1.</li>
-          <li><strong>TS:</strong> pump.ts handles the new position message and sets the bead sprite to the received position. DELETE the TS position/timing math: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), the duplicated rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and store.ts moveNode's local re-derive of arc length + simLatencyMs. TS plots only.</li>
-          <li><strong>TS:</strong> The zustand store (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>) becomes a no-op holder — Go is the sole writer of its data, so TS keeps no authoritative graph state. The per-frame path already bypasses React/Zustand by reading imperative stores (pulse-state.ts, edge-curve map); Go's position stream feeds that imperative path directly.</li>
-          <li><strong>Exit:</strong> beads move from Go's stream; TS computes no positions; tsc + build green; visual parity with before. Run the trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
+          <li><strong>Go:</strong> each wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (new trace kind); deliver at t ≥ 1.</li>
+          <li><strong>TS:</strong> pump.ts sets the bead sprite to the received position. DELETE: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and moveNode's arc-length + simLatencyMs re-derive (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>). TS plots only.</li>
+          <li><strong>TS:</strong> zustand store (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>) becomes a no-op holder; Go's position stream feeds the imperative path (pulse-state.ts, edge-curve map) directly.</li>
+          <li><strong>Exit:</strong> beads animate from Go's stream; TS computes no positions; tsc + build green; visual parity. Run trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
         </ul>
       </div>
 
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card3">☐</button>Phase 3 · Geometry data into Go</h3>
         <ul>
-          <li><strong>Go:</strong> hold node positions, port positions, and edge data (endpoints source→target, curve control points) as authoritative state; compute curves in Go.</li>
-          <li><strong>TS:</strong> send editor geometry edits to Go (node move, edge create/delete — partly exists via moveNode/deleteEdge IPC; extend to full geometry CRUD); render from the geometry Go streams back, computing none of it locally.</li>
-          <li><strong>TS:</strong> Any remaining structural state (which nodes/edges exist) is a passive render copy of what Go sent — the zustand store is a no-op holder, Go sole writer, and holds no geometry logic. Zustand's data-computing role (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">moveNode</span> arc-length re-derive, curve management, fade fixpoint) is removed from it, not relocated.</li>
+          <li><strong>Go:</strong> hold node positions, port positions, and edge data (endpoints + curve control points) as authoritative state; compute curves in Go.</li>
+          <li><strong>TS:</strong> send geometry edits to Go (node-move, edge create/delete — extend existing moveNode/deleteEdge IPC to full geometry CRUD); render from Go's stream, computing none locally.</li>
+          <li><strong>TS:</strong> zustand store is a no-op holder, Go sole writer; remove moveNode arc-length re-derive, curve management, and fade fixpoint from it, not relocate.</li>
           <li><strong>Exit:</strong> dragging a node updates Go's data, Go re-streams geometry + positions, TS renders without local geometry math.</li>
-          <li><strong>Note:</strong> per the handoff caveat, edge RECONNECT (moving a wire's endpoint) is a network redesign, not a small edit — scope it separately; target-end move is delete+create, source-end needs a new rewire IPC verb.</li>
-          <li><strong>Delete edge with a pulse in flight:</strong>
-            <ul style="margin-top:0.4rem;margin-bottom:0.4rem;">
-              <li>TS can send deleteEdge while a pulse is still inside that edge, during pause or play. The message is fire-and-forget; TS does not wait for Go.</li>
-              <li>Go receives it and erases the edge AND drops the in-flight pulse (Reset) before the pulse reaches the destination node — the pulse must never land on a deleted edge.</li>
-              <li>TS removes the bead from the scene on Go's echo (edge-gone / pulse-cancelled message), not on its own — Go is authoritative about whether the pulse delivered or was dropped.</li>
-              <li>The existing <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> handler (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">stdin_reader.go</span> → Reset only) must be REWRITTEN: it was built for TS-triggered delivery and only drops the bead + frees a parked sender. It now must atomically cancel the wire's clock-driven delivery (deleted wire never delivers) AND emit a pulse-cancelled echo so TS removes the bead. Reset alone is no longer sufficient.</li>
-            </ul>
-          </li>
+          <li><strong>Note:</strong> edge RECONNECT is a network redesign — scope separately; target-end = delete+create, source-end needs a new rewire IPC verb.</li>
+          <li><strong>Delete edge with a pulse in flight:</strong> Go atomically cancels clock-delivery and drops the bead (Reset) before the pulse reaches the destination; emits <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">pulse-cancelled</span> echo so TS removes the bead. The existing <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> handler (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">stdin_reader.go</span> → Reset only) must be rewritten — Reset alone is no longer sufficient.</li>
         </ul>
       </div>
 
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card4">☐</button>Phase 4 · Shading data into Go</h3>
         <ul>
-          <li><strong>Go:</strong> hold material/color/fill/stroke (already partly in NODE_DEFS data), glass/material parameters, and environment/lighting parameters as data.</li>
-          <li><strong>TS:</strong> receive shading parameters and apply them to GPU materials; bake the environment map on the GPU from Go-supplied parameters (the bake itself is a GPU op and stays in TS).</li>
-          <li><strong>Exit:</strong> appearance is driven entirely by Go data; TS only executes GPU material setup.</li>
+          <li><strong>Go:</strong> hold material/color/fill/stroke (partly in NODE_DEFS already), glass/material parameters, and environment/lighting parameters as data.</li>
+          <li><strong>TS:</strong> receive shading parameters, apply to GPU materials; bake environment map on the GPU from Go-supplied parameters.</li>
+          <li><strong>Exit:</strong> appearance driven entirely by Go data; TS only executes GPU material setup.</li>
         </ul>
       </div>
 
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card5">☐</button>Phase 5 · Bridge → CRUD + docs</h3>
         <ul>
-          <li>Reshape the bridge into plain CRUD: data stream out (geometry + shading + position); edits in (create/update/delete geometry + animation updates); pause/resume as a control signal.</li>
-          <li>Delete the notifyDelivered message and its Go stdin handler entirely.</li>
+          <li>Reshape bridge into plain CRUD: data stream out (geometry + shading + position); edits in (create/update/delete geometry + animation updates); pause/resume as a control signal.</li>
+          <li>Delete <code>notifyDelivered</code> and its Go stdin handler entirely.</li>
           <li>Run message-kind parity (Go stdin_reader ↔ TS WEBVIEW_TO_HOST_TYPES), no-TS-timers, and slot-phase-boundary guards.</li>
           <li>Finalize MODEL.md (Driver, Cross-boundary, Geometry/time, Editor-surface) and CLAUDE.md (pump description, bridge surface, drift rule) in this commit.</li>
-          <li>No await / no Promises on the TS→Go path. TS communication to Go is fire-and-forget: write a message to the pipe Go reads (stdin) and return immediately. TS never awaits a Go response and never blocks on Go. Inbound data from Go is handled as separate independent messages (write to buffer, return). No request/response, no promise chains gating other work.</li>
-          <li>Fold <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> into the generic CRUD edit path — remove it as a bespoke verb. Edge deletion becomes a delete edit like any other geometry change; the clock-cancel + pulse-cancelled echo from Phase 3 ride along. One CRUD shape, not per-operation verbs.</li>
+          <li>No await / no Promises on the TS→Go path — fire-and-forget; never block on Go; no request/response.</li>
+          <li>Fold <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> into the generic CRUD edit path — one CRUD shape, not per-operation verbs; clock-cancel + pulse-cancelled echo from Phase 3 ride along.</li>
         </ul>
       </div>
     </div>
