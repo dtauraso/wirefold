@@ -1047,6 +1047,14 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-decisions">☐</button><strong>Decisions (not yet musts):</strong> fade reachability fixpoint — the per-wire fade flag is already Go (<code style="font-family:var(--mono);font-size:11px;">paced_wire.go</code>: <code style="font-family:var(--mono);font-size:11px;">SetFaded</code> plus the fade broadcast), but the reachability TS computes is not. Label-display heuristics (nearest-N-to-camera, occlusion counts) — Go once it owns the camera, or stay TS render glue.</div>
+
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-libs">☐</button><strong>Go libraries.</strong> One real dependency plus the stdlib:
+      <ul style="margin-top:0.5rem;padding-left:1.25rem;">
+        <li style="margin-bottom:0.5rem;"><code style="font-family:var(--mono);font-size:11px;">github.com/go-gl/mathgl/mgl64</code> — Go's GLM port; the 3D-math medium. Camera: <code style="font-family:var(--mono);font-size:11px;">Perspective</code>, <code style="font-family:var(--mono);font-size:11px;">LookAtV</code>, <code style="font-family:var(--mono);font-size:11px;">Quat</code> / <code style="font-family:var(--mono);font-size:11px;">Vec3</code> (build and stream the view). Picking: <code style="font-family:var(--mono);font-size:11px;">UnProject</code> (pointer to world ray). Bezier eval and AABB: <code style="font-family:var(--mono);font-size:11px;">Vec3</code> lerps and min/max. (<code style="font-family:var(--mono);font-size:11px;">mgl64</code> matches the existing float64 node positions; <code style="font-family:var(--mono);font-size:11px;">mgl32</code> if you prefer GPU-native floats.)</li>
+        <li style="margin-bottom:0.5rem;">stdlib <code style="font-family:var(--mono);font-size:11px;">time</code> — the monotonic clock (Chain 1, clock + per-frame stepping). Not a 3D problem; no dependency.</li>
+        <li>Hand-rolled on top of mathgl: ray-sphere intersection (a ~10-line quadratic; nodes are spheres) and bezier eval over the existing control points. No standalone ray library needed — the geometry is simple.</li>
+      </ul>
+      Medium vs substance: mathgl is the medium — grab it, it is the GLM-idiomatic standard. The camera control feel and picking policy are substance — author them on mathgl's primitives; do not adopt a Go camera-controller library (the OrbitControls lesson). Reject <code style="font-family:var(--mono);font-size:11px;">g3n/engine</code> too: it has a camera and raycaster but drags an OpenGL renderer you will not use — wrong-sized dependency.</div>
   </div>
 
   <!-- TAB 8: Doc Updates -->
