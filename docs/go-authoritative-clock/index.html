@@ -479,7 +479,7 @@
   <!-- TAB: Goroutines -->
   <div class="panel" id="panel-goroutines" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:h2">☐</button>What each goroutine does.</h2>
-    <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes and the wires: each node — and each wire — is its own small loop on its own goroutine, coordinating only through channels. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges.</p>
+    <p>Go does not run one scheduler ticking everything in lockstep. The concurrency <em>is</em> the nodes and the wires: each node — and each wire — is its own small loop on its own goroutine, coordinating only through channels. There is no global clock goroutine and no central round. A handful of singleton goroutines handle I/O around the edges. Active set: four goroutines — Input loop (in08), i0 loop (ChainInhibitor), i1 loop (ChainInhibitor), and PacedWire (i0&rarr;i1).</p>
 
     <table class="spec-table" id="goroutines-table">
       <caption>The goroutines</caption>
@@ -498,17 +498,24 @@
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
-            <td><ol><li>Hold a read head at init index i (the current input item).</li><li>Wait for a signal from another node to check the current input — in08 may not advance the read head, or send, without it.</li><li>Advance the read head to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat), then wait for the next signal.</li></ol></td>
+            <td><ol><li>Read the signal on the wire i0-&gt;in08 (1 or 0).</li><li>i += signal — 1 advances the read head, 0 holds it.</li><li>Send Init[i] on the wire in08-&gt;i0.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">2</td>
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-            <td>ChainInhibitor loop</td>
-            <td>one per ChainInhibitor node</td>
-            <td><ol><li>Check every ToNext output wire; if any still carries a pulse, restart the loop and wait — it does not consume its input yet.</li><li>When all outputs are clear, take the pulse from FromPrevChainInhibitorNode and consume it — clear its slot and mark the delivering wire clear.</li><li>Spawn one goroutine per ToNext port to fan out the held value concurrently; each sends the value on the channel to its wire, only once the PacedWire for that output is clear, never dropping.</li><li>Store the value as Held and loop.</li></ol></td>
+            <td>i0 loop</td>
+            <td>one (i0)</td>
+            <td><ol><li>Read a value v from in08 on the wire in08-&gt;i0, if a pulse arrived this round.</li><li>If v differs from the held value: set held = v and send 1 on the wire i0-&gt;in08. Otherwise (v same as held, or no pulse this round): send 0 on i0-&gt;in08. (held inits to -1.)</li><li>Send the held value on the wire i0-&gt;i1.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
+          </tr>
+          <tr>
+            <td class="enum">3</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+            <td>i1 loop</td>
+            <td>one (i1)</td>
+            <td><ol><li>Receive i0's held value on the wire i0-&gt;i1.</li><li>Its output wires are inactive in this config, so i1 is a sink — it holds the received value and produces nothing downstream. (Behavior beyond receiving is not yet specified.)</li></ol></td>
           </tr>
         <tr>
-          <td class="enum">3</td>
+          <td class="enum">4</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire loop</td>
           <td>goroutine — one per destination input port</td>
@@ -517,7 +524,7 @@
       </tbody>
     </table>
 
-    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note1">☐</button><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is the only wire goroutine kind. It owns clear/busy state: placing a bead makes it busy; the destination's consume marks it clear.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note1">☐</button><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is the only wire goroutine kind. It owns clear/busy state: placing a bead makes it busy; the destination's consume marks it clear. <strong>Note:</strong> the two handshake wires in08&rarr;i0 and i0&rarr;in08 carry <em>multiple</em> pulses in flight at once (each its own value), unlike the single-pulse consumeGated PacedWire — they are direct channels, not paced wires.</div>
 
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note2">☐</button>Where the clock change lands: in the target model each wire loop (PacedWire) wakes about every 16&nbsp;ms to advance its bead, emit the bead's position, and self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note3">☐</button><strong>Geometry is Go's; TS only draws it.</strong> Beyond the per-bead position stream, the static geometry — node and port world-positions, edge curve control points, arc lengths — is derived in Go at load and re-derived on each edit (node-move, addEdge), then emitted to TS over the same out-stream. TS plots all of it and computes none.</div>
@@ -526,39 +533,58 @@
   <!-- TAB: Goroutine graph -->
   <div class="panel" id="panel-goroutinegraph" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:h2">☐</button>The goroutines, wired.</h2>
-    <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel and holds clear/busy state; the destination's consume marks it clear. Nodes and wires are all goroutines &mdash; they touch only through channels.</p>
+    <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel and holds clear/busy state; the destination's consume marks it clear. Nodes and wires are all goroutines &mdash; they touch only through channels. The in08&harr;i0 handshake wires are direct channels (multi-pulse), not PacedWires.</p>
     <div class="diagram">
 <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="goroutinegraph:svg1">☐</button>
-<svg width="760" height="210" viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" aria-label="The active subgraph as goroutine loops. A wired unit at top: ChainInhibitor loop i0 sends a bead over a channel to a PacedWire goroutine, which delivers it to ChainInhibitor loop i1; the PacedWire owns clear/busy state and i1's consume marks it clear. Below, disconnected: Input loop in08 is an active source whose only wired output is inactive in this config, so it has no active downstream.">
-  <line x1="184" y1="63" x2="291" y2="63" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
-  <text x="237" y="55" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">send</text>
-  <line x1="449" y1="63" x2="556" y2="63" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
-  <text x="502" y="55" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">deliver</text>
-  <rect x="24" y="30" width="160" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="104" y="64" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
-  <text x="104" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i0</text>
-  <rect x="576" y="30" width="160" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="656" y="64" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
-  <text x="656" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i1</text>
-  <rect x="291" y="30" width="158" height="66" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
-  <text x="370" y="54" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
-  <text x="370" y="69" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
-  <line x1="316" y1="84" x2="424" y2="84" stroke="#3a5290" stroke-width="1"/>
-  <circle cx="388" cy="84" r="3.5" fill="#7c9ef8"/>
-  <text x="430" y="87" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">&#9654;</text>
-  <rect x="24" y="140" width="200" height="56" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="124" y="166" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">Input loop</text>
-  <text x="124" y="184" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
-  <text x="240" y="160" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#6a6a78">active source &mdash;</text>
-  <text x="240" y="174" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#6a6a78">its only wired output is inactive</text>
-  <text x="240" y="188" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#6a6a78">in this config (no active downstream)</text>
+<svg width="760" height="300" viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" aria-label="The active subgraph as goroutine loops. Top row: Input loop in08 is connected bidirectionally to ChainInhibitor loop i0 via two direct channels (in08 to i0 labeled 'value'; i0 to in08 labeled '1/0'). Below that, i0 connects via a PacedWire goroutine to ChainInhibitor loop i1 (wire labeled 'held'). i1 is a sink with no active downstream.">
   <defs>
+    <marker id="arrG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
     <marker id="arrB" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#7c9ef8"/></marker>
   </defs>
+
+  <!-- in08 node -->
+  <rect x="40" y="30" width="180" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="130" y="61" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">Input loop</text>
+  <text x="130" y="79" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
+
+  <!-- i0 node -->
+  <rect x="380" y="30" width="200" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="480" y="55" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
+  <text x="480" y="73" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i0</text>
+  <text x="480" y="88" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d5a50">(held inits -1)</text>
+
+  <!-- in08->i0 arrow (value), slightly above center -->
+  <line x1="221" y1="55" x2="378" y2="55" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
+  <text x="299" y="48" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">value</text>
+
+  <!-- i0->in08 arrow (1/0), slightly below center -->
+  <line x1="379" y1="70" x2="222" y2="70" stroke="#c47c5e" stroke-width="1.5" marker-end="url(#arrOrange)"/>
+  <text x="299" y="84" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#c47c5e">1 / 0</text>
+  <defs>
+    <marker id="arrOrange" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c47c5e"/></marker>
+  </defs>
+
+  <!-- PacedWire node (i0->i1) -->
+  <rect x="290" y="170" width="158" height="56" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
+  <text x="369" y="196" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
+  <text x="369" y="212" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
+
+  <!-- i1 node -->
+  <rect x="530" y="170" width="200" height="56" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="630" y="196" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
+  <text x="630" y="213" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i1 (sink)</text>
+
+  <!-- i0 -> PacedWire -->
+  <line x1="480" y1="97" x2="410" y2="169" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="462" y="140" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">held</text>
+
+  <!-- PacedWire -> i1 -->
+  <line x1="449" y1="198" x2="528" y2="198" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="488" y="191" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">deliver</text>
 </svg>
     </div>
-    <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward). A bead track marks a wire goroutine; arrows are channels. The forward bead is paced (arcLength &divide; pulseSpeed on Go's clock); the PacedWire owns clear/busy state and the destination's consume marks it clear.</div>
-    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>The active subgraph, as loops.</strong> The wired unit at top is the i0 &rarr; i1 ChainInhibitor edge &mdash; one PacedWire. in08 is a separate active source: its only wired output is inactive in this config, so it sits disconnected with no active downstream. Every active edge is one PacedWire.</div>
+    <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = a node-loop goroutine; blue = the PacedWire (forward); orange = i0&rarr;in08 signal (1/0). Arrows are channels. The handshake wires (in08&harr;i0) are direct multi-pulse channels; the i0&rarr;i1 wire is a single-pulse PacedWire. The PacedWire owns clear/busy state and the destination's consume marks it clear.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>The active subgraph, as loops.</strong> in08 and i0 are connected by a bidirectional handshake: in08 sends Init[i] (value) to i0; i0 sends 1 (held changed) or 0 (held same) back to in08. i0 also forwards its held value to i1 via a PacedWire. i1 is a sink — no active downstream.</div>
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note3">☐</button><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
   </div>
 
@@ -1203,6 +1229,9 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
     <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
       <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note10">☐</button><span style="color:var(--good);font-weight:700;">2026-06-08 &mdash; active set reduced to in08 + i0 + i1 (edge i0&rarr;i1).</span> <code style="font-family:var(--mono);font-size:11px;">bootstrap_rg</code>, <code style="font-family:var(--mono);font-size:11px;">readGate1</code>, and <code style="font-family:var(--mono);font-size:11px;">inhibitRight0</code> moved to <code style="font-family:var(--mono);font-size:11px;">topology.inactive.json</code>. The spec was trimmed to the active nodes: the Goroutines tab dropped the Bootstrap, ReadGate, and InhibitRightGate rows (survivors renumbered 1 Input / 2 ChainInhibitor / 3 PacedWire); the in08 Input row lost its readGate send step; the W (coincidence window) note was removed (its only subjects were ReadGate and InhibitRightGate; ChainInhibitor does not use W); and the Goroutine-graph diagram + its "tiles" note were reworked to the active subgraph &mdash; the i0&rarr;i1 ChainInhibitor edge plus in08 as a disconnected active source. The active subgraph is honestly disconnected: in08's only wired output (to readGate1) is now inactive, and i0&rarr;i1 is a separate active chain. <em>Note (in08 row):</em> step 2 still says in08 "may not advance the read head, or send, without it" &mdash; it now references a send with no send step in the row (the send step was the deleted readGate step); left verbatim per scope. General-mechanism spots that merely <em>illustrate</em> with an inactive node were left intact and flagged, not gutted: the Phase 1 scope (in08 &rarr; readGate1 migration slice), the Clock-Change Before/After diagrams, and the Overview "where each property lives" table.
+    </div>
+    <div class="note" style="border-left:3px solid var(--good);margin-top:0.75rem;">
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note11">☐</button><span style="color:var(--good);font-weight:700;">2026-06-08 &mdash; in08&harr;i0 handshake added.</span> in08 does i += (i0&rsquo;s 1/0 signal) and sends Init[i] to i0; i0 sends 1 when its held value changes (held copies in08&rsquo;s value, init &minus;1) else 0, and forwards held to i1; both nodes run slowly (pacing interval). <strong>NEW:</strong> the in08&harr;i0 wires are multi-pulse direct channels, deviating from the single-pulse PacedWire &mdash; track. <strong>OPEN:</strong> i1&rsquo;s behavior beyond receiving is unspecified.
     </div>
     <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Mostly consistent, three open items.</strong> Verified consistent across all tabs: clock ownership (Go), position computation (Go), wire pacing (sim-clock &mdash; the ~16 ms sleep is report rate only, not speed), and play/pause &mdash; no conflicts there. What's left after this session's redesign is the residual <strong>"slot"</strong> vocabulary in target-model descriptions: findings #5 (Goroutines ChainInhibitor loop), #6 (Concept table), and #7 (Clock-Change After diagram). Each is a one-line reword to node-local held state / channel delivery; migration-tab "Before" references to the old slot model are intentional and stay.</div>
   </div>
