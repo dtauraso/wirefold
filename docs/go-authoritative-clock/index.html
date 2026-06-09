@@ -500,7 +500,7 @@
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
-            <td><ol><li>Read the value readGate1 sends back on the edge readGate1ToIn08.</li><li>If the value is 1: send Init[i] on in08ToReadGate1 into readGate1's FromInput port — the same Init[i] each pass while the value stays 1 (readGate treats the repeats as the same input, not a new value).</li><li>If the value is 0: advance to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat).</li></ol></td>
+            <td><ol><li>Hold a read head at init index i (the current input item).</li><li>Wait for a signal from another node to check the current input — in08 may not advance the read head, or send, without it.</li><li>On the signal: send one bead of Init[i] to readGate1's FromInput port — one bead, one time.</li><li>Advance the read head to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat), then wait for the next signal.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">2</td>
