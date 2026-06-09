@@ -204,6 +204,11 @@
   #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 110px; white-space: normal; }
   #panel-tscode .spec-table td, #panel-tscode .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
 
+  /* Verify panel: keep the 3-col table inside the panel (col 2 defaults to nowrap) */
+  #panel-verify .spec-table { table-layout: fixed; }
+  #panel-verify .spec-table th, #panel-verify .spec-table td { white-space: normal; word-break: break-word; }
+  #panel-verify .spec-table th:first-child, #panel-verify .spec-table td:first-child { width: 120px; }
+
   /* Cards */
   .cards {
     display: flex;
