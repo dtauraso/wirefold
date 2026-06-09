@@ -62,30 +62,9 @@ renderer is told where the bead is, not asked when it has arrived.
   reads that one channel and accumulates received beads in node-local
   state. Distinct inputs are distinct channels.
 
-## Send gating
+## Sending
 
-A source places a bead on a forward wire only when that wire is **clear**.
-The PacedWire owns its clear/busy state: placing a bead makes the wire
-busy; the wire becomes clear again when the destination node has consumed
-the delivered bead. There is no separate signaling entity in the network —
-the wire's state is the gate.
-
-Two send rules exist, node-owned, per output port, at
-`node.data.sendRules` (a map: output-port-name → rule):
-
-- **`consumeGated`** (default) — the source sends only when the wire is
-  clear; if it is busy, the source holds the bead and tries again on its
-  next loop pass. Nothing is dropped.
-- **`fireAndForget`** — the source sends if the wire is clear; if it is
-  busy, the source drops the send and moves on.
-
-The rule lives on the source node, keyed by outgoing port name. The wire
-carries no rule. One node may use different rules on different outgoing
-ports, and the rule survives edge deletion because it lives on the node,
-not the edge. A wire starts clear, so the first send needs no bootstrap.
-
-> **Needs confirmation.** The shape of the consume signal — how the
-> destination node marks the wire clear — is not yet pinned in code.
+A node places a bead on its outgoing wire whenever its own rule says to. It does not check the wire's state and does not wait on the destination — there is no clear/busy state, no acknowledgment, no back-pressure. A wire may carry more than one bead at once, each its own value; it transports whatever the source emits, and the destination reads whatever arrives. Coordination between nodes is the topology and each node's local rule, not a delivery guarantee between the two.
 
 > **Needs confirmation.** How a node times a firing window (whether a
 > firing rule may span a duration, or fires purely on held-state
@@ -110,8 +89,8 @@ global gate halts or resumes wire animation. There is no central walker.
 
 There is no global round, tick, or simultaneity layer. The network does
 not count rounds or align activity to a shared clock. Coordination
-between nodes happens through each source node's per-output-port send
-rule and the wires' clear/busy state — not through a shared time concept. Any
+between nodes happens through the values nodes place on wires and the
+topology — not through a shared time concept or a delivery handshake. Any
 reasoning that treats activity as a sequence of globally-aligned rounds
 is drift; re-derive from local rules over channels and wires.
 
@@ -121,13 +100,13 @@ The model lives entirely in Go. The TS/React layer is **render-only**:
 it receives bead positions from Go and draws them. It never sets node
 state and never tells Go when a bead has arrived — Go owns the clock.
 
-- **Go runtime** owns all node-local held state, firing rules, wire
-  traversal timing, and send gating. It emits trace events (bead
+- **Go runtime** owns all node-local held state, firing rules, and wire
+  traversal timing. It emits trace events (bead
   positions and node events) as JSON lines on stdout.
 - **`pump.ts`** (`tools/topology-vscode/src/webview/three/pump.ts`) is
   the sole translator: it reads trace events from the extension bridge
   and updates state stores (pulse-state, three/store) so the 3D renderer
-  can animate them. Pump is the boundary — no firing-rule or send-gating
+  can animate them. Pump is the boundary — no firing-rule
   logic may live outside it on the TS side.
 - **`GraphNode`** (in
   `tools/topology-vscode/src/webview/three/scene-content.tsx`) renders
@@ -152,7 +131,7 @@ state and never tells Go when a bead has arrived — Go owns the clock.
 
 ## Drift rule
 
-Send-gating, traversal-timing, or firing-rule logic outside the Go node
+Traversal-timing or firing-rule logic outside the Go node
 and wire goroutines (or `pump.ts` for render translation) is drift —
 move it back into Go.
 
@@ -160,8 +139,6 @@ move it back into Go.
 
 - bead, in-flight, held (node-local) state
 - channel, input port, output port, fan-in
-- wire clear, wire busy
-- send rule, `consumeGated`, `fireAndForget`, `node.data.sendRules`
 - arc length, pulse speed, in-flight traversal time (the one permitted
   duration)
 - clock (the one system monotonic clock Go reads)

@@ -8,12 +8,10 @@ read [MODEL.md](MODEL.md). It pins the model. Do not propose multi-step
 plans with options for network/wire work; state the next single concrete
 step and wait.
 
-## Core concepts and send gating
+## Core concepts
 
 These live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
-partition nodes, AND-gate tree, lateral inhibition, and send gating
-(`consumeGated`/`fireAndForget`, node-owned per output port; the wire's
-clear/busy state is the gate). The
+partition nodes, AND-gate tree, and lateral inhibition. The
 "Model" pointer at the top of this file is the only entry point you need.
 
 ## Primitive landing rule (narrowed)
@@ -36,7 +34,7 @@ added to `WireProps` in `wire-defs.ts` and threaded through `SingleEdgeTube` in 
 same commit it is used; otherwise the editor path is silently incomplete.
 
 **Drift rule:** if TS code outside `pump.ts` starts accumulating
-send-gating, traversal-timing, or firing-rule logic, that is drift —
+traversal-timing or firing-rule logic, that is drift —
 those belong in Go.
 
 ## Node kinds
