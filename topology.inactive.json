@@ -1,72 +1,47 @@
 {
-  "_note": "Parked content moved out of topology.json so only in08, bootstrap_rg, and readGate1 are active. The editor never reads this file, so it survives editor saves. Restore by copying objects back into topology.json. in08's init was reduced from [0,1] to [0]; the removed value is recorded below.",
-  "in08InitRemoved": [1],
+  "_note": "Parked/inactive content. The editor never reads this file, so it survives editor saves. Active set is in08 + i0 + i1 with edge i0->i1; everything here is inactive. Restore by copying objects back into topology.json.",
   "nodes": [
     {
-      "id": "i0",
-      "type": "ChainInhibitor",
+      "id": "bootstrap_rg",
+      "type": "Input",
       "data": {
-        "state": {
-          "held": 0
-        },
-        "sendRules": {
-          "ToNext1": "fireAndForget"
-        }
+        "init": [
+          1
+        ],
+        "repeat": false
       },
-      "inputs": [
-        {
-          "name": "FromPrevChainInhibitorNode",
-          "kind": "chain",
-          "side": "left",
-          "slot": 1
-        }
-      ],
       "outputs": [
         {
-          "name": "ToNext0",
+          "name": "ToReadGate",
           "kind": "chain",
-          "side": "bottom",
+          "side": "right",
           "slot": 1
-        },
-        {
-          "name": "ToNext1",
-          "kind": "inhibit-in",
-          "side": "left",
-          "slot": 2
         }
       ]
     },
     {
-      "id": "i1",
-      "type": "ChainInhibitor",
-      "data": {
-        "state": {
-          "held": 0
-        },
-        "sendRules": {
-          "ToNext0": "fireAndForget"
-        }
-      },
+      "id": "readGate1",
+      "type": "ReadGate",
       "inputs": [
         {
-          "name": "FromPrevChainInhibitorNode",
+          "name": "FromInput",
           "kind": "chain",
-          "side": "top",
+          "side": "left",
           "slot": 1
+        },
+        {
+          "name": "FromChainInhibitor",
+          "kind": "chain",
+          "side": "bottom",
+          "slot": 0
         }
       ],
       "outputs": [
         {
-          "name": "ToNext0",
-          "kind": "inhibit-in",
-          "side": "left",
-          "slot": 0
-        },
-        {
-          "name": "ToNext1",
+          "name": "ToChainInhibitor",
           "kind": "chain",
-          "side": "bottom",
-          "slot": 2
+          "side": "top",
+          "slot": 0
         }
       ]
     },
@@ -97,6 +72,30 @@
   ],
   "edges": [
     {
+      "id": "in08ToReadGate1",
+      "source": "in08",
+      "sourceHandle": "ToReadGate",
+      "target": "readGate1",
+      "targetHandle": "FromInput",
+      "kind": "chain",
+      "label": "in08ToReadGate1",
+      "data": {
+        "slots": 1
+      }
+    },
+    {
+      "id": "bootstrapRgToReadGate1",
+      "source": "bootstrap_rg",
+      "sourceHandle": "ToReadGate",
+      "target": "readGate1",
+      "targetHandle": "FromChainInhibitor",
+      "kind": "chain",
+      "label": "bootstrapRgToReadGate1",
+      "data": {
+        "slots": 1
+      }
+    },
+    {
       "id": "readGate1ToI0",
       "source": "readGate1",
       "sourceHandle": "ToChainInhibitor",
@@ -104,18 +103,6 @@
       "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
       "label": "readGate1ToI0",
-      "data": {
-        "slots": 1
-      }
-    },
-    {
-      "id": "i0ToI1",
-      "source": "i0",
-      "sourceHandle": "ToNext0",
-      "target": "i1",
-      "targetHandle": "FromPrevChainInhibitorNode",
-      "kind": "chain",
-      "label": "i0ToI1",
       "data": {
         "slots": 1
       }

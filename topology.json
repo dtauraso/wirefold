@@ -5,7 +5,8 @@
       "type": "Input",
       "data": {
         "init": [
-          0
+          0,
+          1
         ],
         "repeat": true
       },
@@ -19,71 +20,83 @@
       ]
     },
     {
-      "id": "readGate1",
-      "type": "ReadGate",
+      "id": "i0",
+      "type": "ChainInhibitor",
+      "data": {
+        "state": {
+          "held": 0
+        },
+        "sendRules": {
+          "ToNext1": "fireAndForget"
+        }
+      },
       "inputs": [
         {
-          "name": "FromInput",
+          "name": "FromPrevChainInhibitorNode",
           "kind": "chain",
           "side": "left",
           "slot": 1
-        },
-        {
-          "name": "FromChainInhibitor",
-          "kind": "chain",
-          "side": "bottom",
-          "slot": 0
         }
       ],
       "outputs": [
         {
-          "name": "ToChainInhibitor",
+          "name": "ToNext0",
           "kind": "chain",
-          "side": "top",
-          "slot": 0
+          "side": "bottom",
+          "slot": 1
+        },
+        {
+          "name": "ToNext1",
+          "kind": "inhibit-in",
+          "side": "left",
+          "slot": 2
         }
       ]
     },
     {
-      "id": "bootstrap_rg",
-      "type": "Input",
+      "id": "i1",
+      "type": "ChainInhibitor",
       "data": {
-        "init": [
-          1
-        ],
-        "repeat": false
+        "state": {
+          "held": 0
+        },
+        "sendRules": {
+          "ToNext0": "fireAndForget"
+        }
       },
+      "inputs": [
+        {
+          "name": "FromPrevChainInhibitorNode",
+          "kind": "chain",
+          "side": "top",
+          "slot": 1
+        }
+      ],
       "outputs": [
         {
-          "name": "ToReadGate",
+          "name": "ToNext0",
+          "kind": "inhibit-in",
+          "side": "left",
+          "slot": 0
+        },
+        {
+          "name": "ToNext1",
           "kind": "chain",
-          "side": "right",
-          "slot": 1
+          "side": "bottom",
+          "slot": 2
         }
       ]
     }
   ],
   "edges": [
     {
-      "id": "in08ToReadGate1",
-      "source": "in08",
-      "sourceHandle": "ToReadGate",
-      "target": "readGate1",
-      "targetHandle": "FromInput",
+      "id": "i0ToI1",
+      "source": "i0",
+      "sourceHandle": "ToNext0",
+      "target": "i1",
+      "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
-      "label": "in08ToReadGate1",
-      "data": {
-        "slots": 1
-      }
-    },
-    {
-      "id": "bootstrapRgToReadGate1",
-      "source": "bootstrap_rg",
-      "sourceHandle": "ToReadGate",
-      "target": "readGate1",
-      "targetHandle": "FromChainInhibitor",
-      "kind": "chain",
-      "label": "bootstrapRgToReadGate1",
+      "label": "i0ToI1",
       "data": {
         "slots": 1
       }
