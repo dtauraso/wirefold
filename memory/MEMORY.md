@@ -11,6 +11,7 @@ These rarely change; skim once per session and apply throughout.
 - [feedback_bash_cwd_persistence.md](feedback_bash_cwd_persistence.md) — Bash cwd persists across calls; use absolute paths for destructive ops
 - [feedback_feature_audit_two_layers.md](feedback_feature_audit_two_layers.md) — Feature-audit removals need both data.js and the hand-authored features/<slug>.html page; rendered page caches data.js
 - [feedback_finish_calibrated_work.md](feedback_finish_calibrated_work.md) — Once scope/style are agreed, finish every in-scope item; don't stop one short to ask
+- [feedback_text_wall_is_structural_not_word_count.md](feedback_text_wall_is_structural_not_word_count.md) — "Text wall" is structural density, not word count; detect by structure, fix to the git pattern, leave algorithm steps alone
 
 ## Active (project/substrate state — may go stale, re-verify against code)
 
