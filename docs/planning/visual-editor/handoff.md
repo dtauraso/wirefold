@@ -7,57 +7,76 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-07 — task/spec-go-backend-ts-frontend, pushed; MODEL.md LEADS the code; THE CLOCK IS NOW A PINNED MODEL ENTITY)
+## State at handoff (2026-06-08 — task/spec-go-backend-ts-frontend, pushed; MODEL SHIFT: send-gating removed, local-units/no-guarantees, active net in08/i0/i1)
 
-- Active branch: `task/spec-go-backend-ts-frontend`, pushed, tree clean. Latest pushed commit: `26c270e7`. **No Go/TS code changed this session** — docs only. `topology.json` untouched.
+- Active branch: `task/spec-go-backend-ts-frontend`, pushed, tree clean. Latest pushed commit: `b33d7349`.
+- **NOTE:** `topology.json` has the git skip-worktree bit SET — editor churn stays out of git. Deliberate changes require `git update-index --no-skip-worktree topology.json` first, then re-set after.
 
-- **THE CLOCK IS NOW A PINNED MODEL ENTITY (this session's headline).** MODEL.md "What things are" gains a **Clock** bullet: the system monotonic clock Go reads — exactly ONE clock; all other timing is arithmetic in code on its deltas (`distanceCovered += pulseSpeed × Δ`; `inFlightTime = arcLength / pulseSpeed` is derived, not a second timer); the play/pause gate stops the arithmetic, not the clock; nodes do not read the clock; the ~16 ms emit is a render cadence. Allowed vocabulary adds `clock (the one system monotonic clock Go reads)`. **`sim-time`/`sim-clock` were rejected** as reifying a second time concept and purged from all target-model surfaces (MODEL.md, spec doc ×6, handoff ×2). One residual `sim-clock` remains in the spec doc's Inconsistencies tracker note (~L1249) — fold the one-word `sim-clock`→`clock` fix into the #5/#6/#7 cleanup commit.
+### The model shift (this session's headline)
 
-- **Spec doc clock additions.** The clock lands in both division surfaces: row 4 of the Overview "Where each property lives" table, and a "Reads the one clock" line in the Go-backend responsibilities list. The TS card already said "no geometry math, no animation calculation, no clock" — both halves of the division now name the clock explicitly.
+This session fundamentally simplified the pinned model, away from delivery/coordination machinery toward local units with no guarantees:
 
-- **Goroutines tab reordered and rows 1–3 audited against code.** Order: 1 main, 2 trace drain, 3 stdin reader, 4–8 node loops (Input, Bootstrap, ReadGate, ChainInhibitor, InhibitRightGate), 9 PacedWire. Rows 1–3 were verified step-by-step against `main.go` / `Trace/Trace.go` / `stdin_reader.go`; six inaccuracies fixed: NewWithSink-before-LoadTopology order; false "initial geometry emitted to TS at startup"; `tr.Close()` blocks on `<-t.done`; `addEdge` only calls `pw.Restore()`, derives no curve/arc length; node-move handlers emit nothing to TS; stdin reader stops on `ctx.Done()`/stdin EOF — not "never stopping". Rows 1–3 checkmarks removed (plumbing the spec changes won't touch these rows; same rationale as the Clock-Change "Before" diagram drop in `80373502`).
+- **Send-gating was REMOVED** from MODEL.md (the `## Send gating` section is gone, replaced by `## Sending`: a node places a bead on its outgoing wire whenever its own rule says to — no clear/busy, no ack, no back-pressure; a wire may carry more than one bead at once; coordination is the topology, not a delivery guarantee). The removal swept CLAUDE.md (the `## Core concepts and send gating` heading + drift rule) and the spec doc too. The Go code still implements the OLD send-gating (consumeGated/clear-busy) — that is the pending rewrite.
 
-- **Candidate finding #8 (not yet decided).** Three of the six row-1–3 errors shared the same shape: target-model "emits geometry to TS" claims embedded in rows that otherwise describe current code. David hasn't said whether to open it as finding #8 in the Inconsistencies tab.
+- **The conceptual conclusion** (present for context, deliberately NOT pinned as doctrine): the topology can be unreliable but the node must be reliable; a node trusts and owes only its own input-handling and output (totality in, no guarantees out); reliability lives in the node, not the channel; forcing reliability onto the channel generated the deadlock/seed/coupling. David asked NOT to add these principles to MODEL.md/memory ("don't add these things") — they are meant to manifest in the code/structure, not in prose. A future session should NOT re-pitch pinning them.
 
-- **Session commits, all pushed:** `7ba745e6` (Clock defined in MODEL.md + division table), `b74d7d8f` (one-clock reword), `c9add08c` (clock in Go-backend list), `229eb6f7` (trace drain to item 2), `7a8e33ae` (stdin reader to item 3), `fbc5f96c` (rows 1–3 audited vs code), `ae1e86bb` (rows 1–3 checkmarks dropped), `f1ddfded` (handoff re-render), `15245833` (send steps gate on the PacedWire; no round vocabulary), `78d7e5da` (ack concept removed — send gating is wire-owned clear/busy), `9fca7a84` (handoff fold-in), `26c270e7` (input-loop send step: the "ToReadGate wire" shorthand expanded to its referent — edge `in08ToReadGate1`, this node's `ToReadGate` output port → `readGate1.FromInput`; step reorganized as if-clear / if-busy sentences).
+- **The "neuron" analogy** was used in conversation then scrubbed: removed from the memory file (renamed `feedback_node_model_not_networking_handshake.md`) AND from commit messages via a history rewrite (force-push with `--force-with-lease`; trees verified byte-identical). Zero "neuron" in content or history.
 
-- **2026-06-07 (later): the ack concept was REMOVED from the model** (no ack edge/wire, no ok, no consume-ack, no seed); the PacedWire owns clear/busy and the destination's consume marks it clear; MODEL.md/CLAUDE.md/spec doc swept in the same commit. Two additional facts: (a) residual "ack" mentions survive ONLY as past-tense records — this handoff's history lines and two Inconsistencies-tracker entries in index.html (~L1219/L1240); MODEL.md/CLAUDE.md/README have zero. (b) Two e2e test topologies wire into a port literally named `readGate.ack` (`tools/topology-vscode` e2e: `scenario-ring-animates.spec.ts`, `scenario-edge-seed.spec.ts`) — old-model code, untouched; that port name is renamed when the code rewrite lands.
+- **Clock** was pinned earlier this session: one system monotonic clock Go reads; all other timing is code arithmetic on its readings (`pulseSpeed` = the human-speed slowdown).
 
-- **CRUCIAL — MODEL.md now LEADS the code.** MODEL.md describes the **TARGET**. The Go/TS code still implements the **OLD** model (one passive `PacedWire` per destination input port: lock+cond monitor; `Send` blocks while in-flight; `WaitConsumed`; delivery triggered by TS via `NotifyDelivered`; a slot on the wire). The model→code direction is reversed from the usual: the doc is ahead, the code rewrite is pending. Until the code lands, MODEL.md is the source of truth for the **target**, and the actual runtime behaves per the old model — read both with that gap in mind.
+- **Memory added:** `memory/feedback_node_model_not_networking_handshake.md` — nodes do local work + drive outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees. (MEMORY.md indexed.)
 
-- **Three open model mechanics, flagged inline in MODEL.md as "Needs confirmation":**
-  1. The **consume signal** — what marks the wire clear; the shape of the consume signal from node to wire is not yet pinned in code.
-  2. **Whether firing spans a timed window** — whether a firing rule may span a duration or fires purely on a held-state predicate. MODEL.md currently treats firing as predicate-gated on held state with no timed window.
-  3. **The `notifyDelivered` message's fate** — with Go owning delivery, the old `notifyDelivered` stdin message no longer drives delivery; whether it is removed outright or repurposed is a code change not yet made.
+### Active experimental network
 
-- **The spec doc `docs/go-authoritative-clock/index.html`** is the long-form design this model came out of (a single self-contained HTML file, multi-tab). Its **Inconsistencies tab is the live cross-tab findings tracker**. **Findings #1–#4 are all resolved** (finding #1 further SUPERSEDED by the ack-removal 2026-06-07). **Three OPEN findings (#5/#6/#7)** remain — all residual "slot" vocabulary on TARGET-model surfaces that MODEL.md now calls node-local held state: #5 Goroutines-tab node-loop rows ("clear their slots", L474/479/484); #6 Concept "Lives in" table ("local rules over slots and wires", L396); #7 Clock-Change-After diagram ("Go delivers to slot", L764/775; the prose at L805 already says channel). Fix for all three: reword slot → node-local held state (#7's diagram → "delivers on channel"). Two decided model facts: **all input goes to Go** (editing gestures, drag, wiring, AND camera orbit/pan/zoom — Go owns the scene + camera + editor affordances and streams back what TS draws; no local-apply, no camera carve-out; justified by local IPC being few-ms round-trips well inside a 16ms frame); and **the wire is a goroutine; send gating is wire-owned clear/busy state**.
+`topology.json` holds ONLY the active set: nodes `in08` (Input, init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor); one active edge `i0ToI1` (`i0`→`i1`).
 
-- **Transport assumption (load-bearing):** Go is a native child process; extension ⇄ Go over **line-buffered JSON on stdio**; extension ⇄ webview via **postMessage**. The "all input → Go, no lag" conclusion rests on this being *local* IPC. If it stays stdio, batch the position stream to one message per frame so the bridge never backs up.
+`topology.inactive.json` (NEW sibling file the editor never reads, so it survives editor saves) holds the inactive nodes `bootstrap_rg`, `readGate1`, `inhibitRight0` and 6 inactive edges. Restore by copying objects back into `topology.json`.
+
+The spec doc (`docs/go-authoritative-clock/index.html`) was reduced to be ONLY about `in08`/`i0`/`i1`: goroutines table = Input(`in08`)/i0/i1/PacedWire rows; ring/ChainInhibitor-extra/InhibitRightGate/ReadGate/bootstrap content removed; diagram reworked to `in08`⇄`i0` + `i0`→`i1`; the W coincidence-window note removed (its gates are inactive).
+
+### The in08↔i0 handshake — spec'd in the goroutines table but NOT yet wired in topology/code
+
+- `in08` loop: read the signal on wire `i0→in08` (1/0); `i += signal` (1 advances the read head, 0 holds); send `Init[i]` to `i0`.
+- `i0` loop: held copies `in08`'s value (init `-1`); if the arriving value DIFFERS from held → set held, send `1` to `in08`; else send `0`; forward held value to `i1`.
+- `i1` loop: receives `i0`'s held value; it is a SINK (its outputs are inactive); behavior beyond receiving is UNSPECIFIED (open).
+- This needs TWO new wires (`in08→i0`, `i0→in08`) and new PORTS on the Input and ChainInhibitor node kinds (Go struct fields), plus `i0`'s held init changed `0`→`-1`. None of that exists yet — pending Go code.
+
+### The PacedWire loop — the most fully-specified piece, in the goroutines table
+
+"PacedWire cares only about the beads it receives and the beads it sends":
+
+1. Add the beads it received this round to the set it holds (multi-bead, not single).
+2. Each round, for every bead, compute its next position from the Go clock and the human-speed slowdown (`pulseSpeed`).
+3. If that position is still on the wire, send the bead's 3D data (its position) to TS.
+4. If that position is past the end of the wire, the bead is done — hand the VALUE the bead is holding to the destination node and remove the bead (the off-the-end position is never sent to TS).
+5. Loop.
+
+---
 
 ### What is on main — UNCHANGED (nothing merged)
 
-Main is where the prior handoff left it (glass node bodies + init beads; dead slot-trace removal; `DEFAULT_EDGE_KIND`; level-4 audit site; F1 stale-doc re-anchor + dead-token guard; F2 `NODE_DIM_FALLBACK`; F3 structural SendRule). See `git log main`. No branch work merged this session. **MODEL.md + CLAUDE.md on main still describe the OLD model** — the rewrite lives only on this branch.
+Nothing merged this session. Main still describes the OLD model (send-gating, the full ring, etc.). All the above lives only on this branch. Main is where the prior sessions left it (glass node bodies + init beads; dead slot-trace removal; `DEFAULT_EDGE_KIND`; level-4 audit site; F1/F2/F3 fixes). See `git log main`.
 
 ### OPEN ITEMS / NEXT
 
-1. **Spec-doc Inconsistencies findings #5/#6/#7 + tracker-note sim-clock→clock fix (next concrete step).** Reword residual "slot" → node-local held state in three TARGET-model surfaces: Goroutines-tab node-loop rows (L474/479/484), Concept "Lives in" table (L396), Clock-Change-After diagram (L764/775; prose at L805 already correct). Also fold the one remaining `sim-clock` in the tracker note (~L1249) → `clock`. All four changes are mechanical; deliver as one commit.
-2. **Sibling send-step shorthand expansions (awaiting David's call).** The same port-name-as-wire shorthand that was expanded in `26c270e7` survives in three other node-loop send steps; candidates for the same treatment: L531 Bootstrap (`ToReadGate`, edge `bootstrapRg→readGate1` — note this step says "into readGate1.FromChainInhibitor", verify the real targetHandle from topology.json before expanding), L538 ReadGate (`ToChainInhibitor`), L545 ChainInhibitor (fan-out `ToNext` ports), L552 InhibitRightGate (`ToPassed`). Verify each edge id in topology.json at expansion time.
-3. **Decide whether to open finding #8** — three row-1–3 errors sharing the "emits geometry to TS" shape; David hasn't decided yet.
-4. **Scope gate before implementation** — the wire-as-goroutine + all-geometry/all-input-in-Go model is the pinned target, but confirm it is worth building now before writing code; no code depends on the spec doc.
-5. **Pin the three open model mechanics** (consume signal shape, firing-window question, `notifyDelivered` fate) before or alongside the code — they are the parts MODEL.md marks "Needs confirmation."
-6. **The code rewrite is the headline work.** Bring the Go/TS code to the MODEL.md target: wire (`nodes/Wiring/paced_wire.go`) becomes a goroutine transporting beads over channels (poll inbound → traverse on Go's clock + emit position → put on the outbound channel); the cond-var monitor, blocking `Send`, `WaitConsumed`, and the wire-side slot are deleted; the wire owns clear/busy state and the destination's consume marks it clear; the destination node holds received beads in node-local state and fires on its rule; `pump.ts` becomes a pure position-stream plotter; the `readGate.ack` port name in the two e2e test topologies (`scenario-ring-animates.spec.ts`, `scenario-edge-seed.spec.ts`) is renamed to match the new model. **MODEL.md now also pins the Clock entity.** When the code lands, MODEL.md + CLAUDE.md change in the SAME commit (they are already at the target, so this is mostly verifying they match what shipped). The spec doc's Doc-Updates tab enumerates the exact re-derivations.
-7. **Merge decision** — merge `task/spec-go-backend-ts-frontend` to main (the `docs/go-authoritative-clock/` spec rides along — under `docs/`, NOT `docs/planning/`, so not branch-local-stripped; the MODEL.md + CLAUDE.md rewrite rides along too) or keep as a pushed reference. Before merging, run `tools/strip-branch-local-docs.sh task/spec-go-backend-ts-frontend`. Merging to main needs explicit sign-off.
-8. `session-log.md` and the branch-local planning docs still carry dated old-model / React-Flow references — historical, left intentionally.
+1. **The code rewrite is the headline.** Target is now MUCH simpler: no send-gating/clear-busy/ack; wires multi-bead (PacedWire loop above); nodes emit on local state; PacedWire sends on-wire 3D positions to TS and hands a finished bead's value to the node. The Go/TS code still implements the OLD model.
+2. **The in08↔i0 handshake** needs 2 new wires + new ports on Input/ChainInhibitor + `i0` held init `-1` (Go code).
+3. **i1's behavior** beyond receiving is unspecified — sink for now.
+4. **The node-contract principle** is deliberately unpinned — let it land in code, do not re-pitch pinning it to MODEL.md/memory.
+5. **The W coincidence-window** is the concrete (local) answer to MODEL.md's firing-window "Needs confirmation" — a windowed gate spans a duration to scope which inputs are considered together; not pinned because ReadGate/InhibitRightGate are inactive.
+6. **Minor history hygiene:** a couple of Inconsistencies-tracker entries phrase the retired send-gating apparatus in present tense — fold into a future cleanup commit.
+7. **Merge decision** — run `tools/strip-branch-local-docs.sh task/spec-go-backend-ts-frontend` before merging; needs explicit sign-off.
 
 ### Model contract (target vs code)
 
-`MODEL.md` (../../../MODEL.md) is authoritative for the **TARGET**: nodes and wires are goroutines over channels, Go owns the clock (the one system monotonic clock) and times its own bead delivery, no slot (node-local held state), send gating by wire-owned clear/busy state, send policy node-owned per output port. The **code still implements the OLD model** (passive `PacedWire` with a lock+cond monitor, blocking `Send`, `WaitConsumed`, TS-triggered `NotifyDelivered`, a wire-side slot). **MODEL.md leads; the code rewrite is pending.** Read the doc as the spec to build toward and the runtime as the old model still in force, and keep the three "Needs confirmation" mechanics in mind — they are not yet pinned.
+`MODEL.md` (`../../../MODEL.md`) is authoritative for the **TARGET**: one Clock; `## Sending` (nodes emit on local state, multi-bead wires, no delivery guarantee/back-pressure/clear-busy); active network reduced to `in08`/`i0`/`i1`. The **code still implements the OLD model** (consumeGated, single-bead, the full ring). MODEL.md leads; the rewrite is pending and now aims at the simpler no-guarantee model. The firing-window "Needs confirmation" still stands.
 
 ## Dev-loop
 
 - **The spec is a single self-contained HTML file** (`docs/go-authoritative-clock/index.html`) — no build. Tabs: add a `<button class="tab-btn" role="tab" data-panel="X">Label</button>` to the `.tabs` nav and a `<div class="panel" id="panel-X" role="tabpanel">` panel; the inline `<script>` auto-wires by `data-panel`. Palette CSS vars in `:root` (--go-hue #5ec4a0, --ts-hue #c07ef8, --accent #7c9ef8, --warn #d4a017, --good #3db87a, --info #7c9ef8, --muted #808090, --mono).
+- **Active topology** is `in08`/`i0`/`i1` (not the old ring). `topology.json` is skip-worktree — deliberate edits require clearing the bit first.
 - **Verify a diagram visually:** extract its `<svg>…</svg>`, wrap in `<body style="background:#0e0e10">…</body>`, screenshot headless — `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --screenshot=/tmp/x.png --window-size=W,H file:///tmp/x.html` — then read the PNG. (Tabs are JS-switched, so screenshot the extracted SVG, not the whole page.)
-- For Go/TS code work (none this session — docs only): after TS edit `npm run build` from `tools/topology-vscode/` (and `npx tsc --noEmit` for removals); after Go change `go build ./...` + `go test ./nodes/...`; `tools/check-generated.sh` after shared `CurveParam*` / SPEC.md `## View` changes. The ring has no headless run (`go run .` deadlocks after the first hop). Guard scripts run via the Stop hook (note: the banned-term checker script was deleted in a prior session — do not expect it).
+- For Go/TS code work: after TS edit `npm run build` from `tools/topology-vscode/` (and `npx tsc --noEmit` for removals); after Go change `go build ./...` + `go test ./nodes/...`; `tools/check-generated.sh` after shared `CurveParam*` / SPEC.md `## View` changes. The ring has no headless run (`go run .` deadlocks after the first hop). Guard scripts run via the Stop hook (note: the banned-term checker script was deleted in a prior session — do not expect it).
 
 ## ALWAYS clause
 
