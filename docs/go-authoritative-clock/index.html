@@ -636,14 +636,14 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Outbound IPC</td>
           <td>on user action</td>
-          <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Types out are CRUD + control + raw input: deleteEdge, addEdge, fade, node-move, pause/resume &mdash; actions carrying the picked Go id, plus geometry and animation edits &mdash; never delivery, timing, or camera navigation (orbit/pan/zoom stays in TS).</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
+          <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Out types: CRUD + control + raw input (deleteEdge, addEdge, fade, node-move, pause/resume), each carrying the picked Go id plus geometry/animation edits &mdash; never delivery, timing, or camera nav (orbit/pan/zoom stays in TS).</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">6</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Input handlers</td>
           <td>DOM pointer / wheel events</td>
-          <td><ol><li>pointer down: raycast-pick a port, node, or empty space; capture the drag/wiring origin (interaction-controls.ts).</li><li>pointer move: drag a node (&rarr; node-move IPC, rAF-throttled), preview a wire, or arcball-rotate the camera.</li><li>pointer up: complete wiring (createEdge), persist a node move, or reset.</li><li>wheel/pointer for navigation: TS interprets it (ctrl = pinch-zoom toward cursor, else pan on the z=0 plane) and commits the camera locally — TS owns the camera (three.js); nothing is forwarded to Go.</li></ol></td>
+          <td><ol><li>pointer down: raycast-pick a port, node, or empty space; capture the drag/wiring origin (interaction-controls.ts).</li><li>pointer move: drag a node (&rarr; node-move IPC, rAF-throttled), preview a wire, or arcball-rotate the camera.</li><li>pointer up: complete wiring (createEdge), persist a node move, or reset.</li><li>wheel/pointer navigation: TS interprets it (ctrl = pinch-zoom to cursor, else pan on z=0) and commits the camera locally — TS owns the camera (three.js), nothing forwarded to Go.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">7</td>
