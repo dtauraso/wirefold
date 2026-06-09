@@ -419,9 +419,9 @@
         <tr>
           <td class="enum">2</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-          <td>Geometric</td>
+          <td>Geometric + shading</td>
           <td>Go (backend)</td>
-          <td>Holds all geometric data; computes arc length, positions, durations.</td>
+          <td>Holds all geometric data (nodes, ports, edges — endpoints and curves, wires, pulses); computes arc length, positions, durations. Also holds all shading data — materials, colors, glass and environment parameters. Runs the Go network (nodes, wires).</td>
         </tr>
         <tr>
           <td class="enum">3</td>
@@ -440,38 +440,12 @@
         <tr>
           <td class="enum">5</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
-          <td>Viewpoint (camera, scene navigation, projection, picking)</td>
+          <td>Viewpoint + GPU + input</td>
           <td>TS (frontend)</td>
-          <td>How the diagram is viewed, not what it is &mdash; camera, orbit/pan/zoom, world&rarr;screen projection, and raycast-picking live with the GPU render in TS (three.js). Go owns the diagram; TS owns the viewpoint.</td>
+          <td>How the diagram is viewed, not what it is &mdash; camera, orbit/pan/zoom, world&rarr;screen projection, and raycast-picking live with the GPU render in TS (three.js). Go owns the diagram; TS owns the viewpoint. Runs the GPU: issues draw calls, manages WebGL context, compiled shaders, and baked textures. Captures human input: camera/arcball/pan/pinch handled locally; pick/select and drag/wire sent to Go carrying the picked Go id.</td>
         </tr>
       </tbody>
     </table>
-
-    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:h2">☐</button>Backend and frontend.</h2>
-    <div class="cards">
-      <div class="card">
-        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:card1">☐</button>Go — backend</h3>
-        <ul>
-          <li>Holds all geometry data — nodes, ports, edges (endpoints, curves), wires, pulses</li>
-          <li>Holds all shading data — materials, colors, glass and environment parameters</li>
-          <li>Reads the one clock — the system monotonic clock; all timing is arithmetic on its deltas (pulseSpeed scaling for bead advancement, inFlightTime = arcLength / pulseSpeed); the play/pause gate stops the arithmetic, not the clock</li>
-          <li>Computes all animation values — arc length, positions, traversal progress, durations</li>
-          <li>Computes every bead position and emits it to TS</li>
-          <li>Runs the Go network (nodes, wires)</li>
-          <li>Sends messages describing what to render — geometry, shading, and position data</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:card2">☐</button>TS — frontend</h3>
-        <ul>
-          <li>Builds nothing on its own — takes geometry and shading data from Go and displays it</li>
-          <li>Runs the GPU: issues draw calls, manages the WebGL context, compiled shaders, and baked textures</li>
-          <li>Owns the viewpoint &mdash; camera, scene navigation (orbit/pan/zoom), projection, and raycast-picking, handled locally in three.js. Go owns the diagram; TS owns how it is viewed.</li>
-          <li>Captures human input: camera/arcball/pan/pinch handled locally; pick/select and drag/wire sent to Go carrying the picked Go id</li>
-          <li>Sends editor geometry and animation updates to Go; Go updates its data accordingly — no geometry math, no animation calculation, no clock</li>
-        </ul>
-      </div>
-    </div>
 
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:h2">☐</button>The contract in one line.</h2>
 
@@ -761,10 +735,6 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="note" style="margin-top:0.75rem;">
-      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note2">☐</button>Go computes every bead's position from its clock and path geometry and emits it. TS sets each sprite to the position it receives — no interpolation, no math on the frontend.
-    </div>
-
-    <div class="note" style="margin-top:0.75rem;">
       <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note3">☐</button>TS sends editor geometry and animation updates to Go; Go updates its data accordingly. Go remains the single authoritative holder of all geometry and animation state.
     </div>
 
@@ -801,7 +771,11 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
   <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note5">☐</button><strong>The relay is a dumb pipe.</strong> The extension host forwards each line verbatim &mdash; no parse, no transform, no policy beyond line-splitting. All meaning lives in Go and TS; the host could be swapped for any byte-forwarder without either side noticing. <strong>stdout carries protocol only</strong> &mdash; Go's logging goes to stderr or the <code>.probe/*.jsonl</code> files; a stray write to stdout corrupts the stream.</div>
 
-  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note6">☐</button><strong>One id space &mdash; Go's.</strong> Every object Go streams to TS carries its Go identity (node / edge / port id). A user interaction on a rendered component forms its outbound message <em>directly</em> from that identity &mdash; e.g. <code>{"t":"node-move","id":"i0","x":480,"y":63}</code> &mdash; using the id Go already gave it. TS keeps no TS-specific ids and does no interaction&rarr;component lookup: the rendered component already <em>is</em> the Go thing, so "what to do, to which component" is addressable with Go's own id and nothing else.</div>
+  <h3 style="margin-top:1.5rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note6">☐</button>One id space &mdash; Go's</h3>
+  <ul style="margin-top:0.5rem;padding-left:1.25rem;color:var(--muted);font-size:13px;line-height:1.65;">
+    <li style="margin-bottom:0.4rem;">Every object Go streams to TS carries its Go id (node / edge / port).</li>
+    <li>A user interaction forms its outbound message directly from that id &mdash; e.g. <code>{"t":"node-move","id":"i0","x":480,"y":63}</code>. TS keeps no TS-specific id and does no lookup.</li>
+  </ul>
 
   <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note7">☐</button><strong>Illustrative shapes.</strong> Go &rarr; TS, a bead position on a wire: <code>{"t":"pos","id":"i0ToI1","b":0,"x":1.2,"y":0.4,"z":0}</code>. Go &rarr; TS, recomputed edge geometry after an edit: <code>{"t":"edge","id":"i0ToI1","cp":[&hellip;],"arc":12.3}</code>. TS &rarr; Go, a wiring edit: <code>{"t":"add-edge","src":"in08","dst":"i0"}</code>. Every <code>id</code> is Go's, both ways.</div>
 
@@ -954,7 +928,12 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
   <!-- TAB 7: TS → Go -->
   <div class="panel" id="panel-tsgo" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:h2">☐</button>How much of TS converts to Go?</h2>
-    <p>The dividing line is now <strong>data vs. the GPU</strong>. All geometry, animation, and shading are data — Go owns and emits them. TS only runs the GPU (issues draw calls, manages GPU-resident resources) and captures human input. Everything TS currently computes that is data — bezier geometry, arc length, bead positions, traversal timing, material parameters, color, glass settings, environment parameters — moves to Go as data Go produces and streams out. What cannot leave TS is whatever physically requires the browser's WebGL context or the DOM event loop.</p>
+    <p>The dividing line is <strong>data vs. the GPU</strong>.</p>
+    <ul style="margin-top:0.5rem;margin-bottom:1.25rem;padding-left:1.25rem;color:var(--muted);font-size:13.5px;line-height:1.65;max-width:680px;">
+      <li style="margin-bottom:0.5rem;">Geometry, animation, and shading are data &mdash; Go owns and emits them.</li>
+      <li style="margin-bottom:0.5rem;">Running the GPU and capturing input need the browser &mdash; these stay in TS.</li>
+      <li>Input that produces geometry (e.g. a node drag) is captured in TS and sent to Go as an edit, so Go stays authoritative.</li>
+    </ul>
 
     <table class="spec-table" style="margin-top:1rem;">
       <caption>Data that moves to Go</caption>
@@ -1203,15 +1182,44 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         </ul>
       </div>
 
-      <div class="card">
-        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card2">☐</button>What shows it worked — per phase</h3>
-        <ul>
-          <li><strong>Phase 1 (clock):</strong> <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> / a Go test completes the full cascade with no editor (previously impossible). go.jsonl shows deliveries firing on Go's clock timing (~inFlightTime apart), not on a TS message. Stronger check: freeze or detach the renderer — Go keeps delivering on schedule.</li>
-          <li><strong>Phase 2 (position stream):</strong> beads animate from Go's emitted positions with visual parity to before. probe shows position messages arriving; TS computes no positions (the deleted PulseBead/rfArcLength/moveNode math is gone). A Go test can assert positions are emitted ~16ms apart with monotonically increasing t and arrival at t=1.</li>
-          <li><strong>Phase 3 (geometry):</strong> drag a node in the editor — the wire re-curves and the in-flight bead re-derives remaining travel, all from Go's data. Proof TS no longer computes geometry: dragging stays correct after the local TS geometry math is removed. probe shows the geometry edit round-tripping through Go.</li>
-          <li><strong>Phase 4 (shading):</strong> appearance is unchanged at parity; changing a shading parameter in Go's data is reflected on screen. Proof: materials are driven by Go-supplied parameters, not TS constants.</li>
-          <li><strong>Phase 5 (bridge/CRUD):</strong> the notifyDelivered message is gone — grep confirms nothing sends it; all parity/guard scripts pass; save/load through VS Code still works end to end.</li>
-        </ul>
+      <div>
+        <table class="spec-table" style="margin-top:0.5rem;">
+          <caption><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card2">☐</button>What shows it worked</caption>
+          <thead>
+            <tr>
+              <th>Phase</th>
+              <th>Success signal</th>
+              <th>How to verify</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1 · Clock</td>
+              <td>Headless <code>go test</code> / <code>go run .</code> completes full cascade with no editor (previously deadlocks)</td>
+              <td><code>go.jsonl</code> shows deliveries at ~<code>inFlightTime</code> apart, not on a TS message. Freeze / detach renderer — Go keeps delivering on schedule.</td>
+            </tr>
+            <tr>
+              <td>2 · Position stream</td>
+              <td>Beads animate from Go's emitted positions with visual parity to before; TS computes no positions</td>
+              <td>probe shows position messages arriving. Deleted <code>PulseBead</code>/<code>rfArcLength</code>/<code>moveNode</code> math is gone. <code>go test</code> asserts positions emitted ~16ms apart, monotonically increasing t, arrival at t=1.</td>
+            </tr>
+            <tr>
+              <td>3 · Geometry</td>
+              <td>Drag a node — wire re-curves and in-flight bead re-derives remaining travel from Go's data</td>
+              <td>Dragging stays correct after local TS geometry math is removed. probe shows geometry edit round-tripping through Go.</td>
+            </tr>
+            <tr>
+              <td>4 · Shading</td>
+              <td>Appearance unchanged at parity; changing a shading parameter in Go's data is reflected on screen</td>
+              <td>Materials driven by Go-supplied parameters, not TS constants.</td>
+            </tr>
+            <tr>
+              <td>5 · Bridge / CRUD</td>
+              <td><code>notifyDelivered</code> is gone; all parity/guard scripts pass; save/load through VS Code works end to end</td>
+              <td>grep confirms nothing sends <code>notifyDelivered</code>; run check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="card">
