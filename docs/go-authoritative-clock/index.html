@@ -383,8 +383,7 @@
     <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">Overview</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="division">Division</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS code</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgraph">TS graph</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
@@ -677,11 +676,8 @@
     </table>
 
     <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:note1">☐</button>Stays in TS: the GPU render loop (draw calls, WebGL context), screen-space overlays, the camera + scene navigation, and DOM input capture &mdash; they need the browser. Moves to Go: bead positions, curve geometry, arc length, timing. The zustand store stays in TS as a no-op holder &mdash; Go is the sole writer of its data, so the data is authoritative in Go though the holder is TS's. The dividing line and the per-symbol migration list are in the <strong>TS &rarr; Go</strong> tab.</div>
-  </div>
 
-<!-- TAB: TS graph -->
-<div class="panel" id="panel-tsgraph" role="tabpanel">
-  <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:h2">☐</button>The TS frontend, wired.</h2>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:h2">☐</button>The TS frontend, wired.</h2>
   <p>Two pipes to Go &mdash; nothing else crosses. <strong>In (trace pump):</strong> Go emits a position stream; the pump feeds the render loop, which draws the beads to the screen, no math. <strong>Out (writeStdin):</strong> what the user does &mdash; CRUD, pause/resume, and click events (carrying the picked Go id) &mdash; go straight to Go through the write; camera navigation (orbit/pan/zoom) stays in TS. There's no separate input stage, and TS computes no geometry.</p>
   <div class="diagram">
 <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="tsgraph:svg1">☐</button>
@@ -715,7 +711,7 @@
   </div>
   <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:note1">☐</button><strong>Legend.</strong> Green = Go; blue = the trace pump (Go&rarr;TS, in); purple = the render path; amber = the write (TS&rarr;Go, out). Those two pipes are all that cross. The dashed <strong>user</strong> arrow is the human &mdash; they see what the render loop draws, and what they do is written to Go.</div>
   <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:note2">☐</button>TS only renders Go's stream, owns the camera + scene navigation, and forwards the user's actions. The authoritative data &mdash; positions, geometry, timing &mdash; lives in Go; the TS zustand store is a no-op holder Go writes.</div>
-</div>
+  </div>
 
   <!-- TAB 3: The Bridge -->
   <div class="panel" id="panel-bridge" role="tabpanel">
