@@ -791,6 +791,16 @@
     </svg>
   </div>
   <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note4">☐</button>Fire-and-forget both ways &mdash; no request/response. Go &rarr; TS is the position stream over stdout, relayed by postMessage; TS &rarr; Go is CRUD + pause/resume via postMessage, written to Go's stdin. The extension host only relays &mdash; it holds no state.</div>
+
+  <p style="margin-top:1.5rem;"><strong>The wire format &mdash; JSONL.</strong> Both directions are newline-delimited JSON: one object per line, parsed by splitting on <code>\n</code>. No other envelope &mdash; the same framing the probe logs (<code>go.jsonl</code> / <code>ts.jsonl</code>) already use. What is pinned is the framing and the single id space, not the field names.</p>
+
+  <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note5">☐</button><strong>The relay is a dumb pipe.</strong> The extension host forwards each line verbatim &mdash; no parse, no transform, no policy beyond line-splitting. All meaning lives in Go and TS; the host could be swapped for any byte-forwarder without either side noticing. <strong>stdout carries protocol only</strong> &mdash; Go's logging goes to stderr or the <code>.probe/*.jsonl</code> files; a stray write to stdout corrupts the stream.</div>
+
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note6">☐</button><strong>One id space &mdash; Go's.</strong> Every object Go streams to TS carries its Go identity (node / edge / port id). A user interaction on a rendered component forms its outbound message <em>directly</em> from that identity &mdash; e.g. <code>{"t":"node-move","id":"i0","x":480,"y":63}</code> &mdash; using the id Go already gave it. TS keeps no TS-specific ids and does no interaction&rarr;component lookup: the rendered component already <em>is</em> the Go thing, so "what to do, to which component" is addressable with Go's own id and nothing else.</div>
+
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note7">☐</button><strong>Illustrative shapes.</strong> Go &rarr; TS, a bead position on a wire: <code>{"t":"pos","id":"i0ToI1","b":0,"x":1.2,"y":0.4,"z":0}</code>. Go &rarr; TS, recomputed edge geometry after an edit: <code>{"t":"edge","id":"i0ToI1","cp":[&hellip;],"arc":12.3}</code>. TS &rarr; Go, a wiring edit: <code>{"t":"add-edge","src":"in08","dst":"i0"}</code>. Every <code>id</code> is Go's, both ways.</div>
+
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note8">☐</button><strong>Escape hatch (not built).</strong> If the relay ever has to leave the data plane, the one-hop alternative is a localhost WebSocket from the webview straight to a server in the Go process &mdash; the extension would only spawn Go and hand over the port. <code>postMessage</code> handles the per-bead stream at current volumes, so this stays unbuilt until profiling says otherwise.</div>
   </div>
 
   <!-- TAB 4: Clock Change -->
