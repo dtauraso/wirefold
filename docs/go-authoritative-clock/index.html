@@ -476,7 +476,8 @@
         <ul>
           <li>Builds nothing on its own — takes geometry and shading data from Go and displays it</li>
           <li>Runs the GPU: issues draw calls, manages the WebGL context, compiled shaders, and baked textures</li>
-          <li>Captures human input: camera/arcball/pan/pinch, pick/select, drag/wire</li>
+          <li>Owns the viewpoint &mdash; camera, scene navigation (orbit/pan/zoom), projection, and raycast-picking, handled locally in three.js. Go owns the diagram; TS owns how it is viewed.</li>
+          <li>Captures human input: camera/arcball/pan/pinch handled locally; pick/select and drag/wire sent to Go carrying the picked Go id</li>
           <li>Sends editor geometry and animation updates to Go; Go updates its data accordingly — no geometry math, no animation calculation, no clock</li>
         </ul>
       </div>
@@ -961,7 +962,7 @@
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:h2">☐</button>The contract in one line.</h2>
 
     <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
-TS (frontend) runs the GPU to display Go's data and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
+TS (frontend) runs the GPU to display Go's data, owns the viewpoint (camera and scene navigation), and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
 The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
 
     <div class="note" style="margin-bottom:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:note1">☐</button>Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
