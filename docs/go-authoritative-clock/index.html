@@ -519,7 +519,7 @@
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire loop</td>
           <td>goroutine — one per destination input port</td>
-          <td><p>PacedWire cares only about the beads it receives and the beads it sends.</p><ol><li>Add the beads it received this round to the set it already holds.</li><li>Each round, for every bead it holds, compute the bead's next position from the Go clock and the human-speed slowdown (the pulseSpeed scaling).</li><li>If a bead is done, send it to the destination node and remove it from PacedWire.</li><li>Loop.</li></ol></td>
+          <td><p>PacedWire cares only about the beads it receives and the beads it sends.</p><ol><li>Add the beads it received this round to the set it already holds.</li><li>Each round, for every bead it holds, compute the bead's next position from the Go clock and the human-speed slowdown (the pulseSpeed scaling).</li><li>Send each bead&#x2019;s 3D data (its computed position) to TS.</li><li>If a bead is done, send it to the destination node and remove it from PacedWire.</li><li>Loop.</li></ol></td>
         </tr>
       </tbody>
     </table>
