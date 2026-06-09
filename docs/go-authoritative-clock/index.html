@@ -681,7 +681,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </tbody>
     </table>
 
-    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:note1">☐</button>Stays in TS: the GPU render loop (draw calls, WebGL context), screen-space overlays, the camera + scene navigation, and DOM input capture &mdash; they need the browser. Moves to Go: bead positions, curve geometry, arc length, timing. The zustand store stays in TS as a no-op holder &mdash; Go is the sole writer of its data, so the data is authoritative in Go though the holder is TS's. The dividing line and the per-symbol migration list are in the <strong>TS &rarr; Go</strong> tab.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:note1">☐</button>What stays in TS vs. what is Go's &mdash; see the <strong>TS &rarr; Go</strong> tab.</div>
 
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:h2">☐</button>The TS frontend, wired.</h2>
   <p>Two pipes to Go &mdash; nothing else crosses. <strong>In (trace pump):</strong> Go emits a position stream; the pump feeds the render loop, which draws the beads to the screen, no math. <strong>Out (writeStdin):</strong> what the user does &mdash; CRUD, pause/resume, and click events (carrying the picked Go id) &mdash; go straight to Go through the write; camera navigation (orbit/pan/zoom) stays in TS. There's no separate input stage, and TS computes no geometry.</p>
@@ -956,44 +956,103 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:h2">☐</button>How much of TS converts to Go?</h2>
     <p>The dividing line is now <strong>data vs. the GPU</strong>. All geometry, animation, and shading are data — Go owns and emits them. TS only runs the GPU (issues draw calls, manages GPU-resident resources) and captures human input. Everything TS currently computes that is data — bezier geometry, arc length, bead positions, traversal timing, material parameters, color, glass settings, environment parameters — moves to Go as data Go produces and streams out. What cannot leave TS is whatever physically requires the browser's WebGL context or the DOM event loop.</p>
 
-    <div class="cards" style="margin-top:1rem;">
-      <div class="card">
-        <h3 style="color:var(--go-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card1">☐</button>Geometry data → Go</h3>
-        <ul>
-          <li>Node sphere geometry — center position, radius, and the 3-D coordinates of every port position on the sphere surface; border ring geometry anchored to each node (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">nodeWorldPos</code>, <code style="font-family:var(--mono);font-size:11px;">portDir</code>, <code style="font-family:var(--mono);font-size:11px;">portWorldPos</code>)</li>
-          <li>Edge data — endpoints (source node/port → target node/port) and curve geometry (quadratic bezier control points: midpoint, perpendicular lift, bulge-factor offset); the full tube path TS uses to build <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code> is held and computed by Go (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">buildPortCurve</code>, <code style="font-family:var(--mono);font-size:11px;">buildEdgeCurve</code>)</li>
-          <li>Pulse / bead geometry — the 3-D path a bead rides, expressed as bezier control points Go already stores</li>
-          <li>Arc length — 50-segment numeric integration currently duplicated in TS; Go's own <code style="font-family:var(--mono);font-size:11px;">BezierArcLength</code> is the single source (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">rfArcLength</code>)</li>
-          <li>Node positions — world coordinates authoritative in Go; TS forwards drags to Go as geometry edits and receives updated positions back (store.ts: <code style="font-family:var(--mono);font-size:11px;">moveNode</code>)</li>
-          <li>Bounding box — min/max over all node positions and dimensions, used for camera fit; input positions are geometry Go holds (geometry-helpers.ts: <code style="font-family:var(--mono);font-size:11px;">boundingBox</code>)</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="cards" style="margin-top:1rem;">
-      <div class="card">
-        <h3 style="color:var(--go-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card2">☐</button>Animation data → Go</h3>
-        <ul>
-          <li>Bead position along the path — <code style="font-family:var(--mono);font-size:11px;">curve.getPointAt(t)</code> currently evaluated every frame in TS; Go emits the 3-D position directly and TS plots it (scene-content.tsx: <code style="font-family:var(--mono);font-size:11px;">PulseBead useFrame</code>)</li>
-          <li>Traversal progress fraction — <code style="font-family:var(--mono);font-size:11px;">t = (now − startTime) / simLatencyMs</code>, clamped to [0, 1]; Go owns the clock and <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> so it computes and emits t (pulse-state.ts, scene-content.tsx)</li>
-          <li>Timing — <code style="font-family:var(--mono);font-size:11px;">simLatencyMs</code> derived from arc length ÷ uniform pulse speed; delivery detection when elapsed reaches <code style="font-family:var(--mono);font-size:11px;">inFlightTime</code>; bead progress preservation across geometry edits (store.ts: <code style="font-family:var(--mono);font-size:11px;">moveNode</code>; pulse-state.ts: <code style="font-family:var(--mono);font-size:11px;">claimDelivered</code>)</li>
-          <li>Pause-adjusted clock — <code style="font-family:var(--mono);font-size:11px;">getPauseAdjustedNow()</code> is a TS re-implementation of a pauseable clock; Go's clock already embodies this (state/run-status.ts, pulse-state.ts)</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="cards" style="margin-top:1rem;">
-      <div class="card">
-        <h3 style="color:var(--go-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card3">☐</button>Shading data → Go</h3>
-        <ul>
-          <li>Material / color / fill / stroke — <code style="font-family:var(--mono);font-size:11px;">node.data.fill</code> and <code style="font-family:var(--mono);font-size:11px;">node.data.stroke</code> keyed off <code style="font-family:var(--mono);font-size:11px;">NODE_DEFS</code>; the definition of what color a node is is data Go supplies</li>
-          <li>Glass / material parameters — roughness, metalness, transmission, ior, thickness, clearcoat, reflectivity, and any per-node overrides; Go holds the parameter set, TS feeds it into <code style="font-family:var(--mono);font-size:11px;">MeshPhysicalMaterial</code></li>
-          <li>Environment / lighting parameters — sky color, sun direction, ambient intensity, and any other parameters that define the scene's lighting; Go supplies the values, TS bakes them into the PMREM environment map on the GPU</li>
-          <li>Wire / tube appearance — tube radius, opacity, color; Go provides these per-edge so TS can configure <code style="font-family:var(--mono);font-size:11px;">SingleEdgeTube</code> without computing them</li>
-          <li>Pulse / bead appearance — bead size, color, emissive intensity; Go emits these alongside the bead position</li>
-        </ul>
-      </div>
-    </div>
+    <table class="spec-table" style="margin-top:1rem;">
+      <caption>Data that moves to Go</caption>
+      <thead>
+        <tr>
+          <th>Class</th>
+          <th>What</th>
+          <th>TS symbol(s) today</th>
+          <th>Now</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Geometry</td>
+          <td>node / port world positions</td>
+          <td><code>nodeWorldPos</code>, <code>portDir</code>, <code>portWorldPos</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>edge curve / control points</td>
+          <td><code>buildPortCurve</code>, <code>buildEdgeCurve</code>, <code>SingleEdgeTube</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>arc length</td>
+          <td><code>rfArcLength</code></td>
+          <td>Go (already: <code>BezierArcLength</code>)</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>node positions</td>
+          <td><code>moveNode</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>bounding box</td>
+          <td><code>boundingBox</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>bead position</td>
+          <td><code>getPointAt(t)</code>, <code>PulseBead useFrame</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>traversal progress fraction</td>
+          <td><code>t = (now − startTime) / simLatencyMs</code>, <code>simLatencyMs</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>traversal timing / delivery</td>
+          <td><code>simLatencyMs</code>, <code>inFlightTime</code>, <code>claimDelivered</code>, <code>moveNode</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>pause-adjusted clock</td>
+          <td><code>getPauseAdjustedNow()</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>materials / colors</td>
+          <td><code>node.data.fill</code>, <code>node.data.stroke</code>, <code>NODE_DEFS</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>glass / material params</td>
+          <td><code>MeshPhysicalMaterial</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>wire / tube appearance</td>
+          <td><code>SingleEdgeTube</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>environment / lighting params</td>
+          <td>(env/lighting parameter values)</td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>bead appearance</td>
+          <td>(bead size, color, emissive — alongside bead position)</td>
+          <td>Go</td>
+        </tr>
+      </tbody>
+    </table>
 
     <div class="cards" style="margin-top:1rem;">
       <div class="card">
