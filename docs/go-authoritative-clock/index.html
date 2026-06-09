@@ -393,7 +393,6 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgo">TS → Go</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="docs">Doc Updates</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="phases">Phases</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="verify">Verify</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="issues">Inconsistencies</button>
   </div>
@@ -1104,10 +1103,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <div class="note" style="margin-top:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:note1">☐</button>Ordering principle — each phase ends green (go build/test, tsc, npm run build, all guard scripts). The clock phase is the keystone; the data phases are independent migrations after it.</div>
 
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:newbuilds-ptr">☐</button>The authoritative list of what Go must newly build lives in the <strong>TS → Go</strong> tab, "New Go builds" subsection. Chain 1 (clock + per-frame bead eval) is the PacedWire rewrite = first phase. Chain 2 (camera + picking) is a later phase that depends on Go owning a camera.</div>
-  </div>
 
-  <!-- TAB 10: Phases -->
-  <div class="panel" id="panel-phases" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:h2">☐</button>The five phases in detail.</h2>
 
     <div class="cards" style="flex-direction:column;">
