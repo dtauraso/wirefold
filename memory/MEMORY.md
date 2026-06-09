@@ -45,4 +45,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_invariants_drive_design.md](feedback_invariants_drive_design.md) — Treat user-stated invariants as axioms that drive design and verify framing; simulate frame-by-frame, not just steady-state
 - [feedback_dont_invent_doctrine.md](feedback_dont_invent_doctrine.md) — Don't paraphrase a one-off note into a "rule" and cite the paraphrase as project doctrine; grep for the literal phrasing first
 - [feedback_tsc_verify_after_removal.md](feedback_tsc_verify_after_removal.md) — After deleting/refactoring webview TS, verify with `tsc --noEmit` too; esbuild (`npm run build`) skips type-checking and lets dangling refs reach runtime
-- [feedback_neuron_model_not_networking_handshake.md](feedback_neuron_model_not_networking_handshake.md) — Neurons do local work + stress outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees
+- [feedback_node_model_not_networking_handshake.md](feedback_node_model_not_networking_handshake.md) — Nodes do local work + drive their outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees
