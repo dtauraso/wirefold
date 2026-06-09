@@ -383,7 +383,6 @@
     <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">Overview</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="division">Division</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutinegraph">Goroutine graph</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS code</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgraph">TS graph</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
@@ -535,10 +534,7 @@
 
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note2">☐</button>Where the clock change lands: in the target model each wire loop (PacedWire) wakes about every 16&nbsp;ms to advance its bead, emit the bead's position, and self-deliver when elapsed reaches inFlightTime. Today that delivery instead waits on the stdin reader receiving a "delivered" message from TS — which is exactly the inversion Phase 1 removes.</div>
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note3">☐</button><strong>Geometry is Go's; TS captures edits and draws.</strong> Beyond the per-bead position stream, the static geometry — node and port world-positions, edge curve control points, arc lengths — is derived in Go at load and re-derived on each edit. The edit messages (node-move, addEdge) originate in TS and are sent to Go; Go runs the calculations and sends the new 3D data back to TS over the same out-stream the bead positions ride. TS plots all of it and computes none.</div>
-  </div>
 
-  <!-- TAB: Goroutine graph -->
-  <div class="panel" id="panel-goroutinegraph" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:h2">☐</button>The goroutines, wired.</h2>
     <p>Every connection between two node loops is the same unit: a <strong>PacedWire goroutine</strong> carries the bead forward over a channel, holding no clear/busy state &mdash; the source places a bead whenever its rule says to, and the wire may carry more than one at once. Nodes and wires are all goroutines &mdash; they touch only through channels.</p>
     <div class="diagram">
