@@ -380,13 +380,11 @@
   <div class="page-subtitle">Go Backend / TS Frontend</div>
 
   <div class="tabs" role="tablist">
-    <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">Overview</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="division">Division</button>
+    <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">The split</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock Change</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="contract">Contract</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="playpause">Play / Pause</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgo">TS → Go</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="docs">Doc Updates</button>
@@ -450,10 +448,7 @@
         </tr>
       </tbody>
     </table>
-  </div>
 
-  <!-- TAB 2: Division -->
-  <div class="panel" id="panel-division" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="division:h2">☐</button>Backend and frontend.</h2>
     <div class="cards">
       <div class="card">
@@ -478,6 +473,19 @@
           <li>Sends editor geometry and animation updates to Go; Go updates its data accordingly — no geometry math, no animation calculation, no clock</li>
         </ul>
       </div>
+    </div>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:h2">☐</button>The contract in one line.</h2>
+
+    <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
+TS (frontend) runs the GPU to display Go's data, owns the viewpoint (camera and scene navigation), and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
+The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
+
+    <div class="note" style="margin-bottom:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:note1">☐</button>Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
+
+    <div class="first-step-label">First concrete step</div>
+    <div class="first-step">
+      <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding editor geometry and animation updates to Go, which updates its data accordingly.</p>
     </div>
   </div>
 
@@ -946,22 +954,6 @@
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub2">☐</button>Why the gate lives in Go</div>
     <p>Play/pause is substance, not a TS animation control — it halts the system's clock. If TS paused by stopping its own render loop while Go kept running, Go's clock would race ahead and the frontend would be out of sync on resume. So the button is in TS; the clock it controls is in Go. This fits the bridge: messages out (Go's timeline, including "paused"), control and geometry edits in.</p>
-  </div>
-
-  <!-- TAB 5: Contract -->
-  <div class="panel" id="panel-contract" role="tabpanel">
-    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:h2">☐</button>The contract in one line.</h2>
-
-    <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
-TS (frontend) runs the GPU to display Go's data, owns the viewpoint (camera and scene navigation), and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
-The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
-
-    <div class="note" style="margin-bottom:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:note1">☐</button>Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
-
-    <div class="first-step-label">First concrete step</div>
-    <div class="first-step">
-      <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding editor geometry and animation updates to Go, which updates its data accordingly.</p>
-    </div>
   </div>
 
   <!-- TAB 7: TS → Go -->
