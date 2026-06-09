@@ -402,7 +402,7 @@
   <div class="panel active" id="panel-overview" role="tabpanel">
     <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="overview:h2">☐</button>Go is the backend. TS is the frontend.</h2>
-    <p>The system splits cleanly into a backend and a frontend. Go is the backend: it holds all geometric data and runs all the animation calculations — it owns what is happening and when. TS is the frontend: it renders the messages Go sends, and it sends geometric edits from the editor back to Go so the network updates.</p>
+    <p>The system splits cleanly into a backend and a frontend. Go is the backend: it holds all geometric data and runs all the animation calculations — it owns what is happening and when. TS is the frontend: it renders the messages Go sends, owns the viewpoint (the camera and scene navigation), and sends geometric edits from the editor back to Go so the network updates.</p>
 
     <table class="spec-table">
       <caption>Where each property lives</caption>
@@ -443,6 +443,13 @@
           <td>Clock (the system monotonic clock Go reads)</td>
           <td>Go (backend)</td>
           <td>One clock; wires scale its deltas by pulseSpeed to human speed; the gate stops the arithmetic, not the clock; no shared tick.</td>
+        </tr>
+        <tr>
+          <td class="enum">5</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Viewpoint (camera, scene navigation, projection, picking)</td>
+          <td>TS (frontend)</td>
+          <td>How the diagram is viewed, not what it is &mdash; camera, orbit/pan/zoom, world&rarr;screen projection, and raycast-picking live with the GPU render in TS (three.js). Go owns the diagram; TS owns the viewpoint.</td>
         </tr>
       </tbody>
     </table>
