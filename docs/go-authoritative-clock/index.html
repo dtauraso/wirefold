@@ -500,7 +500,7 @@
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
-            <td><ol><li>Read the value readGate1 sends back on the edge readGate1ToIn08.</li><li>If the value is 1: send Init[i] on in08ToReadGate1 into readGate1's FromInput port — the same Init[i] each pass while the value stays 1 (readGate treats the repeats as the same input, not a new value).</li><li>If the value is 0: advance to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat).</li><li>Sleep for the pacing interval so the loop runs at human-visible speed, then loop.</li></ol></td>
+            <td><ol><li>Read the value readGate1 sends back on the edge readGate1ToIn08.</li><li>If the value is 1: send Init[i] on in08ToReadGate1 into readGate1's FromInput port — the same Init[i] each pass while the value stays 1 (readGate treats the repeats as the same input, not a new value).</li><li>If the value is 0: advance to the next init value (i++, wrapping if repeat; stop when init is exhausted unless repeat).</li></ol></td>
           </tr>
           <tr>
             <td class="enum">2</td>
