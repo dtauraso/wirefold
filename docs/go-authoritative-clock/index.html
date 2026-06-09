@@ -386,10 +386,9 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgo">TS → Go</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="docs">Doc Updates</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="verify">Verify</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="issues">Inconsistencies</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="issues">Tracking</button>
   </div>
 
   <!-- TAB 1: Overview -->
@@ -1032,35 +1031,6 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-libs">☐</button><strong>Go libraries.</strong> Almost none — Go owns the <em>diagram</em> math, not the viewpoint. stdlib <code style="font-family:var(--mono);font-size:11px;">time</code> for the monotonic clock (not a 3D problem). The only new geometry math is per-frame bead-position eval — a few vector lerps over the control points Go already builds (<code style="font-family:var(--mono);font-size:11px;">curve_params.go</code>) — so Go needs no 3D-math or projection library. Camera, projection (<code style="font-family:var(--mono);font-size:11px;">Perspective</code> / <code style="font-family:var(--mono);font-size:11px;">LookAtV</code>) and picking (<code style="font-family:var(--mono);font-size:11px;">UnProject</code> / raycast) live on the TS side in three.js, since TS owns the viewpoint; Go imports none of it.</div>
   </div>
 
-  <!-- TAB 8: Doc Updates -->
-  <div class="panel" id="panel-docs" role="tabpanel">
-    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:h2">☐</button>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
-    <p>This spec changes the substrate model. It deletes NotifyDelivered as the delivery trigger, moves the clock and all position computation into Go, and makes each wire its own goroutine. The pinned docs must change in the same commit as the code, or the model and the implementation will disagree.</p>
-
-    <div class="cards">
-      <div class="card">
-        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card1">☐</button>MODEL.md</h3>
-        <ul>
-          <li>Driver / Firing rule: delivery is no longer triggered by TS animation completion. Go's clock elapses inFlightTime and Go delivers to the slot itself.</li>
-          <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
-          <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
-          <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
-          <li>Slot phase lifecycle / PacedWire: the passive lock+cond monitor is gone — PacedWire becomes a goroutine that transports beads over channels (poll inbound → traverse on Go's clock and emit position → put on the outbound channel); the wire owns no clear/busy state and applies no send policy. Blocking Send, WaitConsumed, the cond var, and the per-send unpark helper are deleted; a source places a bead whenever its own rule says to, with no acknowledgment or back-pressure, and the wire may carry more than one bead at once. "The wire is not a goroutine" is no longer true.</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card2">☐</button>CLAUDE.md</h3>
-        <ul>
-          <li>Substrate model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
-          <li>Bridge surface note: the Go to TS channel carries a per-bead position stream; TS to Go carries geometry edits and pause/resume.</li>
-          <li>Drift rule check: timing/pacing logic stays in Go; TS must not compute positions or interpolate.</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
-  </div>
-
   <!-- TAB 9: Plan -->
   <div class="panel" id="panel-plan" role="tabpanel">
     <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
@@ -1235,6 +1205,32 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
 
   <!-- TAB: Inconsistencies -->
   <div class="panel" id="panel-issues" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:h2">☐</button>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
+    <p>This spec changes the substrate model. It deletes NotifyDelivered as the delivery trigger, moves the clock and all position computation into Go, and makes each wire its own goroutine. The pinned docs must change in the same commit as the code, or the model and the implementation will disagree.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card1">☐</button>MODEL.md</h3>
+        <ul>
+          <li>Driver / Firing rule: delivery is no longer triggered by TS animation completion. Go's clock elapses inFlightTime and Go delivers to the slot itself.</li>
+          <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
+          <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
+          <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
+          <li>Slot phase lifecycle / PacedWire: the passive lock+cond monitor is gone — PacedWire becomes a goroutine that transports beads over channels (poll inbound → traverse on Go's clock and emit position → put on the outbound channel); the wire owns no clear/busy state and applies no send policy. Blocking Send, WaitConsumed, the cond var, and the per-send unpark helper are deleted; a source places a bead whenever its own rule says to, with no acknowledgment or back-pressure, and the wire may carry more than one bead at once. "The wire is not a goroutine" is no longer true.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card2">☐</button>CLAUDE.md</h3>
+        <ul>
+          <li>Substrate model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
+          <li>Bridge surface note: the Go to TS channel carries a per-bead position stream; TS to Go carries geometry edits and pause/resume.</li>
+          <li>Drift rule check: timing/pacing logic stays in Go; TS must not compute positions or interpolate.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
+
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:h2">☐</button>Inconsistencies to resolve.</h2>
     <p>A cross-tab audit. The wire-as-goroutine redesign updated some tabs (Goroutines, TS code, Doc Updates, the three diagrams) but not others, so the contradictions cluster at those seams. Tags: <span style="color:var(--good);font-weight:700;">FIX READY</span> = unambiguous; <span style="color:var(--warn);font-weight:700;">DECIDE</span> = needs a model call; <span style="color:var(--info);font-weight:700;">SEAM</span> = known migration-tab lag; <span style="color:var(--muted);font-weight:700;">MINOR</span> = under-specified, not a contradiction; <span style="color:var(--good);font-weight:700;">RESOLVED</span> = decided (reconcile edits may follow).</p>
     <div class="note" style="border-left:3px solid var(--good);">
