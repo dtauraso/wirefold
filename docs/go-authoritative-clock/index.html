@@ -519,7 +519,7 @@
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire loop</td>
           <td>goroutine — one per destination input port</td>
-          <td><ol><li>Poll its inbound channel for a bead a source node sent — every source converging on this port sends here, so fan-in is correct by construction.</li><li>Mark the wire in-flight and elapse the traversal itself — inFlightTime = arcLength ÷ pulseSpeed on Go's clock — advancing the bead and emitting its position each report (~16ms) for the renderer to draw. No TS NotifyDelivered: the wire times its own delivery.</li><li>On traversal-complete, put the bead on the channel connecting it to the destination node.</li><li>Return to polling the inbound channel for the next bead; restart the loop.</li></ol></td>
+          <td><ol><li>Hold a set of in-flight beads, not a single one.</li><li>Take any beads the source placed on the inbound channel this round and add each to the set, stamping each with its own start so its progress is tracked independently.</li><li>Advance every in-flight bead by the elapsed clock time (inFlightTime = arcLength ÷ pulseSpeed), and emit each bead's position (~16 ms) for the renderer.</li><li>When a bead's traversal completes, put it on the channel to the destination node and drop it from the set; the other beads keep flying.</li><li>Loop.</li></ol></td>
         </tr>
       </tbody>
     </table>
