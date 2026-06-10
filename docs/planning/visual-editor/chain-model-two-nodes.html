@@ -328,6 +328,99 @@
 
 <p>The bead's motion is the hop from item to item along the chain.</p>
 
+<h2>Two timescales: straightening is machine-speed, the bead is clock-paced</h2>
+
+<p>Position adjustment is <strong>not</strong> gated by the simulation clock and is <strong>not</strong> a per-frame or per-superstep solver step. It runs at <strong>machine speed</strong>: when a node moves, the edge item reacts and the correction propagates and settles as fast as the goroutines can exchange positions and reschedule — effectively instantaneous to the viewer.</p>
+
+<p>It is <strong>event-driven</strong>: an item recomputes and re-sends its position only when a neighbor's position actually changes, then goes silent. Absent a perturbation the chain is quiet — no busy-spin. The trigger is the disturbance (a node move); the chain quiesces once it is straight again.</p>
+
+<p>This keeps the two timescales cleanly separate:</p>
+<ul>
+  <li><strong>Geometry maintenance</strong> (the items straightening) — unpaced, machine-speed, event-driven on neighbor change.</li>
+  <li><strong>Bead / value animation</strong> — clock-paced; the visible motion down the chain.</li>
+</ul>
+
+<!-- DIAGRAM 7: TWO TIMESCALES -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 200" width="660" height="200">
+    <!-- Lane labels -->
+    <text x="10" y="60" font-size="12" font-weight="600" fill="#374151">geometry</text>
+    <text x="10" y="75" font-size="11" fill="#6b7280">machine-speed</text>
+    <text x="10" y="140" font-size="12" font-weight="600" fill="#374151">bead</text>
+    <text x="10" y="155" font-size="11" fill="#6b7280">clock-paced</text>
+
+    <!-- Lane divider -->
+    <line x1="130" y1="100" x2="690" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+
+    <!-- ===== TOP LANE: geometry / machine-speed ===== -->
+    <!-- node-move marker: vertical bar at left of lane -->
+    <line x1="140" y1="40" x2="140" y2="80" stroke="#111827" stroke-width="2.5"/>
+    <text x="140" y="33" text-anchor="middle" font-size="10" fill="#374151">node</text>
+    <text x="140" y="24" text-anchor="middle" font-size="10" fill="#374151">moved</text>
+
+    <!-- burst/ripple lines emanating right from move marker -->
+    <line x1="140" y1="60" x2="200" y2="48" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="140" y1="60" x2="200" y2="60" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="140" y1="60" x2="200" y2="72" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+    <!-- Arrow from burst to settled straight line -->
+    <line x1="200" y1="60" x2="240" y2="60" stroke="#9ca3af" stroke-width="2" marker-end="url(#arr-dark)"/>
+
+    <!-- Settled straight line (the chain after relaxation) -->
+    <line x1="245" y1="60" x2="680" y2="60" stroke="#111827" stroke-width="3"/>
+    <!-- anchor dots at each end of settled line -->
+    <circle cx="245" cy="60" r="5" fill="#111827"/>
+    <circle cx="680" cy="60" r="5" fill="#111827"/>
+    <!-- small item circles on the settled line -->
+    <circle cx="339" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
+    <circle cx="433" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
+    <circle cx="527" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
+    <circle cx="621" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
+
+    <!-- settled label -->
+    <text x="460" y="50" text-anchor="middle" font-size="10" fill="#6b7280">settles instantly, then quiet</text>
+
+    <!-- ===== BOTTOM LANE: bead / clock-paced ===== -->
+    <!-- baseline wire -->
+    <line x1="140" y1="140" x2="680" y2="140" stroke="#9ca3af" stroke-width="2"/>
+    <!-- anchor dots -->
+    <circle cx="140" cy="140" r="5" fill="#111827"/>
+    <circle cx="680" cy="140" r="5" fill="#111827"/>
+
+    <!-- Tick marks and bead positions: 5 evenly-spaced ticks -->
+    <!-- positions: 140, 248, 356, 464, 572, 680 — 6 stops (start + 5 ticks) -->
+    <!-- tick marks -->
+    <line x1="248" y1="133" x2="248" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
+    <line x1="356" y1="133" x2="356" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
+    <line x1="464" y1="133" x2="464" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
+    <line x1="572" y1="133" x2="572" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
+    <!-- tick labels -->
+    <text x="140" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₀</text>
+    <text x="248" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₁</text>
+    <text x="356" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₂</text>
+    <text x="464" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₃</text>
+    <text x="572" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₄</text>
+    <text x="680" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₅</text>
+
+    <!-- bead at t₂ (mid-journey) -->
+    <circle cx="356" cy="140" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1.5"/>
+
+    <!-- arrow showing bead direction -->
+    <line x1="370" y1="140" x2="450" y2="140" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+
+    <!-- defs for arrowheads -->
+    <defs>
+      <marker id="arr-dark" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+        <path d="M0,0 L0,7 L7,3.5 z" fill="#9ca3af"/>
+      </marker>
+      <marker id="arr-amber" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+        <path d="M0,0 L0,7 L7,3.5 z" fill="#f59e0b"/>
+      </marker>
+    </defs>
+  </svg>
+  <div class="diagram-caption">Diagram 7 — Two timescales. Top: geometry straightening fires once on disturbance and quiesces (machine-speed). Bottom: bead advances one item per clock tick (clock-paced). The two lanes are independent.</div>
+</div>
+
 <h2>Per-goroutine ownership (the whole point)</h2>
 <ul>
   <li>Each item is a goroutine that owns its own position and computes its own peak/valley relaxation from its two neighbors.</li>
@@ -420,8 +513,7 @@
 
 <h2>Open parameters (to settle at implementation)</h2>
 <ul>
-  <li><strong>Item count per wire</strong> — how many interior items a wire is divided into.</li>
-  <li><strong>Relaxation cadence</strong> — items relax continuously on their goroutines; the check/step rate and how it's paced against the clock.</li>
+  <li><strong>Item count per wire</strong> — the chain uses <em>many</em> densely-spaced items (decided); the exact number/spacing is still to be tuned.</li>
   <li><strong>Peak/valley rule confirmation</strong> — this spec assumes "move to the midpoint of the two neighbors" (Laplacian); the alternative is perpendicular projection onto the neighbor line.</li>
 </ul>
 

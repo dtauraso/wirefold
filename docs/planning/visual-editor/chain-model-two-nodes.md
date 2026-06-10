@@ -130,6 +130,24 @@ source → item₁ → item₂ → … → itemₙ → destination
 
 The bead's motion is the hop from item to item along the chain.
 
+## Two timescales: straightening is machine-speed, the bead is clock-paced
+
+Position adjustment is **not** gated by the simulation clock and is **not** a per-frame
+or per-superstep solver step. It runs at **machine speed**: when a node moves, the edge
+item reacts and the correction propagates and settles as fast as the goroutines can
+exchange positions and reschedule — effectively instantaneous to the viewer.
+
+It is **event-driven**: an item recomputes and re-sends its position only when a
+neighbor's position actually changes, then goes silent. Absent a perturbation the chain
+is quiet — no busy-spin. The trigger is the disturbance (a node move); the chain
+quiesces once it is straight again.
+
+This keeps the two timescales cleanly separate:
+
+- **Geometry maintenance** (the items straightening) — unpaced, machine-speed,
+  event-driven on neighbor change.
+- **Bead / value animation** — clock-paced; the visible motion down the chain.
+
 ## Per-goroutine ownership (the whole point)
 
 - Each item is a goroutine that owns its own position and computes its own
@@ -176,9 +194,7 @@ recompute; the chain re-straightens itself.
 
 ## Open parameters (to settle at implementation)
 
-- **Item count per wire** — how many interior items a wire is divided into.
-- **Relaxation cadence** — items relax continuously on their goroutines; the
-  check/step rate and how it's paced against the clock.
+- **Item count per wire** — the chain uses *many* densely-spaced items (decided); the exact number/spacing is still to be tuned.
 - **Peak/valley rule confirmation** — this spec assumes "move to the midpoint of the
   two neighbors" (Laplacian); the alternative is perpendicular projection onto the
   neighbor line.
