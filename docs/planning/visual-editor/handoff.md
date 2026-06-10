@@ -7,9 +7,9 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-09 — task/spec-go-backend-ts-frontend, pushed; spec doc is SETTLED, CONSISTENT, and CONCISE: 9 tabs, zero open spec items (i1 resolved))
+## State at handoff (2026-06-09 — task/go-backend-ts-frontend, pushed; spec doc is SETTLED, CONSISTENT, and CONCISE: 9 tabs, zero open spec items (i1 resolved))
 
-- Active branch: `task/spec-go-backend-ts-frontend`, pushed, tree clean. Latest pushed commit: `e93d42e2`.
+- Active branch: `task/go-backend-ts-frontend`, pushed, tree clean. Latest pushed commit: `e93d42e2`.
 - **NOTE:** `topology.json` has the git skip-worktree bit SET — editor churn stays out of git. Deliberate changes require `git update-index --no-skip-worktree topology.json` first, then re-set after.
 - All work since the last handoff was on the **spec doc** (`docs/go-authoritative-clock/index.html`): a consistency sweep, a Tracking-tab cleanup, and an exhaustive concision pass. No Go/TS code changed; nothing merged to main.
 
@@ -77,7 +77,7 @@ Nothing merged. Main still describes the OLD model. All session work lives on th
 4. **Camera/picking are TS** (three.js), not Go builds. r3f stays for 3D scene navigation; control feel bespoke (no OrbitControls).
 5. **Store** = no-op holder, Go sole writer — a TS-side change when the rewrite lands.
 6. **The node-contract principle is deliberately UNPINNED** (totality in / no guarantees out; reliability lives in the node, not the channel). Let it manifest in code — do NOT re-pitch pinning it to MODEL.md/memory.
-7. **Merge decision** — run `tools/strip-branch-local-docs.sh task/spec-go-backend-ts-frontend` before merging; needs explicit sign-off.
+7. **Merge decision** — run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` before merging; needs explicit sign-off.
 
 (The slot-vocabulary inconsistency listed as open in the prior handoff is now RESOLVED.)
 
