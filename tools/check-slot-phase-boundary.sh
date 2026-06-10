@@ -24,7 +24,7 @@ HITS=0
 # object property value (comma-separated, runtime form). Exclude pump.ts (the
 # canonical home). The type-definition form uses a semicolon: { phase: "filled"; … }
 # so limiting the match to the comma form avoids flagging messages.ts.
-# We scan only the rf/ subtree (renderer files outside rf/ are not substrate).
+# We scan only the rf/ subtree (renderer files outside rf/ are not Go).
 ts_scan() {
   local pattern="$1"
   local hit

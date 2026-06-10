@@ -573,7 +573,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
-	fmt.Fprintln(w, `// PascalCase Go kind names that have a substrate runtime.`)
+	fmt.Fprintln(w, `// PascalCase Go kind names that have a Go runtime.`)
 	fmt.Fprintln(w, `// Single source of truth — derived from Wiring.Register calls.`)
 	fmt.Fprintf(w, "export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([\n")
 	for _, e := range kinds {
@@ -1172,7 +1172,7 @@ func writeTraceKinds(outPath string, kinds []string) error {
 
 // writeNodeDims emits nodes/Wiring/node_dims_gen.go: a kind → render width/height
 // map sourced from each kind's SPEC.md ## View width/height fields. The Go
-// substrate uses these to mirror nodeRadius/nodeWorldPos in geometry-helpers.ts
+// Go uses these to mirror nodeRadius/nodeWorldPos in geometry-helpers.ts
 // when computing port-to-port arc length. Single source of truth = SPEC.md.
 func writeNodeDims(outPath string, kinds []kindEntry) error {
 	var buf bytes.Buffer

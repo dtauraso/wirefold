@@ -1,4 +1,4 @@
-// node.go — Node interface for the substrate.
+// node.go — Node interface for the Go network.
 //
 // Node is the single interface every node kind must implement.
 // The runner (main.RunTest) launches each node in its own goroutine,
@@ -8,7 +8,7 @@ package Wiring
 
 import "context"
 
-// Node is the substrate node interface. Update runs the node's event
+// Node is the Go node interface. Update runs the node's event
 // loop until ctx is cancelled.
 type Node interface {
 	Update(ctx context.Context)

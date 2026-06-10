@@ -1,7 +1,7 @@
 // Scenario: dragging a node does not disconnect its edges.
 // Observable: the React Flow edge DOM element for each incident wire
 // is still present in the DOM after the drag completes.
-// Fixture: substrate-2node (Input → ReadGate, one edge).
+// Fixture: go-2node (Input → ReadGate, one edge).
 
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -23,7 +23,7 @@ declare global {
 const EDGE_ARIA = "Edge from in08 to readGate1";
 
 test("wire-survives-drag: dragging a node keeps its edge in the DOM", async ({ page }) => {
-  const fixture = readFileSync(resolve(HERE, "fixtures/substrate-2node.json"), "utf-8");
+  const fixture = readFileSync(resolve(HERE, "fixtures/go-2node.json"), "utf-8");
   await page.addInitScript((text: string) => { window.__wirefold_fixture = text; }, fixture);
   await page.goto(HARNESS_URL);
 

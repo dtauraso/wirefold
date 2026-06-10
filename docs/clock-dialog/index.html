@@ -242,7 +242,7 @@
   <strong>TS</strong> decides <em>when</em> those milliseconds elapse
   (animates the bead, and can freeze time on pause).
   They synchronise via exactly <strong>4 messages</strong> per pulse.
-  Pausing TS halts the substrate because Go's
+  Pausing TS halts Go because Go's
   <code>Recv()</code> blocks until TS says "delivered."
 </div>
 
@@ -289,7 +289,7 @@
   <rect x="100" y="20" width="160" height="44" rx="5"
         fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
   <text x="180" y="38" text-anchor="middle" fill="#5ec4a0" font-size="13" font-weight="700">Go</text>
-  <text x="180" y="55" text-anchor="middle" fill="#3d8a70" font-size="10">(substrate)</text>
+  <text x="180" y="55" text-anchor="middle" fill="#3d8a70" font-size="10">(network)</text>
 
   <!-- TS: centred at x=600 -->
   <rect x="520" y="20" width="160" height="44" rx="5"
@@ -481,7 +481,7 @@
   </div>
   <div class="callout good">
     <h3>Animation completion IS the delivery signal</h3>
-    <p>There is no countdown timer in Go. <code>Recv()</code> blocks on a channel that only unblocks when TS fires the "delivered" postMessage. That is why pausing TS halts substrate execution — Go literally cannot proceed until the animation finishes.</p>
+    <p>There is no countdown timer in Go. <code>Recv()</code> blocks on a channel that only unblocks when TS fires the "delivered" postMessage. That is why pausing TS halts Go execution — Go literally cannot proceed until the animation finishes.</p>
   </div>
   <div class="callout info">
     <h3>Two exactly-once guards</h3>

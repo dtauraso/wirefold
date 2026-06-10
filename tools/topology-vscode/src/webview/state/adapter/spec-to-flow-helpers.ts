@@ -47,7 +47,7 @@ export function buildEdges(
       target: e.target,
       sourceHandle: e.sourceHandle,
       targetHandle: e.targetHandle,
-      type: "substrate",
+      type: "go",
       // label rendered via EdgeLabelRenderer (data.label), not RF's foreignObject.
       style: { stroke: (KIND_COLORS as Record<string, string>)[e.kind] ?? "#888", strokeWidth: 1.5 },
       data: {

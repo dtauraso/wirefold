@@ -20,7 +20,7 @@ State at handoff:
   Working tree: {{clean | files modified — note pre-existing vs new}}.
 
 {{Optional: per-branch decision summary — what was chosen on this
-branch and why, e.g. substrate choice, pattern adopted. Omit if the
+branch and why, e.g. Go-layer choice, pattern adopted. Omit if the
 branch is a straightforward continuation.}}
 
 Open branches (pushed, unmerged):

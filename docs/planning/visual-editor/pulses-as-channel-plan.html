@@ -53,7 +53,7 @@
 
   <div class="tab-content" id="c1">
     <p>A Go channel between two nodes is bounded — size 1. At any moment it holds zero or one item. The visual edge <em>is</em> the channel: when an item is in transit it appears as an animated pulse traveling the edge path; when the channel is empty the edge is a plain line.</p>
-    <p>The animation completing at the destination <em>is</em> the receive completing. Visual pacing drives substrate pacing — the receive does not complete until the animation lands. This means the sender blocks for the entire travel duration if it tries to send a second item before the first is consumed.</p>
+    <p>The animation completing at the destination <em>is</em> the receive completing. Visual pacing drives Go pacing — the receive does not complete until the animation lands. This means the sender blocks for the entire travel duration if it tries to send a second item before the first is consumed.</p>
     <p>There is no queue on the wire, no pulse IDs, no dedup refs. The entire state of an edge collapses to a single bit: <em>in-transit or not</em>. On Run restart, channels reset to empty and a new simulation begins. There is no cross-run state to clear.</p>
   </div>
 

@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// Scans tools/topology-vscode/src/webview/substrate-r/ for banned
+// Scans tools/topology-vscode/src/webview/rf/ for banned
 // vocabulary that signals the AI (or a human) has drifted from the
-// substrate model. See MODEL.md at repo root.
+// Go model. See MODEL.md at repo root.
 //
 // Exits non-zero on any hit. Wire into CI / pre-commit as desired.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const ROOT = new URL("../src/webview/substrate-r/", import.meta.url).pathname;
+const ROOT = new URL("../src/webview/rf/", import.meta.url).pathname;
 
 if (!existsSync(ROOT)) {
-  console.log("substrate-r/ directory not present; vocab check skipped.");
+  console.log("rf/ directory not present; vocab check skipped.");
   process.exit(0);
 }
 
@@ -70,7 +70,7 @@ for (const file of walk(ROOT)) {
 }
 
 if (hits > 0) {
-  console.error(`\n${hits} banned-vocabulary hit(s) in substrate-r/. See MODEL.md.`);
+  console.error(`\n${hits} banned-vocabulary hit(s) in rf/. See MODEL.md.`);
   process.exit(1);
 }
-console.log("substrate vocabulary clean.");
+console.log("Go vocabulary clean.");

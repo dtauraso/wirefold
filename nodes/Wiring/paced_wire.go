@@ -361,7 +361,7 @@ func (pw *PacedWire) startDeliveryLocked(value any, bp beadPlacement) {
 // arc/pulseSpeed), and the new arc may put the deadline already behind Now() — in
 // which case the next tick clamps to the deadline and delivery fires immediately.
 //
-// Substrate shape (MODEL.md): the wire reads the ONE clock in its OWN goroutine —
+// Go shape (MODEL.md): the wire reads the ONE clock in its OWN goroutine —
 // no central tick loop or scheduler. WaitUntil is pause-aware (active elapsed
 // freezes while halted), so NO position is emitted while halted and the bead
 // resumes where it left off. The walker self-cancels if its generation no longer

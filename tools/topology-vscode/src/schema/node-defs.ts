@@ -32,7 +32,7 @@ export interface NodeDef {
   requiredInputs?: string[];
 }
 
-// PascalCase Go kind names that have a substrate runtime.
+// PascalCase Go kind names that have a Go runtime.
 // Single source of truth — derived from Wiring.Register calls.
 export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
   "ChainInhibitor",

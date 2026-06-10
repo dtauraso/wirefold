@@ -1,7 +1,7 @@
 // port_geometry.go — Go mirror of the port-to-port segment geometry in
 // tools/topology-vscode/src/webview/three/geometry-helpers.ts.
 //
-// The substrate must compute a pulse's travel budget from the SAME segment the
+// Go must compute a pulse's travel budget from the SAME segment the
 // bead is drawn on: a straight line from the source OUTPUT port's sphere-surface
 // point to the target INPUT port's sphere-surface point. This file reproduces
 // nodeWorldPos, nodeRadius, portDir and portWorldPos so arcLengthBetweenPorts

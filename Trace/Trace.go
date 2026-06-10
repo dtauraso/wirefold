@@ -83,7 +83,7 @@ type Event struct {
 	hasValue bool
 	// Wire geometry fields — populated on send events when the outgoing port
 	// is backed by a PacedWire. Zero values are omitted from JSON output.
-	// ArriveStep is omitted: the substrate has no global ms-per-step cadence,
+	// ArriveStep is omitted: Go has no global ms-per-step cadence,
 	// so the TS layer derives arrival from emitTime + simLatencyMs instead.
 	ArcLength    float64 `json:"arcLength,omitempty"`
 	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`

@@ -2,15 +2,15 @@
 branch: task/full-code-audit
 ---
 
-# Substrate / model integrity audit
+# Go / model integrity audit
 
-Read-only audit of the Go substrate (`nodes/`, `nodes/Wiring/loader.go`,
+Read-only audit of the Go network (`nodes/`, `nodes/Wiring/loader.go`,
 `nodes/Wiring/builders.go`) and the pump (`tools/topology-vscode/src/webview/rf/pump.ts`)
 against [MODEL.md](../../../MODEL.md). No code was edited.
 
 ## Verdict
 
-No CONFIRMED substrate-model violations. Build and tests green; all five
+No CONFIRMED Go-model violations. Build and tests green; all five
 guard scripts clean. Two low-severity doc-drift suspicions noted below.
 
 ## Build / test / guard results
@@ -20,7 +20,7 @@ guard scripts clean. Two low-severity doc-drift suspicions noted below.
   chaininhibitor, inhibitrightgate, input, readgate); cmd/tools have no
   test files.
 - Guard scripts (all exit 0, "clean"):
-  - `tools/check-substrate-vocabulary.sh`
+  - `tools/check-go-vocabulary.sh`
   - `tools/check-trace-kind-parity.sh`
   - `tools/check-no-ts-timers.sh`
   - `tools/check-message-kind-parity.sh`
@@ -32,14 +32,14 @@ short-circuits to exit 0 when nothing is changed.
 
 ## 1. Banned-vocabulary drift — CLEAN
 
-`tools/check-substrate-vocabulary.sh:29` scans the Go substrate
+`tools/check-go-vocabulary.sh:29` scans the Go network
 (`nodes/**`, excluding `Trace/`, plus `Wire.go`/`main.go` if present) with
 `grep -w` for: tick, round, schedule, ack, latch, cohort, scheduler,
 deadline, step. Result: clean. No banned token appears as a whole word in
-substrate Go.
+Go.
 
 Caveat (suspicion, not a violation): the scan is whole-word over Go
-substrate files only. It does not cover comments containing substrings, the
+files only. It does not cover comments containing substrings, the
 TS layer, or `Trace/Trace.go` (intentionally excluded — `Step` is the
 legitimate event-ordinal field, used as `step` in `pump.ts:44`). This is
 by design and matches MODEL.md's allowed vocabulary, but means a banned
@@ -86,10 +86,10 @@ term smuggled into a TS comment or a Go substring would not be flagged.
   blocks on `Recv` (`nodes/Wiring/ports.go:54–62`) rather than busy-spinning.
   No central scheduler. Matches MODEL.md §"Driver."
 - **Round-close stepping**: ABSENT, as required. No round/tick/simultaneity
-  layer exists in substrate. Coordination is via destination slot phase read
+  layer exists in Go. Coordination is via destination slot phase read
   directly by senders. Matches MODEL.md §"Driver."
 - **Global gate**: model places play/pause on wire animations in the TS
-  layer; substrate has no gate code, consistent with "gate halts wires, not
+  layer; Go has no gate code, consistent with "gate halts wires, not
   nodes."
 
 ## 3. Drift rule (slot/backpressure/firing logic in TS outside pump.ts) — CLEAN
@@ -112,11 +112,11 @@ tree (broader than the pump-only `check-no-ts-timers.sh`).
 ## 4. Doc-vs-code drift (SUSPICIONS, low severity)
 
 - **`Wire.go` does not exist.** MODEL.md:4, MODEL.md:46 and CLAUDE.md's
-  "Substrate model" pointer all name `Wire.go` as a substrate file to read
+  "Go model" pointer all name `Wire.go` as a Go file to read
   before editing. `find` across the repo (excluding node_modules) returns no
-  `Wire.go`. The substrate's wire type is `nodes/Wiring/paced_wire.go`. The
+  `Wire.go`. The Go wire type is `nodes/Wiring/paced_wire.go`. The
   guard scripts already treat `Wire.go` as optional (`[[ -f ... ]]` in
-  `check-substrate-vocabulary.sh:14` and `check-slot-phase-boundary.sh:47`),
+  `check-go-vocabulary.sh:14` and `check-slot-phase-boundary.sh:47`),
   so this is harmless to tooling but the doc references are stale. Recommend
   repointing MODEL.md / CLAUDE.md to `nodes/Wiring/paced_wire.go`.
 - **`pump.ts` is 110 lines and references handlers by comment marker**

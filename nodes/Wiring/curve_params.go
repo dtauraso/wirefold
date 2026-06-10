@@ -1,5 +1,5 @@
 // curve_params.go — single source of truth for curve-shape constants shared
-// between the Go substrate and the TS visual layer.
+// between the Go network and the TS visual layer.
 //
 // Codegen: tools/gen-node-defs reads this file and emits
 // tools/topology-vscode/src/schema/curve-params.ts.
@@ -14,7 +14,7 @@ package Wiring
 import "math"
 
 // CurveParamPulseSpeedWuPerMs is the uniform pulse speed in world-units per
-// millisecond.  Both substrate (simLatencyMs) and TS visual layer (travel
+// millisecond.  Both Go (simLatencyMs) and TS visual layer (travel
 // duration) derive timing from this value.
 //
 // Matches PULSE_SPEED_WU_PER_MS in the generated curve-params.ts.

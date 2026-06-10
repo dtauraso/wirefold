@@ -1,6 +1,6 @@
 // shading_params.go — single source of truth for the scene's shading PARAMETERS
 // (glass/material params, environment/lighting params, wire-tube and bead
-// appearance) shared between the Go substrate and the TS visual layer.
+// appearance) shared between Go and the TS visual layer.
 //
 // Substance vs. medium (MODEL.md, docs/go-authoritative-clock/index.html "tsgo"):
 // the GPU render machinery (three.js materials, PMREMGenerator, mesh creation,

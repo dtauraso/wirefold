@@ -22,7 +22,7 @@
 //     LoadTopology emits geometry events (edge curves) but zero position events;
 //     Resume + Advance unblocks bead delivery (position events flow).
 //
-// Substrate-faithful: there is no central runner here. Each PacedWire reads the
+// Go-faithful: there is no central runner here. Each PacedWire reads the
 // one injected clock and self-delivers; the test only advances that clock.
 
 package main

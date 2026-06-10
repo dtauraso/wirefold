@@ -1,6 +1,6 @@
 // pump.ts — trace-event translator. Pure mapping: Go trace events → dedicated state stores.
-// No state machine, no phase tracking, no substrate logic.
-// pump.ts is render-only; substrate poll loops live in Go. See MODEL.md §Driver.
+// No state machine, no phase tracking, no Go logic.
+// pump.ts is render-only; Go poll loops live in Go. See MODEL.md §Driver.
 // Each call to handleTraceEvent updates the relevant state store directly.
 //
 // ── Send→position→done lifecycle (Phase 2) ──────────────────────────────────

@@ -84,7 +84,7 @@ tools/topology-vscode/gen-node-defs
 /.probe/
 
 # Hook block log (local audit trail, not for VCS)
-.claude/hooks/substrate-r-blocks.log
+.claude/hooks/go-blocks.log
 
 # Editor settings
 .vscode/

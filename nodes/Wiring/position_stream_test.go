@@ -19,7 +19,7 @@ import (
 //
 // "Golden" here is analytic, not a recorded file: Go's lerp IS the position eval,
 // so the expected sequence is recomputed in the test from the same formula the
-// substrate uses. Any drift between the formula and the stream fails this test.
+// Go uses. Any drift between the formula and the stream fails this test.
 
 // posEvents extracts the KindPosition events from a drained trace, in order.
 func posEvents(events []T.Event) []T.Event {

@@ -1323,7 +1323,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <div class="card">
         <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card2">☐</button>CLAUDE.md</h3>
         <ul>
-          <li>Substrate model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
+          <li>Go model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
           <li>Bridge surface note: the Go to TS channel carries a per-bead position stream; TS to Go carries geometry edits and pause/resume.</li>
           <li>Drift rule check: timing/pacing logic stays in Go; TS must not compute positions or interpolate.</li>
         </ul>
@@ -1342,7 +1342,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <h2>What's left to do.</h2>
     <p>Open work on <code style="font-family:var(--mono);color:var(--go-hue)">task/go-backend-ts-frontend</code>.
     Edge-curve geometry already moved to Go (Phase 3, commit <code style="font-family:var(--mono);color:var(--go-hue)">8e4b6532</code>);
-    node/port-position geometry is still in TS. This is the remaining substrate work plus cleanups.</p>
+    node/port-position geometry is still in TS. This is the remaining Go work plus cleanups.</p>
     <table style="table-layout:fixed;width:100%;border-collapse:collapse;margin-top:1rem;">
       <colgroup>
         <col style="width:3%">
@@ -1361,7 +1361,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <tbody>
         <tr>
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">1</td>
-          <td style="padding:5px 8px;vertical-align:top"><strong>Per-goroutine node/port world-position emission</strong> — NEXT substrate step</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Per-goroutine node/port world-position emission</strong> — NEXT Go step</td>
           <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Add trace-kind <code style="font-family:var(--mono);color:var(--go-hue)">KindNodeGeometry</code> (<code style="font-family:var(--mono)">"node-geometry"</code>) in <code style="font-family:var(--mono)">Trace.go</code> (const ~L52 + append <code style="font-family:var(--mono)">TraceEventKinds</code> ~L58 + Event fields + emit method following <code style="font-family:var(--mono)">Geometry()</code> ~L205 + <code style="font-family:var(--mono)">marshalEvent</code> case). <code style="font-family:var(--mono)">pump.ts</code>: add <code style="font-family:var(--mono)">case "node-geometry"</code> → new node-geometry store. Each node's goroutine emits its node center + per-port world positions/dirs.</td>
           <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">NOT STARTED</td>
         </tr>
