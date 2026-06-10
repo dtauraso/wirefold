@@ -174,9 +174,29 @@ type Out struct {
 	// its own speed even when multiple edges fan into one destination port.
 	ArcLength    float64
 	SimLatencyMs float64
+	// P0/P1/P2 are this edge's quadratic-bezier control points (source OUT-port
+	// world pos, bulge, dest IN-port world pos) in the SAME 3-D frame the renderer
+	// draws. They travel WITH each placed bead (beadPlacement) so the wire's
+	// position stream evaluates the exact curve this edge is drawn on — fan-in safe
+	// because the shared dest wire never stores per-edge geometry.
+	P0, P1, P2 vec3
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
+}
+
+// placement builds the per-bead beadPlacement this Out hands to the wire: the
+// per-edge in-flight time plus the position-stream context (curve control points
+// + source identity). Centralized so TrySend and TryEmit stay in lockstep.
+func (o *Out) placement() beadPlacement {
+	return beadPlacement{
+		InFlightMs: o.SimLatencyMs,
+		P0:         o.P0,
+		P1:         o.P1,
+		P2:         o.P2,
+		Node:       o.node,
+		Port:       o.port,
+	}
 }
 
 // Gated reports whether the source node should wait for consumption after a
@@ -200,7 +220,7 @@ func (o *Out) TrySend(v int) bool {
 		// (o.SimLatencyMs is this edge's per-bead in-flight time), not by a TS
 		// "delivered" reply — Send returns once the bead is placed.
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		if err := o.pw.Send(o.ctx, v, o.SimLatencyMs); err != nil {
+		if err := o.pw.Send(o.ctx, v, o.placement()); err != nil {
 			return false
 		}
 		return true
@@ -227,8 +247,9 @@ func (o *Out) TryEmit(v int) bool {
 	}
 	if o.pw != nil {
 		// o.SimLatencyMs is this edge's per-bead in-flight time; the wire times
-		// delivery on Go's clock from it.
-		if !o.pw.TryPlace(v, o.SimLatencyMs) {
+		// delivery on Go's clock from it. The placement also carries this edge's
+		// curve so the wire streams the bead's position.
+		if !o.pw.TryPlace(v, o.placement()) {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
@@ -300,9 +321,9 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, P0: curve.P0, P1: curve.P1, P2: curve.P2}
 }

@@ -18,6 +18,35 @@ const PulseSpeedWuPerMs = CurveParamPulseSpeedWuPerMs
 // ErrCanceled is returned by Send or Recv when the context is canceled.
 var ErrCanceled = errors.New("paced wire: context canceled")
 
+// positionEmitIntervalMs is the per-frame position-stream cadence (~60 Hz).
+// MODEL.md: "The ~16 ms position emit is a render cadence, not a clock." The
+// delivery goroutine wakes on the one clock every interval to emit the bead's
+// evaluated position; this is the report rate, not the bead speed (speed stays
+// pulseSpeed; arrival stays at inFlightMs regardless of interval).
+const positionEmitIntervalMs = 16
+
+// beadPlacement bundles everything one placement needs. The in-flight time times
+// delivery (Phase 1); the curve control points + source identity drive the
+// per-frame position stream (Phase 2). Geometry travels WITH the bead, never
+// stored on the shared wire, so fan-in is safe: each in-flight bead evaluates the
+// exact curve it is drawn on. The zero value (empty curve + identity) means "no
+// position stream" — unit tests that only exercise delivery pass just InFlightMs.
+type beadPlacement struct {
+	InFlightMs float64
+	// Position-stream context. P0/P1/P2 are this edge's quadratic-bezier control
+	// points (source OUT-port world pos, bulge, dest IN-port world pos). Node/Port
+	// are the SOURCE node id + output port — the position trace key, matching the
+	// send event so the renderer routes by source+sourceHandle (fan-out).
+	P0, P1, P2 vec3
+	Node, Port string
+}
+
+// streams reports whether this placement carries position-stream context. False
+// for the bare-delivery placements used by unit tests (empty Node).
+func (bp beadPlacement) streams() bool {
+	return bp.Node != ""
+}
+
 // PacedWire is a single-slot wire with two distinct backpressure bits.
 //
 // Two bits, two clear events:
@@ -145,15 +174,16 @@ func (pw *PacedWire) SetFaded(v bool) {
 
 // Send places a bead on the wire and returns immediately once the bead is
 // placed, then schedules the bead's clock-timed delivery into the destination
-// slot at placementElapsed+inFlightMs. inFlightMs is the bead's per-edge travel
-// time (arcLength/pulseSpeed on the SOURCE edge). Returns ErrCanceled if ctx is
-// done before the wire clears. If the wire is faded, Send returns nil immediately
-// without placing a bead.
+// slot at placementElapsed+bp.InFlightMs. bp carries the bead's per-edge travel
+// time (arcLength/pulseSpeed on the SOURCE edge) and, for the position stream, the
+// bead's own curve control points + source identity. Returns ErrCanceled if ctx
+// is done before the wire clears. If the wire is faded, Send returns nil
+// immediately without placing a bead.
 //
 // Backpressure: Send blocks while inFlight is true (wire occupied by a prior
 // bead not yet delivered into its destination slot). It does NOT wait on Done
 // and does NOT observe the destination slot directly.
-func (pw *PacedWire) Send(ctx context.Context, value any, inFlightMs float64) error {
+func (pw *PacedWire) Send(ctx context.Context, value any, bp beadPlacement) error {
 	// Fade/delete gate: skip benignly when the wire is faded or deleted.
 	pw.mu.Lock()
 	if pw.faded {
@@ -189,18 +219,28 @@ func (pw *PacedWire) Send(ctx context.Context, value any, inFlightMs float64) er
 	pw.inFlight = true
 	pw.consumedCh = make(chan struct{})
 	pw.cond.Broadcast()
-	pw.startDeliveryLocked(inFlightMs)
+	pw.startDeliveryLocked(value, bp)
 	pw.mu.Unlock()
 
 	return nil
+}
+
+// SendDeliverOnly places a bead timed for delivery at placement+inFlightMs with
+// NO position stream (empty curve/identity). It exists for cross-package tests
+// (node firing-rule tests, the headless cascade) that exercise delivery timing
+// only; the position stream is covered by Wiring's own deterministic verifier.
+// Production code places beads via the typed Out (TrySend/TryEmit), which always
+// carries the full curve.
+func (pw *PacedWire) SendDeliverOnly(ctx context.Context, value any, inFlightMs float64) error {
+	return pw.Send(ctx, value, beadPlacement{InFlightMs: inFlightMs})
 }
 
 // TryPlace is the non-blocking placement used by the fire-and-forget send rule.
 // It never blocks and never overwrites an in-flight bead: if the wire is faded
 // or already in-flight, it returns false (the send is dropped). Otherwise it
 // places the bead exactly like Send's placement block, schedules the bead's
-// clock-timed delivery at placementElapsed+inFlightMs, and returns true.
-func (pw *PacedWire) TryPlace(value any, inFlightMs float64) bool {
+// clock-timed delivery at placementElapsed+bp.InFlightMs, and returns true.
+func (pw *PacedWire) TryPlace(value any, bp beadPlacement) bool {
 	pw.mu.Lock()
 	if pw.faded {
 		pw.mu.Unlock()
@@ -220,7 +260,7 @@ func (pw *PacedWire) TryPlace(value any, inFlightMs float64) bool {
 	pw.inFlight = true
 	pw.consumedCh = make(chan struct{})
 	pw.cond.Broadcast()
-	pw.startDeliveryLocked(inFlightMs)
+	pw.startDeliveryLocked(value, bp)
 	pw.mu.Unlock()
 	return true
 }
@@ -265,35 +305,91 @@ func (pw *PacedWire) PollRecv() (any, bool) {
 // startDeliveryLocked launches the clock-timed delivery goroutine for the bead
 // just placed. Must be called with pw.mu held, immediately after setting
 // inFlight=true. It bumps deliverGen, captures the placement elapsed reading from
-// the wire's clock, computes the delivery deadline (placementElapsed+inFlightMs),
-// and spawns a goroutine that WaitUntil's that deadline (pause-aware) then calls
-// tryDeliverLocked. The goroutine self-cancels if its generation no longer
-// matches — so a Reset/Delete/Restore (which bump deliverGen and cancel the
-// delivery context) cancels this delivery without delivering a stale bead.
-func (pw *PacedWire) startDeliveryLocked(inFlightMs float64) {
+// the wire's clock, computes the delivery deadline (placementElapsed+InFlightMs),
+// and spawns a goroutine that walks the one clock in ~16 ms steps, emitting the
+// bead's evaluated position each step (Phase 2 position stream), and on reaching
+// the deadline emits the final position (t==1) then calls tryDeliverLocked.
+//
+// Substrate shape (MODEL.md): this is the wire reading the ONE clock in its OWN
+// goroutine — there is no central tick loop or scheduler. Each wire walks its own
+// bead independently. WaitUntil is pause-aware (active elapsed freezes while
+// halted), so NO position is emitted while halted and the bead resumes where it
+// left off. The goroutine self-cancels if its generation no longer matches — so a
+// Reset/Delete/Restore (which bump deliverGen and cancel the delivery context)
+// stops the stream and cancels delivery without emitting/delivering a stale bead.
+//
+// The position emit only runs when bp carries stream context (bp.streams()):
+// production placements via ports.go fill the curve + source identity; unit-test
+// placements pass a bare InFlightMs and get delivery-only behavior (Phase 1).
+func (pw *PacedWire) startDeliveryLocked(value any, bp beadPlacement) {
 	pw.deliverGen++
 	gen := pw.deliverGen
 	clk := pw.clock
+	tr := pw.Trace
 	placement := clk.Now()
-	deadline := placement + time.Duration(inFlightMs*float64(time.Millisecond))
+	inFlightDur := time.Duration(bp.InFlightMs * float64(time.Millisecond))
+	deadline := placement + inFlightDur
 
 	// Per-delivery cancellable context so teardown wakes the parked WaitUntil.
 	dctx, cancel := context.WithCancel(context.Background())
 	pw.deliverCancel = cancel
 
+	// Bead value as int for the position trace (matches the send event's int value).
+	beadVal, _ := value.(int)
+	stream := bp.streams() && tr != nil && inFlightDur > 0
+
 	go func() {
-		// Block on the one clock until the pause-aware deadline is reached.
-		if err := clk.WaitUntil(dctx, deadline); err != nil {
-			// Context canceled by teardown (Reset/Delete) — do not deliver.
-			return
+		interval := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
+		// next is the wall position of the upcoming ~16 ms tick on the clock.
+		next := placement + interval
+		for {
+			// Wait for the next tick, but never past the delivery deadline.
+			target := next
+			final := false
+			if target >= deadline {
+				target = deadline
+				final = true
+			}
+			if err := clk.WaitUntil(dctx, target); err != nil {
+				// Context canceled by teardown (Reset/Delete) — stop the stream,
+				// do not emit, do not deliver.
+				return
+			}
+			// Bail if this is no longer the live placement (teardown / newer bead).
+			pw.mu.Lock()
+			stale := pw.deliverGen != gen
+			pw.mu.Unlock()
+			if stale {
+				return
+			}
+
+			if stream {
+				// t is computed from the tick TARGET (the clock instant we waited
+				// for), not a fresh Now() — WaitUntil guarantees Now() >= target, so
+				// using target keeps the emitted position == bezierPointAt(curve, t)
+				// at t = elapsed/inFlightTime deterministically (the golden parity).
+				elapsed := target - placement
+				t := float64(elapsed) / float64(inFlightDur)
+				if t > 1 {
+					t = 1
+				}
+				pos := bezierPointAt(bp.P0, bp.P1, bp.P2, t)
+				tr.Position(bp.Node, bp.Port, beadVal, pos.X, pos.Y, pos.Z)
+			}
+
+			if final {
+				// Deadline reached (final position already emitted at t==1 above):
+				// complete the Phase-1 delivery under the lock, guarding against a
+				// stale waiter once more.
+				pw.mu.Lock()
+				if pw.deliverGen == gen {
+					pw.tryDeliverLocked()
+				}
+				pw.mu.Unlock()
+				return
+			}
+			next += interval
 		}
-		pw.mu.Lock()
-		// Only deliver if this is still the live placement (no teardown / no
-		// newer bead) — deliverGen guards against a stale waiter.
-		if pw.deliverGen == gen {
-			pw.tryDeliverLocked()
-		}
-		pw.mu.Unlock()
 	}()
 }
 

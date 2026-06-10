@@ -9,10 +9,7 @@ import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap, claimDelivered, lastDeliveredAt } from "./pulse-state";
-import { vscode } from "../vscode-api";
-import { postLog } from "../log/post";
-import { getPauseAdjustedNow } from "../state/run-status";
+import { getPulseMap } from "./pulse-state";
 import {
   nodeRadius,
   boundingBox,
@@ -350,23 +347,17 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere that travels along the port-to-port edge curve at the current pulse t.
-// Duration is substrate-supplied (pulse.simLatencyMs); no speed constant needed.
-// Driven by useFrame reading getPulseMap() imperatively (no React context needed).
-// The curve is rebuilt each frame from src/tgt/handles via buildPortCurve so it tracks
-// node moves in the same drag tick — identical curve to SingleEdgeTube.
+// PulseBead: a bright sphere drawn at the bead's Go-computed world position.
+// Phase 2: Go owns the clock and computes every bead position; this component
+// PLOTS ONLY — it reads pulse.pos from getPulseMap() each frame and sets the mesh
+// position to it. No curve sampling, no t, no clock, no delivery message: the
+// renderer is told where the bead is, never asked when it arrived (MODEL.md).
+// src/tgt/handles are no longer needed for the bead (the wire tube still uses
+// them); they are kept off this component's props.
 export function PulseBead({
   edgeId,
-  src,
-  tgt,
-  sourceHandle,
-  targetHandle,
 }: {
   edgeId: string;
-  src: RFNode<NodeData>;
-  tgt: RFNode<NodeData>;
-  sourceHandle: string | null | undefined;
-  targetHandle: string | null | undefined;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -374,37 +365,12 @@ export function PulseBead({
     const pulse = getPulseMap().get(edgeId);
     const mesh = meshRef.current;
     if (!mesh) return;
-    if (!pulse) {
+    // Hidden until there is a pulse AND Go has streamed at least one position.
+    if (!pulse || !pulse.pos) {
       mesh.visible = false;
       return;
     }
-    const curve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
-    const duration = pulse.simLatencyMs;
-    const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
-    if (t >= 1) {
-      mesh.visible = false;
-      // Capture the prior claim before claiming, so we can report WHY a claim
-      // failed: already-claimed-for-this-startTime (duplicate RAF tick at t>=1)
-      // vs. claimed-for-a-different-startTime (stale pulse instance).
-      const priorClaim = lastDeliveredAt(edgeId);
-      const claimed = claimDelivered(edgeId, pulse.startTime);
-      const claimReason = claimed
-        ? "first-claim"
-        : (priorClaim === pulse.startTime ? "already-claimed-this-startTime" : "claimed-other-startTime");
-      // Use Go-authoritative slot identity from pulse data; fall back to React
-      // prop only if the pulse carries empty strings (old binary compat).
-      const resolvedTarget = (pulse.target !== "") ? pulse.target : tgt.id;
-      const resolvedHandle = (pulse.targetHandle !== "") ? pulse.targetHandle : (targetHandle ?? "");
-      postLog("pulse-deliver", { edgeId, target: pulse.target, targetHandle: pulse.targetHandle, propHandle: targetHandle ?? null, startTime: pulse.startTime, claimed, claimReason, priorClaim: priorClaim ?? null, resolvedHandleMissing: !resolvedHandle, resolvedTarget, resolvedHandle, posted: claimed && !!resolvedHandle });
-      if (claimed) {
-        if (resolvedHandle) {
-          vscode.postMessage({ type: "delivered", target: resolvedTarget, targetHandle: resolvedHandle });
-        }
-      }
-      return;
-    }
-    const pt = curve.getPointAt(t);
-    mesh.position.set(pt.x, pt.y, pt.z);
+    mesh.position.set(pulse.pos.x, pulse.pos.y, pulse.pos.z);
     mesh.visible = true;
   });
 
@@ -465,8 +431,8 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle
           depthWrite={false}
         />
       </mesh>
-      {/* Pulse bead: stronger highlight traveling source → target */}
-      {!faded && <PulseBead edgeId={edgeId} src={src} tgt={tgt} sourceHandle={sourceHandle} targetHandle={targetHandle} />}
+      {/* Pulse bead: plotted at Go's streamed position (Phase 2). */}
+      {!faded && <PulseBead edgeId={edgeId} />}
     </>
   );
 }

@@ -232,7 +232,7 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 	}
 
 	// Place a bead on the loaded wire with its own in-flight time.
-	if err := pw.Send(ctx, 7, inFlightMs); err != nil {
+	if err := pw.SendDeliverOnly(ctx, 7, inFlightMs); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 

@@ -1,18 +1,21 @@
-// Imperative bridge + context for pulse animation state.
-// Also houses the edge-curve store: a non-React Map<edgeId, curve> that is
-// populated synchronously in moveNode (same tick as position store update)
-// so PulseBead always reads the current-frame curve without a React-commit lag.
-// pump.ts calls setPulse / clearPulse; App registers the React setter
-// on mount so the context re-renders when the map changes.
+// Imperative pulse-position store. Phase 2: Go's per-frame position stream is the
+// sole source of bead positions — TS plots, it computes no geometry. pump.ts
+// calls setPulse (on send, to record the in-flight bead + its routing identity),
+// setPulsePos (on each ~16 ms position event, to set the Go-computed world
+// position), and clearPulse (on done). PulseBead reads getPulseMap() imperatively
+// each frame and draws pulse.pos directly — no curve sampling, no t, no clock.
 //
-// Key: edge id.
-// Value: { value, simStep, target, targetHandle, startTime } describing the in-flight pulse.
-// startTime is performance.now() at the moment setPulse is called; it
-// lets remounted components resume animation at the correct t rather
-// than restarting from 0.
+// This is a plain non-React Map: there is no React subscriber (PulseBead polls in
+// useFrame), so updates mutate the map without triggering a commit. That keeps the
+// 60 Hz position stream off React's render path entirely.
+//
+// Key: edge id. Value: { value, simStep, target, targetHandle, pos }.
+//   pos is the latest Go-supplied world position, or null until the first
+//   position event arrives (PulseBead stays hidden while pos is null).
+//
+// Also houses the edge-curve store (bottom of file) used for wire-tube geometry.
 
 import * as THREE from "three";
-import { getPauseAdjustedNow } from "../state/run-status";
 import { postLog } from "../log/post";
 
 export interface PulseData {
@@ -20,58 +23,32 @@ export interface PulseData {
   simStep: number;
   target: string;
   targetHandle: string;
-  simLatencyMs: number;
-  startTime: number;
+  /** Go-computed bead world position (Phase 2 position stream); null until the
+   *  first position event for this pulse arrives. TS never computes this. */
+  pos: { x: number; y: number; z: number } | null;
 }
 
 export type PulseMap = ReadonlyMap<string, PulseData>;
 
-type Setter = (next: Map<string, PulseData>) => void;
-
-let _setter: Setter | null = null;
 let _current: Map<string, PulseData> = new Map();
-// Guard: track which startTime we already posted "delivered" for, per edge.
-const _deliveredAt: Map<string, number> = new Map();
 
-export function registerPulseSetter(setter: Setter) {
-  _setter = setter;
-}
-
-export function setPulse(edgeId: string, data: Omit<PulseData, "startTime">) {
-  // data must include simLatencyMs (substrate-supplied duration) so PulseBead
-  // computes t from substrate truth rather than a fabricated speed constant.
-  // data must include target + targetHandle so use-pulse-animation can write
-  // the held-value badge at t=1 (pulse arrival) rather than at send time.
+export function setPulse(edgeId: string, data: Omit<PulseData, "pos">) {
+  // Records the in-flight bead and its routing identity (target/targetHandle) on
+  // the send event. The position is filled in by setPulsePos as Go's stream
+  // arrives; until then pos stays null and PulseBead stays hidden.
   const next = new Map(_current);
-  next.set(edgeId, { ...data, startTime: getPauseAdjustedNow() });
+  next.set(edgeId, { ...data, pos: null });
   _current = next;
-  _setter?.(next);
 }
 
-/** Returns true if this is the first "delivered" post for this pulse instance. */
-export function claimDelivered(edgeId: string, startTime: number): boolean {
-  if (_deliveredAt.get(edgeId) === startTime) return false;
-  _deliveredAt.set(edgeId, startTime);
-  return true;
-}
-
-/** The startTime we last posted "delivered" for on this edge, or undefined.
- *  Lets the delivery site report WHY a claim failed (already-claimed-for-this
- *  startTime vs. no prior claim). */
-export function lastDeliveredAt(edgeId: string): number | undefined {
-  return _deliveredAt.get(edgeId);
-}
-
-/** Overwrite an existing in-flight pulse with an explicit startTime.
- *  Used by the node-move handler in store.ts to preserve the bead's visual
- *  progress fraction when wire geometry changes during a node drag. */
-export function patchPulse(edgeId: string, simLatencyMs: number, startTime: number) {
+/** Set the bead's Go-computed world position from a position trace event.
+ *  Called ~16 ms; mutates in place (no React commit). If a position arrives
+ *  before the send event created the entry, it is dropped — the send event is
+ *  what establishes routing identity. */
+export function setPulsePos(edgeId: string, x: number, y: number, z: number) {
   const existing = _current.get(edgeId);
   if (!existing) return;
-  const next = new Map(_current);
-  next.set(edgeId, { ...existing, simLatencyMs, startTime });
-  _current = next;
-  _setter?.(next);
+  existing.pos = { x, y, z };
 }
 
 export function clearPulse(edgeId: string) {
@@ -86,7 +63,6 @@ export function clearPulse(edgeId: string) {
   next.delete(edgeId);
   _current = next;
   postLog("clearPulse", { edgeId, removed: true, keysBefore, keysAfter: [...next.keys()] });
-  _setter?.(next);
 }
 
 export function getPulseMap(): PulseMap {

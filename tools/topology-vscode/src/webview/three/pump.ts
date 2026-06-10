@@ -3,27 +3,32 @@
 // pump.ts is render-only; substrate poll loops live in Go. See MODEL.md §Driver.
 // Each call to handleTraceEvent updates the relevant state store directly.
 //
-// ── Send→pulse→delivered→done lifecycle ─────────────────────────────────────
-// Contract source: nodes/Wiring/paced_wire.go Send / NotifyDelivered / Done.
+// ── Send→position→done lifecycle (Phase 2) ──────────────────────────────────
+// Contract source: nodes/Wiring/paced_wire.go Send / startDeliveryLocked / Done.
+// Go owns the clock, computes every bead position, and times its own delivery;
+// TS plots only and never tells Go when a bead arrived.
 //
 //  1. Go emits "send" (node, port, value)
 //     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
-//     → pulse-state.ts:setPulse  writes { value, simStep, target, targetHandle } into PulseCtx
+//     → pulse-state.ts:setPulse  records { value, simStep, target, targetHandle }
+//       (pos starts null — bead hidden until the first position arrives)
 //
-//  2. RAF loop in edges/use-pulse-animation.ts animates pulse 0→1
-//     → posts "delivered" message so Go's PacedWire unblocks Recv
-//     → clears pulseT (dot disappears)
+//  2. Go emits "position" (node, port, x, y, z) every ~16 ms while in flight, and
+//     once more at t==1 just before delivery
+//     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
+//     → pulse-state.ts:setPulsePos  sets the bead's Go-computed world position;
+//       PulseBead (scene-content.tsx) plots pulse.pos directly — no curve sampling
 //
 //  3. Go emits "done" (node, port)
 //     → pump.ts  filters ALL RF edges by target+targetHandle (fan-in)
-//     → pulse-state.ts:clearPulse  removes animation data from PulseCtx
+//     → pulse-state.ts:clearPulse  removes the pulse (bead disappears)
 // ────────────────────────────────────────────────────────────────────────────
 
 import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
-import { setPulse, clearPulse, getPulseMap, patchPulse } from "./pulse-state";
+import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -43,14 +48,10 @@ export function handleTraceEvent(event: TraceEvent): void {
     case "send": {
       // Match ALL edges by source node id + sourceHandle (fan-out).
       // RF edges store source/sourceHandle; trace send events carry node/port.
-      const { node, port, value, simLatencyMs, target: goTarget, targetHandle: goTargetHandle } = event as Extract<TraceEvent, { kind: "send" }>;
-      // simLatencyMs should always be present after Phase 2; fallback guards
-      // against stale Go binaries or future schema gaps.
-      const FALLBACK_MS = 500;
-      if (simLatencyMs == null) {
-        console.warn("[pump] send event missing simLatencyMs — falling back to", FALLBACK_MS, "ms");
-      }
-      const resolvedLatency = simLatencyMs ?? FALLBACK_MS;
+      // The send event ESTABLISHES the in-flight bead (value + routing identity);
+      // its world position is filled in by the position stream (Go-computed). TS
+      // no longer derives any timing/geometry from the send event.
+      const { node, port, value, target: goTarget, targetHandle: goTargetHandle } = event as Extract<TraceEvent, { kind: "send" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
@@ -65,8 +66,21 @@ export function handleTraceEvent(event: TraceEvent): void {
           simStep: step,
           target: (goTarget != null && goTarget !== "") ? goTarget : (edge.target ?? ""),
           targetHandle: (goTargetHandle != null && goTargetHandle !== "") ? goTargetHandle : (edge.targetHandle ?? ""),
-          simLatencyMs: resolvedLatency,
         });
+      }
+      return;
+    }
+    case "position": {
+      // Go's per-frame bead position (Phase 2). Match ALL edges by source node id
+      // + sourceHandle (fan-out), same key as send, and set the bead's world
+      // position directly — TS plots, computes no geometry.
+      const { node, port, x, y, z } = event as Extract<TraceEvent, { kind: "position" }>;
+      const edges = useThreeStore.getState().edges;
+      const matched = edges.filter(
+        (e) => e.source === node && e.sourceHandle === port,
+      );
+      for (const edge of matched) {
+        setPulsePos(edge.id, x, y, z);
       }
       return;
     }

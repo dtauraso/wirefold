@@ -32,7 +32,7 @@ func TestRunStdinReaderDeliveredIgnoredClockDelivers(t *testing.T) {
 	// Place a bead with a 50ms in-flight time; delivery is timed by the clock.
 	const inFlightMs = 50
 	sendErr := make(chan error, 1)
-	go func() { sendErr <- pw.Send(ctx, 42, inFlightMs) }()
+	go func() { sendErr <- pw.Send(ctx, 42, beadPlacement{InFlightMs: inFlightMs}) }()
 	time.Sleep(10 * time.Millisecond)
 
 	// Feed a "delivered" line. Under the Phase 1 contract this is parsed and

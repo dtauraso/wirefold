@@ -25,13 +25,17 @@ export type WebviewToHostMsg =
   | { type: "addEdge"; target: string; targetHandle: string }
   | { type: "node-move"; nodeId: string; x: number; y: number; z?: number };
 
-// Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","done"}.
+// Mirrors Go Trace.Event shape. kind ∈ {"recv","fire","send","done","position"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
 // when the Go side has resolved it (currently omitted — raw form only).
+// position (Phase 2) carries the bead's Go-computed 3-D world position (x,y,z),
+// keyed by source node+port like send so the renderer routes it by
+// source+sourceHandle; TS plots it directly and computes no geometry.
 export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
   | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
-  | { step: number; kind: "done"; node: string; port: string };
+  | { step: number; kind: "done"; node: string; port: string }
+  | { step: number; kind: "position"; node: string; port: string; value?: number; x: number; y: number; z: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string }

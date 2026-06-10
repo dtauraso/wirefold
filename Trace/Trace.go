@@ -33,13 +33,18 @@ const (
 	KindFire           = "fire"
 	KindSend           = "send"
 	KindDone           = "done"
+	// KindPosition is the per-frame bead-position event (Phase 2). The wire's
+	// delivery goroutine emits one every ~16 ms while a bead is in flight,
+	// carrying the bead's evaluated 3-D position so the renderer plots it without
+	// computing geometry itself.
+	KindPosition       = "position"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition}
 
 type Event struct {
 	Step      int    `json:"step"`
@@ -60,6 +65,12 @@ type Event struct {
 	// by a PacedWire so the TS layer never derives targetHandle from edge data.
 	Target       string  `json:"target,omitempty"`
 	TargetHandle string  `json:"targetHandle,omitempty"`
+	// X/Y/Z carry the bead's evaluated 3-D world position on position events
+	// (KindPosition). Go computes the position from the bead's curve + clock; the
+	// renderer plots these directly. hasPos distinguishes a real (possibly 0,0,0)
+	// position from an unset one so marshalEvent always emits all three.
+	X, Y, Z float64
+	hasPos  bool
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -158,6 +169,19 @@ func (t *Trace) Done(node, port string) {
 		return
 	}
 	t.ch <- Event{Kind: KindDone, Node: node, Port: port}
+}
+
+// Position emits a per-frame bead-position event (Phase 2). node/port are the
+// SOURCE node id + output port — the same identity carried by the send event, so
+// the renderer routes the position to the right edge(s) by source+sourceHandle
+// (fan-out). value echoes the bead value; x/y/z is the bead's evaluated 3-D world
+// position on its own edge curve. The wire's delivery goroutine calls this every
+// ~16 ms while the bead is in flight, and once more at t==1 just before delivery.
+func (t *Trace) Position(node, port string, value int, x, y, z float64) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, hasValue: true, X: x, Y: y, Z: z, hasPos: true}
 }
 
 // Breadcrumb writes a free-form diagnostic line directly to the sink
@@ -318,6 +342,16 @@ func marshalEvent(e Event) ([]byte, error) {
 		Node string `json:"node"`
 		Port string `json:"port"`
 	}
+	type position struct {
+		Step  int     `json:"step"`
+		Kind  string  `json:"kind"`
+		Node  string  `json:"node"`
+		Port  string  `json:"port"`
+		Value int     `json:"value"`
+		X     float64 `json:"x"`
+		Y     float64 `json:"y"`
+		Z     float64 `json:"z"`
+	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
@@ -328,6 +362,9 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	case KindDone:
 		return json.Marshal(doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port})
+	case KindPosition:
+		// All three coordinates always emitted (0,0,0 is a valid position).
+		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

@@ -49,7 +49,7 @@ func TestSendRecvClockDelivery(t *testing.T) {
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
-	go func() { sendDone <- pw.Send(ctx, 42, testInFlightMs) }()
+	go func() { sendDone <- pw.Send(ctx, 42, beadPlacement{InFlightMs: testInFlightMs}) }()
 
 	// Send should return immediately once bead is placed (no delivery needed).
 	select {
@@ -113,7 +113,7 @@ func TestPollRecvPresentConsumeContract(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 7, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 7, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	deliverNext(t, pw, clk)
@@ -154,7 +154,7 @@ func TestSendGatedOnInFlight(t *testing.T) {
 	ctx := context.Background()
 
 	// First Send places the bead and returns.
-	if err := pw.Send(ctx, 1, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("first Send: %v", err)
 	}
 	if !pw.InFlight() {
@@ -163,7 +163,7 @@ func TestSendGatedOnInFlight(t *testing.T) {
 
 	// Second Send must block while inFlight is true.
 	sent2 := make(chan error, 1)
-	go func() { sent2 <- pw.Send(ctx, 2, testInFlightMs) }()
+	go func() { sent2 <- pw.Send(ctx, 2, beadPlacement{InFlightMs: testInFlightMs}) }()
 	time.Sleep(5 * time.Millisecond)
 	select {
 	case <-sent2:
@@ -207,14 +207,14 @@ func TestBackPressureSecondSenderWaits(t *testing.T) {
 	ctx := context.Background()
 
 	// Bead 1: place and deliver into slot.
-	if err := pw.Send(ctx, 1, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("first Send: %v", err)
 	}
 	deliverNext(t, pw, clk) // slot now full (hasSend=true), inFlight cleared
 
 	// Bead 2: Send should not block — wire is clear (inFlight=false).
 	sent2 := make(chan error, 1)
-	go func() { sent2 <- pw.Send(ctx, 2, testInFlightMs) }()
+	go func() { sent2 <- pw.Send(ctx, 2, beadPlacement{InFlightMs: testInFlightMs}) }()
 	select {
 	case err := <-sent2:
 		if err != nil {
@@ -237,7 +237,7 @@ func TestBackPressureSecondSenderWaits(t *testing.T) {
 
 	// A third Send must block because inFlight is still true.
 	sent3 := make(chan error, 1)
-	go func() { sent3 <- pw.Send(ctx, 3, testInFlightMs) }()
+	go func() { sent3 <- pw.Send(ctx, 3, beadPlacement{InFlightMs: testInFlightMs}) }()
 	time.Sleep(5 * time.Millisecond)
 	select {
 	case <-sent3:
@@ -304,7 +304,7 @@ func TestContextCancelUnblocksSend(t *testing.T) {
 	var sendErr error
 	go func() {
 		defer wg.Done()
-		sendErr = pw.Send(ctx, "new", testInFlightMs)
+		sendErr = pw.Send(ctx, "new", beadPlacement{InFlightMs: testInFlightMs})
 	}()
 
 	time.Sleep(5 * time.Millisecond)
@@ -323,7 +323,7 @@ func TestClockDeliveryGate(t *testing.T) {
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
-	go func() { sendDone <- pw.Send(ctx, "ping", testInFlightMs) }()
+	go func() { sendDone <- pw.Send(ctx, "ping", beadPlacement{InFlightMs: testInFlightMs}) }()
 
 	// Send should return immediately (bead placed, inFlight=true).
 	select {
@@ -376,7 +376,7 @@ func TestRecvBlocksUntilDelivered(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	go pw.Send(ctx, "hello", testInFlightMs)
+	go pw.Send(ctx, "hello", beadPlacement{InFlightMs: testInFlightMs})
 	time.Sleep(5 * time.Millisecond) // let Send return
 
 	recvDone := make(chan any, 1)
@@ -413,7 +413,7 @@ func TestSendReturnsOnPlacement(t *testing.T) {
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
-	go func() { sendDone <- pw.Send(ctx, "value", testInFlightMs) }()
+	go func() { sendDone <- pw.Send(ctx, "value", beadPlacement{InFlightMs: testInFlightMs}) }()
 
 	// Send returns immediately once bead is placed — before any delivery/Done.
 	select {
@@ -443,7 +443,7 @@ func TestFadedSendSkips(t *testing.T) {
 
 	// Send must return immediately with nil.
 	sendErr := make(chan error, 1)
-	go func() { sendErr <- pw.Send(context.Background(), 99, testInFlightMs) }()
+	go func() { sendErr <- pw.Send(context.Background(), 99, beadPlacement{InFlightMs: testInFlightMs}) }()
 
 	select {
 	case err := <-sendErr:
@@ -472,7 +472,7 @@ func TestUnfadedAfterSetFaded(t *testing.T) {
 	ctx := context.Background()
 
 	sendDone := make(chan error, 1)
-	go func() { sendDone <- pw.Send(ctx, "resumed", testInFlightMs) }()
+	go func() { sendDone <- pw.Send(ctx, "resumed", beadPlacement{InFlightMs: testInFlightMs}) }()
 
 	select {
 	case err := <-sendDone:
@@ -497,7 +497,7 @@ func TestRecvUnblocksOnDelivery(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	go pw.Send(ctx, "data", testInFlightMs)
+	go pw.Send(ctx, "data", beadPlacement{InFlightMs: testInFlightMs})
 	time.Sleep(5 * time.Millisecond)
 
 	recvDone := make(chan any, 1)
@@ -537,7 +537,7 @@ func TestPauseFreezesDelivery(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 5, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 5, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -565,7 +565,7 @@ func TestDeliveryAtExactInFlightTime(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 9, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 9, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -592,7 +592,7 @@ func TestTryPlaceDropsWhenInFlight(t *testing.T) {
 	pw, _ := newFakeWire()
 
 	// Clear wire: TryPlace succeeds and sets inFlight.
-	if !pw.TryPlace(1, testInFlightMs) {
+	if !pw.TryPlace(1, beadPlacement{InFlightMs: testInFlightMs}) {
 		t.Fatal("TryPlace on clear wire: expected true")
 	}
 	if !pw.InFlight() {
@@ -605,7 +605,7 @@ func TestTryPlaceDropsWhenInFlight(t *testing.T) {
 	pw.mu.Unlock()
 
 	// Busy wire: TryPlace drops and leaves pending/inFlight unchanged.
-	if pw.TryPlace(2, testInFlightMs) {
+	if pw.TryPlace(2, beadPlacement{InFlightMs: testInFlightMs}) {
 		t.Fatal("TryPlace on busy wire: expected false (dropped)")
 	}
 	pw.mu.Lock()
@@ -623,7 +623,7 @@ func TestTryPlaceDropsWhenInFlight(t *testing.T) {
 // is busy is dropped (false) without overwriting.
 func TestTryEmitFireAndForget(t *testing.T) {
 	pw, _ := newFakeWire()
-	o := NewOutPaced(pw, context.Background(), "n", "p", T.New(16), RuleFireAndForget, 100, 100/PulseSpeedWuPerMs)
+	o := NewOutPaced(pw, context.Background(), "n", "p", T.New(16), RuleFireAndForget, 100, 100/PulseSpeedWuPerMs, edgeCurve{})
 
 	if !o.TryEmit(7) {
 		t.Fatal("first TryEmit: expected true")
@@ -647,13 +647,13 @@ func TestDeleteSilencesWire(t *testing.T) {
 
 	pw.Delete()
 
-	if err := pw.Send(ctx, 1, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("Send after Delete: got err %v, want nil", err)
 	}
 	if pw.InFlight() {
 		t.Fatalf("Send after Delete placed a bead: inFlight=true, want false")
 	}
-	if pw.TryPlace(2, testInFlightMs) {
+	if pw.TryPlace(2, beadPlacement{InFlightMs: testInFlightMs}) {
 		t.Fatalf("TryPlace after Delete: got true, want false (dropped)")
 	}
 	if pw.InFlight() {
@@ -680,7 +680,7 @@ func TestDeleteCancelsClockDelivery(t *testing.T) {
 	ctx := context.Background()
 
 	// Place a bead (inFlight=true) with a pending clock delivery.
-	if err := pw.Send(ctx, 42, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 42, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -707,7 +707,7 @@ func TestRestoreUnsilencesWire(t *testing.T) {
 	pw.Delete()
 	pw.Restore()
 
-	if err := pw.Send(ctx, 1, testInFlightMs); err != nil {
+	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
 		t.Fatalf("Send after Restore: got err %v, want nil", err)
 	}
 	if !pw.InFlight() {
@@ -719,7 +719,7 @@ func TestRestoreUnsilencesWire(t *testing.T) {
 	pw2, _ := newFakeWire()
 	pw2.Delete()
 	pw2.Restore()
-	if !pw2.TryPlace(2, testInFlightMs) {
+	if !pw2.TryPlace(2, beadPlacement{InFlightMs: testInFlightMs}) {
 		t.Fatalf("TryPlace after Restore: got false, want true")
 	}
 	if !pw2.InFlight() {

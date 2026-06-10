@@ -170,3 +170,15 @@ func arcLengthBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHand
 	p2 := portWorldPos(tgt, tgtHandle, true)  // target INPUT port
 	return PortCurveArcLength(p0, p2, CurveParamBulgeFactor, CurveParamBezierSampleCount)
 }
+
+// curveBetweenPorts computes the quadratic-bezier control points (P0, P1, P2) of
+// the port-to-port curve between the source OUTPUT port and the target INPUT port,
+// mirroring buildPortCurve in geometry-helpers.ts. The bead's position stream
+// evaluates this exact curve, so it matches the drawn wire. P1 is the bulge
+// control point (bezierControlPoint).
+func curveBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHandle string) edgeCurve {
+	p0 := portWorldPos(src, srcHandle, false) // source OUTPUT port
+	p2 := portWorldPos(tgt, tgtHandle, true)  // target INPUT port
+	p1 := bezierControlPoint(p0, p2, CurveParamBulgeFactor)
+	return edgeCurve{P0: p0, P1: p1, P2: p2}
+}
