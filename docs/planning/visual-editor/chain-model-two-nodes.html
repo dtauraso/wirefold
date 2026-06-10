@@ -6,43 +6,61 @@
 <title>The item-chain model — two nodes connecting</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #0e0e10;
+    --surface: #18181c;
+    --border:  #2a2a30;
+    --text:    #e0e0e8;
+    --muted:   #808090;
+    --accent:  #7c9ef8;
+    --go-hue:  #5ec4a0;
+    --ts-hue:  #c07ef8;
+    --warn:    #d4a017;
+    --good:    #3db87a;
+    --mono: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+
   body {
-    background: #ffffff;
-    color: #1f2937;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
     font-size: 16px;
     line-height: 1.7;
     padding: 2rem 1rem 4rem;
   }
   main { max-width: 820px; margin: 0 auto; }
-  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; }
-  h2 { font-size: 1.2rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.35rem; }
+  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--accent); }
+  h2 { font-size: 1.2rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; color: var(--text); }
   p { margin-bottom: 0.9rem; }
   ul { margin: 0.5rem 0 0.9rem 1.5rem; }
   li { margin-bottom: 0.25rem; }
   code {
-    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-family: var(--mono);
     font-size: 0.88em;
-    background: #f3f4f6;
+    background: var(--surface);
+    color: var(--text);
     border-radius: 3px;
     padding: 0.1em 0.35em;
   }
-  .note { font-style: italic; color: #6b7280; font-size: 0.92rem; margin-bottom: 1.5rem; }
-  .status { display: inline-block; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 0.2rem 0.6rem; font-size: 0.875rem; margin-bottom: 1.25rem; }
+  .note { font-style: italic; color: var(--muted); font-size: 0.92rem; margin-bottom: 1.5rem; }
+  .status { display: inline-block; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0.2rem 0.6rem; font-size: 0.875rem; margin-bottom: 1.25rem; color: var(--muted); }
   .diagram-card {
-    border: 1px solid #e5e7eb;
-    background: #f9fafb;
+    border: 1px solid var(--border);
+    background: var(--surface);
     border-radius: 8px;
     padding: 1.25rem 1.5rem 0.75rem;
     margin: 1.25rem 0;
   }
   .diagram-caption {
     font-size: 0.82rem;
-    color: #6b7280;
+    color: var(--muted);
     text-align: center;
     margin-top: 0.6rem;
     font-style: italic;
   }
+  a { color: var(--accent); }
   svg { display: block; margin: 0 auto; overflow: visible; }
 </style>
 </head>
@@ -59,40 +77,40 @@
 
 <p>A wire between two nodes is not a single segment nor a curve. It is a <strong>chain of items</strong>:</p>
 
-<p style="font-family: ui-monospace, monospace; background: #f3f4f6; padding: 0.5rem 1rem; border-radius: 4px; display: inline-block; margin-bottom: 0.9rem;">source node → item₁ → item₂ → … → itemₙ → destination node</p>
+<p style="font-family: var(--mono), monospace; background: #18181c; color: #e0e0e8; padding: 0.5rem 1rem; border-radius: 4px; display: inline-block; margin-bottom: 0.9rem;">source node → item₁ → item₂ → … → itemₙ → destination node</p>
 
 <!-- DIAGRAM 1: THE ITEM CHAIN -->
 <div class="diagram-card">
   <svg viewBox="0 0 700 120" width="660" height="120">
     <!-- connection line (under circles) -->
-    <line x1="60" y1="60" x2="640" y2="60" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="60" y1="60" x2="640" y2="60" stroke="#3a3a42" stroke-width="2"/>
     <!-- anchor: source -->
-    <circle cx="60" cy="60" r="9" fill="#111827"/>
-    <text x="60" y="88" text-anchor="middle" font-size="12" fill="#374151">source</text>
-    <text x="60" y="102" text-anchor="middle" font-size="11" fill="#6b7280">out-port</text>
+    <circle cx="60" cy="60" r="9" fill="#7c9ef8"/>
+    <text x="60" y="88" text-anchor="middle" font-size="12" fill="#e0e0e8">source</text>
+    <text x="60" y="102" text-anchor="middle" font-size="11" fill="#808090">out-port</text>
     <!-- item 1 -->
-    <circle cx="178" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="178" y="85" text-anchor="middle" font-size="12" fill="#374151">i₁</text>
+    <circle cx="178" cy="60" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="178" y="85" text-anchor="middle" font-size="12" fill="#e0e0e8">i₁</text>
     <!-- item 2 -->
-    <circle cx="296" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="296" y="85" text-anchor="middle" font-size="12" fill="#374151">i₂</text>
+    <circle cx="296" cy="60" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="296" y="85" text-anchor="middle" font-size="12" fill="#e0e0e8">i₂</text>
     <!-- item 3 -->
-    <circle cx="414" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="414" y="85" text-anchor="middle" font-size="12" fill="#374151">i₃</text>
+    <circle cx="414" cy="60" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="414" y="85" text-anchor="middle" font-size="12" fill="#e0e0e8">i₃</text>
     <!-- item 4 -->
-    <circle cx="532" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="532" y="85" text-anchor="middle" font-size="12" fill="#374151">i₄</text>
+    <circle cx="532" cy="60" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="532" y="85" text-anchor="middle" font-size="12" fill="#e0e0e8">i₄</text>
     <!-- anchor: destination -->
-    <circle cx="640" cy="60" r="9" fill="#111827"/>
-    <text x="640" y="88" text-anchor="middle" font-size="12" fill="#374151">destination</text>
-    <text x="640" y="102" text-anchor="middle" font-size="11" fill="#6b7280">in-port</text>
+    <circle cx="640" cy="60" r="9" fill="#7c9ef8"/>
+    <text x="640" y="88" text-anchor="middle" font-size="12" fill="#e0e0e8">destination</text>
+    <text x="640" y="102" text-anchor="middle" font-size="11" fill="#808090">in-port</text>
     <!-- legend -->
-    <circle cx="60" cy="18" r="6" fill="#111827"/>
-    <text x="74" y="23" font-size="11" fill="#374151">anchor (fixed port)</text>
-    <circle cx="210" cy="18" r="5" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="222" y="23" font-size="11" fill="#374151">item (goroutine, free to move)</text>
-    <line x1="400" y1="18" x2="430" y2="18" stroke="#9ca3af" stroke-width="2"/>
-    <text x="437" y="23" font-size="11" fill="#374151">adjacency</text>
+    <circle cx="60" cy="18" r="6" fill="#7c9ef8"/>
+    <text x="74" y="23" font-size="11" fill="#e0e0e8">anchor (fixed port)</text>
+    <circle cx="210" cy="18" r="5" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="222" y="23" font-size="11" fill="#e0e0e8">item (goroutine, free to move)</text>
+    <line x1="400" y1="18" x2="430" y2="18" stroke="#3a3a42" stroke-width="2"/>
+    <text x="437" y="23" font-size="11" fill="#e0e0e8">adjacency</text>
   </svg>
   <div class="diagram-caption">Diagram 1 — The item chain. Each interior circle is an item goroutine; the filled circles are the fixed anchors (node ports).</div>
 </div>
@@ -127,79 +145,79 @@
   <svg viewBox="0 0 700 310" width="660" height="310">
 
     <!-- ===== TOP CASE: STRETCH / INSERT ===== -->
-    <text x="10" y="20" font-size="12" font-weight="600" fill="#374151">STRETCH — insert</text>
+    <text x="10" y="20" font-size="12" font-weight="600" fill="#e0e0e8">STRETCH — insert</text>
 
     <!-- anchors -->
-    <circle cx="60" cy="70" r="9" fill="#111827"/>
-    <circle cx="640" cy="70" r="9" fill="#111827"/>
+    <circle cx="60" cy="70" r="9" fill="#7c9ef8"/>
+    <circle cx="640" cy="70" r="9" fill="#7c9ef8"/>
 
     <!-- items left of gap -->
-    <circle cx="160" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="260" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="160" cy="70" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="260" cy="70" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
 
     <!-- items right of gap -->
-    <circle cx="460" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="560" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="460" cy="70" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="560" cy="70" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
 
     <!-- solid segments on either side of the gap -->
-    <line x1="60" y1="70" x2="260" y2="70" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="460" y1="70" x2="640" y2="70" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="60" y1="70" x2="260" y2="70" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="460" y1="70" x2="640" y2="70" stroke="#3a3a42" stroke-width="2"/>
 
     <!-- dashed segment for the too-wide gap -->
-    <line x1="260" y1="70" x2="460" y2="70" stroke="#9ca3af" stroke-width="2" stroke-dasharray="7,5"/>
+    <line x1="260" y1="70" x2="460" y2="70" stroke="#3a3a42" stroke-width="2" stroke-dasharray="7,5"/>
 
     <!-- gap label -->
-    <text x="360" y="52" text-anchor="middle" font-size="11" fill="#374151">&gt; spacing → insert</text>
+    <text x="360" y="52" text-anchor="middle" font-size="11" fill="#e0e0e8">&gt; spacing → insert</text>
     <!-- brace lines pointing to gap ends -->
-    <line x1="270" y1="56" x2="260" y2="66" stroke="#374151" stroke-width="1"/>
-    <line x1="450" y1="56" x2="460" y2="66" stroke="#374151" stroke-width="1"/>
+    <line x1="270" y1="56" x2="260" y2="66" stroke="#e0e0e8" stroke-width="1"/>
+    <line x1="450" y1="56" x2="460" y2="66" stroke="#e0e0e8" stroke-width="1"/>
 
     <!-- new item (green) at midpoint of gap -->
-    <circle cx="360" cy="70" r="7" fill="white" stroke="#16a34a" stroke-width="2"/>
+    <circle cx="360" cy="70" r="7" fill="white" stroke="#3db87a" stroke-width="2"/>
     <!-- + new label -->
-    <text x="360" y="96" text-anchor="middle" font-size="11" fill="#16a34a">+ new</text>
+    <text x="360" y="96" text-anchor="middle" font-size="11" fill="#3db87a">+ new</text>
 
     <!-- relink lines from neighbors to new item (lighter green dashes showing the splice) -->
-    <line x1="260" y1="70" x2="353" y2="70" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <line x1="367" y1="70" x2="460" y2="70" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="260" y1="70" x2="353" y2="70" stroke="#3db87a" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="367" y1="70" x2="460" y2="70" stroke="#3db87a" stroke-width="1.5" stroke-dasharray="4,3"/>
 
     <!-- ===== DIVIDER ===== -->
-    <line x1="0" y1="155" x2="700" y2="155" stroke="#e5e7eb" stroke-width="1"/>
+    <line x1="0" y1="155" x2="700" y2="155" stroke="#2a2a30" stroke-width="1"/>
 
     <!-- ===== BOTTOM CASE: COMPRESS / RETIRE ===== -->
-    <text x="10" y="180" font-size="12" font-weight="600" fill="#374151">COMPRESS — retire</text>
+    <text x="10" y="180" font-size="12" font-weight="600" fill="#e0e0e8">COMPRESS — retire</text>
 
     <!-- anchors -->
-    <circle cx="60" cy="240" r="9" fill="#111827"/>
-    <circle cx="640" cy="240" r="9" fill="#111827"/>
+    <circle cx="60" cy="240" r="9" fill="#7c9ef8"/>
+    <circle cx="640" cy="240" r="9" fill="#7c9ef8"/>
 
     <!-- items far left and far right (normal spacing) -->
-    <circle cx="160" cy="240" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="560" cy="240" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="160" cy="240" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="560" cy="240" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
 
     <!-- two items that are too close (centered around x=360) -->
-    <circle cx="330" cy="240" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="330" cy="240" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
     <!-- retiring item (faded red) -->
-    <circle cx="390" cy="240" r="6" fill="white" stroke="#dc2626" stroke-width="2" opacity="0.35"/>
+    <circle cx="390" cy="240" r="6" fill="white" stroke="#e0556f" stroke-width="2" opacity="0.35"/>
     <!-- × label on retiring item -->
-    <text x="390" y="225" text-anchor="middle" font-size="13" fill="#dc2626" opacity="0.6">×</text>
+    <text x="390" y="225" text-anchor="middle" font-size="13" fill="#e0556f" opacity="0.6">×</text>
 
     <!-- solid segments -->
-    <line x1="60" y1="240" x2="330" y2="240" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="390" y1="240" x2="640" y2="240" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="60" y1="240" x2="330" y2="240" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="390" y1="240" x2="640" y2="240" stroke="#3a3a42" stroke-width="2"/>
 
     <!-- dashed bracket for too-close gap -->
-    <line x1="330" y1="240" x2="390" y2="240" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4,3"/>
+    <line x1="330" y1="240" x2="390" y2="240" stroke="#3a3a42" stroke-width="2" stroke-dasharray="4,3"/>
 
     <!-- compress label -->
-    <text x="360" y="222" text-anchor="middle" font-size="11" fill="#374151">&lt; spacing → retire</text>
+    <text x="360" y="222" text-anchor="middle" font-size="11" fill="#e0e0e8">&lt; spacing → retire</text>
     <!-- bracket lines -->
-    <line x1="340" y1="222" x2="330" y2="236" stroke="#374151" stroke-width="1"/>
-    <line x1="380" y1="222" x2="390" y2="236" stroke="#374151" stroke-width="1"/>
+    <line x1="340" y1="222" x2="330" y2="236" stroke="#e0e0e8" stroke-width="1"/>
+    <line x1="380" y1="222" x2="390" y2="236" stroke="#e0e0e8" stroke-width="1"/>
 
     <!-- relink line directly between the two surviving neighbors (bypassing retired item) -->
-    <line x1="330" y1="240" x2="560" y2="240" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5"/>
-    <text x="445" y="265" text-anchor="middle" font-size="10" fill="#dc2626" opacity="0.7">neighbors relink</text>
+    <line x1="330" y1="240" x2="560" y2="240" stroke="#e0556f" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5"/>
+    <text x="445" y="265" text-anchor="middle" font-size="10" fill="#e0556f" opacity="0.7">neighbors relink</text>
 
   </svg>
   <div class="diagram-caption">Diagram — Birth and retirement. Top: a gap grows past the upper threshold; a new item (green) is spliced in at the midpoint. Bottom: two items crowd below the lower threshold; the retiring item (faded red) is unlinked and its neighbors relink directly.</div>
@@ -220,42 +238,42 @@
 
     <!-- === PEAK === (left third) -->
     <!-- dashed A-B reference line -->
-    <line x1="30" y1="120" x2="190" y2="120" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <line x1="30" y1="120" x2="190" y2="120" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="5,4"/>
     <!-- peak segments -->
-    <line x1="30" y1="120" x2="110" y2="42" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="110" y1="42" x2="190" y2="120" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="30" y1="120" x2="110" y2="42" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="110" y1="42" x2="190" y2="120" stroke="#3a3a42" stroke-width="2"/>
     <!-- anchors A B -->
-    <circle cx="30" cy="120" r="9" fill="#111827"/>
-    <text x="30" y="145" text-anchor="middle" font-size="12" fill="#374151">A</text>
-    <circle cx="190" cy="120" r="9" fill="#111827"/>
-    <text x="190" y="145" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <circle cx="30" cy="120" r="9" fill="#7c9ef8"/>
+    <text x="30" y="145" text-anchor="middle" font-size="12" fill="#e0e0e8">A</text>
+    <circle cx="190" cy="120" r="9" fill="#7c9ef8"/>
+    <text x="190" y="145" text-anchor="middle" font-size="12" fill="#e0e0e8">B</text>
     <!-- item i -->
-    <circle cx="110" cy="42" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="110" y="32" text-anchor="middle" font-size="12" fill="#374151">i</text>
+    <circle cx="110" cy="42" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="110" y="32" text-anchor="middle" font-size="12" fill="#e0e0e8">i</text>
     <!-- label -->
-    <text x="110" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#dc2626">peak</text>
+    <text x="110" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#e0556f">peak</text>
 
     <!-- === VALLEY === (middle third) -->
-    <line x1="260" y1="55" x2="420" y2="55" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
-    <line x1="260" y1="55" x2="340" y2="133" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="340" y1="133" x2="420" y2="55" stroke="#9ca3af" stroke-width="2"/>
-    <circle cx="260" cy="55" r="9" fill="#111827"/>
-    <text x="260" y="45" text-anchor="middle" font-size="12" fill="#374151">A</text>
-    <circle cx="420" cy="55" r="9" fill="#111827"/>
-    <text x="420" y="45" text-anchor="middle" font-size="12" fill="#374151">B</text>
-    <circle cx="340" cy="133" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="340" y="152" text-anchor="middle" font-size="12" fill="#374151">i</text>
-    <text x="340" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#2563eb">valley</text>
+    <line x1="260" y1="55" x2="420" y2="55" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <line x1="260" y1="55" x2="340" y2="133" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="340" y1="133" x2="420" y2="55" stroke="#3a3a42" stroke-width="2"/>
+    <circle cx="260" cy="55" r="9" fill="#7c9ef8"/>
+    <text x="260" y="45" text-anchor="middle" font-size="12" fill="#e0e0e8">A</text>
+    <circle cx="420" cy="55" r="9" fill="#7c9ef8"/>
+    <text x="420" y="45" text-anchor="middle" font-size="12" fill="#e0e0e8">B</text>
+    <circle cx="340" cy="133" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="340" y="152" text-anchor="middle" font-size="12" fill="#e0e0e8">i</text>
+    <text x="340" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#7c9ef8">valley</text>
 
     <!-- === NEITHER === (right third) -->
-    <line x1="500" y1="88" x2="660" y2="88" stroke="#9ca3af" stroke-width="2"/>
-    <circle cx="500" cy="88" r="9" fill="#111827"/>
-    <text x="500" y="112" text-anchor="middle" font-size="12" fill="#374151">A</text>
-    <circle cx="660" cy="88" r="9" fill="#111827"/>
-    <text x="660" y="112" text-anchor="middle" font-size="12" fill="#374151">B</text>
-    <circle cx="580" cy="88" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="580" y="112" text-anchor="middle" font-size="12" fill="#374151">i</text>
-    <text x="580" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">neither (straight)</text>
+    <line x1="500" y1="88" x2="660" y2="88" stroke="#3a3a42" stroke-width="2"/>
+    <circle cx="500" cy="88" r="9" fill="#7c9ef8"/>
+    <text x="500" y="112" text-anchor="middle" font-size="12" fill="#e0e0e8">A</text>
+    <circle cx="660" cy="88" r="9" fill="#7c9ef8"/>
+    <text x="660" y="112" text-anchor="middle" font-size="12" fill="#e0e0e8">B</text>
+    <circle cx="580" cy="88" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="580" y="112" text-anchor="middle" font-size="12" fill="#e0e0e8">i</text>
+    <text x="580" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#e0e0e8">neither (straight)</text>
   </svg>
   <div class="diagram-caption">Diagram 2 — Peak, valley, and neither. Dashed lines show the straight A–B reference. Red = peak; blue = valley.</div>
 </div>
@@ -265,41 +283,41 @@
   <svg viewBox="0 0 700 140" width="660" height="140">
 
     <!-- === BEFORE (valley) === -->
-    <text x="140" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">before</text>
+    <text x="140" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="#e0e0e8">before</text>
     <!-- dashed A-B reference -->
-    <line x1="30" y1="50" x2="250" y2="50" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <line x1="30" y1="50" x2="250" y2="50" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="5,4"/>
     <!-- valley segments -->
-    <line x1="30" y1="50" x2="140" y2="115" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="140" y1="115" x2="250" y2="50" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="30" y1="50" x2="140" y2="115" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="140" y1="115" x2="250" y2="50" stroke="#3a3a42" stroke-width="2"/>
     <!-- anchors -->
-    <circle cx="30" cy="50" r="9" fill="#111827"/>
-    <text x="30" y="36" text-anchor="middle" font-size="12" fill="#374151">A</text>
-    <circle cx="250" cy="50" r="9" fill="#111827"/>
-    <text x="250" y="36" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <circle cx="30" cy="50" r="9" fill="#7c9ef8"/>
+    <text x="30" y="36" text-anchor="middle" font-size="12" fill="#e0e0e8">A</text>
+    <circle cx="250" cy="50" r="9" fill="#7c9ef8"/>
+    <text x="250" y="36" text-anchor="middle" font-size="12" fill="#e0e0e8">B</text>
     <!-- item i (valley bottom) -->
-    <circle cx="140" cy="115" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="160" y="120" font-size="12" fill="#2563eb">i  (valley)</text>
+    <circle cx="140" cy="115" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="160" y="120" font-size="12" fill="#7c9ef8">i  (valley)</text>
 
     <!-- arrow -->
-    <text x="330" y="82" text-anchor="middle" font-size="28" fill="#374151">→</text>
+    <text x="330" y="82" text-anchor="middle" font-size="28" fill="#e0e0e8">→</text>
 
     <!-- === AFTER === -->
-    <text x="555" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">after</text>
+    <text x="555" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="#e0e0e8">after</text>
     <!-- dotted vertical showing movement -->
-    <line x1="555" y1="50" x2="555" y2="115" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="3,3"/>
+    <line x1="555" y1="50" x2="555" y2="115" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="3,3"/>
     <!-- straight line A-B -->
-    <line x1="445" y1="50" x2="665" y2="50" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="445" y1="50" x2="665" y2="50" stroke="#3a3a42" stroke-width="2"/>
     <!-- anchors -->
-    <circle cx="445" cy="50" r="9" fill="#111827"/>
-    <text x="445" y="36" text-anchor="middle" font-size="12" fill="#374151">A</text>
-    <circle cx="665" cy="50" r="9" fill="#111827"/>
-    <text x="665" y="36" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <circle cx="445" cy="50" r="9" fill="#7c9ef8"/>
+    <text x="445" y="36" text-anchor="middle" font-size="12" fill="#e0e0e8">A</text>
+    <circle cx="665" cy="50" r="9" fill="#7c9ef8"/>
+    <text x="665" y="36" text-anchor="middle" font-size="12" fill="#e0e0e8">B</text>
     <!-- item i now on midpoint -->
-    <circle cx="555" cy="50" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <text x="555" y="36" text-anchor="middle" font-size="12" fill="#374151">i</text>
+    <circle cx="555" cy="50" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <text x="555" y="36" text-anchor="middle" font-size="12" fill="#e0e0e8">i</text>
     <!-- caption under -->
-    <text x="555" y="130" text-anchor="middle" font-size="12" fill="#6b7280">i ← midpoint(A, B)</text>
-    <text x="555" y="144" text-anchor="middle" font-size="11" fill="#6b7280">now on the A–B line, neither peak nor valley</text>
+    <text x="555" y="130" text-anchor="middle" font-size="12" fill="#808090">i ← midpoint(A, B)</text>
+    <text x="555" y="144" text-anchor="middle" font-size="11" fill="#808090">now on the A–B line, neither peak nor valley</text>
   </svg>
   <div class="diagram-caption">Diagram 3 — One relax step. Item i (a valley) moves up to the midpoint of its neighbors A and B.</div>
 </div>
@@ -308,44 +326,44 @@
 <div class="diagram-card">
   <svg viewBox="0 0 700 220" width="660" height="220">
     <!-- === t₀ jagged === -->
-    <text x="26" y="22" font-size="12" font-weight="600" fill="#374151">t₀</text>
-    <text x="66" y="22" font-size="12" fill="#6b7280">jagged</text>
+    <text x="26" y="22" font-size="12" font-weight="600" fill="#e0e0e8">t₀</text>
+    <text x="66" y="22" font-size="12" fill="#808090">jagged</text>
     <!-- polyline: anchors at y=50, items alternating y=22/78 -->
     <polyline points="60,50 178,22 296,78 414,22 532,78 640,50"
-              fill="none" stroke="#9ca3af" stroke-width="2"/>
-    <circle cx="60" cy="50" r="9" fill="#111827"/>
-    <circle cx="178" cy="22" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="78" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="22" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="78" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="50" r="9" fill="#111827"/>
-    <text x="640" y="95" text-anchor="middle" font-size="11" fill="#6b7280">peaks &amp; valleys</text>
+              fill="none" stroke="#3a3a42" stroke-width="2"/>
+    <circle cx="60" cy="50" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="22" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="78" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="22" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="78" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="50" r="9" fill="#7c9ef8"/>
+    <text x="640" y="95" text-anchor="middle" font-size="11" fill="#808090">peaks &amp; valleys</text>
 
     <!-- === t₁ flatter === -->
-    <text x="26" y="122" font-size="12" font-weight="600" fill="#374151">t₁</text>
-    <text x="66" y="122" font-size="12" fill="#6b7280">flatter</text>
+    <text x="26" y="122" font-size="12" font-weight="600" fill="#e0e0e8">t₁</text>
+    <text x="66" y="122" font-size="12" fill="#808090">flatter</text>
     <!-- items closer to y=110 baseline -->
     <polyline points="60,110 178,97 296,123 414,97 532,123 640,110"
-              fill="none" stroke="#9ca3af" stroke-width="2"/>
-    <circle cx="60" cy="110" r="9" fill="#111827"/>
-    <circle cx="178" cy="97" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="123" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="97" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="123" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="110" r="9" fill="#111827"/>
-    <text x="640" y="140" text-anchor="middle" font-size="11" fill="#6b7280">bumps shrink</text>
+              fill="none" stroke="#3a3a42" stroke-width="2"/>
+    <circle cx="60" cy="110" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="97" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="123" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="97" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="123" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="110" r="9" fill="#7c9ef8"/>
+    <text x="640" y="140" text-anchor="middle" font-size="11" fill="#808090">bumps shrink</text>
 
     <!-- === t∞ straight === -->
-    <text x="26" y="182" font-size="12" font-weight="600" fill="#374151">t∞</text>
-    <text x="66" y="182" font-size="12" fill="#6b7280">straight</text>
-    <line x1="60" y1="195" x2="640" y2="195" stroke="#9ca3af" stroke-width="2"/>
-    <circle cx="60" cy="195" r="9" fill="#111827"/>
-    <circle cx="178" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="195" r="9" fill="#111827"/>
-    <text x="640" y="214" text-anchor="middle" font-size="11" fill="#6b7280">evenly spaced</text>
+    <text x="26" y="182" font-size="12" font-weight="600" fill="#e0e0e8">t∞</text>
+    <text x="66" y="182" font-size="12" fill="#808090">straight</text>
+    <line x1="60" y1="195" x2="640" y2="195" stroke="#3a3a42" stroke-width="2"/>
+    <circle cx="60" cy="195" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="195" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="195" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="195" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="195" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="195" r="9" fill="#7c9ef8"/>
+    <text x="640" y="214" text-anchor="middle" font-size="11" fill="#808090">evenly spaced</text>
   </svg>
   <div class="diagram-caption">Diagram 4 — Chain settling over time. Straightness is emergent from concurrent local relaxation, not a formula.</div>
 </div>
@@ -356,7 +374,7 @@
 
 <p>A bead carries a <strong>value</strong> and <strong>visits each item in sequence</strong> as its animation:</p>
 
-<p style="font-family: ui-monospace, monospace; background: #f3f4f6; padding: 0.5rem 1rem; border-radius: 4px; display: inline-block; margin-bottom: 0.9rem;">source → item₁ → item₂ → … → itemₙ → destination</p>
+<p style="font-family: var(--mono), monospace; background: #18181c; color: #e0e0e8; padding: 0.5rem 1rem; border-radius: 4px; display: inline-block; margin-bottom: 0.9rem;">source → item₁ → item₂ → … → itemₙ → destination</p>
 
 <!-- DIAGRAM 5: BEAD TRAVERSAL -->
 <div class="diagram-card">
@@ -364,58 +382,58 @@
     <!-- Helper: 6 positions: 60,296,414,532 items; 60=src anchor, 640=dst anchor; items at 178,296,414,532 -->
 
     <!-- step 0 -->
-    <text x="26" y="30" font-size="11" fill="#6b7280">step 0</text>
-    <line x1="60" y1="30" x2="640" y2="30" stroke="#9ca3af" stroke-width="1.5"/>
-    <circle cx="60" cy="30" r="9" fill="#111827"/>
-    <circle cx="60" cy="30" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
-    <circle cx="178" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="30" r="9" fill="#111827"/>
-    <text x="660" y="34" font-size="11" fill="#6b7280">value enters at source</text>
+    <text x="26" y="30" font-size="11" fill="#808090">step 0</text>
+    <line x1="60" y1="30" x2="640" y2="30" stroke="#3a3a42" stroke-width="1.5"/>
+    <circle cx="60" cy="30" r="9" fill="#7c9ef8"/>
+    <circle cx="60" cy="30" r="7" fill="#d4a017" stroke="#7c9ef8" stroke-width="1"/>
+    <circle cx="178" cy="30" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="30" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="30" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="30" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="30" r="9" fill="#7c9ef8"/>
+    <text x="660" y="34" font-size="11" fill="#808090">value enters at source</text>
 
     <!-- step 1 -->
-    <text x="26" y="80" font-size="11" fill="#6b7280">step 1</text>
-    <line x1="60" y1="80" x2="640" y2="80" stroke="#9ca3af" stroke-width="1.5"/>
-    <circle cx="60" cy="80" r="9" fill="#111827"/>
-    <circle cx="178" cy="80" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
-    <circle cx="296" cy="80" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="80" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="80" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="80" r="9" fill="#111827"/>
+    <text x="26" y="80" font-size="11" fill="#808090">step 1</text>
+    <line x1="60" y1="80" x2="640" y2="80" stroke="#3a3a42" stroke-width="1.5"/>
+    <circle cx="60" cy="80" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="80" r="7" fill="#d4a017" stroke="#7c9ef8" stroke-width="1"/>
+    <circle cx="296" cy="80" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="80" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="80" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="80" r="9" fill="#7c9ef8"/>
 
     <!-- step 2 -->
-    <text x="26" y="130" font-size="11" fill="#6b7280">step 2</text>
-    <line x1="60" y1="130" x2="640" y2="130" stroke="#9ca3af" stroke-width="1.5"/>
-    <circle cx="60" cy="130" r="9" fill="#111827"/>
-    <circle cx="178" cy="130" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="130" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
-    <circle cx="414" cy="130" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="130" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="130" r="9" fill="#111827"/>
+    <text x="26" y="130" font-size="11" fill="#808090">step 2</text>
+    <line x1="60" y1="130" x2="640" y2="130" stroke="#3a3a42" stroke-width="1.5"/>
+    <circle cx="60" cy="130" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="130" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="130" r="7" fill="#d4a017" stroke="#7c9ef8" stroke-width="1"/>
+    <circle cx="414" cy="130" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="130" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="130" r="9" fill="#7c9ef8"/>
 
     <!-- step 3 -->
-    <text x="26" y="180" font-size="11" fill="#6b7280">step 3</text>
-    <line x1="60" y1="180" x2="640" y2="180" stroke="#9ca3af" stroke-width="1.5"/>
-    <circle cx="60" cy="180" r="9" fill="#111827"/>
-    <circle cx="178" cy="180" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="180" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="180" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
-    <circle cx="532" cy="180" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="180" r="9" fill="#111827"/>
+    <text x="26" y="180" font-size="11" fill="#808090">step 3</text>
+    <line x1="60" y1="180" x2="640" y2="180" stroke="#3a3a42" stroke-width="1.5"/>
+    <circle cx="60" cy="180" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="180" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="180" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="180" r="7" fill="#d4a017" stroke="#7c9ef8" stroke-width="1"/>
+    <circle cx="532" cy="180" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="180" r="9" fill="#7c9ef8"/>
 
     <!-- step n -->
-    <text x="26" y="230" font-size="11" fill="#6b7280">step n</text>
-    <line x1="60" y1="230" x2="640" y2="230" stroke="#9ca3af" stroke-width="1.5"/>
-    <circle cx="60" cy="230" r="9" fill="#111827"/>
-    <circle cx="178" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="296" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="414" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="532" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="640" cy="230" r="9" fill="#111827"/>
-    <circle cx="640" cy="230" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
-    <text x="660" y="234" font-size="11" fill="#6b7280">value delivered at destination</text>
+    <text x="26" y="230" font-size="11" fill="#808090">step n</text>
+    <line x1="60" y1="230" x2="640" y2="230" stroke="#3a3a42" stroke-width="1.5"/>
+    <circle cx="60" cy="230" r="9" fill="#7c9ef8"/>
+    <circle cx="178" cy="230" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="296" cy="230" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="414" cy="230" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="532" cy="230" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="640" cy="230" r="9" fill="#7c9ef8"/>
+    <circle cx="640" cy="230" r="7" fill="#d4a017" stroke="#7c9ef8" stroke-width="1"/>
+    <text x="660" y="234" font-size="11" fill="#808090">value delivered at destination</text>
   </svg>
   <div class="diagram-caption">Diagram 5 — Bead traversal. The amber bead hops from item to item along the chain, carrying a value from source to destination.</div>
 </div>
@@ -438,77 +456,77 @@
 <div class="diagram-card">
   <svg viewBox="0 0 700 200" width="660" height="200">
     <!-- Lane labels -->
-    <text x="10" y="60" font-size="12" font-weight="600" fill="#374151">geometry</text>
-    <text x="10" y="75" font-size="11" fill="#6b7280">machine-speed</text>
-    <text x="10" y="140" font-size="12" font-weight="600" fill="#374151">bead</text>
-    <text x="10" y="155" font-size="11" fill="#6b7280">clock-paced</text>
+    <text x="10" y="60" font-size="12" font-weight="600" fill="#e0e0e8">geometry</text>
+    <text x="10" y="75" font-size="11" fill="#808090">machine-speed</text>
+    <text x="10" y="140" font-size="12" font-weight="600" fill="#e0e0e8">bead</text>
+    <text x="10" y="155" font-size="11" fill="#808090">clock-paced</text>
 
     <!-- Lane divider -->
-    <line x1="130" y1="100" x2="690" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+    <line x1="130" y1="100" x2="690" y2="100" stroke="#2a2a30" stroke-width="1"/>
 
     <!-- ===== TOP LANE: geometry / machine-speed ===== -->
     <!-- node-move marker: vertical bar at left of lane -->
-    <line x1="140" y1="40" x2="140" y2="80" stroke="#111827" stroke-width="2.5"/>
-    <text x="140" y="33" text-anchor="middle" font-size="10" fill="#374151">node</text>
-    <text x="140" y="24" text-anchor="middle" font-size="10" fill="#374151">moved</text>
+    <line x1="140" y1="40" x2="140" y2="80" stroke="#7c9ef8" stroke-width="2.5"/>
+    <text x="140" y="33" text-anchor="middle" font-size="10" fill="#e0e0e8">node</text>
+    <text x="140" y="24" text-anchor="middle" font-size="10" fill="#e0e0e8">moved</text>
 
     <!-- burst/ripple lines emanating right from move marker -->
-    <line x1="140" y1="60" x2="200" y2="48" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <line x1="140" y1="60" x2="200" y2="60" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3"/>
-    <line x1="140" y1="60" x2="200" y2="72" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="140" y1="60" x2="200" y2="48" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="140" y1="60" x2="200" y2="60" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="140" y1="60" x2="200" y2="72" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="4,3"/>
 
     <!-- Arrow from burst to settled straight line -->
-    <line x1="200" y1="60" x2="240" y2="60" stroke="#9ca3af" stroke-width="2" marker-end="url(#arr-dark)"/>
+    <line x1="200" y1="60" x2="240" y2="60" stroke="#3a3a42" stroke-width="2" marker-end="url(#arr-dark)"/>
 
     <!-- Settled straight line (the chain after relaxation) -->
-    <line x1="245" y1="60" x2="680" y2="60" stroke="#111827" stroke-width="3"/>
+    <line x1="245" y1="60" x2="680" y2="60" stroke="#7c9ef8" stroke-width="3"/>
     <!-- anchor dots at each end of settled line -->
-    <circle cx="245" cy="60" r="5" fill="#111827"/>
-    <circle cx="680" cy="60" r="5" fill="#111827"/>
+    <circle cx="245" cy="60" r="5" fill="#7c9ef8"/>
+    <circle cx="680" cy="60" r="5" fill="#7c9ef8"/>
     <!-- small item circles on the settled line -->
-    <circle cx="339" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
-    <circle cx="433" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
-    <circle cx="527" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
-    <circle cx="621" cy="60" r="4" fill="white" stroke="#2563eb" stroke-width="1.5"/>
+    <circle cx="339" cy="60" r="4" fill="#0e0e10" stroke="#5ec4a0" stroke-width="1.5"/>
+    <circle cx="433" cy="60" r="4" fill="#0e0e10" stroke="#5ec4a0" stroke-width="1.5"/>
+    <circle cx="527" cy="60" r="4" fill="#0e0e10" stroke="#5ec4a0" stroke-width="1.5"/>
+    <circle cx="621" cy="60" r="4" fill="#0e0e10" stroke="#5ec4a0" stroke-width="1.5"/>
 
     <!-- settled label -->
-    <text x="460" y="50" text-anchor="middle" font-size="10" fill="#6b7280">settles instantly, then quiet</text>
+    <text x="460" y="50" text-anchor="middle" font-size="10" fill="#808090">settles instantly, then quiet</text>
 
     <!-- ===== BOTTOM LANE: bead / clock-paced ===== -->
     <!-- baseline wire -->
-    <line x1="140" y1="140" x2="680" y2="140" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="140" y1="140" x2="680" y2="140" stroke="#3a3a42" stroke-width="2"/>
     <!-- anchor dots -->
-    <circle cx="140" cy="140" r="5" fill="#111827"/>
-    <circle cx="680" cy="140" r="5" fill="#111827"/>
+    <circle cx="140" cy="140" r="5" fill="#7c9ef8"/>
+    <circle cx="680" cy="140" r="5" fill="#7c9ef8"/>
 
     <!-- Tick marks and bead positions: 5 evenly-spaced ticks -->
     <!-- positions: 140, 248, 356, 464, 572, 680 — 6 stops (start + 5 ticks) -->
     <!-- tick marks -->
-    <line x1="248" y1="133" x2="248" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
-    <line x1="356" y1="133" x2="356" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
-    <line x1="464" y1="133" x2="464" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
-    <line x1="572" y1="133" x2="572" y2="147" stroke="#9ca3af" stroke-width="1.5"/>
+    <line x1="248" y1="133" x2="248" y2="147" stroke="#3a3a42" stroke-width="1.5"/>
+    <line x1="356" y1="133" x2="356" y2="147" stroke="#3a3a42" stroke-width="1.5"/>
+    <line x1="464" y1="133" x2="464" y2="147" stroke="#3a3a42" stroke-width="1.5"/>
+    <line x1="572" y1="133" x2="572" y2="147" stroke="#3a3a42" stroke-width="1.5"/>
     <!-- tick labels -->
-    <text x="140" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₀</text>
-    <text x="248" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₁</text>
-    <text x="356" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₂</text>
-    <text x="464" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₃</text>
-    <text x="572" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₄</text>
-    <text x="680" y="162" text-anchor="middle" font-size="10" fill="#6b7280">t₅</text>
+    <text x="140" y="162" text-anchor="middle" font-size="10" fill="#808090">t₀</text>
+    <text x="248" y="162" text-anchor="middle" font-size="10" fill="#808090">t₁</text>
+    <text x="356" y="162" text-anchor="middle" font-size="10" fill="#808090">t₂</text>
+    <text x="464" y="162" text-anchor="middle" font-size="10" fill="#808090">t₃</text>
+    <text x="572" y="162" text-anchor="middle" font-size="10" fill="#808090">t₄</text>
+    <text x="680" y="162" text-anchor="middle" font-size="10" fill="#808090">t₅</text>
 
     <!-- bead at t₂ (mid-journey) -->
-    <circle cx="356" cy="140" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1.5"/>
+    <circle cx="356" cy="140" r="7" fill="#d4a017" stroke="#7c9ef8" stroke-width="1.5"/>
 
     <!-- arrow showing bead direction -->
-    <line x1="370" y1="140" x2="450" y2="140" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+    <line x1="370" y1="140" x2="450" y2="140" stroke="#d4a017" stroke-width="1.5" marker-end="url(#arr-amber)"/>
 
     <!-- defs for arrowheads -->
     <defs>
       <marker id="arr-dark" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-        <path d="M0,0 L0,7 L7,3.5 z" fill="#9ca3af"/>
+        <path d="M0,0 L0,7 L7,3.5 z" fill="#3a3a42"/>
       </marker>
       <marker id="arr-amber" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-        <path d="M0,0 L0,7 L7,3.5 z" fill="#f59e0b"/>
+        <path d="M0,0 L0,7 L7,3.5 z" fill="#d4a017"/>
       </marker>
     </defs>
   </svg>
@@ -530,71 +548,71 @@
   <svg viewBox="0 0 700 260" width="660" height="260">
 
     <!-- === sub-figure A: the half-valley moment === -->
-    <text x="175" y="14" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">anchor jumps</text>
+    <text x="175" y="14" text-anchor="middle" font-size="12" font-weight="600" fill="#e0e0e8">anchor jumps</text>
 
     <!-- source anchor (right, fixed) -->
-    <circle cx="350" cy="160" r="9" fill="#111827"/>
-    <text x="368" y="164" font-size="11" fill="#374151">SRC</text>
+    <circle cx="350" cy="160" r="9" fill="#7c9ef8"/>
+    <text x="368" y="164" font-size="11" fill="#e0e0e8">SRC</text>
 
     <!-- old DST position (faint hollow) -->
-    <circle cx="30" cy="160" r="9" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="4,3"/>
-    <text x="30" y="180" text-anchor="middle" font-size="10" fill="#9ca3af">old DST</text>
+    <circle cx="30" cy="160" r="9" fill="none" stroke="#3a3a42" stroke-width="2" stroke-dasharray="4,3"/>
+    <text x="30" y="180" text-anchor="middle" font-size="10" fill="#3a3a42">old DST</text>
 
     <!-- new DST anchor (solid, moved up) -->
-    <circle cx="30" cy="60" r="9" fill="#111827"/>
-    <text x="30" y="50" text-anchor="middle" font-size="11" fill="#374151">DST</text>
+    <circle cx="30" cy="60" r="9" fill="#7c9ef8"/>
+    <text x="30" y="50" text-anchor="middle" font-size="11" fill="#e0e0e8">DST</text>
 
     <!-- faint movement arrow from old to new -->
-    <line x1="30" y1="148" x2="30" y2="75" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr-grey)"/>
+    <line x1="30" y1="148" x2="30" y2="75" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr-grey)"/>
 
     <!-- chain: edge item (nearest DST) reacts first to half-valley -->
     <!-- old chain baseline at y=160: DST_old, edgeItem, i2, i3, SRC -->
     <!-- edge item shifts up a bit (half-valley) -->
-    <line x1="30" y1="60" x2="120" y2="130" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="120" y1="130" x2="220" y2="160" stroke="#9ca3af" stroke-width="2"/>
-    <line x1="220" y1="160" x2="350" y2="160" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="30" y1="60" x2="120" y2="130" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="120" y1="130" x2="220" y2="160" stroke="#3a3a42" stroke-width="2"/>
+    <line x1="220" y1="160" x2="350" y2="160" stroke="#3a3a42" stroke-width="2"/>
 
     <!-- edge item (half-valley) highlighted blue -->
-    <circle cx="120" cy="130" r="7" fill="white" stroke="#2563eb" stroke-width="2.5"/>
-    <text x="80" y="125" font-size="11" fill="#2563eb">edge item</text>
-    <text x="80" y="138" font-size="10" fill="#2563eb">(half-valley)</text>
+    <circle cx="120" cy="130" r="7" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2.5"/>
+    <text x="80" y="125" font-size="11" fill="#7c9ef8">edge item</text>
+    <text x="80" y="138" font-size="10" fill="#7c9ef8">(half-valley)</text>
 
     <!-- interior items -->
-    <circle cx="220" cy="160" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="290" cy="160" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="220" cy="160" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="290" cy="160" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
 
     <!-- dashed reference line new DST → SRC (straight) -->
-    <line x1="30" y1="60" x2="350" y2="160" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <line x1="30" y1="60" x2="350" y2="160" stroke="#3a3a42" stroke-width="1.5" stroke-dasharray="5,4"/>
 
     <!-- arrow to second sub-figure -->
-    <text x="420" y="110" text-anchor="middle" font-size="22" fill="#374151">→</text>
+    <text x="420" y="110" text-anchor="middle" font-size="22" fill="#e0e0e8">→</text>
 
     <!-- === sub-figure B: after propagation === -->
-    <text x="565" y="14" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">chain relaxed</text>
+    <text x="565" y="14" text-anchor="middle" font-size="12" font-weight="600" fill="#e0e0e8">chain relaxed</text>
 
     <!-- new DST -->
-    <circle cx="470" cy="60" r="9" fill="#111827"/>
-    <text x="470" y="50" text-anchor="middle" font-size="11" fill="#374151">DST</text>
+    <circle cx="470" cy="60" r="9" fill="#7c9ef8"/>
+    <text x="470" y="50" text-anchor="middle" font-size="11" fill="#e0e0e8">DST</text>
 
     <!-- SRC -->
-    <circle cx="690" cy="160" r="9" fill="#111827"/>
-    <text x="690" y="176" text-anchor="middle" font-size="11" fill="#374151">SRC</text>
+    <circle cx="690" cy="160" r="9" fill="#7c9ef8"/>
+    <text x="690" y="176" text-anchor="middle" font-size="11" fill="#e0e0e8">SRC</text>
 
     <!-- straight relaxed chain -->
-    <line x1="470" y1="60" x2="690" y2="160" stroke="#9ca3af" stroke-width="2"/>
-    <circle cx="524" cy="85" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="578" cy="110" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
-    <circle cx="632" cy="135" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <line x1="470" y1="60" x2="690" y2="160" stroke="#3a3a42" stroke-width="2"/>
+    <circle cx="524" cy="85" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="578" cy="110" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="632" cy="135" r="6" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
 
     <!-- defs for arrowhead -->
     <defs>
       <marker id="arr-grey" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-        <path d="M0,0 L0,6 L6,3 z" fill="#d1d5db"/>
+        <path d="M0,0 L0,6 L6,3 z" fill="#3a3a42"/>
       </marker>
     </defs>
 
     <!-- caption row -->
-    <text x="350" y="240" text-anchor="middle" font-size="11" fill="#6b7280">fix propagates inward item by item; chain re-straightens to new anchor position</text>
+    <text x="350" y="240" text-anchor="middle" font-size="11" fill="#808090">fix propagates inward item by item; chain re-straightens to new anchor position</text>
   </svg>
   <div class="diagram-caption">Diagram 6 — Movement. The edge item nearest the jumped anchor reacts first (half-valley), and the correction propagates inward until the chain is straight again.</div>
 </div>
