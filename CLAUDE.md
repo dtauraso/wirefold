@@ -8,6 +8,12 @@ read [MODEL.md](MODEL.md). It pins the model. Do not propose multi-step
 plans with options for network/wire work; state the next single concrete
 step and wait.
 
+`pump.ts` is a **position-stream plotter**, not the delivery driver: Go owns the one
+clock and times its own bead delivery; pump only maps Go's trace stream (bead
+positions, node events, edge curves, shading params) into render stores. It computes
+no positions, no geometry, and no traversal timing, and never tells Go when a bead
+arrived.
+
 ## Core concepts
 
 These live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
@@ -33,9 +39,20 @@ the store into `SingleEdgeTube` via `GraphEdges` in
 added to `WireProps` in `wire-defs.ts` and threaded through `SingleEdgeTube` in the
 same commit it is used; otherwise the editor path is silently incomplete.
 
+**Bridge surface:** the editor ↔ Go bridge is two channels and nothing else.
+**Go → TS** is the trace stream (bead positions, node events, edge curves, shading
+params) — Go reporting what it does. **TS → Go** is spec save/load plus a single
+geometry-CRUD `edit` message (`op` = create / update / delete / fade) and the
+play/pause control signal (see `nodes/Wiring/stdin_reader.go` `applyEdit` and
+`src/messages.ts` `EditMsg`). The TS → Go send is **fire-and-forget** — no `await`,
+no Promise chain, no request/response, no delivery signal (guard:
+`tools/check-no-await-on-bridge.sh`). Adding a TS → Go message kind means one
+top-level `edit` op, kept in message-kind parity with the Go stdin reader.
+
 **Drift rule:** if TS code outside `pump.ts` starts accumulating
-traversal-timing or firing-rule logic, that is drift —
-those belong in Go.
+traversal-timing, firing-rule, position, or geometry logic — or starts awaiting Go
+on the bridge — that is drift; those belong in Go and the bridge stays
+fire-and-forget.
 
 ## Node kinds
 

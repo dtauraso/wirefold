@@ -482,7 +482,8 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newCurve edgeCurve) 
 // (deliverLocked), otherwise it defers the delivery to Done (pendingDelivered).
 // A no-op when the wire is deleted or no bead is in flight (idempotent against a
 // duplicate trigger). Must be called with pw.mu held. This is the single delivery
-// path shared by the clock goroutine and (manual) NotifyDelivered.
+// path; the clock goroutine is its only caller (Go times its own delivery — there
+// is no cross-boundary delivery signal, MODEL.md).
 func (pw *PacedWire) tryDeliverLocked() {
 	if pw.deleted {
 		return
@@ -577,27 +578,6 @@ func (pw *PacedWire) WaitConsumed(ctx context.Context) error {
 	case <-ctx.Done():
 		return ErrCanceled
 	}
-}
-
-// NotifyDelivered is a manual immediate-delivery hook. As of Phase 1, Go's clock
-// drives delivery (see startDeliveryLocked); the TS "delivered" stdin message no
-// longer calls this — stdin_reader parses and ignores it. The method is retained
-// (Phase 5 removes it) and shares the single tryDeliverLocked path, so it is
-// idempotent: a call after the clock already delivered is a no-op (inFlight is
-// false). It NEVER blocks. If the wire is deleted, the pulse is discarded.
-func (pw *PacedWire) NotifyDelivered(ctx context.Context) error {
-	pw.mu.Lock()
-	if pw.deleted {
-		// Wire was deleted: discard the pulse. A late NotifyDelivered for a bead
-		// that was in-flight when Delete was called must NOT set hasSend — no node
-		// is allowed to receive a pulse from a removed wire.
-		pw.Trace.Breadcrumb("notify_on_deleted_wire_ignored", pw.Target, pw.TargetHandle, "")
-		pw.mu.Unlock()
-		return nil
-	}
-	pw.tryDeliverLocked()
-	pw.mu.Unlock()
-	return nil
 }
 
 // resetLocked performs the shared teardown for Reset and Delete: drops any

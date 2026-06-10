@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "position", "geometry", "pulse-cancelled"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -79,5 +79,34 @@ describe("trace-event-fields contract", () => {
     expect(e.kind).toBe("done");
     expect(typeof e.node).toBe("string");
     expect(typeof (e as Extract<TraceEvent, { kind: "done" }> & { port?: string }).port).toBe("string");
+  });
+
+  it("position event has step, kind, node, port, x, y, z (Phase 2)", () => {
+    const e = events.find((ev) => ev.kind === "position")! as Extract<TraceEvent, { kind: "position" }>;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("position");
+    expect(typeof e.node).toBe("string");
+    expect(typeof e.port).toBe("string");
+    expect(typeof e.x).toBe("number");
+    expect(typeof e.y).toBe("number");
+    expect(typeof e.z).toBe("number");
+  });
+
+  it("geometry event has step, kind, edge, and nine control-point coords (Phase 3)", () => {
+    const e = events.find((ev) => ev.kind === "geometry")! as Extract<TraceEvent, { kind: "geometry" }>;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("geometry");
+    expect(typeof e.edge).toBe("string");
+    for (const key of ["p0x", "p0y", "p0z", "p1x", "p1y", "p1z", "p2x", "p2y", "p2z"] as const) {
+      expect(typeof e[key]).toBe("number");
+    }
+  });
+
+  it("pulse-cancelled event has step, kind, node, port (Phase 3)", () => {
+    const e = events.find((ev) => ev.kind === "pulse-cancelled")! as Extract<TraceEvent, { kind: "pulse-cancelled" }>;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("pulse-cancelled");
+    expect(typeof e.node).toBe("string");
+    expect(typeof e.port).toBe("string");
   });
 });

@@ -9,6 +9,17 @@ export type RunStatus =
   | { state: "error"; message: string }
   | { state: "cancelled" };
 
+// Geometry-CRUD / animation edit sent webview → host → Go. ONE message kind
+// ("edit") with an `op` discriminator, mirroring the single Go stdin "edit" shape
+// (nodes/Wiring/stdin_reader.go applyEdit). Go owns the clock; this seam carries no
+// delivery signal. ops: create/delete a wire (edge add/remove), update node
+// geometry (node-move), fade an edge set.
+export type EditMsg =
+  | { type: "edit"; op: "create"; target: string; targetHandle: string }
+  | { type: "edit"; op: "delete"; target: string; targetHandle: string }
+  | { type: "edit"; op: "update"; nodeId: string; x: number; y: number; z?: number }
+  | { type: "edit"; op: "fade"; edges: string[] };
+
 export type WebviewToHostMsg =
   | { type: "ready" }
   | { type: "save"; text: string }
@@ -19,11 +30,7 @@ export type WebviewToHostMsg =
   | { type: "resume" }
   | { type: "stop" }
   | { type: "webview-log"; entry: string }
-  | { type: "delivered"; target: string; targetHandle: string }
-  | { type: "fade"; edges: string[] }
-  | { type: "deleteEdge"; target: string; targetHandle: string }
-  | { type: "addEdge"; target: string; targetHandle: string }
-  | { type: "node-move"; nodeId: string; x: number; y: number; z?: number };
+  | EditMsg;
 
 // Mirrors Go Trace.Event shape. kind ∈
 // {"recv","fire","send","done","position","geometry","pulse-cancelled"}.
@@ -52,12 +59,35 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "delivered", "fade", "deleteEdge", "addEdge", "node-move",
+  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "edit",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
   "load", "run-status", "flush", "save-error", "trace-event",
 ]);
+
+// parseEdit validates an "edit" message by its op, mirroring the per-op payloads
+// in EditMsg (and Go's applyEdit). Returns undefined for an unknown op or a payload
+// missing required fields, so a malformed edit is dropped rather than forwarded.
+function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
+  switch (m.op) {
+    case "create":
+    case "delete":
+      return typeof m.target === "string" && typeof m.targetHandle === "string"
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
+    case "update":
+      return typeof m.nodeId === "string" && typeof m.x === "number" && typeof m.y === "number"
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
+    case "fade":
+      return Array.isArray(m.edges) && m.edges.every((e) => typeof e === "string")
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
+    default:
+      return undefined;
+  }
+}
 
 export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -76,14 +106,8 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
         : undefined;
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "delivered":
-    case "deleteEdge":
-    case "addEdge":
-      return typeof m.target === "string" && typeof m.targetHandle === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "node-move":
-      return typeof m.nodeId === "string" && typeof m.x === "number" && typeof m.y === "number"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
+    case "edit":
+      return parseEdit(m);
     default:
       return m as unknown as WebviewToHostMsg;
   }

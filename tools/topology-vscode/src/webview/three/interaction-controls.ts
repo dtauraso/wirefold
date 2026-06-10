@@ -112,7 +112,8 @@ export function useInteractionControls(
   const rafPending = useRef(false);
 
   const flushNodeMove = useCallback((nodeId: string, x: number, y: number) => {
-    vscode.postMessage({ type: "node-move", nodeId, x, y, z: 0 });
+    // Single geometry-CRUD bridge: edit/update re-derives the moved node's edges.
+    vscode.postMessage({ type: "edit", op: "update", nodeId, x, y, z: 0 });
   }, []);
 
   const scheduleNodeMove = useCallback((nodeId: string, x: number, y: number) => {

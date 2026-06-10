@@ -125,10 +125,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     // Phase 3: TS computes no geometry. Go is the authoritative curve holder and
     // streams the edge's control points; the tube renders from Go's stream once Go
     // knows the edge (on its next load/run). No TS-built curve here.
-    // Tell Go to un-silence this wire so it carries pulses again (mirrors deleteEdge).
-    postLog("addEdge-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
+    // Tell Go to un-silence this wire so it carries pulses again (mirrors the
+    // delete edit). Single geometry-CRUD bridge: edit/create.
+    postLog("edit-create-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
     vscode.postMessage({
-      type: "addEdge",
+      type: "edit",
+      op: "create",
       target: result.newEdge.target,
       targetHandle: result.newEdge.targetHandle ?? "",
     });
@@ -140,16 +142,19 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const { edges } = get();
     const edge = edges.find((ed) => ed.id === id);
     // Tell Go to drop this wire's in-flight pulse and free its parked sender,
-    // keyed by the destination slot identity (target + targetHandle).
+    // keyed by the destination slot identity (target + targetHandle). Single
+    // geometry-CRUD bridge: edit/delete (Go cancels clock-delivery + echoes
+    // pulse-cancelled atomically).
     if (edge) {
-      postLog("deleteEdge-post", { edgeId: id, target: edge.target, targetHandle: edge.targetHandle ?? "", found: true });
+      postLog("edit-delete-post", { edgeId: id, target: edge.target, targetHandle: edge.targetHandle ?? "", found: true });
       vscode.postMessage({
-        type: "deleteEdge",
+        type: "edit",
+        op: "delete",
         target: edge.target,
         targetHandle: edge.targetHandle ?? "",
       });
     } else {
-      postLog("deleteEdge-post", { edgeId: id, found: false });
+      postLog("edit-delete-post", { edgeId: id, found: false });
     }
     const nextEdges = edges.filter((ed) => ed.id !== id);
     set({ edges: nextEdges });
@@ -206,6 +211,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     scheduleViewSave();
 
     // Emit the full faded-edge set to the host so Go can update its wire flags.
-    vscode.postMessage({ type: "fade", edges: [...result.fadedEdges] });
+    // Single geometry-CRUD bridge: edit/fade.
+    vscode.postMessage({ type: "edit", op: "fade", edges: [...result.fadedEdges] });
   },
 }));

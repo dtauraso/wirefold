@@ -2,3 +2,6 @@
 {"step":1,"kind":"fire","node":"A"}
 {"step":2,"kind":"send","node":"A","port":"out","value":1}
 {"step":3,"kind":"done","node":"A","port":"out"}
+{"step":4,"kind":"position","node":"A","port":"out","value":1,"x":1.5,"y":2.5,"z":0}
+{"step":5,"kind":"geometry","edge":"AtoB","p0x":0,"p0y":0,"p0z":0,"p1x":1,"p1y":1,"p1z":0,"p2x":2,"p2y":0,"p2z":0}
+{"step":6,"kind":"pulse-cancelled","node":"A","port":"out","value":1}

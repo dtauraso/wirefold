@@ -87,6 +87,12 @@ A node places a bead on its outgoing wire whenever its own rule says to. It does
 and wire is a goroutine; they coordinate through channels. A single
 global gate halts or resumes wire animation. There is no central walker.
 
+Each wire times its OWN delivery on the one clock: when `inFlightTime`
+has elapsed the wire puts the bead on the channel to the destination
+node. Delivery is not triggered by the renderer — there is no
+cross-boundary delivery signal. The editor is told where each bead is;
+it is never asked when a bead has arrived.
+
 There is no global round, tick, or simultaneity layer. The network does
 not count rounds or align activity to a shared clock. Coordination
 between nodes happens through the values nodes place on wires and the
@@ -100,14 +106,17 @@ The model lives entirely in Go. The TS/React layer is **render-only**:
 it receives bead positions from Go and draws them. It never sets node
 state and never tells Go when a bead has arrived — Go owns the clock.
 
-- **Go runtime** owns all node-local held state, firing rules, and wire
-  traversal timing. It emits trace events (bead
-  positions and node events) as JSON lines on stdout.
-- **`pump.ts`** (`tools/topology-vscode/src/webview/three/pump.ts`) is
-  the sole translator: it reads trace events from the extension bridge
-  and updates state stores (pulse-state, three/store) so the 3D renderer
-  can animate them. Pump is the boundary — no firing-rule
-  logic may live outside it on the TS side.
+- **Go runtime** owns all node-local held state, firing rules, wire
+  traversal timing, node positions, per-edge curve geometry, and shading
+  parameters. It emits trace events — bead positions, node events, edge
+  curves, and shading params — as JSON lines on stdout.
+- **`pump.ts`** (`tools/topology-vscode/src/webview/three/pump.ts`) is a
+  position-stream plotter, not a delivery driver: it reads Go's trace
+  events from the extension bridge and writes them into state stores
+  (pulse-state, three/store) so the 3D renderer can draw what Go is
+  doing. It computes no positions, no geometry, and no traversal timing.
+  Pump is the boundary — no firing-rule or timing logic may live outside
+  it on the TS side.
 - **`GraphNode`** (in
   `tools/topology-vscode/src/webview/three/scene-content.tsx`) renders
   all nodes generically as a sphere mesh + border ring, keyed off
@@ -117,17 +126,19 @@ state and never tells Go when a bead has arrived — Go owns the clock.
   `tools/topology-vscode/src/webview/three/ThreeView.tsx`) renders wire
   animation driven by the positions Go emits. It owns no traversal
   timing.
-- **Global gate** is a play/pause signal sent to the Go process. While
-  paused, Go stops advancing beads and firing; the editor reflects the
-  last known state.
-- **Bridge surface** carries spec I/O only — `ready`, `spec`, `view`,
-  `save`, `view-safe`. Nothing about node state or animation internals
-  crosses the bridge.
-
-> **Needs confirmation.** With Go owning delivery, the previous
-> `notifyDelivered` stdin message no longer drives delivery. Whether it
-> is removed outright or repurposed is a code change not yet made; this
-> doc describes the target (Go-timed delivery, no TS delivery signal).
+- **Global gate** is a play/pause signal sent to the Go process (the one
+  clock's halt/resume). While halted, Go stops advancing beads and
+  firing; the editor reflects the last known state.
+- **Bridge surface** is two channels and nothing else. **Go → TS:** the
+  trace stream (bead positions, node events, edge curves, shading
+  params) — Go reporting what it is doing. **TS → Go:** spec I/O for
+  save/load (`save`, `view-save`, `load`) plus a single geometry-CRUD
+  `edit` message (`op` = create / update / delete / fade) and the
+  play/pause control signal. The TS → Go send is fire-and-forget: the
+  editor places an edit and never blocks on Go, never asks when a bead
+  arrived, and there is no delivery signal — Go times its own delivery.
+  Nothing about node-local state or animation internals crosses the
+  bridge.
 
 ## Drift rule
 
