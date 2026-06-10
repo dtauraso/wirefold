@@ -73,6 +73,24 @@ the straightening relaxation continues unchanged around them. Holding the spacin
 constant is what keeps each item's midpoint move tiny no matter how far apart the nodes
 are dragged.
 
+## A retiring item hands off its bead
+
+Density maintenance runs at machine speed while a bead traverses the chain at clock
+speed, so an item can be retired while it is **carrying the bead**. A value must never be
+lost to the geometry layer's churn: before an item unsplices, if it holds the bead it
+**hands the bead to its next neighbor toward the destination** (downstream), then
+retires. The bead continues from there.
+
+- **Birth never threatens a bead** — inserting an item just adds one more waypoint to
+  visit.
+- **Only retirement can strand a bead**, so retirement is **gated on hand-off**: an item
+  carrying a value relinks its two neighbors and passes the value downstream as part of
+  retiring; it does not drop out while still holding the bead.
+
+This keeps value-transport correct under the machine-speed churn of the geometry layer:
+the two timescales share the chain, and the slower bead is never discarded by the faster
+density changes.
+
 ## Straightening: each item removes its own peak/valley
 
 Each item, on its own goroutine, repeatedly:
