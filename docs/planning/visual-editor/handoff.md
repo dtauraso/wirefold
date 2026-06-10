@@ -7,7 +7,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-09 — task/spec-go-backend-ts-frontend, pushed; spec doc is SETTLED, CONSISTENT, and CONCISE: 9 tabs, one open spec item (i1))
+## State at handoff (2026-06-09 — task/spec-go-backend-ts-frontend, pushed; spec doc is SETTLED, CONSISTENT, and CONCISE: 9 tabs, zero open spec items (i1 resolved))
 
 - Active branch: `task/spec-go-backend-ts-frontend`, pushed, tree clean. Latest pushed commit: `e93d42e2`.
 - **NOTE:** `topology.json` has the git skip-worktree bit SET — editor churn stays out of git. Deliberate changes require `git update-index --no-skip-worktree topology.json` first, then re-set after.
@@ -46,7 +46,7 @@ Go needs **no 3D-math/projection library** — camera/projection/picking are TS 
 
 - `in08` loop: read the signal on wire `i0→in08` (1/0); `i = (i + signal) % len(Init)` (1 advances the read head, wrapping at the end; 0 holds); send `Init[i]` on wire `in08→i0`.
 - `i0` loop: held copies `in08`'s value (init `-1`); if the arriving value DIFFERS from held → set held, send `1` to `in08`; else send `0`; forward held value to `i1`.
-- `i1` loop: receives `i0`'s held value; it is a SINK; behavior beyond receiving is UNSPECIFIED (the one open spec item).
+- `i1` loop: receives `i0`'s held value; runs the standard ChainInhibitor rule; SINK (`ToNext` unwired) — sends nothing.
 - Needs TWO new wires (`in08→i0`, `i0→in08`) + new PORTS on the Input and ChainInhibitor kinds + `i0`'s held init `0`→`-1`. None exists in code yet. The goroutine graph draws the handshake routed through TWO PacedWire goroutines (one per direction).
 
 ### The PacedWire loop — spec'd, NOT yet coded
@@ -63,7 +63,7 @@ Go needs **no 3D-math/projection library** — camera/projection/picking are TS 
 - **9 tabs:** The split · Goroutines · TS · The Bridge · Clock · TS → Go · Plan · Verify · Tracking (merged down from 16). The inline `<script>` wires tabs dynamically by `data-panel`.
 - **Consistency-swept:** camera/picking uniformly TS; "all input to Go" superseded; store uniformly "no-op holder"; slot vocabulary → "held state" / "channel" everywhere (the Clock **"Before"** diagram intentionally keeps "slot" for contrast).
 - **Concise:** every prose block over ~40 words was tightened to bullets / tables / one-line claims (exhaustive sweep — 0 blocks over 40 words remain, excepting the contract box and the "Spec is authoritative" callout).
-- **Tracking tab** is trimmed to ONE open item: **i1's behavior beyond receiving is unspecified.** All resolved findings and dated changelog records were removed — that history lives in git + this handoff.
+- **Tracking tab** has ZERO open items — i1 resolved (ordinary ChainInhibitor; sink via unwired `ToNext`). All resolved findings and dated changelog records were removed — that history lives in git + this handoff.
 
 ### What is on main — UNCHANGED
 
@@ -73,7 +73,7 @@ Nothing merged. Main still describes the OLD model. All session work lives on th
 
 1. **The code rewrite is the headline.** Chain 1 (clock + per-frame bead eval = the PacedWire rewrite) is the first domino. The Go/TS code still implements the OLD model (consumeGated/single-bead/full ring; TS owns the clock + animation and computes geometry).
 2. **The in08↔i0 handshake** needs 2 new wires + new ports on Input/ChainInhibitor + `i0` held init `-1` (Go code).
-3. **i1's behavior** beyond receiving is the lone open spec question — sink for now.
+3. **i1's behavior** — RESOLVED: ordinary ChainInhibitor; runs its rule; sink (`ToNext` unwired), sends nothing.
 4. **Camera/picking are TS** (three.js), not Go builds. r3f stays for 3D scene navigation; control feel bespoke (no OrbitControls).
 5. **Store** = no-op holder, Go sole writer — a TS-side change when the rewrite lands.
 6. **The node-contract principle is deliberately UNPINNED** (totality in / no guarantees out; reliability lives in the node, not the channel). Let it manifest in code — do NOT re-pitch pinning it to MODEL.md/memory.

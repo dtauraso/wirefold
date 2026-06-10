@@ -502,7 +502,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>i1 loop</td>
             <td>one (i1)</td>
-            <td><ol><li>Receive i0's held value on the wire i0-&gt;i1.</li><li>Its output wires are inactive in this config, so i1 is a sink — it holds the received value and produces nothing downstream. (Behavior beyond receiving is not yet specified.)</li></ol></td>
+            <td><ol><li>Receive i0's held value on the wire i0-&gt;i1.</li><li>Its output wires are inactive here, so i1 is a sink — it runs the standard ChainInhibitor rule on i0's value and produces nothing downstream (ToNext unwired).</li></ol></td>
           </tr>
         <tr>
           <td class="enum">4</td>
@@ -1295,9 +1295,8 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
 
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:h2">☐</button>Inconsistencies to resolve.</h2>
-    <p>A cross-tab audit. One open item remains; everything else is resolved and recorded in git history and handoff.md.</p>
-    <div class="note" style="border-left:3px solid var(--warn);margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note11">☐</button><span style="color:var(--warn);font-weight:700;">OPEN &mdash; i1 behavior unspecified.</span> i1 is a sink: its behavior beyond receiving i0&rsquo;s held value is unspecified. (The in08&harr;i0 handshake itself is specified in the Goroutines tab.)</div>
-    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Consistent across all tabs</strong> &mdash; clock, position, pacing, and ownership are settled, no cross-tab conflicts. The Clock <strong>&ldquo;Before&rdquo;</strong> diagram intentionally keeps the old slot model, for contrast.</div>
+    <p>A cross-tab audit. No open items remain; everything is resolved and recorded in git history and handoff.md.</p>
+<div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Consistent across all tabs</strong> &mdash; clock, position, pacing, and ownership are settled, no cross-tab conflicts. The Clock <strong>&ldquo;Before&rdquo;</strong> diagram intentionally keeps the old slot model, for contrast.</div>
   </div>
 </div>
 
