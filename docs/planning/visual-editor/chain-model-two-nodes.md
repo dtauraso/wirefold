@@ -73,6 +73,27 @@ the straightening relaxation continues unchanged around them. Holding the spacin
 constant is what keeps each item's midpoint move tiny no matter how far apart the nodes
 are dragged.
 
+## A node knows its distance to a connected node — as the chain's length
+
+Because the items hold a constant spacing, the **number of items in a chain is a measure
+of the distance** between the two nodes it connects: `distance ≈ item-count × spacing`.
+A node stays aware of how far it is from a connected node by **reading that count** — not
+by ever measuring across space to the other node.
+
+The count is maintained by the very same events that keep the spacing constant:
+
+- an item is **born** (gap stretched) → the chain's count ticks **+1**,
+- an item **retires** (gap shrank) → the count ticks **−1**.
+
+So distance-awareness is a running counter, updated locally as the chain grows and
+shrinks — never recomputed from coordinates and never a node-to-node subtraction. A node
+becomes aware it is "**X away**" when the connecting chain reaches **N = X / spacing**
+items; an awareness threshold is just a count crossing.
+
+This only answers the distance to nodes a chain actually connects to — which is the
+point: the chain that already exists *is* the ruler. (Distance to an *unconnected* node
+would require reaching across empty space, which this model does not do.)
+
 ## A retiring item hands off its bead
 
 Density maintenance runs at machine speed while a bead traverses the chain at clock
