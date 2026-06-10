@@ -49,3 +49,5 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_dont_invent_doctrine.md](feedback_dont_invent_doctrine.md) — Don't paraphrase a one-off note into a "rule" and cite the paraphrase as project doctrine; grep for the literal phrasing first
 - [feedback_tsc_verify_after_removal.md](feedback_tsc_verify_after_removal.md) — After deleting/refactoring webview TS, verify with `tsc --noEmit` too; esbuild (`npm run build`) skips type-checking and lets dangling refs reach runtime
 - [feedback_node_model_not_networking_handshake.md](feedback_node_model_not_networking_handshake.md) — Nodes do local work + drive their outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees
+- [feedback_paced_tryrecv_blocks.md](feedback_paced_tryrecv_blocks.md) — Paced TryRecv blocks (not a poll); judge from paced_wire.go impl, not the Try/ok idiom
+- [feedback_per_goroutine_bridge.md](feedback_per_goroutine_bridge.md) — Go↔TS bridge is per-goroutine (each goroutine sends/picks up); geometry's central emitter is the deviation
