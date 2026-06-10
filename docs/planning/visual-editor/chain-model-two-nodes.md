@@ -42,6 +42,14 @@ wire; each item self-places from its neighbors.
 - Owns its own **position**.
 - Is a **goroutine**.
 
+## Many items, densely spaced
+
+The chain uses **many** items, so the spacing between neighbors is **very small**.
+That density is what keeps the model purely local: because every gap is tiny, an item
+only ever makes a tiny midpoint adjustment against its immediate neighbors — **no node
+ever computes a distance or a straight line to another node**. The straight wire is the
+aggregate of many trivial local moves, never a node-to-node line calculation.
+
 ## Straightening: each item removes its own peak/valley
 
 Each item, on its own goroutine, repeatedly:
@@ -131,23 +139,32 @@ The bead's motion is the hop from item to item along the chain.
 
 ## Movement keeps the chain unbroken
 
-When a node moves, only its terminal **anchor** (the port the chain attaches to)
-changes. The adjacent item sees its neighbor moved on its next check and relaxes
-toward the new midpoint; the relaxation propagates down the chain until it is straight
-again. No central node-move recompute — the chain re-straightens itself.
+A node-move is felt **first by the edge item** — the item attached to that node's port
+anchor. The instant the anchor moves, that edge item becomes a **peak / half-peak or
+valley / half-valley** (a *half* peak/valley because only its anchor-side neighbor
+jumped; its interior neighbor hasn't moved yet) and **adjusts immediately** toward its
+new midpoint. That move makes its inner neighbor the next peak/valley, and the
+correction **propagates inward** along the chain. Because the items are dense and each
+step is a tiny move, the chain stays visually straight as the node is dragged — the
+edge item's immediate reaction keeps a kink from ever appearing. No central node-move
+recompute; the chain re-straightens itself.
 
 ```
-   before:
-       [SRC]●───○───○───○───●[DST]
+   node dragged up; the EDGE item (attached to the port) reacts first:
 
-   node dragged — the in-port anchor jumps; the last item is now a valley:
-                             ●[DST]
-                            /
-       [SRC]●───○───○───○──○
-                         (valley)
+       ●[DST]  ← anchor jumped up
+        \
+         ○      ← edge item: anchor-side neighbor moved, inner side
+         │         hasn't yet  =  a HALF-valley
+         ○──○──○──●[SRC]
 
-   the chain relaxes (each item → midpoint) until straight to the new anchor:
-       [SRC]●──○──○──○──○──●[DST]
+   it adjusts immediately to its new midpoint; that makes the next
+   item a half-valley, and the fix propagates inward, item by item,
+   keeping the chain straight as the node moves:
+
+       ●[DST]
+         \
+          ○─○─○─○─●[SRC]   →   eventually straight to the new anchor
 ```
 
 ## What this replaces
