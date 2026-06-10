@@ -18,6 +18,18 @@ items**:
 source node → item₁ → item₂ → … → itemₙ → destination node
 ```
 
+```
+   source                                  destination
+   node                                           node
+    ●━━━━━○━━━━━○━━━━━○━━━━━○━━━━━●
+   out    i₁    i₂    i₃    i₄    in
+   port                          port
+
+   ●  fixed anchor (a node's port)
+   ○  item — its own goroutine, free to move
+   ━  adjacency between neighbors (not a drawn curve)
+```
+
 Each item is its own **goroutine**. There is no central solver that positions the
 wire; each item self-places from its neighbors.
 
@@ -41,6 +53,49 @@ Each item, on its own goroutine, repeatedly:
 3. If it is a peak or valley, it **moves onto that line** — to the **midpoint of its
    two neighbors** — so it is neither.
 
+```
+   PEAK                          VALLEY
+   (item above the                (item below the
+    neighbor line)                 neighbor line)
+
+        ○ i                       A ●─────────● B
+       / \                             \     /
+      /   \                             \   /
+   A ●     ● B                           ○ i
+
+   neither (already straight):   A ●────○────● B
+                                        i
+```
+
+```
+   one relax step at item i (neighbors A, B):
+
+   before:  A ●        ● B      after:  A ●────●────● B
+                \      /                       i
+                 \    /                 i ← midpoint(A, B):
+                  ○ i                   now on the A–B line,
+              (a valley)                neither peak nor valley
+```
+
+```
+   t₀  jagged (right after a node moves):
+            ○             ○
+           / \           / \
+       ●--/   \--○--   --/   \--●
+                  \   /
+                   \ /
+                    ○        (peaks & valleys)
+
+   t₁  one relax step (each item → midpoint of neighbors):
+             ○         ○
+            / \       / \
+       ●---○   \--○--/   ---●
+                 bumps shrink
+
+   t∞  converged — straight, evenly spaced:
+       ●----○----○----○----○----●
+```
+
 All items do this concurrently and locally. With the two anchors fixed (source
 out-port, dest in-port), the chain **relaxes to a straight line** between them.
 Straightness is **emergent** from local per-item relaxation — not computed from a
@@ -52,6 +107,17 @@ A bead carries a **value** and **visits each item in sequence** as its animation
 
 ```
 source → item₁ → item₂ → … → itemₙ → destination
+```
+
+```
+   the bead ◉ carries a value and lands on each item in turn:
+
+   step 0   ●◉───○───○───○───○───●    value enters at source
+   step 1   ●───◉───○───○───○───●
+   step 2   ●───○───◉───○───○───●
+   step 3   ●───○───○───◉───○───●
+    ⋮
+   step n   ●───○───○───○───○───◉●   value delivered at destination
 ```
 
 The bead's motion is the hop from item to item along the chain.
@@ -69,6 +135,20 @@ When a node moves, only its terminal **anchor** (the port the chain attaches to)
 changes. The adjacent item sees its neighbor moved on its next check and relaxes
 toward the new midpoint; the relaxation propagates down the chain until it is straight
 again. No central node-move recompute — the chain re-straightens itself.
+
+```
+   before:
+       [SRC]●───○───○───○───●[DST]
+
+   node dragged — the in-port anchor jumps; the last item is now a valley:
+                             ●[DST]
+                            /
+       [SRC]●───○───○───○──○
+                         (valley)
+
+   the chain relaxes (each item → midpoint) until straight to the new anchor:
+       [SRC]●──○──○──○──○──●[DST]
+```
 
 ## What this replaces
 
