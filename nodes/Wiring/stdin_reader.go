@@ -93,6 +93,16 @@ func (nmr *NodeMoveRegistry) SetEdgeOuts(outSink map[string]*Out, slotReg SlotRe
 	}
 }
 
+// EdgeOut returns the source *Out bound to the given edge label, or nil if the
+// edge is unknown. Exported so out-of-package callers (e.g. the headless cascade
+// verifier in package main) can read an edge's per-edge in-flight time
+// (Out.SimLatencyMs) from the loaded geometry.
+func (nmr *NodeMoveRegistry) EdgeOut(edgeID string) *Out {
+	nmr.mu.Lock()
+	defer nmr.mu.Unlock()
+	return nmr.edgeOut[edgeID]
+}
+
 // applyNodeMove moves nodeId to (x, y, z) and updates travel-time for every edge
 // that touches it: each affected edge's own per-edge ArcLength/SimLatencyMs is
 // written onto its source Out, and every destination port reached by an affected
@@ -207,15 +217,11 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 			}
 			switch msg.Type {
 			case "delivered":
-				if msg.Target == "" || msg.TargetHandle == "" {
-					continue
-				}
-				destKey := msg.Target + "." + msg.TargetHandle
-				pw, found := slotReg[destKey]
-				if !found {
-					continue
-				}
-				pw.NotifyDelivered(ctx) //nolint:errcheck // ErrCanceled is handled by loop exit
+				// Phase 1: Go's clock times delivery now (see PacedWire
+				// startDeliveryLocked); the TS "delivered" message no longer
+				// triggers it. We still parse and discard the message so the seam
+				// stays message-kind-parity clean (full removal is Phase 5).
+				continue
 			case "deleteEdge":
 				if msg.Target == "" || msg.TargetHandle == "" {
 					continue

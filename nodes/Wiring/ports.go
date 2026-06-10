@@ -195,12 +195,12 @@ func (o *Out) TrySend(v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		// Emit the trace send event BEFORE blocking on delivery so the
-		// webview sees it, animates, posts "delivered", and unblocks Send.
-		// Emitting after Send returns causes a deadlock: the webview never
-		// receives the event, never posts delivered, and Send never returns.
+		// Emit the SendWire trace (the renderer animates from it) BEFORE the
+		// placement returns, then place the bead. Delivery is timed by Go's clock
+		// (o.SimLatencyMs is this edge's per-bead in-flight time), not by a TS
+		// "delivered" reply — Send returns once the bead is placed.
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		if err := o.pw.Send(o.ctx, v); err != nil {
+		if err := o.pw.Send(o.ctx, v, o.SimLatencyMs); err != nil {
 			return false
 		}
 		return true
@@ -226,7 +226,9 @@ func (o *Out) TryEmit(v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		if !o.pw.TryPlace(v) {
+		// o.SimLatencyMs is this edge's per-bead in-flight time; the wire times
+		// delivery on Go's clock from it.
+		if !o.pw.TryPlace(v, o.SimLatencyMs) {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)

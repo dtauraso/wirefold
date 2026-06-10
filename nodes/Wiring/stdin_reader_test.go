@@ -1,8 +1,10 @@
 // stdin_reader_test.go — contract test for RunStdinReader.
 //
-// Verifies that a "delivered" JSON line on stdin calls NotifyDelivered on the
-// matching PacedWire (keyed by slot = target+"."+targetHandle), unblocking Recv;
-// Send unblocks after Done is called.
+// Phase 1 contract: Go's clock drives delivery, NOT the "delivered" stdin
+// message. RunStdinReader parses and ignores "delivered"; the wire delivers when
+// the fake clock is advanced past the bead's in-flight time. This test verifies
+// (a) feeding a "delivered" line does not crash or hang the reader, and (b)
+// delivery is driven by the clock advance, not by the message.
 
 package Wiring
 
@@ -14,32 +16,36 @@ import (
 	"time"
 )
 
-func TestRunStdinReaderDelivered(t *testing.T) {
+func TestRunStdinReaderDeliveredIgnoredClockDelivers(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	clk := NewFakeClock()
+	pw.SetClock(clk)
 	slotReg := SlotRegistry{"nodeA.in": pw}
 	reg := WireRegistry{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Feed one "delivered" message then close.
 	r, w := io.Pipe()
 	go RunStdinReader(ctx, r, slotReg, reg, nil, nil)
 
-	// Send a value on pw in the background; it will block until delivered.
+	// Place a bead with a 50ms in-flight time; delivery is timed by the clock.
+	const inFlightMs = 50
 	sendErr := make(chan error, 1)
-	go func() {
-		sendErr <- pw.Send(ctx, 42)
-	}()
-
-	// Wait briefly to let the send goroutine block.
+	go func() { sendErr <- pw.Send(ctx, 42, inFlightMs) }()
 	time.Sleep(10 * time.Millisecond)
 
-	// Write the delivered message — unblocks Recv (visual delivery).
+	// Feed a "delivered" line. Under the Phase 1 contract this is parsed and
+	// ignored — it must NOT deliver the bead.
 	io.WriteString(w, `{"type":"delivered","target":"nodeA","targetHandle":"in"}`+"\n")
 	time.Sleep(10 * time.Millisecond)
+	if !pw.InFlight() {
+		t.Fatal("bead delivered by stdin 'delivered' message; clock should own delivery")
+	}
 
-	// Recv the value, then call Done — Done unblocks Send.
+	// Advance the clock past the in-flight time → the wire delivers.
+	clk.Advance(inFlightMs * time.Millisecond)
+
 	v, err := pw.Recv(ctx)
 	if err != nil || v != 42 {
 		t.Fatalf("Recv: v=%v err=%v", v, err)
@@ -52,7 +58,7 @@ func TestRunStdinReaderDelivered(t *testing.T) {
 			t.Fatalf("Send returned error: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Send did not unblock after delivered message")
+		t.Fatal("Send did not return after bead placement")
 	}
 	w.Close()
 }

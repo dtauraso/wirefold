@@ -143,7 +143,11 @@ func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
 // SlotRegistry (keyed by "target.targetHandle" for delivery acks), a WireRegistry
 // (keyed by edge label for fade/node-move), and a NodeMoveRegistry for live position
 // updates (used by the stdin reader to handle node-move messages).
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, SlotRegistry, WireRegistry, *NodeMoveRegistry, error) {
+//
+// clk is the single monotonic clock injected into every PacedWire so each wire
+// times its own delivery on it (MODEL.md: exactly one clock). Production passes a
+// RealClock; tests pass a FakeClock they advance deterministically.
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *NodeMoveRegistry, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -201,6 +205,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace) ([]Node, Sl
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
 			pw.Trace = tr
+			pw.SetClock(clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
 		} else if simLatencyMs > pw.MaxIncomingSimLatencyMs {
 			// Fan-in: raise the per-port window aggregate to the max over all
