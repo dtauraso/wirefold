@@ -174,44 +174,53 @@
     font-size: 13px;
   }
 
+  .spec-table{max-width:100%;}
+  .spec-table th,.spec-table td{white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
   .spec-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
-  .spec-table td:first-child { font-family: var(--mono); font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--accent); }
-  .spec-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; white-space: nowrap; color: var(--go-hue); }
+  .spec-table td:first-child { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); }
+  .spec-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; color: var(--go-hue); }
   .spec-table td ol { margin: 0; padding-left: 1.25rem; }
   .spec-table td ol li { padding: 1px 0; line-height: 1.55; }
   #panel-goroutines .spec-table { table-layout: fixed; width: 100%; }
-  #panel-goroutines .spec-table th:first-child, #panel-goroutines .spec-table td:first-child { width: 90px; white-space: normal; }
-  #panel-goroutines .spec-table th:nth-child(2), #panel-goroutines .spec-table td:nth-child(2) { width: 95px; white-space: normal; }
+  #panel-goroutines .spec-table th:first-child, #panel-goroutines .spec-table td:first-child { width: 4%; white-space: normal; }
+  #panel-goroutines .spec-table th:nth-child(2), #panel-goroutines .spec-table td:nth-child(2) { width: 4%; white-space: normal; }
   #panel-goroutines .spec-table td, #panel-goroutines .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
-  #panel-goroutines table#goroutines-table{width:800px;table-layout:fixed;border-collapse:collapse;}
+  #panel-goroutines table#goroutines-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;}
   #panel-goroutines table#goroutines-table th,
   #panel-goroutines table#goroutines-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
-  #panel-goroutines table#goroutines-table th:nth-child(1),#panel-goroutines table#goroutines-table td:nth-child(1),
-  #panel-goroutines table#goroutines-table th:nth-child(2),#panel-goroutines table#goroutines-table td:nth-child(2){width:1.8ch;padding-left:2px;padding-right:2px;}
-  #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:15ch;}
-  #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:24ch;}
-  #panel-goroutines table#goroutines-table td:nth-child(4){font-family:var(--mono);font-size:12px;white-space:nowrap;}
-  #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:9ch;}
-  #panel-goroutines table#goroutines-table th:nth-child(6),#panel-goroutines table#goroutines-table td:nth-child(6){width:41ch;}
-  #panel-tscode table#tscode-table{width:800px;table-layout:fixed;border-collapse:collapse;}
+  #panel-goroutines table#goroutines-table th:nth-child(1),#panel-goroutines table#goroutines-table td:nth-child(1){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-goroutines table#goroutines-table th:nth-child(2),#panel-goroutines table#goroutines-table td:nth-child(2){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:16%;}
+  #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:22%;}
+  #panel-goroutines table#goroutines-table td:nth-child(4){font-family:var(--mono);font-size:12px;}
+  #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:12%;}
+  #panel-goroutines table#goroutines-table th:nth-child(6),#panel-goroutines table#goroutines-table td:nth-child(6){width:42%;}
+  #panel-tscode table#tscode-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;}
   #panel-tscode table#tscode-table th,
   #panel-tscode table#tscode-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
-  #panel-tscode table#tscode-table th:nth-child(1),#panel-tscode table#tscode-table td:nth-child(1),
-  #panel-tscode table#tscode-table th:nth-child(2),#panel-tscode table#tscode-table td:nth-child(2){width:1.8ch;padding-left:2px;padding-right:2px;}
-  #panel-tscode table#tscode-table th:nth-child(3),#panel-tscode table#tscode-table td:nth-child(3){width:20ch;}
-  #panel-tscode table#tscode-table th:nth-child(4),#panel-tscode table#tscode-table td:nth-child(4){width:24ch;}
-  #panel-tscode table#tscode-table td:nth-child(4){font-family:var(--mono);font-size:12px;white-space:nowrap;}
-  #panel-tscode table#tscode-table th:nth-child(5),#panel-tscode table#tscode-table td:nth-child(5){width:13ch;}
-  #panel-tscode table#tscode-table th:nth-child(6),#panel-tscode table#tscode-table td:nth-child(6){width:36ch;}
+  #panel-tscode table#tscode-table th:nth-child(1),#panel-tscode table#tscode-table td:nth-child(1){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-tscode table#tscode-table th:nth-child(2),#panel-tscode table#tscode-table td:nth-child(2){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-tscode table#tscode-table th:nth-child(3),#panel-tscode table#tscode-table td:nth-child(3){width:20%;}
+  #panel-tscode table#tscode-table th:nth-child(4),#panel-tscode table#tscode-table td:nth-child(4){width:22%;}
+  #panel-tscode table#tscode-table td:nth-child(4){font-family:var(--mono);font-size:12px;}
+  #panel-tscode table#tscode-table th:nth-child(5),#panel-tscode table#tscode-table td:nth-child(5){width:14%;}
+  #panel-tscode table#tscode-table th:nth-child(6),#panel-tscode table#tscode-table td:nth-child(6){width:36%;}
   #panel-tscode .spec-table { table-layout: fixed; width: 100%; }
-  #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 135px; white-space: normal; }
-  #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 110px; white-space: normal; }
+  #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 4%; white-space: normal; }
+  #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 4%; white-space: normal; }
   #panel-tscode .spec-table td, #panel-tscode .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
 
   /* Verify panel: keep the 3-col table inside the panel (col 2 defaults to nowrap) */
   #panel-verify .spec-table { table-layout: fixed; }
   #panel-verify .spec-table th, #panel-verify .spec-table td { white-space: normal; word-break: break-word; }
   #panel-verify .spec-table th:first-child, #panel-verify .spec-table td:first-child { width: 120px; }
+
+  /* Inconsistencies panel: controlled column widths so 4-col table fits */
+  #panel-inconsistencies .spec-table{table-layout:fixed;}
+  #panel-inconsistencies .spec-table th:nth-child(1),#panel-inconsistencies .spec-table td:nth-child(1){width:16%;}
+  #panel-inconsistencies .spec-table th:nth-child(2),#panel-inconsistencies .spec-table td:nth-child(2){width:34%;}
+  #panel-inconsistencies .spec-table th:nth-child(3),#panel-inconsistencies .spec-table td:nth-child(3){width:34%;}
+  #panel-inconsistencies .spec-table th:nth-child(4),#panel-inconsistencies .spec-table td:nth-child(4){width:16%;}
 
   /* Cards */
   .cards {
