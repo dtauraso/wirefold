@@ -112,6 +112,10 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
+    case "node-geometry":
+      // TODO(item1-ts): consume — each node's goroutine emits its node+port world
+      // positions/dirs on startup. Pure no-op this commit; the TS consume lands next.
+      return;
     // PUMP_DONE_HANDLER
     case "done": {
       // Match ALL edges by target node id + targetHandle (fan-in).

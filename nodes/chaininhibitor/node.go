@@ -9,6 +9,7 @@ import (
 
 type Node struct {
 	Fire                       func()
+	EmitGeometry               func()
 	Held                       int `wire:"data.state"`
 	FromPrevChainInhibitorNode *Wiring.In
 	ToNext                     Wiring.OutMulti
@@ -16,6 +17,9 @@ type Node struct {
 }
 
 func (in *Node) Update(ctx context.Context) {
+	if in.EmitGeometry != nil {
+		in.EmitGeometry()
+	}
 	// Initialize the compare value for feedback detection.
 	// -1 is the sentinel meaning "no value seen yet"; real values are non-negative
 	// indices, so -1 never collides with a legitimate Init index.

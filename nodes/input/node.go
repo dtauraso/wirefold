@@ -7,7 +7,8 @@ import (
 )
 
 type Node struct {
-	Fire        func()
+	Fire         func()
+	EmitGeometry func()
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
 	ToReadGate  *Wiring.Out
@@ -15,6 +16,9 @@ type Node struct {
 }
 
 func (n *Node) Update(ctx context.Context) {
+	if n.EmitGeometry != nil {
+		n.EmitGeometry()
+	}
 	if len(n.Init) == 0 {
 		return
 	}

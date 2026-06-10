@@ -50,7 +50,8 @@ export type TraceEvent =
   | { step: number; kind: "done"; node: string; port: string }
   | { step: number; kind: "position"; node: string; port: string; value?: number; x: number; y: number; z: number }
   | { step: number; kind: "geometry"; edge: string; p0x: number; p0y: number; p0z: number; p1x: number; p1y: number; p1z: number; p2x: number; p2y: number; p2z: number }
-  | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number };
+  | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number }
+  | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string }

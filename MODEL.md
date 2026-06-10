@@ -110,6 +110,9 @@ state and never tells Go when a bead has arrived — Go owns the clock.
   traversal timing, node positions, per-edge curve geometry, and shading
   parameters. It emits trace events — bead positions, node events, edge
   curves, and shading params — as JSON lines on stdout.
+- Each node's goroutine emits its own node + port world positions/dirs on
+  startup as the `node-geometry` trace event (the node owns its geometry
+  emission; wires still own bead-position emission).
 - **`pump.ts`** (`tools/topology-vscode/src/webview/three/pump.ts`) is a
   position-stream plotter, not a delivery driver: it reads Go's trace
   events from the extension bridge and writes them into state stores

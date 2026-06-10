@@ -49,13 +49,28 @@ const (
 	// the bead was traversing). Keyed by the bead's SOURCE node+port — the same
 	// routing key as send/position — so the renderer drops the sprite by source.
 	KindPulseCancelled = "pulse-cancelled"
+	// KindNodeGeometry carries one node's authoritative center + per-port world
+	// positions/directions (item 1). Each node's goroutine emits this once on
+	// startup via its injected EmitGeometry closure — the node owns its own
+	// geometry emission (wires still own bead-position emission). Keyed by node id.
+	KindNodeGeometry = "node-geometry"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry}
+
+// PortGeom is one port's authoritative world geometry on a node-geometry event:
+// its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
+// and the unit direction from node center toward the port (DX/DY/DZ).
+type PortGeom struct {
+	Name    string
+	IsInput bool
+	PX, PY, PZ float64
+	DX, DY, DZ float64
+}
 
 type Event struct {
 	Step      int    `json:"step"`
@@ -89,6 +104,11 @@ type Event struct {
 	P0X, P0Y, P0Z float64
 	P1X, P1Y, P1Z float64
 	P2X, P2Y, P2Z float64
+	// NX/NY/NZ carry the node's center world position on node-geometry events
+	// (KindNodeGeometry), and Ports carries that node's per-port world geometry.
+	// Keyed by Node (the node id). Set on node-geometry events only.
+	NX, NY, NZ float64
+	Ports      []PortGeom
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -217,6 +237,18 @@ func (t *Trace) Geometry(edge string, p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2
 		P1X: p1x, P1Y: p1y, P1Z: p1z,
 		P2X: p2x, P2Y: p2y, P2Z: p2z,
 	}
+}
+
+// NodeGeometry emits one node's authoritative center + per-port world geometry
+// (item 1), keyed by node id. cx/cy/cz is the node center world position; ports
+// carries each port's world position + direction. Each node's goroutine calls this
+// once on startup via its injected EmitGeometry closure (the node owns its geometry
+// emission; wires still own bead-position emission).
+func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Ports: ports}
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -418,6 +450,25 @@ func marshalEvent(e Event) ([]byte, error) {
 		Port  string `json:"port"`
 		Value int    `json:"value"`
 	}
+	type portGeomJSON struct {
+		Name    string  `json:"name"`
+		IsInput bool    `json:"isInput"`
+		PX      float64 `json:"px"`
+		PY      float64 `json:"py"`
+		PZ      float64 `json:"pz"`
+		DX      float64 `json:"dx"`
+		DY      float64 `json:"dy"`
+		DZ      float64 `json:"dz"`
+	}
+	type nodeGeometry struct {
+		Step  int            `json:"step"`
+		Kind  string         `json:"kind"`
+		Node  string         `json:"node"`
+		NX    float64        `json:"nx"`
+		NY    float64        `json:"ny"`
+		NZ    float64        `json:"nz"`
+		Ports []portGeomJSON `json:"ports"`
+	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
@@ -439,6 +490,12 @@ func marshalEvent(e Event) ([]byte, error) {
 			P2X: e.P2X, P2Y: e.P2Y, P2Z: e.P2Z})
 	case KindPulseCancelled:
 		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+	case KindNodeGeometry:
+		ports := make([]portGeomJSON, len(e.Ports))
+		for i, p := range e.Ports {
+			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
+		}
+		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Ports: ports})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

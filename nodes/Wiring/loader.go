@@ -367,7 +367,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 			}
 		}
 
-		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr)
+		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID])
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

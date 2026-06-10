@@ -195,7 +195,7 @@ func reflectPorts(sample any) []PortSpec {
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node. ctx is required when pb contains PacedWire
 // bindings (paced mode); it is passed into the In/Out wrappers.
-func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
+func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace, geom nodeGeom) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
@@ -205,6 +205,36 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	if f := v.FieldByName("Fire"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
 		nodeName := name
 		f.Set(reflect.ValueOf(func() { tr.Fire(nodeName) }))
+	}
+
+	// Inject EmitGeometry closure if the struct has an `EmitGeometry func()` field
+	// (item 1). The closure captures this node's id + nodeGeom and emits the node's
+	// authoritative center + per-port world positions/dirs as a node-geometry event,
+	// computed with the existing port_geometry.go helpers (no duplicated math). Each
+	// node's goroutine calls it once on startup, so the node owns its geometry emission.
+	if f := v.FieldByName("EmitGeometry"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
+		nodeName := name
+		g := geom
+		f.Set(reflect.ValueOf(func() {
+			center := nodeWorldPos(g)
+			ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
+			appendPort := func(name string, isInput bool) {
+				pos := portWorldPos(g, name, isInput)
+				dir, _ := portDir(g, name, isInput)
+				ports = append(ports, T.PortGeom{
+					Name: name, IsInput: isInput,
+					PX: pos.X, PY: pos.Y, PZ: pos.Z,
+					DX: dir.X, DY: dir.Y, DZ: dir.Z,
+				})
+			}
+			for _, p := range g.Inputs {
+				appendPort(p.Name, true)
+			}
+			for _, p := range g.Outputs {
+				appendPort(p.Name, false)
+			}
+			tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
+		}))
 	}
 
 	// Wire port fields with traced wrappers.
@@ -343,7 +373,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 type NodeBuilder struct {
 	Ports     []PortSpec
 	StateKeys []string // required keys in NodeData.State; nil means none required
-	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
+	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -358,8 +388,8 @@ func init() {
 		Registry[kind] = NodeBuilder{
 			Ports:     ports,
 			StateKeys: stateKeys,
-			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
-				return reflectBuild(ctx, name, data, pb, e, tr)
+			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error) {
+				return reflectBuild(ctx, name, data, pb, e, tr, geom)
 			},
 		}
 	}
