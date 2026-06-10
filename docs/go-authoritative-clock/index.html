@@ -215,6 +215,16 @@
   #panel-verify .spec-table th, #panel-verify .spec-table td { white-space: normal; word-break: break-word; }
   #panel-verify .spec-table th:first-child, #panel-verify .spec-table td:first-child { width: 120px; }
 
+  /* Overview panel: properties-table — fixed layout so Property/Lives-in columns don't squeeze */
+  #panel-overview table#properties-table{table-layout:fixed;width:100%;border-collapse:collapse;}
+  #panel-overview table#properties-table th,
+  #panel-overview table#properties-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
+  #panel-overview table#properties-table th:nth-child(1),#panel-overview table#properties-table td:nth-child(1){width:4%;}
+  #panel-overview table#properties-table th:nth-child(2),#panel-overview table#properties-table td:nth-child(2){width:4%;}
+  #panel-overview table#properties-table th:nth-child(3),#panel-overview table#properties-table td:nth-child(3){width:18%;}
+  #panel-overview table#properties-table th:nth-child(4),#panel-overview table#properties-table td:nth-child(4){width:18%;}
+  #panel-overview table#properties-table th:nth-child(5),#panel-overview table#properties-table td:nth-child(5){width:56%;}
+
   /* Inconsistencies panel: controlled column widths so 4-col table fits */
   #panel-inconsistencies .spec-table{table-layout:fixed;}
   #panel-inconsistencies .spec-table th:nth-child(1),#panel-inconsistencies .spec-table td:nth-child(1){width:16%;}
@@ -416,7 +426,7 @@
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="overview:h2">☐</button>Go is the backend. TS is the frontend.</h2>
     <p>Go is the backend: holds all geometry, runs all animation calculations. TS is the frontend: renders what Go sends, owns the viewpoint (camera + scene navigation), and forwards geometry edits to Go.</p>
 
-    <table class="spec-table">
+    <table class="spec-table" id="properties-table">
       <caption>Where each property lives</caption>
       <thead>
         <tr>
