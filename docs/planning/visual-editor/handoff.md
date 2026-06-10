@@ -44,7 +44,7 @@ Go needs **no 3D-math/projection library** — camera/projection/picking are TS 
 
 ### The in08↔i0 handshake — spec'd, NOT yet coded
 
-- `in08` loop: read the signal on wire `i0→in08` (1/0); `i += signal` (1 advances the read head, 0 holds); send `Init[i]` on wire `in08→i0`.
+- `in08` loop: read the signal on wire `i0→in08` (1/0); `i = (i + signal) % len(Init)` (1 advances the read head, wrapping at the end; 0 holds); send `Init[i]` on wire `in08→i0`.
 - `i0` loop: held copies `in08`'s value (init `-1`); if the arriving value DIFFERS from held → set held, send `1` to `in08`; else send `0`; forward held value to `i1`.
 - `i1` loop: receives `i0`'s held value; it is a SINK; behavior beyond receiving is UNSPECIFIED (the one open spec item).
 - Needs TWO new wires (`in08→i0`, `i0→in08`) + new PORTS on the Input and ChainInhibitor kinds + `i0`'s held init `0`→`-1`. None exists in code yet. The goroutine graph draws the handshake routed through TWO PacedWire goroutines (one per direction).

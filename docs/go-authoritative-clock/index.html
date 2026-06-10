@@ -488,7 +488,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
             <td>one per data-source Input (e.g. in08)</td>
-            <td><ol><li>Read the signal on the wire i0-&gt;in08 (1 or 0).</li><li>i += signal — 1 advances the read head, 0 holds it.</li><li>Send Init[i] on the wire in08-&gt;i0.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
+            <td><ol><li>Read the signal on the wire i0-&gt;in08 (1 or 0).</li><li>i = (i + signal) % len(Init) — 1 advances the read head (wrapping at the end), 0 holds it.</li><li>Send Init[i] on the wire in08-&gt;i0.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
           </tr>
           <tr>
             <td class="enum">2</td>
