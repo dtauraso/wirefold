@@ -50,6 +50,21 @@ only ever makes a tiny midpoint adjustment against its immediate neighbors — *
 ever computes a distance or a straight line to another node**. The straight wire is the
 aggregate of many trivial local moves, never a node-to-node line calculation.
 
+## Visual: a chain of beads
+
+The items are drawn at **bead size**, with spacing of about one bead across — so a wire
+reads as a **chain of beads**: a beaded string between the two nodes, not a drawn tube or
+line. Each item *is* a bead; the wire's shape is simply where those beads sit.
+
+The traveling **value-bead** is one bead made distinct — lit / brighter — as it advances
+from item to item, so a highlight appears to run along the beaded string from source to
+destination. Because items are born and retired to hold roughly one-bead spacing, the
+string always looks continuous — neither gapped nor overlapping — except at the sub-pixel
+floor.
+
+This makes the spacing concrete: **one bead** is the natural unit, so `distance ≈
+item-count × bead-size` and the spacing floor is just where the beads are about to touch.
+
 ## Items are born and retired as the wire stretches or shrinks
 
 The chain keeps its items densely and roughly evenly spaced. When a node moves, the

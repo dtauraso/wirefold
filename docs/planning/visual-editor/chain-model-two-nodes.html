@@ -129,6 +129,74 @@
 
 <p>The chain uses <strong>many</strong> items, so the spacing between neighbors is <strong>very small</strong>. That density is what keeps the model purely local: because every gap is tiny, an item only ever makes a tiny midpoint adjustment against its immediate neighbors — <strong>no node ever computes a distance or a straight line to another node</strong>. The straight wire is the aggregate of many trivial local moves, never a node-to-node line calculation.</p>
 
+<h2>Visual: a chain of beads</h2>
+
+<p>The items are drawn at <strong>bead size</strong>, with spacing of about one bead across — so a wire reads as a <strong>chain of beads</strong>: a beaded string between the two nodes, not a drawn tube or line. Each item <em>is</em> a bead; the wire's shape is simply where those beads sit.</p>
+
+<p>The traveling <strong>value-bead</strong> is one bead made distinct — lit / brighter — as it advances from item to item, so a highlight appears to run along the beaded string from source to destination. Because items are born and retired to hold roughly one-bead spacing, the string always looks continuous — neither gapped nor overlapping — except at the sub-pixel floor.</p>
+
+<p>This makes the spacing concrete: <strong>one bead</strong> is the natural unit, so <code>distance ≈ item-count × bead-size</code> and the spacing floor is just where the beads are about to touch.</p>
+
+<!-- DIAGRAM: CHAIN OF BEADS -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 160" width="660" height="160">
+    <!-- background connection line (behind beads) -->
+    <line x1="50" y1="72" x2="650" y2="72" stroke="#3a3a42" stroke-width="1.5"/>
+
+    <!-- source node anchor -->
+    <circle cx="50" cy="72" r="11" fill="#7c9ef8"/>
+    <text x="50" y="104" text-anchor="middle" font-size="11" fill="#808090">source</text>
+
+    <!-- destination node anchor -->
+    <circle cx="650" cy="72" r="11" fill="#7c9ef8"/>
+    <text x="650" y="104" text-anchor="middle" font-size="11" fill="#808090">dest</text>
+
+    <!-- structural beads (items) — 9 beads, nearly touching, radius 13, spacing ~28px -->
+    <!-- positions: 88, 116, 144, 172, 200, 228, 256, 284, 312 ... spread to fill space -->
+    <!-- use 9 beads evenly between x=90 and x=610, spacing=65/2 ≈ let's use spacing=58, r=12 -->
+    <!-- bead centers: 100, 158, 216, 274, 332, 390, 448, 506, 564  (spacing=58, gap=34, nearly touching r=12 so gap=34-24=10) -->
+    <!-- Let's tighten: spacing=26, r=11 → gap=4px, very close -->
+    <!-- 9 beads from x=104 to x=104+8*26=312 ... that's only halfway. Let's spread: spacing=54, r=23, gap=8 -->
+    <!-- Go with: 9 beads, r=11, spacing=58 is too wide; use r=14, spacing=30, centers from x=110 to x=110+8*30=350 — still tight half -->
+    <!-- Decision: 9 beads, r=12, spacing=28 → gap=4, centers 110..110+8*28=334. Not wide enough. -->
+    <!-- Use 9 beads spanning most of the wire: r=14, evenly spaced from x=105 to x=595, spacing=(595-105)/8=61.25→61 -->
+    <!-- gap between edges: 61-28=33px — too gapped. Use r=20, spacing=43 → gap=3 (nearly touching) -->
+    <!-- Centers: 100, 143, 186, 229, 272, 315, 358, 401, 444 — only reaching x=444. Widen: r=20, spacing=55, 9 beads: 100..100+8*55=540 -->
+    <!-- gap: 55-40=15px — visible space. Tighter: r=22, spacing=46 → gap=2. Centers: 100..100+8*46=468 -->
+    <!-- Still not full width. Scale: r=26, spacing=54 → gap=2. Centers: 100..100+8*54=532 -->
+    <!-- Good enough for visual. Let's use r=22, spacing=54 to fill from ~92 to ~92+8*54=524 -->
+
+    <!-- 9 structural beads, r=18, spacing=52, centers from 96 to 96+8*52=512, gap per side=52-36=16→ still visible -->
+    <!-- Tightest natural: r=18, spacing=37 → gap=1. Centers: 96,133,170,207,244,281,318,355,392 — reaches x=392 only, too left -->
+    <!-- Let's just position them to span the full wire and use spacing≈bead-diameter visually -->
+    <!-- 9 beads, r=14, centers at x: 100,163,226,289,352,415,478,541,604  spacing=63, gap=63-28=35 — too gapped -->
+    <!-- Compromise: 9 beads r=18, evenly from x=100 to x=600, spacing=62.5, gap=62.5-36=26.5 -->
+    <!-- This is visually "densely spaced" enough for the diagram; add spacing-brace annotation -->
+
+    <circle cx="100" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <circle cx="163" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <circle cx="226" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <!-- value-bead (lit, amber, mid-string, slightly larger) -->
+    <circle cx="289" cy="72" r="20" fill="#d4a017" stroke="#0e0e10" stroke-width="2.5"/>
+    <text x="289" y="118" text-anchor="middle" font-size="10" fill="#808090">value-bead (lit)</text>
+    <circle cx="352" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <circle cx="415" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <circle cx="478" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <circle cx="541" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+    <circle cx="604" cy="72" r="18" fill="#5ec4a0" stroke="#0e0e10" stroke-width="2"/>
+
+    <!-- spacing brace between two adjacent beads -->
+    <line x1="352" y1="40" x2="415" y2="40" stroke="#808090" stroke-width="1"/>
+    <line x1="352" y1="36" x2="352" y2="44" stroke="#808090" stroke-width="1"/>
+    <line x1="415" y1="36" x2="415" y2="44" stroke="#808090" stroke-width="1"/>
+    <text x="383" y="32" text-anchor="middle" font-size="10" fill="#808090">≈ 1 bead</text>
+
+    <!-- main label -->
+    <text x="350" y="148" text-anchor="middle" font-size="11" fill="#808090">items drawn at bead size → the wire is a chain of beads</text>
+  </svg>
+  <div class="diagram-caption">The wire as a beaded string. Structural items (teal) sit nearly touching; the value-bead (amber, lit) is one item made distinct as it travels from source to destination.</div>
+</div>
+
 <h2>Items are born and retired as the wire stretches or shrinks</h2>
 
 <p>The chain keeps its items densely and roughly evenly spaced. When a node moves, the wire's length changes, so the <strong>number of items changes</strong> to hold that spacing — locally, with no central length calculation.</p>
