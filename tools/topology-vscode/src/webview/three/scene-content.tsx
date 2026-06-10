@@ -21,6 +21,45 @@ import {
 } from "./geometry-helpers";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import type { PickOptions } from "./interaction-controls";
+// Shading PARAMETER values are Go-authoritative (MODEL.md / Phase 4). They are
+// generated from nodes/Wiring/shading_params.go into ../../schema/shading-params.
+// This module sources NO shading values of its own — it only runs the GPU:
+// creates THREE materials, bakes the PMREM env map, and binds these Go params.
+import {
+  SHADING_PARAM_NODE_TRANSMISSION,
+  SHADING_PARAM_NODE_THICKNESS,
+  SHADING_PARAM_NODE_ROUGHNESS,
+  SHADING_PARAM_NODE_IOR,
+  SHADING_PARAM_NODE_METALNESS,
+  SHADING_PARAM_NODE_CLEARCOAT,
+  SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
+  SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
+  SHADING_PARAM_NODE_OPACITY,
+  SHADING_PARAM_NODE_FADE_OPACITY,
+  SHADING_PARAM_NODE_FADE_BODY_MUL,
+  SHADING_PARAM_ENV_SKY_TOP_R,
+  SHADING_PARAM_ENV_SKY_TOP_G,
+  SHADING_PARAM_ENV_SKY_TOP_B,
+  SHADING_PARAM_ENV_SKY_BOTTOM_R,
+  SHADING_PARAM_ENV_SKY_BOTTOM_G,
+  SHADING_PARAM_ENV_SKY_BOTTOM_B,
+  SHADING_PARAM_ENV_SKY_RADIUS,
+  SHADING_PARAM_ENV_AMBIENT_COLOR,
+  SHADING_PARAM_ENV_AMBIENT_INTENSITY,
+  SHADING_PARAM_ENV_KEY_COLOR,
+  SHADING_PARAM_ENV_KEY_INTENSITY,
+  SHADING_PARAM_ENV_RIM_COLOR,
+  SHADING_PARAM_ENV_RIM_INTENSITY,
+  SHADING_PARAM_ENV_PMREM_BLUR,
+  SHADING_PARAM_SCENE_AMBIENT_INTENSITY,
+  SHADING_PARAM_SCENE_DIR_INTENSITY,
+  SHADING_PARAM_TUBE_COLOR,
+  SHADING_PARAM_TUBE_EMISSIVE,
+  SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
+  SHADING_PARAM_BEAD_COLOR,
+  SHADING_PARAM_BEAD_EMISSIVE,
+  SHADING_PARAM_BEAD_EMISSIVE_INTENSITY,
+} from "../../schema/shading-params";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants
@@ -85,39 +124,39 @@ function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
     // Build a tiny scene: gradient sky sphere, no textures.
     const envScene = new THREE.Scene();
 
-    // Sky hemisphere — top blue-white, horizon warm cream
-    const skyGeo = new THREE.SphereGeometry(50, 16, 8);
+    // Sky hemisphere — top neutral, horizon warm cream (Go-supplied tint params).
+    const skyGeo = new THREE.SphereGeometry(SHADING_PARAM_ENV_SKY_RADIUS, 16, 8);
     const skyMat = new THREE.MeshBasicMaterial({
       side: THREE.BackSide,
       vertexColors: true,
     });
     const skyMesh = new THREE.Mesh(skyGeo, skyMat);
-    // Tint vertices top→bottom: cool blue at top, warm grey at equator
+    // Tint vertices top→bottom by lerping Go's top/bottom sky colors. t=1 at the
+    // top, t=0 at the horizon; channel = top + (bottom - top) * (1 - t).
     const posAttr = skyGeo.attributes.position as THREE.BufferAttribute;
     const count = posAttr.count;
     const colors = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       const y = posAttr.getY(i);
-      const t = Math.max(0, Math.min(1, (y / 50 + 1) / 2)); // 0 bottom → 1 top
-      // top: #c8c4bc (mid neutral, close to bottom — no bright hot-spot), bottom: #ffe0c0 (warm cream)
-      colors[i * 3 + 0] = 0.78 + (1.0 - 0.78) * (1 - t); // r
-      colors[i * 3 + 1] = 0.77 + (0.88 - 0.77) * (1 - t); // g
-      colors[i * 3 + 2] = 0.74 + (0.75 - 0.74) * (1 - t);  // b
+      const t = Math.max(0, Math.min(1, (y / SHADING_PARAM_ENV_SKY_RADIUS + 1) / 2)); // 0 bottom → 1 top
+      colors[i * 3 + 0] = SHADING_PARAM_ENV_SKY_TOP_R + (SHADING_PARAM_ENV_SKY_BOTTOM_R - SHADING_PARAM_ENV_SKY_TOP_R) * (1 - t); // r
+      colors[i * 3 + 1] = SHADING_PARAM_ENV_SKY_TOP_G + (SHADING_PARAM_ENV_SKY_BOTTOM_G - SHADING_PARAM_ENV_SKY_TOP_G) * (1 - t); // g
+      colors[i * 3 + 2] = SHADING_PARAM_ENV_SKY_TOP_B + (SHADING_PARAM_ENV_SKY_BOTTOM_B - SHADING_PARAM_ENV_SKY_TOP_B) * (1 - t); // b
     }
     skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     envScene.add(skyMesh);
 
-    // Soft white fill light — bakes into env
-    const fill = new THREE.AmbientLight(0xffffff, 0.9);
+    // Soft white fill light — bakes into env (Go-supplied color + intensity).
+    const fill = new THREE.AmbientLight(new THREE.Color(SHADING_PARAM_ENV_AMBIENT_COLOR), SHADING_PARAM_ENV_AMBIENT_INTENSITY);
     envScene.add(fill);
-    const key = new THREE.DirectionalLight(0xffeedd, 0.45);
+    const key = new THREE.DirectionalLight(new THREE.Color(SHADING_PARAM_ENV_KEY_COLOR), SHADING_PARAM_ENV_KEY_INTENSITY);
     key.position.set(1, 2, 1);
     envScene.add(key);
-    const rim = new THREE.DirectionalLight(0xaabbff, 0.3);
+    const rim = new THREE.DirectionalLight(new THREE.Color(SHADING_PARAM_ENV_RIM_COLOR), SHADING_PARAM_ENV_RIM_INTENSITY);
     rim.position.set(-2, 1, -1);
     envScene.add(rim);
 
-    const tex = pmrem.fromScene(envScene, 0.04).texture;
+    const tex = pmrem.fromScene(envScene, SHADING_PARAM_ENV_PMREM_BLUR).texture;
     // Store in state — does NOT assign to scene.environment.
     setEnvTex(tex);
 
@@ -210,7 +249,7 @@ export function GraphNode({
   const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
   const torusThick = (selected || hovered) ? r * 0.14 : r * 0.08;
-  const fadeOpacity = 0.25;
+  const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
@@ -219,17 +258,17 @@ export function GraphNode({
         <meshPhysicalMaterial
           key={faded ? "faded" : "solid"}
           color={fillColor}
-          transmission={1.0}
-          thickness={0}
-          roughness={0.12}
-          ior={1.5}
-          metalness={0}
-          clearcoat={0}
-          clearcoatRoughness={0.1}
+          transmission={SHADING_PARAM_NODE_TRANSMISSION}
+          thickness={SHADING_PARAM_NODE_THICKNESS}
+          roughness={SHADING_PARAM_NODE_ROUGHNESS}
+          ior={SHADING_PARAM_NODE_IOR}
+          metalness={SHADING_PARAM_NODE_METALNESS}
+          clearcoat={SHADING_PARAM_NODE_CLEARCOAT}
+          clearcoatRoughness={SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS}
           envMap={envTex ?? undefined}
-          envMapIntensity={1.0}
+          envMapIntensity={SHADING_PARAM_NODE_ENV_MAP_INTENSITY}
           transparent
-          opacity={faded ? fadeOpacity * 0.6 : 0.92}
+          opacity={faded ? fadeOpacity * SHADING_PARAM_NODE_FADE_BODY_MUL : SHADING_PARAM_NODE_OPACITY}
           depthWrite={false}
         />
       </mesh>
@@ -378,9 +417,9 @@ export function PulseBead({
     <mesh ref={meshRef} visible={false}>
       <sphereGeometry args={[4, 8, 8]} />
       <meshStandardMaterial
-        color="#ffffff"
-        emissive={new THREE.Color(0xffffff)}
-        emissiveIntensity={2.5}
+        color={SHADING_PARAM_BEAD_COLOR}
+        emissive={new THREE.Color(SHADING_PARAM_BEAD_EMISSIVE)}
+        emissiveIntensity={SHADING_PARAM_BEAD_EMISSIVE_INTENSITY}
       />
     </mesh>
   );
@@ -428,11 +467,11 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
       <mesh geometry={tubeGeo} userData={{ edgeId }}>
         <meshStandardMaterial
           key={faded ? "faded" : "solid"}
-          color="#5599cc"
-          emissive={new THREE.Color(0x2255aa)}
-          emissiveIntensity={0.8}
+          color={SHADING_PARAM_TUBE_COLOR}
+          emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
+          emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
           transparent={faded}
-          opacity={faded ? 0.25 : 1}
+          opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1}
         />
       </mesh>
       {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
@@ -839,8 +878,8 @@ export function Scene({
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <NearestNTracker nodes={nodes} onNearestN={onNearestN} />
       <CameraSettleDetector onSettle={onCameraSettle} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[0, 0, 10]} intensity={0.8} />
+      <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
+      <directionalLight position={[0, 0, 10]} intensity={SHADING_PARAM_SCENE_DIR_INTENSITY} />
       {nodes.map((n) => (
         <GraphNode
           key={n.id}
