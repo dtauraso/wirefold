@@ -1336,6 +1336,12 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td>Sends Init[i] first, then reads feedback (send → read). The first emit seeds the ring; read-before-send deadlocks at t=0.</td>
           <td>nodes/input/node.go</td>
         </tr>
+        <tr>
+          <td>i0 loop · goroutines</td>
+          <td>Per-round poll — "read v if a pulse arrived this round; no pulse this round → send 0".</td>
+          <td>Blocking recv — paced TryRecv parks until in08 delivers (the select has no default branch); there is no "no pulse this round" case, and send-0 fires only when v equals the held value.</td>
+          <td>nodes/chaininhibitor/node.go</td>
+        </tr>
       </tbody>
     </table>
   </div>
