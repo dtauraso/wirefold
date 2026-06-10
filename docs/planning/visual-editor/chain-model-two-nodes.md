@@ -94,6 +94,25 @@ This only answers the distance to nodes a chain actually connects to — which i
 point: the chain that already exists *is* the ruler. (Distance to an *unconnected* node
 would require reaching across empty space, which this model does not do.)
 
+## You can't out-drag the chain — collisions need sub-pixel proximity
+
+Because births, retirements, and the straightening relaxation all run at **machine
+speed** — far faster than the user can drag or a frame can refresh — the chain fully
+re-settles between input events. The practical consequence: it is **very hard to force a
+collision**. As you pull nodes together the items retire and the chain relaxes faster
+than your motion, so the geometry is always caught up by the time a frame draws; there is
+no window in which things pile up.
+
+The only regime where points could actually coincide is when they are **1px or less
+apart** — the **spacing floor**. Below that there is nothing left to retire (items are
+already at minimum spacing) and no sub-pixel room to separate them. So a collision is
+only reachable at or under the pixel resolution, which is essentially impossible to hit
+deliberately by dragging.
+
+Machine speed thus turns *avoiding collisions* from an explicit rule you would have to
+enforce into an **emergent property**: the geometry layer out-runs the user, and the one
+remaining failure mode is sub-pixel, where it no longer matters visually.
+
 ## A retiring item hands off its bead
 
 Density maintenance runs at machine speed while a bead traverses the chain at clock

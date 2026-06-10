@@ -304,6 +304,64 @@
   <div class="diagram-caption">the item-count is the ruler — distance ≈ N × spacing</div>
 </div>
 
+<h2>You can't out-drag the chain — collisions need sub-pixel proximity</h2>
+
+<p>Because births, retirements, and the straightening relaxation all run at <strong>machine speed</strong> — far faster than the user can drag or a frame can refresh — the chain fully re-settles between input events. The practical consequence: it is <strong>very hard to force a collision</strong>. As you pull nodes together the items retire and the chain relaxes faster than your motion, so the geometry is always caught up by the time a frame draws; there is no window in which things pile up.</p>
+
+<p>The only regime where points could actually coincide is when they are <strong><code>1px or less</code> apart</strong> — the <strong>spacing floor</strong>. Below that there is nothing left to retire (items are already at minimum spacing) and no sub-pixel room to separate them. So a collision is only reachable at or under the pixel resolution, which is essentially impossible to hit deliberately by dragging.</p>
+
+<p>Machine speed thus turns <em>avoiding collisions</em> from an explicit rule you would have to enforce into an <strong>emergent property</strong>: the geometry layer out-runs the user, and the one remaining failure mode is sub-pixel, where it no longer matters visually.</p>
+
+<!-- DIAGRAM: SPACING FLOOR -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 180" width="660" height="180">
+
+    <!-- ===== LEFT: normal case ===== -->
+    <text x="175" y="18" text-anchor="middle" font-size="12" font-weight="600" fill="#e0e0e8">normal spacing</text>
+
+    <!-- connection lines -->
+    <line x1="60" y1="90" x2="290" y2="90" stroke="#3a3a42" stroke-width="2"/>
+
+    <!-- two items at comfortable spacing -->
+    <circle cx="110" cy="90" r="7" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="240" cy="90" r="7" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+
+    <!-- wide bracket below -->
+    <line x1="110" y1="110" x2="240" y2="110" stroke="#808090" stroke-width="1.5"/>
+    <line x1="110" y1="110" x2="110" y2="103" stroke="#808090" stroke-width="1.5"/>
+    <line x1="240" y1="110" x2="240" y2="103" stroke="#808090" stroke-width="1.5"/>
+    <text x="175" y="127" text-anchor="middle" font-size="10" fill="#808090">normal spacing</text>
+    <text x="175" y="140" text-anchor="middle" font-size="10" fill="#808090">— retire keeps gaps open</text>
+
+  <!-- ===== ARROW divider ===== -->
+  <text x="335" y="95" text-anchor="middle" font-size="20" fill="#808090">→</text>
+  <text x="335" y="112" text-anchor="middle" font-size="10" fill="#808090">drag closer</text>
+
+    <!-- ===== RIGHT: spacing floor ===== -->
+    <text x="530" y="18" text-anchor="middle" font-size="12" font-weight="600" fill="#e0e0e8">spacing floor</text>
+
+    <!-- connection lines -->
+    <line x1="390" y1="90" x2="670" y2="90" stroke="#3a3a42" stroke-width="2"/>
+
+    <!-- two items essentially touching (~1px apart) -->
+    <circle cx="515" cy="90" r="7" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+    <circle cx="524" cy="90" r="7" fill="#0e0e10" stroke="#5ec4a0" stroke-width="2"/>
+
+    <!-- tiny bracket below -->
+    <line x1="515" y1="110" x2="524" y2="110" stroke="#808090" stroke-width="1.5"/>
+    <line x1="515" y1="110" x2="515" y2="103" stroke="#808090" stroke-width="1.5"/>
+    <line x1="524" y1="110" x2="524" y2="103" stroke="#808090" stroke-width="1.5"/>
+    <text x="519" y="127" text-anchor="middle" font-size="10" fill="#808090">≤ 1px — spacing floor</text>
+
+    <!-- "nothing left to retire" note -->
+    <text x="519" y="155" text-anchor="middle" font-size="10" fill="#808090">nothing left to retire</text>
+    <!-- small upward tick to the rings -->
+    <line x1="519" y1="148" x2="519" y2="100" stroke="#808090" stroke-width="1" stroke-dasharray="2,2"/>
+
+  </svg>
+  <div class="diagram-caption">Left: normal spacing — retire fires before items crowd, gaps stay open. Right: spacing floor (~1px) — nothing left to retire; collision only reachable at sub-pixel resolution.</div>
+</div>
+
 <h2>A retiring item hands off its bead</h2>
 
 <p>Density maintenance runs at machine speed while a bead traverses the chain at clock speed, so an item can be retired while it is <strong>carrying the bead</strong>. A value must never be lost to the geometry layer's churn: before an item unsplices, if it holds the bead it <strong>hands the bead to its next neighbor toward the destination</strong> (downstream), then retires. The bead continues from there.</p>
