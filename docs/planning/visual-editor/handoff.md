@@ -7,91 +7,71 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-09 — task/go-backend-ts-frontend, pushed; spec doc is SETTLED, CONSISTENT, and CONCISE: 9 tabs, zero open spec items (i1 resolved))
+## State at handoff (2026-06-09 — task/go-backend-ts-frontend, pushed; Go-authoritative rewrite COMPLETE — 5 phases verified green)
 
-- Active branch: `task/go-backend-ts-frontend`, pushed, tree clean. Latest pushed commit: `e93d42e2`.
+- Active branch: `task/go-backend-ts-frontend`, pushed, tree clean (pre-existing untracked `north-seattle-parks.csv` only — not part of this work). Latest pushed commit: `d729ad62`.
 - **NOTE:** `topology.json` has the git skip-worktree bit SET — editor churn stays out of git. Deliberate changes require `git update-index --no-skip-worktree topology.json` first, then re-set after.
-- All work since the last handoff was on the **spec doc** (`docs/go-authoritative-clock/index.html`): a consistency sweep, a Tracking-tab cleanup, and an exhaustive concision pass. No Go/TS code changed; nothing merged to main.
+- **The code now matches MODEL.md.** All 5 spec phases shipped and verified green on this branch. Prior handoffs said "code implements the OLD model" — that is no longer true.
 
-### The settled split (the model)
+### What shipped (5 commits)
 
-The Go/TS boundary is **diagram vs viewpoint**:
+| Commit | Phase | Key change |
+|---|---|---|
+| `b87eb731` | 1 — Clock into Go | Injectable clock (real+fake, pause-aware); each wire times its own delivery at `inFlightTime`; TS `NotifyDelivered` delivery-trigger removed |
+| `e365f030` | 2 — Position stream | Go emits per-frame bead positions (bézier eval factored out of `PortCurveArcLength`); TS plots only; TS position math deleted |
+| `8e4b6532` | 3 — Geometry into Go | Node/edge geometry authoritative in Go; streams curves; in-flight re-derive on edit; delete-mid-flight cancel + `pulse-cancelled` echo; TS renders Go's curve |
+| `47d7c54e` | 4 — Shading into Go | 33 material/glass/env params moved to Go (codegen, like curve-params); TS applies Go params; GPU machinery stays TS; appearance preserved bit-for-bit |
+| `d729ad62` | 5 — Bridge→CRUD + docs | One fire-and-forget `edit` op (create/update/delete/fade) + pause/resume; `notifyDelivered` removed entirely; MODEL.md + CLAUDE.md finalized to the shipped model |
 
-- **Go owns the diagram** — nodes/edges/beads, the 3D math for the diagram (curve control points, arc length, node/port world positions, per-frame bead positions), animations, clock + pulseSpeed, the per-wire fade flag. Go already has the static-geometry math (`curve_params.go: BezierArcLength` / `PortCurveArcLength`, `port_geometry.go: nodeWorldPos` / `portWorldPos`) — the TS twins (`buildEdgeCurve`, `rfArcLength`) are duplicates to delete, not ports.
-- **TS owns the viewpoint** — camera, scene navigation (orbit/pan/zoom), projection, raycast-picking, GPU render. TS keeps **r3f/three.js for the 3D scene-navigation machinery** (Go lacks the libs to replace it cheaply); the control *feel* stays bespoke (substance — not a controls library). "TS computes none" means none of the *diagram*; the viewpoint math is TS's.
-- **Input split:** navigation input (pointer/wheel for the camera) stays in TS; only **action input** — CRUD carrying the picked Go id — goes to Go.
-- **Store:** the zustand store is a **no-op holder** — Go is the sole writer of its data (NOT removed, NOT "moved to Go").
-- **CRUD surfaces** (TS, talk to Go): play/pause, menu, click events.
+### How it was verified (every phase, confirmed in main session — not just subagent claims)
 
-### The only new Go build — Chain 1 (the PacedWire rewrite)
+- `go build` + `go test -race ./...`
+- All **8 guard scripts**: `check-trace-kind-parity`, `check-message-kind-parity`, `check-no-ts-timers`, `check-slot-phase-boundary`, `check-ts-computes-no-geometry` (new), `check-ts-shading-from-go` (new), `check-no-await-on-bridge` (new), `check-generated`
+- `npx tsc --noEmit`; `vitest` 56/56
+- Per-phase deterministic verifiers: headless cascade, golden position parity, geometry re-derive, shading params, save/load round-trip
 
-Go owns no clock today: it emits discrete `send`/`done` events with a one-shot `arcLength`/`simLatencyMs` budget, and **TS** tweens with r3f's `useFrame` clock. New Go work:
-1. **Clock + per-frame stepping** — stdlib `time`, monotonic, with a paused-time accumulator (elapsed must not advance while paused); ~16 ms tick.
-2. **Per-frame bead-position eval** — eval each bead's `t = elapsed / inFlightTime` and the bézier (control points already exist) → 3D position, streamed per frame. `inFlightTime = arcLength / pulseSpeed`. The out-stream changes shape: discrete events + budget → a per-frame position stream.
+Note: IDE/gopls diagnostics went stale after each phase — `go test` is authoritative.
 
-Go needs **no 3D-math/projection library** — camera/projection/picking are TS (three.js). Camera + picking are **TS, not new Go builds**.
+### The settled split (the model — now in code)
 
-### The Bridge — JSONL protocol
-
-- **JSONL over stdio**, both directions, one object per line.
-- The VS Code **extension host is a dumb pipe** — forwards each line verbatim. **stdout carries protocol only** (logs → stderr / `.probe/*.jsonl`).
-- **One id space — Go's.** Every object Go streams to TS carries its Go id; a user interaction forms its outbound message directly from that id. TS keeps no TS-specific ids and does no interaction→component lookup.
-- **Escape hatch (unbuilt):** a localhost WebSocket from the webview straight to a Go server — only if `postMessage` ever bottlenecks.
+- **Go owns the diagram** — nodes/edges/beads, 3D math (curve control points, arc length, node/port world positions, per-frame bead positions), animations, clock + pulseSpeed, shading params (33 codegen'd), per-wire fade flag.
+- **TS owns the viewpoint** — camera, scene navigation (orbit/pan/zoom), projection, raycast-picking, GPU render. TS keeps r3f/three.js for 3D scene-navigation machinery; control feel bespoke (substance — not a controls library). "TS computes none" means none of the *diagram*; viewpoint math is TS's.
+- **Input split:** navigation input (pointer/wheel for camera) stays TS; only **action input** — CRUD carrying the picked Go id — goes to Go.
+- **Store:** zustand store is a **no-op holder** — Go is the sole writer of its data.
+- **Bridge:** JSONL over stdio; one `edit` op (create/update/delete/fade) + pause/resume; one Go id space; extension host is a dumb pipe.
 
 ### Active experimental network — UNCHANGED
 
-`topology.json` holds only `in08` (Input, init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor) + edge `i0ToI1`. `topology.inactive.json` (editor never reads it) holds the inactive nodes/edges.
+`topology.json` holds only `in08` (Input, init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor) + edge `i0ToI1`. `topology.inactive.json` (editor never reads it) holds inactive nodes/edges.
 
-### The in08↔i0 handshake — spec'd, NOT yet coded
+### ⚠️ WHAT DAVID NEEDS TO CHECK (manual end-checks — deterministic halves already green)
 
-- `in08` loop: read the signal on wire `i0→in08` (1/0); `i = (i + signal) % len(Init)` (1 advances the read head, wrapping at the end; 0 holds); send `Init[i]` on wire `in08→i0`.
-- `i0` loop: held copies `in08`'s value (init `-1`); if the arriving value DIFFERS from held → set held, send `1` to `in08`; else send `0`; forward held value to `i1`.
-- `i1` loop: receives `i0`'s held value; runs the standard ChainInhibitor rule; SINK (`ToNext` unwired) — sends nothing.
-- Needs TWO new wires (`in08→i0`, `i0→in08`) + new PORTS on the Input and ChainInhibitor kinds + `i0`'s held init `0`→`-1`. None exists in code yet. The goroutine graph draws the handshake routed through TWO PacedWire goroutines (one per direction).
-
-### The PacedWire loop — spec'd, NOT yet coded
-
-1. Add the beads received this round to the set already held (multi-bead).
-2. Each round, for every bead, compute its next position from the Go clock and the human-speed slowdown (`pulseSpeed`).
-3. If that position is still on the wire, send the bead's 3D position to TS.
-4. If past the end, the bead is done — hand the bead's VALUE to the destination node and remove the bead (the off-the-end position is never sent to TS).
-5. Loop.
-
-### Spec doc state — 9 tabs, consistent, concise
-
-`docs/go-authoritative-clock/index.html`:
-- **9 tabs:** The split · Goroutines · TS · The Bridge · Clock · TS → Go · Plan · Verify · Tracking (merged down from 16). The inline `<script>` wires tabs dynamically by `data-panel`.
-- **Consistency-swept:** camera/picking uniformly TS; "all input to Go" superseded; store uniformly "no-op holder"; slot vocabulary → "held state" / "channel" everywhere (the Clock **"Before"** diagram intentionally keeps "slot" for contrast).
-- **Concise:** every prose block over ~40 words was tightened to bullets / tables / one-line claims (exhaustive sweep — 0 blocks over 40 words remain, excepting the contract box and the "Spec is authoritative" callout).
-- **Tracking tab** has ZERO open items — i1 resolved (ordinary ChainInhibitor; sink via unwired `ToNext`). All resolved findings and dated changelog records were removed — that history lives in git + this handoff.
-
-### What is on main — UNCHANGED
-
-Nothing merged. Main still describes the OLD model. All session work lives on this branch.
+1. **Live-editor litmus:** open `topology.json` in the editor, Run, confirm pulses animate from Go's position stream. Detach the editor → Go keeps running the net (headless half proven by `TestHeadlessCascadeCompletes`); reattach → it draws what Go is doing.
+2. **Phase-4 pixel fidelity:** confirm nodes / wires / beads / environment look unchanged (shading values moved bit-for-bit, but eyes are the judge).
+3. **Save/load through the VS Code UI** end to end (the file round-trip test is green; the UI path is the manual part).
 
 ### OPEN ITEMS / NEXT
 
-1. **The code rewrite is the headline.** Chain 1 (clock + per-frame bead eval = the PacedWire rewrite) is the first domino. The Go/TS code still implements the OLD model (consumeGated/single-bead/full ring; TS owns the clock + animation and computes geometry).
-2. **The in08↔i0 handshake** needs 2 new wires + new ports on Input/ChainInhibitor + `i0` held init `-1` (Go code).
-3. **i1's behavior** — RESOLVED: ordinary ChainInhibitor; runs its rule; sink (`ToNext` unwired), sends nothing.
-4. **Camera/picking are TS** (three.js), not Go builds. r3f stays for 3D scene navigation; control feel bespoke (no OrbitControls).
-5. **Store** = no-op holder, Go sole writer — a TS-side change when the rewrite lands.
-6. **The node-contract principle is deliberately UNPINNED** (totality in / no guarantees out; reliability lives in the node, not the channel). Let it manifest in code — do NOT re-pitch pinning it to MODEL.md/memory.
-7. **Merge decision** — run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` before merging; needs explicit sign-off.
+1. **in08↔i0 handshake — still UNBUILT** (separate from this rewrite). `topology.json` still has only the `i0→i1` edge. Needs: new ports (Input feedback-in, ChainInhibitor feedback-out), two wires (`in08→i0`, `i0→in08`), `i0` held init `-1`. Loop specs:
+   - `in08`: read signal on `i0→in08` (1/0); `i = (i + signal) % len(Init)`; send `Init[i]` on `in08→i0`.
+   - `i0`: held init `-1`; if arriving value DIFFERS from held → set held, send `1` to `in08`; else send `0`; forward held to `i1`.
+   - `i1`: ordinary ChainInhibitor; sink (`ToNext` unwired); sends nothing.
+   - Spec'd in spec doc Goroutines tab; none exists in code yet.
+2. **Minor follow-up:** in-flight delivery goroutines wait on a background context (cancelled by Reset/Delete), not the run-ctx — bounded/harmless; tie to run-ctx if you want it tidier.
+3. **Merge:** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` before merging to main; needs explicit sign-off.
 
-(The slot-vocabulary inconsistency listed as open in the prior handoff is now RESOLVED.)
+### Carry-forward facts
 
-### Model contract (target vs code)
-
-`MODEL.md` is authoritative for the TARGET. The spec doc now fully, consistently, and concisely describes the Go/TS split (diagram vs viewpoint), the JSONL bridge, the single Go id space, and Chain 1. The **code still implements the OLD model**. The rewrite is pending; Chain 1 is the first step. The firing-window "Needs confirmation" still stands (the W coincidence-window is its concrete local answer, unpinned because ReadGate/InhibitRightGate are inactive).
+- Spec doc `docs/go-authoritative-clock/index.html` is the settled planning record (zero open items, deterministic verifiers); MODEL.md + CLAUDE.md are now the authoritative model.
+- The node-contract principle is deliberately UNPINNED (totality in / no guarantees out; reliability lives in the node, not the channel). Do NOT re-pitch pinning it to MODEL.md/memory.
 
 ## Dev-loop
 
-- **The spec is a single self-contained HTML file** (`docs/go-authoritative-clock/index.html`) — no build. 9 tabs. Add a tab with a `<button class="tab-btn" role="tab" data-panel="X">Label</button>` in the `.tabs` nav and a `<div class="panel" id="panel-X" role="tabpanel">` panel; the inline `<script>` auto-wires by `data-panel`. Palette CSS vars in `:root`.
-- **Concision rule:** keep prose blocks under ~40 words — convert any wall to bullets, a table, or a one-line claim. The doc is currently at 0 blocks over 40 words; keep it there.
+- After Go changes: `go build ./...` + `go test -race ./...`; after TS: `npm run build` from `tools/topology-vscode/` (refreshes `out/webview.js`) + `npx tsc --noEmit` + `npx vitest run`; run all 8 guard scripts; `tools/check-generated.sh` after shared `CurveParam*` / `ShadingParam*` / SPEC.md changes.
+- **Concision rule:** keep prose blocks under ~40 words — bullets, tables, or one-line claims only.
 - **Active topology** is `in08`/`i0`/`i1`. `topology.json` is skip-worktree — deliberate edits require clearing the bit first.
-- **Verify a diagram visually:** extract its `<svg>…</svg>`, wrap in `<body style="background:#0e0e10">…</body>`, screenshot headless — `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --screenshot=/tmp/x.png --window-size=W,H file:///tmp/x.html` — then read the PNG. (Tabs are JS-switched; screenshot the extracted SVG.)
-- For Go/TS code work: after a TS edit `npm run build` from `tools/topology-vscode/` (and `npx tsc --noEmit` for removals); after a Go change `go build ./...` + `go test ./nodes/...`; `tools/check-generated.sh` after shared `CurveParam*` / SPEC.md `## View` changes. The ring has no headless run (`go run .` deadlocks after the first hop). Guard scripts run via the Stop hook.
+- Branch hygiene: no merge to main without explicit sign-off. Delete merged branches without re-asking.
+- If user surfaces unrelated friction, log to `docs/planning/visual-editor/session-log.md` and open a fresh `task/<short-kebab>`.
 
 ## ALWAYS clause
 
