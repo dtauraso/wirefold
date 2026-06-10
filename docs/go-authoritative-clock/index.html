@@ -924,7 +924,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     </div>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub1">☐</button>Freeze means stop accumulating</div>
-    <p>Pause means stop accumulating elapsed time — not diff wall-clock on resume. A bead 40% across stays 40% on resume. Implement as a monotonic clock with a paused accumulator: elapsed-while-paused is zero.</p>
+    <p>Pause means stop accumulating elapsed time — not diff wall-clock on resume. A bead 40% across stays 40% on resume. Implement as a monotonic clock with a paused accumulator (elapsed-while-paused is zero), behind an injectable interface — a real impl plus a fake the tests advance, so timing is deterministic.</p>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub2">☐</button>Why the gate lives in Go</div>
     <p>Play/pause halts Go's clock — not a TS render toggle. If TS paused its render loop while Go kept running, Go's clock would race ahead and be out of sync on resume. Button in TS; clock in Go.</p>
@@ -1110,7 +1110,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <ul>
           <li><strong>Scope:</strong> active net <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">in08</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i1</span> and the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span> edge; inactive nodes/edges stay in <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.inactive.json</span>.</li>
           <li><strong>Goal:</strong> clock first — Go's clock drives delivery on <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span>; no TS round-trip required.</li>
-          <li><strong>Go:</strong> monotonic clock + paused accumulator; stamp start on Send; inFlightTime = arcLength / pulseSpeed. Wire sleeps ~16ms; deliver when elapsed ≥ inFlightTime — no TS message. Pause freezes clock; deleteEdge cancels via Reset() (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>).</li>
+          <li><strong>Go:</strong> monotonic clock + paused accumulator (injectable: real + fake for tests); stamp start on Send; inFlightTime = arcLength / pulseSpeed. Wire sleeps ~16ms; deliver when elapsed ≥ inFlightTime — no TS message. Pause freezes clock; deleteEdge cancels via Reset() (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>).</li>
           <li><strong>TS:</strong> none yet — keeps animating on its own (temporary cosmetic dual); delivery no longer depends on it.</li>
           <li><strong>Exit:</strong> headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> runs the active net (in08 / i0 / i1) to completion with no editor attached (today it deadlocks after the first hop).</li>
           <li><strong>Docs:</strong> draft the MODEL.md Driver + Cross-boundary changes.</li>
@@ -1123,7 +1123,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li><strong>Go:</strong> each wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (new trace kind); deliver at t ≥ 1.</li>
           <li><strong>TS:</strong> pump.ts sets the bead sprite to the received position. DELETE: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and moveNode's arc-length + simLatencyMs re-derive (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>). TS plots only.</li>
           <li><strong>TS:</strong> zustand store (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>) becomes a no-op holder; Go's position stream feeds the imperative path (pulse-state.ts, edge-curve map) directly.</li>
-          <li><strong>Exit:</strong> beads animate from Go's stream; TS computes no positions; tsc + build green; visual parity. Run trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
+          <li><strong>Exit:</strong> beads animate from Go's stream; TS computes no positions; tsc + build green; golden position-sequence parity. Run trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
         </ul>
       </div>
 
@@ -1167,7 +1167,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:h2">☐</button>Verification and risks.</h2>
 
     <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:sub1">☐</button>How to test</div>
-    <p>Two test surfaces: live editor (every phase) and, new from Phase 1, headless <code>go test</code> with no editor. Signal it works: headless cascade completes (today deadlocks after the first hop); live editor shows pulses from Go's stream.</p>
+    <p>Two surfaces: the live editor (every phase), and — new from Phase 1 — headless in-process <code style="font-family:var(--mono);font-size:11px;">go test</code> driven by a fake clock (deterministic). Signal: the headless cascade completes (today deadlocks at hop 1); the live editor shows pulses from Go's stream.</p>
 
     <div class="cards" style="flex-direction:column;margin-bottom:1.5rem;">
       <div class="card">
@@ -1193,22 +1193,22 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             <tr>
               <td>1 · Clock</td>
               <td>Headless <code>go test</code> / <code>go run .</code> completes full cascade with no editor (previously deadlocks)</td>
-              <td><code>go.jsonl</code> shows deliveries at ~<code>inFlightTime</code> apart, not on a TS message. Freeze / detach renderer — Go keeps delivering on schedule.</td>
+              <td><code style="font-family:var(--mono);font-size:11px;">go test</code> (fake clock): the cascade completes headless (red today) and each delivery fires at exactly elapsed = <code style="font-family:var(--mono);font-size:11px;">inFlightTime</code>. Detach the renderer — Go keeps delivering.</td>
             </tr>
             <tr>
               <td>2 · Position stream</td>
-              <td>Beads animate from Go's emitted positions with visual parity to before; TS computes no positions</td>
-              <td>probe shows position messages arriving. Deleted <code>PulseBead</code>/<code>rfArcLength</code>/<code>moveNode</code> math is gone. <code>go test</code> asserts positions emitted ~16ms apart, monotonically increasing t, arrival at t=1.</td>
+              <td>Beads animate from Go's emitted positions; the stream matches a captured golden sequence; TS computes no positions</td>
+              <td><code style="font-family:var(--mono);font-size:11px;">go test</code> (fake clock): positions == eval(controlPoints, t), t monotonic, arrival at t=1, exact ~16ms cadence; assert against the golden sequence. Grep guard: <code style="font-family:var(--mono);font-size:11px;">PulseBead</code>/<code style="font-family:var(--mono);font-size:11px;">rfArcLength</code>/<code style="font-family:var(--mono);font-size:11px;">moveNode</code> math gone.</td>
             </tr>
             <tr>
               <td>3 · Geometry</td>
               <td>Drag a node — wire re-curves and in-flight bead re-derives remaining travel from Go's data</td>
-              <td>Dragging stays correct after local TS geometry math is removed. probe shows geometry edit round-tripping through Go.</td>
+              <td><code style="font-family:var(--mono);font-size:11px;">go test</code>: a node-move edit in → recomputed control points/arc-length out; in-flight bead re-derives. Grep guard: TS geometry math removed. (Live-drag feel = manual smoke.)</td>
             </tr>
             <tr>
               <td>4 · Shading</td>
               <td>Appearance unchanged at parity; changing a shading parameter in Go's data is reflected on screen</td>
-              <td>Materials driven by Go-supplied parameters, not TS constants.</td>
+              <td>Deterministic: grep — TS materials read Go-supplied params, not constants; <code style="font-family:var(--mono);font-size:11px;">go test</code> — shading params emitted. Pixel fidelity ('looks unchanged') stays a manual smoke-check — not deterministic.</td>
             </tr>
             <tr>
               <td>5 · Bridge / CRUD</td>
@@ -1237,6 +1237,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <li><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go build ./...</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test ./...</span></li>
           <li>Webview <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npx tsc --noEmit</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npm run build</span></li>
           <li>Guard scripts — check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary</li>
+          <li>New deterministic guards to add: <code style="font-family:var(--mono);font-size:11px;">check-ts-computes-no-geometry</code> (Phases 2–3 — no position/curve/arc-length math in TS); and extend <code style="font-family:var(--mono);font-size:11px;">check-no-ts-timers</code> to also reject <code style="font-family:var(--mono);font-size:11px;">await</code> on the TS→Go send (Phase 5).</li>
         </ul>
       </div>
 
