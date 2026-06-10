@@ -188,17 +188,21 @@
   #panel-goroutines table#goroutines-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
   #panel-goroutines table#goroutines-table th:nth-child(1),#panel-goroutines table#goroutines-table td:nth-child(1),
   #panel-goroutines table#goroutines-table th:nth-child(2),#panel-goroutines table#goroutines-table td:nth-child(2){width:1.8ch;padding-left:2px;padding-right:2px;}
-  #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:16ch;}
-  #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:9ch;}
-  #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:64ch;}
+  #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:15ch;}
+  #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:24ch;}
+  #panel-goroutines table#goroutines-table td:nth-child(4){font-family:var(--mono);font-size:12px;white-space:nowrap;}
+  #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:9ch;}
+  #panel-goroutines table#goroutines-table th:nth-child(6),#panel-goroutines table#goroutines-table td:nth-child(6){width:41ch;}
   #panel-tscode table#tscode-table{width:800px;table-layout:fixed;border-collapse:collapse;}
   #panel-tscode table#tscode-table th,
   #panel-tscode table#tscode-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
   #panel-tscode table#tscode-table th:nth-child(1),#panel-tscode table#tscode-table td:nth-child(1),
   #panel-tscode table#tscode-table th:nth-child(2),#panel-tscode table#tscode-table td:nth-child(2){width:1.8ch;padding-left:2px;padding-right:2px;}
-  #panel-tscode table#tscode-table th:nth-child(3),#panel-tscode table#tscode-table td:nth-child(3){width:22ch;}
-  #panel-tscode table#tscode-table th:nth-child(4),#panel-tscode table#tscode-table td:nth-child(4){width:14ch;}
-  #panel-tscode table#tscode-table th:nth-child(5),#panel-tscode table#tscode-table td:nth-child(5){width:57ch;}
+  #panel-tscode table#tscode-table th:nth-child(3),#panel-tscode table#tscode-table td:nth-child(3){width:20ch;}
+  #panel-tscode table#tscode-table th:nth-child(4),#panel-tscode table#tscode-table td:nth-child(4){width:24ch;}
+  #panel-tscode table#tscode-table td:nth-child(4){font-family:var(--mono);font-size:12px;white-space:nowrap;}
+  #panel-tscode table#tscode-table th:nth-child(5),#panel-tscode table#tscode-table td:nth-child(5){width:13ch;}
+  #panel-tscode table#tscode-table th:nth-child(6),#panel-tscode table#tscode-table td:nth-child(6){width:36ch;}
   #panel-tscode .spec-table { table-layout: fixed; width: 100%; }
   #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 135px; white-space: normal; }
   #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 110px; white-space: normal; }
@@ -478,6 +482,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <th class="enum">#</th>
           <th class="chk">✓</th>
           <th>Goroutine</th>
+          <th>Source file</th>
           <th>How many</th>
           <th>Its job</th>
         </tr>
@@ -487,6 +492,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             <td class="enum">1</td>
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>Input loop</td>
+            <td title="nodes/input/node.go">input/node.go</td>
             <td>one per data-source Input (e.g. in08)</td>
             <td><ol><li>Read the signal on the wire i0-&gt;in08 (1 or 0).</li><li>i = (i + signal) % len(Init) — 1 advances the read head (wrapping at the end), 0 holds it.</li><li>Send Init[i] on the wire in08-&gt;i0.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
           </tr>
@@ -494,6 +500,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             <td class="enum">2</td>
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>i0 loop</td>
+            <td title="nodes/chaininhibitor/node.go">chaininhibitor/node.go</td>
             <td>one (i0)</td>
             <td><ol><li>Read a value v from in08 on the wire in08-&gt;i0, if a pulse arrived this round.</li><li>If v differs from the held value: set held = v and send 1 on the wire i0-&gt;in08. Otherwise (v same as held, or no pulse this round): send 0 on i0-&gt;in08. (held inits to -1.)</li><li>Send the held value on the wire i0-&gt;i1.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
           </tr>
@@ -501,6 +508,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
             <td class="enum">3</td>
             <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
             <td>i1 loop</td>
+            <td title="nodes/chaininhibitor/node.go">chaininhibitor/node.go</td>
             <td>one (i1)</td>
             <td><ol><li>Receive i0's held value on the wire i0-&gt;i1.</li><li>Its output wires are inactive here, so i1 is a sink — it runs the standard ChainInhibitor rule on i0's value and produces nothing downstream (ToNext unwired).</li></ol></td>
           </tr>
@@ -508,6 +516,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">4</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>PacedWire loop</td>
+          <td title="nodes/Wiring/paced_wire.go">Wiring/paced_wire.go</td>
           <td>goroutine — one per destination input port</td>
           <td><ol><li>Add the beads it received this round to the set it already holds.</li><li>Each round, for every bead it holds, compute the bead's next position from the Go clock and the human-speed slowdown (the pulseSpeed scaling).</li><li>If that position is still on the wire, send the bead&#x2019;s 3D data (its position) to TS.</li><li>If that position is past the end of the wire, the bead is done &#x2014; hand the value the bead is holding to the destination node and remove the bead from PacedWire (the off-the-end position is never sent to TS).</li><li>Loop.</li></ol></td>
         </tr>
@@ -605,13 +614,14 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <table class="spec-table" id="tscode-table">
       <caption>The TS execution contexts</caption>
       <thead>
-        <tr><th class="enum">#</th><th class="chk">✓</th><th>Context</th><th>When it runs</th><th>Its job</th></tr>
+        <tr><th class="enum">#</th><th class="chk">✓</th><th>Context</th><th>Source file</th><th>When it runs</th><th>Its job</th></tr>
       </thead>
       <tbody>
         <tr>
           <td class="enum">1</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Render loop · pulse</td>
+          <td title="tools/topology-vscode/src/webview/three/pulse-state.ts">pulse-state.ts</td>
           <td>every frame (~60fps), one per in-flight bead</td>
           <td><ol><li>Read each in-flight bead's current position from the stream Go emits (the pulse map, pulse-state.ts).</li><li>Set the bead mesh position to that point.</li><li>No curve rebuild, no progress t, no curve sampling &mdash; Go computes every position; no delivered post &mdash; Go times its own delivery.</li></ol></td>
         </tr>
@@ -619,6 +629,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">2</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Render loop · overlays</td>
+          <td title="tools/topology-vscode/src/webview/three/scene-content.tsx">scene-content.tsx</td>
           <td>every few frames (throttled)</td>
           <td><ol><li>Project node world positions to screen for the HTML label overlay (LabelProjector).</li><li>Debounce the camera matrix and fire a settle callback once motion stops (CameraSettleDetector).</li><li>Track the nearest N nodes to the camera for occlusion/label decisions (NearestNTracker).</li><li>Screen-space and GPU-tied &mdash; stays in TS.</li></ol></td>
         </tr>
@@ -626,6 +637,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">3</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Trace pump</td>
+          <td title="tools/topology-vscode/src/webview/three/pump.ts">pump.ts</td>
           <td>event-driven (each Go trace event)</td>
           <td><ol><li>handleTraceEvent switches on the event kind (pump.ts).</li><li><strong>send</strong> &rarr; match edges by source+sourceHandle and setPulse on each.</li><li><strong>done</strong> &rarr; match edges by target+targetHandle and clearPulse on each.</li><li><strong>fire / recv</strong> &rarr; no-op.</li></ol></td>
         </tr>
@@ -633,6 +645,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">4</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Message receiver</td>
+          <td title="tools/topology-vscode/src/webview/main.tsx">main.tsx</td>
           <td>event-driven (window "message")</td>
           <td><ol><li>parseHostToWebview narrows the incoming message (main.tsx).</li><li><strong>trace-event</strong> &rarr; handleTraceEvent (the pump).</li><li><strong>load</strong> &rarr; store.load(text); <strong>run-status</strong> &rarr; set run state; <strong>flush</strong> &rarr; flush saves.</li><li>On startup, post {type:"ready"} back to the host.</li></ol></td>
         </tr>
@@ -640,6 +653,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">5</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Outbound IPC</td>
+          <td title="tools/topology-vscode/src/extension/handle-message.ts">handle-message.ts</td>
           <td>on user action</td>
           <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Out types: CRUD + control + raw input (deleteEdge, addEdge, fade, node-move, pause/resume), each carrying the picked Go id plus geometry/animation edits &mdash; never delivery, timing, or camera nav (orbit/pan/zoom stays in TS).</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
         </tr>
@@ -647,6 +661,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">6</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>Input handlers</td>
+          <td title="tools/topology-vscode/src/webview/three/interaction-controls.ts">interaction-controls.ts</td>
           <td>DOM pointer / wheel events</td>
           <td><ol><li>pointer down: raycast-pick a port, node, or empty space; capture the drag/wiring origin (interaction-controls.ts).</li><li>pointer move: drag a node (&rarr; node-move IPC, rAF-throttled), preview a wire, or arcball-rotate the camera.</li><li>pointer up: complete wiring (createEdge), persist a node move, or reset.</li><li>wheel/pointer navigation: TS interprets it (ctrl = pinch-zoom to cursor, else pan on z=0) and commits the camera locally — TS owns the camera (three.js), nothing forwarded to Go.</li></ol></td>
         </tr>
@@ -654,6 +669,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td class="enum">7</td>
           <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
           <td>React / Zustand store</td>
+          <td title="tools/topology-vscode/src/webview/three/store.ts">store.ts</td>
           <td>on state change</td>
           <td><ol><li>Keeps a passive render copy of nodes/edges/selection (store.ts); Go owns the authoritative data.</li><li>moveNode updates a node position locally and posts node-move; it derives no curve geometry and patches no pulse timing &mdash; Go does that.</li><li>createEdge / deleteEdge / toggleFade apply optimistically and post addEdge / deleteEdge / fade to Go.</li></ol></td>
         </tr>
