@@ -90,7 +90,8 @@ export class BuildAndRunRunner {
     this.channel.appendLine("$ go run .");
     this.cancelled = false;
     this.looping = true;
-    this.post({ state: "running" });
+    // Do NOT post "running" here — Go starts HALTED. The clock state drives status:
+    // idle-on-spawn → running-on-play() → paused-on-pause().
     // detached: true makes the child the leader of a new process group, so
     // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
     // SIGTERM hits the `go` driver but leaves the compiled binary orphaned
@@ -199,24 +200,23 @@ export class BuildAndRunRunner {
     }
   }
 
-  pause() {
-    if (!this.proc || this.proc.pid === undefined) return;
-    try {
-      process.kill(-this.proc.pid, "SIGSTOP");
-    } catch {
-      this.proc.kill("SIGSTOP");
-    }
+  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. */
+  play(): void {
+    if (!this.proc) return;
+    this.writeStdin(JSON.stringify({ type: "play" }));
+    this.post({ state: "running" });
+  }
+
+  /** Send pause to Go's stdin — halts the clock gate. Fire-and-forget. */
+  pause(): void {
+    if (!this.proc) return;
+    this.writeStdin(JSON.stringify({ type: "pause" }));
     this.post({ state: "paused" });
   }
 
-  resume() {
-    if (!this.proc || this.proc.pid === undefined) return;
-    try {
-      process.kill(-this.proc.pid, "SIGCONT");
-    } catch {
-      this.proc.kill("SIGCONT");
-    }
-    this.post({ state: "running" });
+  /** Alias for play() — retained so existing handle-message case "resume" still works. */
+  resume(): void {
+    this.play();
   }
 
   isRunning(): boolean {

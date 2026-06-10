@@ -64,6 +64,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
   switch (msg.type) {
     case "ready":
       ctx.send();
+      // Spawn Go immediately so edges render from geometry events before the
+      // user presses Run. Go starts HALTED — the clock won't tick until play().
+      runner.run();
       return;
     case "save":
       try {
@@ -88,6 +91,11 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       catch (err) { post({ type: "save-error", message: toErrorMessage(err) }); }
       return;
     case "run":
+      // Primary path: Go is already spawned on open (case "ready") and the user is
+      // starting the clock for the first time, or resuming after a stop+restart.
+      // runner.run() is idempotent (no-op if already running), so it is safe to call
+      // unconditionally before play(). Pre-write the document text if the webview sent
+      // a diff (same as before so unsaved spec edits reach Go before the clock starts).
       try {
         if (msg.text !== undefined) {
           const viewText = extractViewText(document.getText());
@@ -103,6 +111,10 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         return;
       }
       runner.run();
+      runner.play();
+      return;
+    case "play":
+      runner.play();
       return;
     case "run-cancel":
       runner.cancel();

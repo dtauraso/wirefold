@@ -12,12 +12,15 @@
 // node kind (via kinds_generated.go), so the loader can construct the real
 // in08/i0/i1 node loops.
 //
-// Two assertions:
+// Three assertions:
 //   - TestHeadlessCascadeCompletes: the full net, driven by the real node loops,
 //     completes under a fake clock (the unblock; RED before Phase 1).
 //   - TestHeadlessDeliveryAtExactInFlightTime: a wire from the loaded active net
 //     delivers exactly when elapsed reaches its inFlightTime — one tick short
 //     leaves the bead in flight; the boundary tick delivers it.
+//   - TestHaltedStartGeometryOnlyNoPositions: with the clock halted at start,
+//     LoadTopology emits geometry events (edge curves) but zero position events;
+//     Resume + Advance unblocks bead delivery (position events flow).
 //
 // Substrate-faithful: there is no central runner here. Each PacedWire reads the
 // one injected clock and self-delivers; the test only advances that clock.
@@ -251,4 +254,115 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 		t.Fatalf("Recv at exact in-flight time: v=%v err=%v", v, err)
 	}
 	pw.Done()
+}
+
+// TestHaltedStartGeometryOnlyNoPositions asserts the halted-start contract:
+//
+//  1. With the clock halted at load time, LoadTopology still emits geometry events
+//     (edge curves are NOT clock-gated); the static diagram is always available.
+//  2. While the clock remains halted, node goroutines are running and the Input
+//     node has seeded the first wire — but ZERO position events are emitted
+//     because the clock is frozen and WaitUntil parks all delivery goroutines.
+//  3. After Resume() + advancing the fake clock past the in-flight time, position
+//     events flow and the cascade delivers (i1 receives).
+//
+// This is the deterministic contract for the play/pause gate: geometry is
+// load-time and unconditional; bead delivery is gated by Halt/Resume.
+func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
+	path := writeTopo(t, activeNetTopo)
+
+	sink := &captureSink{}
+	tr := T.NewWithSink(256, sink)
+	clk := W.NewFakeClock()
+
+	// Halt the clock before loading — matches the production runTopology path
+	// which halts immediately after construction, before LoadTopology.
+	clk.Halt()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// LoadTopology emits geometry (KindGeometry) synchronously during load.
+	// Because geometry emission does not wait on the clock, it must succeed
+	// even with the clock halted.
+	nodes, _, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+
+	// Lookup the per-edge in-flight times before launching nodes.
+	hop1 := nmr.EdgeOut("in08ToI0")
+	hop2 := nmr.EdgeOut("i0ToI1")
+	if hop1 == nil || hop2 == nil {
+		t.Fatalf("missing per-edge Outs: hop1=%v hop2=%v", hop1, hop2)
+	}
+	maxHop := hop1.SimLatencyMs
+	if hop2.SimLatencyMs > maxHop {
+		maxHop = hop2.SimLatencyMs
+	}
+
+	// Start the real node goroutines; Input seeds the first wire immediately.
+	var wg sync.WaitGroup
+	wg.Add(len(nodes))
+	for _, node := range nodes {
+		n := node
+		go func() {
+			defer wg.Done()
+			n.Update(ctx)
+		}()
+	}
+
+	// Give the Input goroutine time to seed the first wire and launch the
+	// delivery goroutine. That goroutine should now be parked in WaitUntil.
+	time.Sleep(30 * time.Millisecond)
+
+	// ASSERTION 1: no position events while the clock is halted.
+	if sink.contains(`"kind":"position"`) {
+		t.Fatal("position event emitted while clock was halted; halted-start gate is broken")
+	}
+
+	// ASSERTION 2: geometry events MUST have been emitted synchronously by
+	// LoadTopology. The loader calls tr.Geometry() for each edge during load,
+	// so they arrive in the stream before any node goroutine runs.
+	if !sink.contains(`"kind":"geometry"`) {
+		t.Fatal("no geometry events emitted during LoadTopology; geometry must be clock-independent")
+	}
+
+	// Resume the clock and advance past the in-flight time for both hops.
+	// The parked delivery goroutines unblock; position events and then delivery
+	// flow through the cascade.
+	clk.Resume()
+	step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
+	const maxSteps = 200
+	want := `"kind":"recv","node":"i1"`
+	got := false
+	for i := 0; i < maxSteps; i++ {
+		clk.Advance(step)
+		deadline := time.Now().Add(50 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if sink.contains(want) {
+				got = true
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if got {
+			break
+		}
+	}
+
+	cancel()
+	wg.Wait()
+	tr.Close()
+
+	if !got {
+		t.Fatalf("cascade did not complete after Resume+Advance (i1 never received).\nTrace:\n%s",
+			sink.String())
+	}
+
+	// ASSERTION 3: position events flowed after resume.
+	if !sink.contains(`"kind":"position"`) {
+		t.Fatalf("no position events emitted after Resume+Advance; delivery goroutines should emit positions.\nTrace:\n%s",
+			sink.String())
+	}
 }

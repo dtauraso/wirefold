@@ -26,6 +26,7 @@ export type WebviewToHostMsg =
   | { type: "view-save"; text: string }
   | { type: "run"; text?: string }
   | { type: "run-cancel" }
+  | { type: "play" }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "stop" }
@@ -59,7 +60,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "pause", "resume", "stop", "webview-log", "edit",
+  "ready", "save", "view-save", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

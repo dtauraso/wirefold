@@ -15,6 +15,7 @@ export function RunButton() {
 
   const onPlayPause = () => {
     if (isPaused) {
+      // Resume the clock — sends play to Go via runner.resume() (→ play()).
       vscode.postMessage({ type: "resume" });
       return;
     }
@@ -22,7 +23,9 @@ export function RunButton() {
       vscode.postMessage({ type: "pause" });
       return;
     }
-    // idle/stopped — start a new run
+    // idle: Go is spawned but clock is halted, or process was stopped and needs
+    // a restart. Send "run" with the current spec so any unsaved edits reach Go;
+    // handle-message calls runner.run() (idempotent spawn) then runner.play().
     const { nodes, edges } = useThreeStore.getState();
     const spec = flowToSpec(nodes, edges, { nodes: [], edges: [] });
     const text = JSON.stringify(spec, null, 2) + "\n";

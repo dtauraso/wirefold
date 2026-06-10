@@ -28,6 +28,8 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	if clk == nil {
 		clk = W.NewRealClock()
 	}
+	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
+	clk.Halt()
 
 	nodes, slotReg, reg, nmr, err := W.LoadTopology(ctx, topologyPath, tr, clk)
 	if err != nil {
@@ -38,7 +40,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete/fade)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, reg, nmr, tr)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, reg, nmr, tr, clk)
 		cancel()
 	}()
 

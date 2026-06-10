@@ -1,18 +1,19 @@
 // stdin_reader.go — reads JSON-line messages from stdin and dispatches them.
 //
-// The editor→Go bridge is a single generic geometry-CRUD edit shape plus the
-// play/pause control signal (MODEL.md "Editor surface"). Go owns the clock and
-// delivery; nothing on this seam triggers delivery or carries animation internals.
+// The editor→Go bridge carries two top-level message kinds:
 //
-//	{"type":"edit","op":"create","target":"<node-id>","targetHandle":"<port>"}
-//	{"type":"edit","op":"delete","target":"<node-id>","targetHandle":"<port>"}
-//	{"type":"edit","op":"update","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
-//	{"type":"edit","op":"fade","edges":["<edge-id>", ...]}
+//  1. Geometry-CRUD edits (type=="edit") — op discriminates the operation:
+//     {"type":"edit","op":"create","target":"<node-id>","targetHandle":"<port>"}
+//     {"type":"edit","op":"delete","target":"<node-id>","targetHandle":"<port>"}
+//     {"type":"edit","op":"update","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
+//     {"type":"edit","op":"fade","edges":["<edge-id>", ...]}
 //
-// op semantics: create un-silences a wire (re-added edge), delete silences it and
-// cancels any in-flight bead's clock-delivery (echoing pulse-cancelled), update
-// re-derives the moved node's edge geometry, fade sets the per-wire faded flag set.
-// (pause/resume is the clock's global gate, not a stdin edit — see main.go.)
+//  2. Play/pause control (type=="play" / type=="pause") — routes directly to the
+//     clock's global gate (Halt/Resume). The process starts halted; the first
+//     "play" message resumes bead delivery. "pause" re-halts.
+//
+// Go owns the clock and delivery; nothing on this seam triggers delivery or
+// carries animation internals.
 //
 // One goroutine; cancellable via context. On EOF or context cancel, exits
 // cleanly. Unknown message types and ops are silently ignored (forward-compat).
@@ -233,15 +234,16 @@ type stdinMsg struct {
 // to the wire owned by that destination port.
 type SlotRegistry map[string]*PacedWire
 
-// RunStdinReader reads JSON lines from r, dispatching the single "edit" bridge
-// shape (op = create/update/delete/fade). Returns when ctx is done or r reaches
-// EOF. Call in a goroutine alongside the node run loop.
+// RunStdinReader reads JSON lines from r, dispatching geometry-CRUD "edit"
+// messages and play/pause clock-gate control messages. Returns when ctx is done
+// or r reaches EOF. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
 // destination port's wire. reg is keyed by edge label and drives the fade op.
 // nmr may be nil; if non-nil, update (node-move) ops re-derive wire geometry.
 // tr emits control breadcrumbs for the edit ops.
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg WireRegistry, nmr *NodeMoveRegistry, tr *T.Trace) {
+// clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg WireRegistry, nmr *NodeMoveRegistry, tr *T.Trace, clk Clock) {
 	sc := bufio.NewScanner(r)
 	done := ctx.Done()
 	lineCh := make(chan string, 8)
@@ -267,13 +269,21 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
 				continue
 			}
-			// Single bridge shape: type=="edit", op discriminates the geometry-CRUD/
-			// animation operation. op is dispatched by value (not a switch with case
-			// literals) so the message-kind-parity guard sees only the one top-level
-			// kind "edit" — the op axis is internal to the edit envelope.
+			// Two top-level bridge kinds:
+			//   "edit"  — geometry-CRUD; op discriminates the operation (internal axis).
+			//   "play"  — resume the clock's global gate (bead delivery starts).
+			//   "pause" — halt the clock's global gate (bead delivery freezes).
 			switch msg.Type {
 			case "edit":
 				applyEdit(msg, slotReg, reg, nmr, tr)
+			case "play":
+				if clk != nil {
+					clk.Resume()
+				}
+			case "pause":
+				if clk != nil {
+					clk.Halt()
+				}
 			}
 		}
 	}
