@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The item-chain model — two nodes connecting</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #ffffff;
+    color: #1f2937;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    padding: 2rem 1rem 4rem;
+  }
+  main { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.2rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.35rem; }
+  p { margin-bottom: 0.9rem; }
+  ul { margin: 0.5rem 0 0.9rem 1.5rem; }
+  li { margin-bottom: 0.25rem; }
+  code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 0.88em;
+    background: #f3f4f6;
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+  }
+  .note { font-style: italic; color: #6b7280; font-size: 0.92rem; margin-bottom: 1.5rem; }
+  .status { display: inline-block; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 0.2rem 0.6rem; font-size: 0.875rem; margin-bottom: 1.25rem; }
+  .diagram-card {
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem 0.75rem;
+    margin: 1.25rem 0;
+  }
+  .diagram-caption {
+    font-size: 0.82rem;
+    color: #6b7280;
+    text-align: center;
+    margin-top: 0.6rem;
+    font-style: italic;
+  }
+  svg { display: block; margin: 0 auto; overflow: visible; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>The item-chain model — two nodes connecting</h1>
+<p class="note">Visual companion to chain-model-two-nodes.md (proposed model, pending sign-off).</p>
+<span class="status">Status: proposed — pending sign-off before folding into MODEL.md</span>
+
+<p>This spec supersedes the earlier single-segment framing: a wire is now a chain of relaxing items, and its straightness is <em>emergent</em> from per-item local relaxation, not a <code>Start+t·(End−Start)</code> formula.</p>
+
+<h2>Premise</h2>
+
+<p>A wire between two nodes is not a single segment nor a curve. It is a <strong>chain of items</strong>:</p>
+
+<p style="font-family: ui-monospace, monospace; background: #f3f4f6; padding: 0.5rem 1rem; border-radius: 4px; display: inline-block; margin-bottom: 0.9rem;">source node → item₁ → item₂ → … → itemₙ → destination node</p>
+
+<!-- DIAGRAM 1: THE ITEM CHAIN -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 120" width="660" height="120">
+    <!-- connection line (under circles) -->
+    <line x1="60" y1="60" x2="640" y2="60" stroke="#9ca3af" stroke-width="2"/>
+    <!-- anchor: source -->
+    <circle cx="60" cy="60" r="9" fill="#111827"/>
+    <text x="60" y="88" text-anchor="middle" font-size="12" fill="#374151">source</text>
+    <text x="60" y="102" text-anchor="middle" font-size="11" fill="#6b7280">out-port</text>
+    <!-- item 1 -->
+    <circle cx="178" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="178" y="85" text-anchor="middle" font-size="12" fill="#374151">i₁</text>
+    <!-- item 2 -->
+    <circle cx="296" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="296" y="85" text-anchor="middle" font-size="12" fill="#374151">i₂</text>
+    <!-- item 3 -->
+    <circle cx="414" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="414" y="85" text-anchor="middle" font-size="12" fill="#374151">i₃</text>
+    <!-- item 4 -->
+    <circle cx="532" cy="60" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="532" y="85" text-anchor="middle" font-size="12" fill="#374151">i₄</text>
+    <!-- anchor: destination -->
+    <circle cx="640" cy="60" r="9" fill="#111827"/>
+    <text x="640" y="88" text-anchor="middle" font-size="12" fill="#374151">destination</text>
+    <text x="640" y="102" text-anchor="middle" font-size="11" fill="#6b7280">in-port</text>
+    <!-- legend -->
+    <circle cx="60" cy="18" r="6" fill="#111827"/>
+    <text x="74" y="23" font-size="11" fill="#374151">anchor (fixed port)</text>
+    <circle cx="210" cy="18" r="5" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="222" y="23" font-size="11" fill="#374151">item (goroutine, free to move)</text>
+    <line x1="400" y1="18" x2="430" y2="18" stroke="#9ca3af" stroke-width="2"/>
+    <text x="437" y="23" font-size="11" fill="#374151">adjacency</text>
+  </svg>
+  <div class="diagram-caption">Diagram 1 — The item chain. Each interior circle is an item goroutine; the filled circles are the fixed anchors (node ports).</div>
+</div>
+
+<p>Each item is its own <strong>goroutine</strong>. There is no central solver that positions the wire; each item self-places from its neighbors.</p>
+
+<h2>An item</h2>
+<ul>
+  <li>Has exactly <strong>two ends</strong> — one neighbor on each side.</li>
+  <li>Interior items neighbor two items. The <strong>first</strong> item's outer neighbor is the <strong>source node's output port</strong>; the <strong>last</strong> item's outer neighbor is the <strong>destination node's input port</strong>. Those two ports are the chain's fixed <strong>anchors</strong>.</li>
+  <li>Owns its own <strong>position</strong>.</li>
+  <li>Is a <strong>goroutine</strong>.</li>
+</ul>
+
+<h2>Many items, densely spaced</h2>
+
+<p>The chain uses <strong>many</strong> items, so the spacing between neighbors is <strong>very small</strong>. That density is what keeps the model purely local: because every gap is tiny, an item only ever makes a tiny midpoint adjustment against its immediate neighbors — <strong>no node ever computes a distance or a straight line to another node</strong>. The straight wire is the aggregate of many trivial local moves, never a node-to-node line calculation.</p>
+
+<h2>Straightening: each item removes its own peak/valley</h2>
+
+<p>Each item, on its own goroutine, repeatedly:</p>
+<ol style="margin: 0.5rem 0 0.9rem 1.5rem;">
+  <li>Reads its own position and its two neighbors' positions.</li>
+  <li>Considers the lines drawn to each neighbor. The bend at the item makes it a <strong>peak</strong> (bulging one way) or a <strong>valley</strong> (bulging the other); if the item lies on the straight line between its two neighbors it is <strong>neither</strong>.</li>
+  <li>If it is a peak or valley, it <strong>moves onto that line</strong> — to the <strong>midpoint of its two neighbors</strong> — so it is neither.</li>
+</ol>
+
+<!-- DIAGRAM 2: PEAK vs VALLEY vs NEITHER -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 170" width="660" height="170">
+
+    <!-- === PEAK === (left third) -->
+    <!-- dashed A-B reference line -->
+    <line x1="30" y1="120" x2="190" y2="120" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <!-- peak segments -->
+    <line x1="30" y1="120" x2="110" y2="42" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="110" y1="42" x2="190" y2="120" stroke="#9ca3af" stroke-width="2"/>
+    <!-- anchors A B -->
+    <circle cx="30" cy="120" r="9" fill="#111827"/>
+    <text x="30" y="145" text-anchor="middle" font-size="12" fill="#374151">A</text>
+    <circle cx="190" cy="120" r="9" fill="#111827"/>
+    <text x="190" y="145" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <!-- item i -->
+    <circle cx="110" cy="42" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="110" y="32" text-anchor="middle" font-size="12" fill="#374151">i</text>
+    <!-- label -->
+    <text x="110" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#dc2626">peak</text>
+
+    <!-- === VALLEY === (middle third) -->
+    <line x1="260" y1="55" x2="420" y2="55" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <line x1="260" y1="55" x2="340" y2="133" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="340" y1="133" x2="420" y2="55" stroke="#9ca3af" stroke-width="2"/>
+    <circle cx="260" cy="55" r="9" fill="#111827"/>
+    <text x="260" y="45" text-anchor="middle" font-size="12" fill="#374151">A</text>
+    <circle cx="420" cy="55" r="9" fill="#111827"/>
+    <text x="420" y="45" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <circle cx="340" cy="133" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="340" y="152" text-anchor="middle" font-size="12" fill="#374151">i</text>
+    <text x="340" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#2563eb">valley</text>
+
+    <!-- === NEITHER === (right third) -->
+    <line x1="500" y1="88" x2="660" y2="88" stroke="#9ca3af" stroke-width="2"/>
+    <circle cx="500" cy="88" r="9" fill="#111827"/>
+    <text x="500" y="112" text-anchor="middle" font-size="12" fill="#374151">A</text>
+    <circle cx="660" cy="88" r="9" fill="#111827"/>
+    <text x="660" y="112" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <circle cx="580" cy="88" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="580" y="112" text-anchor="middle" font-size="12" fill="#374151">i</text>
+    <text x="580" y="162" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">neither (straight)</text>
+  </svg>
+  <div class="diagram-caption">Diagram 2 — Peak, valley, and neither. Dashed lines show the straight A–B reference. Red = peak; blue = valley.</div>
+</div>
+
+<!-- DIAGRAM 3: ONE RELAX STEP -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 140" width="660" height="140">
+
+    <!-- === BEFORE (valley) === -->
+    <text x="140" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">before</text>
+    <!-- dashed A-B reference -->
+    <line x1="30" y1="50" x2="250" y2="50" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+    <!-- valley segments -->
+    <line x1="30" y1="50" x2="140" y2="115" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="140" y1="115" x2="250" y2="50" stroke="#9ca3af" stroke-width="2"/>
+    <!-- anchors -->
+    <circle cx="30" cy="50" r="9" fill="#111827"/>
+    <text x="30" y="36" text-anchor="middle" font-size="12" fill="#374151">A</text>
+    <circle cx="250" cy="50" r="9" fill="#111827"/>
+    <text x="250" y="36" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <!-- item i (valley bottom) -->
+    <circle cx="140" cy="115" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="160" y="120" font-size="12" fill="#2563eb">i  (valley)</text>
+
+    <!-- arrow -->
+    <text x="330" y="82" text-anchor="middle" font-size="28" fill="#374151">→</text>
+
+    <!-- === AFTER === -->
+    <text x="555" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="#374151">after</text>
+    <!-- dotted vertical showing movement -->
+    <line x1="555" y1="50" x2="555" y2="115" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="3,3"/>
+    <!-- straight line A-B -->
+    <line x1="445" y1="50" x2="665" y2="50" stroke="#9ca3af" stroke-width="2"/>
+    <!-- anchors -->
+    <circle cx="445" cy="50" r="9" fill="#111827"/>
+    <text x="445" y="36" text-anchor="middle" font-size="12" fill="#374151">A</text>
+    <circle cx="665" cy="50" r="9" fill="#111827"/>
+    <text x="665" y="36" text-anchor="middle" font-size="12" fill="#374151">B</text>
+    <!-- item i now on midpoint -->
+    <circle cx="555" cy="50" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <text x="555" y="36" text-anchor="middle" font-size="12" fill="#374151">i</text>
+    <!-- caption under -->
+    <text x="555" y="130" text-anchor="middle" font-size="12" fill="#6b7280">i ← midpoint(A, B)</text>
+    <text x="555" y="144" text-anchor="middle" font-size="11" fill="#6b7280">now on the A–B line, neither peak nor valley</text>
+  </svg>
+  <div class="diagram-caption">Diagram 3 — One relax step. Item i (a valley) moves up to the midpoint of its neighbors A and B.</div>
+</div>
+
+<!-- DIAGRAM 4: CHAIN SETTLING t₀→t₁→t∞ -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 220" width="660" height="220">
+    <!-- === t₀ jagged === -->
+    <text x="26" y="22" font-size="12" font-weight="600" fill="#374151">t₀</text>
+    <text x="66" y="22" font-size="12" fill="#6b7280">jagged</text>
+    <!-- polyline: anchors at y=50, items alternating y=22/78 -->
+    <polyline points="60,50 178,22 296,78 414,22 532,78 640,50"
+              fill="none" stroke="#9ca3af" stroke-width="2"/>
+    <circle cx="60" cy="50" r="9" fill="#111827"/>
+    <circle cx="178" cy="22" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="78" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="22" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="78" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="50" r="9" fill="#111827"/>
+    <text x="640" y="95" text-anchor="middle" font-size="11" fill="#6b7280">peaks &amp; valleys</text>
+
+    <!-- === t₁ flatter === -->
+    <text x="26" y="122" font-size="12" font-weight="600" fill="#374151">t₁</text>
+    <text x="66" y="122" font-size="12" fill="#6b7280">flatter</text>
+    <!-- items closer to y=110 baseline -->
+    <polyline points="60,110 178,97 296,123 414,97 532,123 640,110"
+              fill="none" stroke="#9ca3af" stroke-width="2"/>
+    <circle cx="60" cy="110" r="9" fill="#111827"/>
+    <circle cx="178" cy="97" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="123" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="97" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="123" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="110" r="9" fill="#111827"/>
+    <text x="640" y="140" text-anchor="middle" font-size="11" fill="#6b7280">bumps shrink</text>
+
+    <!-- === t∞ straight === -->
+    <text x="26" y="182" font-size="12" font-weight="600" fill="#374151">t∞</text>
+    <text x="66" y="182" font-size="12" fill="#6b7280">straight</text>
+    <line x1="60" y1="195" x2="640" y2="195" stroke="#9ca3af" stroke-width="2"/>
+    <circle cx="60" cy="195" r="9" fill="#111827"/>
+    <circle cx="178" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="195" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="195" r="9" fill="#111827"/>
+    <text x="640" y="214" text-anchor="middle" font-size="11" fill="#6b7280">evenly spaced</text>
+  </svg>
+  <div class="diagram-caption">Diagram 4 — Chain settling over time. Straightness is emergent from concurrent local relaxation, not a formula.</div>
+</div>
+
+<p>All items do this concurrently and locally. With the two anchors fixed (source out-port, dest in-port), the chain <strong>relaxes to a straight line</strong> between them. Straightness is <strong>emergent</strong> from local per-item relaxation — not computed from a curve or segment formula.</p>
+
+<h2>The bead</h2>
+
+<p>A bead carries a <strong>value</strong> and <strong>visits each item in sequence</strong> as its animation:</p>
+
+<p style="font-family: ui-monospace, monospace; background: #f3f4f6; padding: 0.5rem 1rem; border-radius: 4px; display: inline-block; margin-bottom: 0.9rem;">source → item₁ → item₂ → … → itemₙ → destination</p>
+
+<!-- DIAGRAM 5: BEAD TRAVERSAL -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 260" width="660" height="260">
+    <!-- Helper: 6 positions: 60,296,414,532 items; 60=src anchor, 640=dst anchor; items at 178,296,414,532 -->
+
+    <!-- step 0 -->
+    <text x="26" y="30" font-size="11" fill="#6b7280">step 0</text>
+    <line x1="60" y1="30" x2="640" y2="30" stroke="#9ca3af" stroke-width="1.5"/>
+    <circle cx="60" cy="30" r="9" fill="#111827"/>
+    <circle cx="60" cy="30" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
+    <circle cx="178" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="30" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="30" r="9" fill="#111827"/>
+    <text x="660" y="34" font-size="11" fill="#6b7280">value enters at source</text>
+
+    <!-- step 1 -->
+    <text x="26" y="80" font-size="11" fill="#6b7280">step 1</text>
+    <line x1="60" y1="80" x2="640" y2="80" stroke="#9ca3af" stroke-width="1.5"/>
+    <circle cx="60" cy="80" r="9" fill="#111827"/>
+    <circle cx="178" cy="80" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
+    <circle cx="296" cy="80" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="80" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="80" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="80" r="9" fill="#111827"/>
+
+    <!-- step 2 -->
+    <text x="26" y="130" font-size="11" fill="#6b7280">step 2</text>
+    <line x1="60" y1="130" x2="640" y2="130" stroke="#9ca3af" stroke-width="1.5"/>
+    <circle cx="60" cy="130" r="9" fill="#111827"/>
+    <circle cx="178" cy="130" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="130" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
+    <circle cx="414" cy="130" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="130" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="130" r="9" fill="#111827"/>
+
+    <!-- step 3 -->
+    <text x="26" y="180" font-size="11" fill="#6b7280">step 3</text>
+    <line x1="60" y1="180" x2="640" y2="180" stroke="#9ca3af" stroke-width="1.5"/>
+    <circle cx="60" cy="180" r="9" fill="#111827"/>
+    <circle cx="178" cy="180" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="180" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="180" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
+    <circle cx="532" cy="180" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="180" r="9" fill="#111827"/>
+
+    <!-- step n -->
+    <text x="26" y="230" font-size="11" fill="#6b7280">step n</text>
+    <line x1="60" y1="230" x2="640" y2="230" stroke="#9ca3af" stroke-width="1.5"/>
+    <circle cx="60" cy="230" r="9" fill="#111827"/>
+    <circle cx="178" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="296" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="414" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="532" cy="230" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="640" cy="230" r="9" fill="#111827"/>
+    <circle cx="640" cy="230" r="7" fill="#f59e0b" stroke="#111827" stroke-width="1"/>
+    <text x="660" y="234" font-size="11" fill="#6b7280">value delivered at destination</text>
+  </svg>
+  <div class="diagram-caption">Diagram 5 — Bead traversal. The amber bead hops from item to item along the chain, carrying a value from source to destination.</div>
+</div>
+
+<p>The bead's motion is the hop from item to item along the chain.</p>
+
+<h2>Per-goroutine ownership (the whole point)</h2>
+<ul>
+  <li>Each item is a goroutine that owns its own position and computes its own peak/valley relaxation from its two neighbors.</li>
+  <li>The wire's shape is owned by nobody centrally — it is the collective result of every item self-placing. This is the per-goroutine model end to end.</li>
+</ul>
+
+<h2>Movement keeps the chain unbroken</h2>
+
+<p>A node-move is felt <strong>first by the edge item</strong> — the item attached to that node's port anchor. The instant the anchor moves, that edge item becomes a <strong>peak / half-peak or valley / half-valley</strong> (a <em>half</em> peak/valley because only its anchor-side neighbor jumped; its interior neighbor hasn't moved yet) and <strong>adjusts immediately</strong> toward its new midpoint. That move makes its inner neighbor the next peak/valley, and the correction <strong>propagates inward</strong> along the chain. Because the items are dense and each step is a tiny move, the chain stays visually straight as the node is dragged — the edge item's immediate reaction keeps a kink from ever appearing. No central node-move recompute; the chain re-straightens itself.</p>
+
+<!-- DIAGRAM 6: MOVEMENT / EDGE-ITEM TRIGGER -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 260" width="660" height="260">
+
+    <!-- === sub-figure A: the half-valley moment === -->
+    <text x="175" y="14" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">anchor jumps</text>
+
+    <!-- source anchor (right, fixed) -->
+    <circle cx="350" cy="160" r="9" fill="#111827"/>
+    <text x="368" y="164" font-size="11" fill="#374151">SRC</text>
+
+    <!-- old DST position (faint hollow) -->
+    <circle cx="30" cy="160" r="9" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="4,3"/>
+    <text x="30" y="180" text-anchor="middle" font-size="10" fill="#9ca3af">old DST</text>
+
+    <!-- new DST anchor (solid, moved up) -->
+    <circle cx="30" cy="60" r="9" fill="#111827"/>
+    <text x="30" y="50" text-anchor="middle" font-size="11" fill="#374151">DST</text>
+
+    <!-- faint movement arrow from old to new -->
+    <line x1="30" y1="148" x2="30" y2="75" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arr-grey)"/>
+
+    <!-- chain: edge item (nearest DST) reacts first to half-valley -->
+    <!-- old chain baseline at y=160: DST_old, edgeItem, i2, i3, SRC -->
+    <!-- edge item shifts up a bit (half-valley) -->
+    <line x1="30" y1="60" x2="120" y2="130" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="120" y1="130" x2="220" y2="160" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="220" y1="160" x2="350" y2="160" stroke="#9ca3af" stroke-width="2"/>
+
+    <!-- edge item (half-valley) highlighted blue -->
+    <circle cx="120" cy="130" r="7" fill="white" stroke="#2563eb" stroke-width="2.5"/>
+    <text x="80" y="125" font-size="11" fill="#2563eb">edge item</text>
+    <text x="80" y="138" font-size="10" fill="#2563eb">(half-valley)</text>
+
+    <!-- interior items -->
+    <circle cx="220" cy="160" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="290" cy="160" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+
+    <!-- dashed reference line new DST → SRC (straight) -->
+    <line x1="30" y1="60" x2="350" y2="160" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="5,4"/>
+
+    <!-- arrow to second sub-figure -->
+    <text x="420" y="110" text-anchor="middle" font-size="22" fill="#374151">→</text>
+
+    <!-- === sub-figure B: after propagation === -->
+    <text x="565" y="14" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">chain relaxed</text>
+
+    <!-- new DST -->
+    <circle cx="470" cy="60" r="9" fill="#111827"/>
+    <text x="470" y="50" text-anchor="middle" font-size="11" fill="#374151">DST</text>
+
+    <!-- SRC -->
+    <circle cx="690" cy="160" r="9" fill="#111827"/>
+    <text x="690" y="176" text-anchor="middle" font-size="11" fill="#374151">SRC</text>
+
+    <!-- straight relaxed chain -->
+    <line x1="470" y1="60" x2="690" y2="160" stroke="#9ca3af" stroke-width="2"/>
+    <circle cx="524" cy="85" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="578" cy="110" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="632" cy="135" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+
+    <!-- defs for arrowhead -->
+    <defs>
+      <marker id="arr-grey" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L6,3 z" fill="#d1d5db"/>
+      </marker>
+    </defs>
+
+    <!-- caption row -->
+    <text x="350" y="240" text-anchor="middle" font-size="11" fill="#6b7280">fix propagates inward item by item; chain re-straightens to new anchor position</text>
+  </svg>
+  <div class="diagram-caption">Diagram 6 — Movement. The edge item nearest the jumped anchor reacts first (half-valley), and the correction propagates inward until the chain is straight again.</div>
+</div>
+
+<h2>What this replaces</h2>
+<ul>
+  <li>The single two-endpoint <code>wireSegment</code> + <code>lerp</code> evaluation is replaced by a chain of item-goroutines that relax to straight.</li>
+  <li>The central <code>NodeMoveRegistry</code> recompute (one lock mutating every affected edge) goes away: moving a node just moves an anchor; the items re-straighten locally.</li>
+</ul>
+
+<h2>Open parameters (to settle at implementation)</h2>
+<ul>
+  <li><strong>Item count per wire</strong> — how many interior items a wire is divided into.</li>
+  <li><strong>Relaxation cadence</strong> — items relax continuously on their goroutines; the check/step rate and how it's paced against the clock.</li>
+  <li><strong>Peak/valley rule confirmation</strong> — this spec assumes "move to the midpoint of the two neighbors" (Laplacian); the alternative is perpendicular projection onto the neighbor line.</li>
+</ul>
+
+</main>
+</body>
+</html>
