@@ -89,19 +89,6 @@ export function portDir(node: RFNode<NodeData>, portName: string, isInput: boole
   return dir.normalize();
 }
 
-/**
- * World-space port position on the node sphere surface, or node center if no port.
- * Uses the sphere surface point in the direction of the port, so endpoints sit
- * on the sphere rather than at the center.
- */
-export function portWorldPos(node: RFNode<NodeData>, portName: string | null | undefined, isInput: boolean): THREE.Vector3 {
-  const center = nodeWorldPos(node);
-  if (!portName) return center;
-  const dir = portDir(node, portName, isInput);
-  if (!dir) return center;
-  return center.clone().add(dir.multiplyScalar(nodeRadius(node)));
-}
-
 /** World position for the top of the node sphere (center.y + radius). */
 export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   const center = nodeWorldPos(node);
@@ -111,8 +98,8 @@ export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
 
 // The port-to-port curve builder was REMOVED in Phase 3. The port-to-port curve
 // (wire-tube shape) is Go-authoritative now: Go computes the control points and
-// streams them; the renderer draws from Go's points. portWorldPos / portDir above
-// remain — they place the PORT SPHERES (still used by node/port rendering), not the
+// streams them; the renderer draws from Go's points. portDir above
+// remains — it places the PORT SPHERES (still used by node/port rendering), not the
 // wire curve.
 
 // ---------------------------------------------------------------------------

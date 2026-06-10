@@ -17,7 +17,6 @@ import {
   nodeTopWorldPos,
   ndcToPixel,
   portDir,
-  portWorldPos,
 } from "./geometry-helpers";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import type { PickOptions } from "./interaction-controls";
