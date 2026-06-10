@@ -7,71 +7,71 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-09 — task/go-backend-ts-frontend, pushed; Go-authoritative rewrite COMPLETE — 5 phases verified green)
+## State at handoff (2026-06-10 — task/go-backend-ts-frontend, pushed; Go-authoritative rewrite DONE; halted-start lifecycle + handshake WIRING shipped; handshake FIRING pending one decision)
 
-- Active branch: `task/go-backend-ts-frontend`, pushed, tree clean (pre-existing untracked `north-seattle-parks.csv` only — not part of this work). Latest pushed commit: `d729ad62`.
-- **NOTE:** `topology.json` has the git skip-worktree bit SET — editor churn stays out of git. Deliberate changes require `git update-index --no-skip-worktree topology.json` first, then re-set after.
-- **The code now matches MODEL.md.** All 5 spec phases shipped and verified green on this branch. Prior handoffs said "code implements the OLD model" — that is no longer true.
+- Active branch: `task/go-backend-ts-frontend`, pushed. Latest commit `49afda02`. Tree clean except pre-existing untracked `north-seattle-parks.csv` and an untracked `.vscode/settings.json` that appeared during subagent runs (uncommitted — remove if unwanted).
+- **`topology.json` has the git skip-worktree bit SET.** Deliberate edits: `git update-index --no-skip-worktree topology.json` → stage → commit → re-set `--skip-worktree`. Bit is currently SET.
+- The 5-phase Go-authoritative rewrite remains DONE/verified (prior handoff). This session built on top of it.
 
-### What shipped (5 commits)
+### What shipped THIS session (2 commits)
 
-| Commit | Phase | Key change |
-|---|---|---|
-| `b87eb731` | 1 — Clock into Go | Injectable clock (real+fake, pause-aware); each wire times its own delivery at `inFlightTime`; TS `NotifyDelivered` delivery-trigger removed |
-| `e365f030` | 2 — Position stream | Go emits per-frame bead positions (bézier eval factored out of `PortCurveArcLength`); TS plots only; TS position math deleted |
-| `8e4b6532` | 3 — Geometry into Go | Node/edge geometry authoritative in Go; streams curves; in-flight re-derive on edit; delete-mid-flight cancel + `pulse-cancelled` echo; TS renders Go's curve |
-| `47d7c54e` | 4 — Shading into Go | 33 material/glass/env params moved to Go (codegen, like curve-params); TS applies Go params; GPU machinery stays TS; appearance preserved bit-for-bit |
-| `d729ad62` | 5 — Bridge→CRUD + docs | One fire-and-forget `edit` op (create/update/delete/fade) + pause/resume; `notifyDelivered` removed entirely; MODEL.md + CLAUDE.md finalized to the shipped model |
+| Commit | What |
+|---|---|
+| `6e0248ab` | **Halted-start lifecycle.** Go starts with the clock `Halt()`'d; `LoadTopology` still emits geometry, so edges render at editor-open (static diagram) with no Run. `play`/`pause` stdin control messages route to the clock's global gate (`Clock.Halt/Resume`), retiring external SIGSTOP/SIGCONT. Extension spawns Go on the `ready` handshake; the Run button resumes the clock instead of spawning. New `TestHaltedStartGeometryOnlyNoPositions`. |
+| `49afda02` | **Handshake wiring.** Added ports Input `FeedbackIn` (in) + ChainInhibitor `FeedbackOut` (out), both `chain` kind. Wired the 2 missing spec'd edges into `topology.json`: `in08→i0` (forward Init value, existing ports) + `i0→in08` (1/0 feedback, new ports). All 3 spec'd edges now render (Go emits 3 geometry events at load). Ports are geometry-only — NO firing yet; unwired-safe (dead-end channels), no ring deadlock. |
 
-### How it was verified (every phase, confirmed in main session — not just subagent claims)
+### Why (David's correction this session)
 
-- `go build` + `go test -race ./...`
-- All **8 guard scripts**: `check-trace-kind-parity`, `check-message-kind-parity`, `check-no-ts-timers`, `check-slot-phase-boundary`, `check-ts-computes-no-geometry` (new), `check-ts-shading-from-go` (new), `check-no-await-on-bridge` (new), `check-generated`
-- `npx tsc --noEmit`; `vitest` 56/56
-- Per-phase deterministic verifiers: headless cascade, golden position parity, geometry re-derive, shading params, save/load round-trip
+"Edges need to be present in the same way the nodes are present" + "I need all the edges for the nodes as specified in the specs." Two root causes, both fixed:
+1. Edges absent at load → Go spawned only on Run-click. Fixed by halted-start (spawn on open, geometry at load).
+2. Only 1 edge in `topology.json` vs 3 spec'd → wired the 2 missing handshake edges.
 
-Note: IDE/gopls diagnostics went stale after each phase — `go test` is authoritative.
-
-### The settled split (the model — now in code)
+### The settled split (the model — unchanged)
 
 - **Go owns the diagram** — nodes/edges/beads, 3D math (curve control points, arc length, node/port world positions, per-frame bead positions), animations, clock + pulseSpeed, shading params (33 codegen'd), per-wire fade flag.
-- **TS owns the viewpoint** — camera, scene navigation (orbit/pan/zoom), projection, raycast-picking, GPU render. TS keeps r3f/three.js for 3D scene-navigation machinery; control feel bespoke (substance — not a controls library). "TS computes none" means none of the *diagram*; viewpoint math is TS's.
-- **Input split:** navigation input (pointer/wheel for camera) stays TS; only **action input** — CRUD carrying the picked Go id — goes to Go.
-- **Store:** zustand store is a **no-op holder** — Go is the sole writer of its data.
-- **Bridge:** JSONL over stdio; one `edit` op (create/update/delete/fade) + pause/resume; one Go id space; extension host is a dumb pipe.
+- **TS owns the viewpoint** — camera, scene navigation, projection, raycast-picking, GPU render. "TS computes none" means none of the *diagram*; viewpoint math is TS's.
+- **Input split:** navigation input (pointer/wheel) stays TS; only action input (CRUD carrying the picked Go id) goes to Go.
+- **Store:** zustand store is a no-op holder — Go is the sole writer.
+- **Bridge:** JSONL over stdio. Go→TS: trace stream (positions, node events, edge curves, shading params). TS→Go: spec save/load + one `edit` op (create/update/delete/fade) + `play`/`pause` control. Fire-and-forget (`check-no-await-on-bridge.sh`).
 
-### Active experimental network — UNCHANGED
+### Active experimental network — NOW 3 EDGES
 
-`topology.json` holds only `in08` (Input, init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor) + edge `i0ToI1`. `topology.inactive.json` (editor never reads it) holds inactive nodes/edges.
+`topology.json`: nodes `in08` (Input, init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges (3, all `chain`):
+- `in08ToI0`: in08.ToReadGate → i0.FromPrevChainInhibitorNode
+- `i0ToI1`: i0.ToNext0 → i1.FromPrevChainInhibitorNode
+- `i0FeedbackToIn08`: i0.FeedbackOut → in08.FeedbackIn
 
-### ⚠️ WHAT DAVID NEEDS TO CHECK (manual end-checks — deterministic halves already green)
+New ports `in08.FeedbackIn` / `i0.FeedbackOut` exist but are GEOMETRY-ONLY (no firing). `topology.inactive.json` is a DIFFERENT/fuller exploration (ReadGate + InhibitRightGate) — NOT this net's spec.
 
-1. **Live-editor litmus:** open `topology.json` in the editor, Run, confirm pulses animate from Go's position stream. Detach the editor → Go keeps running the net (headless half proven by `TestHeadlessCascadeCompletes`); reattach → it draws what Go is doing.
-2. **Phase-4 pixel fidelity:** confirm nodes / wires / beads / environment look unchanged (shading values moved bit-for-bit, but eyes are the judge).
-3. **Save/load through the VS Code UI** end to end (the file round-trip test is green; the UI path is the manual part).
+### ⚠️ WHAT DAVID NEEDS TO CHECK
+
+1. **Reload the WINDOW** (Developer: Reload Window — NOT reopen-file) → confirm all 3 edges render at load, static, no Run. (Reopen-file reloads only the webview; the extension host — Go-spawn-on-open — reloads only on window reload.)
 
 ### OPEN ITEMS / NEXT
 
-1. **in08↔i0 handshake — still UNBUILT** (separate from this rewrite). `topology.json` still has only the `i0→i1` edge. Needs: new ports (Input feedback-in, ChainInhibitor feedback-out), two wires (`in08→i0`, `i0→in08`), `i0` held init `-1`. Loop specs:
-   - `in08`: read signal on `i0→in08` (1/0); `i = (i + signal) % len(Init)`; send `Init[i]` on `in08→i0`.
-   - `i0`: held init `-1`; if arriving value DIFFERS from held → set held, send `1` to `in08`; else send `0`; forward held to `i1`.
-   - `i1`: ordinary ChainInhibitor; sink (`ToNext` unwired); sends nothing.
-   - Spec'd in spec doc Goroutines tab; none exists in code yet.
-2. **Minor follow-up:** in-flight delivery goroutines wait on a background context (cancelled by Reset/Delete), not the run-ctx — bounded/harmless; tie to run-ctx if you want it tidier.
-3. **Merge:** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` before merging to main; needs explicit sign-off.
+1. **Handshake FIRING — pending; rules pinned; ONE decision open (awaiting David).** Both kinds gain behavior ONLY when the new port is wired (i1 / plain Inputs unchanged):
+   - **i0**: held value, init **−1**; on recv `v`: `v≠held` → set held, send **1** on `FeedbackOut`; else send **0**; always forward held to i1.
+   - **in08**: read `FeedbackIn` `s` → `i=(i+s)%len(Init)` → send `Init[i]` on `ToReadGate`.
+   - **OPEN DECISION — ring startup seed:** in08 reads feedback before sending; i0 sends only after receiving → deadlock at t=0 (handoff loop spec omits the seed). **(B) in08 self-seeds** — emit `Init[0]` once, then read-loop; no extra node; in08 is a source — *assistant's lean*. **(A) dedicated bootstrap Input node** → in08.FeedbackIn (the established ring-seed convention; adds a 4th node). David picks; also confirm i0 held-init −1. Then build firing (conditional-on-wiring for both kinds) + a firing test.
+2. **`requiredInputs` cosmetic:** gen-node-defs auto-lists `FeedbackIn` in `requiredInputs`/`REQUIRED_INPUTS` (dead metadata — required-input enforcement removed 2026-06-01; no consumer). Fix with an optional-port SPEC annotation when firing lands.
+3. **Redesign doc → MAIN (David's request, 2026-06-10):** the branch spec `docs/go-authoritative-clock/index.html` is to ride to MAIN as a permanent "major redesign" doc — a *before* section with diagrams of the previous (TS-driven) clock system, then the new Go-authoritative model. EXCEPTION to the branch-local-docs strip rule. Do AFTER the code fixes.
+4. **Merge:** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` before merge (but KEEP the redesign doc per #3); needs explicit sign-off.
 
 ### Carry-forward facts
 
-- Spec doc `docs/go-authoritative-clock/index.html` is the settled planning record (zero open items, deterministic verifiers); MODEL.md + CLAUDE.md are now the authoritative model.
-- The node-contract principle is deliberately UNPINNED (totality in / no guarantees out; reliability lives in the node, not the channel). Do NOT re-pitch pinning it to MODEL.md/memory.
+- **Two-process editor model (cost hours this session):** VS Code webview and extension host are SEPARATE processes. Reopen-file reloads only the WEBVIEW (`out/webview.js`). The extension host (`out/extension.js` — trace parsing, Go spawn) reloads only on **Developer: Reload Window**. `npm run build` refreshes on-disk bundles but NOT the running host. gopls also goes stale — `go test`/`go run` authoritative. (Also saved to memory `feedback_two_process_editor_reload`.)
+- **Debug doctrine that worked:** probe logs (`.probe/*.jsonl`, unfiltered) over static theory; trace the event hop-by-hop. Three static theories died before runtime evidence settled the "no edges" cause: Go was simply never spawned (editor spawned only on Run-click; now fixed).
+- The node-contract principle stays UNPINNED (totality in / no guarantees out; reliability in the node, not the channel). Do NOT re-pitch pinning it.
+- Spec doc `docs/go-authoritative-clock/index.html` is the settled planning record; MODEL.md + CLAUDE.md are the authoritative model.
 
 ## Dev-loop
 
-- After Go changes: `go build ./...` + `go test -race ./...`; after TS: `npm run build` from `tools/topology-vscode/` (refreshes `out/webview.js`) + `npx tsc --noEmit` + `npx vitest run`; run all 8 guard scripts; `tools/check-generated.sh` after shared `CurveParam*` / `ShadingParam*` / SPEC.md changes.
-- **Concision rule:** keep prose blocks under ~40 words — bullets, tables, or one-line claims only.
-- **Active topology** is `in08`/`i0`/`i1`. `topology.json` is skip-worktree — deliberate edits require clearing the bit first.
+- After Go changes: `go build ./...` + `go test -race ./...`; after TS: `npm run build` from `tools/topology-vscode/` (refreshes `out/webview.js` AND `out/extension.js`) + `npx tsc --noEmit` + `npx vitest run`; run all 8 guard scripts; `tools/check-generated.sh` after shared `CurveParam*`/`ShadingParam*`/SPEC.md/port changes.
+- **To exercise editor changes live:** Developer: Reload Window (reloads the extension host, not just the webview).
+- **Concision rule:** prose blocks under ~40 words — bullets/tables/one-liners.
+- **Active topology** is `in08`/`i0`/`i1` (3 edges). `topology.json` is skip-worktree — clear the bit before deliberate edits, re-set after.
 - Branch hygiene: no merge to main without explicit sign-off. Delete merged branches without re-asking.
-- If user surfaces unrelated friction, log to `docs/planning/visual-editor/session-log.md` and open a fresh `task/<short-kebab>`.
+- Unrelated friction → log to `docs/planning/visual-editor/session-log.md`, open a fresh `task/<short-kebab>`.
 
 ## ALWAYS clause
 
