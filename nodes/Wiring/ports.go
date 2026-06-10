@@ -115,6 +115,17 @@ func (i *In) SimLatencyMs() float64 {
 	return i.pw.MaxIncomingSimLatencyMs
 }
 
+// Wired reports whether this In port is bound to a real edge (paced-wire
+// mode). Returns false for a nil In or a dead-end chan port (unwired).
+// Nodes gate optional feedback receives on Wired() so unwired ports are never
+// read.
+func (i *In) Wired() bool {
+	if i == nil {
+		return false
+	}
+	return i.pw != nil
+}
+
 // Breadcrumb emits a trace breadcrumb on the input port's wire identity (target
 // node + handle). Used by windowed nodes for the window_clear breadcrumb.
 func (i *In) Breadcrumb(event, detail string) {
@@ -265,6 +276,17 @@ func (o *Out) TryEmit(v int) bool {
 	default:
 		return false
 	}
+}
+
+// Wired reports whether this Out port is bound to a real edge (paced-wire
+// mode). Returns false for a nil Out or a dead-end chan port (unwired).
+// Nodes gate optional feedback sends on Wired() so unwired ports are never
+// written.
+func (o *Out) Wired() bool {
+	if o == nil {
+		return false
+	}
+	return o.pw != nil
 }
 
 // InFlight reports whether a bead is currently traversing the underlying wire.
