@@ -8,7 +8,7 @@ read this file first (no chat history needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-10 — task/go-backend-ts-frontend, pushed; handshake FIRING shipped + verified live; redesign doc hardened; per-goroutine GEOMETRY is the next substrate step, awaiting David's go)
+## State at handoff (2026-06-10 — task/go-backend-ts-frontend, pushed; handshake FIRING shipped + verified live; redesign doc demoted to branch-local scratch; per-goroutine GEOMETRY is next, verified by file confirmations)
 
 - Active branch: `task/go-backend-ts-frontend`, pushed. Latest commit `ad438591`. Tree clean except pre-existing untracked `north-seattle-parks.csv` and `.vscode/settings.json`.
 - **`topology.json` has git skip-worktree SET.** Deliberate edits: `git update-index --no-skip-worktree topology.json` → stage → commit → re-set. No topology.json change this session.
@@ -56,9 +56,9 @@ Go owns the diagram (nodes/edges/beads, 3D math, clock+pulseSpeed, shading, fade
 1. **Per-goroutine GEOMETRY emission — next substrate step (stated, awaiting David's go).** Problem: Go never emits node/port world positions, so TS recomputes them for viewpoint work — LIVE helpers `nodeWorldPos` (camera pivot), `portDir` (port spheres), `boundingBox` (camera-fit), `nodeTopWorldPos` (labels). Per David's model + the doc's "delete TS duplicates" intent:
    - **NEXT SINGLE STEP:** each node's goroutine emits its node + port world positions/dirs as a NEW trace event (Go→TS), wired with trace-kind parity (`check-trace-kind-parity`; Go trace-kinds ↔ TS `trace-kinds.ts`). Then TS camera/label/port code reads Go's positions; the 4 helpers collapse to thin readers or go away.
    - **After that (state each as a single step, do NOT dump a multi-step plan):** move the central edge-curve emitter (`loader.go`) into per-goroutine emission; route node-move (`stdin_reader` → `NodeMoveRegistry`) to the owning node goroutine ("TS sends things the goroutine picks up").
+   - **Geometry progress verified by FILE CONFIRMATIONS against code** (grep-backed one-liners: caller counts, emit site file:line). Authoritative sources = MODEL.md + CLAUDE.md + the code. The HTML doc (`docs/go-authoritative-clock/index.html`) is branch-local scratch — not kept in sync, stripped at merge.
 2. **`requiredInputs` cosmetic** (open): gen-node-defs auto-lists `FeedbackIn` in requiredInputs/REQUIRED_INPUTS (dead metadata, no consumer). Fix with an optional-port SPEC annotation.
-3. **Redesign doc → MAIN** (standing request): `docs/go-authoritative-clock/index.html` rides to MAIN as the permanent "major redesign" doc — EXCEPTION to the branch-local strip rule. Do after the geometry work.
-4. **Merge:** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` (KEEP the redesign doc per #3); needs explicit sign-off.
+3. **Merge:** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` (redesign doc is branch-local, no exceptions); needs explicit sign-off.
 
 ### Carry-forward facts
 
@@ -66,7 +66,7 @@ Go owns the diagram (nodes/edges/beads, 3D math, clock+pulseSpeed, shading, fade
 - **Per-goroutine bridge:** each goroutine sends to TS / picks up TS input; avoid central emitters/handlers. Saved to memory `feedback_per_goroutine_bridge`.
 - **Two-process editor:** reopen-file reloads only the webview; **Developer: Reload Window** reloads the extension host (Go spawn). gopls goes stale — `go test`/`go run` authoritative.
 - **Node contract:** nodes do local work + drive outputs; no TCP-handshake/ack-nack/send-gating.
-- MODEL.md + CLAUDE.md are the authoritative model; `docs/go-authoritative-clock/index.html` is the settled planning record.
+- MODEL.md + CLAUDE.md are the authoritative model. `docs/go-authoritative-clock/index.html` is branch-local scratch — it drifts (e.g. listed deleted `portWorldPos` as live), stripped at merge, not hand-maintained.
 
 ### Dev-loop
 
