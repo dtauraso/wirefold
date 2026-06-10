@@ -23,12 +23,19 @@ sees — the chain reads as one continuous run, no gaps.
   at B's input port. That far-end/in-port coincidence is the **seam** — one shared
   point, not a gap.
 
+## Wire shape
+
+The wire is a **straight line** between the two ports. There is no curve math and no
+length minimization — the segment is simply the straight connection from the source
+output port to the destination input port. When either endpoint moves, the segment is
+redrawn straight between the new endpoints.
+
 ## Ownership (the whole point of the chain)
 
-- **Wire geometry** — the quadratic-bezier control points (P0/P1/P2), arc length, and
-  the rendered tube — belongs to the **source link** (A). A emits one geometry event
-  per outgoing wire on startup. (Already true: the per-goroutine edge-curve emit makes
-  the source node emit its outgoing curves.)
+- **Wire geometry** — a **straight line segment** from A's output port to B's input
+  port (no curve, no control points), plus its length — belongs to the **source link**
+  (A). A emits one geometry event per outgoing wire on startup. (Already true: the
+  per-goroutine edge-curve emit makes the source node emit its outgoing wires.)
 - **Bead delivery slot + timing** at the far end belongs to the **destination** (B's
   input port owns the `PacedWire` slot; fan-in-safe). A bead is emitted by A, travels
   A's wire, and lands in B's slot.
