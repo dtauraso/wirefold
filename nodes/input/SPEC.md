@@ -31,10 +31,10 @@
 
 ## Ports
 
-| Name | Direction | EdgeKind | Notes |
-|------|-----------|----------|-------|
-| ToReadGate | out | chain | forwards init values to the read gate |
-| FeedbackIn | in | chain | receives feedback signal (1/0) from downstream; geometry-only at this phase |
+| Name | Direction | EdgeKind | Optional | Notes |
+|------|-----------|----------|----------|-------|
+| ToReadGate | out | chain |  | forwards init values to the read gate |
+| FeedbackIn | in | chain | yes | receives feedback signal (1/0) from downstream; geometry-only at this phase |
 
 ## Open questions
 

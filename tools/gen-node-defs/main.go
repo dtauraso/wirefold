@@ -31,6 +31,7 @@ type port struct {
 	accent    string // optional hex color from SPEC.md
 	edgeKind  string // optional edge kind from SPEC.md Ports table EdgeKind column
 	isMulti   bool   // true when the Go type is Wiring.OutMulti
+	optional  bool   // true when SPEC.md Ports table marks this port Optional=yes
 }
 
 // dataField represents a wire:"data.*" tagged struct field.
@@ -109,7 +110,7 @@ func main() {
 		if err != nil {
 			fatalf("parse go kind name %s: %v", e.Name(), err)
 		}
-		view, accentOverrides, edgeKindOverrides, err := parseSpecMD(pkgDir)
+		view, accentOverrides, edgeKindOverrides, optionalPorts, err := parseSpecMD(pkgDir)
 		if err != nil {
 			// SPEC.md missing or no View section — skip this kind.
 			continue
@@ -117,13 +118,16 @@ func main() {
 		if view.kind == "" {
 			continue
 		}
-		// Apply accent and edgeKind overrides from SPEC.md Ports table.
+		// Apply accent, edgeKind overrides, and optional flags from SPEC.md Ports table.
 		for i, p := range ports {
 			if a, ok := accentOverrides[p.id]; ok && a != "" {
 				ports[i].accent = a
 			}
 			if ek, ok := edgeKindOverrides[p.id]; ok && ek != "" {
 				ports[i].edgeKind = ek
+			}
+			if optionalPorts[p.id] {
+				ports[i].optional = true
 			}
 		}
 		defaultData := parseDefaultData(pkgDir)
@@ -329,12 +333,12 @@ func chanDirection(expr ast.Expr) (string, bool) {
 }
 
 // parseSpecMD reads SPEC.md in pkgDir and returns the view definition,
-// a map of port-name → accent override, and a map of port-name → edgeKind
-// from the Ports table.
-func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, error) {
+// a map of port-name → accent override, a map of port-name → edgeKind,
+// and a set of optional port names from the Ports table.
+func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, map[string]bool, error) {
 	data, err := os.ReadFile(filepath.Join(pkgDir, "SPEC.md"))
 	if err != nil {
-		return viewDef{}, nil, nil, err
+		return viewDef{}, nil, nil, nil, err
 	}
 	lines := strings.Split(string(data), "\n")
 
@@ -413,13 +417,13 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 	// Parse View section.
 	viewLines := sectionLines("View")
 	if viewLines == nil {
-		return viewDef{}, nil, nil, fmt.Errorf("no View section")
+		return viewDef{}, nil, nil, nil, fmt.Errorf("no View section")
 	}
 	headers, rows := parseTable(viewLines)
 	fieldIdx := indexOf(headers, "Field")
 	valueIdx := indexOf(headers, "Value")
 	if fieldIdx == -1 || valueIdx == -1 {
-		return viewDef{}, nil, nil, fmt.Errorf("View table missing Field/Value columns")
+		return viewDef{}, nil, nil, nil, fmt.Errorf("View table missing Field/Value columns")
 	}
 	vmap := map[string]string{}
 	for _, row := range rows {
@@ -444,15 +448,17 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 		height:       vmap["height"],
 	}
 
-	// Parse Ports section for accent and edgeKind overrides.
+	// Parse Ports section for accent, edgeKind overrides, and optional flags.
 	accentOverrides := map[string]string{}
 	edgeKindOverrides := map[string]string{}
+	optionalPorts := map[string]bool{}
 	portsLines := sectionLines("Ports")
 	if portsLines != nil {
 		headers, rows := parseTable(portsLines)
 		nameIdx := indexOf(headers, "Name")
 		accentIdx := indexOf(headers, "Accent")
 		edgeKindIdx := indexOf(headers, "EdgeKind")
+		optionalIdx := indexOf(headers, "Optional")
 		for _, row := range rows {
 			if nameIdx >= len(row) {
 				continue
@@ -467,10 +473,13 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 			if edgeKindIdx != -1 && edgeKindIdx < len(row) && row[edgeKindIdx] != "" {
 				edgeKindOverrides[name] = row[edgeKindIdx]
 			}
+			if optionalIdx != -1 && optionalIdx < len(row) && row[optionalIdx] == "yes" {
+				optionalPorts[name] = true
+			}
 		}
 	}
 
-	return view, accentOverrides, edgeKindOverrides, nil
+	return view, accentOverrides, edgeKindOverrides, optionalPorts, nil
 }
 
 // parseDefaultData reads nodes/<Kind>/SPEC.md and returns the JSON string from
@@ -579,15 +588,22 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprint(w, `};`, "\n")
 	fmt.Fprintln(w)
 	// Emit REQUIRED_INPUTS keyed by PascalCase Go kind name.
-	fmt.Fprintln(w, `// Required input port names per Go kind. Derived from *Wiring.In fields.`)
+	// Optional ports (SPEC.md Optional=yes) are excluded.
+	fmt.Fprintln(w, `// Required input port names per Go kind. Derived from *Wiring.In fields (optional ports excluded).`)
 	fmt.Fprintln(w, `export const REQUIRED_INPUTS: Record<string, string[]> = {`)
 	for _, e := range kinds {
 		ins := filterPorts(e.ports, "in")
-		if len(ins) == 0 {
+		var reqIns []port
+		for _, p := range ins {
+			if !p.optional {
+				reqIns = append(reqIns, p)
+			}
+		}
+		if len(reqIns) == 0 {
 			continue
 		}
 		var names []string
-		for _, p := range ins {
+		for _, p := range reqIns {
 			names = append(names, fmt.Sprintf(`"%s"`, p.id))
 		}
 		fmt.Fprintf(w, "  %-20s [%s],\n", `"`+e.goKind+`":`, strings.Join(names, ", "))
@@ -657,9 +673,15 @@ func buildDef(v viewDef, ports []port, defaultData string) string {
 	if defaultData != "" {
 		fields = append(fields, fmt.Sprintf(`defaultData: %s`, defaultData))
 	}
-	if len(targets) > 0 {
+	var reqTargets []port
+	for _, p := range targets {
+		if !p.optional {
+			reqTargets = append(reqTargets, p)
+		}
+	}
+	if len(reqTargets) > 0 {
 		var reqNames []string
-		for _, p := range targets {
+		for _, p := range reqTargets {
 			reqNames = append(reqNames, fmt.Sprintf(`"%s"`, p.id))
 		}
 		fields = append(fields, fmt.Sprintf(`requiredInputs: [%s]`, strings.Join(reqNames, ", ")))
