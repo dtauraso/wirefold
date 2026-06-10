@@ -38,13 +38,24 @@ const (
 	// carrying the bead's evaluated 3-D position so the renderer plots it without
 	// computing geometry itself.
 	KindPosition       = "position"
+	// KindGeometry carries an edge's authoritative quadratic-bezier control points
+	// (Phase 3). Go owns node positions + per-edge curves; it emits one geometry
+	// event per edge on load and again whenever a node-move re-derives that edge's
+	// curve, so the renderer draws the wire tube from Go's control points and
+	// computes no geometry of its own. Keyed by edge label (== the TS edge id).
+	KindGeometry       = "geometry"
+	// KindPulseCancelled tells the renderer to remove an in-flight bead's sprite
+	// (Phase 3). Go emits it when a wire drops a bead mid-flight (edge deleted while
+	// the bead was traversing). Keyed by the bead's SOURCE node+port — the same
+	// routing key as send/position — so the renderer drops the sprite by source.
+	KindPulseCancelled = "pulse-cancelled"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled}
 
 type Event struct {
 	Step      int    `json:"step"`
@@ -71,6 +82,13 @@ type Event struct {
 	// position from an unset one so marshalEvent always emits all three.
 	X, Y, Z float64
 	hasPos  bool
+	// P0/P1/P2 control points carry an edge's authoritative quadratic-bezier curve
+	// on geometry events (KindGeometry): P0 = source OUT-port world pos, P1 = bulge
+	// control point, P2 = dest IN-port world pos. Go owns these; the renderer draws
+	// the wire tube from them. Set on geometry events only (keyed by Edge).
+	P0X, P0Y, P0Z float64
+	P1X, P1Y, P1Z float64
+	P2X, P2Y, P2Z float64
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -182,6 +200,33 @@ func (t *Trace) Position(node, port string, value int, x, y, z float64) {
 		return
 	}
 	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, hasValue: true, X: x, Y: y, Z: z, hasPos: true}
+}
+
+// Geometry emits an edge's authoritative quadratic-bezier control points (Phase 3),
+// keyed by edge label (== the TS edge id). p0 is the source OUT-port world pos, p1
+// the bulge control point, p2 the dest IN-port world pos. Go emits this on load and
+// on each node-move that re-derives the edge's curve; the renderer draws the wire
+// tube from these and computes no geometry.
+func (t *Trace) Geometry(edge string, p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z float64) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{
+		Kind: KindGeometry, Edge: edge,
+		P0X: p0x, P0Y: p0y, P0Z: p0z,
+		P1X: p1x, P1Y: p1y, P1Z: p1z,
+		P2X: p2x, P2Y: p2y, P2Z: p2z,
+	}
+}
+
+// PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
+// keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
+// emits it when a wire drops a bead mid-flight (edge deleted during traversal).
+func (t *Trace) PulseCancelled(node, port string, value int) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value, hasValue: true}
 }
 
 // Breadcrumb writes a free-form diagnostic line directly to the sink
@@ -352,6 +397,27 @@ func marshalEvent(e Event) ([]byte, error) {
 		Y     float64 `json:"y"`
 		Z     float64 `json:"z"`
 	}
+	type geometry struct {
+		Step int     `json:"step"`
+		Kind string  `json:"kind"`
+		Edge string  `json:"edge"`
+		P0X  float64 `json:"p0x"`
+		P0Y  float64 `json:"p0y"`
+		P0Z  float64 `json:"p0z"`
+		P1X  float64 `json:"p1x"`
+		P1Y  float64 `json:"p1y"`
+		P1Z  float64 `json:"p1z"`
+		P2X  float64 `json:"p2x"`
+		P2Y  float64 `json:"p2y"`
+		P2Z  float64 `json:"p2z"`
+	}
+	type pulseCancelled struct {
+		Step  int    `json:"step"`
+		Kind  string `json:"kind"`
+		Node  string `json:"node"`
+		Port  string `json:"port"`
+		Value int    `json:"value"`
+	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
@@ -365,6 +431,14 @@ func marshalEvent(e Event) ([]byte, error) {
 	case KindPosition:
 		// All three coordinates always emitted (0,0,0 is a valid position).
 		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
+	case KindGeometry:
+		// All nine control-point coordinates always emitted (0 is valid).
+		return json.Marshal(geometry{Step: e.Step, Kind: e.Kind, Edge: e.Edge,
+			P0X: e.P0X, P0Y: e.P0Y, P0Z: e.P0Z,
+			P1X: e.P1X, P1Y: e.P1Y, P1Z: e.P1Z,
+			P2X: e.P2X, P2Y: e.P2Y, P2Z: e.P2Z})
+	case KindPulseCancelled:
+		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

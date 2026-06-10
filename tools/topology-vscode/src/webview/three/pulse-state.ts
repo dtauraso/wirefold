@@ -13,9 +13,9 @@
 //   pos is the latest Go-supplied world position, or null until the first
 //   position event arrives (PulseBead stays hidden while pos is null).
 //
-// Also houses the edge-curve store (bottom of file) used for wire-tube geometry.
+// The wire-tube curve is NOT here: it is Go-authoritative and lives in
+// edge-geometry.ts (Phase 3), written by pump.ts from Go's geometry stream.
 
-import * as THREE from "three";
 import { postLog } from "../log/post";
 
 export interface PulseData {
@@ -69,23 +69,7 @@ export function getPulseMap(): PulseMap {
   return _current;
 }
 
-// ---------------------------------------------------------------------------
-// Edge curve store — non-React, keyed by edgeId.
-// Populated synchronously in moveNode + on load/createEdge so PulseBead
-// always reads the up-to-date curve in the same useFrame tick.
-// ---------------------------------------------------------------------------
-
-const _curveMap: Map<string, THREE.QuadraticBezierCurve3> = new Map();
-
-export function getCurve(edgeId: string): THREE.QuadraticBezierCurve3 | undefined {
-  return _curveMap.get(edgeId);
-}
-
-export function setCurve(edgeId: string, curve: THREE.QuadraticBezierCurve3): void {
-  _curveMap.set(edgeId, curve);
-}
-
-export function deleteCurve(edgeId: string): void {
-  _curveMap.delete(edgeId);
-}
+// The former non-React edge-curve cache (TS-built) was removed in Phase 3: the edge
+// curve is Go-authoritative and lives in edge-geometry.ts, written by pump.ts from
+// Go's geometry stream. This file holds bead positions only.
 

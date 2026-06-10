@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# check-ts-computes-no-geometry.sh — Phase 2 guard.
+# check-ts-computes-no-geometry.sh — Phase 2 + Phase 3 guard.
 #
-# Asserts the TS webview computes NO bead position/geometry: Go owns the clock,
-# computes every bead position, and streams it; TS plots only (MODEL.md). This
-# guard fails if the deleted position math returns:
+# Asserts the TS webview computes NO geometry at all: Go owns the clock, computes
+# every bead position AND every edge curve, and streams both; TS plots/draws only
+# (MODEL.md). This guard fails if the deleted math returns:
 #
 #   - PulseBead's per-frame curve sampling: getPointAt        (scene-content.tsx)
 #   - per-bead arc-length for position:     rfArcLength        (geometry-helpers.ts)
 #   - per-bead travel-time re-derive:       arcLengthToSimLatencyMs
 #   - moveNode in-flight bead progress patch: patchPulse
+#   - the edge-curve (wire-tube shape) builders, Phase 3:
+#       buildPortCurve / buildEdgeCurve     (geometry-helpers.ts)
 #
 # Scope: the webview source tree (excludes node_modules / out / generated). Each
 # forbidden token is reported with file:line if found. Exit 0 when clean.
 #
-# Note on what is INTENTIONALLY allowed: buildPortCurve / buildEdgeCurve build the
-# drawn WIRE-TUBE geometry (the wire's shape), not a bead position, so they are not
-# matched here. The bead reads its position from Go's stream (pulse.pos).
+# Note on what is still allowed: portWorldPos / portDir / nodeWorldPos / nodeRadius
+# place the node + PORT SPHERES (and project labels), not the wire curve or a bead
+# position. The wire tube reads Go's streamed control points (edge-geometry store);
+# the bead reads Go's streamed position (pulse.pos).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -32,6 +35,8 @@ FORBIDDEN=(
   "rfArcLength"
   "arcLengthToSimLatencyMs"
   "patchPulse"
+  "buildPortCurve"
+  "buildEdgeCurve"
 )
 
 HITS=0

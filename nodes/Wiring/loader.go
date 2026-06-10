@@ -202,10 +202,17 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
-		edgeCurves[e.Label] = curveBetweenPorts(
+		curve := curveBetweenPorts(
 			nodeGeoms[e.Source], e.SourceHandle,
 			nodeGeoms[e.Target], e.TargetHandle,
 		)
+		edgeCurves[e.Label] = curve
+		// Phase 3: stream this edge's authoritative curve so the renderer draws the
+		// wire tube from Go's control points (keyed by edge label == TS edge id).
+		tr.Geometry(e.Label,
+			curve.P0.X, curve.P0.Y, curve.P0.Z,
+			curve.P1.X, curve.P1.Y, curve.P1.Z,
+			curve.P2.X, curve.P2.Y, curve.P2.Z)
 		pw, exists := destWire[destKey]
 		if !exists {
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
@@ -227,9 +234,11 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 	}
 
 	// Build NodeMoveRegistry from initial geometry and edge endpoints. The
-	// registry recomputes port-to-port arc length on node-move, so it needs the
-	// full per-node geometry (kind/dims/ports), not just position.
+	// registry recomputes port-to-port curve + arc length on node-move, so it needs
+	// the full per-node geometry (kind/dims/ports), not just position. The trace lets
+	// it stream the re-derived curve (KindGeometry) on each move.
 	nmr := NewNodeMoveRegistry(nodeGeoms, edgeEndpoints)
+	nmr.SetTrace(tr)
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}

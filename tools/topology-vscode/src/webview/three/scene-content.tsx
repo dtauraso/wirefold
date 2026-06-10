@@ -18,8 +18,8 @@ import {
   ndcToPixel,
   portDir,
   portWorldPos,
-  buildPortCurve,
 } from "./geometry-helpers";
+import { useEdgeGeometryStore } from "./edge-geometry";
 import type { PickOptions } from "./interaction-controls";
 
 // ---------------------------------------------------------------------------
@@ -386,15 +386,26 @@ export function PulseBead({
   );
 }
 
-export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle, targetHandle }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean; sourceHandle?: string | null; targetHandle?: string | null }) {
-  // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
-  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}:${sourceHandle ?? ""}:${targetHandle ?? ""}`;
-  const { tubeGeo, haloGeo } = useMemo(() => {
-    // Port-to-port curve via shared helper — identical curve to what PulseBead samples.
-    const portCurve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
+export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
+  // Go is the authoritative holder of this edge's curve (Phase 3, MODEL.md). It
+  // streams the control points (geometry trace) on load and on every node-move;
+  // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's
+  // control points and draw the tube from them — TS computes no geometry.
+  const curve = useEdgeGeometryStore((s) => s.curves[edgeId]);
 
-    // Sample the port-to-port bezier directly — endpoints are already on sphere surfaces,
-    // so no t0/t1 surface-trim needed.
+  // Stable key over Go's streamed control points — rebuild the tube only when they
+  // change (e.g. a drag re-streams them).
+  const p0key = curve
+    ? `${curve.p0.x},${curve.p0.y},${curve.p0.z}:${curve.p1.x},${curve.p1.y},${curve.p1.z}:${curve.p2.x},${curve.p2.y},${curve.p2.z}`
+    : "";
+  const { tubeGeo, haloGeo } = useMemo(() => {
+    if (!curve) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
+    const p0 = new THREE.Vector3(curve.p0.x, curve.p0.y, curve.p0.z);
+    const p1 = new THREE.Vector3(curve.p1.x, curve.p1.y, curve.p1.z);
+    const p2 = new THREE.Vector3(curve.p2.x, curve.p2.y, curve.p2.z);
+    const portCurve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
+
+    // Sample the Go-streamed bezier — endpoints are already on sphere surfaces.
     const TUBE_RENDER_SAMPLES = 25;
     const visiblePts = portCurve.getPoints(TUBE_RENDER_SAMPLES);
     const tubeCurve = new THREE.CatmullRomCurve3(visiblePts);
@@ -405,6 +416,11 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle
     return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p0key]);
+
+  // Until Go streams this edge's curve, draw nothing (geometry arrives on load).
+  if (!tubeGeo || !haloGeo) {
+    return <>{!faded && <PulseBead edgeId={edgeId} />}</>;
+  }
 
   return (
     <>
@@ -449,10 +465,12 @@ export function GraphEdges({
   return (
     <>
       {edges.map((e) => {
+        // Endpoints still gate rendering (a dangling edge with a missing node draws
+        // nothing), but the tube SHAPE comes from Go's streamed curve, not from these.
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} sourceHandle={e.sourceHandle ?? e.data?.sourceHandle ?? null} targetHandle={e.targetHandle ?? e.data?.targetHandle ?? null} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} />;
       })}
     </>
   );

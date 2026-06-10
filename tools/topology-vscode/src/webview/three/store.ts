@@ -11,8 +11,8 @@ import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 import { vscode } from "../vscode-api";
-import { clearPulse, setCurve } from "./pulse-state";
-import { buildEdgeCurve } from "./geometry-helpers";
+import { clearPulse } from "./pulse-state";
+import { useEdgeGeometryStore } from "./edge-geometry";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
 
@@ -90,14 +90,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         fadeEdgeOrder,
       });
       setSpecMeta(spec);
-      // Populate curve store synchronously after load so PulseBead can read
-      // curves before the first React commit completes.
-      const nodeMapForLoad = new Map(nodes.map((n) => [n.id, n]));
-      for (const edge of edges) {
-        const s = nodeMapForLoad.get(edge.source);
-        const t = nodeMapForLoad.get(edge.target);
-        if (s && t) setCurve(edge.id, buildEdgeCurve(s, t));
-      }
+      // Phase 3: TS computes NO edge geometry. Go holds node positions + per-edge
+      // control points and streams them (geometry trace) on load and on every move;
+      // SingleEdgeTube draws the tube from the edge-geometry store. The store no
+      // longer builds curves here.
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
       console.error("[ThreeStore] load failed", err);
@@ -126,10 +122,9 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     }
     const nextEdges = [...edges, result.newEdge];
     set({ edges: nextEdges });
-    // Populate curve store for the new edge synchronously.
-    const srcNode = nodes.find((n) => n.id === sourceId);
-    const tgtNode = nodes.find((n) => n.id === targetId);
-    if (srcNode && tgtNode) setCurve(result.id, buildEdgeCurve(srcNode, tgtNode));
+    // Phase 3: TS computes no geometry. Go is the authoritative curve holder and
+    // streams the edge's control points; the tube renders from Go's stream once Go
+    // knows the edge (on its next load/run). No TS-built curve here.
     // Tell Go to un-silence this wire so it carries pulses again (mirrors deleteEdge).
     postLog("addEdge-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
     vscode.postMessage({
@@ -159,28 +154,24 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const nextEdges = edges.filter((ed) => ed.id !== id);
     set({ edges: nextEdges });
     clearPulse(id);
+    // Drop Go's streamed curve for this edge so no stale tube can draw.
+    useEdgeGeometryStore.getState().removeEdgeCurve(id);
     scheduleSave();
   },
 
   moveNode(id, x, y) {
-    const { nodes, edges } = get();
+    const { nodes } = get();
     const nextNodes = nodes.map((n) =>
       n.id === id ? { ...n, position: { x, y } } : n,
     );
     set({ nodes: nextNodes });
 
-    // Phase 2: TS computes NO bead geometry. Go owns the curve + clock and
-    // re-streams the bead's position; the in-flight bead's travel-time is NOT
-    // re-derived here (the old per-bead arc-length + latency + startTime patch is
-    // gone). We only refresh the wire-tube curve cache for affected edges so the
-    // drawn tube tracks the drag. (Phase 3 moves even this into Go.)
-    for (const edge of edges) {
-      if (edge.source !== id && edge.target !== id) continue;
-      const srcNode = nextNodes.find((n) => n.id === edge.source);
-      const tgtNode = nextNodes.find((n) => n.id === edge.target);
-      if (!srcNode || !tgtNode) continue;
-      setCurve(edge.id, buildEdgeCurve(srcNode, tgtNode));
-    }
+    // Phase 3: TS computes NO geometry. Updating the node position here only moves
+    // the node/port SPHERES + labels. The wire-tube curve is Go-authoritative: the
+    // node-move IPC (sent from interaction-controls) drives Go to re-derive every
+    // affected edge's control points and STREAM them back (geometry trace), and the
+    // in-flight bead's remaining travel re-derives on Go's one clock. SingleEdgeTube
+    // redraws the tube from that stream — no TS curve build, no per-bead patch.
   },
 
   saveSpec() {

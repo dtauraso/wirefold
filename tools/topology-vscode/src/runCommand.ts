@@ -3,15 +3,25 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
+import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
 
 export type { RunStatus };
+
+// Set of every trace-event kind Go can emit, sourced from the GENERATED
+// TRACE_EVENT_KINDS (Trace/Trace.go is the single source of truth). Using it here
+// keeps the stdout filter from drifting when a kind is added — a new kind flows to
+// the pump automatically instead of being silently dropped by a hardcoded list.
+const TRACE_EVENT_KIND_SET: ReadonlySet<string> = new Set(TRACE_EVENT_KINDS);
 
 // Go stdout relay: trace events are written to .probe/go.jsonl with a
 // shared envelope { ts_ms, src:"go", step?, ...ev }. Errors (stderr,
 // non-zero exit, spawn failure) are written to .probe/go-errors.jsonl.
 //
-// isTraceEvent: a stdout line is a trace event when it's valid JSON
-// and has both `step` (number) and `kind` ("recv"|"fire"|"send") fields.
+// tryParseTraceEvent: a stdout line is a trace event when it's valid JSON with a
+// numeric `step` and a `kind` in the generated TRACE_EVENT_KINDS set. Validating
+// against the generated set (not a hardcoded literal list) means every Go kind —
+// recv/fire/send/done/position/geometry/pulse-cancelled and any future addition —
+// is recognized and forwarded to the pump without per-kind edits here.
 function tryParseTraceEvent(line: string): TraceEvent | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
@@ -19,7 +29,8 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
     if (
       typeof obj === "object" && obj !== null &&
       typeof obj.step === "number" &&
-      (obj.kind === "recv" || obj.kind === "fire" || obj.kind === "send" || obj.kind === "done")
+      typeof obj.kind === "string" &&
+      TRACE_EVENT_KIND_SET.has(obj.kind)
     ) {
       return obj as TraceEvent;
     }

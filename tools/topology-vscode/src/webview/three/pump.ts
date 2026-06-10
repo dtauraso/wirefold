@@ -29,6 +29,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
+import { useEdgeGeometryStore } from "./edge-geometry";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -81,6 +82,33 @@ export function handleTraceEvent(event: TraceEvent): void {
       );
       for (const edge of matched) {
         setPulsePos(edge.id, x, y, z);
+      }
+      return;
+    }
+    case "geometry": {
+      // Go's authoritative edge curve (Phase 3). Keyed by edge id (== Go edge
+      // label); store the control points so SingleEdgeTube draws the wire tube from
+      // them. TS computes no geometry — this is the sole source of tube shape.
+      const { edge, p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z } = event as Extract<TraceEvent, { kind: "geometry" }>;
+      useEdgeGeometryStore.getState().setEdgeCurve(edge, {
+        p0: { x: p0x, y: p0y, z: p0z },
+        p1: { x: p1x, y: p1y, z: p1z },
+        p2: { x: p2x, y: p2y, z: p2z },
+      });
+      return;
+    }
+    case "pulse-cancelled": {
+      // Go dropped an in-flight bead (edge deleted mid-flight, Phase 3). Match ALL
+      // edges by source node id + sourceHandle (fan-out, same key as send/position)
+      // and remove the bead sprite. The edge itself may already be gone from the
+      // store (deleteEdge removes it locally); clearPulse is a safe no-op then.
+      const { node, port } = event as Extract<TraceEvent, { kind: "pulse-cancelled" }>;
+      const edges = useThreeStore.getState().edges;
+      const matched = edges.filter(
+        (e) => e.source === node && e.sourceHandle === port,
+      );
+      for (const edge of matched) {
+        clearPulse(edge.id);
       }
       return;
     }
