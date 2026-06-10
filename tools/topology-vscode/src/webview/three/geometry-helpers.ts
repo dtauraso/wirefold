@@ -10,6 +10,14 @@ import {
   CURVE_PARAM_SLOT_PCT1,
   CURVE_PARAM_SLOT_PCT2,
 } from "../../schema/curve-params";
+import { getNodeGeometry } from "./node-geometry";
+
+// Node/port positions are Go-authoritative: Go streams a node-geometry event per
+// node (center + per-port world pos/dir) into useNodeGeometryStore, and these
+// helpers READ that store. The local compute below is the pre-emit FALLBACK only —
+// used when a node id is not yet in the store (startup race before the first emit).
+// Go's nodeWorldPos / portDir mirror this fallback line-for-line (same RF y-down →
+// Three y-up frame), so reading the store does not change the coordinate frame.
 
 // ---------------------------------------------------------------------------
 // Edge curve — REMOVED in Phase 3.
@@ -30,22 +38,32 @@ export function nodeRadius(node: RFNode<NodeData>): number {
   return Math.min((node.data?.width ?? NODE_DIM_FALLBACK.width), (node.data?.height ?? NODE_DIM_FALLBACK.height)) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
 }
 
+/**
+ * AABB over node centers (Three y-up world frame). Reads each node's Go-emitted
+ * center from the store; falls back to local compute for any node not yet emitted.
+ */
 export function boundingBox(nodes: RFNode<NodeData>[]) {
   if (nodes.length === 0) return { minX: -200, maxX: 200, minY: -200, maxY: 200 };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const n of nodes) {
-    const w = (n.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
-    const h = (n.data?.height ?? NODE_DIM_FALLBACK.height) / 2;
-    minX = Math.min(minX, n.position.x - w);
-    maxX = Math.max(maxX, n.position.x + w);
-    minY = Math.min(minY, n.position.y - h);
-    maxY = Math.max(maxY, n.position.y + h);
+    const c = nodeWorldPos(n);
+    minX = Math.min(minX, c.x);
+    maxX = Math.max(maxX, c.x);
+    minY = Math.min(minY, c.y);
+    maxY = Math.max(maxY, c.y);
   }
   return { minX, maxX, minY, maxY };
 }
 
-/** World position for a node center (RF y-down → Three y-up). */
+/** World position for a node center — reads Go's emitted center, falls back to local compute. */
 export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
+  const g = getNodeGeometry(node.id);
+  if (g) return new THREE.Vector3(g.center.x, g.center.y, g.center.z);
+  return nodeWorldPosLocal(node);
+}
+
+/** FALLBACK: local node-center compute (RF y-down → Three y-up). Used pre-emit only. */
+function nodeWorldPosLocal(node: RFNode<NodeData>): THREE.Vector3 {
   const x = node.position.x + (node.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
   const y = -(node.position.y + (node.data?.height ?? NODE_DIM_FALLBACK.height) / 2);
   return new THREE.Vector3(x, y, 0);
@@ -62,6 +80,21 @@ const SLOT_PCT = [CURVE_PARAM_SLOT_PCT0, CURVE_PARAM_SLOT_PCT1, CURVE_PARAM_SLOT
  * derived from side/slot like the 2D handle layout. Returns null if port not found.
  */
 export function portDir(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
+  const g = getNodeGeometry(node.id);
+  if (g) {
+    const p = g.ports.find((pp) => pp.name === portName && pp.isInput === isInput);
+    if (p) return new THREE.Vector3(p.dir.x, p.dir.y, p.dir.z);
+    return null;
+  }
+  return portDirLocal(node, portName, isInput);
+}
+
+/**
+ * FALLBACK: local port-direction compute. Used pre-emit only.
+ * Unit direction (z=0 plane) from node center toward the given port's position,
+ * derived from side/slot like the 2D handle layout. Returns null if port not found.
+ */
+function portDirLocal(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
   const list = (isInput ? node.data?.inputs : node.data?.outputs) ?? [];
   const idx = list.findIndex((p) => p.name === portName);
   if (idx < 0) return null;

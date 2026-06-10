@@ -30,6 +30,7 @@ import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
+import { useNodeGeometryStore } from "./node-geometry";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -112,10 +113,23 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
-    case "node-geometry":
-      // TODO(item1-ts): consume — each node's goroutine emits its node+port world
-      // positions/dirs on startup. Pure no-op this commit; the TS consume lands next.
+    case "node-geometry": {
+      // Each node's goroutine emits its node center + per-port world positions/dirs
+      // (Three y-up frame; Go mirrors geometry-helpers.ts). Pure store-write — no
+      // geometry math here (drift rule). The geometry helpers read this store.
+      const e = event as Extract<TraceEvent, { kind: "node-geometry" }>;
+      useNodeGeometryStore.getState().setNodeGeometry(
+        e.node,
+        { x: e.nx, y: e.ny, z: e.nz },
+        e.ports.map((p) => ({
+          name: p.name,
+          isInput: p.isInput,
+          pos: { x: p.px, y: p.py, z: p.pz },
+          dir: { x: p.dx, y: p.dy, z: p.dz },
+        })),
+      );
       return;
+    }
     // PUMP_DONE_HANDLER
     case "done": {
       // Match ALL edges by target node id + targetHandle (fan-in).
