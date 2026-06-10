@@ -398,6 +398,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="verify">Verify</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="issues">Tracking</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="inconsistencies">Inconsistencies</button>
   </div>
 
   <!-- TAB 1: Overview -->
@@ -1283,7 +1284,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <div class="note" style="margin-top:1rem;">This plan stays a proposal until Phase 1 lands; MODEL.md remains current for existing code until then.</div>
   </div>
 
-  <!-- TAB: Inconsistencies -->
+  <!-- TAB: Tracking -->
   <div class="panel" id="panel-issues" role="tabpanel">
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:h2">☐</button>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
     <p>This spec deletes NotifyDelivered as the delivery trigger, moves the clock and all position computation into Go, and makes each wire its own goroutine. Update MODEL.md and CLAUDE.md in the same commit as the code.</p>
@@ -1314,6 +1315,29 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:h2">☐</button>Inconsistencies to resolve.</h2>
     <p>A cross-tab audit. No open items remain; everything is resolved and recorded in git history and handoff.md.</p>
 <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Consistent across all tabs</strong> &mdash; clock, position, pacing, and ownership are settled, no cross-tab conflicts. The Clock <strong>&ldquo;Before&rdquo;</strong> diagram intentionally keeps the old slot model, for contrast.</div>
+  </div>
+
+  <!-- TAB: Inconsistencies -->
+  <div class="panel" id="panel-inconsistencies" role="tabpanel">
+    <h2>Where the spec text and the shipped Go/TS code disagree.</h2>
+    <table class="spec-table">
+      <thead>
+        <tr>
+          <th>Where</th>
+          <th>Spec says</th>
+          <th>Code does</th>
+          <th>Source file</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Input loop · goroutines</td>
+          <td>Reads the i0→in08 feedback first, then sends Init[i] (read → send).</td>
+          <td>Sends Init[i] first, then reads feedback (send → read). The first emit seeds the ring; read-before-send deadlocks at t=0.</td>
+          <td>nodes/input/node.go</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
