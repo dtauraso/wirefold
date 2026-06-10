@@ -159,8 +159,8 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const nextEdges = edges.filter((ed) => ed.id !== id);
     set({ edges: nextEdges });
     clearPulse(id);
-    // Drop Go's streamed curve for this edge so no stale tube can draw.
-    useEdgeGeometryStore.getState().removeEdgeCurve(id);
+    // Drop Go's streamed segment for this edge so no stale tube can draw.
+    useEdgeGeometryStore.getState().removeEdgeSegment(id);
     scheduleSave();
   },
 

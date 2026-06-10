@@ -98,8 +98,8 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 
 	// Place a bead with full position-stream identity, advance partway (in flight).
 	const inFlightMs = 50.0
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{2, 4, 0}, P2: vec3{4, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "src", Port: "out"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "src", Port: "out"}
 	if !pw.TryPlace(33, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}

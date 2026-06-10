@@ -87,14 +87,13 @@ export function handleTraceEvent(event: TraceEvent): void {
       return;
     }
     case "geometry": {
-      // Go's authoritative edge curve (Phase 3). Keyed by edge id (== Go edge
-      // label); store the control points so SingleEdgeTube draws the wire tube from
-      // them. TS computes no geometry — this is the sole source of tube shape.
-      const { edge, p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z } = event as Extract<TraceEvent, { kind: "geometry" }>;
-      useEdgeGeometryStore.getState().setEdgeCurve(edge, {
-        p0: { x: p0x, y: p0y, z: p0z },
-        p1: { x: p1x, y: p1y, z: p1z },
-        p2: { x: p2x, y: p2y, z: p2z },
+      // Go's authoritative edge segment (Phase 3). Keyed by edge id (== Go edge
+      // label); store the endpoints so SingleEdgeTube draws the wire tube as a
+      // LineCurve3 from Start to End. TS computes no geometry.
+      const { edge, sx, sy, sz, ex, ey, ez } = event as Extract<TraceEvent, { kind: "geometry" }>;
+      useEdgeGeometryStore.getState().setEdgeSegment(edge, {
+        start: { x: sx, y: sy, z: sz },
+        end: { x: ex, y: ey, z: ez },
       });
       return;
     }

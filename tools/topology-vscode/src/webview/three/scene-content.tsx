@@ -373,7 +373,7 @@ export function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
-// Edges — 3D tube path using QuadraticBezierCurve3.
+// Edges — 3D tube path using LineCurve3 (straight segment).
 // Exit/entry points: point on each node's sphere surface facing the other node.
 // ---------------------------------------------------------------------------
 
@@ -425,37 +425,32 @@ export function PulseBead({
 }
 
 export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
-  // Go is the authoritative holder of this edge's curve (Phase 3, MODEL.md). It
-  // streams the control points (geometry trace) on load and on every node-move;
+  // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
+  // streams the endpoints (geometry trace) on load and on every node-move;
   // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's
-  // control points and draw the tube from them — TS computes no geometry.
-  const curve = useEdgeGeometryStore((s) => s.curves[edgeId]);
+  // endpoints and draw the tube from them — TS computes no geometry.
+  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
 
-  // Stable key over Go's streamed control points — rebuild the tube only when they
+  // Stable key over Go's streamed endpoints — rebuild the tube only when they
   // change (e.g. a drag re-streams them).
-  const p0key = curve
-    ? `${curve.p0.x},${curve.p0.y},${curve.p0.z}:${curve.p1.x},${curve.p1.y},${curve.p1.z}:${curve.p2.x},${curve.p2.y},${curve.p2.z}`
+  const segKey = seg
+    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
     : "";
   const { tubeGeo, haloGeo } = useMemo(() => {
-    if (!curve) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
-    const p0 = new THREE.Vector3(curve.p0.x, curve.p0.y, curve.p0.z);
-    const p1 = new THREE.Vector3(curve.p1.x, curve.p1.y, curve.p1.z);
-    const p2 = new THREE.Vector3(curve.p2.x, curve.p2.y, curve.p2.z);
-    const portCurve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
+    if (!seg) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
+    const start = new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z);
+    const end = new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z);
+    // Wire is a straight line: P(t) = Start + t*(End-Start).
+    const tubeCurve = new THREE.LineCurve3(start, end);
 
-    // Sample the Go-streamed bezier — endpoints are already on sphere surfaces.
-    const TUBE_RENDER_SAMPLES = 25;
-    const visiblePts = portCurve.getPoints(TUBE_RENDER_SAMPLES);
-    const tubeCurve = new THREE.CatmullRomCurve3(visiblePts);
-
-    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 16, 1.5, 6, false);
-    // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
-    const _haloGeo = new THREE.TubeGeometry(tubeCurve, 16, 5, 6, false);
+    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 1, 1.5, 6, false);
+    // Halo: concentric tube on the same segment, larger radius — reads as a glow around the core.
+    const _haloGeo = new THREE.TubeGeometry(tubeCurve, 1, 5, 6, false);
     return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p0key]);
+  }, [segKey]);
 
-  // Until Go streams this edge's curve, draw nothing (geometry arrives on load).
+  // Until Go streams this edge's segment, draw nothing (geometry arrives on load).
   if (!tubeGeo || !haloGeo) {
     return <>{!faded && <PulseBead edgeId={edgeId} />}</>;
   }

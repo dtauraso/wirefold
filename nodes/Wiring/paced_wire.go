@@ -26,18 +26,18 @@ var ErrCanceled = errors.New("paced wire: context canceled")
 const positionEmitIntervalMs = 16
 
 // beadPlacement bundles everything one placement needs. The in-flight time times
-// delivery (Phase 1); the curve control points + source identity drive the
+// delivery (Phase 1); the segment endpoints + source identity drive the
 // per-frame position stream (Phase 2). Geometry travels WITH the bead, never
 // stored on the shared wire, so fan-in is safe: each in-flight bead evaluates the
-// exact curve it is drawn on. The zero value (empty curve + identity) means "no
+// exact segment it is drawn on. The zero value (empty segment + identity) means "no
 // position stream" — unit tests that only exercise delivery pass just InFlightMs.
 type beadPlacement struct {
 	InFlightMs float64
-	// Position-stream context. P0/P1/P2 are this edge's quadratic-bezier control
-	// points (source OUT-port world pos, bulge, dest IN-port world pos). Node/Port
-	// are the SOURCE node id + output port — the position trace key, matching the
-	// send event so the renderer routes by source+sourceHandle (fan-out).
-	P0, P1, P2 vec3
+	// Position-stream context. Start/End are this edge's straight-segment endpoints
+	// (source OUT-port world pos, dest IN-port world pos). Node/Port are the SOURCE
+	// node id + output port — the position trace key, matching the send event so the
+	// renderer routes by source+sourceHandle (fan-out).
+	Start, End vec3
 	Node, Port string
 }
 
@@ -132,7 +132,7 @@ type PacedWire struct {
 	// travel from the NEW arc and the distance already covered. Distance is NOT
 	// stored: it is a pure function of the one clock — distanceCovered =
 	// pulseSpeed × (clock.Now() − inFlightPlacement) — so a geometry edit changes
-	// only inFlightArc/inFlightCurve and the deadline re-derives from the same
+	// only inFlightArc/inFlightSegment and the deadline re-derives from the same
 	// covered distance (deliver immediately when newArc ≤ covered). pulseSpeed is
 	// the uniform speed; inFlightStreams gates the position emit (false for the
 	// bare-delivery placements used by unit tests). All guarded by mu, valid only
@@ -140,7 +140,7 @@ type PacedWire struct {
 	pulseSpeed        float64
 	inFlightPlacement time.Duration // clock active-elapsed reading when the bead was placed
 	inFlightArc       float64       // current arc length of the bead's edge (re-derived on geometry edit)
-	inFlightCurve     edgeCurve     // current control points of the bead's edge (re-derived on geometry edit)
+	inFlightSegment   wireSegment   // current straight-segment endpoints of the bead's edge (re-derived on geometry edit)
 	inFlightVal       int           // bead value, echoed on the position stream
 	inFlightNode      string        // source node id — the position/cancel routing key
 	inFlightPort      string        // source output port — the position/cancel routing key
@@ -342,7 +342,7 @@ func (pw *PacedWire) startDeliveryLocked(value any, bp beadPlacement) {
 	pw.inFlightVal = beadVal
 	pw.inFlightNode = bp.Node
 	pw.inFlightPort = bp.Port
-	pw.inFlightCurve = edgeCurve{P0: bp.P0, P1: bp.P1, P2: bp.P2}
+	pw.inFlightSegment = wireSegment{Start: bp.Start, End: bp.End}
 	pw.inFlightStreams = bp.streams()
 	// Express the per-edge in-flight time as an arc so deadline = placement +
 	// arc/pulseSpeed is the one formula for both streamed and delivery-only beads.
@@ -396,7 +396,7 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 				return
 			}
 			arc := pw.inFlightArc
-			curve := pw.inFlightCurve
+			seg := pw.inFlightSegment
 			beadVal := pw.inFlightVal
 			node, port := pw.inFlightNode, pw.inFlightPort
 			stream := pw.inFlightStreams && tr != nil && arc > 0
@@ -437,7 +437,7 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 				if t > 1 {
 					t = 1
 				}
-				pos := bezierPointAt(curve.P0, curve.P1, curve.P2, t)
+				pos := lerp(seg.Start, seg.End, t)
 				tr.Position(node, port, beadVal, pos.X, pos.Y, pos.Z)
 			}
 
@@ -459,22 +459,22 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 
 // ReviseInFlightGeometry re-derives an in-flight bead's remaining travel after a
 // geometry edit (node-move) changed the bead's edge (MODEL.md "Geometry and time").
-// It updates the held arc + curve and relaunches the walker so the deadline is
+// It updates the held arc + segment and relaunches the walker so the deadline is
 // recomputed from the NEW arc and the distance ALREADY covered: remaining =
 // (newArc − covered)/pulseSpeed, delivered immediately when newArc ≤ covered. The
 // covered distance is preserved automatically — it is pulseSpeed × elapsed-since-
 // placement on the one clock, untouched by the edit. No-op when no bead is in
 // flight (the new geometry is read off the source Out by the next placement) or the
-// wire is deleted. The position stream now evaluates the new curve, so the bead
+// wire is deleted. The position stream now evaluates the new segment, so the bead
 // tracks the re-drawn wire.
-func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newCurve edgeCurve) {
+func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	if pw.deleted || !pw.inFlight {
 		return
 	}
 	pw.inFlightArc = newArc
-	pw.inFlightCurve = newCurve
+	pw.inFlightSegment = newSeg
 	pw.relaunchDeliveryLocked()
 }
 
@@ -513,7 +513,7 @@ func (pw *PacedWire) deliverLocked() {
 	// Bead delivered normally — drop its in-flight identity so a later Delete on
 	// this (now empty) wire does not echo a spurious pulse-cancelled.
 	pw.inFlightArc = 0
-	pw.inFlightCurve = edgeCurve{}
+	pw.inFlightSegment = wireSegment{}
 	pw.inFlightVal = 0
 	pw.inFlightNode, pw.inFlightPort = "", ""
 	pw.inFlightStreams = false
@@ -594,7 +594,7 @@ func (pw *PacedWire) resetLocked() chan struct{} {
 	// Drop the in-flight bead's geometry/identity so a later Delete can't echo a
 	// stale pulse-cancelled for a bead that already left this wire.
 	pw.inFlightArc = 0
-	pw.inFlightCurve = edgeCurve{}
+	pw.inFlightSegment = wireSegment{}
 	pw.inFlightVal = 0
 	pw.inFlightNode, pw.inFlightPort = "", ""
 	pw.inFlightStreams = false

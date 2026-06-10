@@ -185,16 +185,16 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 	edgeWire := WireRegistry{}
 	edgeEndpoints := map[string]EdgeEndpoints{}
 	// edgeArc / edgeLatency carry each edge's OWN travel-time (per-edge geometry),
-	// distinct from the dest wire's MaxIncomingSimLatencyMs aggregate. edgeCurves
-	// carries each edge's curve control points (P0/P1/P2) so the bead's position
-	// stream evaluates the exact drawn curve. All keyed by edge label; consumed
-	// below when binding the source Out.
+	// distinct from the dest wire's MaxIncomingSimLatencyMs aggregate. edgeSegments
+	// carries each edge's straight-segment endpoints (Start/End) so the bead's
+	// position stream evaluates P(t)=Start+t*(End-Start). All keyed by edge label;
+	// consumed below when binding the source Out.
 	edgeArc := map[string]float64{}
 	edgeLatency := map[string]float64{}
-	edgeCurves := map[string]edgeCurve{}
+	edgeSegments := map[string]wireSegment{}
 	for _, e := range spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
-		// Per-edge arc length / latency / curve from this edge's own port-to-port geometry.
+		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry.
 		arcLength := arcLengthBetweenPorts(
 			nodeGeoms[e.Source], e.SourceHandle,
 			nodeGeoms[e.Target], e.TargetHandle,
@@ -202,11 +202,11 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
-		curve := curveBetweenPorts(
+		seg := segmentBetweenPorts(
 			nodeGeoms[e.Source], e.SourceHandle,
 			nodeGeoms[e.Target], e.TargetHandle,
 		)
-		edgeCurves[e.Label] = curve
+		edgeSegments[e.Label] = seg
 		pw, exists := destWire[destKey]
 		if !exists {
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
@@ -340,7 +340,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 					// Send rule is node-owned, keyed by this output port name.
 					rule := nodeSendRule(n, port.Name)
 					lbl := labels[0]
-					pb.SetSinglePacedRule(port.Name, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeCurves[lbl], lbl)
+					pb.SetSinglePacedRule(port.Name, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeSegments[lbl], lbl)
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
@@ -355,7 +355,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 					// Per-port (per fan-out element): the rule is keyed by the
 					// concrete output port name (sourceHandle, e.g. "ToNext0").
 					rule := nodeSendRule(n, handle)
-					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeCurves[lbl], lbl)
+					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeSegments[lbl], lbl)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}

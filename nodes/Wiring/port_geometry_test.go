@@ -93,39 +93,17 @@ func refPortWorldPos(kind string, x, y, z float64, ports []portGeom, name string
 	return vec3{center.X + dir.X*r, center.Y + dir.Y*r, center.Z + dir.Z*r}
 }
 
-// refBezier3DLength is an independent integration of the 3-D quadratic Bezier.
-func refBezier3DLength(p0, p2 vec3, bulge float64, n int) float64 {
-	mid := vec3{(p0.X + p2.X) / 2, (p0.Y + p2.Y) / 2, (p0.Z + p2.Z) / 2}
-	d := vec3{p2.X - p0.X, p2.Y - p0.Y, p2.Z - p0.Z}
-	dl := math.Sqrt(d.X*d.X + d.Y*d.Y + d.Z*d.Z)
-	edgeDir := vec3{d.X / dl, d.Y / dl, d.Z / dl}
-	// lift = (0,0,1) × edgeDir
-	lift := vec3{0*edgeDir.Z - 1*edgeDir.Y, 1*edgeDir.X - 0*edgeDir.Z, 0*edgeDir.Y - 0*edgeDir.X}
-	ll := math.Sqrt(lift.X*lift.X + lift.Y*lift.Y + lift.Z*lift.Z)
-	if ll != 0 {
-		lift = vec3{lift.X / ll, lift.Y / ll, lift.Z / ll}
-	}
-	span := dl
-	p1 := vec3{mid.X + lift.X*span*bulge, mid.Y + lift.Y*span*bulge, mid.Z + lift.Z*span*bulge}
-	inv := 1.0 / float64(n)
-	prev := p0
-	total := 0.0
-	for i := 1; i <= n; i++ {
-		t := float64(i) * inv
-		u := 1 - t
-		b := vec3{
-			u*u*p0.X + 2*u*t*p1.X + t*t*p2.X,
-			u*u*p0.Y + 2*u*t*p1.Y + t*t*p2.Y,
-			u*u*p0.Z + 2*u*t*p1.Z + t*t*p2.Z,
-		}
-		dx, dy, dz := b.X-prev.X, b.Y-prev.Y, b.Z-prev.Z
-		total += math.Sqrt(dx*dx + dy*dy + dz*dz)
-		prev = b
-	}
-	if total < CurveParamMinArcLength {
+// refChordLength is the reference chord-distance formula (straight-segment model):
+// Euclidean distance between two 3-D points, floored at CurveParamMinArcLength.
+func refChordLength(p0, p2 vec3) float64 {
+	dx := p2.X - p0.X
+	dy := p2.Y - p0.Y
+	dz := p2.Z - p0.Z
+	l := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if l < CurveParamMinArcLength {
 		return CurveParamMinArcLength
 	}
-	return total
+	return l
 }
 
 func almostEqual(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
@@ -151,11 +129,11 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 func TestArcLengthBetweenPortsCases(t *testing.T) {
 	slot0, slot1, slot2 := 0, 1, 2
 	cases := []struct {
-		name     string
-		src      nodeGeom
-		srcH     string
-		tgt      nodeGeom
-		tgtH     string
+		name string
+		src  nodeGeom
+		srcH string
+		tgt  nodeGeom
+		tgtH string
 	}{
 		{
 			name: "input-to-readgate-2d",
@@ -188,11 +166,12 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := arcLengthBetweenPorts(c.src, c.srcH, c.tgt, c.tgtH)
+			// Straight-segment model: arc length is the chord distance.
 			p0 := refPortWorldPos(c.src.Kind, c.src.Pos.X, c.src.Pos.Y, c.src.Pos.Z, c.src.Outputs, c.srcH, false)
 			p2 := refPortWorldPos(c.tgt.Kind, c.tgt.Pos.X, c.tgt.Pos.Y, c.tgt.Pos.Z, c.tgt.Inputs, c.tgtH, true)
-			want := refBezier3DLength(p0, p2, CurveParamBulgeFactor, CurveParamBezierSampleCount)
-			if !almostEqual(got, want, 1e-7) {
-				t.Fatalf("arcLengthBetweenPorts = %v, want %v", got, want)
+			want := refChordLength(p0, p2)
+			if !almostEqual(got, want, 1e-9) {
+				t.Fatalf("arcLengthBetweenPorts = %v, want chord %v", got, want)
 			}
 			if got < CurveParamMinArcLength {
 				t.Fatalf("arc length below floor: %v", got)
@@ -201,26 +180,21 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}
 }
 
-// TestBezierArcLength keeps the legacy 2-D integrator under test: a straight
-// chord (bulge 0) has length equal to the Euclidean distance.
-func TestBezierArcLength(t *testing.T) {
-	got := BezierArcLength(0, 0, 30, 40, 0, CurveParamBezierSampleCount)
-	if !almostEqual(got, 50, 1e-6) {
-		t.Fatalf("BezierArcLength straight chord = %v, want 50", got)
+// TestChordLength verifies chordLength returns the Euclidean distance floored at
+// CurveParamMinArcLength.
+func TestChordLength(t *testing.T) {
+	// 3-4-5 right triangle.
+	got := chordLength(vec3{0, 0, 0}, vec3{3, 4, 0})
+	if !almostEqual(got, 5, 1e-9) {
+		t.Fatalf("chordLength 3-4-5 = %v, want 5", got)
 	}
-	// Floor applies for co-located points.
-	if g := BezierArcLength(5, 5, 5, 5, CurveParamBulgeFactor, CurveParamBezierSampleCount); g != CurveParamMinArcLength {
-		t.Fatalf("BezierArcLength co-located = %v, want floor %v", g, CurveParamMinArcLength)
+	// 3-D diagonal: sqrt(1+4+4) = 3.
+	got = chordLength(vec3{0, 0, 0}, vec3{1, 2, 2})
+	if !almostEqual(got, 3, 1e-9) {
+		t.Fatalf("chordLength 3D = %v, want 3", got)
 	}
-}
-
-// TestPortCurveArcLength3D sanity-checks the 3-D integrator against a known
-// straight diagonal (bulge contributes nothing only when span is 0; here we use
-// bulge 0 to get the exact chord length including dz).
-func TestPortCurveArcLength3D(t *testing.T) {
-	got := PortCurveArcLength(vec3{0, 0, 0}, vec3{1, 2, 2}, 0, CurveParamBezierSampleCount)
-	want := math.Sqrt(1 + 4 + 4) // = 3
-	if !almostEqual(got, want, 1e-6) {
-		t.Fatalf("PortCurveArcLength 3D chord = %v, want %v", got, want)
+	// Floor for co-located points.
+	if g := chordLength(vec3{5, 5, 5}, vec3{5, 5, 5}); g != CurveParamMinArcLength {
+		t.Fatalf("chordLength co-located = %v, want floor %v", g, CurveParamMinArcLength)
 	}
 }

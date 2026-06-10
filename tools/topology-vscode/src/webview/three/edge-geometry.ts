@@ -1,47 +1,46 @@
-// edge-geometry.ts — Go-authoritative edge curve store (Phase 3).
+// edge-geometry.ts — Go-authoritative edge segment store (Phase 3).
 //
-// Go owns node positions + per-edge quadratic-bezier control points; it streams a
+// Go owns node positions + per-edge straight-segment endpoints; it streams a
 // `geometry` trace event per edge on load and again whenever a node-move re-derives
-// that edge's curve (MODEL.md "Geometry and time"). pump.ts writes those control
-// points here; SingleEdgeTube subscribes and draws the wire tube from them. TS
+// that edge's segment (MODEL.md "Geometry and time"). pump.ts writes those endpoints
+// here; SingleEdgeTube subscribes and draws the wire tube from them. TS
 // computes NO geometry of its own — this store is plot-only, fed entirely by Go.
 //
 // Keyed by edge id (== the Go edge label). A zustand store (not the plain imperative
-// map used for bead positions) so SingleEdgeTube re-renders when its edge's curve
+// map used for bead positions) so SingleEdgeTube re-renders when its edge's segment
 // changes during a drag.
 
 import { create } from "zustand";
 
-/** One edge's Go-streamed control points (source OUT pos, bulge, dest IN pos). */
-export interface EdgeCurvePoints {
-  p0: { x: number; y: number; z: number };
-  p1: { x: number; y: number; z: number };
-  p2: { x: number; y: number; z: number };
+/** One edge's Go-streamed straight-segment endpoints (source OUT pos, dest IN pos). */
+export interface EdgeSegment {
+  start: { x: number; y: number; z: number };
+  end: { x: number; y: number; z: number };
 }
 
 interface EdgeGeometryState {
-  /** edgeId → Go-streamed control points. Absent until the first geometry event. */
-  curves: Record<string, EdgeCurvePoints>;
-  /** Replace one edge's control points (pump, on each geometry trace event). */
-  setEdgeCurve: (edgeId: string, c: EdgeCurvePoints) => void;
-  /** Drop one edge's control points (on edge delete) so a stale curve can't draw. */
-  removeEdgeCurve: (edgeId: string) => void;
+  /** edgeId → Go-streamed segment endpoints. Absent until the first geometry event. */
+  segments: Record<string, EdgeSegment>;
+  /** Replace one edge's segment endpoints (pump, on each geometry trace event). */
+  setEdgeSegment: (edgeId: string, s: EdgeSegment) => void;
+  /** Drop one edge's segment (on edge delete) so a stale segment can't draw. */
+  removeEdgeSegment: (edgeId: string) => void;
 }
 
 export const useEdgeGeometryStore = create<EdgeGeometryState>((set) => ({
-  curves: {},
-  setEdgeCurve: (edgeId, c) =>
-    set((s) => ({ curves: { ...s.curves, [edgeId]: c } })),
-  removeEdgeCurve: (edgeId) =>
-    set((s) => {
-      if (!(edgeId in s.curves)) return s;
-      const next = { ...s.curves };
+  segments: {},
+  setEdgeSegment: (edgeId, s) =>
+    set((state) => ({ segments: { ...state.segments, [edgeId]: s } })),
+  removeEdgeSegment: (edgeId) =>
+    set((state) => {
+      if (!(edgeId in state.segments)) return state;
+      const next = { ...state.segments };
       delete next[edgeId];
-      return { curves: next };
+      return { segments: next };
     }),
 }));
 
-/** Non-React read of one edge's Go-streamed curve (for imperative call sites). */
-export function getEdgeCurve(edgeId: string): EdgeCurvePoints | undefined {
-  return useEdgeGeometryStore.getState().curves[edgeId];
+/** Non-React read of one edge's Go-streamed segment (for imperative call sites). */
+export function getEdgeSegment(edgeId: string): EdgeSegment | undefined {
+  return useEdgeGeometryStore.getState().segments[edgeId];
 }

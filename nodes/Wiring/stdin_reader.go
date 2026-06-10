@@ -127,10 +127,10 @@ func (nmr *NodeMoveRegistry) SetTrace(tr *T.Trace) {
 
 // applyNodeMove moves nodeId to (x, y, z) and re-derives geometry for every edge
 // that touches it (MODEL.md: Go is the authoritative holder of node positions +
-// per-edge curve control points). For each affected edge it:
-//   - recomputes the port-to-port curve (P0/P1/P2) and arc length from the moved
-//     geometry, writing arc/latency AND control points onto the source Out, so the
-//     next placement and the geometry stream use the new curve;
+// per-edge segment endpoints). For each affected edge it:
+//   - recomputes the port-to-port segment (Start/End) and arc length from the moved
+//     geometry, writing arc/latency AND endpoints onto the source Out, so the
+//     next placement and the geometry stream use the new segment;
 //   - re-derives any in-flight bead's remaining travel from the NEW arc and the
 //     distance already covered (ReviseInFlightGeometry on the dest wire);
 //   - streams the new curve (KindGeometry) so the renderer redraws the wire tube.
@@ -153,11 +153,11 @@ func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 		return
 	}
 
-	// curveOf computes the current port-to-port curve (control points) for an edge
-	// from the live geometry; arc length is integrated from the same curve.
-	curveOf := func(eid string) (edgeCurve, float64) {
+	// segOf computes the current port-to-port straight segment for an edge
+	// from the live geometry; arc length is the chord distance.
+	segOf := func(eid string) (wireSegment, float64) {
 		ep := nmr.edgeNodes[eid]
-		curve := curveBetweenPorts(
+		seg := segmentBetweenPorts(
 			nmr.geoms[ep.Source], ep.SourceHandle,
 			nmr.geoms[ep.Target], ep.TargetHandle,
 		)
@@ -165,32 +165,31 @@ func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 			nmr.geoms[ep.Source], ep.SourceHandle,
 			nmr.geoms[ep.Target], ep.TargetHandle,
 		)
-		return curve, arc
+		return seg, arc
 	}
 
-	// 1. Re-derive each affected edge: source Out curve + travel-time, in-flight
+	// 1. Re-derive each affected edge: source Out segment + travel-time, in-flight
 	//    bead remaining travel, and the streamed geometry. Track the distinct
 	//    destination ports they feed for the aggregate recompute below.
 	touchedDest := map[string]bool{}
 	for _, eid := range edgeIds {
-		curve, arc := curveOf(eid)
+		seg, arc := segOf(eid)
 		lat := arc / PulseSpeedWuPerMs
 		if o := nmr.edgeOut[eid]; o != nil {
 			o.ArcLength = arc
 			o.SimLatencyMs = lat
-			o.P0, o.P1, o.P2 = curve.P0, curve.P1, curve.P2
+			o.Start, o.End = seg.Start, seg.End
 		}
 		ep := nmr.edgeNodes[eid]
-		// Re-derive an in-flight bead on this edge from the new arc + curve. The
+		// Re-derive an in-flight bead on this edge from the new arc + segment. The
 		// dest wire owns the bead; ReviseInFlightGeometry is a no-op if none in flight.
 		if pw := nmr.destWire[ep.Target+"."+ep.TargetHandle]; pw != nil {
-			pw.ReviseInFlightGeometry(arc, curve)
+			pw.ReviseInFlightGeometry(arc, seg)
 		}
-		// Stream the new curve so the renderer redraws the tube from Go's points.
+		// Stream the new segment so the renderer redraws the wire from Go's endpoints.
 		nmr.tr.Geometry(eid,
-			curve.P0.X, curve.P0.Y, curve.P0.Z,
-			curve.P1.X, curve.P1.Y, curve.P1.Z,
-			curve.P2.X, curve.P2.Y, curve.P2.Z)
+			seg.Start.X, seg.Start.Y, seg.Start.Z,
+			seg.End.X, seg.End.Y, seg.End.Z)
 		touchedDest[ep.Target+"."+ep.TargetHandle] = true
 	}
 
@@ -203,7 +202,7 @@ func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 		}
 		var maxLat float64
 		for _, eid := range nmr.destEdges[destKey] {
-			if _, arc := curveOf(eid); arc/PulseSpeedWuPerMs > maxLat {
+			if _, arc := segOf(eid); arc/PulseSpeedWuPerMs > maxLat {
 				maxLat = arc / PulseSpeedWuPerMs
 			}
 		}

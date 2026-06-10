@@ -10,16 +10,16 @@ import (
 
 // position_stream_test.go — the Phase 2 deterministic verifier (golden
 // position-sequence parity). It asserts that the wire's delivery goroutine emits,
-// for an in-flight bead, exactly the analytic curve: each emitted position equals
-// bezierPointAt(controlPoints, t) at t = elapsed/inFlightTime, with t strictly
-// increasing, a final emit at t==1 immediately followed by delivery, and a ~16 ms
-// emit cadence. There are NO real sleeps in the timing assertions — the FakeClock
-// is advanced explicitly, so the whole stream is reproducible.
+// for an in-flight bead, exactly the analytic straight-segment position:
+// each emitted position equals lerp(Start, End, t) at t = elapsed/inFlightTime,
+// with t strictly increasing, a final emit at t==1 immediately followed by
+// delivery, and a ~16 ms emit cadence. There are NO real sleeps in the timing
+// assertions — the FakeClock is advanced explicitly, so the whole stream is
+// reproducible.
 //
-// "Golden" here is analytic, not a recorded file: Go's bezierPointAt IS the curve,
-// so the expected sequence is recomputed in the test from the same eval the
-// substrate uses. Any drift between the integrator's eval and the stream's eval
-// (or a wrong t) fails this test.
+// "Golden" here is analytic, not a recorded file: Go's lerp IS the position eval,
+// so the expected sequence is recomputed in the test from the same formula the
+// substrate uses. Any drift between the formula and the stream fails this test.
 
 // posEvents extracts the KindPosition events from a drained trace, in order.
 func posEvents(events []T.Event) []T.Event {
@@ -52,15 +52,14 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 	tr := T.New(64)
 	pw.Trace = tr
 
-	// A known, non-degenerate curve so x/y both vary with t.
-	curve := edgeCurve{
-		P0: vec3{X: 0, Y: 0, Z: 0},
-		P1: vec3{X: 50, Y: 100, Z: 0},
-		P2: vec3{X: 100, Y: 0, Z: 0},
+	// A known, non-degenerate segment so x/y both vary with t.
+	seg := wireSegment{
+		Start: vec3{X: 0, Y: 0, Z: 0},
+		End:   vec3{X: 100, Y: 50, Z: 0},
 	}
 	bp := beadPlacement{
 		InFlightMs: inFlightMs,
-		P0:         curve.P0, P1: curve.P1, P2: curve.P2,
+		Start:      seg.Start, End: seg.End,
 		Node: "src", Port: "out",
 	}
 
@@ -109,11 +108,11 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 		}
 		prevT = wantT
 
-		// Each emitted position == bezierPointAt(controlPoints, t) — Go's eval IS
-		// the curve, so this is exact (modulo float noise).
-		want := bezierPointAt(curve.P0, curve.P1, curve.P2, wantT)
+		// Each emitted position == lerp(Start, End, t) — Go's eval IS the segment,
+		// so this is exact (modulo float noise).
+		want := lerp(seg.Start, seg.End, wantT)
 		if !approxEq(e.X, want.X) || !approxEq(e.Y, want.Y) || !approxEq(e.Z, want.Z) {
-			t.Fatalf("position %d (t=%g): got (%g,%g,%g), want bezierPointAt = (%g,%g,%g)",
+			t.Fatalf("position %d (t=%g): got (%g,%g,%g), want lerp = (%g,%g,%g)",
 				i, wantT, e.X, e.Y, e.Z, want.X, want.Y, want.Z)
 		}
 
@@ -134,15 +133,15 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 		t.Fatalf("final tick t=%g, want 1.0 (arrival emit)", finalT)
 	}
 	last := positions[len(positions)-1]
-	wantFinal := bezierPointAt(curve.P0, curve.P1, curve.P2, 1)
+	wantFinal := lerp(seg.Start, seg.End, 1)
 	if !approxEq(last.X, wantFinal.X) || !approxEq(last.Y, wantFinal.Y) || !approxEq(last.Z, wantFinal.Z) {
-		t.Fatalf("final position got (%g,%g,%g), want curve endpoint P2-ish (%g,%g,%g)",
+		t.Fatalf("final position got (%g,%g,%g), want segment endpoint End (%g,%g,%g)",
 			last.X, last.Y, last.Z, wantFinal.X, wantFinal.Y, wantFinal.Z)
 	}
-	// At t==1 the quadratic Bezier equals P2 exactly.
-	if !approxEq(last.X, curve.P2.X) || !approxEq(last.Y, curve.P2.Y) || !approxEq(last.Z, curve.P2.Z) {
-		t.Fatalf("final position (t=1) got (%g,%g,%g), want P2 (%g,%g,%g)",
-			last.X, last.Y, last.Z, curve.P2.X, curve.P2.Y, curve.P2.Z)
+	// At t==1 lerp equals End exactly.
+	if !approxEq(last.X, seg.End.X) || !approxEq(last.Y, seg.End.Y) || !approxEq(last.Z, seg.End.Z) {
+		t.Fatalf("final position (t=1) got (%g,%g,%g), want End (%g,%g,%g)",
+			last.X, last.Y, last.Z, seg.End.X, seg.End.Y, seg.End.Z)
 	}
 
 	// And delivery happened: the slot now holds the bead value.
@@ -164,8 +163,8 @@ func TestPositionStreamCadence(t *testing.T) {
 	tr := T.New(64)
 	pw.Trace = tr
 
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{40, 80, 0}, P2: vec3{80, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "a", Port: "o"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{80, 40, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "a", Port: "o"}
 
 	if !pw.TryPlace(3, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")
@@ -192,7 +191,7 @@ func TestPositionStreamCadence(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		elapsed := float64((i + 1) * positionEmitIntervalMs) // 16,32,48,64,80
 		tt := elapsed / inFlightMs
-		want := bezierPointAt(curve.P0, curve.P1, curve.P2, tt)
+		want := lerp(seg.Start, seg.End, tt)
 		got := positions[i]
 		if !approxEq(got.X, want.X) || !approxEq(got.Y, want.Y) || !approxEq(got.Z, want.Z) {
 			t.Fatalf("cadence tick %d (elapsed=%gms, t=%g): got (%g,%g,%g), want (%g,%g,%g)",
@@ -213,8 +212,8 @@ func TestPositionStreamHaltedNoEmit(t *testing.T) {
 	tr := T.New(64)
 	pw.Trace = tr
 
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{50, 100, 0}, P2: vec3{100, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "s", Port: "p"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{100, 50, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "p"}
 
 	if !pw.TryPlace(9, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")

@@ -63,11 +63,11 @@ func waitNotInFlight(t *testing.T, pw *PacedWire) {
 	}
 }
 
-// TestNodeMoveRederivesControlPointsAndArc is verifier group (a): a node-move on an
-// edge endpoint recomputes the source Out's control points (P0/P1/P2) AND arc
-// length to exactly match curveBetweenPorts / arcLengthBetweenPorts of the new
-// port-to-port geometry, and streams a geometry event carrying the new curve.
-func TestNodeMoveRederivesControlPointsAndArc(t *testing.T) {
+// TestNodeMoveRederivesSegmentAndArc is verifier group (a): a node-move on an
+// edge endpoint recomputes the source Out's segment endpoints (Start/End) AND arc
+// length to exactly match segmentBetweenPorts / arcLengthBetweenPorts of the new
+// port-to-port geometry, and streams a geometry event carrying the new segment.
+func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	const topo = `{
 	  "nodes": [
 	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
@@ -104,23 +104,20 @@ func TestNodeMoveRederivesControlPointsAndArc(t *testing.T) {
 	const nx, ny, nz = 400, 250, 30
 	nmr.applyNodeMove("src", nx, ny, nz)
 
-	// Build the expected curve + arc independently from the moved geometry.
+	// Build the expected segment + arc independently from the moved geometry.
 	srcGeom := nodeGeom{Kind: "FanInSrc", Pos: vec3{X: nx, Y: ny, Z: nz},
 		Outputs: []portGeom{{Name: "Out"}}}
 	dstGeom := nodeGeom{Kind: "FanInSink", Pos: vec3{X: 0, Y: 0, Z: 0},
 		Inputs: []portGeom{{Name: "In"}}}
-	wantCurve := curveBetweenPorts(srcGeom, "Out", dstGeom, "In")
+	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
 	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")
 
-	// Control points on the source Out must match exactly.
-	if !approxEq(out.P0.X, wantCurve.P0.X) || !approxEq(out.P0.Y, wantCurve.P0.Y) || !approxEq(out.P0.Z, wantCurve.P0.Z) {
-		t.Fatalf("Out.P0 = %+v, want %+v", out.P0, wantCurve.P0)
+	// Segment endpoints on the source Out must match exactly.
+	if !approxEq(out.Start.X, wantSeg.Start.X) || !approxEq(out.Start.Y, wantSeg.Start.Y) || !approxEq(out.Start.Z, wantSeg.Start.Z) {
+		t.Fatalf("Out.Start = %+v, want %+v", out.Start, wantSeg.Start)
 	}
-	if !approxEq(out.P1.X, wantCurve.P1.X) || !approxEq(out.P1.Y, wantCurve.P1.Y) || !approxEq(out.P1.Z, wantCurve.P1.Z) {
-		t.Fatalf("Out.P1 = %+v, want %+v", out.P1, wantCurve.P1)
-	}
-	if !approxEq(out.P2.X, wantCurve.P2.X) || !approxEq(out.P2.Y, wantCurve.P2.Y) || !approxEq(out.P2.Z, wantCurve.P2.Z) {
-		t.Fatalf("Out.P2 = %+v, want %+v", out.P2, wantCurve.P2)
+	if !approxEq(out.End.X, wantSeg.End.X) || !approxEq(out.End.Y, wantSeg.End.Y) || !approxEq(out.End.Z, wantSeg.End.Z) {
+		t.Fatalf("Out.End = %+v, want %+v", out.End, wantSeg.End)
 	}
 	// Arc length + derived latency must match.
 	if !approxEq(out.ArcLength, wantArc) {
@@ -130,21 +127,22 @@ func TestNodeMoveRederivesControlPointsAndArc(t *testing.T) {
 		t.Fatalf("Out.SimLatencyMs = %v, want %v", out.SimLatencyMs, wantArc/PulseSpeedWuPerMs)
 	}
 
-	// A geometry event for e0 carrying the new curve was streamed on the move.
+	// A geometry event for e0 carrying the new segment was streamed on the move.
 	tr.Close()
 	gs := geomEvents(tr.Events())
 	var found *T.Event
 	for i := range gs {
-		if gs[i].Edge == "e0" && approxEq(gs[i].P2X, wantCurve.P2.X) && approxEq(gs[i].P0X, wantCurve.P0.X) {
+		if gs[i].Edge == "e0" && approxEq(gs[i].SX, wantSeg.Start.X) && approxEq(gs[i].EX, wantSeg.End.X) {
 			// take the LAST matching (post-move) emit
 			found = &gs[i]
 		}
 	}
 	if found == nil {
-		t.Fatalf("no geometry event for e0 with the re-derived curve; got %+v", gs)
+		t.Fatalf("no geometry event for e0 with the re-derived segment; got %+v", gs)
 	}
-	if !approxEq(found.P1X, wantCurve.P1.X) || !approxEq(found.P1Y, wantCurve.P1.Y) {
-		t.Fatalf("geometry event P1 = (%v,%v), want (%v,%v)", found.P1X, found.P1Y, wantCurve.P1.X, wantCurve.P1.Y)
+	if !approxEq(found.EY, wantSeg.End.Y) || !approxEq(found.SY, wantSeg.Start.Y) {
+		t.Fatalf("geometry event Start.Y=%v End.Y=%v, want Start.Y=%v End.Y=%v",
+			found.SY, found.EY, wantSeg.Start.Y, wantSeg.End.Y)
 	}
 }
 
@@ -161,8 +159,8 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 	// inFlightMs 50 ⇒ arc = 50 * pulseSpeed (= 4.0 wu at 0.08). Half-covered at 25 ms.
 	const inFlightMs = 50.0
 	arc0 := inFlightMs * PulseSpeedWuPerMs
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{2, 4, 0}, P2: vec3{4, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "s", Port: "o"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "o"}
 	if !pw.TryPlace(11, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}
@@ -176,7 +174,7 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 
 	// Revise to a LONGER arc (double). Remaining = (newArc - covered)/pulseSpeed.
 	newArc := arc0 * 2
-	pw.ReviseInFlightGeometry(newArc, curve)
+	pw.ReviseInFlightGeometry(newArc, seg)
 	wantRemainingMs := (newArc - covered) / PulseSpeedWuPerMs // = (8-2)/0.08 = 75 ms
 
 	// One ms short of (25 + remaining): still in flight.
@@ -207,8 +205,8 @@ func TestInFlightRederiveShrinkImmediate(t *testing.T) {
 
 	const inFlightMs = 50.0
 	arc0 := inFlightMs * PulseSpeedWuPerMs
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{2, 4, 0}, P2: vec3{4, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "s", Port: "o"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "o"}
 	if !pw.TryPlace(22, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}
@@ -223,7 +221,7 @@ func TestInFlightRederiveShrinkImmediate(t *testing.T) {
 	if !(newArc < covered) {
 		t.Fatalf("setup: newArc %v must be < covered %v", newArc, covered)
 	}
-	pw.ReviseInFlightGeometry(newArc, curve)
+	pw.ReviseInFlightGeometry(newArc, seg)
 
 	waitNotInFlight(t, pw) // delivers without any Advance
 	v, ok := pw.PollRecv()
@@ -245,8 +243,8 @@ func TestDeleteMidFlightCancels(t *testing.T) {
 	pw.Trace = tr
 
 	const inFlightMs = 50.0
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{2, 4, 0}, P2: vec3{4, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "src", Port: "out"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "src", Port: "out"}
 	if !pw.TryPlace(33, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}
@@ -298,8 +296,8 @@ func TestDeleteAfterDeliveryNoCancel(t *testing.T) {
 	pw.Trace = tr
 
 	const inFlightMs = 50.0
-	curve := edgeCurve{P0: vec3{0, 0, 0}, P1: vec3{2, 4, 0}, P2: vec3{4, 0, 0}}
-	bp := beadPlacement{InFlightMs: inFlightMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, Node: "src", Port: "out"}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "src", Port: "out"}
 	if !pw.TryPlace(44, bp) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}

@@ -1,11 +1,11 @@
-// port_geometry.go — Go mirror of the port-to-port curve geometry in
+// port_geometry.go — Go mirror of the port-to-port segment geometry in
 // tools/topology-vscode/src/webview/three/geometry-helpers.ts.
 //
-// The substrate must compute a pulse's travel budget from the SAME curve the
-// bead is drawn on: a quadratic Bezier from the source OUTPUT port's sphere-
-// surface point to the target INPUT port's sphere-surface point, lifted into 3-D.
-// This file reproduces nodeWorldPos, nodeRadius, portDir and portWorldPos so
-// arcLengthBetweenPorts (loader.go / stdin_reader.go) matches buildPortCurve.
+// The substrate must compute a pulse's travel budget from the SAME segment the
+// bead is drawn on: a straight line from the source OUTPUT port's sphere-surface
+// point to the target INPUT port's sphere-surface point. This file reproduces
+// nodeWorldPos, nodeRadius, portDir and portWorldPos so arcLengthBetweenPorts
+// (loader.go / stdin_reader.go) returns the chord length.
 //
 // Inputs the geometry needs, per node:
 //   - kind        → width/height via kindDims (generated from SPEC.md View)
@@ -162,23 +162,20 @@ func portWorldPos(g nodeGeom, portName string, isInput bool) vec3 {
 	return center.add(dir.scale(nodeRadius(g.Kind)))
 }
 
-// arcLengthBetweenPorts computes the port-to-port Bezier arc length between the
-// source node's OUTPUT port and the target node's INPUT port, mirroring
-// buildPortCurve. This is the travel budget for a pulse on this edge.
+// arcLengthBetweenPorts computes the straight chord distance between the
+// source node's OUTPUT port and the target node's INPUT port. This is the travel
+// budget for a pulse on this edge (wires are straight segments).
 func arcLengthBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHandle string) float64 {
-	p0 := portWorldPos(src, srcHandle, false) // source OUTPUT port
-	p2 := portWorldPos(tgt, tgtHandle, true)  // target INPUT port
-	return PortCurveArcLength(p0, p2, CurveParamBulgeFactor, CurveParamBezierSampleCount)
+	start := portWorldPos(src, srcHandle, false) // source OUTPUT port
+	end := portWorldPos(tgt, tgtHandle, true)    // target INPUT port
+	return chordLength(start, end)
 }
 
-// curveBetweenPorts computes the quadratic-bezier control points (P0, P1, P2) of
-// the port-to-port curve between the source OUTPUT port and the target INPUT port,
-// mirroring buildPortCurve in geometry-helpers.ts. The bead's position stream
-// evaluates this exact curve, so it matches the drawn wire. P1 is the bulge
-// control point (bezierControlPoint).
-func curveBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHandle string) edgeCurve {
-	p0 := portWorldPos(src, srcHandle, false) // source OUTPUT port
-	p2 := portWorldPos(tgt, tgtHandle, true)  // target INPUT port
-	p1 := bezierControlPoint(p0, p2, CurveParamBulgeFactor)
-	return edgeCurve{P0: p0, P1: p1, P2: p2}
+// segmentBetweenPorts returns the straight-line wireSegment from the source
+// OUTPUT port to the target INPUT port. The bead's position stream evaluates
+// P(t) = Start + t*(End-Start) on this segment.
+func segmentBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHandle string) wireSegment {
+	start := portWorldPos(src, srcHandle, false) // source OUTPUT port
+	end := portWorldPos(tgt, tgtHandle, true)    // target INPUT port
+	return wireSegment{Start: start, End: end}
 }

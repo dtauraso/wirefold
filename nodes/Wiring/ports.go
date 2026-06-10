@@ -180,20 +180,20 @@ type Out struct {
 	port  string
 	trace *T.Trace
 	// ArcLength / SimLatencyMs are this edge's own travel-time, computed from
-	// this edge's port-to-port geometry. Travel-time is per-edge (the length of
-	// this specific drawn curve); SendWire logs these so each bead animates at
+	// this edge's port-to-port geometry. Travel-time is per-edge (the chord length
+	// of this specific segment); SendWire logs these so each bead animates at
 	// its own speed even when multiple edges fan into one destination port.
 	ArcLength    float64
 	SimLatencyMs float64
-	// P0/P1/P2 are this edge's quadratic-bezier control points (source OUT-port
-	// world pos, bulge, dest IN-port world pos) in the SAME 3-D frame the renderer
-	// draws. They travel WITH each placed bead (beadPlacement) so the wire's
-	// position stream evaluates the exact curve this edge is drawn on — fan-in safe
-	// because the shared dest wire never stores per-edge geometry.
-	P0, P1, P2 vec3
+	// Start/End are this edge's straight-segment endpoints (source OUT-port world
+	// pos, dest IN-port world pos) in the SAME 3-D frame the renderer draws. They
+	// travel WITH each placed bead (beadPlacement) so the wire's position stream
+	// evaluates P(t)=Start+t*(End-Start) on this edge — fan-in safe because the
+	// shared dest wire never stores per-edge geometry.
+	Start, End vec3
 	// EdgeLabel is the TS edge id for this output port's wire. Set by the loader
 	// so the node's EmitGeometry closure can stream the authoritative curve via
-	// tr.Geometry(EdgeLabel, P0..P2) on startup.
+	// tr.Geometry(EdgeLabel, Start..End) on startup.
 	EdgeLabel string
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
@@ -201,14 +201,13 @@ type Out struct {
 }
 
 // placement builds the per-bead beadPlacement this Out hands to the wire: the
-// per-edge in-flight time plus the position-stream context (curve control points
+// per-edge in-flight time plus the position-stream context (segment endpoints
 // + source identity). Centralized so TrySend and TryEmit stay in lockstep.
 func (o *Out) placement() beadPlacement {
 	return beadPlacement{
 		InFlightMs: o.SimLatencyMs,
-		P0:         o.P0,
-		P1:         o.P1,
-		P2:         o.P2,
+		Start:      o.Start,
+		End:        o.End,
 		Node:       o.node,
 		Port:       o.port,
 	}
@@ -347,9 +346,9 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve, edgeLabel string) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, EdgeLabel: edgeLabel}
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End, EdgeLabel: edgeLabel}
 }
