@@ -191,6 +191,10 @@ type Out struct {
 	// position stream evaluates the exact curve this edge is drawn on — fan-in safe
 	// because the shared dest wire never stores per-edge geometry.
 	P0, P1, P2 vec3
+	// EdgeLabel is the TS edge id for this output port's wire. Set by the loader
+	// so the node's EmitGeometry closure can stream the authoritative curve via
+	// tr.Geometry(EdgeLabel, P0..P2) on startup.
+	EdgeLabel string
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
@@ -343,9 +347,9 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve, edgeLabel string) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, P0: curve.P0, P1: curve.P1, P2: curve.P2}
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, P0: curve.P0, P1: curve.P1, P2: curve.P2, EdgeLabel: edgeLabel}
 }

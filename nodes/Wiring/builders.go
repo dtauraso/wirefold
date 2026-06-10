@@ -56,12 +56,14 @@ type PortBindings struct {
 	singleArc        map[string]float64    // per-edge arc length for singlePaced Out
 	singleLatency    map[string]float64    // per-edge sim latency for singlePaced Out
 	singleCurve      map[string]edgeCurve  // per-edge curve control points for singlePaced Out
+	singleLabel      map[string]string     // per-edge TS edge id for singlePaced Out
 	multiPaced       map[string][]*PacedWire
 	multiPacedHandle map[string][]string // per-element source handle for multiPaced
 	multiRule        map[string][]SendRule // per-element send rule for multiPaced
 	multiArc         map[string][]float64  // per-element arc length for multiPaced Out
 	multiLatency     map[string][]float64  // per-element sim latency for multiPaced Out
 	multiCurve       map[string][]edgeCurve // per-element curve control points for multiPaced Out
+	multiLabel       map[string][]string    // per-element TS edge id for multiPaced Out
 	// outSink, when non-nil, collects every paced *Out built for this node keyed
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
@@ -77,12 +79,14 @@ func newPortBindings() PortBindings {
 		singleArc:        map[string]float64{},
 		singleLatency:    map[string]float64{},
 		singleCurve:      map[string]edgeCurve{},
+		singleLabel:      map[string]string{},
 		multiPaced:       map[string][]*PacedWire{},
 		multiPacedHandle: map[string][]string{},
 		multiRule:        map[string][]SendRule{},
 		multiArc:         map[string][]float64{},
 		multiLatency:     map[string][]float64{},
 		multiCurve:       map[string][]edgeCurve{},
+		multiLabel:       map[string][]string{},
 	}
 }
 
@@ -91,14 +95,16 @@ func (pb *PortBindings) SetSingle(name string, ch chan int) { pb.single[name] = 
 func (pb *PortBindings) SetSinglePaced(name string, pw *PacedWire) { pb.singlePaced[name] = pw }
 
 // SetSinglePacedRule binds a single paced output with its per-edge send rule,
-// that edge's own travel-time (arc length / sim latency), and its curve control
-// points (so the bead's position stream evaluates the exact drawn curve).
-func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve) {
+// that edge's own travel-time (arc length / sim latency), its curve control
+// points (so the bead's position stream evaluates the exact drawn curve), and
+// the TS edge id (label) so the node's EmitGeometry closure can stream the curve.
+func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve, label string) {
 	pb.singlePaced[name] = pw
 	pb.singleRule[name] = rule
 	pb.singleArc[name] = arcLength
 	pb.singleLatency[name] = simLatencyMs
 	pb.singleCurve[name] = curve
+	pb.singleLabel[name] = label
 }
 
 func (pb *PortBindings) AppendMulti(name string, ch chan int) {
@@ -107,14 +113,16 @@ func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 
 // AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
 // source handle (e.g. "ToNext0"), the per-edge send rule, that edge's own
-// travel-time (arc length / sim latency), and its curve control points.
-func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve) {
+// travel-time (arc length / sim latency), its curve control points, and the
+// TS edge id (label) so the node's EmitGeometry closure can stream the curve.
+func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, curve edgeCurve, label string) {
 	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
 	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], handle)
 	pb.multiRule[name] = append(pb.multiRule[name], rule)
 	pb.multiArc[name] = append(pb.multiArc[name], arcLength)
 	pb.multiLatency[name] = append(pb.multiLatency[name], simLatencyMs)
 	pb.multiCurve[name] = append(pb.multiCurve[name], curve)
+	pb.multiLabel[name] = append(pb.multiLabel[name], label)
 }
 
 func (pb *PortBindings) In(name string) <-chan int {
@@ -212,6 +220,9 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	// authoritative center + per-port world positions/dirs as a node-geometry event,
 	// computed with the existing port_geometry.go helpers (no duplicated math). Each
 	// node's goroutine calls it once on startup, so the node owns its geometry emission.
+	// sourceOuts is populated during port wiring below; the closure fires later (at
+	// node startup), so it sees the completed slice.
+	var sourceOuts []*Out
 	if f := v.FieldByName("EmitGeometry"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
 		nodeName := name
 		g := geom
@@ -234,6 +245,17 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 				appendPort(p.Name, false)
 			}
 			tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
+			// Emit each outgoing edge's authoritative curve (per-goroutine, item 2).
+			// sourceOuts is populated just below during port wiring; by the time this
+			// closure fires the slice is complete.
+			for _, o := range sourceOuts {
+				if o != nil && o.EdgeLabel != "" {
+					tr.Geometry(o.EdgeLabel,
+						o.P0.X, o.P0.Y, o.P0.Z,
+						o.P1.X, o.P1.Y, o.P1.Z,
+						o.P2.X, o.P2.Y, o.P2.Z)
+				}
+			}
 		}))
 	}
 
@@ -254,7 +276,8 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			}
 		case PortOut:
 			if pw := pb.singlePaced[port.Name]; pw != nil {
-				o := NewOutPaced(pw, ctx, name, port.Name, tr, pb.singleRule[port.Name], pb.singleArc[port.Name], pb.singleLatency[port.Name], pb.singleCurve[port.Name])
+				o := NewOutPaced(pw, ctx, name, port.Name, tr, pb.singleRule[port.Name], pb.singleArc[port.Name], pb.singleLatency[port.Name], pb.singleCurve[port.Name], pb.singleLabel[port.Name])
+				sourceOuts = append(sourceOuts, o)
 				if pb.outSink != nil {
 					pb.outSink[name+"."+port.Name] = o
 				}
@@ -270,6 +293,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 				arcs := pb.multiArc[port.Name]
 				lats := pb.multiLatency[port.Name]
 				curves := pb.multiCurve[port.Name]
+				labels := pb.multiLabel[port.Name]
 				outs := make(OutMulti, len(pws))
 				for i, pw := range pws {
 					handle := port.Name
@@ -291,7 +315,12 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 					if i < len(curves) {
 						curve = curves[i]
 					}
-					outs[i] = NewOutPaced(pw, ctx, name, handle, tr, rule, arc, lat, curve)
+					var lbl string
+					if i < len(labels) {
+						lbl = labels[i]
+					}
+					outs[i] = NewOutPaced(pw, ctx, name, handle, tr, rule, arc, lat, curve, lbl)
+					sourceOuts = append(sourceOuts, outs[i])
 					if pb.outSink != nil {
 						pb.outSink[name+"."+handle] = outs[i]
 					}

@@ -207,12 +207,6 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 			nodeGeoms[e.Target], e.TargetHandle,
 		)
 		edgeCurves[e.Label] = curve
-		// Phase 3: stream this edge's authoritative curve so the renderer draws the
-		// wire tube from Go's control points (keyed by edge label == TS edge id).
-		tr.Geometry(e.Label,
-			curve.P0.X, curve.P0.Y, curve.P0.Z,
-			curve.P1.X, curve.P1.Y, curve.P1.Z,
-			curve.P2.X, curve.P2.Y, curve.P2.Z)
 		pw, exists := destWire[destKey]
 		if !exists {
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
@@ -346,7 +340,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 					// Send rule is node-owned, keyed by this output port name.
 					rule := nodeSendRule(n, port.Name)
 					lbl := labels[0]
-					pb.SetSinglePacedRule(port.Name, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeCurves[lbl])
+					pb.SetSinglePacedRule(port.Name, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeCurves[lbl], lbl)
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
@@ -361,7 +355,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 					// Per-port (per fan-out element): the rule is keyed by the
 					// concrete output port name (sourceHandle, e.g. "ToNext0").
 					rule := nodeSendRule(n, handle)
-					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeCurves[lbl])
+					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeCurves[lbl], lbl)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}
