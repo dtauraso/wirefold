@@ -86,6 +86,9 @@ tools/topology-vscode/gen-node-defs
 # Hook block log (local audit trail, not for VCS)
 .claude/hooks/substrate-r-blocks.log
 
+# Editor settings
+.vscode/
+
 # macOS
 .DS_Store
 
