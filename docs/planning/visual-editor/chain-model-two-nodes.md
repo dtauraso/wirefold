@@ -50,6 +50,29 @@ only ever makes a tiny midpoint adjustment against its immediate neighbors — *
 ever computes a distance or a straight line to another node**. The straight wire is the
 aggregate of many trivial local moves, never a node-to-node line calculation.
 
+## Items are born and retired as the wire stretches or shrinks
+
+The chain keeps its items densely and roughly evenly spaced. When a node moves, the
+wire's length changes, so the **number of items changes** to hold that spacing —
+locally, with no central length calculation.
+
+- **Node dragged farther:** the gaps stretch. When an item finds its neighbor has
+  drifted past an upper spacing threshold, it **spawns a new item** at the midpoint of
+  that gap and splices it into the chain — the two ends relink to the newcomer. The
+  wire grows item by item to fill the new length.
+- **Node dragged closer:** the gaps shrink. When two neighboring items fall within a
+  lower spacing threshold, one **retires**, and its two neighbors relink directly
+  across the gap it leaves. The wire sheds items as it shortens.
+
+Each item only ever measures the distance to its **immediate neighbor** — a tiny local
+check for the spacing threshold — so no node computes a distance or a line to another
+node. (The position relaxation itself needs no distance at all, just neighbor
+positions; this neighbor-gap check is the only distance anywhere, and it is local.)
+Birth and retirement are local splice / unsplice operations on the chain of goroutines;
+the straightening relaxation continues unchanged around them. Holding the spacing
+constant is what keeps each item's midpoint move tiny no matter how far apart the nodes
+are dragged.
+
 ## Straightening: each item removes its own peak/valley
 
 Each item, on its own goroutine, repeatedly:

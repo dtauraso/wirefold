@@ -111,6 +111,100 @@
 
 <p>The chain uses <strong>many</strong> items, so the spacing between neighbors is <strong>very small</strong>. That density is what keeps the model purely local: because every gap is tiny, an item only ever makes a tiny midpoint adjustment against its immediate neighbors — <strong>no node ever computes a distance or a straight line to another node</strong>. The straight wire is the aggregate of many trivial local moves, never a node-to-node line calculation.</p>
 
+<h2>Items are born and retired as the wire stretches or shrinks</h2>
+
+<p>The chain keeps its items densely and roughly evenly spaced. When a node moves, the wire's length changes, so the <strong>number of items changes</strong> to hold that spacing — locally, with no central length calculation.</p>
+
+<ul>
+  <li><strong>Node dragged farther:</strong> the gaps stretch. When an item finds its neighbor has drifted past an upper spacing threshold, it <strong>spawns a new item</strong> at the midpoint of that gap and splices it into the chain — the two ends relink to the newcomer. The wire grows item by item to fill the new length.</li>
+  <li><strong>Node dragged closer:</strong> the gaps shrink. When two neighboring items fall within a lower spacing threshold, one <strong>retires</strong>, and its two neighbors relink directly across the gap it leaves. The wire sheds items as it shortens.</li>
+</ul>
+
+<p>Each item only ever measures the distance to its <strong>immediate neighbor</strong> — a tiny local check for the spacing threshold — so no node computes a distance or a line to another node. (The position relaxation itself needs no distance at all, just neighbor positions; this neighbor-gap check is the only distance anywhere, and it is local.) Birth and retirement are local splice / unsplice operations on the chain of goroutines; the straightening relaxation continues unchanged around them. Holding the spacing constant is what keeps each item's midpoint move tiny no matter how far apart the nodes are dragged.</p>
+
+<!-- DIAGRAM: BIRTH AND RETIREMENT -->
+<div class="diagram-card">
+  <svg viewBox="0 0 700 310" width="660" height="310">
+
+    <!-- ===== TOP CASE: STRETCH / INSERT ===== -->
+    <text x="10" y="20" font-size="12" font-weight="600" fill="#374151">STRETCH — insert</text>
+
+    <!-- anchors -->
+    <circle cx="60" cy="70" r="9" fill="#111827"/>
+    <circle cx="640" cy="70" r="9" fill="#111827"/>
+
+    <!-- items left of gap -->
+    <circle cx="160" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="260" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+
+    <!-- items right of gap -->
+    <circle cx="460" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="560" cy="70" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+
+    <!-- solid segments on either side of the gap -->
+    <line x1="60" y1="70" x2="260" y2="70" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="460" y1="70" x2="640" y2="70" stroke="#9ca3af" stroke-width="2"/>
+
+    <!-- dashed segment for the too-wide gap -->
+    <line x1="260" y1="70" x2="460" y2="70" stroke="#9ca3af" stroke-width="2" stroke-dasharray="7,5"/>
+
+    <!-- gap label -->
+    <text x="360" y="52" text-anchor="middle" font-size="11" fill="#374151">&gt; spacing → insert</text>
+    <!-- brace lines pointing to gap ends -->
+    <line x1="270" y1="56" x2="260" y2="66" stroke="#374151" stroke-width="1"/>
+    <line x1="450" y1="56" x2="460" y2="66" stroke="#374151" stroke-width="1"/>
+
+    <!-- new item (green) at midpoint of gap -->
+    <circle cx="360" cy="70" r="7" fill="white" stroke="#16a34a" stroke-width="2"/>
+    <!-- + new label -->
+    <text x="360" y="96" text-anchor="middle" font-size="11" fill="#16a34a">+ new</text>
+
+    <!-- relink lines from neighbors to new item (lighter green dashes showing the splice) -->
+    <line x1="260" y1="70" x2="353" y2="70" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="367" y1="70" x2="460" y2="70" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+    <!-- ===== DIVIDER ===== -->
+    <line x1="0" y1="155" x2="700" y2="155" stroke="#e5e7eb" stroke-width="1"/>
+
+    <!-- ===== BOTTOM CASE: COMPRESS / RETIRE ===== -->
+    <text x="10" y="180" font-size="12" font-weight="600" fill="#374151">COMPRESS — retire</text>
+
+    <!-- anchors -->
+    <circle cx="60" cy="240" r="9" fill="#111827"/>
+    <circle cx="640" cy="240" r="9" fill="#111827"/>
+
+    <!-- items far left and far right (normal spacing) -->
+    <circle cx="160" cy="240" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <circle cx="560" cy="240" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+
+    <!-- two items that are too close (centered around x=360) -->
+    <circle cx="330" cy="240" r="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <!-- retiring item (faded red) -->
+    <circle cx="390" cy="240" r="6" fill="white" stroke="#dc2626" stroke-width="2" opacity="0.35"/>
+    <!-- × label on retiring item -->
+    <text x="390" y="225" text-anchor="middle" font-size="13" fill="#dc2626" opacity="0.6">×</text>
+
+    <!-- solid segments -->
+    <line x1="60" y1="240" x2="330" y2="240" stroke="#9ca3af" stroke-width="2"/>
+    <line x1="390" y1="240" x2="640" y2="240" stroke="#9ca3af" stroke-width="2"/>
+
+    <!-- dashed bracket for too-close gap -->
+    <line x1="330" y1="240" x2="390" y2="240" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4,3"/>
+
+    <!-- compress label -->
+    <text x="360" y="222" text-anchor="middle" font-size="11" fill="#374151">&lt; spacing → retire</text>
+    <!-- bracket lines -->
+    <line x1="340" y1="222" x2="330" y2="236" stroke="#374151" stroke-width="1"/>
+    <line x1="380" y1="222" x2="390" y2="236" stroke="#374151" stroke-width="1"/>
+
+    <!-- relink line directly between the two surviving neighbors (bypassing retired item) -->
+    <line x1="330" y1="240" x2="560" y2="240" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5"/>
+    <text x="445" y="265" text-anchor="middle" font-size="10" fill="#dc2626" opacity="0.7">neighbors relink</text>
+
+  </svg>
+  <div class="diagram-caption">Diagram — Birth and retirement. Top: a gap grows past the upper threshold; a new item (green) is spliced in at the midpoint. Bottom: two items crowd below the lower threshold; the retiring item (faded red) is unlinked and its neighbors relink directly.</div>
+</div>
+
 <h2>Straightening: each item removes its own peak/valley</h2>
 
 <p>Each item, on its own goroutine, repeatedly:</p>
