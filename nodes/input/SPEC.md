@@ -29,6 +29,13 @@
 { "init": [0, 1] }
 ```
 
+## Ports
+
+| Name | Direction | EdgeKind | Notes |
+|------|-----------|----------|-------|
+| ToReadGate | out | chain | forwards init values to the read gate |
+| FeedbackIn | in | chain | receives feedback signal (1/0) from downstream; geometry-only at this phase |
+
 ## Open questions
 
 - TSX handle id and Go struct field are now both `ToReadGate` (reconciled per post-fix-5 convention).

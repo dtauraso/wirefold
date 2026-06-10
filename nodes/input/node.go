@@ -7,10 +7,11 @@ import (
 )
 
 type Node struct {
-	Fire       func()
-	Init       []int `wire:"data.init"`
-	Repeat     bool  `wire:"data.repeat"`
-	ToReadGate *Wiring.Out
+	Fire        func()
+	Init        []int `wire:"data.init"`
+	Repeat      bool  `wire:"data.repeat"`
+	ToReadGate  *Wiring.Out
+	FeedbackIn  *Wiring.In
 }
 
 func (n *Node) Update(ctx context.Context) {

@@ -10,6 +10,14 @@
         ],
         "repeat": true
       },
+      "inputs": [
+        {
+          "name": "FeedbackIn",
+          "kind": "chain",
+          "side": "bottom",
+          "slot": 1
+        }
+      ],
       "outputs": [
         {
           "name": "ToReadGate",
@@ -50,6 +58,12 @@
           "kind": "inhibit-in",
           "side": "left",
           "slot": 2
+        },
+        {
+          "name": "FeedbackOut",
+          "kind": "chain",
+          "side": "top",
+          "slot": 1
         }
       ]
     },
@@ -90,6 +104,18 @@
   ],
   "edges": [
     {
+      "id": "in08ToI0",
+      "source": "in08",
+      "sourceHandle": "ToReadGate",
+      "target": "i0",
+      "targetHandle": "FromPrevChainInhibitorNode",
+      "kind": "chain",
+      "label": "in08ToI0",
+      "data": {
+        "slots": 1
+      }
+    },
+    {
       "id": "i0ToI1",
       "source": "i0",
       "sourceHandle": "ToNext0",
@@ -97,6 +123,18 @@
       "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
       "label": "i0ToI1",
+      "data": {
+        "slots": 1
+      }
+    },
+    {
+      "id": "i0FeedbackToIn08",
+      "source": "i0",
+      "sourceHandle": "FeedbackOut",
+      "target": "in08",
+      "targetHandle": "FeedbackIn",
+      "kind": "chain",
+      "label": "i0FeedbackToIn08",
       "data": {
         "slots": 1
       }
@@ -110,15 +148,15 @@
     },
     "camera3d": {
       "position": [
-        140.64183383280727,
-        -378.2661280048658,
-        42.40499500647762
+        215.56369648435253,
+        -437.9729255663436,
+        254.19534336089734
       ],
       "quaternion": [
-        0.2787185085221714,
-        -0.20805624862863695,
-        -0.03094563629958197,
-        0.9370544050415474
+        0.1460609277820182,
+        -0.041696516773813204,
+        -0.06907711922274766,
+        0.9859796942454101
       ]
     },
     "nodes": {

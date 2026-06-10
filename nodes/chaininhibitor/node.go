@@ -12,6 +12,7 @@ type Node struct {
 	Held                       int `wire:"data.state"`
 	FromPrevChainInhibitorNode *Wiring.In
 	ToNext                     Wiring.OutMulti
+	FeedbackOut                *Wiring.Out
 }
 
 func (in *Node) Update(ctx context.Context) {
