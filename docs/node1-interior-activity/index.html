@@ -333,7 +333,7 @@ Geometry: Input.Update() does the array mutation AND the interior bead geometry 
       </tbody>
     </table>
 
-    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled</span> The design is <strong>locked</strong>: double-buffer (working <code>[1,0]</code> + backup <code>[1,0]</code>), pop-the-end on <code>i==1</code> (sends 0 then 1), refill = backup slides down + 2 new at top (animated, human speed), index <code>i</code> removed, and <code>Update()</code> computes the interior geometry coupled to the array mutation and streams the incremental change. The one remaining detail is the trace <strong>event kind name</strong> (see Formulas tab).</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled</span> The design is <strong>locked</strong>: double-buffer (working <code>[1,0]</code> + backup <code>[1,0]</code>), pop-the-end on <code>i==1</code> (sends 0 then 1), refill = backup slides down + 2 new at top (animated, human speed), index <code>i</code> removed, and <code>Update()</code> computes the interior geometry coupled to the array mutation and streams the incremental change. The interior-bead trace event kind name is <code>node-bead</code> (see Formulas tab) — the last open detail, now resolved.</div>
   </div>
 
   <!-- TAB: Array mechanics -->
@@ -527,10 +527,12 @@ valueAt(working slot k) = working[len(working) - (4 - k)]</div>
   Go sends ONLY what changed — NOT a per-node "send all 4 beads every frame" batch.
 TS RENDERS the interior beads from this stream. TS computes NO geometry, no interpolation,
   no interior layout math (consistent with check-ts-computes-no-geometry).
-Implied trace event: an interior-bead geometry/position event keyed by node id + slot,
+Trace event: <code>node-bead</code> — interior-bead geometry/position event keyed by node id + slot,
   payload = bead value (0|1) + position. Slots into the trace stream + pump.ts like the
-  other geometry/position events.</div>
-    <div class="assume"><span class="tag">One open detail</span> <strong>Event kind name.</strong> The only remaining open detail is the exact KIND NAME of the interior-bead geometry/position trace event (keyed by node id + slot, payload = value 0/1 + position). Everything else — the per-slot keying, the incremental semantics, and where it slots into the trace stream / pump.ts — is settled.</div>
+  other geometry/position events. <code>node-bead</code> must be added to the trace-kind
+  allowlist on BOTH Go and TS sides in lockstep (the trace-kind-parity guard enforces it),
+  same as the other trace kinds.</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Resolved</span> <strong>Event kind name: <code>node-bead</code>.</strong> The interior-bead geometry/position trace event is kind <code>node-bead</code> (keyed by node id + slot, payload = value 0/1 + position). <code>node-bead</code> is added to the trace-kind allowlist on BOTH Go and TS sides in lockstep (the trace-kind-parity guard enforces it), like the other trace kinds. The per-slot keying, the incremental semantics, and where it slots into the trace stream / pump.ts are all settled. No open items remain.</div>
   </div>
 
   <!-- TAB: Go changes -->
@@ -549,7 +551,7 @@ Implied trace event: an interior-bead geometry/position event keyed by node id +
         <tr><td>Pop / send</td><td>On feedback step <code>s == 1</code>: pop <code>working[len-1]</code> (the END IS the next value — no index lookup), emit it via <code>ToReadGate</code> on <code>1To2</code>. Stored <code>[1,0]</code> end-pops <code>0</code> then <code>1</code>. On <code>s == 0</code>: do nothing.</td></tr>
         <tr><td>Refill</td><td>When <code>len(working) == 0</code> (working's 2 beads popped): <code>working = backup</code> (slide down), <code>backup = [1,0]</code> (new top). Buffer always 4 beads.</td></tr>
         <tr><td>Geometry calc (coupled)</td><td>In <code>Update()</code>, compute the interior bead positions and the slide transition <code>t</code> (formulas tab) <strong>in the same step as the array mutation</strong> — pop/refill and geometry are ONE coupled operation. No TS-side geometry.</td></tr>
-        <tr><td>Incremental stream</td><td>Stream only the CHANGED interior geometry: on a pop, the shrunk/repositioned beads; on a refill, the sliding beads' positions over the slide duration on Go's clock (per-frame, human-speed, like the wire-bead stream). <strong>Not</strong> a "send all 4 every frame" batch. Extend the existing position trace stream (via <code>EmitGeometry</code> or a sibling emitter); TS pump renders.</td></tr>
+        <tr><td>Incremental stream</td><td>Stream only the CHANGED interior geometry: on a pop, the shrunk/repositioned beads; on a refill, the sliding beads' positions over the slide duration on Go's clock (per-frame, human-speed, like the wire-bead stream). <strong>Not</strong> a "send all 4 every frame" batch. Extend the existing position trace stream with the <code>node-bead</code> event (via <code>EmitGeometry</code> or a sibling emitter); TS pump renders. Add <code>node-bead</code> to the trace-kind allowlist on BOTH Go and TS sides in lockstep (the trace-kind-parity guard enforces it).</td></tr>
         <tr><td>Ports / feedback</td><td><strong>Unchanged.</strong> <code>FeedbackIn</code> and <code>ToReadGate</code> stay; only the step's <em>meaning</em> (1 = pop/send, 0 = hold) is redefined.</td></tr>
       </tbody>
     </table>
@@ -589,10 +591,10 @@ Implied trace event: an interior-bead geometry/position event keyed by node id +
   <!-- stream interior geometry -> TS -->
   <rect x="700" y="190" width="300" height="78" rx="10" fill="#1a0f24" stroke="#c07ef8" stroke-width="1.5"/>
   <text x="850" y="216" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">TS renders 4-bead column</text>
-  <text x="850" y="234" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a06bd0">from streamed interior-bead</text>
+  <text x="850" y="234" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a06bd0">from streamed node-bead</text>
   <text x="850" y="250" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a06bd0">positions · computes no geometry</text>
   <line x1="530" y1="180" x2="698" y2="222" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aV)"/>
-  <text x="600" y="216" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">stream incremental geom</text>
+  <text x="600" y="216" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">stream node-bead (incremental)</text>
 </svg>
     </div>
     <div class="note"><strong>Legend.</strong> Yellow = downstream feedback signal; green = Go <code>Update()</code> doing array + geometry work; blue = bead emitted onto the wire (paced by the existing PacedWire); purple = the new interior-bead geometry stream that TS renders. The bridge stays fire-and-forget; Go owns all timing and positions.</div>
@@ -601,7 +603,7 @@ Implied trace event: an interior-bead geometry/position event keyed by node id +
   <!-- TAB: Open questions -->
   <div class="panel" id="panel-open" role="tabpanel">
     <h2>Resolved — design is locked.</h2>
-    <p>The design questions that were open are now <strong>settled</strong>. One small naming detail remains.</p>
+    <p>The design questions that were open are now <strong>settled</strong>, including the last naming detail. <strong>No open items remain.</strong></p>
     <table class="spec-table">
       <caption>Resolved decisions</caption>
       <thead><tr><th style="width:6%">#</th><th style="width:28%">Topic</th><th style="width:66%">Decision (settled)</th></tr></thead>
@@ -615,9 +617,10 @@ Implied trace event: an interior-bead geometry/position event keyed by node id +
         <tr><td>7</td><td>Animation</td><td>The slide is <strong>animated at human speed</strong>, timed on Go's clock with the same human-speed slowdown used for in-flight beads.</td></tr>
         <tr><td>8</td><td>Geometry ownership</td><td><code>Input.Update()</code> does the interior-bead geometry IN THE SAME STEP as the array mutation (coupled). Go streams the INCREMENTAL change; TS renders, computes no geometry.</td></tr>
         <tr><td>9</td><td>Stream shape</td><td>Incremental — Go sends what changed, keyed by node id + slot (value 0/1 + position), like the wire-bead position stream. NOT a per-node "send all 4" batch.</td></tr>
+        <tr><td>10</td><td>Trace event kind name</td><td><strong><code>node-bead</code>.</strong> The interior-bead geometry/position event (keyed by node id + slot, payload = value 0/1 + position) is kind <code>node-bead</code>. It must be added to the trace-kind allowlist on BOTH Go and TS sides in lockstep (the trace-kind-parity guard enforces it), and slots into the trace stream + <code>pump.ts</code> like the other geometry/position events.</td></tr>
       </tbody>
     </table>
-    <div class="assume" style="margin-top:1.5rem;"><span class="tag">One open detail</span> The exact trace <strong>event KIND NAME</strong> for the interior-bead geometry/position event (keyed by node id + slot, payload = value 0/1 + position) is the one small naming detail still to settle. It slots into the trace stream + <code>pump.ts</code> like the other geometry/position events.</div>
+    <div class="assume" style="margin-top:1.5rem;border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Resolved</span> The trace <strong>event kind name</strong> for the interior-bead geometry/position event (keyed by node id + slot, payload = value 0/1 + position) is <code>node-bead</code>. It slots into the trace stream + <code>pump.ts</code> like the other geometry/position events, and is added to the trace-kind allowlist on both Go and TS sides in lockstep (trace-kind-parity guard). <strong>No open items remain.</strong></div>
     <div class="assume" style="margin-top:1rem;"><span class="tag">Note</span> This page is a <strong>design artifact</strong> — no Go or TS code changes accompany this commit. It is tagged branch-local (HTML comment on line 1) and will be stripped before any merge to main.</div>
   </div>
 </div>
