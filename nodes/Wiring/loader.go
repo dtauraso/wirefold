@@ -127,21 +127,14 @@ type topoSpec struct {
 	View  topoView   `json:"view"`
 }
 
-// WireRegistry maps edge label → *PacedWire. Used for fade/node-move operations
-// where lookup by edge label is needed. Each entry points to the wire owned by
+// WireRegistry maps edge label → *PacedWire. Each entry points to the wire owned by
 // the destination port; multiple edges sharing a destination port map to the same *PacedWire.
+// Fade is now routed via MoveDispatch (per-wire dispatch), not via this map.
 type WireRegistry map[string]*PacedWire
-
-// ForEach calls fn for every (edgeID, wire) pair in the registry.
-func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
-	for id, pw := range reg {
-		fn(id, pw)
-	}
-}
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
 // SlotRegistry (keyed by "target.targetHandle" for delivery acks), a WireRegistry
-// (keyed by edge label for fade/node-move), and a MoveDispatch (key→inbox registry
+// (keyed by edge label), and a MoveDispatch (key→inbox registry
 // for the decentralized node-move path: each node and edge owns its own recompute).
 //
 // clk is the single monotonic clock injected into every PacedWire so each wire

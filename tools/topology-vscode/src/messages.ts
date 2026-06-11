@@ -25,7 +25,7 @@ export type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   | { type: "edit"; op: "update"; entries: Record<string, MoveEntry> }
-  | { type: "edit"; op: "fade"; edges: string[] };
+  | { type: "edit"; op: "fade"; edges: Record<string, boolean> };
 
 export type WebviewToHostMsg =
   | { type: "ready" }
@@ -103,10 +103,15 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       });
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }
-    case "fade":
-      return Array.isArray(m.edges) && m.edges.every((e) => typeof e === "string")
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
+    case "fade": {
+      // edges is Record<string, boolean>: edgeId → desired faded state.
+      const edgesMap = m.edges;
+      if (!edgesMap || typeof edgesMap !== "object" || Array.isArray(edgesMap)) return undefined;
+      const ok = Object.entries(edgesMap as Record<string, unknown>).every(
+        ([k, v]) => typeof k === "string" && typeof v === "boolean",
+      );
+      return ok ? (m as unknown as WebviewToHostMsg) : undefined;
+    }
     default:
       return undefined;
   }

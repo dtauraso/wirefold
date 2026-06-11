@@ -34,13 +34,23 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// moveMsg is one node-move entry routed to a mover's inbox: the node that moved
-// and its new position. ack (if non-nil) is closed by the mover after it has fully
-// handled the message — used only by the synchronous test façade so an assertion
-// can observe the recompute deterministically. The live bridge path leaves ack nil.
+// moveMsgKind discriminates moveMsg payloads.
+const (
+	moveMsgKindMove = "move" // default (zero-value "" is also treated as move)
+	moveMsgKindFade = "fade"
+)
+
+// moveMsg is one entry routed to a mover's inbox. kind selects the payload:
+//   - "" or "move": node-move — NodeID + X/Y/Z applied by nodeMover and edgeMover.
+//   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
+//
+// ack (if non-nil) is closed by the mover after it has fully handled the message —
+// used only by the synchronous test façade. The live bridge path leaves ack nil.
 type moveMsg struct {
+	Kind    string
 	NodeID  string
 	X, Y, Z float64
+	Faded   bool
 	ack     chan struct{}
 }
 
@@ -114,11 +124,19 @@ func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr
 	}
 }
 
-// handle applies one endpoint move to this edge: update the matching endpoint geom,
-// recompute the edge's segment + arc, write them onto the source Out, revise any
-// in-flight bead, emit the new edge geometry, and update the dest port's latency
-// aggregate. A move that touches neither endpoint is ignored.
+// handle applies one inbox message to this edge. For a "fade" message it sets its
+// OWN wire's faded flag (the wire owns its flag — no central fan-out). For a move
+// message it updates the matching endpoint geom, recomputes the edge's segment + arc,
+// writes them onto the source Out, revises any in-flight bead, emits the new edge
+// geometry, and updates the dest port's latency aggregate. A move that touches
+// neither endpoint is ignored.
 func (m *edgeMover) handle(msg moveMsg) {
+	if msg.Kind == moveMsgKindFade {
+		if m.dest != nil {
+			m.dest.SetFaded(msg.Faded)
+		}
+		return
+	}
 	switch msg.NodeID {
 	case m.srcID:
 		m.srcGeom.Pos = vec3{X: msg.X, Y: msg.Y, Z: msg.Z}

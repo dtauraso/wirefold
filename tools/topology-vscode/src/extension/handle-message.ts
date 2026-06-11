@@ -146,6 +146,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "edit-update-forward", entryKeys: Object.keys(msg.entries) }), document.uri);
         runner.writeStdin(JSON.stringify({ type: "edit", op: "update", entries: msg.entries }));
       } else if (msg.op === "fade") {
+        // edges is Record<string, boolean>: edgeId → desired faded state. Forward verbatim.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "fade", edges: msg.edges }));
       }
       return;

@@ -210,8 +210,14 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     });
     scheduleViewSave();
 
-    // Emit the full faded-edge set to the host so Go can update its wire flags.
-    // Single geometry-CRUD bridge: edit/fade.
-    vscode.postMessage({ type: "edit", op: "fade", edges: [...result.fadedEdges] });
+    // Emit the full desired faded state to the host so each Go wire sets its own flag.
+    // Shape: Record<edgeId, boolean> — faded=true for each faded edge, false for each
+    // unfaded edge — so Go's per-wire dispatch can set any wire to its desired state.
+    // Single geometry-CRUD bridge: edit/fade. Fire-and-forget.
+    const edgeFadeMap: Record<string, boolean> = {};
+    for (const e of edges) {
+      edgeFadeMap[e.id] = result.fadedEdges.has(e.id);
+    }
+    vscode.postMessage({ type: "edit", op: "fade", edges: edgeFadeMap });
   },
 }));

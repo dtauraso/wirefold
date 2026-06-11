@@ -6,7 +6,7 @@
 //     {"type":"edit","op":"create","target":"<node-id>","targetHandle":"<port>"}
 //     {"type":"edit","op":"delete","target":"<node-id>","targetHandle":"<port>"}
 //     {"type":"edit","op":"update","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
-//     {"type":"edit","op":"fade","edges":["<edge-id>", ...]}
+//     {"type":"edit","op":"fade","edges":{"<edge-id>":true|false,...}}
 //
 //  2. Play/pause control (type=="play" / type=="pause") — routes directly to the
 //     clock's global gate (Halt/Resume). The process starts halted; the first
@@ -60,7 +60,7 @@ type stdinMsg struct {
 	Op           string               `json:"op"`
 	Target       string               `json:"target"`
 	TargetHandle string               `json:"targetHandle"`
-	Edges        []string             `json:"edges"`
+	Edges        map[string]bool      `json:"edges"`
 	Entries      map[string]moveEntry `json:"entries"`
 }
 
@@ -74,9 +74,9 @@ type SlotRegistry map[string]*PacedWire
 // or r reaches EOF. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
-// destination port's wire. reg is keyed by edge label and drives the fade op.
-// md may be nil; if non-nil, update (node-move) ops mail-sort each entry to the
-// owning node/edge goroutine's inbox (no central recompute lives here).
+// destination port's wire. reg is no longer used for fade (fade is now routed via
+// md.dispatch, same as update). md may be nil; if non-nil, update (node-move) and
+// fade ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
 func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg WireRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
@@ -136,7 +136,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 //     echoing pulse-cancelled (PacedWire.Delete owns both, atomically).
 //   - update: mail-sort the node-move entries to the owning node/edge inboxes; each
 //     owning goroutine recomputes its own geometry (no central recompute here).
-//   - fade:   set the per-wire faded-flag set wholesale across all wires.
+//   - fade:   mail-sort each (edgeId,faded) entry to the owning edgeMover; each wire sets its own flag.
 //
 // Unknown ops are ignored (forward-compat).
 func applyEdit(msg stdinMsg, slotReg SlotRegistry, reg WireRegistry, md *MoveDispatch, tr *T.Trace) {
@@ -183,14 +183,16 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, reg WireRegistry, md *MoveDis
 			}
 		}
 	case msg.Op == "fade":
-		// Build a set of faded edge ids for O(1) lookup, then apply wholesale:
-		// set every wire's faded flag to its membership in the set.
-		faded := make(map[string]bool, len(msg.Edges))
-		for _, id := range msg.Edges {
-			faded[id] = true
+		// Mail-sort: push each (edgeId, faded) entry to its edge's inbox. Each
+		// edgeMover sets its OWN wire's faded flag — no central fan-out. Unknown
+		// keys are ignored (forward-compat).
+		if md == nil || len(msg.Edges) == 0 {
+			return
 		}
-		reg.ForEach(func(id string, pw *PacedWire) {
-			pw.SetFaded(faded[id])
-		})
+		for edgeID, faded := range msg.Edges {
+			if ch, ok := md.dispatch[edgeID]; ok {
+				ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
+			}
+		}
 	}
 }
