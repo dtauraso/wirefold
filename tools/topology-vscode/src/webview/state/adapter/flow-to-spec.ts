@@ -40,6 +40,15 @@ export function flowToSpec(
     }
 
     const d = n.data as NodeData;
+    // Structural guard: a non-note node MUST carry a non-empty kind. Serializing
+    // a typeless, portless node produces a topology.json that Go's LoadTopology
+    // rejects ("... is not an output port on kind \"\"") and crash-loops on. Fail
+    // loud here so performSave can refuse the write and preserve the good file.
+    if (d.type === undefined || d.type === null || (d.type as unknown as string) === "") {
+      throw new Error(
+        `flowToSpec: node "${n.id}" has empty type — refusing to serialize (would crash Go load)`,
+      );
+    }
     const node: SpecNode = {
       id: n.id,
       type: d.type,
