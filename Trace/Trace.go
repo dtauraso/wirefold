@@ -127,12 +127,13 @@ type Event struct {
 // all nodes have stopped to drain
 // the channel and receive the final event slice via Events().
 type Trace struct {
-	ch     chan Event
-	done   chan struct{}
-	mu     sync.Mutex
-	events []Event
-	closed bool
-	sink   io.Writer // if non-nil, each event is written as JSONL in real time
+	ch      chan Event
+	done    chan struct{}
+	stopped chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
+	mu      sync.Mutex
+	events  []Event
+	closed  bool
+	sink    io.Writer // if non-nil, each event is written as JSONL in real time
 }
 
 // New allocates a Trace with a buffered emit channel. buf controls
@@ -151,12 +152,27 @@ func NewWithSink(buf int, sink io.Writer) *Trace {
 		buf = 1024
 	}
 	t := &Trace{
-		ch:   make(chan Event, buf),
-		done: make(chan struct{}),
-		sink: sink,
+		ch:      make(chan Event, buf),
+		done:    make(chan struct{}),
+		stopped: make(chan struct{}),
+		sink:    sink,
 	}
 	go t.drain()
 	return t
+}
+
+// emit is the single send path. It NEVER sends on a closed channel because
+// t.ch is never closed; instead Close() closes t.stopped and a concurrent
+// sender that is mid-flight selects the stopped case and drops the event
+// silently rather than send on a torn-down trace.
+func (t *Trace) emit(e Event) {
+	if t == nil {
+		return
+	}
+	select {
+	case t.ch <- e:
+	case <-t.stopped:
+	}
 }
 
 // Emit sends one event. Called from node Update loops — always check
@@ -166,37 +182,25 @@ func NewWithSink(buf int, sink io.Writer) *Trace {
 // and block briefly rather than drop"). The 1024-deep default keeps
 // this rare in practice.
 func (t *Trace) Emit(e Event) {
-	if t == nil {
-		return
-	}
-	t.ch <- e
+	t.emit(e)
 }
 
 // Recv emits a recv event for `(node, port, value)`. Convenience
 // wrapper so node code stays one-line.
 func (t *Trace) Recv(node, port string, value int) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindRecv, Node: node, Port: port, Value: value}
+	t.emit(Event{Kind: KindRecv, Node: node, Port: port, Value: value})
 }
 
 // Fire emits a fire event for `node`. Called once per handler
 // activation that produces ≥1 emission, before the first Send.
 func (t *Trace) Fire(node string) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindFire, Node: node}
+	t.emit(Event{Kind: KindFire, Node: node})
 }
 
 // Send emits a send event for `(node, port, value)` after a
 // successful S.Send on the corresponding output channel.
 func (t *Trace) Send(node, port string, value int) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value}
+	t.emit(Event{Kind: KindSend, Node: node, Port: port, Value: value})
 }
 
 // SendWire emits a send event like Send, additionally carrying the wire geometry
@@ -204,20 +208,14 @@ func (t *Trace) Send(node, port string, value int) {
 // authoritative destination slot identity (target node id, targetHandle port name)
 // from the outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
 func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64, target, targetHandle string) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
+	t.emit(Event{Kind: KindSend, Node: node, Port: port, Value: value, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle})
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
 // using a value. The node and port identify the input port that was Done'd,
 // matching the edge by target node + targetHandle in the webview.
 func (t *Trace) Done(node, port string) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindDone, Node: node, Port: port}
+	t.emit(Event{Kind: KindDone, Node: node, Port: port})
 }
 
 // Position emits a per-frame bead-position event (Phase 2). node/port are the
@@ -230,10 +228,7 @@ func (t *Trace) Done(node, port string) {
 // wire's delivery goroutine calls this every ~16 ms while the bead is in flight,
 // and once more at t==1 just before delivery.
 func (t *Trace) Position(node, port string, value int, x, y, z, f float64) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, X: x, Y: y, Z: z, hasPos: true, F: f}
+	t.emit(Event{Kind: KindPosition, Node: node, Port: port, Value: value, X: x, Y: y, Z: z, hasPos: true, F: f})
 }
 
 // Geometry emits an edge's authoritative straight-segment endpoints (Phase 3),
@@ -241,14 +236,11 @@ func (t *Trace) Position(node, port string, value int, x, y, z, f float64) {
 // pos (Start), (ex,ey,ez) is the dest IN-port world pos (End). Go emits this on load
 // and on each node-move; the renderer draws the wire tube as a LineCurve3 from these.
 func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{
+	t.emit(Event{
 		Kind: KindGeometry, Edge: edge,
 		SX: sx, SY: sy, SZ: sz,
 		EX: ex, EY: ey, EZ: ez,
-	}
+	})
 }
 
 // NodeGeometry emits one node's authoritative center + per-port world geometry
@@ -257,10 +249,7 @@ func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
 // once on startup via its injected EmitGeometry closure (the node owns its geometry
 // emission; wires still own bead-position emission).
 func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Ports: ports}
+	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Ports: ports})
 }
 
 // Arrive marks a bead completing its traversal — delivered into the destination
@@ -268,20 +257,14 @@ func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom
 // position/pulse-cancelled), so the renderer clears the transit pulse on arrival.
 // The wire's deliverLocked is the single caller; it fires exactly once per bead.
 func (t *Trace) Arrive(node, port string, value int) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindArrive, Node: node, Port: port, Value: value}
+	t.emit(Event{Kind: KindArrive, Node: node, Port: port, Value: value})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
 // keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
 // emits it when a wire drops a bead mid-flight (edge deleted during traversal).
 func (t *Trace) PulseCancelled(node, port string, value int) {
-	if t == nil {
-		return
-	}
-	t.ch <- Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value}
+	t.emit(Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value})
 }
 
 // Breadcrumb writes a free-form diagnostic line directly to the sink
@@ -331,8 +314,11 @@ func (t *Trace) Close() {
 		return
 	}
 	t.closed = true
-	close(t.ch)
+	// Signal senders to stop. t.ch is NEVER closed, so an in-flight emit
+	// selects the stopped case and drops rather than panicking.
+	close(t.stopped)
 	t.mu.Unlock()
+	// drain() observes t.stopped, flushes any buffered events, then closes done.
 	<-t.done
 }
 
@@ -375,7 +361,7 @@ func writeAll(events []Event, w io.Writer, marshal func(Event) ([]byte, error)) 
 }
 
 func (t *Trace) drain() {
-	for ev := range t.ch {
+	record := func(ev Event) {
 		t.mu.Lock()
 		ev.Step = len(t.events)
 		t.events = append(t.events, ev)
@@ -387,7 +373,24 @@ func (t *Trace) drain() {
 			}
 		}
 	}
-	close(t.done)
+	for {
+		select {
+		case ev := <-t.ch:
+			record(ev)
+		case <-t.stopped:
+			// Close() signalled. Drain any events already buffered in t.ch
+			// (senders may have enqueued before observing stopped), then finish.
+			for {
+				select {
+				case ev := <-t.ch:
+					record(ev)
+				default:
+					close(t.done)
+					return
+				}
+			}
+		}
+	}
 }
 
 // marshalEvent emits the closed-vocabulary shape:
