@@ -7,7 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
-import { extractViewText, injectViewText } from "../sidecar";
+import { extractViewText, injectViewText, serializeSceneText, parseSceneText } from "../sidecar";
 import {
   parseWebviewToHost,
   type HostToWebviewMsg,
@@ -81,12 +81,22 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       }
       return;
     case "view-save":
+      // Two persistences, both fire on every view-save:
+      //   1. Diagram-view fields (node positions + the 3 fade arrays) → injected
+      //      into topology.json#view (injectViewText strips scene keys). Go reads
+      //      view.nodes from here, so this is what survives drags/fades on reload.
+      //   2. Scene fields (camera, camera3d, labelsGlobalHidden) → topology.scene.json (flat).
       try {
         const merged = injectViewText(document.getText(), msg.text);
         ctx.setLastAppliedVersion(document.version + 1);
         await applyEdit(document, merged);
         await document.save();
         ctx.setLastAppliedVersion(document.version);
+
+        const sceneFields = parseSceneText(msg.sceneText);
+        const sceneText = serializeSceneText(sceneFields);
+        const scenePath = path.join(path.dirname(document.uri.fsPath), "topology.scene.json");
+        fs.writeFileSync(scenePath, sceneText, "utf8");
       }
       catch (err) { post({ type: "save-error", message: toErrorMessage(err) }); }
       return;

@@ -6,10 +6,9 @@ import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import { parseSpec } from "../../schema";
 import { specToFlow } from "../state/adapter/spec-to-flow";
 import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
-import { parseViewerState } from "../state/viewer/types";
-import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../save";
+import { parseViewerState, mergeSceneIntoViewerState } from "../state/viewer/types";
+import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
 import { postLog } from "../log/post";
-import { serializeViewerState } from "../state/viewer/types";
 import { vscode } from "../vscode-api";
 import { clearPulse } from "./pulse-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
@@ -35,7 +34,7 @@ export interface ThreeStoreState {
   fadeEdgeOrder: string[];
 
   // --- Actions ---
-  load: (text: string) => void;
+  load: (text: string, sceneText?: string) => void;
   setNodes: (updater: RFNode<NodeData>[] | ((ns: RFNode<NodeData>[]) => RFNode<NodeData>[])) => void;
   setEdges: (updater: RFEdge<EdgeData>[] | ((es: RFEdge<EdgeData>[]) => RFEdge<EdgeData>[])) => void;
   setSelected: (id: string | null) => void;
@@ -66,14 +65,22 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   directlyFadedEdges: new Set<string>(),
   fadeEdgeOrder: [],
 
-  load(text: string) {
+  load(text: string, sceneText?: string) {
     try {
       const raw = JSON.parse(text);
       const spec = parseSpec(raw);
+      // Diagram view: positions + fades from topology.json#view (Go reads view.nodes).
       const viewText = raw.view !== undefined ? JSON.stringify(raw.view) : undefined;
-      const next = parseViewerState(viewText);
+      const diagramView = parseViewerState(viewText);
+      // Scene view: camera, camera3d, labelsGlobalHidden from topology.scene.json (optional).
+      const sceneView = sceneText !== undefined ? parseViewerState(sceneText) : undefined;
+      const next = sceneView !== undefined
+        ? mergeSceneIntoViewerState(diagramView, sceneView)
+        : diagramView;
       setViewerState(next);
-      markViewSynced(serializeViewerState(next));
+      // Race guard keyed on the combined diagram+scene payload — must match
+      // performViewSave's guard key so the initial load doesn't retrigger a save.
+      markViewSynced(viewSyncedKey(next));
       const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
       const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
       const flow = specToFlow(spec, next, next.lastSelectionIds ?? []);

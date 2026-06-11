@@ -30,7 +30,7 @@ export type EditMsg =
 export type WebviewToHostMsg =
   | { type: "ready" }
   | { type: "save"; text: string }
-  | { type: "view-save"; text: string }
+  | { type: "view-save"; text: string; sceneText: string }
   | { type: "run"; text?: string }
   | { type: "run-cancel" }
   | { type: "play" }
@@ -65,7 +65,7 @@ export type TraceEvent =
   | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] };
 
 export type HostToWebviewMsg =
-  | { type: "load"; text: string }
+  | { type: "load"; text: string; sceneText?: string }
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
   | { type: "flush" }
   | { type: "save-error"; message: string }
@@ -126,8 +126,11 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   const m = raw as Record<string, unknown>;
   switch (t) {
     case "save":
-    case "view-save":
       return typeof m.text === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "view-save":
+      return typeof m.text === "string" && typeof m.sceneText === "string"
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
     case "run":
       return m.text === undefined || typeof m.text === "string"
         ? (m as unknown as WebviewToHostMsg)

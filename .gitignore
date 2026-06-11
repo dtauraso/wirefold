@@ -83,6 +83,10 @@ tools/topology-vscode/gen-node-defs
 # Pulse-probe dump from the visual editor's webview (workspace-local, transient)
 /.probe/
 
+# Scene sidecar — gitignored so camera/label state does not generate commit noise.
+# Diagram state (positions, fades) stays in topology.json.
+/topology.scene.json
+
 # Hook block log (local audit trail, not for VCS)
 .claude/hooks/go-blocks.log
 

@@ -111,3 +111,25 @@ export function parseViewerState(text: string | undefined): ViewerState {
 export function serializeViewerState(s: ViewerState): string {
   return JSON.stringify(s, null, 2) + "\n";
 }
+
+// Scene-only fields (camera, camera3d, labelsGlobalHidden) — for topology.scene.json.
+export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "labelsGlobalHidden">;
+
+export function serializeSceneState(s: ViewerState): string {
+  const scene: SceneState = {};
+  if (s.camera !== undefined) scene.camera = s.camera;
+  if (s.camera3d !== undefined) scene.camera3d = s.camera3d;
+  if (s.labelsGlobalHidden !== undefined) scene.labelsGlobalHidden = s.labelsGlobalHidden;
+  return JSON.stringify(scene, null, 2) + "\n";
+}
+
+// Merge scene fields from a parsed flat scene object into a ViewerState.
+// Returns a new ViewerState with scene fields overlaid.
+export function mergeSceneIntoViewerState(base: ViewerState, sceneParsed: ViewerState): ViewerState {
+  const out: ViewerState = { ...base };
+  if (sceneParsed.camera !== undefined) out.camera = sceneParsed.camera;
+  if (sceneParsed.camera3d !== undefined) out.camera3d = sceneParsed.camera3d;
+  if (sceneParsed.labelsGlobalHidden !== undefined) out.labelsGlobalHidden = sceneParsed.labelsGlobalHidden;
+  else delete out.labelsGlobalHidden; // absent = false (labels shown)
+  return out;
+}
