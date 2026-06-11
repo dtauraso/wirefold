@@ -15,26 +15,45 @@ import { parseSpec } from "../../src/schema";
 import type { Spec } from "../../src/schema";
 import { specToFlow } from "../../src/webview/state/adapter/spec-to-flow";
 import { flowToSpec } from "../../src/webview/state/adapter/flow-to-spec";
-import { parseViewerState } from "../../src/webview/state/viewer/types";
+import { parseViewerState, mergeSceneIntoViewerState } from "../../src/webview/state/viewer/types";
+import { existsSync, readFileSync as _readFileSync } from "node:fs";
 
 const TOPOLOGY_PATH = join(__dirname, "../../../../topology.json");
+const SCENE_PATH = join(__dirname, "../../../../topology.scene.json");
 
 // One full editor round-trip: spec → RF flow state → spec, exactly as the live
 // load (store.load) then save (save.performSave → flowToSpec) path runs it.
-function roundTrip(spec: Spec, viewText: string | undefined): Spec {
-  const vs = parseViewerState(viewText);
+// viewText = diagram view (topology.json#view, positions + fades).
+// sceneText = scene sidecar (topology.scene.json, camera + labels). Optional.
+function roundTrip(spec: Spec, viewText: string | undefined, sceneText?: string): Spec {
+  const diagramView = parseViewerState(viewText);
+  const sceneView = sceneText !== undefined ? parseViewerState(sceneText) : undefined;
+  const vs = sceneView !== undefined ? mergeSceneIntoViewerState(diagramView, sceneView) : diagramView;
   const { nodes, edges } = specToFlow(spec, vs, vs.lastSelectionIds ?? []);
   return flowToSpec(nodes, edges, spec);
 }
 
 describe("topology.json save/load round-trip is idempotent", () => {
   const raw = JSON.parse(readFileSync(TOPOLOGY_PATH, "utf8"));
+  // After the scene split, topology.json#view contains only diagram fields
+  // (nodes/positions, directlyFadedNodes, directlyFadedEdges, fadeEdgeOrder).
+  // Scene fields (camera, camera3d, labelsGlobalHidden) live in topology.scene.json.
   const viewText = raw.view !== undefined ? JSON.stringify(raw.view) : undefined;
-  const spec = parseSpec(raw, raw.view);
+  const sceneText = existsSync(SCENE_PATH) ? readFileSync(SCENE_PATH, "utf8") : undefined;
+  const spec = parseSpec(raw);
+
+  it("topology.json#view does not contain camera, camera3d, or labelsGlobalHidden", () => {
+    if (raw.view && typeof raw.view === "object") {
+      const view = raw.view as Record<string, unknown>;
+      expect(view).not.toHaveProperty("camera");
+      expect(view).not.toHaveProperty("camera3d");
+      expect(view).not.toHaveProperty("labelsGlobalHidden");
+    }
+  });
 
   it("re-serialized spec re-parses without throwing", () => {
-    const out = roundTrip(spec, viewText);
-    expect(() => parseSpec(out, raw.view)).not.toThrow();
+    const out = roundTrip(spec, viewText, sceneText);
+    expect(() => parseSpec(out)).not.toThrow();
   });
 
   it("reloaded round-trip is deep-equal to the originally parsed spec (idempotent)", () => {
@@ -43,18 +62,18 @@ describe("topology.json save/load round-trip is idempotent", () => {
     // deep-equal of save(load(x)) vs load(x) is intentionally NOT used: parseSpec
     // surfaces data.state as a convenience top-level node.state that the serializer
     // keeps only in data.state — re-parsing restores it, which is what reload does.)
-    const reloaded = parseSpec(roundTrip(spec, viewText), raw.view);
+    const reloaded = parseSpec(roundTrip(spec, viewText, sceneText));
     expect(reloaded).toEqual(spec);
   });
 
   it("a second round-trip is a fixpoint (stable, no progressive drift)", () => {
-    const once = roundTrip(spec, viewText);
-    const twice = roundTrip(parseSpec(once, raw.view), viewText);
+    const once = roundTrip(spec, viewText, sceneText);
+    const twice = roundTrip(parseSpec(once), viewText, sceneText);
     expect(twice).toEqual(once);
   });
 
   it("preserves node ids, types, and edge endpoints", () => {
-    const out = roundTrip(spec, viewText);
+    const out = roundTrip(spec, viewText, sceneText);
     expect(out.nodes.map((n) => n.id).sort()).toEqual(spec.nodes.map((n) => n.id).sort());
     expect(out.nodes.map((n) => n.type).sort()).toEqual(spec.nodes.map((n) => n.type).sort());
     const edgeKey = (e: Spec["edges"][number]) =>

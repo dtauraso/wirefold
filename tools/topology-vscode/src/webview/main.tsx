@@ -90,8 +90,9 @@ window.addEventListener("message", (e) => {
     flushSave();
     flushViewSave();
   } else if (msg.type === "load") {
-    // Feed the R3F store; full document text includes spec + view key.
-    useThreeStore.getState().load(msg.text);
+    // Feed the R3F store; topology.json text carries spec + diagram view;
+    // sceneText (optional) carries camera/camera3d/labelsGlobalHidden from topology.scene.json.
+    useThreeStore.getState().load(msg.text, msg.sceneText);
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
   }

@@ -65,7 +65,7 @@ export type TraceEvent =
   | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] };
 
 export type HostToWebviewMsg =
-  | { type: "load"; text: string }
+  | { type: "load"; text: string; sceneText?: string }
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
   | { type: "flush" }
   | { type: "save-error"; message: string }

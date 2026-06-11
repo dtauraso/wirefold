@@ -1,5 +1,5 @@
 import { viewerState } from "./state/viewer-state";
-import { serializeViewerState } from "./state/viewer/types";
+import { serializeViewerState, serializeSceneState } from "./state/viewer/types";
 import type { Spec } from "../schema";
 import { vscode } from "./vscode-api";
 import { useThreeStore } from "./three/store";
@@ -49,7 +49,10 @@ export function performViewSave() {
   // viewerState lacks the persisted positions from topology.json#view. Saving
   // in that window serializes empty state and clobbers the file on disk.
   if (lastViewSyncedText === undefined) return;
-  const text = serializeViewerState(viewerState);
+  // Send only scene fields (camera, camera3d, labelsGlobalHidden) — the host
+  // writes them to topology.scene.json. Diagram fields (positions, fades) are
+  // persisted via the main "save" path into topology.json#view.
+  const text = serializeSceneState(viewerState);
   if (text.trim() === "null") { return; }
   if (text === lastViewSyncedText) return;
   lastViewSyncedText = text;

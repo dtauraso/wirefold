@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "./runCommand";
@@ -37,7 +38,17 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
     // breaks on no-op resaves (the same text fires a change event
     // whose version bumps); version comparison handles those correctly.
     let lastAppliedVersion = document.version;
-    const send = () => post({ type: "load", text: document.getText() });
+    const scenePath = path.join(path.dirname(document.uri.fsPath), "topology.scene.json");
+    const readSceneText = (): string | undefined => {
+      try { return fs.readFileSync(scenePath, "utf8"); } catch { return undefined; }
+    };
+    const send = (): Thenable<boolean> => {
+      const sceneText = readSceneText();
+      const msg: HostToWebviewMsg = sceneText !== undefined
+        ? { type: "load", text: document.getText(), sceneText }
+        : { type: "load", text: document.getText() };
+      return post(msg);
+    };
 
     let restartTimer: ReturnType<typeof setTimeout> | undefined;
     const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
