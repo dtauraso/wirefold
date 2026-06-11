@@ -3,13 +3,12 @@
 // CameraRefBridge, LabelProjector, CameraSettleDetector,
 // computeOcclusionCounts, RaycasterHelper, NearestNTracker, Scene.
 
-import { useEffect, useRef, useMemo, createContext, useContext, useState } from "react";
+import React, { useEffect, useRef, useMemo, createContext, useContext, useState } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap } from "./pulse-state";
 import {
   nodeRadius,
   boundingBox,
@@ -19,6 +18,8 @@ import {
   portDir,
 } from "./geometry-helpers";
 import { useEdgeGeometryStore } from "./edge-geometry";
+import { useChainBeadStore } from "./chain-bead-geometry";
+import { usePulseLitStore } from "./pulse-lit";
 import type { PickOptions } from "./interaction-controls";
 // Shading PARAMETER values are Go-authoritative (MODEL.md / Phase 4). They are
 // generated from nodes/Wiring/shading_params.go into ../../schema/shading-params.
@@ -53,11 +54,8 @@ import {
   SHADING_PARAM_SCENE_AMBIENT_INTENSITY,
   SHADING_PARAM_SCENE_DIR_INTENSITY,
   SHADING_PARAM_TUBE_COLOR,
-  SHADING_PARAM_TUBE_EMISSIVE,
-  SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
   SHADING_PARAM_BEAD_COLOR,
   SHADING_PARAM_BEAD_EMISSIVE,
-  SHADING_PARAM_BEAD_EMISSIVE_INTENSITY,
 } from "../../schema/shading-params";
 
 // ---------------------------------------------------------------------------
@@ -385,44 +383,82 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere drawn at the bead's Go-computed world position.
-// Phase 2: Go owns the clock and computes every bead position; this component
-// PLOTS ONLY — it reads pulse.pos from getPulseMap() each frame and sets the mesh
-// position to it. No curve sampling, no t, no clock, no delivery message: the
-// renderer is told where the bead is, never asked when it arrived (MODEL.md).
-// src/tgt/handles are no longer needed for the bead (the wire tube still uses
-// them); they are kept off this component's props.
-export function PulseBead({
-  edgeId,
-}: {
-  edgeId: string;
-}) {
-  const meshRef = useRef<THREE.Mesh>(null);
+// The single moving PulseBead (one sphere driven by the "position" event /
+// getPulseMap) was removed: the pulse now reads purely as chain beads recoloring
+// to the pulse color as it passes (EdgeBeadChain). The underlying pulse-state
+// store / PacedWire are left intact — we simply no longer render that sphere, so
+// there is no double pulse.
+
+// EdgeBeadChain: the wire, drawn as a chain of beads (MODEL.md "The wire is a
+// chain of bead-items"). Go runs a chain of bead-item goroutines per edge and
+// STREAMS each item's world position (chain-bead trace) and pulse-highlight
+// (pulse-lit trace); pump.ts writes them to the chain-bead-geometry / pulse-lit
+// stores. This component PLOTS ONLY: one sphere per chain bead at its Go-streamed
+// position, default-colored the edge (tube) color, recolored to the pulse (bead)
+// color while its pulse-lit entry has lit=true. TS computes no positions, no
+// timing — both come from the stores. One InstancedMesh per edge.
+const _EDGE_BEAD_COLOR = new THREE.Color(SHADING_PARAM_TUBE_COLOR);
+const _PULSE_BEAD_COLOR = new THREE.Color(SHADING_PARAM_BEAD_COLOR);
+
+export function EdgeBeadChain({ edgeId, faded }: { edgeId: string; faded: boolean }) {
+  const beads = useChainBeadStore((s) => s.beads[edgeId]);
+  const lit = usePulseLitStore((s) => s.lit[edgeId]);
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  // Stable, sorted bead ids so instance index ↔ bead id is deterministic.
+  const beadIds = useMemo(
+    () => (beads ? Object.keys(beads).map(Number).sort((a, b) => a - b) : []),
+    [beads],
+  );
+
+  // Re-instance only when the SET of beads changes (births/retirements). Position
+  // and color updates run every frame against the current store snapshot.
+  const count = beadIds.length;
 
   useFrame(() => {
-    const pulse = getPulseMap().get(edgeId);
     const mesh = meshRef.current;
-    if (!mesh) return;
-    // Hidden until there is a pulse AND Go has streamed at least one position.
-    if (!pulse || !pulse.pos) {
-      mesh.visible = false;
-      return;
+    if (!mesh || count === 0) return;
+    const curBeads = useChainBeadStore.getState().beads[edgeId];
+    const curLit = usePulseLitStore.getState().lit[edgeId];
+    if (!curBeads) return;
+    const dummy = _beadDummy;
+    for (let i = 0; i < count; i++) {
+      const id = beadIds[i];
+      const p = curBeads[id];
+      if (!p) continue;
+      dummy.position.set(p.x, p.y, p.z);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      const isLit = !!curLit?.[id]?.lit;
+      mesh.setColorAt(i, isLit ? _PULSE_BEAD_COLOR : _EDGE_BEAD_COLOR);
     }
-    mesh.position.set(pulse.pos.x, pulse.pos.y, pulse.pos.z);
-    mesh.visible = true;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
 
+  // Startup race: Go has not streamed this edge's chain yet → draw nothing.
+  if (count === 0 || faded) return null;
+
   return (
-    <mesh ref={meshRef} visible={false}>
+    <instancedMesh
+      key={count}
+      ref={meshRef}
+      args={[undefined, undefined, count]}
+      userData={{ edgeId }}
+    >
       <sphereGeometry args={[4, 8, 8]} />
       <meshStandardMaterial
-        color={SHADING_PARAM_BEAD_COLOR}
         emissive={new THREE.Color(SHADING_PARAM_BEAD_EMISSIVE)}
-        emissiveIntensity={SHADING_PARAM_BEAD_EMISSIVE_INTENSITY}
+        emissiveIntensity={0}
       />
-    </mesh>
+    </instancedMesh>
   );
 }
+
+// Shared scratch object for per-frame instance matrix composition (no per-frame
+// allocation). Geometry math here is identity transform only — positions come
+// straight from Go's stored values.
+const _beadDummy = new THREE.Object3D();
 
 export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
@@ -436,53 +472,35 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
   const segKey = seg
     ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
     : "";
-  const { tubeGeo, haloGeo } = useMemo(() => {
-    if (!seg) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
+  const { haloGeo } = useMemo(() => {
+    if (!seg) return { haloGeo: null as THREE.TubeGeometry | null };
     const start = new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z);
     const end = new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z);
     // Wire is a straight line: P(t) = Start + t*(End-Start).
     const tubeCurve = new THREE.LineCurve3(start, end);
-
-    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 1, 1.5, 6, false);
-    // Halo: concentric tube on the same segment, larger radius — reads as a glow around the core.
+    // Halo: concentric tube on the segment — the wide pick target / selection glow.
     const _haloGeo = new THREE.TubeGeometry(tubeCurve, 1, 5, 6, false);
-    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
+    return { haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segKey]);
 
   // Until Go streams this edge's segment, draw nothing (geometry arrives on load).
-  if (!tubeGeo || !haloGeo) {
-    return <>{!faded && <PulseBead edgeId={edgeId} />}</>;
-  }
+  if (!haloGeo) return null;
 
+  // The visible wire is now the bead chain (EdgeBeadChain). The base tube and the
+  // single moving PulseBead are no longer rendered — the pulse reads purely as
+  // chain beads recoloring as it passes. This component now contributes ONLY the
+  // selection halo, which doubles as the wide pick target along the segment.
   return (
-    <>
-      {/* Always-lit base tube — emissive so it reads at any camera angle */}
-      <mesh geometry={tubeGeo} userData={{ edgeId }}>
-        <meshStandardMaterial
-          key={faded ? "faded" : "solid"}
-          color={SHADING_PARAM_TUBE_COLOR}
-          emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
-          emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
-          transparent={faded}
-          opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1}
-        />
-      </mesh>
-      {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
-          can hit anywhere within the halo radius; painted only when selected (opacity 0
-          otherwise — an opacity-0 visible mesh is still raycast-hittable). */}
-      <mesh geometry={haloGeo} userData={{ edgeId }}>
-        <meshBasicMaterial
-          color="#ff5a00"
-          transparent
-          opacity={selected ? 0.6 : 0}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-      {/* Pulse bead: plotted at Go's streamed position (Phase 2). */}
-      {!faded && <PulseBead edgeId={edgeId} />}
-    </>
+    <mesh geometry={haloGeo} userData={{ edgeId }}>
+      <meshBasicMaterial
+        color="#ff5a00"
+        transparent
+        opacity={selected ? 0.6 : 0}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
+    </mesh>
   );
 }
 
@@ -503,7 +521,15 @@ export function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} />;
+        const faded = !!e.data?.faded;
+        return (
+          <React.Fragment key={e.id}>
+            {/* Visible wire: chain of beads at Go's streamed positions. */}
+            <EdgeBeadChain edgeId={e.id} faded={faded} />
+            {/* Selection halo / wide pick target (no visible tube anymore). */}
+            <SingleEdgeTube edgeId={e.id} faded={faded} selected={e.id === selectedId} />
+          </React.Fragment>
+        );
       })}
     </>
   );
