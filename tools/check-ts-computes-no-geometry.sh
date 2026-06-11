@@ -18,15 +18,11 @@ set -euo pipefail
 # forbidden token is reported with file:line if found. Exit 0 when clean.
 #
 # Note on what is still allowed: portWorldPos / portDir / nodeWorldPos / nodeRadius
-# place the node + PORT SPHERES (and project labels). They ALSO source the straight
-# wire's endpoints and the pulse bead's placement — both from the editor-owned LIVE
-# local node positions, so a dragged node carries its wire + bead with no Go round-trip
-# (MODEL.md: Go owns the bead's PROGRESS/fraction t via the clock; the editor owns live
-# node placement during interaction). Placing Go's fraction t (pulse.frac) at
-# lerp(localStart, localEnd, t) is NOT geometry computation — it is placement of a
-# Go-owned value on editor-owned node positions, the same exception nodeWorldPos uses.
-# The straight segment Start/End come from portWorldPos (node center + port dir ×
-# radius); the wire SHAPE is a straight LineCurve3, not a TS-computed curve.
+# place the node + PORT SPHERES (and project labels), not the wire curve or a bead
+# position. nodeWorldPos reads Go's emitted node-geometry center (Go re-emits it on
+# node-move); the wire tube reads Go's streamed straight-segment endpoints
+# (edge-geometry store); the bead reads Go's streamed position (pulse.pos). TS sources
+# none of the wire/bead geometry from local React Flow node positions.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

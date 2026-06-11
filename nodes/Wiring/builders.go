@@ -227,24 +227,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		nodeName := name
 		g := geom
 		f.Set(reflect.ValueOf(func() {
-			center := nodeWorldPos(g)
-			ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
-			appendPort := func(name string, isInput bool) {
-				pos := portWorldPos(g, name, isInput)
-				dir, _ := portDir(g, name, isInput)
-				ports = append(ports, T.PortGeom{
-					Name: name, IsInput: isInput,
-					PX: pos.X, PY: pos.Y, PZ: pos.Z,
-					DX: dir.X, DY: dir.Y, DZ: dir.Z,
-				})
-			}
-			for _, p := range g.Inputs {
-				appendPort(p.Name, true)
-			}
-			for _, p := range g.Outputs {
-				appendPort(p.Name, false)
-			}
-			tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
+			emitNodeGeometry(tr, nodeName, g)
 			// Emit each outgoing edge's authoritative segment (per-goroutine, item 2).
 			// sourceOuts is populated just below during port wiring; by the time this
 			// closure fires the slice is complete.
@@ -392,6 +375,32 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		return nil, fmt.Errorf("reflectBuild: %T does not implement Node", nodePtr)
 	}
 	return node, nil
+}
+
+// emitNodeGeometry streams a node's authoritative center + per-port world
+// positions/dirs as a node-geometry event, computed with the port_geometry.go
+// helpers (no duplicated math). Called from each node's EmitGeometry closure on
+// startup AND from applyNodeMove when the node's held position changes, so the
+// renderer always draws the node body + ports from Go's stream.
+func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
+	center := nodeWorldPos(g)
+	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
+	appendPort := func(name string, isInput bool) {
+		pos := portWorldPos(g, name, isInput)
+		dir, _ := portDir(g, name, isInput)
+		ports = append(ports, T.PortGeom{
+			Name: name, IsInput: isInput,
+			PX: pos.X, PY: pos.Y, PZ: pos.Z,
+			DX: dir.X, DY: dir.Y, DZ: dir.Z,
+		})
+	}
+	for _, p := range g.Inputs {
+		appendPort(p.Name, true)
+	}
+	for _, p := range g.Outputs {
+		appendPort(p.Name, false)
+	}
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
 }
 
 // NodeBuilder is the public-facing type consumed by the loader.

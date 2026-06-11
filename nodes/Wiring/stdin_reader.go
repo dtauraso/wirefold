@@ -148,6 +148,13 @@ func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 	g.Pos = vec3{X: x, Y: y, Z: z}
 	nmr.geoms[nodeId] = g
 
+	// Re-emit the moved node's authoritative node-geometry (center + per-port world
+	// positions/dirs) so the renderer redraws the node body + ports from Go's stream,
+	// mirroring the per-goroutine startup emit. Edge-geometry re-emit follows below.
+	if nmr.tr != nil {
+		emitNodeGeometry(nmr.tr, nodeId, g)
+	}
+
 	edgeIds := nmr.nodeEdges[nodeId]
 	if len(edgeIds) == 0 {
 		return
