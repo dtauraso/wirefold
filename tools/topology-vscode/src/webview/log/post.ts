@@ -1,7 +1,7 @@
 // Transport for the webview's structured log channel. Posts one JSON
 // entry to the extension host, which routes it to .probe/ts.jsonl or
 // .probe/ts-errors.jsonl. Replaces the slog() side-channel from the
-// pre-collapse substrate.
+// pre-collapse webview.
 //
 // Failure is swallowed: a logging path that throws would mask the real
 // error it was trying to report.

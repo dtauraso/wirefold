@@ -11,4 +11,4 @@ When adding a new variant (e.g. a new event kind) to a discriminated-union pipel
 
 **How to apply:** Before declaring done on a new-variant change, grep each existing variant name (e.g. `grep -rn '"recv"' src/`) and inspect every hit. Any allowlist, switch, type guard, or string-equality check that enumerates the known set must learn the new variant too. Design sketches naming "the files to edit" are not exhaustive — derive the allowlist set from a grep, not from the sketch.
 
-[[feedback_audit_invariant_call_sites_first]] is the related rule for the substrate side.
+[[feedback_audit_invariant_call_sites_first]] is the related rule for the Go side.

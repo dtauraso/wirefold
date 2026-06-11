@@ -31,6 +31,7 @@ type port struct {
 	accent    string // optional hex color from SPEC.md
 	edgeKind  string // optional edge kind from SPEC.md Ports table EdgeKind column
 	isMulti   bool   // true when the Go type is Wiring.OutMulti
+	optional  bool   // true when SPEC.md Ports table marks this port Optional=yes
 }
 
 // dataField represents a wire:"data.*" tagged struct field.
@@ -109,7 +110,7 @@ func main() {
 		if err != nil {
 			fatalf("parse go kind name %s: %v", e.Name(), err)
 		}
-		view, accentOverrides, edgeKindOverrides, err := parseSpecMD(pkgDir)
+		view, accentOverrides, edgeKindOverrides, optionalPorts, err := parseSpecMD(pkgDir)
 		if err != nil {
 			// SPEC.md missing or no View section — skip this kind.
 			continue
@@ -117,13 +118,16 @@ func main() {
 		if view.kind == "" {
 			continue
 		}
-		// Apply accent and edgeKind overrides from SPEC.md Ports table.
+		// Apply accent, edgeKind overrides, and optional flags from SPEC.md Ports table.
 		for i, p := range ports {
 			if a, ok := accentOverrides[p.id]; ok && a != "" {
 				ports[i].accent = a
 			}
 			if ek, ok := edgeKindOverrides[p.id]; ok && ek != "" {
 				ports[i].edgeKind = ek
+			}
+			if optionalPorts[p.id] {
+				ports[i].optional = true
 			}
 		}
 		defaultData := parseDefaultData(pkgDir)
@@ -185,6 +189,17 @@ func main() {
 		fatalf("write %s: %v", curveParamsTsPath, err)
 	}
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d constants)\n", curveParamsTsPath, len(curveParams))
+
+	shadingParamsGoPath := filepath.Join(repoRoot, "nodes", "Wiring", "shading_params.go")
+	shadingParams, err := parseShadingParams(shadingParamsGoPath)
+	if err != nil {
+		fatalf("parse shading params: %v", err)
+	}
+	shadingParamsTsPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "shading-params.ts")
+	if err := writeShadingParams(shadingParamsTsPath, shadingParams); err != nil {
+		fatalf("write %s: %v", shadingParamsTsPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d constants)\n", shadingParamsTsPath, len(shadingParams))
 
 }
 
@@ -318,12 +333,12 @@ func chanDirection(expr ast.Expr) (string, bool) {
 }
 
 // parseSpecMD reads SPEC.md in pkgDir and returns the view definition,
-// a map of port-name → accent override, and a map of port-name → edgeKind
-// from the Ports table.
-func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, error) {
+// a map of port-name → accent override, a map of port-name → edgeKind,
+// and a set of optional port names from the Ports table.
+func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, map[string]bool, error) {
 	data, err := os.ReadFile(filepath.Join(pkgDir, "SPEC.md"))
 	if err != nil {
-		return viewDef{}, nil, nil, err
+		return viewDef{}, nil, nil, nil, err
 	}
 	lines := strings.Split(string(data), "\n")
 
@@ -402,13 +417,13 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 	// Parse View section.
 	viewLines := sectionLines("View")
 	if viewLines == nil {
-		return viewDef{}, nil, nil, fmt.Errorf("no View section")
+		return viewDef{}, nil, nil, nil, fmt.Errorf("no View section")
 	}
 	headers, rows := parseTable(viewLines)
 	fieldIdx := indexOf(headers, "Field")
 	valueIdx := indexOf(headers, "Value")
 	if fieldIdx == -1 || valueIdx == -1 {
-		return viewDef{}, nil, nil, fmt.Errorf("View table missing Field/Value columns")
+		return viewDef{}, nil, nil, nil, fmt.Errorf("View table missing Field/Value columns")
 	}
 	vmap := map[string]string{}
 	for _, row := range rows {
@@ -433,15 +448,17 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 		height:       vmap["height"],
 	}
 
-	// Parse Ports section for accent and edgeKind overrides.
+	// Parse Ports section for accent, edgeKind overrides, and optional flags.
 	accentOverrides := map[string]string{}
 	edgeKindOverrides := map[string]string{}
+	optionalPorts := map[string]bool{}
 	portsLines := sectionLines("Ports")
 	if portsLines != nil {
 		headers, rows := parseTable(portsLines)
 		nameIdx := indexOf(headers, "Name")
 		accentIdx := indexOf(headers, "Accent")
 		edgeKindIdx := indexOf(headers, "EdgeKind")
+		optionalIdx := indexOf(headers, "Optional")
 		for _, row := range rows {
 			if nameIdx >= len(row) {
 				continue
@@ -456,10 +473,13 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 			if edgeKindIdx != -1 && edgeKindIdx < len(row) && row[edgeKindIdx] != "" {
 				edgeKindOverrides[name] = row[edgeKindIdx]
 			}
+			if optionalIdx != -1 && optionalIdx < len(row) && row[optionalIdx] == "yes" {
+				optionalPorts[name] = true
+			}
 		}
 	}
 
-	return view, accentOverrides, edgeKindOverrides, nil
+	return view, accentOverrides, edgeKindOverrides, optionalPorts, nil
 }
 
 // parseDefaultData reads nodes/<Kind>/SPEC.md and returns the JSON string from
@@ -537,7 +557,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 	// Emit RUNTIME_IMPLEMENTED_KINDS from goKind names.
-	fmt.Fprintln(w, `// PascalCase Go kind names that have a substrate runtime.`)
+	fmt.Fprintln(w, `// PascalCase Go kind names that have a Go runtime.`)
 	fmt.Fprintln(w, `// Single source of truth — derived from Wiring.Register calls.`)
 	fmt.Fprintf(w, "export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([\n")
 	for _, e := range kinds {
@@ -1077,7 +1097,7 @@ func writeTraceKinds(outPath string, kinds []string) error {
 
 // writeNodeDims emits nodes/Wiring/node_dims_gen.go: a kind → render width/height
 // map sourced from each kind's SPEC.md ## View width/height fields. The Go
-// substrate uses these to mirror nodeRadius/nodeWorldPos in geometry-helpers.ts
+// Go uses these to mirror nodeRadius/nodeWorldPos in geometry-helpers.ts
 // when computing port-to-port arc length. Single source of truth = SPEC.md.
 func writeNodeDims(outPath string, kinds []kindEntry) error {
 	var buf bytes.Buffer
@@ -1202,6 +1222,89 @@ func writeCurveParams(outPath string, params []curveParam) error {
 	for _, p := range params {
 		if p.isInt {
 			fmt.Fprintf(w, "export const %s = %s;\n", p.tsName, p.value)
+		} else {
+			fmt.Fprintf(w, "export const %s = %s;\n", p.tsName, p.value)
+		}
+	}
+
+	w.Flush()
+	return os.WriteFile(outPath, buf.Bytes(), 0644)
+}
+
+// shadingParam is one exported constant from shading_params.go with a
+// "ShadingParam" name prefix. Unlike curveParam, shading params include string
+// literals (hex colors), so isStr drives quoting in the emitted TS.
+type shadingParam struct {
+	tsName string // TS export name (SCREAMING_SNAKE, ShadingParam prefix stripped)
+	value  string // raw literal value (unquoted for strings)
+	isStr  bool   // true if the Go literal is a string (emit quoted in TS)
+}
+
+// parseShadingParams reads the Go source at goPath and returns all top-level
+// const declarations whose names start with "ShadingParam". Mirrors
+// parseCurveParams but records string-ness so writeShadingParams can quote
+// color literals correctly.
+func parseShadingParams(goPath string) ([]shadingParam, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, goPath, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	var params []shadingParam
+	for _, decl := range f.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range vs.Names {
+				if !strings.HasPrefix(name.Name, "ShadingParam") {
+					continue
+				}
+				if i >= len(vs.Values) {
+					continue
+				}
+				lit, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok {
+					continue
+				}
+				raw := lit.Value
+				isStr := lit.Kind == token.STRING
+				if isStr {
+					raw = strings.Trim(raw, `"`)
+				}
+				tsName := camelToScreamingSnake(name.Name)
+				params = append(params, shadingParam{tsName: tsName, value: raw, isStr: isStr})
+			}
+		}
+	}
+	if len(params) == 0 {
+		return nil, fmt.Errorf("no ShadingParam* constants found in %s", goPath)
+	}
+	return params, nil
+}
+
+// writeShadingParams emits shading-params.ts from the parsed shadingParam slice.
+// String literals (hex colors) are emitted quoted; numeric literals raw.
+func writeShadingParams(outPath string, params []shadingParam) error {
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+
+	fmt.Fprintln(w, `// GENERATED by tools/gen-node-defs — do not edit.`)
+	fmt.Fprintln(w, `// Source: nodes/Wiring/shading_params.go ShadingParam* constants.`)
+	fmt.Fprintln(w, `// Regenerate with: npm run gen:node-defs`)
+	fmt.Fprintln(w, `//`)
+	fmt.Fprintln(w, `// Go owns the shading PARAMETER values (MODEL.md). TS reads these and applies`)
+	fmt.Fprintln(w, `// them to GPU materials / bakes the env map from them — no shading values of its`)
+	fmt.Fprintln(w, `// own. The GPU machinery (three.js materials, PMREM bake, binding) stays in TS.`)
+	fmt.Fprintln(w)
+	for _, p := range params {
+		if p.isStr {
+			fmt.Fprintf(w, "export const %s = %q;\n", p.tsName, p.value)
 		} else {
 			fmt.Fprintf(w, "export const %s = %s;\n", p.tsName, p.value)
 		}

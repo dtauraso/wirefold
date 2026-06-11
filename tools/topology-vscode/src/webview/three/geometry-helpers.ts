@@ -5,46 +5,29 @@ import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import {
-  CURVE_PARAM_PULSE_SPEED_WU_PER_MS,
-  CURVE_PARAM_MIN_ARC_LENGTH,
-  CURVE_PARAM_BULGE_FACTOR,
-  CURVE_PARAM_BEZIER_SAMPLE_COUNT,
   CURVE_PARAM_NODE_RADIUS_DIVISOR,
   CURVE_PARAM_SLOT_PCT0,
   CURVE_PARAM_SLOT_PCT1,
   CURVE_PARAM_SLOT_PCT2,
 } from "../../schema/curve-params";
+import { getNodeGeometry } from "./node-geometry";
+
+// Node/port positions are Go-authoritative: Go streams a node-geometry event per
+// node (center + per-port world pos/dir) into useNodeGeometryStore, and these
+// helpers READ that store. The local compute below is the pre-emit FALLBACK only —
+// used when a node id is not yet in the store (startup race before the first emit).
+// Go's nodeWorldPos / portDir mirror this fallback line-for-line (same RF y-down →
+// Three y-up frame), so reading the store does not change the coordinate frame.
 
 // ---------------------------------------------------------------------------
-// Edge curve
+// Edge curve — REMOVED in Phase 3.
+//
+// The edge curve (wire-tube shape) is now Go-authoritative: Go holds node positions
+// + per-edge control points and STREAMS them (geometry trace event); SingleEdgeTube
+// draws the tube from Go's points (edge-geometry store). TS computes NO edge
+// geometry — the former edge-curve builders were deleted (their names are now fenced
+// by tools/check-ts-computes-no-geometry.sh).
 // ---------------------------------------------------------------------------
-
-/**
- * Returns the center of `node` in world space.
- * `other` is accepted but ignored — kept for API symmetry with scene-content.tsx (kept in sync).
- */
-function surfacePointForNodes(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.Vector3 {
-  return nodeWorldPos(node);
-}
-
-/**
- * Build the QuadraticBezierCurve3 for an edge between two nodes.
- * Control-point math matches SingleEdgeTube's useMemo exactly.
- * Called from moveNode (synchronous, same drag tick) and from initial load / createEdge.
- */
-export function buildEdgeCurve(
-  src: RFNode<NodeData>,
-  tgt: RFNode<NodeData>,
-): THREE.QuadraticBezierCurve3 {
-  const p0 = surfacePointForNodes(src, tgt);
-  const p2 = surfacePointForNodes(tgt, src);
-  const mid = p0.clone().add(p2).multiplyScalar(0.5);
-  const edgeDir = p2.clone().sub(p0).normalize();
-  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-  const span = p0.distanceTo(p2);
-  const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
-  return new THREE.QuadraticBezierCurve3(p0, p1, p2);
-}
 
 // ---------------------------------------------------------------------------
 // Node geometry
@@ -55,22 +38,39 @@ export function nodeRadius(node: RFNode<NodeData>): number {
   return Math.min((node.data?.width ?? NODE_DIM_FALLBACK.width), (node.data?.height ?? NODE_DIM_FALLBACK.height)) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
 }
 
+/**
+ * AABB over node centers (Three y-up world frame). Reads each node's Go-emitted
+ * center from the store; falls back to local compute for any node not yet emitted.
+ */
 export function boundingBox(nodes: RFNode<NodeData>[]) {
   if (nodes.length === 0) return { minX: -200, maxX: 200, minY: -200, maxY: 200 };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const n of nodes) {
-    const w = (n.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
-    const h = (n.data?.height ?? NODE_DIM_FALLBACK.height) / 2;
-    minX = Math.min(minX, n.position.x - w);
-    maxX = Math.max(maxX, n.position.x + w);
-    minY = Math.min(minY, n.position.y - h);
-    maxY = Math.max(maxY, n.position.y + h);
+    const c = nodeWorldPos(n);
+    minX = Math.min(minX, c.x);
+    maxX = Math.max(maxX, c.x);
+    minY = Math.min(minY, c.y);
+    maxY = Math.max(maxY, c.y);
   }
   return { minX, maxX, minY, maxY };
 }
 
-/** World position for a node center (RF y-down → Three y-up). */
+/**
+ * World position for a node center — reads Go's emitted center, falls back to local
+ * compute pre-emit. Go is authoritative for node position: on a node-move it updates
+ * its held position AND re-emits node-geometry (see Wiring/stdin_reader.go
+ * applyNodeMove → emitNodeGeometry), so the body follows the drag ~1 frame behind via
+ * the stream rather than from local React Flow node.position. The local-compute path
+ * is the startup fallback only (before Go's first emit).
+ */
 export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
+  const g = getNodeGeometry(node.id);
+  if (g) return new THREE.Vector3(g.center.x, g.center.y, g.center.z);
+  return nodeWorldPosLocal(node);
+}
+
+/** FALLBACK: local node-center compute (RF y-down → Three y-up). Used pre-emit only. */
+function nodeWorldPosLocal(node: RFNode<NodeData>): THREE.Vector3 {
   const x = node.position.x + (node.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
   const y = -(node.position.y + (node.data?.height ?? NODE_DIM_FALLBACK.height) / 2);
   return new THREE.Vector3(x, y, 0);
@@ -87,6 +87,21 @@ const SLOT_PCT = [CURVE_PARAM_SLOT_PCT0, CURVE_PARAM_SLOT_PCT1, CURVE_PARAM_SLOT
  * derived from side/slot like the 2D handle layout. Returns null if port not found.
  */
 export function portDir(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
+  const g = getNodeGeometry(node.id);
+  if (g) {
+    const p = g.ports.find((pp) => pp.name === portName && pp.isInput === isInput);
+    if (p) return new THREE.Vector3(p.dir.x, p.dir.y, p.dir.z);
+    return null;
+  }
+  return portDirLocal(node, portName, isInput);
+}
+
+/**
+ * FALLBACK: local port-direction compute. Used pre-emit only.
+ * Unit direction (z=0 plane) from node center toward the given port's position,
+ * derived from side/slot like the 2D handle layout. Returns null if port not found.
+ */
+function portDirLocal(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
   const list = (isInput ? node.data?.inputs : node.data?.outputs) ?? [];
   const idx = list.findIndex((p) => p.name === portName);
   if (idx < 0) return null;
@@ -115,16 +130,20 @@ export function portDir(node: RFNode<NodeData>, portName: string, isInput: boole
 }
 
 /**
- * World-space port position on the node sphere surface, or node center if no port.
- * Uses the sphere surface point in the direction of the port, so endpoints sit
- * on the sphere rather than at the center.
+ * World position of a port sphere on the node surface: node center + port unit
+ * direction × node radius. This is the SAME placement the port-sphere meshes use
+ * in scene-content.tsx (position={[dir.x*r, dir.y*r, dir.z*r]} relative to the node
+ * group at nodeWorldPos). Because nodeWorldPos reads Go's emitted center, this tracks
+ * a dragged node ~1 frame behind via the stream. Returns the node center if the port
+ * direction is unknown. Used for the port-sphere meshes; wire endpoints + bead are
+ * sourced from Go's edge-geometry / position streams, not from here.
  */
-export function portWorldPos(node: RFNode<NodeData>, portName: string | null | undefined, isInput: boolean): THREE.Vector3 {
+export function portWorldPos(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 {
   const center = nodeWorldPos(node);
-  if (!portName) return center;
   const dir = portDir(node, portName, isInput);
   if (!dir) return center;
-  return center.clone().add(dir.multiplyScalar(nodeRadius(node)));
+  const r = nodeRadius(node);
+  return new THREE.Vector3(center.x + dir.x * r, center.y + dir.y * r, center.z + dir.z * r);
 }
 
 /** World position for the top of the node sphere (center.y + radius). */
@@ -134,89 +153,22 @@ export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return new THREE.Vector3(center.x, center.y + r, center.z);
 }
 
-/**
- * Build the port-to-port QuadraticBezierCurve3 for an edge.
- * p0 is on the source OUTPUT port sphere surface, p2 is on the target INPUT port sphere surface.
- * Used by both SingleEdgeTube and PulseBead so the bead travels the identical visible curve.
- */
-export function buildPortCurve(
-  src: RFNode<NodeData>,
-  tgt: RFNode<NodeData>,
-  sourceHandle: string | null | undefined,
-  targetHandle: string | null | undefined,
-): THREE.QuadraticBezierCurve3 {
-  const p0 = portWorldPos(src, sourceHandle, false); // source OUTPUT port
-  const p2 = portWorldPos(tgt, targetHandle, true);  // target INPUT port
-  const mid = p0.clone().add(p2).multiplyScalar(0.5);
-  const edgeDir = p2.clone().sub(p0).normalize();
-  const lift = new THREE.Vector3(0, 0, 1).cross(edgeDir).normalize();
-  const span = p0.distanceTo(p2);
-  const p1 = mid.clone().addScaledVector(lift, span * CURVE_PARAM_BULGE_FACTOR);
-  return new THREE.QuadraticBezierCurve3(p0, p1, p2);
-}
+// The port-to-port curve builder was REMOVED in Phase 3. The port-to-port curve
+// (wire-tube shape) is Go-authoritative now: Go computes the control points and
+// streams them; the renderer draws from Go's points. portDir above
+// remains — it places the PORT SPHERES (still used by node/port rendering), not the
+// wire curve.
 
 // ---------------------------------------------------------------------------
-// Pulse geometry
+// Pulse + edge geometry — REMOVED (Phase 2 bead positions, Phase 3 edge curves).
+//
+// Bead position AND the wire-tube curve are both computed by Go and streamed to the
+// renderer (MODEL.md: "the wire advances the bead and emits its position"; Go holds
+// node positions + per-edge control points). TS plots only. The former per-bead
+// arc-length / travel-time / pulse-speed math (Phase 2) and the edge-curve builders
+// (Phase 3) were all deleted; nothing in the webview computes a wire curve or a bead
+// position any more (enforced by tools/check-ts-computes-no-geometry.sh).
 // ---------------------------------------------------------------------------
-
-/**
- * Uniform pulse speed — single source of truth in nodes/Wiring/curve_params.go.
- * Re-exported for callers that reference PULSE_SPEED_WU_PER_MS directly.
- */
-export const PULSE_SPEED_WU_PER_MS = CURVE_PARAM_PULSE_SPEED_WU_PER_MS;
-
-/**
- * Quadratic Bezier arc length between two RF node-center positions.
- * Mirrors Go's BezierArcLength in nodes/Wiring/curve_params.go exactly:
- *   - control point = chord midpoint offset by BULGE_FACTOR * chordLen perpendicularly
- *   - arc integrated with BEZIER_SAMPLE_COUNT equal-parameter segments
- *   - result floored at MIN_ARC_LENGTH
- * Using node centers (not surface points) keeps Go and TS inputs identical.
- */
-export function rfArcLength(ax: number, ay: number, bx: number, by: number): number {
-  const chordX = bx - ax;
-  const chordY = by - ay;
-  const chordLen = Math.sqrt(chordX * chordX + chordY * chordY);
-
-  // Midpoint of chord.
-  const midX = (ax + bx) * 0.5;
-  const midY = (ay + by) * 0.5;
-
-  // Perpendicular: rotate chord direction 90° CCW and normalise.
-  let perpX = 0, perpY = 0;
-  if (chordLen > 0) {
-    perpX = -chordY / chordLen;
-    perpY = chordX / chordLen;
-  }
-
-  // Control point p1.
-  const p1x = midX + perpX * CURVE_PARAM_BULGE_FACTOR * chordLen;
-  const p1y = midY + perpY * CURVE_PARAM_BULGE_FACTOR * chordLen;
-
-  // Integrate arc length over BEZIER_SAMPLE_COUNT segments.
-  const n = CURVE_PARAM_BEZIER_SAMPLE_COUNT;
-  const inv = 1.0 / n;
-  let prevX = ax, prevY = ay;
-  let total = 0;
-  for (let i = 1; i <= n; i++) {
-    const t = i * inv;
-    const u = 1 - t;
-    const bpx = u * u * ax + 2 * u * t * p1x + t * t * bx;
-    const bpy = u * u * ay + 2 * u * t * p1y + t * t * by;
-    const dx = bpx - prevX;
-    const dy = bpy - prevY;
-    total += Math.sqrt(dx * dx + dy * dy);
-    prevX = bpx;
-    prevY = bpy;
-  }
-
-  return total < CURVE_PARAM_MIN_ARC_LENGTH ? CURVE_PARAM_MIN_ARC_LENGTH : total;
-}
-
-/** Convert arc length to simLatencyMs using the uniform pulse speed. */
-export function arcLengthToSimLatencyMs(arcLength: number): number {
-  return arcLength / CURVE_PARAM_PULSE_SPEED_WU_PER_MS;
-}
 
 // ---------------------------------------------------------------------------
 // Camera geometry

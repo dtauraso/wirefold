@@ -1,12 +1,22 @@
 // stdin_reader.go — reads JSON-line messages from stdin and dispatches them.
 //
-// Supported message shapes:
-//   {"type":"delivered","target":"<node-id>","targetHandle":"<port-name>"}
-//   {"type":"fade","edges":["<edge-id>", ...]}
-//   {"type":"node-move","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
+// The editor→Go bridge carries two top-level message kinds:
+//
+//  1. Geometry-CRUD edits (type=="edit") — op discriminates the operation:
+//     {"type":"edit","op":"create","target":"<node-id>","targetHandle":"<port>"}
+//     {"type":"edit","op":"delete","target":"<node-id>","targetHandle":"<port>"}
+//     {"type":"edit","op":"update","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
+//     {"type":"edit","op":"fade","edges":{"<edge-id>":true|false,...}}
+//
+//  2. Play/pause control (type=="play" / type=="pause") — routes directly to the
+//     clock's global gate (Halt/Resume). The process starts halted; the first
+//     "play" message resumes bead delivery. "pause" re-halts.
+//
+// Go owns the clock and delivery; nothing on this seam triggers delivery or
+// carries animation internals.
 //
 // One goroutine; cancellable via context. On EOF or context cancel, exits
-// cleanly. Unknown message types are silently ignored (forward-compat).
+// cleanly. Unknown message types and ops are silently ignored (forward-compat).
 
 package Wiring
 
@@ -15,8 +25,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"maps"
-	"sync"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -30,156 +38,47 @@ type EdgeEndpoints struct {
 	TargetHandle string
 }
 
-// NodeMoveRegistry carries the extra state needed to handle node-move messages.
-// It is built by the loader alongside the WireRegistry and passed to RunStdinReader.
-type NodeMoveRegistry struct {
-	mu    sync.Mutex
-	geoms map[string]nodeGeom // nodeId → current geometry (position is mutable)
-	// edgeNodes: edgeId → endpoints (immutable after construction)
-	edgeNodes map[string]EdgeEndpoints
-	// nodeEdges: nodeId → list of edgeIds that touch this node (immutable after construction)
-	nodeEdges map[string][]string
-	// edgeOut: edgeId → source *Out for that edge, indexed by "source.sourceHandle".
-	// Populated by SetEdgeOuts after node construction. Used by node-move to write
-	// the affected edge's own per-edge travel-time onto its source Out.
-	edgeOut map[string]*Out
-	// destWire: destKey ("target.targetHandle") → dest *PacedWire, for recomputing
-	// MaxIncomingSimLatencyMs across all edges feeding a port on node-move.
-	destWire map[string]*PacedWire
-	// destEdges: destKey → edgeIds feeding that destination port.
-	destEdges map[string][]string
+// moveEntry is one (key → position) value in a node-move "update" message. NodeId is
+// the node that moved; the key it is routed under is either that node's id or an
+// incident edge id (the dispatch is a mail-sort, see RunStdinReader / MoveDispatch).
+type moveEntry struct {
+	NodeId string  `json:"nodeId"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Z      float64 `json:"z"`
 }
 
-// NewNodeMoveRegistry allocates and initialises a NodeMoveRegistry.
-// geoms is a snapshot of per-node geometry (kind/dims/ports/position) at load time.
-// edgeNodes maps each edge label to its source/target node IDs and handles.
-func NewNodeMoveRegistry(geoms map[string]nodeGeom, edgeNodes map[string]EdgeEndpoints) *NodeMoveRegistry {
-	nodeEdges := map[string][]string{}
-	destEdges := map[string][]string{}
-	for edgeId, ep := range edgeNodes {
-		nodeEdges[ep.Source] = append(nodeEdges[ep.Source], edgeId)
-		nodeEdges[ep.Target] = append(nodeEdges[ep.Target], edgeId)
-		destKey := ep.Target + "." + ep.TargetHandle
-		destEdges[destKey] = append(destEdges[destKey], edgeId)
-	}
-	// Defensively copy geoms.
-	g := make(map[string]nodeGeom, len(geoms))
-	maps.Copy(g, geoms)
-	return &NodeMoveRegistry{
-		geoms:     g,
-		edgeNodes: edgeNodes,
-		nodeEdges: nodeEdges,
-		edgeOut:   map[string]*Out{},
-		destWire:  map[string]*PacedWire{},
-		destEdges: destEdges,
-	}
-}
-
-// SetEdgeOuts wires the per-edge source Outs (indexed by "source.sourceHandle"
-// in outSink) and the destination wires (slotReg, keyed by "target.targetHandle")
-// into the registry so node-move can update per-edge travel-time and recompute
-// each affected port's MaxIncomingSimLatencyMs. Call once after node construction.
-func (nmr *NodeMoveRegistry) SetEdgeOuts(outSink map[string]*Out, slotReg SlotRegistry) {
-	nmr.mu.Lock()
-	defer nmr.mu.Unlock()
-	for edgeId, ep := range nmr.edgeNodes {
-		if o, ok := outSink[ep.Source+"."+ep.SourceHandle]; ok {
-			nmr.edgeOut[edgeId] = o
-		}
-		destKey := ep.Target + "." + ep.TargetHandle
-		if pw, ok := slotReg[destKey]; ok {
-			nmr.destWire[destKey] = pw
-		}
-	}
-}
-
-// applyNodeMove moves nodeId to (x, y, z) and updates travel-time for every edge
-// that touches it: each affected edge's own per-edge ArcLength/SimLatencyMs is
-// written onto its source Out, and every destination port reached by an affected
-// edge has its MaxIncomingSimLatencyMs recomputed as max over ALL edges feeding
-// it (not just the moved ones). No-op if nodeId is unknown.
-func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
-	nmr.mu.Lock()
-	defer nmr.mu.Unlock()
-	g, ok := nmr.geoms[nodeId]
-	if !ok {
-		return
-	}
-	g.Pos = vec3{X: x, Y: y, Z: z}
-	nmr.geoms[nodeId] = g
-
-	edgeIds := nmr.nodeEdges[nodeId]
-	if len(edgeIds) == 0 {
-		return
-	}
-
-	// arcLenOf computes the current port-to-port arc length for an edge.
-	arcLenOf := func(eid string) float64 {
-		ep := nmr.edgeNodes[eid]
-		return arcLengthBetweenPorts(
-			nmr.geoms[ep.Source], ep.SourceHandle,
-			nmr.geoms[ep.Target], ep.TargetHandle,
-		)
-	}
-
-	// 1. Update the affected edges' source Outs (per-edge travel-time).
-	//    Track the distinct destination ports they feed for the aggregate recompute below.
-	touchedDest := map[string]bool{}
-	for _, eid := range edgeIds {
-		arc := arcLenOf(eid)
-		lat := arc / PulseSpeedWuPerMs
-		if o := nmr.edgeOut[eid]; o != nil {
-			o.ArcLength = arc
-			o.SimLatencyMs = lat
-		}
-		ep := nmr.edgeNodes[eid]
-		touchedDest[ep.Target+"."+ep.TargetHandle] = true
-	}
-
-	// 2. Recompute each touched dest port's MaxIncomingSimLatencyMs over ALL its
-	//    feeding edges (some may be unaffected by this move).
-	for destKey := range touchedDest {
-		pw := nmr.destWire[destKey]
-		if pw == nil {
-			continue
-		}
-		var maxLat float64
-		for _, eid := range nmr.destEdges[destKey] {
-			if lat := arcLenOf(eid) / PulseSpeedWuPerMs; lat > maxLat {
-				maxLat = lat
-			}
-		}
-		pw.mu.Lock()
-		pw.MaxIncomingSimLatencyMs = maxLat
-		pw.mu.Unlock()
-	}
-}
-
-
+// stdinMsg is the single editor→Go bridge shape. type is always "edit"; op
+// discriminates the CRUD/animation operation. The remaining fields are the union
+// of every op's payload (only the fields for the active op are populated).
+//
+// For op=="update" (node-move), Entries maps each routing key (the moved node id
+// AND each incident edge id) to the moved node's new position. The reader mail-sorts
+// each entry to channels[key]; the owning node/edge goroutine recomputes.
 type stdinMsg struct {
-	Type         string   `json:"type"`
-	Target       string   `json:"target"`
-	TargetHandle string   `json:"targetHandle"`
-	Edges        []string `json:"edges"`
-	NodeId       string   `json:"nodeId"`
-	X            float64  `json:"x"`
-	Y            float64  `json:"y"`
-	Z            float64  `json:"z"`
+	Type         string               `json:"type"`
+	Op           string               `json:"op"`
+	Target       string               `json:"target"`
+	TargetHandle string               `json:"targetHandle"`
+	Edges        map[string]bool      `json:"edges"`
+	Entries      map[string]moveEntry `json:"entries"`
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
-// It is the stable, slot-keyed identity used for delivery acks.
+// It is the stable, slot-keyed identity used to resolve an edit's create/delete op
+// to the wire owned by that destination port.
 type SlotRegistry map[string]*PacedWire
 
-// RunStdinReader reads JSON lines from r, dispatching messages.
-// Returns when ctx is done or r reaches EOF.
-// Call in a goroutine alongside the node run loop.
+// RunStdinReader reads JSON lines from r, dispatching geometry-CRUD "edit"
+// messages and play/pause clock-gate control messages. Returns when ctx is done
+// or r reaches EOF. Call in a goroutine alongside the node run loop.
 //
-// slotReg is keyed by "target.targetHandle" and used for delivery acks.
-// reg is keyed by edge label and used for fade/node-move operations.
-// nmr may be nil; if non-nil, node-move messages update wire geometry.
-// tr is retained for future use but no longer used by the node-move handler.
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg WireRegistry, nmr *NodeMoveRegistry, tr *T.Trace) {
+// slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
+// destination port's wire. md may be nil; if non-nil, update (node-move) and
+// fade ops mail-sort each entry to the owning node/edge goroutine's inbox.
+// tr emits control breadcrumbs for the edit ops.
+// clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	sc := bufio.NewScanner(r)
 	done := ctx.Done()
 	lineCh := make(chan string, 8)
@@ -205,61 +104,94 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
 				continue
 			}
+			// Two top-level bridge kinds:
+			//   "edit"  — geometry-CRUD; op discriminates the operation (internal axis).
+			//   "play"  — resume the clock's global gate (bead delivery starts).
+			//   "pause" — halt the clock's global gate (bead delivery freezes).
 			switch msg.Type {
-			case "delivered":
-				if msg.Target == "" || msg.TargetHandle == "" {
-					continue
+			case "edit":
+				applyEdit(msg, slotReg, md, tr)
+			case "play":
+				if clk != nil {
+					clk.Resume()
 				}
-				destKey := msg.Target + "." + msg.TargetHandle
-				pw, found := slotReg[destKey]
-				if !found {
-					continue
+			case "pause":
+				if clk != nil {
+					clk.Halt()
 				}
-				pw.NotifyDelivered(ctx) //nolint:errcheck // ErrCanceled is handled by loop exit
-			case "deleteEdge":
-				if msg.Target == "" || msg.TargetHandle == "" {
-					continue
-				}
-				tr.Breadcrumb("deleteEdge-recv", msg.Target, msg.TargetHandle, "")
-				destKey := msg.Target + "." + msg.TargetHandle
-				pw, found := slotReg[destKey]
-				if !found {
-					tr.Breadcrumb("deleteEdge-notfound", msg.Target, msg.TargetHandle, destKey)
-					continue
-				}
-				// "delete" breadcrumb emitted here (not from PacedWire.Delete, which has
-				// no Trace reference) carrying the wire's authoritative slot identity.
-				tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, "")
-				tr.Breadcrumb("deleteEdge-delete", msg.Target, msg.TargetHandle, destKey)
-				pw.Delete()
-			case "addEdge":
-				if msg.Target == "" || msg.TargetHandle == "" {
-					continue
-				}
-				tr.Breadcrumb("addEdge-recv", msg.Target, msg.TargetHandle, "")
-				destKey := msg.Target + "." + msg.TargetHandle
-				pw, found := slotReg[destKey]
-				if !found {
-					tr.Breadcrumb("addEdge-notfound", msg.Target, msg.TargetHandle, destKey)
-					continue
-				}
-				tr.Breadcrumb("addEdge-restore", pw.Target, pw.TargetHandle, "")
-				pw.Restore()
-			case "fade":
-				// Build a set of faded edge ids for O(1) lookup.
-				faded := make(map[string]bool, len(msg.Edges))
-				for _, id := range msg.Edges {
-					faded[id] = true
-				}
-				// Apply wholesale: set every wire's faded flag.
-				reg.ForEach(func(id string, pw *PacedWire) {
-					pw.SetFaded(faded[id])
-				})
-			case "node-move":
-				if nmr == nil || msg.NodeId == "" {
-					continue
-				}
-				nmr.applyNodeMove(msg.NodeId, msg.X, msg.Y, msg.Z)
+			}
+		}
+	}
+}
+
+// applyEdit dispatches one geometry-CRUD/animation edit by its op. It is the
+// internal op-axis of the single "edit" bridge shape; the op values are matched by
+// value (==) rather than a case-literal switch so they stay invisible to the
+// message-kind-parity guard, which fences only top-level msg.Type kinds.
+//
+// Ops:
+//   - create: un-silence the destination port's wire (edge re-added) — Restore.
+//   - delete: silence the wire AND cancel any in-flight bead's clock-delivery,
+//     echoing pulse-cancelled (PacedWire.Delete owns both, atomically).
+//   - update: mail-sort the node-move entries to the owning node/edge inboxes; each
+//     owning goroutine recomputes its own geometry (no central recompute here).
+//   - fade:   mail-sort each (edgeId,faded) entry to the owning edgeMover via
+//     md.dispatch; each wire sets its own flag.
+//
+// Unknown ops are ignored (forward-compat).
+func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
+	switch {
+	case msg.Op == "create":
+		if msg.Target == "" || msg.TargetHandle == "" {
+			return
+		}
+		tr.Breadcrumb("edit-create-recv", msg.Target, msg.TargetHandle, "")
+		destKey := msg.Target + "." + msg.TargetHandle
+		pw, found := slotReg[destKey]
+		if !found {
+			tr.Breadcrumb("edit-create-notfound", msg.Target, msg.TargetHandle, destKey)
+			return
+		}
+		tr.Breadcrumb("edit-create-restore", pw.Target, pw.TargetHandle, "")
+		pw.Restore()
+	case msg.Op == "delete":
+		if msg.Target == "" || msg.TargetHandle == "" {
+			return
+		}
+		tr.Breadcrumb("edit-delete-recv", msg.Target, msg.TargetHandle, "")
+		destKey := msg.Target + "." + msg.TargetHandle
+		pw, found := slotReg[destKey]
+		if !found {
+			tr.Breadcrumb("edit-delete-notfound", msg.Target, msg.TargetHandle, destKey)
+			return
+		}
+		// "delete" breadcrumb emitted here (PacedWire.Delete has no Trace reference)
+		// carrying the wire's authoritative slot identity. Delete cancels any
+		// in-flight bead's clock-delivery and echoes pulse-cancelled atomically.
+		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, "")
+		tr.Breadcrumb("edit-delete-delete", msg.Target, msg.TargetHandle, destKey)
+		pw.Delete()
+	case msg.Op == "update":
+		if md == nil || len(msg.Entries) == 0 {
+			return
+		}
+		// Mail-sort: push each entry to its key's inbox. Unknown keys are ignored.
+		// No recompute, no topology logic here — the owning goroutine does the work.
+		for key, e := range msg.Entries {
+			if ch, ok := md.dispatch[key]; ok {
+				ch <- moveMsg{NodeID: e.NodeId, X: e.X, Y: e.Y, Z: e.Z}
+			}
+		}
+	case msg.Op == "fade":
+		// Mail-sort: push each (edgeId, faded) entry to its edge's inbox. Each
+		// edgeMover sets its OWN wire's faded flag — no central fan-out. Unknown
+		// keys are ignored (forward-compat).
+		if md == nil || len(msg.Edges) == 0 {
+			return
+		}
+		for edgeID, faded := range msg.Edges {
+			if ch, ok := md.dispatch[edgeID]; ok {
+				ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
 			}
 		}
 	}

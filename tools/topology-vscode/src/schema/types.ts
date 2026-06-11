@@ -25,7 +25,7 @@ export type Port = {
   required?: boolean;
   // Visual placement. Independent of input/output: inputs default to
   // "left" and outputs to "right", but any port may be placed on any
-  // side. Layout-only — has no substrate-model effect.
+  // side. Layout-only — has no Go-model effect.
   side?: "left" | "right" | "top" | "bottom";
   // Snap slot along the side: 0=25%, 1=50%, 2=75%. Absent = auto-space.
   slot?: 0 | 1 | 2;

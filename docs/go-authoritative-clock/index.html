@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Go-Authoritative Clock — Wirefold Design Spec</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0e0e10;
+    --surface:  #18181c;
+    --border:   #2a2a30;
+    --text:     #e0e0e8;
+    --muted:    #808090;
+    --accent:   #7c9ef8;
+    --go-hue:   #5ec4a0;
+    --ts-hue:   #c07ef8;
+    --warn:     #d4a017;
+    --warn-bg:  #1e1800;
+    --good:     #3db87a;
+    --good-bg:  #0a2018;
+    --info:     #7c9ef8;
+    --info-bg:  #0d1628;
+    --mono: 'JetBrains Mono', 'Fira Mono', 'Cascadia Code', monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.65;
+    padding: 40px 24px 80px;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .page-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .page-subtitle {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 28px;
+    letter-spacing: -0.3px;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+
+  .tab-btn {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 8px 20px 9px;
+    cursor: pointer;
+    border-radius: 5px 5px 0 0;
+    margin-bottom: -1px;
+    transition: color 0.12s;
+    white-space: nowrap;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+
+  .tab-btn.active {
+    color: var(--accent);
+    background: var(--surface);
+    border-color: var(--border);
+  }
+
+  .panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    padding: 2.25rem 2.5rem;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .panel.active { display: block; }
+
+  /* Typography inside panels */
+  .panel h2 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 16px;
+    margin-top: 0;
+  }
+
+  .panel h3 {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+  }
+
+  .panel p {
+    color: var(--muted);
+    margin-bottom: 1.25rem;
+    max-width: 680px;
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+
+  .panel p:last-child { margin-bottom: 0; }
+
+  /* Table */
+  .spec-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1.25rem;
+    font-size: 13px;
+  }
+
+  .spec-table caption {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    caption-side: top;
+    padding-bottom: 0.4rem;
+  }
+
+  .spec-table th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+  }
+
+  .spec-table td {
+    padding: 8px 12px;
+    vertical-align: top;
+    border-bottom: 1px solid rgba(42,42,48,0.6);
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .spec-table{max-width:100%;}
+  .spec-table th,.spec-table td{white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+  .spec-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
+  .spec-table td:first-child { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); }
+  .spec-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; color: var(--go-hue); }
+  .spec-table td ol { margin: 0; padding-left: 1.25rem; }
+  .spec-table td ol li { padding: 1px 0; line-height: 1.55; }
+  #panel-goroutines .spec-table { table-layout: fixed; width: 100%; }
+  #panel-goroutines .spec-table th:first-child, #panel-goroutines .spec-table td:first-child { width: 4%; white-space: normal; }
+  #panel-goroutines .spec-table th:nth-child(2), #panel-goroutines .spec-table td:nth-child(2) { width: 4%; white-space: normal; }
+  #panel-goroutines .spec-table td, #panel-goroutines .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
+  #panel-goroutines table#goroutines-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;}
+  #panel-goroutines table#goroutines-table th,
+  #panel-goroutines table#goroutines-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
+  #panel-goroutines table#goroutines-table th:nth-child(1),#panel-goroutines table#goroutines-table td:nth-child(1){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-goroutines table#goroutines-table th:nth-child(2),#panel-goroutines table#goroutines-table td:nth-child(2){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-goroutines table#goroutines-table th:nth-child(3),#panel-goroutines table#goroutines-table td:nth-child(3){width:20%;}
+  #panel-goroutines table#goroutines-table th:nth-child(4),#panel-goroutines table#goroutines-table td:nth-child(4){width:26%;}
+  #panel-goroutines table#goroutines-table td:nth-child(4){font-family:var(--mono);font-size:12px;}
+  #panel-goroutines table#goroutines-table th:nth-child(5),#panel-goroutines table#goroutines-table td:nth-child(5){width:18%;}
+  #panel-goroutines table#goroutines-table th:nth-child(6),#panel-goroutines table#goroutines-table td:nth-child(6){width:28%;}
+  #panel-tscode table#tscode-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;}
+  #panel-tscode table#tscode-table th,
+  #panel-tscode table#tscode-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
+  #panel-tscode table#tscode-table th:nth-child(1),#panel-tscode table#tscode-table td:nth-child(1){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-tscode table#tscode-table th:nth-child(2),#panel-tscode table#tscode-table td:nth-child(2){width:4%;padding-left:2px;padding-right:2px;}
+  #panel-tscode table#tscode-table th:nth-child(3),#panel-tscode table#tscode-table td:nth-child(3){width:20%;}
+  #panel-tscode table#tscode-table th:nth-child(4),#panel-tscode table#tscode-table td:nth-child(4){width:22%;}
+  #panel-tscode table#tscode-table td:nth-child(4){font-family:var(--mono);font-size:12px;}
+  #panel-tscode table#tscode-table th:nth-child(5),#panel-tscode table#tscode-table td:nth-child(5){width:14%;}
+  #panel-tscode table#tscode-table th:nth-child(6),#panel-tscode table#tscode-table td:nth-child(6){width:36%;}
+  #panel-tscode .spec-table { table-layout: fixed; width: 100%; }
+  #panel-tscode .spec-table th:first-child, #panel-tscode .spec-table td:first-child { width: 4%; white-space: normal; }
+  #panel-tscode .spec-table th:nth-child(2), #panel-tscode .spec-table td:nth-child(2) { width: 4%; white-space: normal; }
+  #panel-tscode .spec-table td, #panel-tscode .spec-table th { word-break: break-word; overflow-wrap: anywhere; }
+
+  /* Verify panel: keep the 3-col table inside the panel (col 2 defaults to nowrap) */
+  #panel-verify .spec-table { table-layout: fixed; }
+  #panel-verify .spec-table th, #panel-verify .spec-table td { white-space: normal; word-break: break-word; }
+  #panel-verify .spec-table th:first-child, #panel-verify .spec-table td:first-child { width: 120px; }
+
+  /* Overview panel: properties-table — fixed layout so Property/Lives-in columns don't squeeze */
+  #panel-overview table#properties-table{table-layout:fixed;width:100%;border-collapse:collapse;}
+  #panel-overview table#properties-table th,
+  #panel-overview table#properties-table td{padding:2px 7px;vertical-align:top;white-space:normal;overflow-wrap:break-word;}
+  #panel-overview table#properties-table th:nth-child(1),#panel-overview table#properties-table td:nth-child(1){width:4%;}
+  #panel-overview table#properties-table th:nth-child(2),#panel-overview table#properties-table td:nth-child(2){width:4%;}
+  #panel-overview table#properties-table th:nth-child(3),#panel-overview table#properties-table td:nth-child(3){width:22%;}
+  #panel-overview table#properties-table th:nth-child(4),#panel-overview table#properties-table td:nth-child(4){width:24%;}
+  #panel-overview table#properties-table th:nth-child(5),#panel-overview table#properties-table td:nth-child(5){width:46%;}
+
+  /* Inconsistencies panel: controlled column widths so 4-col table fits */
+  #panel-inconsistencies .spec-table{table-layout:fixed;}
+  #panel-inconsistencies .spec-table th:nth-child(1),#panel-inconsistencies .spec-table td:nth-child(1){width:16%;}
+  #panel-inconsistencies .spec-table th:nth-child(2),#panel-inconsistencies .spec-table td:nth-child(2){width:34%;}
+  #panel-inconsistencies .spec-table th:nth-child(3),#panel-inconsistencies .spec-table td:nth-child(3){width:34%;}
+  #panel-inconsistencies .spec-table th:nth-child(4),#panel-inconsistencies .spec-table td:nth-child(4){width:16%;}
+
+  /* Cards */
+  .cards {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .card {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.4rem;
+    background: var(--bg);
+  }
+
+  .card h3 {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .card ul li {
+    font-size: 13px;
+    color: var(--muted);
+    padding: 0.3rem 0;
+    padding-left: 1rem;
+    position: relative;
+    line-height: 1.5;
+  }
+
+  .card ul li::before {
+    content: "–";
+    position: absolute;
+    left: 0;
+    color: var(--border);
+  }
+
+  /* SVG diagrams */
+  .diagram {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px 20px;
+    margin: 1.5rem 0 1rem;
+    display: flex;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .diagram svg {
+    display: block;
+  }
+
+  .note {
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.65rem 0.9rem;
+    margin-top: 0.25rem;
+    max-width: 620px;
+  }
+
+  /* Contract block */
+  .contract-box {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    background: var(--bg);
+    border: 1px solid rgba(124,158,248,0.3);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 1.1rem 1.3rem;
+    color: var(--text);
+    margin: 1.25rem 0 1.75rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .first-step-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.4rem;
+  }
+
+  .first-step {
+    font-size: 13.5px;
+    color: var(--muted);
+    border-left: 3px solid var(--go-hue);
+    padding-left: 0.85rem;
+    margin-top: 0.25rem;
+  }
+
+  /* Flow diagram stacked */
+  .flow-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    margin: 1.5rem 0 1.25rem;
+  }
+
+  .flow-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .subheading {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 1.5rem 0 0.5rem;
+  }
+
+  .callout-warn {
+    font-size: 13.5px;
+    color: var(--warn);
+    background: var(--warn-bg);
+    border: 1px solid var(--warn);
+    border-left: 4px solid var(--warn);
+    border-radius: 4px;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 1.5rem;
+    max-width: 680px;
+    line-height: 1.65;
+  }
+
+  .callout-warn strong {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--warn);
+  }
+
+  td.enum, th.enum, td.chk, th.chk { width: 2.2ch; text-align: center; color: var(--muted); white-space: nowrap; }
+
+  .chk-btn{background:none;border:none;cursor:pointer;font:inherit;color:var(--muted);padding:1px 4px;border-radius:3px;line-height:1;}
+  .chk-btn:hover{background:rgba(255,255,255,.08);}
+  .chk-btn.checked{color:var(--good);}
+  .chk-btn.heading-chk{display:inline-block;vertical-align:middle;margin-right:4px;font-size:1em;}
+  .chk-btn.diagram-chk{display:block;margin-bottom:6px;font-size:12px;}
+
+  @media (max-width: 600px) {
+    .cards { flex-direction: column; }
+    .panel { padding: 1.5rem 1.25rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="page-title">Wirefold — Design Spec</div>
+  <div class="page-subtitle">Go Backend / TS Frontend</div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab-btn active" role="tab" aria-selected="true" data-panel="overview">The split</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="goroutines">Goroutines</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="tscode">TS</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="bridge">The Bridge</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="clock">Clock</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="tsgo">TS → Go</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="plan">Plan</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="verify">Verify</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="issues">Tracking</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="inconsistencies">Inconsistencies</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="todo">What's left</button>
+  </div>
+
+  <!-- TAB 1: Overview -->
+  <div class="panel active" id="panel-overview" role="tabpanel">
+    <div class="callout-warn"><strong>Spec is authoritative.</strong> Where the implementation and this spec conflict in interpretation, the spec wins — change the code to match the spec, not the spec to match the code. If the spec is genuinely wrong or ambiguous, stop and flag it for revision rather than silently diverging. Also flag any implementation code this spec does not mention — the spec's silence on a piece of code is itself something to surface for review, not a default-keep.</div>
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="overview:h2">☐</button>Go is the backend. TS is the frontend.</h2>
+    <p>Go is the backend: holds all geometry, runs all animation calculations. TS is the frontend: renders what Go sends, owns the viewpoint (camera + scene navigation), and forwards geometry edits to Go.</p>
+
+    <table class="spec-table" id="properties-table">
+      <caption>Where each property lives</caption>
+      <thead>
+        <tr>
+          <th class="enum">#</th>
+          <th class="chk">✓</th>
+          <th>Property</th>
+          <th>Lives in</th>
+          <th>Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="enum">1</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Concurrent</td>
+          <td>Go (backend)</td>
+          <td>Self-scheduling nodes, local rules over held state and wires. No global clock or round.</td>
+        </tr>
+        <tr>
+          <td class="enum">2</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Geometric</td>
+          <td>Go (backend)</td>
+          <td>Holds all geometric data (nodes, ports, edges — endpoints and curves, wires, pulses); computes arc length, positions, durations.</td>
+        </tr>
+        <tr>
+          <td class="enum">3</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Animating</td>
+          <td>Go calculates, TS draws</td>
+          <td>Go computes all animation values (progress, timing); TS only renders the result.</td>
+        </tr>
+        <tr>
+          <td class="enum">4</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Clock (the system monotonic clock Go reads)</td>
+          <td>Go (backend)</td>
+          <td>One clock; wires scale its deltas by pulseSpeed to human speed; the gate stops the arithmetic, not the clock; no shared tick.</td>
+        </tr>
+        <tr>
+          <td class="enum">5</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Viewpoint</td>
+          <td>TS (frontend)</td>
+          <td>How the diagram is viewed, not what it is &mdash; camera, orbit/pan/zoom, world&rarr;screen projection, raycast-picking, GPU render &mdash; in TS (three.js). Go owns the diagram; TS owns how it's viewed.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:h2">☐</button>The contract in one line.</h2>
+
+    <div class="contract-box">Go (backend) holds all geometry (nodes, ports, edges — endpoints and curves), shading, and animation data, runs the clock, and computes every bead position.
+TS (frontend) runs the GPU to display Go's data, owns the viewpoint (camera and scene navigation), and forwards editor geometry and animation updates to Go; Go updates its data accordingly.
+The bridge is: geometry + shading + position data out, editor geometry + animation updates in.</div>
+
+    <div class="note" style="margin-bottom:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="contract:note1">☐</button>Human-viewing speed is Go's: Go runs the animation at a human pace; TS sends CRUD edits and the animation updates at that same pace. TS contributes data, never timing.</div>
+
+    <div class="first-step-label">First concrete step</div>
+    <div class="first-step">
+      <p>Go computes bead positions from clock + path geometry and emits them; TS is reduced to plotting the positions it receives and forwarding editor geometry and animation updates to Go, which updates its data accordingly.</p>
+    </div>
+  </div>
+
+  <!-- TAB: Goroutines -->
+  <div class="panel" id="panel-goroutines" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:h2">☐</button>What each goroutine does.</h2>
+    <p>Concurrency <em>is</em> the nodes and wires: each is its own loop on its own goroutine, coordinating only through channels — no global clock, no central round. Active set: Input loop (in08), i0, i1 (ChainInhibitor), PacedWire (i0&rarr;i1).</p>
+
+    <table class="spec-table" id="goroutines-table">
+      <caption>The goroutines</caption>
+      <thead>
+        <tr>
+          <th class="enum">#</th>
+          <th class="chk">✓</th>
+          <th>Goroutine</th>
+          <th>Source file</th>
+          <th>How many</th>
+          <th>Its job</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+            <td class="enum">1</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+            <td>Input loop</td>
+            <td title="nodes/input/node.go">input/node.go</td>
+            <td>one per data-source Input (e.g. in08)</td>
+            <td><ol><li>Read the signal on the wire i0-&gt;in08 (1 or 0).</li><li>i = (i + signal) % len(Init) — 1 advances the read head (wrapping at the end), 0 holds it.</li><li>Send Init[i] on the wire in08-&gt;i0.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
+          </tr>
+          <tr>
+            <td class="enum">2</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+            <td>i0 loop</td>
+            <td title="nodes/chaininhibitor/node.go">chaininhibitor/node.go</td>
+            <td>one (i0)</td>
+            <td><ol><li>Read a value v from in08 on the wire in08-&gt;i0, if a pulse arrived this round.</li><li>If v differs from the held value: set held = v and send 1 on the wire i0-&gt;in08. Otherwise (v same as held, or no pulse this round): send 0 on i0-&gt;in08. (held inits to -1.)</li><li>Send the held value on the wire i0-&gt;i1.</li><li>Sleep a pacing interval (the node runs slowly), then loop.</li></ol></td>
+          </tr>
+          <tr>
+            <td class="enum">3</td>
+            <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+            <td>i1 loop</td>
+            <td title="nodes/chaininhibitor/node.go">chaininhibitor/node.go</td>
+            <td>one (i1)</td>
+            <td><ol><li>Receive i0's held value on the wire i0-&gt;i1.</li><li>Its output wires are inactive here, so i1 is a sink — it runs the standard ChainInhibitor rule on i0's value and produces nothing downstream (ToNext unwired).</li></ol></td>
+          </tr>
+        <tr>
+          <td class="enum">4</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>PacedWire loop</td>
+          <td title="nodes/Wiring/paced_wire.go">Wiring/paced_wire.go</td>
+          <td>goroutine — one per destination input port</td>
+          <td><ol><li>Add the beads it received this round to the set it already holds.</li><li>Each round, for every bead it holds, compute the bead's next position from the Go clock and the human-speed slowdown (the pulseSpeed scaling).</li><li>If that position is still on the wire, send the bead&#x2019;s 3D data (its position) to TS.</li><li>If that position is past the end of the wire, the bead is done &#x2014; hand the value the bead is holding to the destination node and remove the bead from PacedWire (the off-the-end position is never sent to TS).</li><li>Loop.</li></ol></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note1">☐</button><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">PacedWire</span> is the only wire goroutine kind. It owns no clear/busy state and applies no send policy: a source places a bead whenever its own rule says to, and the wire may carry more than one bead at once.</div>
+
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note2">☐</button>In the target model each PacedWire wakes ~16&nbsp;ms, advances its bead, emits the position, and self-delivers when elapsed reaches inFlightTime.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutines:note3">☐</button><strong>Geometry is Go's; TS captures edits and draws.</strong> Control points, arc length, world positions derived in Go at load and on each edit. TS sends edit messages; Go returns 3D data; TS plots only.</div>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:h2">☐</button>The goroutines, wired.</h2>
+    <p>Every connection is a <strong>PacedWire goroutine</strong>: carries beads over a channel, holds no clear/busy state, may carry more than one bead at once. Nodes and wires are all goroutines — channels only.</p>
+    <div class="diagram">
+<button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="goroutinegraph:svg1">☐</button>
+<svg width="1080" height="440" viewBox="0 0 1080 440" xmlns="http://www.w3.org/2000/svg" aria-label="The active subgraph as goroutine loops. in08 and i0 are connected via two PacedWire goroutines forming a diamond: forward green 'value' path goes over the top through PacedWire, reverse orange '1/0' path goes under the bottom through a second PacedWire. Below, i0 connects via a third PacedWire to ChainInhibitor loop i1 (wire labeled 'held'). i1 is a sink with no active downstream.">
+  <defs>
+    <marker id="arrG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
+    <marker id="arrB" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#7c9ef8"/></marker>
+    <marker id="arrOrange" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c47c5e"/></marker>
+  </defs>
+
+  <!-- in08 node: center (120, 150) -->
+  <rect x="30" y="117" width="180" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="120" y="148" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">Input loop</text>
+  <text x="120" y="166" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">in08</text>
+
+  <!-- PacedWire FORWARD (in08→i0), center (420, 70) -->
+  <rect x="341" y="44" width="158" height="52" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
+  <text x="420" y="68" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
+  <text x="420" y="84" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
+
+  <!-- PacedWire REVERSE (i0→in08), center (420, 230) -->
+  <rect x="341" y="204" width="158" height="52" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
+  <text x="420" y="228" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
+  <text x="420" y="244" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
+
+  <!-- i0 node: center (720, 150) -->
+  <rect x="620" y="117" width="200" height="66" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="720" y="142" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
+  <text x="720" y="160" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i0</text>
+  <text x="720" y="175" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d5a50">(held inits -1)</text>
+
+  <!-- FORWARD path: in08 right edge → PW_fwd left, top; label "value" above -->
+  <!-- in08 right: (210, 132); PW_fwd left: (341, 70) -->
+  <line x1="210" y1="132" x2="341" y2="70" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
+  <text x="270" y="92" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">value</text>
+
+  <!-- FORWARD path: PW_fwd right → i0 left, top; label "value" above -->
+  <!-- PW_fwd right: (499, 70); i0 left: (620, 132) -->
+  <line x1="499" y1="70" x2="620" y2="132" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arrG)"/>
+  <text x="566" y="90" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#5ec4a0">value</text>
+
+  <!-- REVERSE path: i0 left → PW_rev right; label "1/0" below -->
+  <!-- i0 left: (620, 168); PW_rev right: (499, 230) -->
+  <line x1="620" y1="168" x2="499" y2="230" stroke="#c47c5e" stroke-width="1.5" marker-end="url(#arrOrange)"/>
+  <text x="566" y="215" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#c47c5e">1 / 0</text>
+
+  <!-- REVERSE path: PW_rev left → in08 right, bottom; label "1/0" below -->
+  <!-- PW_rev left: (341, 230); in08 right: (210, 168) -->
+  <line x1="341" y1="230" x2="210" y2="168" stroke="#c47c5e" stroke-width="1.5" marker-end="url(#arrOrange)"/>
+  <text x="270" y="215" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#c47c5e">1 / 0</text>
+
+  <!-- PacedWire for i0→i1 chain, center (730, 350) -->
+  <rect x="651" y="324" width="158" height="52" rx="10" ry="10" fill="#0d1628" stroke="#7c9ef8" stroke-width="2"/>
+  <text x="730" y="348" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#7c9ef8">PacedWire</text>
+  <text x="730" y="364" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">goroutine</text>
+
+  <!-- i1 node: center (960, 350), generous spacing from PW_i1 -->
+  <rect x="870" y="324" width="180" height="52" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="960" y="348" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">ChainInhibitor loop</text>
+  <text x="960" y="366" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">i1 (sink)</text>
+
+  <!-- i0 bottom → PacedWire_i1 top -->
+  <!-- i0 bottom: (720, 183); PW_i1 top: (730, 324) -->
+  <line x1="720" y1="183" x2="730" y2="324" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="736" y="262" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">held</text>
+
+  <!-- PacedWire_i1 right → i1 left -->
+  <!-- PW_i1 right: (809, 350); i1 left: (870, 350) -->
+  <line x1="809" y1="350" x2="868" y2="350" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#arrB)"/>
+  <text x="838" y="341" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#7c9ef8">deliver</text>
+</svg>
+    </div>
+    <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note1">☐</button><strong>Legend.</strong> Green = node-loop goroutine; blue = PacedWire; orange = i0&rarr;in08 signal (1/0). Arrows = channels. PacedWire holds no clear/busy state; source emits on its own rule; wire may carry multiple beads.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note2">☐</button><strong>Active subgraph.</strong> in08↔i0 bidirectional: in08 sends Init[i] (value); i0 sends 1 (held changed) or 0 (held same) back. i0 forwards held value to i1 via PacedWire. i1 is a sink.</div>
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="goroutinegraph:note3">☐</button><strong>Singletons, off to the side.</strong> main (spawns everything, then waits), the stdin reader (CRUD + pause/resume in), and the trace drain (orders and writes the trace) &mdash; process lifecycle and I/O, not part of the bead path.</div>
+  </div>
+
+  <!-- TAB: TS code -->
+  <div class="panel" id="panel-tscode" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:h2">☐</button>What the TS frontend runs.</h2>
+    <p>TS has no goroutines; its job is to render the stream Go emits and send CRUD + pause/resume back. Its execution contexts are below; the data work is Go's (see the TS &rarr; Go tab).</p>
+
+    <table class="spec-table" id="tscode-table">
+      <caption>The TS execution contexts</caption>
+      <thead>
+        <tr><th class="enum">#</th><th class="chk">✓</th><th>Context</th><th>Source file</th><th>When it runs</th><th>Its job</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="enum">1</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Render loop · pulse</td>
+          <td title="tools/topology-vscode/src/webview/three/pulse-state.ts">pulse-state.ts</td>
+          <td>every frame (~60fps), one per in-flight bead</td>
+          <td><ol><li>Read each in-flight bead's current position from the stream Go emits (the pulse map, pulse-state.ts).</li><li>Set the bead mesh position to that point.</li><li>No curve rebuild, no progress t, no curve sampling &mdash; Go computes every position; no delivered post &mdash; Go times its own delivery.</li></ol></td>
+        </tr>
+        <tr>
+          <td class="enum">2</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Render loop · overlays</td>
+          <td title="tools/topology-vscode/src/webview/three/scene-content.tsx">scene-content.tsx</td>
+          <td>every few frames (throttled)</td>
+          <td><ol><li>Project node world positions to screen for the HTML label overlay (LabelProjector).</li><li>Debounce the camera matrix and fire a settle callback once motion stops (CameraSettleDetector).</li><li>Track the nearest N nodes to the camera for occlusion/label decisions (NearestNTracker).</li><li>Screen-space and GPU-tied &mdash; stays in TS.</li></ol></td>
+        </tr>
+        <tr>
+          <td class="enum">3</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Trace pump</td>
+          <td title="tools/topology-vscode/src/webview/three/pump.ts">pump.ts</td>
+          <td>event-driven (each Go trace event)</td>
+          <td><ol><li>handleTraceEvent switches on the event kind (pump.ts).</li><li><strong>send</strong> &rarr; match edges by source+sourceHandle and setPulse on each.</li><li><strong>done</strong> &rarr; match edges by target+targetHandle and clearPulse on each.</li><li><strong>fire / recv</strong> &rarr; no-op.</li></ol></td>
+        </tr>
+        <tr>
+          <td class="enum">4</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Message receiver</td>
+          <td title="tools/topology-vscode/src/webview/main.tsx">main.tsx</td>
+          <td>event-driven (window "message")</td>
+          <td><ol><li>parseHostToWebview narrows the incoming message (main.tsx).</li><li><strong>trace-event</strong> &rarr; handleTraceEvent (the pump).</li><li><strong>load</strong> &rarr; store.load(text); <strong>run-status</strong> &rarr; set run state; <strong>flush</strong> &rarr; flush saves.</li><li>On startup, post {type:"ready"} back to the host.</li></ol></td>
+        </tr>
+        <tr>
+          <td class="enum">5</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Outbound IPC</td>
+          <td title="tools/topology-vscode/src/extension/handle-message.ts">handle-message.ts</td>
+          <td>on user action</td>
+          <td><ol><li>vscode.postMessage from the webview; the extension's dispatch writes a JSON line to the Go process stdin (handle-message.ts).</li><li>Out types: CRUD + control + raw input (deleteEdge, addEdge, fade, node-move, pause/resume), each carrying the picked Go id plus geometry/animation edits &mdash; never delivery, timing, or camera nav (orbit/pan/zoom stays in TS).</li><li>Fire-and-forget &mdash; the writeStdin is not awaited; no request/response.</li></ol></td>
+        </tr>
+        <tr>
+          <td class="enum">6</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>Input handlers</td>
+          <td title="tools/topology-vscode/src/webview/three/interaction-controls.ts">interaction-controls.ts</td>
+          <td>DOM pointer / wheel events</td>
+          <td><ol><li>pointer down: raycast-pick a port, node, or empty space; capture the drag/wiring origin (interaction-controls.ts).</li><li>pointer move: drag a node (&rarr; node-move IPC, rAF-throttled), preview a wire, or arcball-rotate the camera.</li><li>pointer up: complete wiring (createEdge), persist a node move, or reset.</li><li>wheel/pointer navigation: TS interprets it (ctrl = pinch-zoom to cursor, else pan on z=0) and commits the camera locally — TS owns the camera (three.js), nothing forwarded to Go.</li></ol></td>
+        </tr>
+        <tr>
+          <td class="enum">7</td>
+          <td class="chk"><button type="button" class="chk-btn" aria-pressed="false" aria-label="toggle done">☐</button></td>
+          <td>React / Zustand store</td>
+          <td title="tools/topology-vscode/src/webview/three/store.ts">store.ts</td>
+          <td>on state change</td>
+          <td><ol><li>Keeps a passive render copy of nodes/edges/selection (store.ts); Go owns the authoritative data.</li><li>moveNode updates a node position locally and posts node-move; it derives no curve geometry and patches no pulse timing &mdash; Go does that.</li><li>createEdge / deleteEdge / toggleFade apply optimistically and post addEdge / deleteEdge / fade to Go.</li></ol></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tscode:note1">☐</button>What stays in TS vs. what is Go's &mdash; see the <strong>TS &rarr; Go</strong> tab.</div>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:h2">☐</button>The TS frontend, wired.</h2>
+  <p>Two pipes to Go — nothing else crosses. <strong>In:</strong> position stream → trace pump → render (draw beads). <strong>Out:</strong> CRUD, pause/resume, action input (Go id) via writeStdin. Camera stays in TS; TS computes no geometry.</p>
+  <div class="diagram">
+<button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="tsgraph:svg1">☐</button>
+<svg width="560" height="240" viewBox="0 0 560 240" xmlns="http://www.w3.org/2000/svg" aria-label="TS frontend: two pipes to Go. The trace pump feeds Go's position stream to the render loop, which draws beads to the screen. The user sees the render and acts; the outbound IPC (writeStdin) sends CRUD, pause/resume, and action input (Go id) to Go.">
+  <line x1="120" y1="78" x2="210" y2="78" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aG)"/>
+  <text x="165" y="70" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5ec4a0">position stream</text>
+  <line x1="340" y1="78" x2="400" y2="78" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aP)"/>
+  <line x1="470" y1="106" x2="470" y2="140" stroke="#808090" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#aM)"/>
+  <text x="485" y="127" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#808090">user</text>
+  <line x1="400" y1="168" x2="120" y2="168" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aA)"/>
+  <text x="262" y="160" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#d4a017">CRUD &middot; pause/resume &middot; action input (Go id)</text>
+  <rect x="24" y="46" width="96" height="150" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="72" y="116" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#5ec4a0">GO</text>
+  <text x="72" y="134" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">backend</text>
+  <rect x="210" y="50" width="130" height="56" rx="9" ry="9" fill="#0d1628" stroke="#7c9ef8" stroke-width="1.5"/>
+  <text x="275" y="74" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#7c9ef8">Trace pump</text>
+  <text x="275" y="91" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#5a78c0">setPulse(pos)</text>
+  <rect x="400" y="50" width="140" height="56" rx="9" ry="9" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+  <text x="470" y="74" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">Render loop</text>
+  <text x="470" y="91" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#8040b0">draw beads to screen</text>
+  <rect x="400" y="140" width="140" height="56" rx="9" ry="9" fill="#1e1800" stroke="#d4a017" stroke-width="1.5"/>
+  <text x="470" y="164" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#d4a017">Outbound IPC</text>
+  <text x="470" y="181" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#9a7818">writeStdin</text>
+  <defs>
+    <marker id="aG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
+    <marker id="aP" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/></marker>
+    <marker id="aA" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#d4a017"/></marker>
+    <marker id="aM" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#808090"/></marker>
+  </defs>
+</svg>
+  </div>
+  <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:note1">☐</button><strong>Legend.</strong> Green = Go; blue = trace pump (Go&rarr;TS); purple = render path; amber = writeStdin (TS&rarr;Go). Two pipes; nothing else crosses. Dashed user arrow = the human sees the render, their actions go to Go.</div>
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgraph:note2">☐</button>TS only renders Go's stream, owns the camera + scene navigation, and forwards the user's actions. The authoritative data &mdash; positions, geometry, timing &mdash; lives in Go; the TS zustand store is a no-op holder Go writes.</div>
+  </div>
+
+  <!-- TAB 3: The Bridge -->
+  <div class="panel" id="panel-bridge" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:h2">☐</button>Trace out, geometry in.</h2>
+    <p>The whole boundary is two arrows. Nothing else crosses.</p>
+
+    <div class="diagram">
+      <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="bridge:svg1">☐</button>
+      <svg width="680" height="180" viewBox="0 0 680 180" xmlns="http://www.w3.org/2000/svg" aria-label="Bridge diagram: Go sends trace stream to TS; TS sends editor geometry and animation updates to Go">
+        <!-- Go box -->
+        <rect x="20" y="40" width="200" height="100" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+        <text x="120" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#5ec4a0">GO</text>
+        <text x="120" y="102" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#3d8a70">backend — geometry + animation calc</text>
+
+        <!-- TS box -->
+        <rect x="460" y="40" width="200" height="100" rx="10" ry="10" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+        <text x="560" y="82" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="15" font-weight="700" fill="#c07ef8">TS</text>
+        <text x="560" y="102" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#8040b0">frontend — renderer</text>
+
+        <!-- Top arrow: GO → TS (trace stream) -->
+        <line x1="222" y1="68" x2="458" y2="68" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="340" y="58" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">position stream (per-bead x,y,z)</text>
+
+        <!-- Bottom arrow: TS → GO (geometry edits) -->
+        <line x1="458" y1="112" x2="222" y2="112" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
+        <text x="340" y="130" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#c07ef8">editor geometry + animation updates + action input (Go id)</text>
+
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/>
+          </marker>
+          <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+
+    <div class="note">
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note1">☐</button>This matches uniform pulse speed — speed is a shared constant; the only per-wire variation is arc length, which is geometry.
+    </div>
+
+    <div class="note" style="margin-top:0.75rem;">
+      <button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note3">☐</button>TS sends editor geometry and animation updates to Go; Go updates its data accordingly. Go remains the single authoritative holder of all geometry and animation state.
+    </div>
+
+<p style="margin-top:1.5rem;"><strong>The actual path.</strong> Conceptually two arrows; concretely the VS Code extension host relays them between Go's stdio and the webview.</p>
+  <div class="diagram">
+    <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="bridge:svg2">☐</button>
+    <svg width="720" height="220" viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" aria-label="The actual Go-TS relay: Go's stdout position stream is relayed by the VS Code extension host via postMessage to the TS webview; the webview's CRUD and pause/resume go back via postMessage and the extension's writeStdin to Go's stdin.">
+      <text x="360" y="42" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0">position stream (per-bead x,y,z)</text>
+      <text x="360" y="57" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#3d8a70">stdout &rarr; postMessage</text>
+      <line x1="174" y1="95" x2="285" y2="95" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#brG)"/>
+      <line x1="435" y1="95" x2="546" y2="95" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#brG)"/>
+      <line x1="546" y1="140" x2="435" y2="140" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#brP)"/>
+      <line x1="285" y1="140" x2="174" y2="140" stroke="#c07ef8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#brP)"/>
+      <text x="360" y="190" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#c07ef8">deleteEdge &middot; addEdge &middot; fade &middot; node-move &middot; pause/resume</text>
+      <text x="360" y="205" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#8040b0">postMessage &rarr; stdin (writeStdin)</text>
+      <rect x="24" y="72" width="150" height="90" rx="10" ry="10" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+      <text x="99" y="112" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">GO process</text>
+      <text x="99" y="132" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">stdio</text>
+      <rect x="285" y="72" width="150" height="90" rx="10" ry="10" fill="#161618" stroke="#808090" stroke-width="1.5"/>
+      <text x="360" y="108" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="12" font-weight="700" fill="#a0a0b0">extension host</text>
+      <text x="360" y="128" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="9" fill="#808090">relay &middot; VS Code</text>
+      <rect x="546" y="72" width="150" height="90" rx="10" ry="10" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.5"/>
+      <text x="621" y="112" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="13" font-weight="700" fill="#c07ef8">TS webview</text>
+      <text x="621" y="132" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#8040b0">renderer</text>
+      <defs>
+        <marker id="brG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
+        <marker id="brP" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note4">☐</button>Fire-and-forget both ways. Go&rarr;TS: position stream via stdout → postMessage. TS&rarr;Go: CRUD + pause/resume via postMessage → stdin. Extension host only relays; holds no state.</div>
+
+  <p style="margin-top:1.5rem;"><strong>Wire format — JSONL.</strong> Both directions: one JSON object per line, split on <code>\n</code> — same framing as the probe logs. Pinned: the framing and the single id space, not field names.</p>
+
+  <div class="note"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note5">☐</button><strong>Relay is a dumb pipe.</strong> Extension host forwards each line verbatim — no parse, no transform. <strong>stdout carries protocol only</strong> — logging goes to stderr or <code>.probe/*.jsonl</code>; a stray write corrupts the stream.</div>
+
+  <h3 style="margin-top:1.5rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note6">☐</button>One id space &mdash; Go's</h3>
+  <ul style="margin-top:0.5rem;padding-left:1.25rem;color:var(--muted);font-size:13px;line-height:1.65;">
+    <li style="margin-bottom:0.4rem;">Every object Go streams to TS carries its Go id (node / edge / port).</li>
+    <li>A user interaction forms its outbound message directly from that id &mdash; e.g. <code>{"t":"node-move","id":"i0","x":480,"y":63}</code>. TS keeps no TS-specific id and does no lookup.</li>
+  </ul>
+
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note7">☐</button><strong>Illustrative shapes.</strong> Go &rarr; TS, a bead position on a wire: <code>{"t":"pos","id":"i0ToI1","b":0,"x":1.2,"y":0.4,"z":0}</code>. Go &rarr; TS, recomputed edge geometry after an edit: <code>{"t":"edge","id":"i0ToI1","cp":[&hellip;],"arc":12.3}</code>. TS &rarr; Go, a wiring edit: <code>{"t":"add-edge","src":"in08","dst":"i0"}</code>. Every <code>id</code> is Go's, both ways.</div>
+
+  <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="bridge:note8">☐</button><strong>Escape hatch (not built).</strong> If <code>postMessage</code> can't handle the stream volume: localhost WebSocket from webview to a server in the Go process; extension only spawns Go and hands over the port. Unbuilt until profiling says otherwise.</div>
+  </div>
+
+  <!-- TAB 4: Clock Change -->
+  <div class="panel" id="panel-clock" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:h2-go-calculates">☐</button>Go calculates the animation; TS only draws it.</h2>
+    <p>Go does all animation calculation — timing, progress, durations — and emits ready-to-render messages. TS draws them. The frontend never calculates animation; it renders frames Go describes. Today's inversion (TS pacing Go via NotifyDelivered) is what this design removes.</p>
+
+    <div class="flow-stack">
+      <div>
+        <div class="flow-label">Before</div>
+        <svg width="640" height="70" viewBox="0 0 640 70" xmlns="http://www.w3.org/2000/svg" aria-label="Before: TS animation completes drives NotifyDelivered which drives Go delivers to slot">
+          <!-- Box 1 -->
+          <rect x="0" y="14" width="178" height="38" rx="6" fill="#1e0e0e" stroke="#c07ef8" stroke-width="1.2"/>
+          <text x="89" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11.5" fill="#c07ef8" font-weight="600">TS calculates / drives</text>
+
+          <!-- Arrow 1 -->
+          <line x1="180" y1="33" x2="225" y2="33" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#ba1)"/>
+
+          <!-- Box 2 -->
+          <rect x="227" y="14" width="138" height="38" rx="6" fill="#1e0e0e" stroke="#c07ef8" stroke-width="1.2"/>
+          <text x="296" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11.5" fill="#c07ef8" font-weight="600">NotifyDelivered</text>
+
+          <!-- Arrow 2 -->
+          <line x1="367" y1="33" x2="412" y2="33" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#ba1)"/>
+
+          <!-- Box 3 -->
+          <rect x="414" y="14" width="178" height="38" rx="6" fill="#18181c" stroke="#2a2a30" stroke-width="1.2"/>
+          <text x="503" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11.5" fill="#808090" font-weight="600">Go delivers to slot</text>
+
+          <!-- TS drives label -->
+          <text x="200" y="62" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#8040b0">TS drives Go</text>
+
+          <defs>
+            <marker id="ba1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" fill="#c07ef8"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+
+      <div>
+        <div class="flow-label">After</div>
+        <button type="button" class="chk-btn diagram-chk" aria-pressed="false" data-chk="panel-clock:svg2-after">☐</button>
+        <svg width="640" height="70" viewBox="0 0 640 70" xmlns="http://www.w3.org/2000/svg" aria-label="After: Go elapses inFlightTime drives Go delivers on channel drives trace out drives TS animates to fit duration">
+          <!-- Box 1 -->
+          <rect x="0" y="14" width="170" height="38" rx="6" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.2"/>
+          <text x="85" y="32" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0" font-weight="600">Go calculates all</text>
+          <text x="85" y="46" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0" font-weight="600">animation values</text>
+
+          <!-- Arrow 1 -->
+          <line x1="172" y1="33" x2="210" y2="33" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aa1)"/>
+
+          <!-- Box 2 -->
+          <rect x="212" y="14" width="148" height="38" rx="6" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.2"/>
+          <text x="286" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#5ec4a0" font-weight="600">Go delivers on channel</text>
+
+          <!-- Arrow 2 -->
+          <line x1="362" y1="33" x2="400" y2="33" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aa1)"/>
+
+          <!-- Box 3 -->
+          <rect x="402" y="14" width="80" height="38" rx="6" fill="#18181c" stroke="#2a2a30" stroke-width="1.2"/>
+          <text x="442" y="36" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="11" fill="#808090" font-weight="600">trace out</text>
+
+          <!-- Arrow 3 -->
+          <line x1="484" y1="33" x2="520" y2="33" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#aa1)"/>
+
+          <!-- Box 4 -->
+          <rect x="522" y="6" width="116" height="54" rx="6" fill="#1a0e24" stroke="#c07ef8" stroke-width="1.2"/>
+          <text x="580" y="28" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10.5" fill="#c07ef8" font-weight="600">TS renders</text>
+          <text x="580" y="42" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10.5" fill="#c07ef8" font-weight="600">the result</text>
+
+          <!-- Go drives label -->
+          <text x="100" y="62" text-anchor="middle" font-family="'JetBrains Mono','Fira Mono',monospace" font-size="10" fill="#3d8a70">Go drives</text>
+
+          <defs>
+            <marker id="aa1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L7,3 z" fill="#5ec4a0"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-go-computes-position">☐</button>Go computes and emits each position directly</div>
+    <p>Each wire's loop computes its bead's current position from the clock and path geometry (bezier math) and emits it; when <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">elapsed</span> reaches <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">inFlightTime</span>, the wire puts the bead on the destination channel.</p>
+
+    <div class="cards" style="margin-top:0.5rem;">
+      <div class="card">
+        <ul>
+          <li>Position computation is part of the wire's own loop — not a separate reader polling state at a fixed rate.</li>
+          <li>Pause freezes motion naturally: when the clock is paused, elapsed stops advancing, so the computed position is unchanged.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-sleep-paces-loop">☐</button>Sleep paces the loop</div>
+    <p>The ~16 ms sleep is the report rate (matching a 60Hz display), not bead speed — speed stays pulseSpeed, arrival stays at inFlightTime regardless of sleep duration.</p>
+
+    <div class="cards" style="margin-top:0.5rem;">
+      <div class="card">
+        <ul>
+          <li>16 ms is the starting point — it matches a 60Hz display, which is the most a monitor can show. Emitting faster than the refresh is wasted.</li>
+          <li>The sleep sets report smoothness, not speed. The bead still arrives at exactly inFlightTime no matter the sleep — a longer sleep just shows fewer waypoints along the path.</li>
+          <li>Pause still freezes motion: while paused the clock stops advancing, so each wake computes the same position.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-human-speed">☐</button>Human speed belongs to Go</div>
+    <p>pulseSpeed sets the human-watchable pace; Go emits positions at the ~16ms report rate; TS sends CRUD edits only and never drives timing.</p>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="panel-clock:sub-keeping-locked">☐</button>Keeping them locked</div>
+    <p>Go is the single source of all animation values; TS renders exactly what Go sends, so there is nothing to keep in sync.</p>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:h2">☐</button>Play / Pause: the button is in TS, the clock is in Go.</h2>
+    <p>Pause and resume act on Go's single clock. TS does not hold time — it holds a button. TS sends a pause or resume message to Go; Go's clock halts or runs. The frontend never owns any time.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:card1">☐</button>Pause</h3>
+        <ul>
+          <li>TS sends "pause"</li>
+          <li>Go freezes its clock</li>
+          <li>In-flight beads stop progressing</li>
+          <li>No new firing (no wire completes)</li>
+          <li>Editor shows last known state</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:card2">☐</button>Resume</h3>
+        <ul>
+          <li>TS sends "resume"</li>
+          <li>Go's clock advances from where it left off</li>
+          <li>In-flight traversal continues</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub1">☐</button>Freeze means stop accumulating</div>
+    <p>Pause means stop accumulating elapsed time — not diff wall-clock on resume. A bead 40% across stays 40% on resume. Implement as a monotonic clock with a paused accumulator (elapsed-while-paused is zero), behind an injectable interface — a real impl plus a fake the tests advance, so timing is deterministic.</p>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="playpause:sub2">☐</button>Why the gate lives in Go</div>
+    <p>Play/pause halts Go's clock — not a TS render toggle. If TS paused its render loop while Go kept running, Go's clock would race ahead and be out of sync on resume. Button in TS; clock in Go.</p>
+  </div>
+
+  <!-- TAB 7: TS → Go -->
+  <div class="panel" id="panel-tsgo" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:h2">☐</button>How much of TS converts to Go?</h2>
+    <p>The dividing line is <strong>data vs. the GPU</strong>.</p>
+    <ul style="margin-top:0.5rem;margin-bottom:1.25rem;padding-left:1.25rem;color:var(--muted);font-size:13.5px;line-height:1.65;max-width:680px;">
+      <li style="margin-bottom:0.5rem;">Geometry, animation, and shading are data &mdash; Go owns and emits them.</li>
+      <li style="margin-bottom:0.5rem;">Running the GPU and capturing input need the browser &mdash; these stay in TS.</li>
+      <li>Input that produces geometry (e.g. a node drag) is captured in TS and sent to Go as an edit, so Go stays authoritative.</li>
+    </ul>
+
+    <table class="spec-table" style="margin-top:1rem;">
+      <caption>Data that moves to Go</caption>
+      <thead>
+        <tr>
+          <th>Class</th>
+          <th>What</th>
+          <th>TS symbol(s) today</th>
+          <th>Now</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Geometry</td>
+          <td>node / port world positions</td>
+          <td><code>nodeWorldPos</code>, <code>portDir</code>, <code>portWorldPos</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>edge curve / control points</td>
+          <td><code>buildPortCurve</code>, <code>buildEdgeCurve</code><br><span style="color:var(--muted)">SingleEdgeTube — TS renderer of Go's curve (stays TS)</span></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>arc length</td>
+          <td><code>rfArcLength</code></td>
+          <td>Go (already: <code>BezierArcLength</code>)</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>node positions</td>
+          <td><code>moveNode</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Geometry</td>
+          <td>bounding box</td>
+          <td><code>boundingBox</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>bead position</td>
+          <td><code>getPointAt(t)</code><br><span style="color:var(--muted)">PulseBead — TS bead renderer (stays TS)</span></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>traversal progress fraction</td>
+          <td><code>t = (now − startTime) / simLatencyMs</code>, <code>simLatencyMs</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>traversal timing / delivery</td>
+          <td><code>simLatencyMs</code>, <code>inFlightTime</code>, <code>claimDelivered</code>, <code>moveNode</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Animation</td>
+          <td>pause-adjusted clock</td>
+          <td><code>getPauseAdjustedNow()</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>materials / colors</td>
+          <td><code>node.data.fill</code>, <code>node.data.stroke</code>, <code>NODE_DEFS</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>glass / material params</td>
+          <td><code>MeshPhysicalMaterial</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>wire / tube appearance</td>
+          <td><code>SingleEdgeTube</code></td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>environment / lighting params</td>
+          <td>(env/lighting parameter values)</td>
+          <td>Go</td>
+        </tr>
+        <tr>
+          <td>Shading</td>
+          <td>bead appearance</td>
+          <td>(bead size, color, emissive — alongside bead position)</td>
+          <td>Go</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="cards" style="margin-top:1rem;">
+      <div class="card">
+        <h3 style="color:var(--ts-hue);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:card4">☐</button>Stays in TS (render + input + authoring)</h3>
+        <ul>
+          <li><strong>GPU draw calls</strong> — WebGL/three.js render: sphere/torus/tube geometry, <code style="font-family:var(--mono);font-size:11px;">renderer.render()</code>, the @react-three/fiber Canvas loop (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>: GraphNode, SingleEdgeTube, PulseBead).</li>
+          <li><strong>GPU-resident resources</strong> — WebGL context, compiled shaders, baked textures/env maps; Go supplies the parameters, TS bakes + binds them (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>: ProceduralEnvProvider).</li>
+          <li><strong>Human input</strong> — camera arcball/pan/pinch-dolly committed locally, never forwarded; raycast pick identifies node/port/edge; drag + wiring go to Go as geometry edits (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">useInteractionControls</span>, <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">RaycasterHelper</span>).</li>
+          <li><strong>DOM editor chrome</strong> — label overlays, occlusion badges, spec-override text, run button, camera-UI widgets; HTML stays in the browser (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">ThreeView.tsx</span>).</li>
+          <li><strong>Authoring lifecycle</strong> — editor state, JSON parse/serialize, VS Code save IPC: authoring, not Go-network compute (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>, <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">save.ts</span>, <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">SaveLifecycle.tsx</span>).</li>
+          <li><strong>No authoritative store</strong> — TS holds no source-of-truth graph state; the zustand store is a no-op holder Go writes (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>).</li>
+          <li><strong>Fire-and-forget sends</strong> — no await/Promise/reply; optimistic local apply for responsiveness, Go's echo reconciles.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:note1">☐</button>Dividing line: data vs. GPU. Geometry, animation, shading are data — Go owns them. GPU + input capture require the browser — stay in TS. Geometry-producing input (node drag) is sent to Go as a geometry edit.</div>
+
+    <div class="note" style="margin-top:0.75rem;border-left-color:var(--warn);"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:note2">☐</button>Moving geometry into Go doesn't mean serializing the <em>derived</em> geometry into <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.json</span> — node x/y is the geometric input and still persists. File holds: network spec + <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">view</span> block (node x/y, camera, fade/label); port positions, curves, and arc lengths are recomputed at load. Node drag writes back one x/y.</div>
+
+    <h3 style="margin-top:1.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-intro">☐</button>New Go builds</h3>
+    <p><strong>Static geometry is already Go's</strong> — delete TS duplicates: <code style="font-family:var(--mono);font-size:11px;">BezierArcLength</code>, <code style="font-family:var(--mono);font-size:11px;">PortCurveArcLength</code>, <code style="font-family:var(--mono);font-size:11px;">nodeWorldPos</code>, <code style="font-family:var(--mono);font-size:11px;">portWorldPos</code>, <code style="font-family:var(--mono);font-size:11px;">CurveParamPulseSpeedWuPerMs</code>. Go must newly build Chain 1 (clock + per-frame streaming; the bézier eval already exists).</p>
+
+    <div class="note" style="margin-top:0.5rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-chain1">☐</button><strong>Chain 1 — animation (first domino):</strong>
+      <ul style="margin-top:0.4rem;padding-left:1.25rem;">
+        <li style="margin-bottom:0.3rem;"><strong>Clock + per-frame stepping — NEW.</strong> Monotonic clock; stdlib <code style="font-family:var(--mono);font-size:11px;">time</code>.</li>
+        <li><strong>Bead-position eval — EXPOSE, don't build.</strong> The 3D bézier eval and <code style="font-family:var(--mono);font-size:11px;">vec3</code> already exist inline in <code style="font-family:var(--mono);font-size:11px;">PortCurveArcLength</code>; factor out and call per frame: bead t → 3D pos, streamed.</li>
+      </ul>
+    </div>
+
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-divline">☐</button><strong>Diagram vs viewpoint.</strong>
+      <ul style="margin-top:0.4rem;padding-left:1.2rem;">
+        <li>Go: diagram (nodes/edges/beads, control points, arc length, world positions, animation).</li>
+        <li>TS: viewpoint (camera, orbit/pan/zoom, projection, picking, GPU). "TS computes none" = no diagram math.</li>
+        <li>CRUD surfaces send actions to Go with the Go id (one id space).</li>
+      </ul>
+    </div>
+
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-decisions">☐</button><strong>Fade reachability → Go.</strong> <code style="font-family:var(--mono);font-size:11px;">SetFaded</code> + <code style="font-family:var(--mono);font-size:11px;">fade</code> broadcast are already Go; the reachability that drives them is Go's too — diagram logic, not camera-dependent. Camera-dependent label-display (nearest-N-to-camera, occlusion) stays in TS.</div>
+
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="tsgo:newbuilds-libs">☐</button><strong>Go libraries.</strong> stdlib <code style="font-family:var(--mono);font-size:11px;">time</code> for the clock; the existing <code style="font-family:var(--mono);font-size:11px;">vec3</code> + bézier eval for beads — no 3D-math library. Camera, projection, and picking (<code style="font-family:var(--mono);font-size:11px;">Perspective</code>, <code style="font-family:var(--mono);font-size:11px;">UnProject</code>) stay in three.js.</div>
+  </div>
+
+  <!-- TAB 9: Plan -->
+  <div class="panel" id="panel-plan" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:h2">☐</button>Coding plan: clock first, then migrate data.</h2>
+    <p>One model shift (Go owns the clock) plus staged data migration (positions, geometry, shading). Clock first — it unblocks the rest by letting Go run and deliver without TS. Each phase leaves the build green and the editor working.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:card1">☐</button>The five phases at a glance</h3>
+        <ul>
+          <li><strong>1. Clock into Go</strong> — each wire goroutine elapses inFlightTime on Go's clock and delivers by putting the bead on the destination channel; wire loops sleep ~16ms. Deletes the NotifyDelivered-from-TS delivery trigger. (The unblock.)</li>
+          <li><strong>2. Position stream</strong> — Go computes each bead position and emits it; TS plots; delete TS position/timing math.</li>
+          <li><strong>3. Geometry data into Go</strong> — nodes, ports, edges (endpoints + curves) become Go-owned; TS sends geometry edits.</li>
+          <li><strong>4. Shading data into Go</strong> — materials, colors, glass and environment parameters become Go data; TS applies them on the GPU.</li>
+          <li><strong>5. Bridge → CRUD + docs</strong> — reshape messages into plain CRUD, delete notifyDelivered, finalize MODEL.md + CLAUDE.md.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:note1">☐</button>Ordering principle — each phase ends green (go build/test, tsc, npm run build, all guard scripts). The clock phase is the keystone; the data phases are independent migrations after it.</div>
+
+    <div class="note" style="margin-top:0.75rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="plan:newbuilds-ptr">☐</button>The authoritative new-Go-builds list is in the <strong>TS → Go</strong> tab. Chain 1 (clock + per-frame bead eval) is the PacedWire rewrite — the first phase. Camera and picking are TS (three.js), not a Go phase.</div>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:h2">☐</button>The five phases in detail.</h2>
+
+    <div class="cards" style="flex-direction:column;">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card1">☐</button>Phase 1 · Clock into Go (the unblock)</h3>
+        <ul>
+          <li><strong>Scope:</strong> active net <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">in08</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i1</span> and the <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span> edge; inactive nodes/edges stay in <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">topology.inactive.json</span>.</li>
+          <li><strong>Goal:</strong> clock first — Go's clock drives delivery on <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">i0→i1</span>; no TS round-trip required.</li>
+          <li><strong>Go:</strong> monotonic clock + paused accumulator (injectable: real + fake for tests); stamp start on Send; inFlightTime = arcLength / pulseSpeed. Wire sleeps ~16ms; deliver when elapsed ≥ inFlightTime — no TS message. Pause freezes clock; deleteEdge cancels via Reset() (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">paced_wire.go</span>).</li>
+          <li><strong>TS:</strong> none yet — keeps animating on its own (temporary cosmetic dual); delivery no longer depends on it.</li>
+          <li><strong>Exit:</strong> headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> runs the active net (in08 / i0 / i1) to completion with no editor attached (today it deadlocks after the first hop).</li>
+          <li><strong>Docs:</strong> draft the MODEL.md Driver + Cross-boundary changes.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card2">☐</button>Phase 2 · Position stream</h3>
+        <ul>
+          <li><strong>Go:</strong> each wake computes position = eval(controlPoints, elapsed / inFlightTime) and emits a position message (new trace kind); deliver at t ≥ 1.</li>
+          <li><strong>TS:</strong> pump.ts sets the bead sprite to the received position. DELETE: PulseBead's per-frame getPointAt + t computation (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">scene-content.tsx</span>), rfArcLength (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">geometry-helpers.ts</span>), and moveNode's arc-length + simLatencyMs re-derive (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>). TS plots only.</li>
+          <li><strong>TS:</strong> zustand store (<span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">store.ts</span>) becomes a no-op holder; Go's position stream feeds the imperative path (pulse-state.ts, edge-curve map) directly.</li>
+          <li><strong>Exit:</strong> beads animate from Go's stream; TS computes no positions; tsc + build green; golden position-sequence parity. Run trace-kind parity guard (TRACE_EVENT_KINDS ↔ pump switch).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card3">☐</button>Phase 3 · Geometry data into Go</h3>
+        <ul>
+          <li><strong>Go:</strong> hold node positions, port positions, and edge data (endpoints + curve control points) as authoritative state; compute curves in Go.</li>
+          <li><strong>TS:</strong> send geometry edits to Go (node-move, edge create/delete — extend existing moveNode/deleteEdge IPC to full geometry CRUD); render from Go's stream, computing none locally.</li>
+          <li><strong>TS:</strong> zustand store is a no-op holder, Go sole writer; remove moveNode arc-length re-derive, curve management, and fade fixpoint from it, not relocate.</li>
+          <li><strong>Exit:</strong> dragging a node updates Go's data, Go re-streams geometry + positions, TS renders without local geometry math.</li>
+          <li><strong>Note:</strong> edge RECONNECT is a network redesign — scope separately; target-end = delete+create, source-end needs a new rewire IPC verb.</li>
+          <li><strong>Delete edge with a pulse in flight:</strong> Go atomically cancels clock-delivery, drops the bead (Reset), emits <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">pulse-cancelled</span> so TS removes the bead. The existing <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> handler (<span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">stdin_reader.go</span>) must be rewritten — Reset alone is no longer sufficient.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card4">☐</button>Phase 4 · Shading data into Go</h3>
+        <ul>
+          <li><strong>Go:</strong> hold material/color/fill/stroke (partly in NODE_DEFS already), glass/material parameters, and environment/lighting parameters as data.</li>
+          <li><strong>TS:</strong> receive shading parameters, apply to GPU materials; bake environment map on the GPU from Go-supplied parameters.</li>
+          <li><strong>Exit:</strong> appearance driven entirely by Go data; TS only executes GPU material setup.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="phases:card5">☐</button>Phase 5 · Bridge → CRUD + docs</h3>
+        <ul>
+          <li>Reshape bridge into plain CRUD: data stream out (geometry + shading + position); edits in (create/update/delete geometry + animation updates); pause/resume as a control signal.</li>
+          <li>Delete <code>notifyDelivered</code> and its Go stdin handler entirely.</li>
+          <li>Run message-kind parity (Go stdin_reader ↔ TS WEBVIEW_TO_HOST_TYPES), no-TS-timers, and slot-phase-boundary guards.</li>
+          <li>Finalize MODEL.md (Driver, Cross-boundary, Geometry/time, Editor-surface) and CLAUDE.md (pump description, bridge surface, drift rule) in this commit.</li>
+          <li>No await / no Promises on the TS→Go path — fire-and-forget; never block on Go; no request/response.</li>
+          <li>Fold <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> into the generic CRUD edit path — one CRUD shape, not per-operation verbs; clock-cancel + pulse-cancelled echo from Phase 3 ride along.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 11: Verify -->
+  <div class="panel" id="panel-verify" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:h2">☐</button>Verification and risks.</h2>
+
+    <div class="subheading"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:sub1">☐</button>How to test</div>
+    <p>Two surfaces: the live editor (every phase), and — new from Phase 1 — headless in-process <code style="font-family:var(--mono);font-size:11px;">go test</code> driven by a fake clock (deterministic). Signal: the headless cascade completes (today deadlocks at hop 1); the live editor shows pulses from Go's stream.</p>
+
+    <div class="cards" style="flex-direction:column;margin-bottom:1.5rem;">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card1">☐</button>Can it be tested in the editor?</h3>
+        <ul>
+          <li>Yes — at every phase. Load topology.json (click it → custom editor opens), Run, and watch pulses animate. The editor stays the integration test surface throughout.</li>
+          <li>From Phase 1: headless <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test</span> / <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go run .</span> runs the cascade with no TS. Today it deadlocks after the first hop — "headless completes" is the proof Phase 1 worked.</li>
+          <li>Inspection tool both ways: the .probe breadcrumb logs (go.jsonl / ts.jsonl). Clear them, Run, read them to see Go deliveries firing on Go's clock and TS applying the stream.</li>
+        </ul>
+      </div>
+
+      <div>
+        <table class="spec-table" style="margin-top:0.5rem;">
+          <caption><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card2">☐</button>What shows it worked</caption>
+          <thead>
+            <tr>
+              <th>Phase</th>
+              <th>Success signal</th>
+              <th>How to verify</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1 · Clock</td>
+              <td>Headless <code>go test</code> / <code>go run .</code> completes full cascade with no editor (previously deadlocks)</td>
+              <td><code style="font-family:var(--mono);font-size:11px;">go test</code> (fake clock): the cascade completes headless (red today) and each delivery fires at exactly elapsed = <code style="font-family:var(--mono);font-size:11px;">inFlightTime</code>. Detach the renderer — Go keeps delivering.</td>
+            </tr>
+            <tr>
+              <td>2 · Position stream</td>
+              <td>Beads animate from Go's emitted positions; the stream matches a captured golden sequence; TS computes no positions</td>
+              <td><code style="font-family:var(--mono);font-size:11px;">go test</code> (fake clock): positions == eval(controlPoints, t), t monotonic, arrival at t=1, exact ~16ms cadence; assert against the golden sequence. Grep guard: <code style="font-family:var(--mono);font-size:11px;">PulseBead</code>/<code style="font-family:var(--mono);font-size:11px;">rfArcLength</code>/<code style="font-family:var(--mono);font-size:11px;">moveNode</code> math gone.</td>
+            </tr>
+            <tr>
+              <td>3 · Geometry</td>
+              <td>Drag a node — wire re-curves and in-flight bead re-derives remaining travel from Go's data</td>
+              <td><code style="font-family:var(--mono);font-size:11px;">go test</code>: a node-move edit in → recomputed control points/arc-length out; in-flight bead re-derives. Grep guard: TS geometry math removed. (Live-drag feel = manual smoke.)</td>
+            </tr>
+            <tr>
+              <td>4 · Shading</td>
+              <td>Appearance unchanged at parity; changing a shading parameter in Go's data is reflected on screen</td>
+              <td>Deterministic: grep — TS materials read Go-supplied params, not constants; <code style="font-family:var(--mono);font-size:11px;">go test</code> — shading params emitted. Pixel fidelity ('looks unchanged') stays a manual smoke-check — not deterministic.</td>
+            </tr>
+            <tr>
+              <td>5 · Bridge / CRUD</td>
+              <td><code>notifyDelivered</code> is gone; all parity/guard scripts pass; save/load through VS Code works end to end</td>
+              <td>grep confirms nothing sends <code>notifyDelivered</code>; run check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card3">☐</button>Reference / regression</h3>
+        <ul>
+          <li>Capture a visual reference run before Phase 2 (a short recording or screenshots of a cascade) and compare after each phase for parity — motion should look identical; only the source of the motion changed.</li>
+          <li>Add the headless cascade Go test as a permanent regression: it locks in that the Go network runs without the editor and never silently re-couples to it.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-bottom:1.5rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:note1">☐</button>The litmus test for the whole effort: pull the editor away and Go still runs the network; reattach the editor and it draws exactly what Go is doing. If both hold, the clock and data truly moved to Go.</div>
+
+    <div class="cards" style="flex-direction:column;">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card4">☐</button>Green gate every phase</h3>
+        <ul>
+          <li><span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go build ./...</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">go test ./...</span></li>
+          <li>Webview <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npx tsc --noEmit</span> and <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">npm run build</span></li>
+          <li>Guard scripts — check-trace-kind-parity, check-message-kind-parity, check-no-ts-timers, check-slot-phase-boundary</li>
+          <li>New deterministic guards to add: <code style="font-family:var(--mono);font-size:11px;">check-ts-computes-no-geometry</code> (Phases 2–3 — no position/curve/arc-length math in TS); and extend <code style="font-family:var(--mono);font-size:11px;">check-no-ts-timers</code> to also reject <code style="font-family:var(--mono);font-size:11px;">await</code> on the TS→Go send (Phase 5).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card5">☐</button>New milestones</h3>
+        <ul>
+          <li><strong>Phase 1</strong> — headless cascade run works (a Go test runs the network with no TS; previously impossible).</li>
+          <li><strong>Pause/resume</strong> — verify the paused accumulator preserves each bead's progress across resume (a bead 40% across stays 40%, no teleport).</li>
+          <li><strong>Delete-edge-mid-flight test, both states:</strong> send deleteEdge while PLAYING and while PAUSED. Assert: bead never arrives, edge + bead are gone, no stray delivery. Proves pause keeps inbound live and delete beats clock-delivery atomically.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="verify:card6">☐</button>Risks to watch</h3>
+        <ul>
+          <li><strong>Bandwidth / busy stdout pipe:</strong> N beads × ~60/s over stdout — if the pipe fills, Go stalls and TS re-paces Go. Escape: emit-on-change deduplication (not a separate tick).</li>
+          <li><strong>Two arc-length implementations</strong> must agree until Phase 2 deletes the TS copy — until then a drift risk.</li>
+          <li><strong>Bead speed vs report rate:</strong> confirm the sleep never affects speed — speed stays pulseSpeed, arrival stays inFlightTime, the sleep only changes how many waypoints are shown.</li>
+          <li>Run an industry bug-class scan on the Phase 1–2 timing change before declaring it ready.</li>
+          <li><strong>Zustand store (no-op holder):</strong> once store.ts is stripped of authority, grep its consumers — structural rendering must read from Go's data, not a local model.</li>
+          <li><strong>Guard the TS→Go path against await/Promises:</strong> no <span style="font-family:var(--mono);font-size:12px;color:var(--ts-hue)">await</span> on a send-to-Go, no request/response. Consider extending the existing no-TS-timers guard to also reject awaiting the bridge. A blocking TS→Go call reintroduces event-loop coordination — the exact thing this avoids.</li>
+          <li><strong>deleteEdge rewrite:</strong> confirm the new path cancels clock-delivery atomically and emits the pulse-cancelled echo; grep old <span style="font-family:var(--mono);font-size:12px;color:var(--go-hue)">deleteEdge</span> call sites so nothing still relies on the Reset-only behavior. Removing the bespoke verb must not orphan any sender still using it.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1rem;">This plan stays a proposal until Phase 1 lands; MODEL.md remains current for existing code until then.</div>
+  </div>
+
+  <!-- TAB: Tracking -->
+  <div class="panel" id="panel-issues" role="tabpanel">
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:h2">☐</button>This is a model amendment — update MODEL.md and CLAUDE.md when implementing.</h2>
+    <p>This spec deletes NotifyDelivered as the delivery trigger, moves the clock and all position computation into Go, and makes each wire its own goroutine. Update MODEL.md and CLAUDE.md in the same commit as the code.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card1">☐</button>MODEL.md</h3>
+        <ul>
+          <li>Driver / Firing rule: delivery is no longer triggered by TS animation completion. Go's clock elapses inFlightTime and the PacedWire puts the bead on the destination channel.</li>
+          <li>Cross-boundary contract: NotifyDelivered is removed as the delivery trigger and is no longer "the only cross-boundary signal." The bridge becomes: position/geometry/shading data out; editor geometry + animation updates in (plus pause/resume).</li>
+          <li>Geometry and time: Go computes each bead position from its clock and path geometry; node and wire loops sleep (~16ms) to set the report rate; bead speed stays pulseSpeed (uniform), arrival stays at inFlightTime.</li>
+          <li>Editor surface realization: pump.ts no longer sends notifyDelivered; TS plots the position stream Go emits. The Go runtime no longer waits on a TS message to deliver.</li>
+          <li>Slot phase lifecycle / PacedWire: passive lock+cond monitor removed; PacedWire is a goroutine (poll inbound → traverse on clock + emit → put on outbound). No clear/busy state, no send policy; Blocking Send, WaitConsumed, cond var, unpark helper deleted.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:card2">☐</button>CLAUDE.md</h3>
+        <ul>
+          <li>Go model pointer / pump description: pump.ts is now a position-stream plotter, not the driver of delivery timing.</li>
+          <li>Bridge surface note: the Go to TS channel carries a per-bead position stream; TS to Go carries geometry edits and pause/resume.</li>
+          <li>Drift rule check: timing/pacing logic stays in Go; TS must not compute positions or interpolate.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Go-authoritative delivery is the current model. Each <code style="font-family:var(--mono)">PacedWire</code> times its own delivery on the one clock; no central scheduler or TS delivery signal exists. The per-goroutine node-move model (<code style="font-family:var(--mono)">MoveDispatch</code>) and per-goroutine fade are also fully shipped. This spec and MODEL.md are consistent.</div>
+
+    <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:h2">☐</button>Inconsistencies to resolve.</h2>
+    <p>A cross-tab audit. No open items remain; everything is resolved and recorded in git history and handoff.md.</p>
+<div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:note8">☐</button><strong>Consistent across all tabs</strong> &mdash; clock, position, pacing, and ownership are settled, no cross-tab conflicts. The Clock <strong>&ldquo;Before&rdquo;</strong> diagram intentionally keeps the old slot model, for contrast.</div>
+  </div>
+
+  <!-- TAB: What's left -->
+  <div class="panel" id="panel-todo" role="tabpanel">
+    <h2>What's left to do.</h2>
+    <p>Items 1–4 are done. Node/port-position geometry is Go-authoritative (items 1–2 shipped); edge-curve geometry and node-move/fade are fully per-goroutine (items 3–4 done). Item 5 is cosmetic and open. Item 6 (merge) is gated on explicit sign-off only.</p>
+    <table style="table-layout:fixed;width:100%;border-collapse:collapse;margin-top:1rem;">
+      <colgroup>
+        <col style="width:3%">
+        <col style="width:28%">
+        <col style="width:47%">
+        <col style="width:22%">
+      </colgroup>
+      <thead>
+        <tr>
+          <th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap">#</th>
+          <th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap">Item</th>
+          <th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">Detail</th>
+          <th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">1</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Per-goroutine node/port world-position emission</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. <code style="font-family:var(--mono);color:var(--go-hue)">KindNodeGeometry</code> / <code style="font-family:var(--mono)">"node-geometry"</code> exists in <code style="font-family:var(--mono)">Trace/Trace.go</code>. <code style="font-family:var(--mono)">emitNodeGeometry</code> in <code style="font-family:var(--mono)">nodes/Wiring/builders.go</code> streams each node's center + per-port world positions/dirs as a trace event. On node-move, <code style="font-family:var(--mono)">nodeMover</code> and <code style="font-family:var(--mono)">edgeMover</code> goroutines in <code style="font-family:var(--mono)">node_move.go</code> re-emit node-geometry and edge geometry per-goroutine. <code style="font-family:var(--mono)">pump.ts</code> handles <code style="font-family:var(--mono)">case "node-geometry"</code> → <code style="font-family:var(--mono)">useNodeGeometryStore</code>.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
+        </tr>
+        <tr style="background:rgba(255,255,255,0.03)">
+          <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">2</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Repoint the 4 TS geometry helpers</strong> in <code style="font-family:var(--mono)">geometry-helpers.ts</code></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. All four helpers read Go's store via <code style="font-family:var(--mono)">getNodeGeometry</code> and fall back to local compute only pre-emit (startup race before Go's first emission). <code style="font-family:var(--mono);color:var(--go-hue)">nodeWorldPos</code>: reads <code style="font-family:var(--mono)">g.center</code>; falls back to <code style="font-family:var(--mono)">nodeWorldPosLocal</code>. <code style="font-family:var(--mono);color:var(--go-hue)">portDir</code>: reads <code style="font-family:var(--mono)">g.ports</code> by name+isInput; falls back to <code style="font-family:var(--mono)">portDirLocal</code>. <code style="font-family:var(--mono);color:var(--go-hue)">nodeTopWorldPos</code>: delegates to <code style="font-family:var(--mono)">nodeWorldPos</code> (inherits store read). <code style="font-family:var(--mono);color:var(--go-hue)">boundingBox</code>: delegates to <code style="font-family:var(--mono)">nodeWorldPos</code> per node (inherits store read). No helper computes geometry independently when the store entry is present.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">3</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Move central edge-curve emitter into per-goroutine emission</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. Each <code style="font-family:var(--mono)">edgeMover</code> goroutine (<code style="font-family:var(--mono)">node_move.go</code>) emits its own edge geometry (<code style="font-family:var(--mono)">tr.Geometry</code>) on every node-move that touches either endpoint. The loader no longer has a central curve-emit loop.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
+        </tr>
+        <tr style="background:rgba(255,255,255,0.03)">
+          <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">4</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Route node-move to the owning node/edge goroutine</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. <code style="font-family:var(--mono)">applyNodeMove</code> and <code style="font-family:var(--mono)">NodeMoveRegistry</code> are gone. The loader builds a <code style="font-family:var(--mono)">MoveDispatch</code> — a pure key&rarr;inbox-channel registry keyed by BOTH node ids AND edge ids. The stdin reader mail-sorts each <code style="font-family:var(--mono)">(key,value)</code> entry from a node-move message onto <code style="font-family:var(--mono)">channels[key]</code>; no recompute lives in the reader. Each <code style="font-family:var(--mono)">nodeMover</code> goroutine owns one node's geometry and re-emits its own node-geometry on a move. Each <code style="font-family:var(--mono)">edgeMover</code> goroutine owns one edge: on a move of either endpoint it recomputes its own segment/arc, writes them onto the source <code style="font-family:var(--mono)">Out</code>, revises any in-flight bead via <code style="font-family:var(--mono)">ReviseInFlightGeometry</code>, emits its own edge geometry, and updates the dest port's <code style="font-family:var(--mono)">MaxIncomingSimLatencyMs</code> aggregate. Fade also routes through <code style="font-family:var(--mono)">MoveDispatch</code>: each <code style="font-family:var(--mono)">edgeMover</code> calls <code style="font-family:var(--mono)">SetFaded</code> on its own <code style="font-family:var(--mono)">PacedWire</code> — no central fan-out.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
+        </tr>
+        <tr>
+          <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">5</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>requiredInputs cosmetic</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere"><code style="font-family:var(--mono)">gen-node-defs</code> auto-lists <code style="font-family:var(--mono)">FeedbackIn</code> in <code style="font-family:var(--mono)">requiredInputs</code>/<code style="font-family:var(--mono)">REQUIRED_INPUTS</code> (dead metadata, no consumer); fix with an optional-port SPEC annotation.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">Open, cosmetic</td>
+        </tr>
+        <tr style="background:rgba(255,255,255,0.03)">
+          <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">6</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Merge to main</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Run <code style="font-family:var(--mono)">tools/strip-branch-local-docs.sh task/go-backend-ts-frontend</code> — NO exceptions; this redesign doc is branch-local scratch and gets stripped. Needs explicit sign-off.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">Blocked on sign-off only</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TAB: Inconsistencies -->
+  <div class="panel" id="panel-inconsistencies" role="tabpanel">
+    <h2>Where the spec text and the shipped Go/TS code disagree.</h2>
+    <table class="spec-table">
+      <thead>
+        <tr>
+          <th>Where</th>
+          <th>Spec says</th>
+          <th>Code does</th>
+          <th>Source file</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Input loop · goroutines</td>
+          <td>Reads the i0→in08 feedback first, then sends Init[i] (read → send).</td>
+          <td>Sends Init[i] first, then reads feedback (send → read). The first emit seeds the ring; read-before-send deadlocks at t=0.</td>
+          <td>nodes/input/node.go</td>
+        </tr>
+        <tr>
+          <td>i0 loop · goroutines</td>
+          <td>Per-round poll — "read v if a pulse arrived this round; no pulse this round → send 0".</td>
+          <td>Blocking recv — paced TryRecv parks until in08 delivers (the select has no default branch); there is no "no pulse this round" case, and send-0 fires only when v equals the held value.</td>
+          <td>nodes/chaininhibitor/node.go</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var btns = document.querySelectorAll('.tab-btn');
+    var panels = document.querySelectorAll('.panel');
+
+    btns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = btn.getAttribute('data-panel');
+
+        btns.forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        panels.forEach(function (p) { p.classList.remove('active'); });
+
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        document.getElementById('panel-' + target).classList.add('active');
+      });
+    });
+  })();
+
+  function chkKey(btn){if(btn.dataset.chk)return btn.dataset.chk; const p=btn.closest('.panel'); const pid=p?p.id:'nopanel'; const r=btn.closest('tr'); const n=r&&r.querySelector('.enum')?r.querySelector('.enum').textContent.trim():''; return pid+'#'+n;}
+  function saveChk(){const s={}; document.querySelectorAll('.chk-btn').forEach(b=>{if(b.classList.contains('checked'))s[chkKey(b)]=1;}); try{localStorage.setItem('chk-go-clock',JSON.stringify(s));}catch(e){}}
+  function restoreChk(){let s={}; try{s=JSON.parse(localStorage.getItem('chk-go-clock')||'{}');}catch(e){} document.querySelectorAll('.chk-btn').forEach(b=>{const on=!!s[chkKey(b)]; b.classList.toggle('checked',on); b.textContent=on?'☑':'☐'; b.setAttribute('aria-pressed',on?'true':'false');});}
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target;
+    if (!btn || !btn.classList || !btn.classList.contains('chk-btn')) return;
+    var checked = btn.classList.toggle('checked');
+    btn.textContent = checked ? '☑' : '☐';
+    btn.setAttribute('aria-pressed', checked ? 'true' : 'false');
+    saveChk();
+  });
+
+  window.addEventListener('DOMContentLoaded', restoreChk);
+</script>
+</body>
+</html>

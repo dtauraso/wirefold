@@ -1,60 +1,68 @@
+---
 # Handoff
 
 Live continuation prompt. Schema lives in
-[continuation-prompt-template.md](continuation-prompt-template.md);
-this file is the filled-in current state. A fresh AI session should
-read this file first (no chat history needed) and proceed.
+[continuation-prompt-template.md](continuation-prompt-template.md); this file is the
+filled-in current state. A fresh AI session should read this first (no chat history
+needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-01 — no task branch in flight; all merged to main)
+## State at handoff (2026-06-11 — branch `task/go-backend-ts-frontend-fixes` MERGED TO MAIN; no task in flight)
 
-- Active branch: none. `main` is current (commit 03a75e5b). Latest session: removed the dead `slot` trace event end-to-end (KindSlot/Slot()/SlotEvent + marshal case + contract tests/fixtures + a stray runCommand.ts guard), merged from `task/remove-slot-trace-event` (4195742a), merge commit 03a75e5b.
-- Build/test gate GREEN on `main`: `go build ./...`, `go test ./...`, webview `npx tsc --noEmit` + `npm run build`, `tools/check-generated.sh` (no diff), and `scripts/check-dead-doc-tokens.sh` all pass.
-- Uncommitted: `topology.json` remains modified (editor scratch), deliberately untouched all session.
+This branch's work is **complete and merged**. The next session starts fresh on `main` with no in-flight task.
 
-### What is on main (recent work, newest first)
+### What this branch delivered (all committed, merged)
 
-1. **Dead slot trace event removed.** `KindSlot` removed from `Trace/Trace.go` (`TraceEventKinds`, `Slot()` emitter, marshal case). `SlotEvent` union member + `pump.ts` `case "slot": return;` no-op removed from TS. Marshal contract test entries and `test/fixtures/trace-events.jsonl` slot fixture removed. Stray `runCommand.ts` slot guard removed. Merged from `task/remove-slot-trace-event` (4195742a), merge commit 03a75e5b. **NOTE: this CORRECTS the prior handoff's stale claim that `slot` was a "LIVE Go trace kind that still flows"** — verification showed `Trace.Slot()` was never called anywhere (dead emitter, no-op consumer). The runtime slot/backpressure concept in `paced_wire.go` is entirely separate and was untouched.
-2. **DEFAULT_EDGE_KIND constant.** `flow-to-spec.ts:74` unguarded `"signal"` edge-kind literal is now `DEFAULT_EDGE_KIND` in `src/schema/types.ts` (typed as `EdgeKind`, validated against the `EDGE_KINDS` union at compile time); imported into `flow-to-spec.ts`. Merged from `task/default-edge-kind-const` (e46ebd17), merge commit b40fff69.
-3. **Level-4 audit site.** `docs/level4-audit/index.html` — self-contained offline HTML report (horizontal tabs, inline SVG diagrams, 3 findings each with evidence + a proposed-solution block, a "what's healthy" page, leverage-ranked recs). Leverage axis = AI re-derivation cost.
-4. **F1 — stale docs re-anchored.** CLAUDE.md + MODEL.md described the RETIRED React Flow architecture as current. Re-anchored to the live `three/` reality: node rendering is generic via `GraphNode` in `scene-content.tsx` (reads `node.data.fill`/`stroke` from `NODE_DEFS`); there are NO per-kind `<Kind>Node.tsx` files and no `rf/` dir; `NODE_DEFS` in `src/schema/node-defs.ts` is the single registry (no `registry.ts`); pump is at `webview/three/pump.ts`. Added `scripts/check-dead-doc-tokens.sh` (tokens: `rf/nodes`, `GenericNode`, `PUMP_SLOT_HANDLER`, `webview/schema/`, `webview/rf/`) wired into `scripts/stop-checks.sh` so these docs cannot silently rot again.
-5. **F2 — silent-failure duplication closed.** Extracted `NODE_DIM_FALLBACK = {width:110,height:60}` to `src/schema/node-dims.ts` (neutral layer; `src/webview/state/node-dims.ts` is now a re-export shim) and replaced all 110/60 literal fallbacks across spec-to-flow, geometry-helpers, interaction-controls, node-types. `node-override-text.ts` handled kind names ("Input","ChainInhibitor") are now a compile-checked subset of `NODE_DEFS` keys (renaming a kind breaks tsc instead of silently returning ""). Trace-kind exhaustiveness was already enforced via assertNever in pump.ts.
-6. **F3 — SendRule made structural.** Added `ParseSendRule(string) (SendRule, error)` in `nodes/Wiring/ports.go` and a parse-time rejection in `nodes/Wiring/validate.go` (Check 4): an invalid `data.sendRules` value is now REJECTED at load instead of silently degrading to consumeGated. loader.go uses ParseSendRule too. Tests in ports_test.go.
-7. **Dead slot badge removed.** Deleted unused `SlotEntry`/`SlotMap` types from `messages.ts` (the old badge-render state, consumed by nothing). This was the precursor cleanup; the full slot trace removal landed in item 1 above.
+- **Post-decentralization cleanup (`a18fa000`).** Removed `dbg.flushmove` + `edit-update-forward` breadcrumbs, the thin `applyNodeMove` test shim, and the unused `reg` param in `applyEdit` (`stdin_reader.go`).
+- **Fade trace event: added then REMOVED.** `5cf8c14a` added `Trace.Fade` (emitted in `node_move.go` edgeMover fade branch, TS pump + `trace-kinds.ts` + `messages.ts` updated in parity). `169404ce` reverted it — used only to confirm behavior was clean, then removed as unneeded bridge surface. Net: **no fade trace in the bridge**. `PacedWire.SetFaded` gating `Send` is unchanged. The `arrive` test-fixture fix that rode in with that commit is kept.
+- **Doc-drift audit (`baa59460`, `0f5a6d10`, `cd1532b5`).** Corrected per-node SPEC.md port tables + firing rules; fixed two false "geometry-only at this phase" claims; regenerated `node-defs.ts`; deleted the rejected item-chain HTML page; corrected `go-authoritative-clock/index.html` to the MoveDispatch model and marked items 1–2 DONE.
+- **Branch-local docs stripped (`65c870a6`).** `chain-model-two-nodes.md` + `ownership-audit.html` removed via `tools/strip-branch-local-docs.sh`.
 
-### Process note (worth keeping)
+### Investigation note
 
-The re-audit (re-running the SAME audit after the fix) caught that the F1 fix was itself incomplete: `MODEL.md:5` still said `webview/rf/pump.ts`, and the first version of the dead-token guard only checked `rf/nodes`, so it would NOT have caught it. Adding `webview/rf/` to the guard + re-auditing closed it. Lesson: re-run the audit post-fix; a guard must cover the token that actually appeared, not a near-miss.
+A reported node render anomaly around fade was traced via logs — Go's stream is clean (continuous drag path, fades independent of drag frames, no anomaly in position/geometry data). Any residual is TS render-layer (node mesh store / raycast / camera). User believes it may already be fixed; left unconfirmed, low priority. If it resurfaces, fix is in TS, not Go.
 
-### OPEN ITEMS / NEXT
+### The settled architecture (complete — no open items)
 
-1. **No task in flight.** Friction-driven from here.
-2. **`task/partial-feature-audit` starting.** New audit branch to inventory other partially-done features across the codebase — findings-only pass, no fixes on that branch.
-3. **`session-log.md`** still has dead React-Flow line references (app.tsx, AnimatedEdge.tsx) — left intentionally; it's a dated historical snapshot, rewriting it would falsify the record.
+- **Go** owns the running model: one clock, pacing/timing, bead transport+delivery, bead **progress (fraction t)**, node-local held state, firing rules, node positions (held, re-emitted on move), per-edge geometry, shading. Self-scheduling per-goroutine nodes + wires; **no central coordinator** — node-move AND fade both via key→channel dispatch through `MoveDispatch`. Zero central fan-out.
+- **TS** is render-only (viewpoint): camera, projection, raycast picking, GPU render; places the bead at Go's fraction along Go's segment. Sends fire-and-forget `edit` (create/update/delete/fade) + play/pause. Owns interaction, NOT position data. Geometry helpers are store-readers with startup-only local fallback.
+- **Bridge:** Go→TS trace stream (9 active kinds, no fade trace); TS→Go fire-and-forget. The MoveDispatch reader is a pure mail-sorter.
+- **MODEL.md + CLAUDE.md confirmed drift-free this session.**
 
-### Substrate model contract (stable)
+### Active experimental network — 3 edges
 
-See [MODEL.md](../../../MODEL.md#slot-phase-lifecycle). One `PacedWire` per destination input port (slot + backpressure). Send rules are node-owned (`consumeGated` / `fireAndForget`). Travel-time is per-edge (on `Out`); the wire holds `MaxIncomingSimLatencyMs` for `W`. `pump.ts` stays render-only. Note (re-derived this session): a wire's identity IS its destination port and its slot state lives in the destination node — so edge "reconnect" is not a small feature but a substrate redesign (target-end move = delete+create; source-end move would need a net-new `rewireSource` IPC verb and reworked load-time `SimLatencyMs`). Rejected as not worth the risk to the pulse animation.
+`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate. File is skip-worktree.
 
-## Dev-loop
+### NEXT
 
-After TS edit: `npm run build` from `tools/topology-vscode/`.
-After Go change: `go build ./...` from repo root, `go test ./nodes/...`. After any change to shared `CurveParam*` constants or SPEC.md `## View`, regenerate and run `tools/check-generated.sh`.
-To repro / inspect: clear `.probe/*.jsonl`, reload window in VS Code, Run once, inspect `go.jsonl` / `ts.jsonl` breadcrumbs.
-Note: the ring has no headless run — `go run .` builds but deadlocks after the first hop. Delivery is paced by the visual layer (webview pulse-completion → stdin reader → NotifyDelivered); use the live editor to exercise it.
-**TS removal/refactor verification:** when removing or refactoring webview TS, run `npx tsc --noEmit` (from `tools/topology-vscode/`) in addition to `npm run build`. esbuild bundles without type-checking, so dangling refs to deleted symbols pass the build and crash at runtime. Captured in memory `feedback_tsc_verify_after_removal`.
+**No in-flight task.** Start fresh on `main` from user-reported friction (log to `docs/planning/visual-editor/session-log.md`, open a fresh `task/<short-kebab>`).
 
-Check: `go test ./...`. All guard scripts run via the Stop hook (`scripts/stop-checks.sh`). Bash approval guard runs via PreToolUse.
+If the node render-layer anomaly resurfaces: fix is TS-side (node mesh store / raycast / camera), not Go.
+
+### Carry-forward facts
+
+- **Per-goroutine model complete; zero central fan-out.** node-move + fade both go through `MoveDispatch` (key→channel). create/delete are single-target (one wire). play/pause is the intentional global gate (one clock). loader/clock/trace-sink/dispatch-router are shared facts/conduits, not coordinators.
+- **Go holds node position**, re-emits node-geometry on move; render is Go-authoritative (node body, wire, bead all from Go's stream). The editor owns interaction/viewpoint, not position data.
+- **Pulse placement** = `lerp(edge-geometry segment, Go's fraction)` — same store the tube reads, so the bead can't leave the wire.
+- **No fade trace in bridge.** Fade behavior is `PacedWire.SetFaded` gating `Send`; no trace event emitted.
+- **Parser-parity is a recurring trap:** when changing a TS→Go message shape, update `parseEdit` in `messages.ts` AND the Go stdin-reader struct in the same change, or the message is silently dropped (no error). See `feedback_schema_parser_parity`.
+- **Two-process editor:** changing extension-host code (`messages.ts`/`handle-message.ts`/`extension.ts`) needs **Developer: Reload Window**; webview-only changes refresh on reopen. See `feedback_two_process_editor_reload`.
+- **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; straightness is non-local → O(N²) follow latency.
+- **Probe logs** (`.probe/*.jsonl`) accumulate across sessions; clear them (`: > file`) for a clean diagnostic read.
+
+### Dev-loop
+
+- Go: `go build ./...` + `go test -race ./...`. TS (from `tools/topology-vscode/`): `npm run build` (rebuilds extension.js + webview.js) + `npx tsc --noEmit` + `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
+- Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file for webview-only.
+- topology.json is skip-worktree (in08/i0/i1, 3 edges). No merge to main without explicit sign-off. Delete merged branches without re-asking.
 
 ## ALWAYS clause
 
-At end of session, overwrite this file with a freshly-rendered prompt
-tailored to the state you're leaving the branch in, and commit on the
-active branch (main if no task is in flight). Do not rely on chat
-history; the next AI may be a fresh model with no transcript. The
-rendered handoff must itself contain this same ALWAYS clause so the
-loop is self-perpetuating across sessions. Use
-[continuation-prompt-template.md](continuation-prompt-template.md) as
-the structural source of truth; update the template when an invariant
-changes.
+At end of session, overwrite this file with a freshly-rendered prompt tailored to the
+state you're leaving the branch in, and commit on the active branch (main if no task is
+in flight). Do not rely on chat history; the next AI may be a fresh model with no
+transcript. The rendered handoff must itself contain this same ALWAYS clause so the loop
+is self-perpetuating across sessions. Use
+[continuation-prompt-template.md](continuation-prompt-template.md) as the structural
+source of truth; update the template when an invariant changes.

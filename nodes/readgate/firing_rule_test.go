@@ -95,13 +95,29 @@ func newInputWire(arcLength float64, tr *T.Trace, target, handle string) *Wiring
 	return pw
 }
 
+// send places a value on a paced In wire and drives Go's clock past the bead's
+// in-flight time so the wire delivers it into the slot (clock-delivery contract;
+// replaces the old NotifyDelivered trigger). It uses a per-call FakeClock and a
+// fixed inFlightMs, advances past the deadline, then waits until the bead has
+// landed (InFlight cleared) so the helper is synchronous like the old one.
 func send(t *testing.T, pw *Wiring.PacedWire, v int) {
 	t.Helper()
 	ctx := context.Background()
-	if err := pw.Send(ctx, v); err != nil {
+	clk := Wiring.NewFakeClock()
+	pw.SetClock(clk)
+	const inFlightMs = 10
+	if err := pw.SendDeliverOnly(ctx, v, inFlightMs); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	pw.NotifyDelivered(ctx)
+	clk.Advance(inFlightMs * time.Millisecond)
+	// Wait for the clock-delivery goroutine to fill the slot.
+	deadline := time.Now().Add(time.Second)
+	for pw.InFlight() {
+		if time.Now().After(deadline) {
+			t.Fatal("clock delivery did not fill slot after Advance")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // TestWindowFire: both inputs delivered within W → node fires once, both consumed,

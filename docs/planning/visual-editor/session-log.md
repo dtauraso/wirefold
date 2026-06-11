@@ -174,7 +174,7 @@ Suggested cluster order: state→zustand (R1-R3) → panels→React
 ---
 
 
-## 2026-05-14 — Integration test suite (task/integrated-substrate-tests)
+## 2026-05-14 — Integration test suite (task/integrated-go-tests)
 
 Implemented the integration test plan from `diagrams/test-plan/`. Created harness
 utilities (`_fixtures.ts`, `_harness.ts`) and 5 new test files covering:
@@ -190,7 +190,7 @@ a subsequent left delivery fires anyway. Mutual exclusion requires inhibit
 upstream of CI's own firing decision. Documented in test comment; needs design
 decision.
 
-**Substrate finding:** relay fires only on input fill (fill→onRun). Sequential
+**Go finding:** relay fires only on input fill (fill→onRun). Sequential
 drain via relay requires timer advancement; E1 test uses direct input→readgate
 to observe canAccept-triggered sequential delivery.
 

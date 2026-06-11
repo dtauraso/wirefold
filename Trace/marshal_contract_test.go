@@ -45,6 +45,14 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 1, Kind: KindFire, Node: "A"},
 		{Step: 2, Kind: KindSend, Node: "A", Port: "out", Value: 1},
 		{Step: 3, Kind: KindDone, Node: "A", Port: "out"},
+		{Step: 4, Kind: KindPosition, Node: "A", Port: "out", Value: 1, X: 1.5, Y: 2.5, Z: 0, hasPos: true, F: 0.5},
+		{Step: 5, Kind: KindGeometry, Edge: "AtoB", SX: 0, SY: 0, SZ: 0, EX: 2, EY: 0, EZ: 0},
+		{Step: 6, Kind: KindPulseCancelled, Node: "A", Port: "out", Value: 1},
+		{Step: 7, Kind: KindNodeGeometry, Node: "A", NX: 1.5, NY: -2.5, NZ: 0, Ports: []PortGeom{
+			{Name: "in", IsInput: true, PX: 1.0, PY: -2.5, PZ: 0, DX: -1, DY: 0, DZ: 0},
+			{Name: "out", IsInput: false, PX: 2.0, PY: -2.5, PZ: 0, DX: 1, DY: 0, DZ: 0},
+		}},
+		{Step: 8, Kind: KindArrive, Node: "A", Port: "out", Value: 1},
 	}
 
 	fixture := fixtureLines(t)

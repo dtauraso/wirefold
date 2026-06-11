@@ -1,5 +1,5 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// GlobalLabelsToggle, HomeButton — no scene/substrate logic.
+// GlobalLabelsToggle, HomeButton — no scene/Go logic.
 
 import { useCallback } from "react";
 import * as THREE from "three";

@@ -62,11 +62,13 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
-	_, slotReg, _, nmr, err := LoadTopology(ctx, path, T.New(16))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, slotReg, _, nmr, err := LoadTopology(ctx, path, T.New(16), NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
+	nmr.Start(ctx)
 
 	nearOut := nmr.edgeOut["eNear"]
 	farOut := nmr.edgeOut["eFar"]
@@ -107,7 +109,7 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 	// 4. Node-move recomputes both the moved edge's Out and the port aggregate.
 	//    Move srcFar even farther; far Out latency rises and so does the aggregate.
 	beforeFar := farOut.SimLatencyMs
-	nmr.applyNodeMove("srcFar", 2000, 0, 0)
+	deliver(nmr, "srcFar", 2000, 0, 0)
 	if !(farOut.SimLatencyMs > beforeFar) {
 		t.Fatalf("node-move did not raise far Out latency: before=%v after=%v",
 			beforeFar, farOut.SimLatencyMs)

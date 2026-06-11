@@ -300,7 +300,7 @@
 
   <div class="evidence">
     <h3>Evidence</h3>
-    <p><strong>(a) CLAUDE.md — Substrate primitive landing rule</strong></p>
+    <p><strong>(a) CLAUDE.md — Node primitive landing rule</strong></p>
     <p>Instructs AI to create:</p>
     <pre>tools/topology-vscode/src/webview/rf/nodes/&lt;Kind&gt;Node.tsx</pre>
     <p>and register in:</p>
@@ -317,7 +317,7 @@
     <ul>
       <li>Re-anchor <code>CLAUDE.md</code> and <code>MODEL.md</code> to the current <code>three/</code> architecture in one pass:
         <ul>
-          <li>In CLAUDE.md "Substrate primitive landing rule", replace the React-Flow path <code>tools/topology-vscode/src/webview/rf/nodes/&lt;Kind&gt;Node.tsx</code> and <code>webview/schema/registry.ts</code> with the real render path under <code>tools/topology-vscode/src/webview/three/</code> and the real schema dir <code>tools/topology-vscode/src/schema/</code>.</li>
+          <li>In CLAUDE.md "Node primitive landing rule", replace the React-Flow path <code>tools/topology-vscode/src/webview/rf/nodes/&lt;Kind&gt;Node.tsx</code> and <code>webview/schema/registry.ts</code> with the real render path under <code>tools/topology-vscode/src/webview/three/</code> and the real schema dir <code>tools/topology-vscode/src/schema/</code>.</li>
           <li>In MODEL.md §slot-phase, delete the dead <code>PUMP_SLOT_HANDLER</code>, <code>slots[port]</code> writes, and <code>GenericNode.tsx:142</code> description; replace with how <code>pump.ts</code>'s <code>slot</code> case is a no-op <code>return</code> and where slot phase actually renders today.</li>
         </ul>
       </li>
@@ -451,7 +451,7 @@
     <p><code>loader.go:288</code> — raw string cast into SendRule with no validation.</p>
     <p><code>ports.go:171</code> — logic is <code>Rule != RuleFireAndForget</code>: anything unrecognized evaluates as <code>consumeGated</code>.</p>
     <p>Example: <code>"fireandforget"</code> (missing camel case) in <code>topology.json</code> → silently treated as <code>consumeGated</code>. The node runs but blocks on slot fill instead of firing independently. No log, no error, no panic.</p>
-    <p>This is the only place in the substrate model where a convention (the exact string <code>"fireAndForget"</code>) is not enforced by structure.</p>
+    <p>This is the only place in the Go model where a convention (the exact string <code>"fireAndForget"</code>) is not enforced by structure.</p>
   </div>
 
   <div class="proposed">
@@ -501,7 +501,7 @@
   </svg>
 
   <h2>Fix</h2>
-  <p>In <code>validate.go</code> (or as a dedicated parse step), validate SendRule strings against the allowlist <code>{consumeGated, fireAndForget}</code> and return an error for unrecognized values. This moves a runtime convention to a parse-time invariant — the correct shape for the substrate model.</p>
+  <p>In <code>validate.go</code> (or as a dedicated parse step), validate SendRule strings against the allowlist <code>{consumeGated, fireAndForget}</code> and return an error for unrecognized values. This moves a runtime convention to a parse-time invariant — the correct shape for the Go model.</p>
 
   <div class="leverage">
     <strong>Leverage: MED.</strong> Hits only when topology.json has SendRule values. But the failure is completely silent — a debugging session to diagnose wrong firing behavior can cost 5k–20k tokens. Drift likelihood: moderate (typos in JSON are common).
@@ -514,18 +514,18 @@
 <section id="healthy">
   <h1>What's Healthy</h1>
   <span class="badge GOOD">GOOD</span>
-  <p class="summary">The Go↔TS substrate boundary is genuinely self-enforcing. The code defends its own model. It is the context docs <em>about</em> the code that rotted — the inverse of the usual worry.</p>
+  <p class="summary">The Go↔TS boundary is genuinely self-enforcing. The code defends its own model. It is the context docs <em>about</em> the code that rotted — the inverse of the usual worry.</p>
 
   <h2>Verified Invariants</h2>
   <table>
     <tr><th>Invariant</th><th>Evidence</th></tr>
     <tr>
       <td>No slot-phase / backpressure / firing logic leaked into TS outside pump.ts</td>
-      <td>Grep across <code>webview/</code> confirms all such logic lives in Go substrate or pump.ts only</td>
+      <td>Grep across <code>webview/</code> confirms all such logic lives in Go or pump.ts only</td>
     </tr>
     <tr>
       <td>pump.ts is render-only</td>
-      <td>TS side only routes messages and renders pulses; no substrate decisions</td>
+      <td>TS side only routes messages and renders pulses; no Go decisions</td>
     </tr>
     <tr>
       <td>Send rules live on Out struct, survive edge deletion</td>
@@ -537,22 +537,22 @@
     </tr>
     <tr>
       <td>No banned coordinator vocabulary in code</td>
-      <td>No <code>orchestrate</code>, <code>schedule</code>, <code>dispatch</code>, <code>await-all</code> patterns in substrate code</td>
+      <td>No <code>orchestrate</code>, <code>schedule</code>, <code>dispatch</code>, <code>await-all</code> patterns in Go code</td>
     </tr>
   </table>
 
   <h2>Key Insight</h2>
   <p style="font-size:15px; padding: 14px; background: var(--good-bg); border: 1px solid var(--good); border-radius: 6px; color: var(--good);">
-    The <strong>code</strong> defends itself. It is the <strong>context documents about the code</strong> that rotted. This is the inverse of the usual worry — ordinarily, code drifts while docs stay correct. Here the substrate boundary held; CLAUDE.md and MODEL.md did not keep up with the RF→Three migration.
+    The <strong>code</strong> defends itself. It is the <strong>context documents about the code</strong> that rotted. This is the inverse of the usual worry — ordinarily, code drifts while docs stay correct. Here the Go boundary held; CLAUDE.md and MODEL.md did not keep up with the RF→Three migration.
   </p>
 
   <h2>Boundary Diagram</h2>
   <svg width="640" height="200" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg">
     <rect width="640" height="200" fill="#18181c" rx="8"/>
 
-    <!-- Go substrate -->
+    <!-- Go network -->
     <rect x="20" y="30" width="260" height="140" rx="6" fill="#0a2018" stroke="#3db87a" stroke-width="1.5"/>
-    <text x="150" y="55" fill="#3db87a" font-size="13" text-anchor="middle" font-weight="bold">Go Substrate</text>
+    <text x="150" y="55" fill="#3db87a" font-size="13" text-anchor="middle" font-weight="bold">Go Network</text>
     <text x="150" y="76" fill="#3db87a" font-size="11" text-anchor="middle">slot-phase · backpressure</text>
     <text x="150" y="92" fill="#3db87a" font-size="11" text-anchor="middle">firing rules · send rules</text>
     <text x="150" y="108" fill="#3db87a" font-size="11" text-anchor="middle">AND-gate · inhibitor chain</text>
@@ -564,7 +564,7 @@
     <text x="490" y="76" fill="#7c9ef8" font-size="11" text-anchor="middle">render only</text>
     <text x="490" y="92" fill="#7c9ef8" font-size="11" text-anchor="middle">pulse animation</text>
     <text x="490" y="108" fill="#7c9ef8" font-size="11" text-anchor="middle">message routing</text>
-    <text x="490" y="130" fill="#7c9ef8" font-size="10" text-anchor="middle" opacity="0.7">✓ no substrate logic leaked</text>
+    <text x="490" y="130" fill="#7c9ef8" font-size="10" text-anchor="middle" opacity="0.7">✓ no Go logic leaked</text>
 
     <!-- arrow -->
     <line x1="282" y1="100" x2="358" y2="100" stroke="#3db87a" stroke-width="1.5" marker-end="url(#arrf)"/>
@@ -618,7 +618,7 @@
       <td style="font-family:var(--mono);color:var(--muted);">4</td>
       <td>Add parse-time SendRule validation in <code>validate.go</code> against <code>{consumeGated, fireAndForget}</code>. Return an error for unrecognized strings.</td>
       <td><span class="badge MED" style="margin:0">MED</span></td>
-      <td>Typo flips send semantics silently. Only the substrate model convention not yet enforced by structure.</td>
+      <td>Typo flips send semantics silently. Only the Go model convention not yet enforced by structure.</td>
       <td>Small</td>
     </tr>
     <tr>

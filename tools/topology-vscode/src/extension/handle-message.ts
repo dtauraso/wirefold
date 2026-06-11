@@ -64,6 +64,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
   switch (msg.type) {
     case "ready":
       ctx.send();
+      // Spawn Go immediately so edges render from geometry events before the
+      // user presses Run. Go starts HALTED — the clock won't tick until play().
+      runner.run();
       return;
     case "save":
       try {
@@ -88,6 +91,11 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       catch (err) { post({ type: "save-error", message: toErrorMessage(err) }); }
       return;
     case "run":
+      // Primary path: Go is already spawned on open (case "ready") and the user is
+      // starting the clock for the first time, or resuming after a stop+restart.
+      // runner.run() is idempotent (no-op if already running), so it is safe to call
+      // unconditionally before play(). Pre-write the document text if the webview sent
+      // a diff (same as before so unsaved spec edits reach Go before the clock starts).
       try {
         if (msg.text !== undefined) {
           const viewText = extractViewText(document.getText());
@@ -103,6 +111,10 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         return;
       }
       runner.run();
+      runner.play();
+      return;
+    case "play":
+      runner.play();
       return;
     case "run-cancel":
       runner.cancel();
@@ -119,22 +131,23 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "webview-log":
       await appendWebviewLog(msg.entry, document.uri);
       return;
-    case "delivered":
-      runner.writeStdin(JSON.stringify({ type: "delivered", target: msg.target, targetHandle: msg.targetHandle }));
-      return;
-    case "fade":
-      runner.writeStdin(JSON.stringify({ type: "fade", edges: msg.edges }));
-      return;
-    case "deleteEdge":
-      await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "deleteEdge-forward", target: msg.target, targetHandle: msg.targetHandle }), document.uri);
-      runner.writeStdin(JSON.stringify({ type: "deleteEdge", target: msg.target, targetHandle: msg.targetHandle }));
-      return;
-    case "addEdge":
-      await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "addEdge-forward", target: msg.target, targetHandle: msg.targetHandle }), document.uri);
-      runner.writeStdin(JSON.stringify({ type: "addEdge", target: msg.target, targetHandle: msg.targetHandle }));
-      return;
-    case "node-move":
-      runner.writeStdin(JSON.stringify({ type: "node-move", nodeId: msg.nodeId, x: msg.x, y: msg.y, z: msg.z ?? 0 }));
+    case "edit":
+      // Single geometry-CRUD bridge: forward the edit to Go's stdin verbatim by op.
+      // Fire-and-forget — Go owns the clock; we never await Go (no request/response).
+      // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
+      // only); the writeStdin send itself is non-blocking. z defaults to 0.
+      if (msg.op === "create" || msg.op === "delete") {
+        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+        runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op, target: msg.target, targetHandle: msg.targetHandle }));
+      } else if (msg.op === "update") {
+        // Forward the node-move entries map verbatim (keyed by moved node id + each
+        // incident edge id); Go's stdin reader mail-sorts each entry to the owning
+        // node/edge goroutine. Fire-and-forget.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "update", entries: msg.entries }));
+      } else if (msg.op === "fade") {
+        // edges is Record<string, boolean>: edgeId → desired faded state. Forward verbatim.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "fade", edges: msg.edges }));
+      }
       return;
   }
 }

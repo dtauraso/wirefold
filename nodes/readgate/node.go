@@ -17,6 +17,7 @@ const pollInterval = 5 * time.Millisecond
 
 type Node struct {
 	Fire               func()
+	EmitGeometry       func()
 	Value              int
 	HasValue           bool
 	HasChainInhibitor  bool
@@ -52,6 +53,9 @@ func (g *Node) clear(t0Set *bool) {
 }
 
 func (g *Node) Update(ctx context.Context) {
+	if g.EmitGeometry != nil {
+		g.EmitGeometry()
+	}
 	var t0 time.Time
 	var t0Set bool
 

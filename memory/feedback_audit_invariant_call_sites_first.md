@@ -18,7 +18,7 @@ while in-flight` was thrown on `i0.out->i1.in`. Three successive agent
 investigations chased ReadGate's duty cycle, InputBody's queue, and a
 hypothetical stale-handle bug in `useImperativeHandle` — across many turns
 and several SVGs — before a 30-second grep of every `wire.load(` call site
-under `substrate-r/` surfaced two unguarded loads in ChainInhibitorBody.
+under the old `rf/` component tree surfaced two unguarded loads in ChainInhibitorBody.
 The bug was in a sibling primitive nobody had framed the investigation
 around. Each prior agent stayed inside the narrow frame it was given.
 

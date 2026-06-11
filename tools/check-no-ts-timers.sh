@@ -8,7 +8,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PUMP_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/rf/pump.ts"
+PUMP_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/three/pump.ts"
+
+# Fail loudly if the pump moved — a missing PUMP_FILE would make every scan below
+# trivially "clean", silently disabling the guard.
+if [[ ! -f "$PUMP_FILE" ]]; then
+  echo "no-ts-timers: pump.ts not found at $PUMP_FILE — update PUMP_FILE in this guard" >&2
+  exit 1
+fi
 
 HITS=0
 scan() {

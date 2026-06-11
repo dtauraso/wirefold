@@ -1,0 +1,145 @@
+// node_move_test.go — decentralized node-move path.
+//
+// Locks that a node-move handled WITHOUT a central coordinator reproduces the old
+// applyNodeMove result per-goroutine: the moved node re-emits its node-geometry, and
+// each incident edge recomputes its own segment/arc, re-emits its edge geometry,
+// revises any in-flight bead, and updates the dest port's latency aggregate. The
+// move is delivered exactly as the live bridge does — by mail-sorting each entry to
+// the node's inbox and every incident edge's inbox via MoveDispatch.dispatch.
+
+package Wiring
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	T "github.com/dtauraso/wirefold/Trace"
+)
+
+// deliver mail-sorts a node-move to the node's inbox + every incident edge's inbox,
+// each with an ack the mover closes when done, then waits — mirroring the live
+// stdin-reader dispatch but blocking so the test can assert deterministically.
+func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
+	var keys []string
+	keys = append(keys, nodeID)
+	for edgeID, em := range md.edgeMovers {
+		if em.srcID == nodeID || em.dstID == nodeID {
+			keys = append(keys, edgeID)
+		}
+	}
+	acks := make([]chan struct{}, 0, len(keys))
+	for _, k := range keys {
+		ack := make(chan struct{})
+		md.dispatch[k] <- moveMsg{NodeID: nodeID, X: x, Y: y, Z: z, ack: ack}
+		acks = append(acks, ack)
+	}
+	for _, ack := range acks {
+		<-ack
+	}
+}
+
+func TestDecentralizedNodeMove(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(256)
+	_, slotReg, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx) // launch the per-node and per-edge goroutines
+
+	out := md.EdgeOut("e0")
+	pw := slotReg["dst.In"]
+	if out == nil || pw == nil {
+		t.Fatalf("missing Out/wire: out=%v pw=%v", out, pw)
+	}
+
+	// Place a bead on the wire so the move must revise it in flight.
+	seg0 := wireSegment{Start: out.Start, End: out.End}
+	bp := beadPlacement{InFlightMs: out.SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
+	if !pw.TryPlace(7, bp) {
+		t.Fatal("TryPlace rejected on fresh wire")
+	}
+
+	// Move src — delivered per-goroutine (no central registry).
+	const nx, ny, nz = 400, 250, 30
+	deliver(md, "src", nx, ny, nz)
+
+	// Expected recompute from the moved geometry.
+	srcGeom := nodeGeom{Kind: "FanInSrc", Pos: vec3{X: nx, Y: ny, Z: nz}, Outputs: []portGeom{{Name: "Out"}}}
+	dstGeom := nodeGeom{Kind: "FanInSink", Pos: vec3{X: 0, Y: 0, Z: 0}, Inputs: []portGeom{{Name: "In"}}}
+	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
+	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")
+
+	// Edge mover wrote the new segment/arc onto the source Out.
+	if !approxEq(out.ArcLength, wantArc) || !approxEq(out.SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
+		t.Fatalf("Out arc/lat = %v/%v, want %v/%v", out.ArcLength, out.SimLatencyMs, wantArc, wantArc/PulseSpeedWuPerMs)
+	}
+	if !approxEq(out.End.X, wantSeg.End.X) || !approxEq(out.Start.X, wantSeg.Start.X) {
+		t.Fatalf("Out segment = %+v..%+v, want %+v..%+v", out.Start, out.End, wantSeg.Start, wantSeg.End)
+	}
+
+	// Wire latency aggregate updated to the moved edge's latency.
+	pw.mu.Lock()
+	gotMax := pw.MaxIncomingSimLatencyMs
+	pw.mu.Unlock()
+	if !approxEq(gotMax, wantArc/PulseSpeedWuPerMs) {
+		t.Fatalf("MaxIncomingSimLatencyMs = %v, want %v", gotMax, wantArc/PulseSpeedWuPerMs)
+	}
+
+	// In-flight bead's geometry was revised to the new segment (still in flight).
+	pw.mu.Lock()
+	revisedSeg := pw.inFlightSegment
+	stillInFlight := pw.inFlight
+	pw.mu.Unlock()
+	if !stillInFlight {
+		t.Fatal("bead left flight unexpectedly during move")
+	}
+	if !approxEq(revisedSeg.End.X, wantSeg.End.X) || !approxEq(revisedSeg.Start.X, wantSeg.Start.X) {
+		t.Fatalf("in-flight segment not revised: got %+v..%+v", revisedSeg.Start, revisedSeg.End)
+	}
+
+	// Give the trace a moment, then assert the node re-emitted node-geometry and the
+	// edge re-emitted its segment.
+	time.Sleep(5 * time.Millisecond)
+	tr.Close()
+	events := tr.Events()
+	var sawNodeGeom, sawEdgeGeom bool
+	for _, e := range events {
+		if e.Kind == T.KindNodeGeometry && e.Node == "src" {
+			sawNodeGeom = true
+		}
+		if e.Kind == T.KindGeometry && e.Edge == "e0" && approxEq(e.EX, wantSeg.End.X) {
+			sawEdgeGeom = true
+		}
+	}
+	if !sawNodeGeom {
+		t.Fatal("node 'src' did not re-emit node-geometry on move")
+	}
+	if !sawEdgeGeom {
+		t.Fatal("edge 'e0' did not re-emit its re-derived segment on move")
+	}
+}
