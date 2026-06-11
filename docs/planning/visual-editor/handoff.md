@@ -10,62 +10,61 @@ needed) and proceed.
 
 ## State at handoff (2026-06-11 — on `main`, clean, no task in flight)
 
-All task branches deleted. Latest main: `8e397d34` (merge of dead-code removal). Fresh session starts on `main`.
+All task branches deleted. Latest main: `819fec68` (node rename). Fresh session starts on `main`.
 
-### Settled architecture (complete — no open items)
+### Settled architecture (complete + merged — no open items)
 
-- **Go** owns the running model: one clock, pacing/timing, bead transport+delivery, bead **progress (fraction t)**, node-local held state, firing rules, node positions (held, re-emitted on move), per-edge geometry, shading. Self-scheduling per-goroutine nodes + wires; **no central coordinator** — node-move AND fade both via key→channel dispatch through `MoveDispatch`. Zero central fan-out.
-- **TS** is render-only (viewpoint): camera, projection, raycast picking, GPU render; places the bead at Go's fraction along Go's segment. Sends fire-and-forget `edit` (create/update/delete/fade) + play/pause. Owns interaction, NOT position data. Geometry helpers are store-readers with startup-only local fallback.
-- **Bridge:** Go→TS trace stream (9 active kinds, no fade trace); TS→Go fire-and-forget. The MoveDispatch reader is a pure mail-sorter.
-- **MODEL.md + CLAUDE.md confirmed drift-free.**
+Go-authoritative per-goroutine model is complete: one clock; pacing/timing,
+bead transport+delivery, bead progress (fraction t), node-local held state, firing
+rules, node/port positions, and per-edge geometry all owned by Go. node-move AND
+fade route via key→channel dispatch through `MoveDispatch` — **zero central fan-out**.
+TS is render-only (camera, projection, raycast picking, GPU render); it places the
+bead at Go's fraction along Go's segment and sends fire-and-forget `edit`
+(create/update/delete/fade) + play/pause. **MODEL.md + CLAUDE.md confirmed drift-free.**
 
-### This session's work (all merged to main)
+### Work landed on main since last handoff (all merged)
 
-**Dead-code removal F1–F4 (net −277 lines):**
+1. **Removed redundant `wire_recv` breadcrumb** (commit `e71d5293`) — it duplicated the `recv` trace event.
+2. **Doc hygiene** (commits `9d5642f6`, `5d9f77d7`): stripped 7 leaked branch-local planning docs (their branches had merged+deleted without `strip-branch-local-docs.sh` ever running); deleted `clock-dialog/index.html` (described the superseded TS-authoritative "delivered" model); fixed `fade.md` drift (WireRegistry/delivered → MoveDispatch/SetFaded). Hardened `tools/strip-branch-local-docs.sh` to also match HTML-comment branch tags (`<!-- branch: ... -->`) — the form by which a doc had leaked.
+3. **Scene split** (commit `2e684237`): persistence split by ownership.
+   - `topology.json` (tracked) = the **DIAGRAM**: nodes, edges, `view.nodes` positions, fade arrays.
+   - `topology.scene.json` (gitignored) = the **SCENE** TS owns: camera, camera3d, labelsGlobalHidden.
+   - Absent scene file → canvas-default camera + labels shown; diagram intact (reconstitutes to defaults, never harmfully "missing").
+   - Go loader unchanged (reads `view.nodes`).
+   - `topology.json` is **no longer skip-worktree** — camera churn is gitignored now, so position/fade diffs are real and committable.
+   - A round-trip vitest guards positions+fades persistence (a mid-build regression had dropped it; now covered).
+4. **Node rename** (commit `819fec68`): active network nodes renamed `in08→1`, `i0→2`, `i1→3` (id is the display name). Propagated to edge endpoints, edge labels (`1To2`, `2To3`, `2FeedbackTo1`), `view.nodes` keys, fade refs, and `topology.inactive.json` cross-refs.
 
-- **F1:** Deleted orphaned canonical/edge-keyed trace resolver (`Trace/Resolve.go`, `WriteCanonicalJSONL`, `marshalCanonicalEvent`) — the TS-simulator consumer was gone. `Event.Edge` was **kept** (live for geometry events).
-- **F2:** Removed write-only `Event.hasValue` (all 6 set-sites deleted; no read-sites existed).
-- **F3:** Removed dead `arrowStyle`/`concurrent` wire props + corresponding `specEdge` fields — never read downstream.
-- **F4:** Dropped orphan `NODE_DEFS` fields from per-kind-component and required-input-enforcement eras via generator + regen. `isMulti` **kept** (live consumer).
-- Dropped audit scaffolding (planning md + HTML report).
+### Active experimental network — 3 edges (feedback ring)
 
-**Branch hygiene:** deleted all merged task branches (`editor-3d-plan`, `full-code-audit`, `inhibitright-pseudo`, `partial-feature-audit`). Only `main` remains.
-
-**Memory recorded:** `project_superseded_arch_orphans` — orphaned old-architecture plumbing is drift bait; delete-don't-revive.
-
-### Key lessons from this session
-
-- **Dead-on-main ≠ patch-applies-cleanly.** A stale removal branch had to be brought current (merge main in, finish F2's extra sites, regen F4) rather than cherry-picked.
-- **Verify the real build independently.** Mid-merge IDE diagnostics were stale LSP cache; subagent "all green" was double-checked against an actual `go build`/`go test`.
+`topology.json`: node `1` (Input, init `[0,1]`, repeat), node `2` (ChainInhibitor),
+node `3` (ChainInhibitor). Edges: `1To2` (1→2), `2To3` (2→3), `2FeedbackTo1` (2→1
+feedback). A feedback ring; animates. File is tracked normally (not skip-worktree).
 
 ### Carry-forward facts
 
-- **Per-goroutine model complete; zero central fan-out.** node-move + fade both go through `MoveDispatch` (key→channel). create/delete are single-target (one wire). play/pause is the intentional global gate (one clock). loader/clock/trace-sink/dispatch-router are shared facts/conduits, not coordinators.
-- **Go holds node position**, re-emits node-geometry on move; render is Go-authoritative (node body, wire, bead all from Go's stream). The editor owns interaction/viewpoint, not position data.
-- **Pulse placement** = `lerp(edge-geometry segment, Go's fraction)` — same store the tube reads, so the bead can't leave the wire.
-- **No fade trace in bridge.** Fade behavior is `PacedWire.SetFaded` gating `Send`; no trace event emitted.
-- **Parser-parity is a recurring trap:** when changing a TS→Go message shape, update `parseEdit` in `messages.ts` AND the Go stdin-reader struct in the same change, or the message is silently dropped (no error). See `feedback_schema_parser_parity`.
-- **Two-process editor:** changing extension-host code (`messages.ts`/`handle-message.ts`/`extension.ts`) needs **Developer: Reload Window**; webview-only changes refresh on reopen. See `feedback_two_process_editor_reload`.
-- **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; straightness is non-local → O(N²) follow latency.
-- **Probe logs** (`.probe/*.jsonl`) accumulate across sessions; clear them (`: > file`) for a clean diagnostic read.
+- **`topology.json` is tracked normally now** (not skip-worktree). The gitignored `topology.scene.json` holds camera/labels and reconstitutes to defaults when absent — never harmfully missing.
+- **Fading a load-bearing ring edge stalls the whole ring.** Dropping the circulating token leaves every node waiting on an input that never comes; **unfade does NOT revive it** — restart the animation to re-seed from node `1`'s Input init. This is EXPECTED model behavior, not a bug.
+- **Parser-parity trap:** when changing a TS→Go message shape, update `parseEdit` in `messages.ts` AND the Go stdin-reader struct in lockstep, or the message is silently dropped. See `feedback_schema_parser_parity`.
+- **Two-process editor:** extension-host changes (`extension.ts`/`handle-message.ts`/`messages.ts`) need **Developer: Reload Window**; webview-only changes refresh on reopen. See `feedback_two_process_editor_reload`.
+- **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; O(N²) follow latency.
 
 ### Unconfirmed thread (low priority)
 
-A possible TS render-layer node issue was noted — Go's stream is clean (continuous drag path, fades independent of drag frames, no anomaly in position/geometry data). Any residual is TS-side (node mesh store / raycast / camera). Low priority; may already be resolved. If it resurfaces, fix is in TS, not Go.
+A possible TS render-layer node issue was noted — Go's stream is clean; any residual
+is TS-side (node mesh store / raycast / camera). Low priority; may already be resolved.
+If it resurfaces, fix is in TS, not Go.
 
 ### NEXT
 
-**No in-flight task.** Start fresh on `main` from user-reported friction (log to `docs/planning/visual-editor/session-log.md`, open a fresh `task/<short-kebab>`).
-
-### Active experimental network — 3 edges
-
-`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate. File is skip-worktree.
+**No in-flight task.** Start fresh on `main` from user-reported friction (log to
+`docs/planning/visual-editor/session-log.md`, open a fresh `task/<short-kebab>`).
 
 ### Dev-loop
 
 - Go: `go build ./...` + `go test -race ./...`. TS (from `tools/topology-vscode/`): `npm run build` (rebuilds extension.js + webview.js) + `npx tsc --noEmit` + `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
 - Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file for webview-only.
-- topology.json is skip-worktree (in08/i0/i1, 3 edges). No merge to main without explicit sign-off. Delete merged branches without re-asking.
+- No merge to main without explicit sign-off. Delete merged branches without re-asking.
 
 ## ALWAYS clause
 
