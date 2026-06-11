@@ -8,40 +8,39 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-10 — branch `task/go-backend-ts-frontend-fixes`, pushed; latest `968c8e30`; tree clean)
+## State at handoff (2026-06-11 — branch `task/go-backend-ts-frontend-fixes`, pushed; latest `a18fa000`; tree clean after this commit)
 
 - Branch was **renamed** `task/go-backend-ts-frontend` → `task/go-backend-ts-frontend-fixes` (it carries fixes too). topology.json is skip-worktree.
-- This session: explored the **bead-item chain** wire model (built fully) then **reverted** to straight-line PacedWire; a run of **drag/pulse correctness fixes**; then **completed the Go-authoritative per-goroutine model** — decentralized node-move (item 4, the last load-bearing deviation) AND decentralized fade. **Zero central-fan-out remains.**
+- This session: post-decentralization **cleanup landed** (`a18fa000`); a **`fade` trace event** added to `.probe/go.jsonl` (`5cf8c14a`); a **node-drag anomaly investigated** (Go stream clean — any residual is TS render-layer, possibly already fixed). Branch-local docs stripped (this commit). **Merge to main is the only remaining item.**
 
 ### The arc this session
 
-- **Bead-item chain — explored + reverted (`e7faf250`).** Built wires as N bead-goroutines relaxing to straight (per-item pulse hops, born/retire, color animation), then reverted. Straightness is endpoint-defined (non-local), so neighbor-only relaxation is **O(N²) follow-latency regardless of goroutines**. Memory: `project_wire_is_straight_line_not_chain`. MODEL.md cleaned (`45521898`).
-- **Go-authoritative node position (`fa4eb25f`).** Bug: Go emitted node-geometry only at startup, never on move → dragging didn't update the body. Fix: the move handlers re-emit node-geometry on move; TS renders node/wire/bead all from Go's stream (reverted a TS-local-placement shortcut). Go holds the position; ~1-frame round-trip.
-- **Pulse fixes:** in-flight revision preserves the bead's **fraction** (not absolute distance) at uniform speed — no racing (`7bf74109`); walker relaunch tick clamped to ≥now — no t≈0 replay (`8e4c6766`); pulse clears on a new `arrive` trace event at traversal-complete — no lingering at dest port (`2bc98a43`); pulse placed at `lerp(Go segment, Go fraction)` — same store the tube reads, so it stays on the wire as the node moves (`a579b0e6`).
-- **Item 4 — node-move decentralized (`a37fae51`).** Replaced central `NodeMoveRegistry.applyNodeMove` with **`MoveDispatch`**: a pure `(key,value)→channels[key]` mail-sorter keyed by node ids AND edge ids. Per-node inboxes (node re-emits its own node-geometry) + per-wire inboxes (each PacedWire owns itself: recomputes its own segment/arc, revises its own in-flight bead under its own lock, emits its own geometry). TS sends keyed entries (moved node + incident edges). Fixed a **parser-parity** bug (`6ec2141c`): `parseEdit` still validated the old update shape → moves silently dropped.
-- **Fade decentralized (`968c8e30`).** Last central-fan-out gone — fade routes per-wire via MoveDispatch (each wire sets its own faded flag); `WireRegistry.ForEach` removed. TS sends a per-edge fade map; `parseEdit` + Go reader updated in lockstep.
+- **Cleanup (`a18fa000`).** Removed `dbg.flushmove` + `edit-update-forward` breadcrumbs, the thin `applyNodeMove` test shim (façade that let old tests compile over the new dispatch path), and the unused `reg` param in `applyEdit` (`stdin_reader.go`).
+- **Fade trace event (`5cf8c14a`).** Added `Trace.Fade` in `Trace/Trace.go`; emitted in `node_move.go` edgeMover fade branch. Shape: `{"kind":"fade","edge":"<id>","faded":bool}` (no `omitempty` on `faded` so unfades appear). TS side updated in lockstep: `trace-kinds.ts` union, `pump.ts` case returns, `messages.ts` discriminated union — **parity guard clean**.
+- **Node-drag investigation.** Logs show: drag path continuous (max ~5.6u/frame, no teleport/freeze), fades apply independently of drag (zero shared timestamps), no anomaly in Go's position/geometry data. Conclusion: any residual node misbehavior is TS render-layer, not Go data. User believes it may already be fixed; left open/unconfirmed.
+- **Branch-local docs stripped (this commit).** `ownership-audit.html` (tag: -fixes) and `chain-model-two-nodes.md` (tag: original name) removed via `tools/strip-branch-local-docs.sh`.
 
-### The settled architecture (now complete)
+### The settled architecture (complete)
 
-- **Go** owns the running model: one clock, pacing/timing, bead transport+delivery, bead **progress (fraction t)**, node-local held state, firing rules, node positions (held, re-emitted on move), per-edge geometry, shading. Self-scheduling per-goroutine nodes + wires; **no central coordinator** (node-move + fade both via key→channel dispatch).
+- **Go** owns the running model: one clock, pacing/timing, bead transport+delivery, bead **progress (fraction t)**, node-local held state, firing rules, node positions (held, re-emitted on move), per-edge geometry, shading. Self-scheduling per-goroutine nodes + wires; **no central coordinator** (node-move + fade both via key→channel dispatch through `MoveDispatch`).
 - **TS** is render-only (viewpoint): camera, projection, raycast picking, GPU render; places the bead at Go's fraction along Go's segment. Sends fire-and-forget `edit` (create/update/delete/fade) + play/pause. Owns interaction, NOT position data.
-- **Bridge:** Go→TS trace stream (9 kinds incl. `arrive`); TS→Go fire-and-forget. The MoveDispatch reader is a pure mail-sorter.
+- **Bridge:** Go→TS trace stream (10 kinds incl. `arrive`, `fade`); TS→Go fire-and-forget. The MoveDispatch reader is a pure mail-sorter.
 
 ### Active experimental network — 3 edges
 
-`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate.
+`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate. File is skip-worktree.
 
 ### OPEN ITEMS / NEXT
 
-1. **Reload to verify fade** — extension-host changed (`968c8e30`); **Developer: Reload Window**, confirm fade dimming still works.
-2. **Cleanup (not spec):** remove debug breadcrumbs (`dbg.flushmove`, `edit-update-forward`); the thin `applyNodeMove` test façade (a shim so existing tests compile over the new path); the now-unused `x,y,z` on the position trace event (the bead uses fraction); the unused `reg` param in `applyEdit` (`stdin_reader.go:142`).
-3. **Merge to main (go-auth spec item 6 — the only remaining spec item):** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend-fixes` (strips the chain spec md+html, the go-auth doc, the ownership-audit html), then merge — **needs explicit sign-off**. go-auth spec items 1–5 are DONE.
+1. **Merge to main (go-auth spec item 6 — the ONLY remaining item):** branch-local docs are now stripped (this commit). Needs **explicit user sign-off** to merge. After merge: delete branch local + remote without re-asking.
+2. **Node-drag TS render anomaly (open/unconfirmed):** Go data is clean. If the user observes residual jank after merge, the fix is in the TS render layer, not Go.
 
 ### Carry-forward facts
 
 - **Per-goroutine model complete; zero central-fan-out.** node-move + fade both go through `MoveDispatch` (key→channel). create/delete are single-target (one wire). play/pause is the intentional global gate (one clock). loader/clock/trace-sink/dispatch-router are shared facts/conduits, not coordinators.
 - **Go holds node position**, re-emits node-geometry on move; render is Go-authoritative (node body, wire, bead all from Go's stream). The editor owns interaction/viewpoint, not position data.
 - **Pulse placement** = `lerp(edge-geometry segment, Go's fraction)` — same store the tube reads, so the bead can't leave the wire.
+- **Fade trace event:** `{"kind":"fade","edge":"<id>","faded":bool}` in `.probe/go.jsonl`; emitted by `node_move.go` edgeMover; TS pump handles it.
 - **Parser-parity is a recurring trap:** when changing a TS→Go message shape, update `parseEdit` in `messages.ts` AND the Go stdin-reader struct in the same change, or the message is silently dropped (no error). See `feedback_schema_parser_parity`.
 - **Two-process editor:** changing extension-host code (`messages.ts`/`handle-message.ts`/`extension.ts`) needs **Developer: Reload Window**; webview-only changes refresh on reopen. See `feedback_two_process_editor_reload`.
 - **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; straightness is non-local → O(N²) follow latency.
