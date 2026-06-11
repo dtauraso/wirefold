@@ -30,17 +30,17 @@ Propagation rules:
 
 ## Go side (firing/delivery)
 
-The fade gate lives entirely in the `Wiring` layer (`paced_wire.go` + `WireRegistry`). Per-kind node packages (`input`, `readgate`, `inhibitrightgate`, …) are **not touched** — there are ZERO per-kind changes. All per-kind loops inherit the gate automatically.
+The fade gate lives entirely in the `Wiring` layer (`paced_wire.go` + `MoveDispatch`). Per-kind node packages (`input`, `readgate`, `inhibitrightgate`, …) are **not touched** — there are ZERO per-kind changes. All per-kind loops inherit the gate automatically.
 
-Mechanism: each `PacedWire` carries a `faded` flag. The `"fade"` bridge handler sets these flags via the `WireRegistry`. `Send` checks the flag at the top of the function, under the mutex; if the wire is faded, the send is **skipped** — returns benignly, does not fill the slot, does not block. A faded node has all its incident edges faded, so all of its sends skip and it goes inert without any poll-loop changes. In-flight values already past the gate finish normally.
+Mechanism: each `PacedWire` carries a `faded` flag. The `"fade"` bridge handler mail-sorts each `(edgeId, faded)` entry via `MoveDispatch` to the owning `edgeMover` goroutine, which calls `SetFaded` on its own `PacedWire` — no central fan-out. `Send` checks the flag at the top of the function, under the mutex; if the wire is faded, the send is **skipped** — returns benignly, does not fill the slot, does not block. A faded node has all its incident edges faded, so all of its sends skip and it goes inert without any poll-loop changes. In-flight values already past the gate finish normally.
 
 
 ## Bridge
 
-Fade is a **live control signal**, analogous to the existing global play/pause gate — not a spec/topology change. It crosses webview → host → Go stdin, following the `"delivered"` precedent (`stdin_reader.go:52`).
+Fade is a **live control signal**, analogous to the existing global play/pause gate — not a spec/topology change. It crosses webview → host → Go stdin, following the play/pause precedent (`stdin_reader.go`).
 
 - New webview→host message kind: `"fade"` carrying the **complete current faded edge set** — every time anything changes, the full set is sent. Go replaces its set wholesale (idempotent, self-correcting, no delta stream to keep in sync). Add to `WebviewToHostMsg` / `WEBVIEW_TO_HOST_TYPES` (`messages.ts:35,95`) and to `stdin_reader.go`'s accepted types; keep `tools/check-message-kind-parity.sh` green.
-- **Node fade is NOT sent.** A faded node expands to its incident edges via the TS fixpoint, so Go only ever receives faded **edge** ids. The `WireRegistry` receives the edge id set and sets the `faded` flag on each matching `PacedWire`. No in-flight `Send` is interrupted — faded nodes simply stop initiating new sends.
+- **Node fade is NOT sent.** A faded node expands to its incident edges via the TS fixpoint, so Go only ever receives faded **edge** ids. `MoveDispatch` routes each `(edgeId, faded)` entry to the owning `edgeMover` goroutine, which calls `SetFaded` on its `PacedWire`. No in-flight `Send` is interrupted — faded nodes simply stop initiating new sends.
 
 ## Persistence
 
