@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # strip-branch-local-docs.sh <branch>
-# Removes planning docs tagged with frontmatter `branch: <branch>`.
+# Removes planning docs tagged with branch: <branch> in either form within the first 10 lines:
+#   Markdown frontmatter: `branch: <branch>`
+#   HTML comment:         `<!-- branch: <branch> -->` (flexible inner whitespace)
 # Run before merging a task branch to main.
 
 set -euo pipefail
@@ -18,18 +20,17 @@ if [[ ! -d "$DOCS_DIR" ]]; then
   exit 1
 fi
 
-# Find files whose first three lines form YAML frontmatter containing `branch: <BRANCH>`.
-# Pattern: file starts with ---, has a line `branch: <BRANCH>`, then a closing ---.
+# Find files whose first 10 lines contain a branch tag in either form.
 matched=()
 while IFS= read -r -d '' file; do
-  # Extract up to first 10 lines to find frontmatter block
   head10=$(head -10 "$file" 2>/dev/null || true)
-  first_line=$(echo "$head10" | head -1)
-  if [[ "$first_line" != "---" ]]; then
+  # Markdown frontmatter form: `branch: <BRANCH>` anchored at line start
+  if echo "$head10" | grep -qE "^branch: ${BRANCH}$"; then
+    matched+=("$file")
     continue
   fi
-  # Check for branch tag inside the frontmatter
-  if echo "$head10" | grep -qE "^branch: ${BRANCH}$"; then
+  # HTML comment form: `<!-- branch: <BRANCH> -->` with flexible inner whitespace
+  if echo "$head10" | grep -qE "^[[:space:]]*<!--[[:space:]]*branch:[[:space:]]*${BRANCH}[[:space:]]*-->[[:space:]]*$"; then
     matched+=("$file")
   fi
 done < <(find "$DOCS_DIR" -type f \( -name "*.md" -o -name "*.html" \) -print0)
