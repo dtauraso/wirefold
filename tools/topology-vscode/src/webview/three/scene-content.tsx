@@ -55,9 +55,6 @@ import {
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
   SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
-  SHADING_PARAM_BEAD_COLOR,
-  SHADING_PARAM_BEAD_EMISSIVE,
-  SHADING_PARAM_BEAD_EMISSIVE_INTENSITY,
 } from "../../schema/shading-params";
 
 // ---------------------------------------------------------------------------
@@ -87,9 +84,27 @@ function StyledPulseBead({ pr, faded, fadeOpacityInner, fill, ring }: InitPulseB
   );
 }
 
-function WhiteRingPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#ffffff" ring="#000000" />; }
-function BlackRingPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#000000" ring="#000000" />; }
-function DefaultPulseBead(p: InitPulseBeadProps) { return <StyledPulseBead {...p} fill="#888888" ring="#000000" />; }
+// Single source of truth for value→appearance. Both the static init beads (inside
+// node 1) and the animated edge bead derive their fill/ring colors here, so they
+// cannot visually diverge.
+const VALUE_BEAD_STYLE: Record<number, { fill: string; ring: string }> = {
+  0: { fill: "#ffffff", ring: "#000000" },
+  1: { fill: "#000000", ring: "#000000" },
+};
+const DEFAULT_BEAD_STYLE = { fill: "#888888", ring: "#000000" };
+function beadStyleForValue(v: number): { fill: string; ring: string } {
+  return VALUE_BEAD_STYLE[v] ?? DEFAULT_BEAD_STYLE;
+}
+
+function ValuePulseBead(value: number): React.FC<InitPulseBeadProps> {
+  const { fill, ring } = beadStyleForValue(value);
+  return (p) => <StyledPulseBead {...p} fill={fill} ring={ring} />;
+}
+const WhiteRingPulseBead = ValuePulseBead(0);
+const BlackRingPulseBead = ValuePulseBead(1);
+const DefaultPulseBead: React.FC<InitPulseBeadProps> = (p) => (
+  <StyledPulseBead {...p} fill={DEFAULT_BEAD_STYLE.fill} ring={DEFAULT_BEAD_STYLE.ring} />
+);
 
 // Map each raw init value (Go emits 0/1) to the component that renders its bead.
 const INIT_PULSE_COMPONENTS: Record<number, React.FC<InitPulseBeadProps>> = {
@@ -402,40 +417,48 @@ export function PulseBead({
 }: {
   edgeId: string;
 }) {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const sphereMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const torusMatRef = useRef<THREE.MeshStandardMaterial>(null);
   // SAME source SingleEdgeTube subscribes to — bead and tube cannot diverge.
   const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
 
   useFrame(() => {
     const pulse = getPulseMap().get(edgeId);
-    const mesh = meshRef.current;
-    if (!mesh) return;
+    const group = groupRef.current;
+    if (!group) return;
     // Hidden until there is a pulse with a fraction AND Go has streamed this edge's
     // segment (startup race: no segment yet → render nothing, no crash).
     if (!pulse || pulse.frac == null || !seg) {
-      mesh.visible = false;
+      group.visible = false;
       return;
     }
     // Render placement of Go-owned values: place the bead at its Go-supplied fraction
     // along the Go-supplied segment. Same exception class as nodeWorldPos.
     const f = pulse.frac;
-    mesh.position.set(
+    group.position.set(
       seg.start.x + f * (seg.end.x - seg.start.x),
       seg.start.y + f * (seg.end.y - seg.start.y),
       seg.start.z + f * (seg.end.z - seg.start.z),
     );
-    mesh.visible = true;
+    // Color the bead by the value it carries — same map as the static init beads.
+    const style = beadStyleForValue(pulse.value ?? 0);
+    sphereMatRef.current?.color.set(style.fill);
+    torusMatRef.current?.color.set(style.ring);
+    group.visible = true;
   });
 
   return (
-    <mesh ref={meshRef} visible={false} raycast={() => null}>
-      <sphereGeometry args={[4, 8, 8]} />
-      <meshStandardMaterial
-        color={SHADING_PARAM_BEAD_COLOR}
-        emissive={new THREE.Color(SHADING_PARAM_BEAD_EMISSIVE)}
-        emissiveIntensity={SHADING_PARAM_BEAD_EMISSIVE_INTENSITY}
-      />
-    </mesh>
+    <group ref={groupRef} visible={false}>
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[4, 16, 16]} />
+        <meshStandardMaterial ref={sphereMatRef} emissiveIntensity={0} />
+      </mesh>
+      <mesh raycast={() => null}>
+        <torusGeometry args={[4, 4 * 0.12, 8, 24]} />
+        <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
+      </mesh>
+    </group>
   );
 }
 
