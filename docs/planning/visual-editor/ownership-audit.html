@@ -292,12 +292,12 @@ branch: task/go-backend-ts-frontend-fixes
   <div class="panel active" id="panel-overview" role="tabpanel">
     <h2>The organizing principle</h2>
     <p>Route each calculation to the part that owns the <strong>live truth</strong>.
-       <span class="go">Go owns the diagram</span> — the one clock, traversal timing, bead transport + delivery, and the bead's <strong>progress</strong> (the fraction <code>t</code> along a wire).
-       <span class="ts">The editor (TS) owns the viewpoint</span> — camera, projection, raycast-picking, GPU render — and the <strong>live placement</strong> during interaction: while a node is being dragged, the editor's local React&nbsp;Flow <code>node.position</code> is the live truth for the node body, the wire endpoints, and where the bead sits.</p>
+       <span class="go">Go owns the diagram</span> — the one clock, traversal timing, bead transport + delivery, the bead's <strong>world position</strong> (emitted every ~16 ms), and the <strong>node position</strong> (held in Go, re-emitted as <code>node-geometry</code> on every move).
+       <span class="ts">The editor (TS) owns the viewpoint</span> — camera, projection, raycast-picking, GPU render. TS only renders what Go streams; it holds no position data of its own. The interaction sends a fire-and-forget <code>edit·update</code> to Go, which updates its held position and re-emits the geometry.</p>
 
-    <div class="contract-box"><span class="go">Go runtime</span> holds geometry at rest, runs the clock, paces traversal, transports + delivers beads, and emits each bead's fractional progress t.
-<span class="ts">TS editor</span> renders Go's stream, owns camera/projection/picking, and during a drag owns the live node position, wire endpoints, and bead placement (lerp of Go's t over local endpoints).
-The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (positions+fraction, node events, geometry, node-geometry); TS&rarr;Go spec save/load + one `edit` op + play/pause — fire-and-forget, no await.</div>
+    <div class="contract-box"><span class="go">Go runtime</span> holds the node position, runs the clock, paces traversal, transports + delivers beads, and emits: bead world positions, node-geometry (center + port world pos/dir) on startup and on every move, and edge-geometry (wireSegment) on load and on every node-move.
+<span class="ts">TS editor</span> renders Go's stream — plots bead position from Go's emitted world pos, draws wire from Go's edge-geometry store, renders the node body from Go's node-geometry. TS owns camera/projection/picking and the drag interaction (sending the fire-and-forget update).
+The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (bead positions, node events, geometry, node-geometry, arrive); TS&rarr;Go spec save/load + one `edit` op + play/pause — fire-and-forget, no await.</div>
 
     <h2>Three columns: who computes what</h2>
     <div class="diagram">
@@ -315,8 +315,8 @@ The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (pos
   <text x="40" y="150" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">• bead transport + self-delivery</text>
   <text x="40" y="176" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">• bead PROGRESS — fraction t (0..1)</text>
   <text x="40" y="202" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">• node-local held state + firing rules</text>
-  <text x="40" y="228" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">• authoritative node/port geometry</text>
-  <text x="40" y="254" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">  (at rest; port offsets + dirs always)</text>
+  <text x="40" y="228" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">• node position (held; re-emitted on move)</text>
+  <text x="40" y="254" font-family="'JetBrains Mono',monospace" font-size="12" fill="#cfe8df">• node/port geometry (startup + on move)</text>
   <text x="40" y="290" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#5e8a78">paced_wire.go · clock.go · Trace/Trace.go</text>
   <text x="40" y="308" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#5e8a78">port_geometry.go · nodes/&lt;Kind&gt;/</text>
 
@@ -344,15 +344,15 @@ The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (pos
   <text x="780" y="124" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• camera / orbit / pan / zoom</text>
   <text x="780" y="150" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• world&rarr;screen projection</text>
   <text x="780" y="176" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• raycast picking</text>
-  <text x="780" y="202" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• LIVE node position during drag</text>
-  <text x="780" y="228" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• wire endpoints (local port pos)</text>
-  <text x="780" y="254" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• bead placement = lerp(start,end,t)</text>
+  <text x="780" y="202" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• drag interaction → fire-and-forget update</text>
+  <text x="780" y="228" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• wire = Go's edge-geometry store</text>
+  <text x="780" y="254" font-family="'JetBrains Mono',monospace" font-size="12" fill="#e3cdf2">• bead = Go's emitted world position</text>
   <text x="780" y="290" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#8a6a9a">pump.ts · scene-content.tsx</text>
   <text x="780" y="308" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#8a6a9a">interaction-controls.ts · geometry-helpers.ts</text>
 </svg>
     </div>
-    <div class="note go"><strong>Go owns the diagram.</strong> Geometry at rest, the clock, every bead's progress. <code>nodes/Wiring/clock.go</code>, <code>nodes/Wiring/paced_wire.go</code>, <code>Trace/Trace.go</code>.</div>
-    <div class="note ts"><strong>The editor owns the viewpoint + live placement.</strong> Render, camera, picking, and the dragged node's live position. <code>pump.ts</code> is the only TS&harr;Go boundary; everything downstream of it is plotting and viewpoint.</div>
+    <div class="note go"><strong>Go owns the diagram.</strong> Node positions, geometry at rest, the clock, every bead's world position. <code>nodes/Wiring/clock.go</code>, <code>nodes/Wiring/paced_wire.go</code>, <code>nodes/Wiring/stdin_reader.go</code>, <code>Trace/Trace.go</code>.</div>
+    <div class="note ts"><strong>The editor owns the viewpoint + interaction.</strong> Render, camera, picking, and the drag gesture (fire-and-forget <code>edit·update</code> to Go). <code>pump.ts</code> is the only TS&harr;Go boundary; everything downstream of it is plotting.</div>
   </div>
 
   <!-- TAB 2: Ownership table -->
@@ -392,9 +392,9 @@ The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (pos
         </tr>
         <tr>
           <td>Bead spatial placement</td>
-          <td><span class="owner ts">Editor</span></td>
-          <td class="file">tools/topology-vscode/src/webview/three/scene-content.tsx</td>
-          <td><code>PulseBead</code> places at <code>lerp(liveStart, liveEnd, pulse.frac)</code> over the LOCAL node-port endpoints — Go owns t, the editor owns where t lands in space.</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">tools/topology-vscode/src/webview/three/scene-content.tsx · nodes/Wiring/paced_wire.go</td>
+          <td><code>PulseBead</code> plots Go's emitted world position (<code>pulse.pos</code> from the <code>position</code> trace event). Go owns the position; TS sets the mesh to it. <code>pulse.frac</code> is still streamed but no longer used for placement.</td>
         </tr>
         <tr>
           <td>Node-local held state + firing rules</td>
@@ -405,20 +405,20 @@ The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (pos
         <tr>
           <td>Authoritative node/port geometry</td>
           <td><span class="owner go">Go</span></td>
-          <td class="file">nodes/Wiring/port_geometry.go · nodes/&lt;Kind&gt;/ (per-node emit)</td>
-          <td>Each node's goroutine emits its center + per-port world pos/dir once on startup (<code>node-geometry</code> event). Authoritative at rest; port dirs always.</td>
+          <td class="file">nodes/Wiring/port_geometry.go · nodes/Wiring/builders.go emitNodeGeometry · nodes/Wiring/stdin_reader.go applyNodeMove</td>
+          <td>Each node's goroutine emits its center + per-port world pos/dir as a <code>node-geometry</code> event on startup AND on every node-move (via <code>applyNodeMove</code> → <code>emitNodeGeometry</code>). TS renders the node body and reads port dirs from this store.</td>
         </tr>
         <tr>
           <td>Live node position during drag</td>
-          <td><span class="owner ts">Editor</span></td>
-          <td class="file">tools/topology-vscode/src/webview/three/geometry-helpers.ts</td>
-          <td><code>nodeWorldPos</code> reads local React&nbsp;Flow <code>node.position</code> (not Go's emitted center) so the body follows the drag with no round-trip lag.</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">nodes/Wiring/stdin_reader.go applyNodeMove · nodes/Wiring/builders.go emitNodeGeometry</td>
+          <td>Go holds the node position. A drag sends a fire-and-forget <code>edit·update</code> to Go; <code>applyNodeMove</code> updates the held position and calls <code>emitNodeGeometry</code>, streaming a fresh <code>node-geometry</code> event. TS renders the node body from that stream. The editor owns the <em>interaction</em> (sending the update), not the position data.</td>
         </tr>
         <tr>
           <td>Wire endpoint placement</td>
-          <td><span class="owner ts">Editor</span></td>
-          <td class="file">tools/topology-vscode/src/webview/three/scene-content.tsx · geometry-helpers.ts</td>
-          <td><code>SingleEdgeTube</code> recomputes endpoints each frame from <code>portWorldPos</code> on local node positions (a <code>LineCurve3</code>). Port DIRECTIONS still read Go's store.</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">tools/topology-vscode/src/webview/three/scene-content.tsx SingleEdgeTube · nodes/Wiring/stdin_reader.go applyNodeMove</td>
+          <td><code>SingleEdgeTube</code> reads <code>useEdgeGeometryStore</code> — Go's <code>wireSegment</code> from the <code>geometry</code> trace event. Go re-emits edge geometry on every node-move via <code>applyNodeMove</code>, so the wire follows ~1 frame behind the drag. TS computes no endpoints.</td>
         </tr>
         <tr>
           <td>Raycast picking</td>
@@ -468,84 +468,111 @@ The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (pos
 
   <!-- TAB 3: The drag case -->
   <div class="panel" id="panel-drag" role="tabpanel">
-    <h2>The drag case — routing each piece to its live owner</h2>
-    <p>The recent refinement: while a node is being dragged, the editor owns the live node position, the wire endpoints, and the bead's placement; Go still owns the bead's progress (fraction <code>t</code>) and delivery. The bead rides the SAME live segment the tube draws, at Go's fraction.</p>
+    <h2>The drag case — Go holds the position, TS renders from Go's stream</h2>
+    <p><strong>The correct model:</strong> Go holds the node position. A drag sends a fire-and-forget <code>edit·update</code> to Go; Go updates its held position, re-emits <code>node-geometry</code> (node body + port positions), and re-emits <code>geometry</code> (edge wireSegment) for every incident edge. TS renders node body, wire, and bead all from Go's stream — no local position state in TS.</p>
+
+    <h2>What the bug was</h2>
+    <p>The bug was a missing RETURN emit in <code>applyNodeMove</code>: it updated Go's held position and re-emitted edge geometry, but never re-emitted the node's <code>node-geometry</code>. So TS had no fresh node center — the node body looked stuck on screen while the wire and bead updated. Fix: <code>applyNodeMove</code> now calls <code>emitNodeGeometry</code> after updating the held position, so the body, wire, and bead all update from Go's stream in the same round-trip.</p>
 
     <div class="diagram">
-<svg width="1040" height="360" viewBox="0 0 1040 360" xmlns="http://www.w3.org/2000/svg" aria-label="During a drag, the node body, wire endpoints and bead placement come from the editor's local node position; Go supplies only the fractional progress t which the editor lerps onto the live local endpoints.">
+<svg width="1040" height="420" viewBox="0 0 1040 420" xmlns="http://www.w3.org/2000/svg" aria-label="The drag loop: TS sends fire-and-forget edit update to Go. Go updates held position, calls emitNodeGeometry and re-emits geometry for incident edges. TS renders node body from node-geometry store, wire from edge-geometry store, and bead world position from position trace event.">
   <defs>
     <marker id="dArrTs" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c07ef8"/></marker>
     <marker id="dArrGo" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5ec4a0"/></marker>
   </defs>
 
-  <!-- source node (being dragged) -->
-  <circle cx="150" cy="150" r="46" fill="#1a0e22" stroke="#c07ef8" stroke-width="2"/>
-  <text x="150" y="146" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">source</text>
-  <text x="150" y="164" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c79fe8">dragging</text>
-  <text x="150" y="226" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#c79fe8">node.position (local)</text>
+  <!-- TS drag box -->
+  <rect x="20" y="30" width="250" height="80" rx="8" fill="#1a0e22" stroke="#c07ef8" stroke-width="1.5"/>
+  <text x="145" y="58" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">TS — drag interaction</text>
+  <text x="145" y="78" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#c79fe8">pointer-move event</text>
+  <text x="145" y="96" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#c79fe8">→ fire-and-forget edit·update</text>
 
-  <!-- dest node -->
-  <circle cx="780" cy="150" r="46" fill="#1a0e22" stroke="#c07ef8" stroke-width="2"/>
-  <text x="780" y="154" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="700" fill="#c07ef8">dest</text>
-  <text x="780" y="226" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#c79fe8">node.position (local)</text>
+  <!-- arrow TS→Go (update) -->
+  <line x1="270" y1="70" x2="430" y2="70" stroke="#c07ef8" stroke-width="2" marker-end="url(#dArrTs)"/>
+  <text x="350" y="58" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c79fe8">edit·update</text>
+  <text x="350" y="88" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#8a6a9a">(no await)</text>
 
-  <!-- the live wire -->
-  <line x1="196" y1="150" x2="734" y2="150" stroke="#c07ef8" stroke-width="3" marker-end="url(#dArrTs)"/>
-  <text x="465" y="138" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#c07ef8">live wire = LineCurve3(portWorldPos start, portWorldPos end)</text>
-  <text x="465" y="184" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#8a6a9a">endpoints recomputed each frame from LOCAL node positions</text>
+  <!-- Go box -->
+  <rect x="430" y="30" width="320" height="120" rx="8" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
+  <text x="590" y="58" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="700" fill="#5ec4a0">Go — applyNodeMove</text>
+  <text x="590" y="78" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#cfe8df">1. update held position</text>
+  <text x="590" y="96" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#cfe8df">2. emitNodeGeometry → node-geometry event</text>
+  <text x="590" y="114" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#cfe8df">3. ReviseInFlightGeometry + geometry events</text>
+  <text x="590" y="132" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9.5" fill="#5e8a78">stdin_reader.go · builders.go</text>
 
-  <!-- the bead -->
-  <circle cx="430" cy="150" r="11" fill="#5ec4a0" stroke="#0e1e1a" stroke-width="2"/>
-  <text x="430" y="120" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#5ec4a0">bead</text>
+  <!-- arrows Go→TS (three streams) -->
+  <!-- node-geometry -->
+  <line x1="750" y1="80" x2="900" y2="80" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#dArrGo)"/>
+  <text x="825" y="68" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">node-geometry</text>
 
-  <!-- Go supplies t -->
-  <line x1="430" y1="300" x2="430" y2="168" stroke="#5ec4a0" stroke-width="2" marker-end="url(#dArrGo)"/>
-  <rect x="320" y="300" width="220" height="44" rx="8" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-  <text x="430" y="320" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" font-weight="700" fill="#5ec4a0">Go: fraction t (the one clock)</text>
-  <text x="430" y="336" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5e8a78">place = lerp(liveStart, liveEnd, t)</text>
+  <!-- geometry -->
+  <line x1="750" y1="200" x2="900" y2="200" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#dArrGo)"/>
+  <text x="825" y="188" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">geometry (wireSegment)</text>
+
+  <!-- position -->
+  <line x1="750" y1="320" x2="900" y2="320" stroke="#5ec4a0" stroke-width="1.5" marker-end="url(#dArrGo)"/>
+  <text x="825" y="308" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">position (bead world pos)</text>
+
+  <!-- TS render boxes -->
+  <rect x="900" y="56" width="130" height="48" rx="6" fill="#1a0e22" stroke="#c07ef8" stroke-width="1"/>
+  <text x="965" y="76" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">node body</text>
+  <text x="965" y="92" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#8a6a9a">nodeGeometryStore</text>
+
+  <rect x="900" y="176" width="130" height="48" rx="6" fill="#1a0e22" stroke="#c07ef8" stroke-width="1"/>
+  <text x="965" y="196" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">wire tube</text>
+  <text x="965" y="212" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#8a6a9a">edgeGeometryStore</text>
+
+  <rect x="900" y="296" width="130" height="48" rx="6" fill="#1a0e22" stroke="#c07ef8" stroke-width="1"/>
+  <text x="965" y="316" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">bead sphere</text>
+  <text x="965" y="332" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#8a6a9a">pulse.pos (world xyz)</text>
+
+  <!-- round-trip note -->
+  <text x="590" y="380" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10.5" fill="#d4a017">round-trip ≈ 1 frame (local stdio) — acceptable lag</text>
 </svg>
     </div>
 
     <table class="spec-table">
       <colgroup><col class="c-d1"><col class="c-d2"><col class="c-d3"><col class="c-d4"></colgroup>
-      <thead><tr><th>During a drag</th><th>Owner</th><th>Source</th><th>Why here</th></tr></thead>
+      <thead><tr><th>During a drag</th><th>Owner</th><th>Source</th><th>Notes</th></tr></thead>
       <tbody>
         <tr>
           <td>Node body position</td>
-          <td><span class="owner ts">Editor / local</span></td>
-          <td class="file">nodeWorldPos → node.position (geometry-helpers.ts)</td>
-          <td>Sourcing the body from Go's emitted center made dragging invisible — Go re-emits only edge curves on node-move, not node-geometry, so the body read a stale center.</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">node-geometry event → useNodeGeometryStore (pump.ts → scene-content.tsx)</td>
+          <td>Go holds the position and re-emits <code>node-geometry</code> on every move via <code>applyNodeMove</code> → <code>emitNodeGeometry</code>. TS reads <code>nodeGeometryStore</code> to place the body mesh.</td>
         </tr>
         <tr>
           <td>Wire endpoints</td>
-          <td><span class="owner ts">Editor / local</span></td>
-          <td class="file">portWorldPos (scene-content.tsx SingleEdgeTube)</td>
-          <td>Reading them from Go's edge-geometry store lagged a round-trip behind the body (already local), so the wire trailed the node.</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">geometry event → useEdgeGeometryStore (SingleEdgeTube, scene-content.tsx)</td>
+          <td>Go re-emits edge wireSegment for every incident edge on node-move. <code>SingleEdgeTube</code> reads <code>useEdgeGeometryStore</code>; TS computes no endpoints.</td>
         </tr>
         <tr>
-          <td>Bead progress (fraction t)</td>
-          <td><span class="owner go">Go / t</span></td>
-          <td class="file">position event field f (paced_wire.go → Trace.go)</td>
-          <td>Progress is timing, off the one clock; the editor must not invent it.</td>
+          <td>Bead world position</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">position event field x/y/z (paced_wire.go → Trace.go → pump.ts)</td>
+          <td>Go's <code>ReviseInFlightGeometry</code> preserves the fraction (not absolute distance) when the wire reshapes, so the bead position lands on the moved wire without racing. TS plots <code>pulse.pos</code> directly onto the mesh.</td>
         </tr>
         <tr>
-          <td>Bead placement</td>
-          <td><span class="owner ts">Editor (lerp)</span></td>
-          <td class="file">mesh.position.lerpVectors(start, end, frac)</td>
-          <td>Go's t lerped over the live local endpoints — the bead rides the exact segment the tube draws.</td>
+          <td>Bead clear on arrival</td>
+          <td><span class="owner go">Go</span></td>
+          <td class="file">arrive event (Trace.go KindArrive → pump.ts)</td>
+          <td>The pulse is cleared on an <code>arrive</code> trace event (traversal-complete), not on node-consume, so it doesn't linger at the dest port. The walker's relaunch tick is clamped to ≥now so it doesn't replay from t≈0 after a wire reshape.</td>
         </tr>
       </tbody>
     </table>
 
-    <div class="callout-good"><strong>Bug-class note (both fixed).</strong> Computing from a <em>stale source</em> (sourcing the body / endpoints from Go's round-tripped geometry) caused wire lag. Conserving the <em>wrong invariant</em> (placing the bead by absolute distance instead of fraction t) caused a pulse race when the wire length changed mid-flight. The fix: editor owns live placement, Go owns fraction t — distance is re-derived from t over whatever the live endpoints currently are.</div>
+    <div class="callout-good"><strong>Bug fixed: missing return emit.</strong> <code>applyNodeMove</code> updated Go's held position and re-emitted edge geometry but never called <code>emitNodeGeometry</code>. The node body read a stale center and appeared stuck. Fix in <code>nodes/Wiring/stdin_reader.go</code> line 155: <code>emitNodeGeometry(nmr.tr, nodeId, g)</code> after updating the held position.</div>
 
-    <div class="note"><strong>At rest vs. live.</strong> Go's emitted node-geometry is authoritative at rest and is always the source for port offsets + directions (which don't change when a node translates). The editor takes over only the live <em>position</em> during a drag. Legacy <code>geometry</code> (wireSegment) trace events + the edge-geometry store still exist but are no longer read for rendering — kept for the delete path.</div>
+    <div class="callout-good"><strong>Bead-specific fixes (Go-side, still in place).</strong> In-flight revision preserves the FRACTION (not absolute distance) so the bead doesn't race when a wire reshapes (<code>ReviseInFlightGeometry</code>). The walker's relaunch tick is clamped to ≥now so it doesn't replay from t≈0. The pulse clears on an <code>arrive</code> trace event (traversal-complete) rather than on node-consume, so it doesn't linger at the dest port.</div>
+
+    <div class="note"><strong>Old shortcut (reverted).</strong> An earlier attempt had TS read local React Flow <code>node.position</code> for the body and compute local wire endpoints — giving zero round-trip lag at the cost of TS owning position data. That shortcut was reverted: the fix belonged in Go (add the missing <code>emitNodeGeometry</code> call), not in TS accumulating position state. The round-trip lag (~1 frame over local stdio) is acceptable.</div>
   </div>
 
   <!-- TAB 4: Bridge -->
   <div class="panel" id="panel-bridge" role="tabpanel">
     <h2>Go &rarr; TS — the trace stream</h2>
-    <p>The closed kind vocabulary from <code>Trace/Trace.go</code> (<code>TraceEventKinds</code>), mirrored in <code>messages.ts</code> (<code>TraceEvent</code> union). Go reports what it does; TS plots.</p>
+    <p>The closed kind vocabulary from <code>Trace/Trace.go</code> (<code>TraceEventKinds</code>), mirrored in <code>messages.ts</code> (<code>TraceEvent</code> union). Go reports what it does; TS plots. There are 9 kinds.</p>
     <table class="spec-table">
       <colgroup><col class="c-b1"><col class="c-b2"><col class="c-b3"><col class="c-b4"><col class="c-b5"></colgroup>
       <thead><tr><th>Kind</th><th>Owner</th><th>Dir</th><th>Payload gist</th><th>TS consumer</th></tr></thead>
@@ -555,9 +582,10 @@ The <span class="br">bridge</span> is two channels: Go&rarr;TS trace stream (pos
         <tr><td class="file">send</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>node + out port + value; +arcLength, simLatencyMs, target, targetHandle when PacedWire-backed.</td><td>pump.ts → setPulse (match by source+sourceHandle)</td></tr>
         <tr><td class="file">done</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>node + input port — receiver finished with a value.</td><td>pump.ts → clearPulse (match by target+targetHandle)</td></tr>
         <tr><td class="file">position</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>source node+port, value, world x/y/z, and fraction <code>f</code> (0..1). ~every 16 ms in flight + once at t=1.</td><td>pump.ts → pulse-state (editor uses f, not x/y/z, to place)</td></tr>
-        <tr><td class="file">geometry</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>edge (label) + straight-segment endpoints sx/sy/sz → ex/ey/ez. Emitted on load &amp; on node-move.</td><td>edge-geometry store (legacy — kept for delete path, not read for render)</td></tr>
+        <tr><td class="file">geometry</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>edge (label) + straight-segment endpoints sx/sy/sz → ex/ey/ez. Emitted on load &amp; on every node-move (<code>applyNodeMove</code>).</td><td>edge-geometry store → <code>SingleEdgeTube</code> reads <code>useEdgeGeometryStore</code> to draw the wire tube. Go re-streams on drag, so the wire follows the moved node.</td></tr>
         <tr><td class="file">pulse-cancelled</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>source node+port+value — wire dropped a bead mid-flight (edge deleted during traversal).</td><td>pump.ts → drop bead sprite by source</td></tr>
-        <tr><td class="file">node-geometry</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>node id + center nx/ny/nz + per-port world pos/dir. Each node's goroutine emits once on startup.</td><td>useNodeGeometryStore (port dirs at rest; body via local during drag)</td></tr>
+        <tr><td class="file">node-geometry</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>node id + center nx/ny/nz + per-port world pos/dir. Emitted on startup AND on every node-move (<code>applyNodeMove</code> → <code>emitNodeGeometry</code>).</td><td>useNodeGeometryStore — node body position + port dirs; authoritative for both rest and drag.</td></tr>
+        <tr><td class="file">arrive</td><td><span class="owner go">Go</span></td><td>Go&rarr;TS</td><td>source node+port+value — bead reached the dest port (traversal-complete). Emitted after <code>deliverLocked</code>, once per bead.</td><td>pump.ts → clear pulse (removes bead sprite at traversal-complete, before node-consume)</td></tr>
       </tbody>
     </table>
 
