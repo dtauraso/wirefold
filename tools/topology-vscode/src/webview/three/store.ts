@@ -6,8 +6,8 @@ import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import { parseSpec } from "../../schema";
 import { specToFlow } from "../state/adapter/spec-to-flow";
 import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
-import { parseViewerState, serializeSceneState, mergeSceneIntoViewerState } from "../state/viewer/types";
-import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../save";
+import { parseViewerState, mergeSceneIntoViewerState } from "../state/viewer/types";
+import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
 import { postLog } from "../log/post";
 import { vscode } from "../vscode-api";
 import { clearPulse } from "./pulse-state";
@@ -78,8 +78,9 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         ? mergeSceneIntoViewerState(diagramView, sceneView)
         : diagramView;
       setViewerState(next);
-      // Race guard keyed on scene text — performViewSave sends serializeSceneState.
-      markViewSynced(serializeSceneState(next));
+      // Race guard keyed on the combined diagram+scene payload — must match
+      // performViewSave's guard key so the initial load doesn't retrigger a save.
+      markViewSynced(viewSyncedKey(next));
       const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
       const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
       const flow = specToFlow(spec, next, next.lastSelectionIds ?? []);
