@@ -5,8 +5,8 @@
       "type": "Input",
       "data": {
         "init": [
-          0,
-          1
+          1,
+          0
         ],
         "repeat": true
       },
