@@ -140,7 +140,10 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), document.uri);
         runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op, target: msg.target, targetHandle: msg.targetHandle }));
       } else if (msg.op === "update") {
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "update", nodeId: msg.nodeId, x: msg.x, y: msg.y, z: msg.z ?? 0 }));
+        // Forward the node-move entries map verbatim (keyed by moved node id + each
+        // incident edge id); Go's stdin reader mail-sorts each entry to the owning
+        // node/edge goroutine. Fire-and-forget.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "update", entries: msg.entries }));
       } else if (msg.op === "fade") {
         runner.writeStdin(JSON.stringify({ type: "edit", op: "fade", edges: msg.edges }));
       }

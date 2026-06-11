@@ -151,6 +151,12 @@ type PacedWire struct {
 	// read only by In.SimLatencyMs() to derive a windowed node's coincidence
 	// window W. Set at load and recomputed on node-move. Guarded by mu.
 	MaxIncomingSimLatencyMs float64
+	// incomingLatency tracks each feeding edge's own SimLatencyMs (edgeId →
+	// latency), so a per-edge mover can update its contribution on a node-move and
+	// have the wire recompute MaxIncomingSimLatencyMs as the max over ALL feeding
+	// edges (not just the moved one). Seeded at load via SetIncomingLatency.
+	// Guarded by mu.
+	incomingLatency map[string]float64
 	Target           string       // destination node id — authoritative slot identity (set by loader)
 	TargetHandle     string       // destination input-port name — authoritative slot identity (set by loader)
 	Trace            *T.Trace     // injected by loader; used for breadcrumb diagnostics only
@@ -172,6 +178,27 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	}
 	pw.cond = sync.NewCond(&pw.mu)
 	return pw
+}
+
+// SetIncomingLatency records one feeding edge's own travel-time (SimLatencyMs)
+// and recomputes MaxIncomingSimLatencyMs as the max over every feeding edge. The
+// loader seeds it per edge at construction; an edge mover calls it on a node-move
+// so the per-port window aggregate stays correct across ALL feeding edges (fan-in),
+// not just the one that moved. Guarded by mu.
+func (pw *PacedWire) SetIncomingLatency(edgeID string, lat float64) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	if pw.incomingLatency == nil {
+		pw.incomingLatency = map[string]float64{}
+	}
+	pw.incomingLatency[edgeID] = lat
+	var maxLat float64
+	for _, l := range pw.incomingLatency {
+		if l > maxLat {
+			maxLat = l
+		}
+	}
+	pw.MaxIncomingSimLatencyMs = maxLat
 }
 
 // SetClock injects the monotonic clock this wire reads to time delivery. The

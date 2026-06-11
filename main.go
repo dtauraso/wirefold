@@ -31,16 +31,20 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()
 
-	nodes, slotReg, reg, nmr, err := W.LoadTopology(ctx, topologyPath, tr, clk)
+	nodes, slotReg, reg, md, err := W.LoadTopology(ctx, topologyPath, tr, clk)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
 
+	// Launch the per-node and per-edge move-handler goroutines (decentralized
+	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
+	md.Start(ctx)
+
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete/fade)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, reg, nmr, tr, clk)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, reg, md, tr, clk)
 		cancel()
 	}()
 

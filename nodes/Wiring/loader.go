@@ -141,13 +141,13 @@ func (reg WireRegistry) ForEach(fn func(id string, pw *PacedWire)) {
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
 // SlotRegistry (keyed by "target.targetHandle" for delivery acks), a WireRegistry
-// (keyed by edge label for fade/node-move), and a NodeMoveRegistry for live position
-// updates (used by the stdin reader to handle node-move messages).
+// (keyed by edge label for fade/node-move), and a MoveDispatch (key→inbox registry
+// for the decentralized node-move path: each node and edge owns its own recompute).
 //
 // clk is the single monotonic clock injected into every PacedWire so each wire
 // times its own delivery on it (MODEL.md: exactly one clock). Production passes a
 // RealClock; tests pass a FakeClock they advance deterministically.
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *NodeMoveRegistry, error) {
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -227,12 +227,12 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		}
 	}
 
-	// Build NodeMoveRegistry from initial geometry and edge endpoints. The
-	// registry recomputes port-to-port curve + arc length on node-move, so it needs
-	// the full per-node geometry (kind/dims/ports), not just position. The trace lets
-	// it stream the re-derived curve (KindGeometry) on each move.
-	nmr := NewNodeMoveRegistry(nodeGeoms, edgeEndpoints)
-	nmr.SetTrace(tr)
+	// Build the MoveDispatch from initial geometry and edge endpoints. It creates one
+	// nodeMover per node and one edgeMover per edge; each owns its geometry and
+	// recomputes itself on a node-move (no central coordinator). The trace lets each
+	// mover stream its own node/edge geometry on a move. Outs + dest wires are bound
+	// below once node construction has populated them.
+	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}
@@ -368,9 +368,10 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		nodes = append(nodes, nd)
 	}
 
-	// Index per-edge source Outs and dest wires into the move registry so
-	// node-move can update per-edge travel-time and the per-port window aggregate.
-	nmr.SetEdgeOuts(outSink, SlotRegistry(destWire))
+	// Bind per-edge source Outs and dest wires into each edgeMover so a node-move
+	// updates per-edge travel-time and the per-port window aggregate, and seed each
+	// dest wire's per-edge latency for the MaxIncomingSimLatencyMs aggregate.
+	md.Bind(outSink, SlotRegistry(destWire))
 
-	return nodes, SlotRegistry(destWire), edgeWire, nmr, nil
+	return nodes, SlotRegistry(destWire), edgeWire, md, nil
 }

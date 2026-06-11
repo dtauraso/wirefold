@@ -380,8 +380,8 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 // emitNodeGeometry streams a node's authoritative center + per-port world
 // positions/dirs as a node-geometry event, computed with the port_geometry.go
 // helpers (no duplicated math). Called from each node's EmitGeometry closure on
-// startup AND from applyNodeMove when the node's held position changes, so the
-// renderer always draws the node body + ports from Go's stream.
+// startup AND from the node's own move-handler goroutine (nodeMover) when its held
+// position changes, so the renderer always draws the node body + ports from Go's stream.
 func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 	center := nodeWorldPos(g)
 	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))

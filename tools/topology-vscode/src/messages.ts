@@ -14,10 +14,17 @@ export type RunStatus =
 // (nodes/Wiring/stdin_reader.go applyEdit). Go owns the clock; this seam carries no
 // delivery signal. ops: create/delete a wire (edge add/remove), update node
 // geometry (node-move), fade an edge set.
+//
+// For op="update" (node-move): the decentralized Go path mail-sorts the move to the
+// owning node + each incident edge goroutine, so the entries map is keyed by the
+// moved node id AND each incident edge id (source===moved || target===moved). Every
+// entry carries the same moved node id + new position. The webview computes the
+// incident edges from its React Flow graph (TS owns the graph; Go owns the recompute).
+export type MoveEntry = { nodeId: string; x: number; y: number; z: number };
 export type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
-  | { type: "edit"; op: "update"; nodeId: string; x: number; y: number; z?: number }
+  | { type: "edit"; op: "update"; entries: Record<string, MoveEntry> }
   | { type: "edit"; op: "fade"; edges: string[] };
 
 export type WebviewToHostMsg =
