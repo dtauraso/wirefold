@@ -567,7 +567,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `export const NODE_DEFS: Record<string, NodeDef> = {`)
 	for _, e := range kinds {
-		fmt.Fprintf(w, "  %s: %s,\n", e.goKind, buildDef(e.view, e.ports, e.defaultData))
+		fmt.Fprintf(w, "  %s: %s,\n", e.goKind, buildDef(e.view, e.ports))
 	}
 	fmt.Fprint(w, `};`, "\n")
 
@@ -575,7 +575,7 @@ func writeNodeDefs(outPath string, kinds []kindEntry) error {
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }
 
-func buildDef(v viewDef, ports []port, defaultData string) string {
+func buildDef(v viewDef, ports []port) string {
 	targets := filterPorts(ports, "in")
 	sources := filterPorts(ports, "out")
 
