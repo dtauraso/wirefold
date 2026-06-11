@@ -16,7 +16,6 @@ import { GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts } from "./scene-content";
-import { nodeOverrideText } from "./node-override-text";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -292,43 +291,6 @@ export function ThreeView() {
             }}
           >
             +{count}
-          </div>
-        );
-      })}
-
-      {/* In-node spec-override text — HTML overlay (NOT drei) projected at
-          each node's world center. Mirrors the top billboard pattern above. */}
-      {nodes.map((n) => {
-        const pos = labelMap.get(n.id);
-        if (!pos) return null;
-        const text = nodeOverrideText(n);
-        if (!text) return null;
-        const overrideOverlayPill: React.CSSProperties = {
-              background: "rgba(0,0,0,0.35)",
-              border: "none",
-              borderRadius: 4,
-              padding: "3px 6px",
-            };
-        return (
-          <div
-            key={`override-${n.id}`}
-            style={{
-              position: "absolute",
-              left: pos.cx,
-              top: pos.cy,
-              transform: "translate(-50%, -50%)",
-              fontSize: 9,
-              fontFamily: "monospace",
-              color: "#e0e0e0",
-              pointerEvents: "none",
-              lineHeight: 1.25,
-              textAlign: "center",
-              whiteSpace: "pre",
-              zIndex: 12,
-              ...overrideOverlayPill,
-            }}
-          >
-            {text}
           </div>
         );
       })}
