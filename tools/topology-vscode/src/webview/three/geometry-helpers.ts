@@ -55,14 +55,27 @@ export function boundingBox(nodes: RFNode<NodeData>[]) {
   return { minX, maxX, minY, maxY };
 }
 
-/** World position for a node center — reads Go's emitted center, falls back to local compute. */
+/**
+ * World position for a node center.
+ *
+ * The node BODY position is sourced from the editor's LOCAL React Flow
+ * node.position — the editor owns viewpoint + interaction, and the node position
+ * the user is dragging is a local fact. Sourcing the body from Go's emitted center
+ * made dragging invisible: Go emits node-geometry once at startup and applyNodeMove
+ * re-emits only edge curves, never node-geometry, so the body read a stale center
+ * and never followed the drag. Reading node.position makes the drag immediate and
+ * optimistic. Go still re-derives + streams the edge curves on the node-move IPC, so
+ * the wire bead-chain endpoints follow.
+ *
+ * Note: portDir below still reads Go's store — port DIRECTIONS are relative offsets
+ * from the center and don't change when the node translates, so they stay
+ * Go-authoritative.
+ */
 export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
-  const g = getNodeGeometry(node.id);
-  if (g) return new THREE.Vector3(g.center.x, g.center.y, g.center.z);
   return nodeWorldPosLocal(node);
 }
 
-/** FALLBACK: local node-center compute (RF y-down → Three y-up). Used pre-emit only. */
+/** Local node-center compute (RF y-down → Three y-up). */
 function nodeWorldPosLocal(node: RFNode<NodeData>): THREE.Vector3 {
   const x = node.position.x + (node.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
   const y = -(node.position.y + (node.data?.height ?? NODE_DIM_FALLBACK.height) / 2);

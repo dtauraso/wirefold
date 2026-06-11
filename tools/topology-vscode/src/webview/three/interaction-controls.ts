@@ -278,7 +278,13 @@ export function useInteractionControls(
             const newCenterY = planePoint.y + (nd.nodeCenterAtStart.y - nd.planePointAtStart.y);
             const newPosX = newCenterX - w / 2;
             const newPosY = -newCenterY - h / 2;
+            postLog("dbg.dragmove", { nodeId: nd.nodeId, newPosX, newPosY });
             onMoveNode(nd.nodeId, newPosX, newPosY);
+            postLog("dbg.dragmove-applied", {
+              nodeId: nd.nodeId,
+              local: { x: newPosX, y: newPosY },
+              sentToGo: true,
+            });
             scheduleNodeMove(nd.nodeId, newPosX, newPosY);
           }
         }
