@@ -22,10 +22,57 @@ as circuit primitives.
 The visual editor is the medium for authoring and observing the network;
 the network itself is the nodes-and-wires Go runtime.
 
+## The wire is a chain of bead-items
+
+A wire is not a single transport with a drawn curve. It is a **chain of many bead-sized
+items** strung between the source node's output port and the destination node's input
+port — those two ports are the chain's fixed **anchors**. The wire renders as a chain of
+beads; each item *is* a bead.
+
+Each item is a **goroutine** that owns its own position and has exactly two neighbors
+(one toward each anchor). An item **sends its position to its two neighbors**; when a
+neighbor's position changes, the item moves to the **midpoint of its two neighbors**,
+removing its own peak/valley. Straightness is **emergent** from this local relaxation —
+there is no curve formula and no central solver. The relaxation runs at **machine
+speed**, is **event-driven** (an item recomputes only when a neighbor's position
+actually changed, then goes quiet), and is **decoupled from the clock**.
+
+Items are **born and retired** to hold ~one-bead spacing as the wire stretches or
+shrinks: a too-wide gap spawns a new item at its midpoint; a too-tight pair retires one
+and relinks its neighbors. The **item-count is the wire's length measure** — `distance ≈
+item-count × bead-size` — so a node knows its distance to a *connected* node as the
+chain's length, never by measuring node-to-node across space. Because density
+maintenance runs at machine speed, points can only coincide at the sub-pixel spacing
+floor.
+
+The **value-bead** carries the transported value and visits each item in sequence,
+source → items → destination; it is the lit bead running along the string. A retiring
+item that is carrying the value-bead **hands it to its next neighbor toward the
+destination** before unsplicing, so a value is never lost to the machine-speed churn.
+
+**Two timescales:** geometry maintenance (items straightening, born/retired) is unpaced
+machine-speed; the **value-bead's motion is clock-paced** (the one clock), at uniform
+pulse speed.
+
+**Node-move** is felt first by the **edge item** adjacent to the moved port anchor: it
+becomes a peak/valley — a *half* one, since only its anchor-side neighbor moved — and
+adjusts immediately; the correction propagates inward along the chain. There is no
+central node-move recompute; the chain re-straightens itself.
+
+### Implementation status
+
+This chain model is the authoritative target. The current code still implements the
+**prior form**: a single `PacedWire` goroutine per destination port carrying a bead along
+a straight `wireSegment` (`lerp`), with arc-length / pulse-speed traversal timing and a
+central `NodeMoveRegistry` recompute on node-move. Migration to the bead-item chain is
+pending. Until then, the `PacedWire` / `wireSegment` / `NodeMoveRegistry` descriptions
+elsewhere in this file describe the code **as built**; this section describes **where it
+is going**.
+
 ## What things are
 
 - **Bead.** A value in transit from a source node to a destination node.
-- **Wire (`PacedWire` goroutine).** Transport plus visual depiction. A
+- **Wire.** *Model:* a chain of bead-sized item goroutines (see *The wire is a chain of bead-items*). *Current implementation (`PacedWire` goroutine):* transport plus visual depiction. A
   wire polls its inbound channel for a bead the source placed, times the
   traversal on Go's clock, advances the bead, emits the bead's position
   for the renderer, and on traversal-complete puts the bead on the
@@ -80,6 +127,7 @@ A node places a bead on its outgoing wire whenever its own rule says to. It does
   time. If the new arc length is below the distance covered, the
   traversal completes immediately.
 - Traversal time is the only duration the network tracks.
+- *(Chain model, pending):* straightness and length are emergent from the bead-item chain (item-count × bead-size), not a curve; the value-bead traverses items at uniform pulse speed. Arc-length/pulse-speed timing above is the current implementation.
 
 ## Driver
 
@@ -159,3 +207,4 @@ move it back into Go.
 - node receives, node holds, node fires, wire advances, wire delivers,
   wire emits position
 - halt, resume, global gate
+- bead-item (item), chain, anchor, neighbor, midpoint relax, peak/valley, born/retired item, value-bead, spacing floor, edge item (chain model)
