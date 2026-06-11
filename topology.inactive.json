@@ -1,5 +1,5 @@
 {
-  "_note": "Parked/inactive content. The editor never reads this file, so it survives editor saves. Active set is in08 + i0 + i1 with edge i0->i1; everything here is inactive. Restore by copying objects back into topology.json.",
+  "_note": "Parked/inactive content. The editor never reads this file, so it survives editor saves. Active set is 1 + 2 + 3 with edge 2->3; everything here is inactive. Restore by copying objects back into topology.json.",
   "nodes": [
     {
       "id": "bootstrap_rg",
@@ -139,7 +139,7 @@
       "target": "inhibitRight0",
       "targetHandle": "FromLeft",
       "kind": "any",
-      "label": "i0ToNext1ToInhibitRight0FromLeft"
+      "label": "2ToNext1ToInhibitRight0FromLeft"
     }
   ]
 }
