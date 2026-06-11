@@ -3,16 +3,12 @@
 // CameraRefBridge, LabelProjector, CameraSettleDetector,
 // computeOcclusionCounts, RaycasterHelper, NearestNTracker, Scene.
 
-import { useEffect, useRef, useMemo, createContext, useContext, useState } from "react";
+import React, { useEffect, useRef, useMemo, createContext, useContext, useState } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
-import { getPulseMap, claimDelivered, lastDeliveredAt } from "./pulse-state";
-import { vscode } from "../vscode-api";
-import { postLog } from "../log/post";
-import { getPauseAdjustedNow } from "../state/run-status";
 import {
   nodeRadius,
   boundingBox,
@@ -20,10 +16,49 @@ import {
   nodeTopWorldPos,
   ndcToPixel,
   portDir,
-  portWorldPos,
-  buildPortCurve,
 } from "./geometry-helpers";
+import { getPulseMap } from "./pulse-state";
+import { useEdgeGeometryStore } from "./edge-geometry";
 import type { PickOptions } from "./interaction-controls";
+// Shading PARAMETER values are Go-authoritative (MODEL.md / Phase 4). They are
+// generated from nodes/Wiring/shading_params.go into ../../schema/shading-params.
+// This module sources NO shading values of its own — it only runs the GPU:
+// creates THREE materials, bakes the PMREM env map, and binds these Go params.
+import {
+  SHADING_PARAM_NODE_TRANSMISSION,
+  SHADING_PARAM_NODE_THICKNESS,
+  SHADING_PARAM_NODE_ROUGHNESS,
+  SHADING_PARAM_NODE_IOR,
+  SHADING_PARAM_NODE_METALNESS,
+  SHADING_PARAM_NODE_CLEARCOAT,
+  SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
+  SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
+  SHADING_PARAM_NODE_OPACITY,
+  SHADING_PARAM_NODE_FADE_OPACITY,
+  SHADING_PARAM_NODE_FADE_BODY_MUL,
+  SHADING_PARAM_ENV_SKY_TOP_R,
+  SHADING_PARAM_ENV_SKY_TOP_G,
+  SHADING_PARAM_ENV_SKY_TOP_B,
+  SHADING_PARAM_ENV_SKY_BOTTOM_R,
+  SHADING_PARAM_ENV_SKY_BOTTOM_G,
+  SHADING_PARAM_ENV_SKY_BOTTOM_B,
+  SHADING_PARAM_ENV_SKY_RADIUS,
+  SHADING_PARAM_ENV_AMBIENT_COLOR,
+  SHADING_PARAM_ENV_AMBIENT_INTENSITY,
+  SHADING_PARAM_ENV_KEY_COLOR,
+  SHADING_PARAM_ENV_KEY_INTENSITY,
+  SHADING_PARAM_ENV_RIM_COLOR,
+  SHADING_PARAM_ENV_RIM_INTENSITY,
+  SHADING_PARAM_ENV_PMREM_BLUR,
+  SHADING_PARAM_SCENE_AMBIENT_INTENSITY,
+  SHADING_PARAM_SCENE_DIR_INTENSITY,
+  SHADING_PARAM_TUBE_COLOR,
+  SHADING_PARAM_TUBE_EMISSIVE,
+  SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
+  SHADING_PARAM_BEAD_COLOR,
+  SHADING_PARAM_BEAD_EMISSIVE,
+  SHADING_PARAM_BEAD_EMISSIVE_INTENSITY,
+} from "../../schema/shading-params";
 
 // ---------------------------------------------------------------------------
 // Label LOD constants
@@ -88,39 +123,39 @@ function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
     // Build a tiny scene: gradient sky sphere, no textures.
     const envScene = new THREE.Scene();
 
-    // Sky hemisphere — top blue-white, horizon warm cream
-    const skyGeo = new THREE.SphereGeometry(50, 16, 8);
+    // Sky hemisphere — top neutral, horizon warm cream (Go-supplied tint params).
+    const skyGeo = new THREE.SphereGeometry(SHADING_PARAM_ENV_SKY_RADIUS, 16, 8);
     const skyMat = new THREE.MeshBasicMaterial({
       side: THREE.BackSide,
       vertexColors: true,
     });
     const skyMesh = new THREE.Mesh(skyGeo, skyMat);
-    // Tint vertices top→bottom: cool blue at top, warm grey at equator
+    // Tint vertices top→bottom by lerping Go's top/bottom sky colors. t=1 at the
+    // top, t=0 at the horizon; channel = top + (bottom - top) * (1 - t).
     const posAttr = skyGeo.attributes.position as THREE.BufferAttribute;
     const count = posAttr.count;
     const colors = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       const y = posAttr.getY(i);
-      const t = Math.max(0, Math.min(1, (y / 50 + 1) / 2)); // 0 bottom → 1 top
-      // top: #c8c4bc (mid neutral, close to bottom — no bright hot-spot), bottom: #ffe0c0 (warm cream)
-      colors[i * 3 + 0] = 0.78 + (1.0 - 0.78) * (1 - t); // r
-      colors[i * 3 + 1] = 0.77 + (0.88 - 0.77) * (1 - t); // g
-      colors[i * 3 + 2] = 0.74 + (0.75 - 0.74) * (1 - t);  // b
+      const t = Math.max(0, Math.min(1, (y / SHADING_PARAM_ENV_SKY_RADIUS + 1) / 2)); // 0 bottom → 1 top
+      colors[i * 3 + 0] = SHADING_PARAM_ENV_SKY_TOP_R + (SHADING_PARAM_ENV_SKY_BOTTOM_R - SHADING_PARAM_ENV_SKY_TOP_R) * (1 - t); // r
+      colors[i * 3 + 1] = SHADING_PARAM_ENV_SKY_TOP_G + (SHADING_PARAM_ENV_SKY_BOTTOM_G - SHADING_PARAM_ENV_SKY_TOP_G) * (1 - t); // g
+      colors[i * 3 + 2] = SHADING_PARAM_ENV_SKY_TOP_B + (SHADING_PARAM_ENV_SKY_BOTTOM_B - SHADING_PARAM_ENV_SKY_TOP_B) * (1 - t); // b
     }
     skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     envScene.add(skyMesh);
 
-    // Soft white fill light — bakes into env
-    const fill = new THREE.AmbientLight(0xffffff, 0.9);
+    // Soft white fill light — bakes into env (Go-supplied color + intensity).
+    const fill = new THREE.AmbientLight(new THREE.Color(SHADING_PARAM_ENV_AMBIENT_COLOR), SHADING_PARAM_ENV_AMBIENT_INTENSITY);
     envScene.add(fill);
-    const key = new THREE.DirectionalLight(0xffeedd, 0.45);
+    const key = new THREE.DirectionalLight(new THREE.Color(SHADING_PARAM_ENV_KEY_COLOR), SHADING_PARAM_ENV_KEY_INTENSITY);
     key.position.set(1, 2, 1);
     envScene.add(key);
-    const rim = new THREE.DirectionalLight(0xaabbff, 0.3);
+    const rim = new THREE.DirectionalLight(new THREE.Color(SHADING_PARAM_ENV_RIM_COLOR), SHADING_PARAM_ENV_RIM_INTENSITY);
     rim.position.set(-2, 1, -1);
     envScene.add(rim);
 
-    const tex = pmrem.fromScene(envScene, 0.04).texture;
+    const tex = pmrem.fromScene(envScene, SHADING_PARAM_ENV_PMREM_BLUR).texture;
     // Store in state — does NOT assign to scene.environment.
     setEnvTex(tex);
 
@@ -213,7 +248,7 @@ export function GraphNode({
   const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
   const torusThick = (selected || hovered) ? r * 0.14 : r * 0.08;
-  const fadeOpacity = 0.25;
+  const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
@@ -222,17 +257,17 @@ export function GraphNode({
         <meshPhysicalMaterial
           key={faded ? "faded" : "solid"}
           color={fillColor}
-          transmission={1.0}
-          thickness={0}
-          roughness={0.12}
-          ior={1.5}
-          metalness={0}
-          clearcoat={0}
-          clearcoatRoughness={0.1}
+          transmission={SHADING_PARAM_NODE_TRANSMISSION}
+          thickness={SHADING_PARAM_NODE_THICKNESS}
+          roughness={SHADING_PARAM_NODE_ROUGHNESS}
+          ior={SHADING_PARAM_NODE_IOR}
+          metalness={SHADING_PARAM_NODE_METALNESS}
+          clearcoat={SHADING_PARAM_NODE_CLEARCOAT}
+          clearcoatRoughness={SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS}
           envMap={envTex ?? undefined}
-          envMapIntensity={1.0}
+          envMapIntensity={SHADING_PARAM_NODE_ENV_MAP_INTENSITY}
           transparent
-          opacity={faded ? fadeOpacity * 0.6 : 0.92}
+          opacity={faded ? fadeOpacity * SHADING_PARAM_NODE_FADE_BODY_MUL : SHADING_PARAM_NODE_OPACITY}
           depthWrite={false}
         />
       </mesh>
@@ -338,7 +373,7 @@ export function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
-// Edges — 3D tube path using QuadraticBezierCurve3.
+// Edges — 3D tube path using LineCurve3 (straight segment).
 // Exit/entry points: point on each node's sphere surface facing the other node.
 // ---------------------------------------------------------------------------
 
@@ -350,95 +385,90 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere that travels along the port-to-port edge curve at the current pulse t.
-// Duration is substrate-supplied (pulse.simLatencyMs); no speed constant needed.
-// Driven by useFrame reading getPulseMap() imperatively (no React context needed).
-// The curve is rebuilt each frame from src/tgt/handles via buildPortCurve so it tracks
-// node moves in the same drag tick — identical curve to SingleEdgeTube.
+// PulseBead: a bright sphere drawn ON the wire at its Go-owned fractional progress.
+// Go owns the clock and the bead's fraction along the wire; this component PLOTS ONLY —
+// each frame it reads pulse.frac (the bead's progress t, 0..1) from getPulseMap() and
+// places the bead at lerp(start, end, frac) on the SAME segment SingleEdgeTube draws,
+// read from useEdgeGeometryStore (Go's wireSegment Start/End, re-emitted on every
+// node-move). Because bead and tube share one segment source, the bead is provably on
+// the line every frame and rides the wire as the node moves — no lag, no drift.
+// No curve sampling beyond the linear lerp, no clock, no delivery message: the renderer
+// is told where the bead is (segment + fraction), never asked when it arrived (MODEL.md).
+// pulse.frac is now LIVE — it is the progress used to place the bead on the live wire.
+// Go's emitted x,y,z on the position event (pulse.pos) is now unused by the bead; it is
+// left on the bridge for now (no Go/bridge churn).
 export function PulseBead({
   edgeId,
-  src,
-  tgt,
-  sourceHandle,
-  targetHandle,
 }: {
   edgeId: string;
-  src: RFNode<NodeData>;
-  tgt: RFNode<NodeData>;
-  sourceHandle: string | null | undefined;
-  targetHandle: string | null | undefined;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
+  // SAME source SingleEdgeTube subscribes to — bead and tube cannot diverge.
+  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
 
   useFrame(() => {
     const pulse = getPulseMap().get(edgeId);
     const mesh = meshRef.current;
     if (!mesh) return;
-    if (!pulse) {
+    // Hidden until there is a pulse with a fraction AND Go has streamed this edge's
+    // segment (startup race: no segment yet → render nothing, no crash).
+    if (!pulse || pulse.frac == null || !seg) {
       mesh.visible = false;
       return;
     }
-    const curve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
-    const duration = pulse.simLatencyMs;
-    const t = Math.min((getPauseAdjustedNow() - pulse.startTime) / duration, 1);
-    if (t >= 1) {
-      mesh.visible = false;
-      // Capture the prior claim before claiming, so we can report WHY a claim
-      // failed: already-claimed-for-this-startTime (duplicate RAF tick at t>=1)
-      // vs. claimed-for-a-different-startTime (stale pulse instance).
-      const priorClaim = lastDeliveredAt(edgeId);
-      const claimed = claimDelivered(edgeId, pulse.startTime);
-      const claimReason = claimed
-        ? "first-claim"
-        : (priorClaim === pulse.startTime ? "already-claimed-this-startTime" : "claimed-other-startTime");
-      // Use Go-authoritative slot identity from pulse data; fall back to React
-      // prop only if the pulse carries empty strings (old binary compat).
-      const resolvedTarget = (pulse.target !== "") ? pulse.target : tgt.id;
-      const resolvedHandle = (pulse.targetHandle !== "") ? pulse.targetHandle : (targetHandle ?? "");
-      postLog("pulse-deliver", { edgeId, target: pulse.target, targetHandle: pulse.targetHandle, propHandle: targetHandle ?? null, startTime: pulse.startTime, claimed, claimReason, priorClaim: priorClaim ?? null, resolvedHandleMissing: !resolvedHandle, resolvedTarget, resolvedHandle, posted: claimed && !!resolvedHandle });
-      if (claimed) {
-        if (resolvedHandle) {
-          vscode.postMessage({ type: "delivered", target: resolvedTarget, targetHandle: resolvedHandle });
-        }
-      }
-      return;
-    }
-    const pt = curve.getPointAt(t);
-    mesh.position.set(pt.x, pt.y, pt.z);
+    // Render placement of Go-owned values: place the bead at its Go-supplied fraction
+    // along the Go-supplied segment. Same exception class as nodeWorldPos.
+    const f = pulse.frac;
+    mesh.position.set(
+      seg.start.x + f * (seg.end.x - seg.start.x),
+      seg.start.y + f * (seg.end.y - seg.start.y),
+      seg.start.z + f * (seg.end.z - seg.start.z),
+    );
     mesh.visible = true;
   });
 
   return (
-    <mesh ref={meshRef} visible={false}>
+    <mesh ref={meshRef} visible={false} raycast={() => null}>
       <sphereGeometry args={[4, 8, 8]} />
       <meshStandardMaterial
-        color="#ffffff"
-        emissive={new THREE.Color(0xffffff)}
-        emissiveIntensity={2.5}
+        color={SHADING_PARAM_BEAD_COLOR}
+        emissive={new THREE.Color(SHADING_PARAM_BEAD_EMISSIVE)}
+        emissiveIntensity={SHADING_PARAM_BEAD_EMISSIVE_INTENSITY}
       />
     </mesh>
   );
 }
 
-export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle, targetHandle }: { edgeId: string; src: RFNode<NodeData>; tgt: RFNode<NodeData>; faded: boolean; selected: boolean; sourceHandle?: string | null; targetHandle?: string | null }) {
-  // Memoize geometry to avoid allocation every render — only rebuild when endpoints change.
-  const p0key = `${src.id}:${tgt.id}:${src.position.x},${src.position.y},${tgt.position.x},${tgt.position.y}:${sourceHandle ?? ""}:${targetHandle ?? ""}`;
+export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
+  // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
+  // streams the endpoints (geometry trace) on load and on every node-move;
+  // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's
+  // endpoints and draw the tube from them — TS computes no geometry. A dragged node
+  // re-streams its touched edges' segments, so the wire follows ~1 frame behind.
+  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
+
+  // Stable key over Go's streamed endpoints — rebuild the tube only when they
+  // change (e.g. a drag re-streams them).
+  const segKey = seg
+    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
+    : "";
   const { tubeGeo, haloGeo } = useMemo(() => {
-    // Port-to-port curve via shared helper — identical curve to what PulseBead samples.
-    const portCurve = buildPortCurve(src, tgt, sourceHandle, targetHandle);
-
-    // Sample the port-to-port bezier directly — endpoints are already on sphere surfaces,
-    // so no t0/t1 surface-trim needed.
-    const TUBE_RENDER_SAMPLES = 25;
-    const visiblePts = portCurve.getPoints(TUBE_RENDER_SAMPLES);
-    const tubeCurve = new THREE.CatmullRomCurve3(visiblePts);
-
-    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 16, 1.5, 6, false);
-    // Halo: concentric tube on the same curve, larger radius — reads as a glow around the core.
-    const _haloGeo = new THREE.TubeGeometry(tubeCurve, 16, 5, 6, false);
+    if (!seg) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
+    const start = new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z);
+    const end = new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z);
+    // Wire is a straight line: P(t) = Start + t*(End-Start).
+    const tubeCurve = new THREE.LineCurve3(start, end);
+    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 1, 1.5, 6, false);
+    // Halo: concentric tube on the same segment, larger radius — reads as a glow around the core.
+    const _haloGeo = new THREE.TubeGeometry(tubeCurve, 1, 5, 6, false);
     return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p0key]);
+  }, [segKey]);
+
+  // Until Go streams this edge's segment, draw nothing (geometry arrives on load).
+  if (!tubeGeo || !haloGeo) {
+    return <>{!faded && <PulseBead edgeId={edgeId} />}</>;
+  }
 
   return (
     <>
@@ -446,11 +476,11 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle
       <mesh geometry={tubeGeo} userData={{ edgeId }}>
         <meshStandardMaterial
           key={faded ? "faded" : "solid"}
-          color="#5599cc"
-          emissive={new THREE.Color(0x2255aa)}
-          emissiveIntensity={0.8}
+          color={SHADING_PARAM_TUBE_COLOR}
+          emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
+          emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
           transparent={faded}
-          opacity={faded ? 0.25 : 1}
+          opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1}
         />
       </mesh>
       {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
@@ -465,8 +495,8 @@ export function SingleEdgeTube({ edgeId, src, tgt, faded, selected, sourceHandle
           depthWrite={false}
         />
       </mesh>
-      {/* Pulse bead: stronger highlight traveling source → target */}
-      {!faded && <PulseBead edgeId={edgeId} src={src} tgt={tgt} sourceHandle={sourceHandle} targetHandle={targetHandle} />}
+      {/* Pulse bead: plotted at Go's streamed position (Phase 2). */}
+      {!faded && <PulseBead edgeId={edgeId} />}
     </>
   );
 }
@@ -483,10 +513,13 @@ export function GraphEdges({
   return (
     <>
       {edges.map((e) => {
+        // Node-presence gate (a dangling edge with a missing node draws nothing).
+        // The wire segment itself is sourced from Go's edge-geometry store inside
+        // SingleEdgeTube — Go re-streams it on node-move, so the wire tracks drags.
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} src={s} tgt={t} faded={!!e.data?.faded} selected={e.id === selectedId} sourceHandle={e.sourceHandle ?? e.data?.sourceHandle ?? null} targetHandle={e.targetHandle ?? e.data?.targetHandle ?? null} />;
+        return <SingleEdgeTube key={e.id} edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} />;
       })}
     </>
   );
@@ -765,16 +798,25 @@ export function RaycasterHelper({
         }
       }
 
+      // Node-favoring margin: the wide invisible edge selection-halo runs node→node,
+      // so over a node the halo surface is at/closer than the node sphere. Without a
+      // bias the edge would win and node-drag would silently break. An edge only wins
+      // when it is clearly closer than the node by this margin (world units).
+      const EDGE_BIAS = 2;
+
       // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
+      let picked: string | null = null;
       if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
-        return portHit.id;
+        picked = portHit.id;
+      } else if (edgeHit && nodeHit) {
+        picked = edgeHit.dist < nodeHit.dist - EDGE_BIAS ? edgeHit.id : nodeHit.id;
+      } else if (edgeHit) {
+        picked = edgeHit.id;
+      } else if (nodeHit) {
+        picked = nodeHit.id;
       }
-      if (edgeHit && nodeHit) {
-        return edgeHit.dist <= nodeHit.dist ? edgeHit.id : nodeHit.id;
-      }
-      if (edgeHit) return edgeHit.id;
-      if (nodeHit) return nodeHit.id;
-      return null;
+
+      return picked;
     };
   }, [camera, scene, nodes]);
 
@@ -855,8 +897,8 @@ export function Scene({
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <NearestNTracker nodes={nodes} onNearestN={onNearestN} />
       <CameraSettleDetector onSettle={onCameraSettle} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[0, 0, 10]} intensity={0.8} />
+      <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
+      <directionalLight position={[0, 0, 10]} intensity={SHADING_PARAM_SCENE_DIR_INTENSITY} />
       {nodes.map((n) => (
         <GraphNode
           key={n.id}

@@ -18,6 +18,33 @@
 | width | 80 |
 | height | 60 |
 
+## Non-channel fields
+
+| Field | Type | Source | Notes |
+|-------|------|--------|-------|
+| Init | []int | `data.init` | sequence of values to emit |
+| Repeat | bool | `data.repeat` | if true, cycle through Init indefinitely |
+
+## Ports
+
+| Name | Direction | EdgeKind | Optional | Notes |
+|------|-----------|----------|----------|-------|
+| ToReadGate | out | chain |  | forwards Init values to the read gate |
+| FeedbackIn | in | chain | yes | receives step (1=advance, 0=hold index) from ChainInhibitor; enables feedback-ring mode when wired |
+
+## Firing rule
+
+Plain emit path (FeedbackIn not wired): iterate through Init (wrapping if Repeat), Fire and send each value on ToReadGate in order. Exit when all values sent (or never if Repeat).
+
+Feedback-ring path (FeedbackIn wired): iterate indefinitely (index `i` starting at 0).
+1. Fire.
+2. Send Init[i % len(Init)] on ToReadGate.
+3. Block on FeedbackIn for a step value `s` from ChainInhibitor.
+4. Advance: `i = (i + s) % len(Init)`.
+5. Loop (exit on ctx cancel or wire close).
+
+The first send (i=0) is the ring seed; there is no t=0 deadlock because the send precedes the first FeedbackIn read.
+
 ## Runtime status
 
 - Loader-registered: yes
@@ -28,7 +55,3 @@
 ```json
 { "init": [0, 1] }
 ```
-
-## Open questions
-
-- TSX handle id and Go struct field are now both `ToReadGate` (reconciled per post-fix-5 convention).

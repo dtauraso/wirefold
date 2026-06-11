@@ -188,7 +188,7 @@ Severity MEDIUM: narrow timing window, self-corrects on next drag.
 ## Adapter round-trip (spec↔flow) assessment
 
 `specToFlow`/`flowToSpec` are field-symmetric for spec data (id, type, index,
-props, spec, notes, inputs, outputs, node.data/state/edgeSeeds packed at
+props, spec, notes, inputs, outputs, node.data/state packed at
 `data.*`, wire props via `WIRE_PROPS`). No data loss found in the pair
 *itself*. The asymmetry that bites is **external**: `flowToSpec` depends on a
 `currentSpec` arg that `save.ts` never populates (H2), so notes-fallback and

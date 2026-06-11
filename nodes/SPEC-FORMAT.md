@@ -1,6 +1,6 @@
 # Node Kind SPEC Format
 
-Each `nodes/<Kind>/SPEC.md` is the canonical description of one substrate node kind. It is the source of truth that drives the Go runtime (firing rule + struct), the TSX render (port positions + label), and the AI-assisted parity check.
+Each `nodes/<Kind>/SPEC.md` is the canonical description of one Go node kind. It is the source of truth that drives the Go runtime (firing rule + struct), the TSX render (port positions + label), and the AI-assisted parity check.
 
 This document defines what goes in a SPEC and what each section means.
 
@@ -112,5 +112,5 @@ SPEC.md files without a `## View` section are skipped by the generator (treated 
 Do not include in a SPEC:
 
 - Go code or Go syntax. The pseudocode is the contract; Go is downstream.
-- Implementation notes about goroutine scheduling, select ordering, channel buffer sizes. Those are substrate concerns owned by the runtime, not per-kind.
+- Implementation notes about goroutine scheduling, select ordering, channel buffer sizes. Those are Go runtime concerns, not per-kind.
 - TSX styling, CSS classes, port positions in pixel coordinates. Side is the only render-relevant column.

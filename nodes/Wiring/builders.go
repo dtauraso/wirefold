@@ -55,11 +55,15 @@ type PortBindings struct {
 	singleRule       map[string]SendRule   // per-port send rule for singlePaced
 	singleArc        map[string]float64    // per-edge arc length for singlePaced Out
 	singleLatency    map[string]float64    // per-edge sim latency for singlePaced Out
+	singleSegment    map[string]wireSegment // per-edge segment endpoints for singlePaced Out
+	singleLabel      map[string]string      // per-edge TS edge id for singlePaced Out
 	multiPaced       map[string][]*PacedWire
-	multiPacedHandle map[string][]string // per-element source handle for multiPaced
-	multiRule        map[string][]SendRule // per-element send rule for multiPaced
-	multiArc         map[string][]float64  // per-element arc length for multiPaced Out
-	multiLatency     map[string][]float64  // per-element sim latency for multiPaced Out
+	multiPacedHandle map[string][]string    // per-element source handle for multiPaced
+	multiRule        map[string][]SendRule  // per-element send rule for multiPaced
+	multiArc         map[string][]float64   // per-element arc length for multiPaced Out
+	multiLatency     map[string][]float64   // per-element sim latency for multiPaced Out
+	multiSegment     map[string][]wireSegment // per-element segment endpoints for multiPaced Out
+	multiLabel       map[string][]string    // per-element TS edge id for multiPaced Out
 	// outSink, when non-nil, collects every paced *Out built for this node keyed
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
@@ -74,11 +78,15 @@ func newPortBindings() PortBindings {
 		singleRule:       map[string]SendRule{},
 		singleArc:        map[string]float64{},
 		singleLatency:    map[string]float64{},
+		singleSegment:    map[string]wireSegment{},
+		singleLabel:      map[string]string{},
 		multiPaced:       map[string][]*PacedWire{},
 		multiPacedHandle: map[string][]string{},
 		multiRule:        map[string][]SendRule{},
 		multiArc:         map[string][]float64{},
 		multiLatency:     map[string][]float64{},
+		multiSegment:     map[string][]wireSegment{},
+		multiLabel:       map[string][]string{},
 	}
 }
 
@@ -86,13 +94,17 @@ func (pb *PortBindings) SetSingle(name string, ch chan int) { pb.single[name] = 
 
 func (pb *PortBindings) SetSinglePaced(name string, pw *PacedWire) { pb.singlePaced[name] = pw }
 
-// SetSinglePacedRule binds a single paced output with its per-edge send rule
-// and that edge's own travel-time (arc length / sim latency).
-func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64) {
+// SetSinglePacedRule binds a single paced output with its per-edge send rule,
+// that edge's own travel-time (arc length / sim latency), its straight-segment
+// endpoints (so the bead's position stream evaluates the exact drawn segment), and
+// the TS edge id (label) so the node's EmitGeometry closure can stream the segment.
+func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, label string) {
 	pb.singlePaced[name] = pw
 	pb.singleRule[name] = rule
 	pb.singleArc[name] = arcLength
 	pb.singleLatency[name] = simLatencyMs
+	pb.singleSegment[name] = seg
+	pb.singleLabel[name] = label
 }
 
 func (pb *PortBindings) AppendMulti(name string, ch chan int) {
@@ -100,14 +112,17 @@ func (pb *PortBindings) AppendMulti(name string, ch chan int) {
 }
 
 // AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
-// source handle (e.g. "ToNext0"), the per-edge send rule, and that edge's own
-// travel-time (arc length / sim latency).
-func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64) {
+// source handle (e.g. "ToNext0"), the per-edge send rule, that edge's own
+// travel-time (arc length / sim latency), its straight-segment endpoints, and
+// the TS edge id (label) so the node's EmitGeometry closure can stream the segment.
+func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, label string) {
 	pb.multiPaced[name] = append(pb.multiPaced[name], pw)
 	pb.multiPacedHandle[name] = append(pb.multiPacedHandle[name], handle)
 	pb.multiRule[name] = append(pb.multiRule[name], rule)
 	pb.multiArc[name] = append(pb.multiArc[name], arcLength)
 	pb.multiLatency[name] = append(pb.multiLatency[name], simLatencyMs)
+	pb.multiSegment[name] = append(pb.multiSegment[name], seg)
+	pb.multiLabel[name] = append(pb.multiLabel[name], label)
 }
 
 func (pb *PortBindings) In(name string) <-chan int {
@@ -188,7 +203,7 @@ func reflectPorts(sample any) []PortSpec {
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node. ctx is required when pb contains PacedWire
 // bindings (paced mode); it is passed into the In/Out wrappers.
-func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace) (Node, error) {
+func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace, geom nodeGeom) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
@@ -198,6 +213,32 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	if f := v.FieldByName("Fire"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
 		nodeName := name
 		f.Set(reflect.ValueOf(func() { tr.Fire(nodeName) }))
+	}
+
+	// Inject EmitGeometry closure if the struct has an `EmitGeometry func()` field
+	// (item 1). The closure captures this node's id + nodeGeom and emits the node's
+	// authoritative center + per-port world positions/dirs as a node-geometry event,
+	// computed with the existing port_geometry.go helpers (no duplicated math). Each
+	// node's goroutine calls it once on startup, so the node owns its geometry emission.
+	// sourceOuts is populated during port wiring below; the closure fires later (at
+	// node startup), so it sees the completed slice.
+	var sourceOuts []*Out
+	if f := v.FieldByName("EmitGeometry"); f.IsValid() && f.CanSet() && f.Type() == tFireFunc {
+		nodeName := name
+		g := geom
+		f.Set(reflect.ValueOf(func() {
+			emitNodeGeometry(tr, nodeName, g)
+			// Emit each outgoing edge's authoritative segment (per-goroutine, item 2).
+			// sourceOuts is populated just below during port wiring; by the time this
+			// closure fires the slice is complete.
+			for _, o := range sourceOuts {
+				if o != nil && o.EdgeLabel != "" {
+					tr.Geometry(o.EdgeLabel,
+						o.Start.X, o.Start.Y, o.Start.Z,
+						o.End.X, o.End.Y, o.End.Z)
+				}
+			}
+		}))
 	}
 
 	// Wire port fields with traced wrappers.
@@ -217,7 +258,8 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			}
 		case PortOut:
 			if pw := pb.singlePaced[port.Name]; pw != nil {
-				o := NewOutPaced(pw, ctx, name, port.Name, tr, pb.singleRule[port.Name], pb.singleArc[port.Name], pb.singleLatency[port.Name])
+				o := NewOutPaced(pw, ctx, name, port.Name, tr, pb.singleRule[port.Name], pb.singleArc[port.Name], pb.singleLatency[port.Name], pb.singleSegment[port.Name], pb.singleLabel[port.Name])
+				sourceOuts = append(sourceOuts, o)
 				if pb.outSink != nil {
 					pb.outSink[name+"."+port.Name] = o
 				}
@@ -232,6 +274,8 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 				rules := pb.multiRule[port.Name]
 				arcs := pb.multiArc[port.Name]
 				lats := pb.multiLatency[port.Name]
+				segs := pb.multiSegment[port.Name]
+				labels := pb.multiLabel[port.Name]
 				outs := make(OutMulti, len(pws))
 				for i, pw := range pws {
 					handle := port.Name
@@ -249,7 +293,16 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 					if i < len(lats) {
 						lat = lats[i]
 					}
-					outs[i] = NewOutPaced(pw, ctx, name, handle, tr, rule, arc, lat)
+					var seg wireSegment
+					if i < len(segs) {
+						seg = segs[i]
+					}
+					var lbl string
+					if i < len(labels) {
+						lbl = labels[i]
+					}
+					outs[i] = NewOutPaced(pw, ctx, name, handle, tr, rule, arc, lat, seg, lbl)
+					sourceOuts = append(sourceOuts, outs[i])
 					if pb.outSink != nil {
 						pb.outSink[name+"."+handle] = outs[i]
 					}
@@ -324,6 +377,32 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	return node, nil
 }
 
+// emitNodeGeometry streams a node's authoritative center + per-port world
+// positions/dirs as a node-geometry event, computed with the port_geometry.go
+// helpers (no duplicated math). Called from each node's EmitGeometry closure on
+// startup AND from the node's own move-handler goroutine (nodeMover) when its held
+// position changes, so the renderer always draws the node body + ports from Go's stream.
+func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
+	center := nodeWorldPos(g)
+	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
+	appendPort := func(name string, isInput bool) {
+		pos := portWorldPos(g, name, isInput)
+		dir, _ := portDir(g, name, isInput)
+		ports = append(ports, T.PortGeom{
+			Name: name, IsInput: isInput,
+			PX: pos.X, PY: pos.Y, PZ: pos.Z,
+			DX: dir.X, DY: dir.Y, DZ: dir.Z,
+		})
+	}
+	for _, p := range g.Inputs {
+		appendPort(p.Name, true)
+	}
+	for _, p := range g.Outputs {
+		appendPort(p.Name, false)
+	}
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
+}
+
 // NodeBuilder is the public-facing type consumed by the loader.
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
 // StateKeys lists the data.state map keys required by this kind's
@@ -331,7 +410,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 type NodeBuilder struct {
 	Ports     []PortSpec
 	StateKeys []string // required keys in NodeData.State; nil means none required
-	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error)
+	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -346,8 +425,8 @@ func init() {
 		Registry[kind] = NodeBuilder{
 			Ports:     ports,
 			StateKeys: stateKeys,
-			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace) (Node, error) {
-				return reflectBuild(ctx, name, data, pb, e, tr)
+			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error) {
+				return reflectBuild(ctx, name, data, pb, e, tr, geom)
 			},
 		}
 	}

@@ -14,7 +14,7 @@ central scheduler).
 **Why:** This session showed agents repeatedly proposing banned-vocab patterns
 (ack channels, tick loops, schedulers) when designing in sparse areas. Code that
 makes the wrong shape structurally impossible (no `Ack` type exists, no central
-scheduler module exists, linter rejects banned tokens in substrate files) beats
+scheduler module exists, linter rejects banned tokens in Go files) beats
 memory entries that warn against drift.
 
 **How to apply:** Each time a memory entry would otherwise correct AI drift, ask
@@ -23,7 +23,7 @@ retire the memory. Code that prevents the wrong thing > memory that warns
 against it.
 
 **Levers:**
-- Volume + consistency: more substrate code using the correct vocabulary leaves
+- Volume + consistency: more Go code using the correct vocabulary leaves
   less room for the AI to interpolate from training data.
 - Anti-industry naming: type and function names that don't match industry
   defaults make wrong patterns harder to reach by autocomplete.

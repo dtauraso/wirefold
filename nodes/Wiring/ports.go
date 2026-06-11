@@ -115,6 +115,17 @@ func (i *In) SimLatencyMs() float64 {
 	return i.pw.MaxIncomingSimLatencyMs
 }
 
+// Wired reports whether this In port is bound to a real edge (paced-wire
+// mode). Returns false for a nil In or a dead-end chan port (unwired).
+// Nodes gate optional feedback receives on Wired() so unwired ports are never
+// read.
+func (i *In) Wired() bool {
+	if i == nil {
+		return false
+	}
+	return i.pw != nil
+}
+
 // Breadcrumb emits a trace breadcrumb on the input port's wire identity (target
 // node + handle). Used by windowed nodes for the window_clear breadcrumb.
 func (i *In) Breadcrumb(event, detail string) {
@@ -169,14 +180,37 @@ type Out struct {
 	port  string
 	trace *T.Trace
 	// ArcLength / SimLatencyMs are this edge's own travel-time, computed from
-	// this edge's port-to-port geometry. Travel-time is per-edge (the length of
-	// this specific drawn curve); SendWire logs these so each bead animates at
+	// this edge's port-to-port geometry. Travel-time is per-edge (the chord length
+	// of this specific segment); SendWire logs these so each bead animates at
 	// its own speed even when multiple edges fan into one destination port.
 	ArcLength    float64
 	SimLatencyMs float64
+	// Start/End are this edge's straight-segment endpoints (source OUT-port world
+	// pos, dest IN-port world pos) in the SAME 3-D frame the renderer draws. They
+	// travel WITH each placed bead (beadPlacement) so the wire's position stream
+	// evaluates P(t)=Start+t*(End-Start) on this edge — fan-in safe because the
+	// shared dest wire never stores per-edge geometry.
+	Start, End vec3
+	// EdgeLabel is the TS edge id for this output port's wire. Set by the loader
+	// so the node's EmitGeometry closure can stream the authoritative curve via
+	// tr.Geometry(EdgeLabel, Start..End) on startup.
+	EdgeLabel string
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
+}
+
+// placement builds the per-bead beadPlacement this Out hands to the wire: the
+// per-edge in-flight time plus the position-stream context (segment endpoints
+// + source identity). Centralized so TrySend and TryEmit stay in lockstep.
+func (o *Out) placement() beadPlacement {
+	return beadPlacement{
+		InFlightMs: o.SimLatencyMs,
+		Start:      o.Start,
+		End:        o.End,
+		Node:       o.node,
+		Port:       o.port,
+	}
 }
 
 // Gated reports whether the source node should wait for consumption after a
@@ -195,12 +229,12 @@ func (o *Out) TrySend(v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		// Emit the trace send event BEFORE blocking on delivery so the
-		// webview sees it, animates, posts "delivered", and unblocks Send.
-		// Emitting after Send returns causes a deadlock: the webview never
-		// receives the event, never posts delivered, and Send never returns.
+		// Emit the SendWire trace (the renderer animates from it) BEFORE the
+		// placement returns, then place the bead. Delivery is timed by Go's clock
+		// (o.SimLatencyMs is this edge's per-bead in-flight time), not by a TS
+		// "delivered" reply — Send returns once the bead is placed.
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		if err := o.pw.Send(o.ctx, v); err != nil {
+		if err := o.pw.Send(o.ctx, v, o.placement()); err != nil {
 			return false
 		}
 		return true
@@ -226,7 +260,10 @@ func (o *Out) TryEmit(v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		if !o.pw.TryPlace(v) {
+		// o.SimLatencyMs is this edge's per-bead in-flight time; the wire times
+		// delivery on Go's clock from it. The placement also carries this edge's
+		// curve so the wire streams the bead's position.
+		if !o.pw.TryPlace(v, o.placement()) {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
@@ -242,6 +279,17 @@ func (o *Out) TryEmit(v int) bool {
 	default:
 		return false
 	}
+}
+
+// Wired reports whether this Out port is bound to a real edge (paced-wire
+// mode). Returns false for a nil Out or a dead-end chan port (unwired).
+// Nodes gate optional feedback sends on Wired() so unwired ports are never
+// written.
+func (o *Out) Wired() bool {
+	if o == nil {
+		return false
+	}
+	return o.pw != nil
 }
 
 // InFlight reports whether a bead is currently traversing the underlying wire.
@@ -298,9 +346,9 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs}
+	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End, EdgeLabel: edgeLabel}
 }

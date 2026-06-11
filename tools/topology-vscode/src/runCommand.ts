@@ -3,15 +3,25 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
+import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
 
 export type { RunStatus };
+
+// Set of every trace-event kind Go can emit, sourced from the GENERATED
+// TRACE_EVENT_KINDS (Trace/Trace.go is the single source of truth). Using it here
+// keeps the stdout filter from drifting when a kind is added — a new kind flows to
+// the pump automatically instead of being silently dropped by a hardcoded list.
+const TRACE_EVENT_KIND_SET: ReadonlySet<string> = new Set(TRACE_EVENT_KINDS);
 
 // Go stdout relay: trace events are written to .probe/go.jsonl with a
 // shared envelope { ts_ms, src:"go", step?, ...ev }. Errors (stderr,
 // non-zero exit, spawn failure) are written to .probe/go-errors.jsonl.
 //
-// isTraceEvent: a stdout line is a trace event when it's valid JSON
-// and has both `step` (number) and `kind` ("recv"|"fire"|"send") fields.
+// tryParseTraceEvent: a stdout line is a trace event when it's valid JSON with a
+// numeric `step` and a `kind` in the generated TRACE_EVENT_KINDS set. Validating
+// against the generated set (not a hardcoded literal list) means every Go kind —
+// recv/fire/send/done/position/geometry/pulse-cancelled and any future addition —
+// is recognized and forwarded to the pump without per-kind edits here.
 function tryParseTraceEvent(line: string): TraceEvent | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
@@ -19,7 +29,8 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
     if (
       typeof obj === "object" && obj !== null &&
       typeof obj.step === "number" &&
-      (obj.kind === "recv" || obj.kind === "fire" || obj.kind === "send" || obj.kind === "done")
+      typeof obj.kind === "string" &&
+      TRACE_EVENT_KIND_SET.has(obj.kind)
     ) {
       return obj as TraceEvent;
     }
@@ -79,7 +90,8 @@ export class BuildAndRunRunner {
     this.channel.appendLine("$ go run .");
     this.cancelled = false;
     this.looping = true;
-    this.post({ state: "running" });
+    // Do NOT post "running" here — Go starts HALTED. The clock state drives status:
+    // idle-on-spawn → running-on-play() → paused-on-pause().
     // detached: true makes the child the leader of a new process group, so
     // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
     // SIGTERM hits the `go` driver but leaves the compiled binary orphaned
@@ -188,24 +200,23 @@ export class BuildAndRunRunner {
     }
   }
 
-  pause() {
-    if (!this.proc || this.proc.pid === undefined) return;
-    try {
-      process.kill(-this.proc.pid, "SIGSTOP");
-    } catch {
-      this.proc.kill("SIGSTOP");
-    }
+  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. */
+  play(): void {
+    if (!this.proc) return;
+    this.writeStdin(JSON.stringify({ type: "play" }));
+    this.post({ state: "running" });
+  }
+
+  /** Send pause to Go's stdin — halts the clock gate. Fire-and-forget. */
+  pause(): void {
+    if (!this.proc) return;
+    this.writeStdin(JSON.stringify({ type: "pause" }));
     this.post({ state: "paused" });
   }
 
-  resume() {
-    if (!this.proc || this.proc.pid === undefined) return;
-    try {
-      process.kill(-this.proc.pid, "SIGCONT");
-    } catch {
-      this.proc.kill("SIGCONT");
-    }
-    this.post({ state: "running" });
+  /** Alias for play() — retained so existing handle-message case "resume" still works. */
+  resume(): void {
+    this.play();
   }
 
   isRunning(): boolean {

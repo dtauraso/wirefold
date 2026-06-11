@@ -1,7 +1,7 @@
 // validate.go — parse-time spec validation for topology JSON.
 //
 // validateSpec runs immediately after JSON unmarshal in LoadTopology, before
-// any substrate/graph construction.  It aggregates all spec-shape errors and
+// any graph construction.  It aggregates all spec-shape errors and
 // returns them together so the caller sees every problem in one pass.
 //
 // Only checks decidable purely from the parsed spec are placed here.
@@ -25,7 +25,7 @@ func exportedFieldName(key string) string {
 }
 
 // validateSpec checks the parsed topoSpec for shape errors that are
-// decidable without constructing any substrate objects.  It returns a
+// decidable without constructing any Go objects.  It returns a
 // combined error listing every problem found, or nil if the spec is valid.
 func validateSpec(spec *topoSpec) error {
 	var errs []string

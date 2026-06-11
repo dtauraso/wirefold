@@ -93,7 +93,7 @@ export function buildEdge(
     sourceHandle,
     target: targetId,
     targetHandle,
-    type: "substrate",
+    type: "go",
     style: { stroke: KIND_COLORS[kind] ?? "#888", strokeWidth: 1.5 },
     data: { kind, label, sourceHandle, targetHandle } as EdgeData,
   };

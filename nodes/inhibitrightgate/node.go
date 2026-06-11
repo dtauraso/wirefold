@@ -16,7 +16,8 @@ const windowFactor = 1.5
 const pollInterval = 5 * time.Millisecond
 
 type Node struct {
-	Fire     func()
+	Fire         func()
+	EmitGeometry func()
 	Left     int
 	HasLeft  bool
 	Right    int
@@ -53,6 +54,9 @@ func (g *Node) clear(t0Set *bool) {
 }
 
 func (g *Node) Update(ctx context.Context) {
+	if g.EmitGeometry != nil {
+		g.EmitGeometry()
+	}
 	var t0 time.Time
 	var t0Set bool
 

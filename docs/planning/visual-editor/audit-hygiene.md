@@ -18,7 +18,7 @@ Five boundary guard scripts all pass. The `audit-channel-names.sh` script flags 
 
 | Script | Result | Notes |
 |---|---|---|
-| `tools/check-substrate-vocabulary.sh` | **PASS** | `substrate-vocabulary: clean` |
+| `tools/check-go-vocabulary.sh` | **PASS** | `go-vocabulary: clean` |
 | `tools/check-trace-kind-parity.sh` | **PASS** | `trace-kind-parity: clean` |
 | `tools/check-no-ts-timers.sh` | **PASS** | `no-ts-timers: clean` |
 | `tools/check-message-kind-parity.sh` | **PASS** | `message-kind-parity: clean` |
@@ -111,7 +111,7 @@ This is expected (feature not yet implemented), but the schema/parser will need 
 - `memory/feedback_schema_parser_parity.md` — references `tools/topology-vscode/src/schema/types.ts` and `src/schema/parse-nodes-edges.ts` (paths that don't exist).
 - `memory/project_edge_midpoint_offset_plumbing.md` — references `rf/adapter/spec-to-flow.ts` (EXISTS), `rf/app/_use-edge-handlers.ts` (deleted), `rf/edges/SubstrateEdge.tsx` (deleted).
 - `memory/feedback_enforce_required_inputs.md` — references `nodes/Wiring/validate.go` which EXISTS.
-- `memory/feedback_hook_block_means_stop.md` — references `.claude/hooks/substrate-r-model-derive.sh` which does not exist.
+- `memory/feedback_hook_block_means_stop.md` — references `.claude/hooks/go-model-derive.sh` which does not exist.
 - `memory/feedback_runner_errors_probe_first.md`, `memory/MEMORY.md` — reference `.probe/runner-errors-last.json` etc. — these are runtime-generated files, not committed; expected absent.
 
 ### 3b. Key string/key duplications across files
@@ -122,9 +122,9 @@ This is expected (feature not yet implemented), but the schema/parser will need 
 - No automated cross-check script exists to verify the TS set matches the Go set. If a new kind is added in Go but not in `NODE_DEFS` (or vice versa), no guard catches it.
 - **Risk: MEDIUM** — the parity is manual; it has drifted before (the CLAUDE.md primitive landing rule requires both in the same commit, but there's no enforcement).
 
-**`"substrate"` edge type string**
-- `tools/topology-vscode/src/webview/three/store.ts:144` — hardcoded `type: "substrate"` on new edges.
-- `tools/topology-vscode/src/webview/rf/adapter/spec-to-flow.ts` — also produces `type: "substrate"` edges.
+**`"go"` edge type string**
+- `tools/topology-vscode/src/webview/three/store.ts:144` — hardcoded `type: "go"` on new edges.
+- `tools/topology-vscode/src/webview/rf/adapter/spec-to-flow.ts` — also produces `type: "go"` edges.
 - No constant defined; duplicated string literal. Low risk currently (RF edge type registry is being retired) but worth noting.
 
 ### 3c. `rf/history.ts` — pushSnapshot is a no-op at runtime

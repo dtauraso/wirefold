@@ -32,7 +32,7 @@ export interface NodeDef {
   requiredInputs?: string[];
 }
 
-// PascalCase Go kind names that have a substrate runtime.
+// PascalCase Go kind names that have a Go runtime.
 // Single source of truth — derived from Wiring.Register calls.
 export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
   "ChainInhibitor",
@@ -42,13 +42,13 @@ export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 export const NODE_DEFS: Record<string, NodeDef> = {
-  ChainInhibitor: { defaultLabel: "chainInhibitor", bg: "#fff3e0", border: "#e65100", text: "#bf360c", accent: "#e65100", minWidth: 90, targets: [{ id: "FromPrevChainInhibitorNode" }], sources: [{ id: "ToNext", isMulti: true }], role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }], displays: ["held"], requiredInputs: ["FromPrevChainInhibitorNode"] },
-  InhibitRightGate: { defaultLabel: "inhibitRightGate", bg: "#fce4ec", border: "#880e4f", text: "#880e4f", accent: "#880e4f", minWidth: 110, targets: [{ id: "FromLeft" }, { id: "FromRight" }], sources: [{ id: "ToPassed" }], role: "inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 110, height: 36, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }], requiredInputs: ["FromLeft", "FromRight"] },
-  Input: { defaultLabel: "input", bg: "#e0e0e0", border: "#666", text: "#1a1a1a", accent: "#3fb950", minWidth: 90, sources: [{ id: "ToReadGate" }], role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, outputs: [{ name: "ToReadGate", kind: "chain" }], defaultData: { "init": [0, 1] } },
-  ReadGate: { defaultLabel: "readgate", bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", accent: "#7b1fa2", minWidth: 70, targets: [{ id: "FromInput" }, { id: "FromChainInhibitor" }], sources: [{ id: "ToChainInhibitor" }], role: "and-gate", shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40, inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }], requiredInputs: ["FromInput", "FromChainInhibitor"] },
+  ChainInhibitor: { defaultLabel: "chainInhibitor", bg: "#fff3e0", border: "#e65100", text: "#bf360c", accent: "#e65100", minWidth: 90, targets: [{ id: "FromPrevChainInhibitorNode", edgeKind: "chain" }], sources: [{ id: "ToNext", edgeKind: "chain", isMulti: true }, { id: "FeedbackOut", edgeKind: "chain" }], role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }, { name: "FeedbackOut", kind: "chain" }], displays: ["held"], requiredInputs: ["FromPrevChainInhibitorNode"] },
+  InhibitRightGate: { defaultLabel: "inhibitRightGate", bg: "#fce4ec", border: "#880e4f", text: "#880e4f", accent: "#880e4f", minWidth: 110, targets: [{ id: "FromLeft", edgeKind: "chain" }, { id: "FromRight", edgeKind: "chain" }], sources: [{ id: "ToPassed", edgeKind: "chain" }], role: "inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 110, height: 36, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }], requiredInputs: ["FromLeft", "FromRight"] },
+  Input: { defaultLabel: "input", bg: "#e0e0e0", border: "#666", text: "#1a1a1a", accent: "#3fb950", minWidth: 90, targets: [{ id: "FeedbackIn", edgeKind: "chain" }], sources: [{ id: "ToReadGate", edgeKind: "chain" }], role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, inputs: [{ name: "FeedbackIn", kind: "chain" }], outputs: [{ name: "ToReadGate", kind: "chain" }], defaultData: { "init": [0, 1] } },
+  ReadGate: { defaultLabel: "readgate", bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", accent: "#7b1fa2", minWidth: 70, targets: [{ id: "FromInput", edgeKind: "chain" }, { id: "FromChainInhibitor", edgeKind: "chain" }], sources: [{ id: "ToChainInhibitor", edgeKind: "chain" }], role: "and-gate", shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40, inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }], requiredInputs: ["FromInput", "FromChainInhibitor"] },
 };
 
-// Required input port names per Go kind. Derived from *Wiring.In fields.
+// Required input port names per Go kind. Derived from *Wiring.In fields (optional ports excluded).
 export const REQUIRED_INPUTS: Record<string, string[]> = {
   "ChainInhibitor":    ["FromPrevChainInhibitorNode"],
   "InhibitRightGate":  ["FromLeft", "FromRight"],

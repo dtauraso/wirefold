@@ -17,13 +17,13 @@ structure.
 
 Going 3D is almost entirely a **medium** change. The following stay **untouched**:
 
-- Go substrate (`nodes/`, `Wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`)
-- Substrate model (slot-phase, AND-gate tree, backpressure)
+- Go network (`nodes/`, `Wire.go`, `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`)
+- Go model (slot-phase, AND-gate tree, backpressure)
 - `pump.ts` firing and animation logic
 
 Only rendering, interaction, layout, and the position schema change.
 
-**Drift signal:** if 3D math starts appearing in `pump.ts` or the Go substrate,
+**Drift signal:** if 3D math starts appearing in `pump.ts` or Go,
 stop — that is the wrong frame.
 
 ## Coordinate model
@@ -96,7 +96,7 @@ for React + 3D. drei is explicitly excluded (see Medium stack section below).
 | `SubstrateEdge.tsx` 2D path | 3D spline/tube geometry |
 | Pulse animation (pump-driven) | Same pump logic; geometry it travels changes from 2D SVG path to 3D curve |
 
-The **"render only, no substrate logic"** contract on `<Kind>Node.tsx` is
+The **"render only, no Go logic"** contract on `<Kind>Node.tsx` is
 unchanged. The pump-driven pulse animation logic stays in `pump.ts`; only the
 geometry it travels over changes.
 
@@ -123,7 +123,7 @@ one existing rule — it tells you which side of the line 3D interaction falls o
 **The medium-vs-substance rule, applied here:**
 
 - **RENDERING / PLUMBING = medium.** Three.js + react-three-fiber as the render
-  substrate, quaternion math, bundler, file watcher — adopt the dominant choice,
+  layer, quaternion math, bundler, file watcher — adopt the dominant choice,
   no hesitation. R3F is the correct, non-weird medium pick. The axiom never
   touches these.
 - **CONTROL OVER THE SYSTEM = substance.** Which DOF exist, that all stay
@@ -481,7 +481,7 @@ which this project does not use — all geometry is generated from `topology.jso
 
 ### Three layers, kept strictly separate
 
-1. **Logical connection (Go substrate).** Output channel of node A to input
+1. **Logical connection (Go).** Output channel of node A to input
    channel of node B — the truth. No geometry, no position.
 2. **Human-speed timing / pulse-animation layer (pump-driven).** Bridges logical
    events to what a human sees. Geography-free.
@@ -698,18 +698,18 @@ attention-scoped execution is a **FEATURE**, not a correctness violation. Same
 substance-vs-medium split CLAUDE.md names: industry puts value+weight in nodes;
 this project keeps nodes thin and puts structure in the wiring.
 
-### Substrate implication
+### Go implication
 
 A fold node is a new **node kind** — structural, not merely a view operation. Per
 CLAUDE.md's landing rule, it requires three things in one commit:
 
 1. `tools/topology-vscode/src/webview/rf/nodes/FoldNode.tsx` — the R3F render
-   component (render only; no substrate logic).
+   component (render only; no Go logic).
 2. Registration in `tools/topology-vscode/src/webview/rf/nodes/registry.ts`.
 3. The Go node package under `nodes/Fold/`.
 
 Because folding affects execution (interior nodes go dormant, the fold node
-stands in), this is NOT a pure view operation — it is a new substrate primitive.
+stands in), this is NOT a pure view operation — it is a new Go primitive.
 
 ### Fold-node boundary behavior — resolved
 
@@ -734,7 +734,7 @@ subgraphs** (essentially pipe-like). Add branching, state, or complex internal
 coordination and folding breaks. Complexity is not foldable. This is the same
 lightweight-node discipline that makes folding cheap in the first place.
 
-**Substrate implication unchanged:** fold node is a new node kind (component +
+**Go implication unchanged:** fold node is a new node kind (component +
 registry + Go package per CLAUDE.md landing rule); structural, affects execution.
 
 ## Problem #10 (input-device variance) — resolved
@@ -787,7 +787,7 @@ Everything device-specific beyond that — trackpad multitouch, SpaceMouse nativ
 Build a **throwaway react-three-fiber prototype** that validates the gesture
 grammar only:
 
-- Static cluster of cubes (no real topology, no substrate)
+- Static cluster of cubes (no real topology, no Go network)
 - Arcball drag-rotate via incremental quaternion composition
 - Scroll-dolly camera
 - Click-to-pick (highlight a cube)

@@ -4,7 +4,8 @@
 
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
-import type { RFNode, NodeData } from "../types";
+import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
+import type { MoveEntry } from "../../messages";
 import { nodeWorldPos, pixelToNDC } from "./geometry-helpers";
 import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import { useThreeStore } from "./store";
@@ -84,6 +85,7 @@ export function useInteractionControls(
   onMoveNode: (id: string, x: number, y: number) => void,
   storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
   selectedIdRef: React.MutableRefObject<string | null>,
+  edgesRef: React.MutableRefObject<RFEdge<EdgeData>[]>,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -112,8 +114,19 @@ export function useInteractionControls(
   const rafPending = useRef(false);
 
   const flushNodeMove = useCallback((nodeId: string, x: number, y: number) => {
-    vscode.postMessage({ type: "node-move", nodeId, x, y, z: 0 });
-  }, []);
+    // Decentralized node-move: mail-sort the move to the moved node + every incident
+    // edge (source===moved || target===moved). TS owns the graph and computes the
+    // incident edges; Go's per-node/per-edge goroutines own the recompute. Every
+    // entry carries the same moved node id + new position; keys are node id + edge ids.
+    const entry: MoveEntry = { nodeId, x, y, z: 0 };
+    const entries: Record<string, MoveEntry> = { [nodeId]: entry };
+    for (const e of edgesRef.current) {
+      if (e.source === nodeId || e.target === nodeId) {
+        entries[e.id] = entry;
+      }
+    }
+    vscode.postMessage({ type: "edit", op: "update", entries });
+  }, [edgesRef]);
 
   const scheduleNodeMove = useCallback((nodeId: string, x: number, y: number) => {
     pendingNodeMove.current = { nodeId, x, y };

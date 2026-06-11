@@ -218,7 +218,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .align-guide-h { left: 0; right: 0; height: 0; border-top-width: 1px; }
 
 /* Inert node: one or more required wires are unconnected — node will silently no-op */
-.r-substrate-node--inert {
+.r-go-node--inert {
   opacity: 0.5;
   outline: 2px dashed #999 !important;
   outline-offset: 2px;

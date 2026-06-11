@@ -40,6 +40,9 @@ export function ThreeView() {
   );
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
+  // Ref mirror of edges — read in interaction-controls to compute incident edges
+  // for the decentralized node-move dispatch (avoids stale closure).
+  const edgesRef = useRef<RFEdge<EdgeData>[]>(edges);
   // Ref mirror of selectedId — read in interaction-controls to find arcball pivot.
   const selectedIdRef = useRef<string | null>(selectedId);
 
@@ -53,6 +56,9 @@ export function ThreeView() {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
@@ -112,6 +118,7 @@ export function ThreeView() {
     storeMoveNode,
     storeCreateEdge,
     selectedIdRef,
+    edgesRef,
   );
 
   // Bind wheel listener as non-passive so e.preventDefault() actually works.

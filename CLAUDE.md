@@ -1,23 +1,26 @@
 # CLAUDE.md
 
-## Substrate model — read first
+## Model — read first
 
-Before changing anything in the **Go substrate** (`nodes/`, `nodes/Wiring/paced_wire.go`,
+Before changing anything in the **Go network** (`nodes/`, `nodes/Wiring/paced_wire.go`,
 `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **pump** (`tools/topology-vscode/src/webview/three/pump.ts`),
-read [MODEL.md](MODEL.md). It pins the substrate model and the banned
-vocabulary that signals drift. If your reasoning uses banned
-vocabulary, you are in the wrong frame — stop and re-derive from the
-model. Do not propose multi-step plans with options for substrate/wire
-work; state the next single concrete step and wait.
+read [MODEL.md](MODEL.md). It pins the model. Do not propose multi-step
+plans with options for network/wire work; state the next single concrete
+step and wait.
 
-## Core concepts and backpressure
+`pump.ts` is a **position-stream plotter**, not the delivery driver: Go owns the one
+clock and times its own bead delivery; pump only maps Go's trace stream (bead
+positions, node events, edge curves, shading params) into render stores. It computes
+no positions, no geometry, and no traversal timing, and never tells Go when a bead
+arrived.
 
-Both live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
-partition nodes, AND-gate tree, lateral inhibition, slot-in-node
-backpressure, and round-close stepping. The "Substrate model"
-pointer at the top of this file is the only entry point you need.
+## Core concepts
 
-## Substrate primitive landing rule (narrowed)
+These live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
+partition nodes, AND-gate tree, and lateral inhibition. The
+"Model" pointer at the top of this file is the only entry point you need.
+
+## Primitive landing rule (narrowed)
 
 **Node kinds:** adding a kind requires three things in the same commit:
 1. Add an entry to `NODE_DEFS` in `tools/topology-vscode/src/schema/node-defs.ts`
@@ -36,8 +39,20 @@ the store into `SingleEdgeTube` via `GraphEdges` in
 added to `WireProps` in `wire-defs.ts` and threaded through `SingleEdgeTube` in the
 same commit it is used; otherwise the editor path is silently incomplete.
 
-**Drift rule:** if TS code outside `pump.ts` starts accumulating slot-phase,
-backpressure, or firing-rule logic, that is drift — those belong in Go.
+**Bridge surface:** the editor ↔ Go bridge is two channels and nothing else.
+**Go → TS** is the trace stream (bead positions, node events, edge curves, shading
+params) — Go reporting what it does. **TS → Go** is spec save/load plus a single
+geometry-CRUD `edit` message (`op` = create / update / delete / fade) and the
+play/pause control signal (see `nodes/Wiring/stdin_reader.go` `applyEdit` and
+`src/messages.ts` `EditMsg`). The TS → Go send is **fire-and-forget** — no `await`,
+no Promise chain, no request/response, no delivery signal (guard:
+`tools/check-no-await-on-bridge.sh`). Adding a TS → Go message kind means one
+top-level `edit` op, kept in message-kind parity with the Go stdin reader.
+
+**Drift rule:** if TS code outside `pump.ts` starts accumulating
+traversal-timing, firing-rule, position, or geometry logic — or starts awaiting Go
+on the bridge — that is drift; those belong in Go and the bridge stays
+fire-and-forget.
 
 ## Node kinds
 
@@ -74,7 +89,7 @@ docs, and the auto-memory dir, costing tokens and time.
 - **Cost markers:** only record a `($N.NN)` cost marker on a commit (or bundle of commits) when the work was sized at **≥$5 expected** beforehand. Sub-$5 work lands without a marker. Bundle small commits into ≥$5 chunks for marker purposes. Pre-v0 sub-$5 markers stay as historical record but are no longer the convention.
 - **Branch hygiene:** task-named branches (`task/<short-kebab-description>`) that merge to `main` quickly. Avoid long-lived feature branches like the v0 `visual-editor` pattern.
 - Channel names encode which two nodes are connected — preserve this convention.
-- **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the substrate that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise substrate was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
+- **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the Go network that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise execution model was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
 
 ## Planning docs are branch-local
 

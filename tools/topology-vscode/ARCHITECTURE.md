@@ -64,9 +64,9 @@ Each `webview/<feature>.ts` owns one UI affordance. Most expose
 If a field affects generated Go, it belongs in the spec. Otherwise the
 sidecar.
 
-## Editor substrate
+## Editor renderer
 
-The webview renders with React Three Fiber (R3F) — a 3D canvas. The runtime loader stays authoritative — the substrate change was about *how nodes/edges are rendered and interacted with*, not about who owns the spec.
+The webview renders with React Three Fiber (R3F) — a 3D canvas. The runtime loader stays authoritative — the renderer change was about *how nodes/edges are rendered and interacted with*, not about who owns the spec.
 
 The topology has genuine depth (inhibitor chain, rings, lateral-inhibition lattices). 2D React Flow was retired because it flattened real 3D structure into misleading edge crossings. R3F is the sole view; RF types are kept for their node/edge shapes but no RF component is instantiated.
 

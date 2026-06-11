@@ -22,7 +22,7 @@ value parked in the slot.
 
 **How to apply:** any editor affordance that clears a slot must be
 gated on the destination slot's phase (`armed = slotPhase === "filled"`).
-Under the slot-in-node substrate, the slot lives on the destination
+Under the slot-in-node model, the slot lives on the destination
 node, so read it via `dest.slotPhase(slotId)`. Do not lean on
-substrate-side deferral to "do the right thing" — that mechanism
-exists for the substrate, not the UI contract.
+Go-side deferral to "do the right thing" — that mechanism
+exists for Go, not the UI contract.

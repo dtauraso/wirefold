@@ -11,9 +11,8 @@ import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave } from "../
 import { postLog } from "../log/post";
 import { serializeViewerState } from "../state/viewer/types";
 import { vscode } from "../vscode-api";
-import { clearPulse, getPulseMap, patchPulse, setCurve } from "./pulse-state";
-import { rfArcLength, arcLengthToSimLatencyMs, buildEdgeCurve } from "./geometry-helpers";
-import { getPauseAdjustedNow } from "../state/run-status";
+import { clearPulse } from "./pulse-state";
+import { useEdgeGeometryStore } from "./edge-geometry";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
 
@@ -91,14 +90,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         fadeEdgeOrder,
       });
       setSpecMeta(spec);
-      // Populate curve store synchronously after load so PulseBead can read
-      // curves before the first React commit completes.
-      const nodeMapForLoad = new Map(nodes.map((n) => [n.id, n]));
-      for (const edge of edges) {
-        const s = nodeMapForLoad.get(edge.source);
-        const t = nodeMapForLoad.get(edge.target);
-        if (s && t) setCurve(edge.id, buildEdgeCurve(s, t));
-      }
+      // Phase 3: TS computes NO edge geometry. Go holds node positions + per-edge
+      // control points and streams them (geometry trace) on load and on every move;
+      // SingleEdgeTube draws the tube from the edge-geometry store. The store no
+      // longer builds curves here.
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
       console.error("[ThreeStore] load failed", err);
@@ -127,14 +122,15 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     }
     const nextEdges = [...edges, result.newEdge];
     set({ edges: nextEdges });
-    // Populate curve store for the new edge synchronously.
-    const srcNode = nodes.find((n) => n.id === sourceId);
-    const tgtNode = nodes.find((n) => n.id === targetId);
-    if (srcNode && tgtNode) setCurve(result.id, buildEdgeCurve(srcNode, tgtNode));
-    // Tell Go to un-silence this wire so it carries pulses again (mirrors deleteEdge).
-    postLog("addEdge-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
+    // Phase 3: TS computes no geometry. Go is the authoritative curve holder and
+    // streams the edge's control points; the tube renders from Go's stream once Go
+    // knows the edge (on its next load/run). No TS-built curve here.
+    // Tell Go to un-silence this wire so it carries pulses again (mirrors the
+    // delete edit). Single geometry-CRUD bridge: edit/create.
+    postLog("edit-create-post", { edgeId: result.id, target: result.newEdge.target, targetHandle: result.newEdge.targetHandle ?? "" });
     vscode.postMessage({
-      type: "addEdge",
+      type: "edit",
+      op: "create",
       target: result.newEdge.target,
       targetHandle: result.newEdge.targetHandle ?? "",
     });
@@ -146,58 +142,41 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     const { edges } = get();
     const edge = edges.find((ed) => ed.id === id);
     // Tell Go to drop this wire's in-flight pulse and free its parked sender,
-    // keyed by the destination slot identity (target + targetHandle).
+    // keyed by the destination slot identity (target + targetHandle). Single
+    // geometry-CRUD bridge: edit/delete (Go cancels clock-delivery + echoes
+    // pulse-cancelled atomically).
     if (edge) {
-      postLog("deleteEdge-post", { edgeId: id, target: edge.target, targetHandle: edge.targetHandle ?? "", found: true });
+      postLog("edit-delete-post", { edgeId: id, target: edge.target, targetHandle: edge.targetHandle ?? "", found: true });
       vscode.postMessage({
-        type: "deleteEdge",
+        type: "edit",
+        op: "delete",
         target: edge.target,
         targetHandle: edge.targetHandle ?? "",
       });
     } else {
-      postLog("deleteEdge-post", { edgeId: id, found: false });
+      postLog("edit-delete-post", { edgeId: id, found: false });
     }
     const nextEdges = edges.filter((ed) => ed.id !== id);
     set({ edges: nextEdges });
     clearPulse(id);
+    // Drop Go's streamed segment for this edge so no stale tube can draw.
+    useEdgeGeometryStore.getState().removeEdgeSegment(id);
     scheduleSave();
   },
 
   moveNode(id, x, y) {
-    const { nodes, edges } = get();
+    const { nodes } = get();
     const nextNodes = nodes.map((n) =>
       n.id === id ? { ...n, position: { x, y } } : n,
     );
     set({ nodes: nextNodes });
 
-    // TS-local latency recompute: patch in-flight pulses on affected edges so
-    // bead speed stays at the uniform 0.08 wu/ms target during drag.
-    // Curve store is updated for ALL touching edges (not just in-flight) so the
-    // next pulse always reads the correct geometry without a React-commit lag.
-    const pulseMap = getPulseMap();
-    const now = getPauseAdjustedNow();
-    for (const edge of edges) {
-      if (edge.source !== id && edge.target !== id) continue;
-      // Use the NEW position for the dragged node, current position for the other.
-      const srcNode = nextNodes.find((n) => n.id === edge.source);
-      const tgtNode = nextNodes.find((n) => n.id === edge.target);
-      if (!srcNode || !tgtNode) continue;
-      // Always update curve store synchronously so PulseBead reads the new geometry
-      // in the same useFrame tick without waiting for a React commit.
-      setCurve(edge.id, buildEdgeCurve(srcNode, tgtNode));
-      const pulse = pulseMap.get(edge.id);
-      if (!pulse) continue;
-      const newArcLength = rfArcLength(
-        srcNode.position.x, srcNode.position.y,
-        tgtNode.position.x, tgtNode.position.y,
-      );
-      const newSimLatencyMs = arcLengthToSimLatencyMs(newArcLength);
-      // Preserve fractional progress t_curr so the bead doesn't jump.
-      const elapsed = now - pulse.startTime;
-      const tCurr = Math.min(1, elapsed / pulse.simLatencyMs);
-      const newStartTime = now - tCurr * newSimLatencyMs;
-      patchPulse(edge.id, newSimLatencyMs, newStartTime);
-    }
+    // Phase 3: TS computes NO geometry. Updating the node position here only moves
+    // the node/port SPHERES + labels. The wire-tube curve is Go-authoritative: the
+    // node-move IPC (sent from interaction-controls) drives Go to re-derive every
+    // affected edge's control points and STREAM them back (geometry trace), and the
+    // in-flight bead's remaining travel re-derives on Go's one clock. SingleEdgeTube
+    // redraws the tube from that stream — no TS curve build, no per-bead patch.
   },
 
   saveSpec() {
@@ -231,7 +210,14 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     });
     scheduleViewSave();
 
-    // Emit the full faded-edge set to the host so Go can update its wire flags.
-    vscode.postMessage({ type: "fade", edges: [...result.fadedEdges] });
+    // Emit the full desired faded state to the host so each Go wire sets its own flag.
+    // Shape: Record<edgeId, boolean> — faded=true for each faded edge, false for each
+    // unfaded edge — so Go's per-wire dispatch can set any wire to its desired state.
+    // Single geometry-CRUD bridge: edit/fade. Fire-and-forget.
+    const edgeFadeMap: Record<string, boolean> = {};
+    for (const e of edges) {
+      edgeFadeMap[e.id] = result.fadedEdges.has(e.id);
+    }
+    vscode.postMessage({ type: "edit", op: "fade", edges: edgeFadeMap });
   },
 }));
