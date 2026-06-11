@@ -37,6 +37,10 @@ export type WebviewToHostMsg =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "stop" }
+  // Host-originated control re-sent to Go's stdin (geometry resend on webview remount).
+  // Declared here for seam parity with stdin_reader.go's "resend" kind; the webview
+  // itself does not emit it (the host triggers it in the "ready" handler).
+  | { type: "resend" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
@@ -72,7 +76,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit",
+  "ready", "save", "view-save", "run", "run-cancel", "play", "pause", "resume", "resend", "stop", "webview-log", "edit",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

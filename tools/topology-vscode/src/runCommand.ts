@@ -223,6 +223,14 @@ export class BuildAndRunRunner {
     return this.proc !== undefined;
   }
 
+  /** Ask the running Go to re-emit its full current node + edge geometry. Used after a
+   *  webview remount (e.g. hot-reload), which resets the TS edge-geometry store but
+   *  leaves Go running. Fire-and-forget; no-op if not running. */
+  resend(): void {
+    if (!this.proc) return;
+    this.writeStdin(JSON.stringify({ type: "resend" }));
+  }
+
   stop() {
     this.looping = false;
     this.cancel();

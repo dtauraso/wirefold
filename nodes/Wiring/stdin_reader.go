@@ -12,6 +12,11 @@
 //     clock's global gate (Halt/Resume). The process starts halted; the first
 //     "play" message resumes bead delivery. "pause" re-halts.
 //
+//  3. Geometry resend (type=="resend") — re-emits the full current node + edge
+//     geometry from the held authoritative state (MoveDispatch.ResendGeometry).
+//     A freshly-(re)mounted webview that lost its module-level edge-geometry store
+//     requests this to rebuild it without restarting Go. Safe to repeat / while running.
+//
 // Go owns the clock and delivery; nothing on this seam triggers delivery or
 // carries animation internals.
 //
@@ -106,8 +111,9 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			}
 			// Two top-level bridge kinds:
 			//   "edit"  — geometry-CRUD; op discriminates the operation (internal axis).
-			//   "play"  — resume the clock's global gate (bead delivery starts).
-			//   "pause" — halt the clock's global gate (bead delivery freezes).
+			//   "play"   — resume the clock's global gate (bead delivery starts).
+			//   "pause"  — halt the clock's global gate (bead delivery freezes).
+			//   "resend" — re-emit full current node + edge geometry (remount recovery).
 			switch msg.Type {
 			case "edit":
 				applyEdit(msg, slotReg, md, tr)
@@ -118,6 +124,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			case "pause":
 				if clk != nil {
 					clk.Halt()
+				}
+			case "resend":
+				if md != nil {
+					md.ResendGeometry(tr)
 				}
 			}
 		}
