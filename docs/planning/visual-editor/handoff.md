@@ -2,79 +2,63 @@
 # Handoff
 
 Live continuation prompt. Schema lives in
-[continuation-prompt-template.md](continuation-prompt-template.md);
-this file is the filled-in current state. A fresh AI session should
-read this file first (no chat history needed) and proceed.
+[continuation-prompt-template.md](continuation-prompt-template.md); this file is the
+filled-in current state. A fresh AI session should read this first (no chat history
+needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-10 — task/go-backend-ts-frontend, pushed; per-goroutine node-geometry DONE (both Go + TS halves, verified); edge-curve per-goroutine emit is next)
+## State at handoff (2026-06-10 — branch `task/go-backend-ts-frontend-fixes`, pushed; latest `968c8e30`; tree clean)
 
-- Active branch: `task/go-backend-ts-frontend`, pushed. Latest commit `440a7daa`. Tree clean (topology.json skip-worktree; north-seattle-parks.csv moved to ~/Desktop; .vscode/ gitignored).
-- **`topology.json` has git skip-worktree SET.** Deliberate edits: `git update-index --no-skip-worktree topology.json` → stage → commit → re-set. No topology.json change this session.
-- Prior 5-phase Go-authoritative rewrite + halted-start + handshake WIRING + handshake FIRING remain DONE. This session shipped per-goroutine node-geometry (both halves).
+- Branch was **renamed** `task/go-backend-ts-frontend` → `task/go-backend-ts-frontend-fixes` (it carries fixes too). topology.json is skip-worktree.
+- This session: explored the **bead-item chain** wire model (built fully) then **reverted** to straight-line PacedWire; a run of **drag/pulse correctness fixes**; then **completed the Go-authoritative per-goroutine model** — decentralized node-move (item 4, the last load-bearing deviation) AND decentralized fade. **Zero central-fan-out remains.**
 
-### Commits this session (`git log --oneline e41f3bcc..HEAD`)
+### The arc this session
 
-```
-440a7daa chore: gitignore .vscode/ editor settings
-15adf9ff feat(webview): consume node-geometry — 4 geometry helpers read Go's emitted node/port positions (fallback to local compute pre-emit)
-38a278d0 feat(net): per-goroutine node-geometry emit — each node emits its node+port world positions/dirs on startup (TS consume next)
-7ca50c02 docs(redesign): add Whats-left tab — remaining geometry + cleanup work
-d782f3e0 docs(handoff): demote redesign doc to branch-local scratch; geometry verified by file confirmations
-```
+- **Bead-item chain — explored + reverted (`e7faf250`).** Built wires as N bead-goroutines relaxing to straight (per-item pulse hops, born/retire, color animation), then reverted. Straightness is endpoint-defined (non-local), so neighbor-only relaxation is **O(N²) follow-latency regardless of goroutines**. Memory: `project_wire_is_straight_line_not_chain`. MODEL.md cleaned (`45521898`).
+- **Go-authoritative node position (`fa4eb25f`).** Bug: Go emitted node-geometry only at startup, never on move → dragging didn't update the body. Fix: the move handlers re-emit node-geometry on move; TS renders node/wire/bead all from Go's stream (reverted a TS-local-placement shortcut). Go holds the position; ~1-frame round-trip.
+- **Pulse fixes:** in-flight revision preserves the bead's **fraction** (not absolute distance) at uniform speed — no racing (`7bf74109`); walker relaunch tick clamped to ≥now — no t≈0 replay (`8e4c6766`); pulse clears on a new `arrive` trace event at traversal-complete — no lingering at dest port (`2bc98a43`); pulse placed at `lerp(Go segment, Go fraction)` — same store the tube reads, so it stays on the wire as the node moves (`a579b0e6`).
+- **Item 4 — node-move decentralized (`a37fae51`).** Replaced central `NodeMoveRegistry.applyNodeMove` with **`MoveDispatch`**: a pure `(key,value)→channels[key]` mail-sorter keyed by node ids AND edge ids. Per-node inboxes (node re-emits its own node-geometry) + per-wire inboxes (each PacedWire owns itself: recomputes its own segment/arc, revises its own in-flight bead under its own lock, emits its own geometry). TS sends keyed entries (moved node + incident edges). Fixed a **parser-parity** bug (`6ec2141c`): `parseEdit` still validated the old update shape → moves silently dropped.
+- **Fade decentralized (`968c8e30`).** Last central-fan-out gone — fade routes per-wire via MoveDispatch (each wire sets its own faded flag); `WireRegistry.ForEach` removed. TS sends a per-edge fade map; `parseEdit` + Go reader updated in lockstep.
 
-### What that covers
+### The settled architecture (now complete)
 
-- **Per-goroutine node-geometry emission — DONE (both halves).**
-  - **Go (`38a278d0`):** new `KindNodeGeometry`/`node-geometry` trace event. Each node's goroutine emits its node center + per-port world positions/dirs on startup via an `EmitGeometry func()` closure injected by `reflectBuild` (mirrors the `Fire` pattern), called once at top of each node kind's `Update` (`input`, `chaininhibitor`, `inhibitrightgate`, `readgate`). Math reuses `port_geometry.go` (`nodeWorldPos`/`portWorldPos`/`portDir`) — no duplication. MODEL.md got a one-line contract addition (node owns its geometry emission; wires still own bead-position emission). New Go test asserts emit.
-  - **TS (`15adf9ff`):** new `useNodeGeometryStore` (`node-geometry.ts`, mirrors `edge-geometry.ts`); `pump.ts` consumes `node-geometry` as a pure store-write (drift guard clean); all 4 geometry helpers (`nodeWorldPos`, `portDir`, `nodeTopWorldPos`, `boundingBox`) flipped to READ Go's emitted positions, with local-compute fallback during the pre-emit startup race. Frame verified: no coordinate flip (Go mirrors TS y-down→y-up).
-  - **Correction:** an earlier explore wrongly thought `nodeTopWorldPos`/`boundingBox` were dead. They are LIVE — callers in `scene-content.tsx` L194 + L579. All 4 helpers were flipped.
-  - All green: `go build`, `go test -race`, `tsc --noEmit`, 56/56 vitest, `check-trace-kind-parity`, `check-no-await-on-bridge`, `check-ts-computes-no-geometry`.
-- **Redesign doc demoted (`d782f3e0`)** to branch-local scratch. `docs/go-authoritative-clock/index.html` is NOT main-bound; `strip-branch-local-docs.sh` strips it at merge, no exceptions. A "What's left" tab was added to it for reference only.
-- **Housekeeping:** `.vscode/` added to `.gitignore`; north-seattle-parks.csv moved out of repo.
+- **Go** owns the running model: one clock, pacing/timing, bead transport+delivery, bead **progress (fraction t)**, node-local held state, firing rules, node positions (held, re-emitted on move), per-edge geometry, shading. Self-scheduling per-goroutine nodes + wires; **no central coordinator** (node-move + fade both via key→channel dispatch).
+- **TS** is render-only (viewpoint): camera, projection, raycast picking, GPU render; places the bead at Go's fraction along Go's segment. Sends fire-and-forget `edit` (create/update/delete/fade) + play/pause. Owns interaction, NOT position data.
+- **Bridge:** Go→TS trace stream (9 kinds incl. `arrive`); TS→Go fire-and-forget. The MoveDispatch reader is a pure mail-sorter.
 
-### The settled split (model — unchanged)
+### Active experimental network — 3 edges
 
-Go owns the diagram (nodes/edges/beads, 3D math, clock+pulseSpeed, shading, fade). TS owns the viewpoint (camera, projection, raycast-picking, GPU render). Store is a no-op holder; Go is sole writer. Bridge = JSONL over stdio, fire-and-forget TS→Go.
-
-### Active experimental network — 3 EDGES, all firing
-
-`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges: `in08→i0` (ToReadGate→FromPrev), `i0→i1` (ToNext0→FromPrev), `i0→in08` (FeedbackOut→FeedbackIn). All three animate.
+`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate.
 
 ### OPEN ITEMS / NEXT
 
-1. **NEXT SINGLE STEP — move central edge-curve emitter to per-goroutine.** `loader.go:212` emits edge curves centrally at load time. Per David's model, each goroutine should emit its own geometry. Move the edge-curve `node-curve` trace event emission into the wire's goroutine (mirrors the node-geometry pattern).
-2. **After that — route node-move to owning goroutine.** `stdin_reader.go` `applyNodeMove` / `NodeMoveRegistry ~L190` handles node-move centrally. Route to the owning node goroutine ("TS sends things the goroutine picks up").
-3. **`requiredInputs` cosmetic (open):** gen-node-defs auto-lists `FeedbackIn` in `requiredInputs`/`REQUIRED_INPUTS` — dead metadata, no consumer. Fix with an optional-port SPEC annotation.
-4. **Merge:** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend` (strips redesign doc + any other branch-local docs); needs explicit sign-off.
-
-**Geometry verified by FILE CONFIRMATIONS against code** (grep-backed: caller counts, emit site file:line). The HTML doc (`docs/go-authoritative-clock/index.html`) is branch-local scratch — drifts, stripped at merge, not hand-maintained.
+1. **Reload to verify fade** — extension-host changed (`968c8e30`); **Developer: Reload Window**, confirm fade dimming still works.
+2. **Cleanup (not spec):** remove debug breadcrumbs (`dbg.flushmove`, `edit-update-forward`); the thin `applyNodeMove` test façade (a shim so existing tests compile over the new path); the now-unused `x,y,z` on the position trace event (the bead uses fraction); the unused `reg` param in `applyEdit` (`stdin_reader.go:142`).
+3. **Merge to main (go-auth spec item 6 — the only remaining spec item):** run `tools/strip-branch-local-docs.sh task/go-backend-ts-frontend-fixes` (strips the chain spec md+html, the go-auth doc, the ownership-audit html), then merge — **needs explicit sign-off**. go-auth spec items 1–5 are DONE.
 
 ### Carry-forward facts
 
-- **Paced `TryRecv` BLOCKS** (not a poll) despite the `if v, ok := …TryRecv(); ok` idiom — `ok=false` only on ctx-cancel. Judge recv semantics from `paced_wire.go` impl, not call-site idiom.
-- **Per-goroutine bridge:** each goroutine sends to TS / picks up TS input; avoid central emitters/handlers.
-- **Two-process editor:** reopen-file reloads only the webview; **Developer: Reload Window** reloads the extension host (Go spawn). gopls goes stale — `go test`/`go run` authoritative.
-- **Node contract:** nodes do local work + drive outputs; no TCP-handshake/ack-nack/send-gating.
-- MODEL.md + CLAUDE.md are the authoritative model. `docs/go-authoritative-clock/index.html` is branch-local scratch — stripped at merge.
+- **Per-goroutine model complete; zero central-fan-out.** node-move + fade both go through `MoveDispatch` (key→channel). create/delete are single-target (one wire). play/pause is the intentional global gate (one clock). loader/clock/trace-sink/dispatch-router are shared facts/conduits, not coordinators.
+- **Go holds node position**, re-emits node-geometry on move; render is Go-authoritative (node body, wire, bead all from Go's stream). The editor owns interaction/viewpoint, not position data.
+- **Pulse placement** = `lerp(edge-geometry segment, Go's fraction)` — same store the tube reads, so the bead can't leave the wire.
+- **Parser-parity is a recurring trap:** when changing a TS→Go message shape, update `parseEdit` in `messages.ts` AND the Go stdin-reader struct in the same change, or the message is silently dropped (no error). See `feedback_schema_parser_parity`.
+- **Two-process editor:** changing extension-host code (`messages.ts`/`handle-message.ts`/`extension.ts`) needs **Developer: Reload Window**; webview-only changes refresh on reopen. See `feedback_two_process_editor_reload`.
+- **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; straightness is non-local → O(N²) follow latency.
+- **Probe logs** (`.probe/*.jsonl`) accumulate across sessions; clear them (`: > file`) for a clean diagnostic read.
 
 ### Dev-loop
 
-- After Go: `go build ./...` + `go test -race ./...`; after TS (from `tools/topology-vscode/`): `npm run build` + `npx tsc --noEmit` + `npx vitest run`; run guard scripts; `tools/check-generated.sh` + `check-trace-kind-parity` after trace-kind/SPEC/port changes.
-- Exercise editor changes: Developer: Reload Window.
-- Concision: prose blocks under ~40 words — bullets/tables/one-liners.
-- Active topology in08/i0/i1 (3 edges, all firing). topology.json is skip-worktree.
-- No merge to main without explicit sign-off. Delete merged branches without re-asking.
+- Go: `go build ./...` + `go test -race ./...`. TS (from `tools/topology-vscode/`): `npm run build` (rebuilds extension.js + webview.js) + `npx tsc --noEmit` + `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
+- Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file for webview-only.
+- topology.json is skip-worktree (in08/i0/i1, 3 edges). No merge to main without explicit sign-off. Delete merged branches without re-asking.
 
 ## ALWAYS clause
 
-At end of session, overwrite this file with a freshly-rendered prompt
-tailored to the state you're leaving the branch in, and commit on the
-active branch (main if no task is in flight). Do not rely on chat
-history; the next AI may be a fresh model with no transcript. The
-rendered handoff must itself contain this same ALWAYS clause so the
-loop is self-perpetuating across sessions. Use
-[continuation-prompt-template.md](continuation-prompt-template.md) as
-the structural source of truth; update the template when an invariant
-changes.
+At end of session, overwrite this file with a freshly-rendered prompt tailored to the
+state you're leaving the branch in, and commit on the active branch (main if no task is
+in flight). Do not rely on chat history; the next AI may be a fresh model with no
+transcript. The rendered handoff must itself contain this same ALWAYS clause so the loop
+is self-perpetuating across sessions. Use
+[continuation-prompt-template.md](continuation-prompt-template.md) as the structural
+source of truth; update the template when an invariant changes.
