@@ -51,3 +51,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_node_model_not_networking_handshake.md](feedback_node_model_not_networking_handshake.md) — Nodes do local work + drive their outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees
 - [feedback_paced_tryrecv_blocks.md](feedback_paced_tryrecv_blocks.md) — Paced TryRecv blocks (not a poll); judge from paced_wire.go impl, not the Try/ok idiom
 - [feedback_per_goroutine_bridge.md](feedback_per_goroutine_bridge.md) — Go↔TS bridge is per-goroutine (each goroutine sends/picks up); geometry's central emitter is the deviation
+- [project_wire_is_straight_line_not_chain.md](project_wire_is_straight_line_not_chain.md) — Wires are straight PacedWire lines; bead-item chain model was built then rejected (O(N²) follow latency); don't re-propose it
