@@ -53,7 +53,6 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 			{Name: "out", IsInput: false, PX: 2.0, PY: -2.5, PZ: 0, DX: 1, DY: 0, DZ: 0},
 		}},
 		{Step: 8, Kind: KindArrive, Node: "A", Port: "out", Value: 1, hasValue: true},
-		{Step: 9, Kind: KindFade, Edge: "AtoB", Faded: true},
 	}
 
 	fixture := fixtureLines(t)

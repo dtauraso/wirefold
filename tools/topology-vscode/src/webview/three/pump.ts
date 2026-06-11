@@ -148,12 +148,6 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
-    case "fade": {
-      // Per-wire fade/unfade from Go. The visual fade is already applied TS-locally
-      // (the editor sends the fade edit and updates its own store); this event is
-      // logged for correlation in .probe/go.jsonl but requires no render action here.
-      return;
-    }
     // PUMP_DONE_HANDLER
     case "done": {
       // The consumer finished USING the held value (node's firing rule ran). Held

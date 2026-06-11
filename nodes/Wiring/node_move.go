@@ -135,7 +135,6 @@ func (m *edgeMover) handle(msg moveMsg) {
 		if m.dest != nil {
 			m.dest.SetFaded(msg.Faded)
 		}
-		m.tr.Fade(m.edgeID, msg.Faded)
 		return
 	}
 	switch msg.NodeID {

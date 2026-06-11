@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "position", "geometry", "pulse-cancelled", "node-geometry", "arrive", "fade"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "position", "geometry", "pulse-cancelled", "node-geometry", "arrive"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -119,11 +119,4 @@ describe("trace-event-fields contract", () => {
     expect(typeof (e as Extract<TraceEvent, { kind: "arrive" }> & { port?: string }).port).toBe("string");
   });
 
-  it("fade event has step, kind, edge, faded", () => {
-    const e = events.find((ev) => ev.kind === "fade")! as Record<string, unknown>;
-    expect(typeof e["step"]).toBe("number");
-    expect(e["kind"]).toBe("fade");
-    expect(typeof e["edge"]).toBe("string");
-    expect(typeof e["faded"]).toBe("boolean");
-  });
 });
