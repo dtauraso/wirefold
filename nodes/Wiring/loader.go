@@ -419,6 +419,8 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		geomObs := make(chan ItemReport, 1024)
 		pulseObs := make(chan PulseReport, 256)
 		chain := NewBeadChainWithPulse(seg.Start, seg.End, geomObs, clk, pulseObs)
+		// Register the chain so node-move can move its anchors (chain follows node).
+		nmr.SetEdgeChain(e.Label, chain)
 
 		edge := e.Label
 		// Geometry drain: coalesce per-bead positions and flush at a render cadence
