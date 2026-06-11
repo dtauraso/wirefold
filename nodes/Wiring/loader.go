@@ -1,14 +1,14 @@
 // loader.go — runtime topology loader.
 //
 // LoadTopology reads topology.json, allocates one PacedWire per destination
-// port (fan-in safe), and returns ([]Node, WireRegistry). WireRegistry is
-// keyed by edge label and is consumed by the stdin-reader goroutine (see
-// RunStdinReader in main.go) to dispatch "edit" CRUD ops from the webview.
+// port (fan-in safe), and returns ([]Node, SlotRegistry, WireRegistry, *MoveDispatch).
+// WireRegistry is edge-label-keyed; fade ops are now routed via MoveDispatch.dispatch
+// so WireRegistry is retained for future use but no longer consumed by RunStdinReader.
 //
 // Key behaviors:
 //   - One *PacedWire per (destNode, destPort); multiple edges sharing a
 //     destination port reuse the same wire (fan-in support).
-//   - WireRegistry maps edge label → wire for the stdin_reader fade op.
+//   - SlotRegistry maps "target.targetHandle" → wire for create/delete ops.
 //   - Input nodes: data.init values pre-seeded via pw.Send in a goroutine.
 //   - ChainInhibitor: data.state["held"] → Held via wire:"data.state" tag.
 //   - Slice output ports (ToEdge): all outbound wires appended in spec order.

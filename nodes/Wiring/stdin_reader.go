@@ -74,12 +74,11 @@ type SlotRegistry map[string]*PacedWire
 // or r reaches EOF. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
-// destination port's wire. reg is no longer used for fade (fade is now routed via
-// md.dispatch, same as update). md may be nil; if non-nil, update (node-move) and
+// destination port's wire. md may be nil; if non-nil, update (node-move) and
 // fade ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg WireRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	sc := bufio.NewScanner(r)
 	done := ctx.Done()
 	lineCh := make(chan string, 8)
@@ -111,7 +110,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 			//   "pause" — halt the clock's global gate (bead delivery freezes).
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, slotReg, reg, md, tr)
+				applyEdit(msg, slotReg, md, tr)
 			case "play":
 				if clk != nil {
 					clk.Resume()
@@ -136,10 +135,11 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, reg 
 //     echoing pulse-cancelled (PacedWire.Delete owns both, atomically).
 //   - update: mail-sort the node-move entries to the owning node/edge inboxes; each
 //     owning goroutine recomputes its own geometry (no central recompute here).
-//   - fade:   mail-sort each (edgeId,faded) entry to the owning edgeMover; each wire sets its own flag.
+//   - fade:   mail-sort each (edgeId,faded) entry to the owning edgeMover via
+//     md.dispatch; each wire sets its own flag.
 //
 // Unknown ops are ignored (forward-compat).
-func applyEdit(msg stdinMsg, slotReg SlotRegistry, reg WireRegistry, md *MoveDispatch, tr *T.Trace) {
+func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
 	switch {
 	case msg.Op == "create":
 		if msg.Target == "" || msg.TargetHandle == "" {

@@ -143,7 +143,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         // Forward the node-move entries map verbatim (keyed by moved node id + each
         // incident edge id); Go's stdin reader mail-sorts each entry to the owning
         // node/edge goroutine. Fire-and-forget.
-        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "edit-update-forward", entryKeys: Object.keys(msg.entries) }), document.uri);
         runner.writeStdin(JSON.stringify({ type: "edit", op: "update", entries: msg.entries }));
       } else if (msg.op === "fade") {
         // edges is Record<string, boolean>: edgeId → desired faded state. Forward verbatim.

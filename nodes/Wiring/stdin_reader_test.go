@@ -22,13 +22,11 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	clk := NewFakeClock()
 	pw.SetClock(clk)
 	slotReg := SlotRegistry{"nodeA.in": pw}
-	reg := WireRegistry{}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, slotReg, reg, nil, nil, nil)
+	go RunStdinReader(ctx, r, slotReg, nil, nil, nil)
 
 	// Place a bead with a 50ms in-flight time; delivery is timed by the clock.
 	const inFlightMs = 50
@@ -66,13 +64,12 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 
 func TestRunStdinReaderUnknownTargetIgnored(t *testing.T) {
 	slotReg := SlotRegistry{}
-	reg := WireRegistry{}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	// Unknown slot on a delete edit → no panic, reader exits cleanly on ctx cancel.
 	r := strings.NewReader(`{"type":"edit","op":"delete","target":"unknown","targetHandle":"in"}` + "\n")
-	RunStdinReader(ctx, r, slotReg, reg, nil, nil, nil) // should return without hanging
+	RunStdinReader(ctx, r, slotReg, nil, nil, nil) // should return without hanging
 }
 
 // TestRunStdinReaderEditDeleteCancelsInFlight drives a delete through the NEW
@@ -89,12 +86,11 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 	pw.Trace = tr
 	pw.Target, pw.TargetHandle = "nodeA", "in"
 	slotReg := SlotRegistry{"nodeA.in": pw}
-	reg := WireRegistry{"e0": pw}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, slotReg, reg, nil, tr, nil)
+	go RunStdinReader(ctx, r, slotReg, nil, tr, nil)
 
 	// Place a bead with full position-stream identity, advance partway (in flight).
 	const inFlightMs = 50.0

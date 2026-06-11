@@ -90,12 +90,14 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	tr := T.New(64)
 	_, _, _, nmr, err := LoadTopology(ctx, path, tr, NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
+	nmr.Start(ctx)
 
 	out := nmr.edgeOut["e0"]
 	if out == nil {
@@ -104,7 +106,7 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 
 	// Move src to a new position and re-derive.
 	const nx, ny, nz = 400, 250, 30
-	nmr.applyNodeMove("src", nx, ny, nz)
+	deliver(nmr, "src", nx, ny, nz)
 
 	// Build the expected segment + arc independently from the moved geometry.
 	srcGeom := nodeGeom{Kind: "FanInSrc", Pos: vec3{X: nx, Y: ny, Z: nz},
