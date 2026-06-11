@@ -59,7 +59,6 @@ func (i *In) TryRecv() (int, bool) {
 		}
 		n, _ := v.(int)
 		i.trace.Recv(i.node, i.port, n)
-		i.trace.Breadcrumb("wire_recv", i.pw.Target, i.pw.TargetHandle, fmt.Sprintf("%d", n))
 		return n, true
 	}
 	if i.ch == nil {
@@ -90,7 +89,6 @@ func (i *In) PollRecv() (int, bool) {
 		}
 		n, _ := v.(int)
 		i.trace.Recv(i.node, i.port, n)
-		i.trace.Breadcrumb("wire_recv", i.pw.Target, i.pw.TargetHandle, fmt.Sprintf("%d", n))
 		return n, true
 	}
 	if i.ch == nil {
