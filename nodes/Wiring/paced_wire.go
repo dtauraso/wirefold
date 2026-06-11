@@ -461,10 +461,13 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 				// complete the Phase-1 delivery under the lock, guarding once more
 				// against a stale waiter (teardown/revise between WaitUntil and here).
 				pw.mu.Lock()
+				var ai arriveInfo
 				if pw.deliverGen == gen {
-					pw.tryDeliverLocked()
+					ai = pw.tryDeliverLocked()
 				}
 				pw.mu.Unlock()
+				// Emit traversal-complete off the lock (trace channel send).
+				pw.emitArrive(ai)
 				return
 			}
 			next += interval
@@ -526,32 +529,47 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) 
 // duplicate trigger). Must be called with pw.mu held. This is the single delivery
 // path; the clock goroutine is its only caller (Go times its own delivery — there
 // is no cross-boundary delivery signal, MODEL.md).
-func (pw *PacedWire) tryDeliverLocked() {
+func (pw *PacedWire) tryDeliverLocked() arriveInfo {
 	if pw.deleted {
-		return
+		return arriveInfo{}
 	}
 	if !pw.inFlight {
 		// Already delivered (or never placed): nothing to do.
-		return
+		return arriveInfo{}
 	}
 	if pw.hasSend {
-		// Slot full: defer delivery to Done.
+		// Slot full: defer delivery to Done. The arrive trace fires when Done
+		// completes the deferred deliverLocked — still exactly once per bead.
 		pw.pendingDelivered = true
-		return
+		return arriveInfo{}
 	}
-	pw.deliverLocked()
+	return pw.deliverLocked()
+}
+
+// arriveInfo carries the source identity a deliverLocked caller must echo on the
+// arrive trace AFTER releasing pw.mu (the trace channel must not be sent while the
+// wire lock is held, same discipline as Delete's pulse-cancelled). emit is false
+// for a delivery that carried no position stream (bare unit-test placements).
+type arriveInfo struct {
+	emit              bool
+	node, port string
+	value             int
 }
 
 // deliverLocked moves the pending value into the slot and signals Recv.
 // Must be called with pw.mu held. Precondition: hasSend==false.
 // Sets hasSend=true, clears inFlight and pendingDelivered, broadcasts, and
-// closes the current slotReadyCh so any waiting Recv unblocks.
-func (pw *PacedWire) deliverLocked() {
+// closes the current slotReadyCh so any waiting Recv unblocks. Returns the
+// bead's source identity so the caller can emit the arrive trace after unlocking
+// (this is the single traversal-complete point — exactly once per bead).
+func (pw *PacedWire) deliverLocked() arriveInfo {
 	pw.slot = pw.pending
 	pw.pending = nil
 	pw.hasSend = true
 	pw.inFlight = false
 	pw.pendingDelivered = false
+	// Capture the bead's source identity for the arrive trace before zeroing it.
+	ai := arriveInfo{emit: pw.inFlightStreams, node: pw.inFlightNode, port: pw.inFlightPort, value: pw.inFlightVal}
 	// Bead delivered normally — drop its in-flight identity so a later Delete on
 	// this (now empty) wire does not echo a spurious pulse-cancelled.
 	pw.inFlightArc = 0
@@ -564,6 +582,15 @@ func (pw *PacedWire) deliverLocked() {
 	// Close outside the broadcast but still under the lock is fine; Recv only
 	// reads the channel after capturing it while holding the lock.
 	close(ch)
+	return ai
+}
+
+// emitArrive sends the traversal-complete trace for a delivered bead. Called by
+// deliverLocked's callers AFTER releasing pw.mu (trace channel send off the lock).
+func (pw *PacedWire) emitArrive(ai arriveInfo) {
+	if ai.emit {
+		pw.Trace.Arrive(ai.node, ai.port, ai.value)
+	}
 }
 
 // Done is called by the receiver when it has finished using the value.
@@ -576,10 +603,12 @@ func (pw *PacedWire) Done() {
 	pw.slot = nil
 	pw.hasSend = false
 	pw.slotReadyCh = make(chan struct{})
+	var ai arriveInfo
 	if pw.pendingDelivered {
 		// A clock delivery's deadline was reached while the slot was full;
-		// complete it now.
-		pw.deliverLocked()
+		// complete it now. The deferred bead's traversal completes here, so the
+		// arrive trace fires here (exactly once — tryDeliverLocked did not emit).
+		ai = pw.deliverLocked()
 	} else {
 		pw.cond.Broadcast()
 	}
@@ -587,6 +616,9 @@ func (pw *PacedWire) Done() {
 	ch := pw.consumedCh
 	pw.consumedCh = nil
 	pw.mu.Unlock()
+
+	// Emit a deferred bead's traversal-complete off the lock (trace channel send).
+	pw.emitArrive(ai)
 
 	if ch != nil {
 		close(ch)

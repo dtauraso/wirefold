@@ -132,21 +132,32 @@ export function handleTraceEvent(event: TraceEvent): void {
       );
       return;
     }
-    // PUMP_DONE_HANDLER
-    case "done": {
-      // Match ALL edges by target node id + targetHandle (fan-in).
-      // RF edges store target/targetHandle; trace done events carry node/port.
-      const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
+    case "arrive": {
+      // Bead COMPLETED its traversal — delivered into the dest slot (f reached the
+      // end). Match ALL edges by source node id + sourceHandle (fan-out, same key
+      // as send/position/pulse-cancelled) and clear the transit pulse: the in-flight
+      // bead vanishes the instant it arrives, NOT when the node later consumes the
+      // held value (that's "done"). deliverLocked fires arrive exactly once per bead.
+      const { node, port } = event as Extract<TraceEvent, { kind: "arrive" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
-        (e) => e.target === node && e.targetHandle === port,
+        (e) => e.source === node && e.sourceHandle === port,
       );
-      // Held value is intentionally NOT cleared here — badges are sticky and
-      // show the last value received per input port until overwritten by a new send.
       for (const edge of matched) {
-        postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null, edgeId: edge.id });
         clearPulse(edge.id);
       }
+      return;
+    }
+    // PUMP_DONE_HANDLER
+    case "done": {
+      // The consumer finished USING the held value (node's firing rule ran). Held
+      // value/badge is intentionally NOT cleared here — badges are sticky and show
+      // the last value received per input port until overwritten by a new send.
+      // The transit pulse is NOT cleared here either: it already vanished on
+      // "arrive" (traversal-complete). Clearing on done made the bead LINGER at the
+      // dest port until consume, which in a ring can lag arrival noticeably.
+      const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
+      postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null });
       return;
     }
     default:

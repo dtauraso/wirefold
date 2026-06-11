@@ -54,13 +54,22 @@ const (
 	// startup via its injected EmitGeometry closure — the node owns its own
 	// geometry emission (wires still own bead-position emission). Keyed by node id.
 	KindNodeGeometry = "node-geometry"
+	// KindArrive marks a bead COMPLETING its traversal on a wire — the bead has
+	// reached the destination port and is delivered into the slot. The wire emits
+	// it from deliverLocked (the single delivery path), keyed by the bead's SOURCE
+	// node+port — the same routing key as send/position/pulse-cancelled — so the
+	// renderer clears the transit pulse the instant the bead arrives. This is
+	// DISTINCT from "done" (the consumer finished USING the held value): the transit
+	// pulse represents a bead in flight and must vanish on arrival, not linger at the
+	// port until the node's firing rule consumes the held value.
+	KindArrive = "arrive"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -254,6 +263,17 @@ func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom
 		return
 	}
 	t.ch <- Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Ports: ports}
+}
+
+// Arrive marks a bead completing its traversal — delivered into the destination
+// slot. Keyed by the bead's SOURCE node+port (the same routing key as send/
+// position/pulse-cancelled), so the renderer clears the transit pulse on arrival.
+// The wire's deliverLocked is the single caller; it fires exactly once per bead.
+func (t *Trace) Arrive(node, port string, value int) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindArrive, Node: node, Port: port, Value: value, hasValue: true}
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -491,6 +511,9 @@ func marshalEvent(e Event) ([]byte, error) {
 			SX: e.SX, SY: e.SY, SZ: e.SZ,
 			EX: e.EX, EY: e.EY, EZ: e.EZ})
 	case KindPulseCancelled:
+		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+	case KindArrive:
+		// Same wire shape as pulse-cancelled: source node+port+value routing key.
 		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	case KindNodeGeometry:
 		ports := make([]portGeomJSON, len(e.Ports))
