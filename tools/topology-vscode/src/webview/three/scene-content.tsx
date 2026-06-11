@@ -385,31 +385,45 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere drawn at the bead's Go-computed world position.
-// Go owns the clock and computes every bead position; this component PLOTS ONLY —
-// it reads pulse.pos from getPulseMap() each frame and sets the mesh position to it.
-// No curve sampling, no t, no clock, no delivery message: the renderer is told where
-// the bead is, never asked when it arrived (MODEL.md). Under a drag the bead stays
-// smooth because Go's ReviseInFlightGeometry preserves the fraction while re-deriving
-// the new segment, so pulse.pos lands on the moved wire ~1 frame behind the cursor.
-// (pulse.frac is still streamed but is now unused by rendering — kept on the bridge.)
+// PulseBead: a bright sphere drawn ON the wire at its Go-owned fractional progress.
+// Go owns the clock and the bead's fraction along the wire; this component PLOTS ONLY —
+// each frame it reads pulse.frac (the bead's progress t, 0..1) from getPulseMap() and
+// places the bead at lerp(start, end, frac) on the SAME segment SingleEdgeTube draws,
+// read from useEdgeGeometryStore (Go's wireSegment Start/End, re-emitted on every
+// node-move). Because bead and tube share one segment source, the bead is provably on
+// the line every frame and rides the wire as the node moves — no lag, no drift.
+// No curve sampling beyond the linear lerp, no clock, no delivery message: the renderer
+// is told where the bead is (segment + fraction), never asked when it arrived (MODEL.md).
+// pulse.frac is now LIVE — it is the progress used to place the bead on the live wire.
+// Go's emitted x,y,z on the position event (pulse.pos) is now unused by the bead; it is
+// left on the bridge for now (no Go/bridge churn).
 export function PulseBead({
   edgeId,
 }: {
   edgeId: string;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
+  // SAME source SingleEdgeTube subscribes to — bead and tube cannot diverge.
+  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
 
   useFrame(() => {
     const pulse = getPulseMap().get(edgeId);
     const mesh = meshRef.current;
     if (!mesh) return;
-    // Hidden until there is a pulse AND Go has streamed at least one position.
-    if (!pulse || !pulse.pos) {
+    // Hidden until there is a pulse with a fraction AND Go has streamed this edge's
+    // segment (startup race: no segment yet → render nothing, no crash).
+    if (!pulse || pulse.frac == null || !seg) {
       mesh.visible = false;
       return;
     }
-    mesh.position.set(pulse.pos.x, pulse.pos.y, pulse.pos.z);
+    // Render placement of Go-owned values: place the bead at its Go-supplied fraction
+    // along the Go-supplied segment. Same exception class as nodeWorldPos.
+    const f = pulse.frac;
+    mesh.position.set(
+      seg.start.x + f * (seg.end.x - seg.start.x),
+      seg.start.y + f * (seg.end.y - seg.start.y),
+      seg.start.z + f * (seg.end.z - seg.start.z),
+    );
     mesh.visible = true;
   });
 
