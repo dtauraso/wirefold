@@ -63,13 +63,18 @@ const (
 	// pulse represents a bead in flight and must vanish on arrival, not linger at the
 	// port until the node's firing rule consumes the held value.
 	KindArrive = "arrive"
+	// KindFade is emitted by edgeMover when a per-wire fade/unfade is applied
+	// (SetFaded call). Keyed by edge id. Faded=true means faded (inhibited);
+	// Faded=false means unfaded (restored). Both values must be visible in the
+	// log, so the field is never omitted.
+	KindFade = "fade"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindFade}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -122,6 +127,10 @@ type Event struct {
 	// Keyed by Node (the node id). Set on node-geometry events only.
 	NX, NY, NZ float64
 	Ports      []PortGeom
+	// Faded carries the faded flag on fade events (KindFade), keyed by Edge.
+	// Both true and false must appear in the log (unfade must be visible), so
+	// this field uses json:"faded" WITHOUT omitempty.
+	Faded bool `json:"faded"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -284,6 +293,16 @@ func (t *Trace) PulseCancelled(node, port string, value int) {
 		return
 	}
 	t.ch <- Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value, hasValue: true}
+}
+
+// Fade emits a per-wire fade/unfade event, keyed by edge id. faded=true means
+// the wire is now inhibited; faded=false means it is restored. Both values are
+// always emitted so unfades are visible in .probe/go.jsonl.
+func (t *Trace) Fade(edge string, faded bool) {
+	if t == nil {
+		return
+	}
+	t.ch <- Event{Kind: KindFade, Edge: edge, Faded: faded}
 }
 
 // Breadcrumb writes a free-form diagnostic line directly to the sink
@@ -521,6 +540,16 @@ func marshalEvent(e Event) ([]byte, error) {
 			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
 		}
 		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Ports: ports})
+	case KindFade:
+		// faded is always emitted (no omitempty) so both fade and unfade are
+		// visible in the log.
+		type fadeEvent struct {
+			Step  int    `json:"step"`
+			Kind  string `json:"kind"`
+			Edge  string `json:"edge"`
+			Faded bool   `json:"faded"`
+		}
+		return json.Marshal(fadeEvent{Step: e.Step, Kind: e.Kind, Edge: e.Edge, Faded: e.Faded})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}
