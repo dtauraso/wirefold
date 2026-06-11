@@ -16,8 +16,8 @@ import {
   nodeTopWorldPos,
   ndcToPixel,
   portDir,
+  portWorldPos,
 } from "./geometry-helpers";
-import { useEdgeGeometryStore } from "./edge-geometry";
 import { getPulseMap } from "./pulse-state";
 import type { PickOptions } from "./interaction-controls";
 // Shading PARAMETER values are Go-authoritative (MODEL.md / Phase 4). They are
@@ -385,17 +385,22 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere drawn at the bead's Go-computed world position.
-// Phase 2: Go owns the clock and computes every bead position; this component
-// PLOTS ONLY — it reads pulse.pos from getPulseMap() each frame and sets the mesh
-// position to it. No curve sampling, no t, no clock, no delivery message: the
-// renderer is told where the bead is, never asked when it arrived (MODEL.md).
-// src/tgt/handles are no longer needed for the bead (the wire tube still uses
-// them); they are kept off this component's props.
+// PulseBead: a bright sphere placed at the bead's live position on the wire.
+// Go owns the bead's PROGRESS (fraction t, timed on the one clock); the EDITOR owns
+// the live node positions during a drag. This component reads Go's fraction (pulse.frac)
+// and places the bead at lerp(liveStart, liveEnd, frac) on the SAME local node-port
+// endpoints the wire tube draws — so the bead rides the live wire with no round-trip
+// lag and no t-swing race. It is NOT geometry computation: it places a Go-owned value
+// on editor-owned node positions (see tools/check-ts-computes-no-geometry.sh note).
+// liveStart/liveEnd are recomputed by the parent each frame from local node positions.
 export function PulseBead({
   edgeId,
+  startRef,
+  endRef,
 }: {
   edgeId: string;
+  startRef: React.MutableRefObject<THREE.Vector3>;
+  endRef: React.MutableRefObject<THREE.Vector3>;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -403,12 +408,13 @@ export function PulseBead({
     const pulse = getPulseMap().get(edgeId);
     const mesh = meshRef.current;
     if (!mesh) return;
-    // Hidden until there is a pulse AND Go has streamed at least one position.
-    if (!pulse || !pulse.pos) {
+    // Hidden until there is a pulse AND Go has streamed at least one fraction.
+    if (!pulse || pulse.frac == null) {
       mesh.visible = false;
       return;
     }
-    mesh.position.set(pulse.pos.x, pulse.pos.y, pulse.pos.z);
+    // Place Go's fractional progress on the live local endpoints (lerp).
+    mesh.position.lerpVectors(startRef.current, endRef.current, pulse.frac);
     mesh.visible = true;
   });
 
@@ -424,40 +430,64 @@ export function PulseBead({
   );
 }
 
-export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
-  // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
-  // streams the endpoints (geometry trace) on load and on every node-move;
-  // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's
-  // endpoints and draw the tube from them — TS computes no geometry.
-  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
+export function SingleEdgeTube({
+  edgeId,
+  source,
+  target,
+  sourceHandle,
+  targetHandle,
+  faded,
+  selected,
+}: {
+  edgeId: string;
+  source: RFNode<NodeData>;
+  target: RFNode<NodeData>;
+  sourceHandle: string;
+  targetHandle: string;
+  faded: boolean;
+  selected: boolean;
+}) {
+  // Wire endpoints follow the dragged node IMMEDIATELY: they are the LOCAL node port
+  // positions (editor owns live node positions during interaction, MODEL.md). Sourcing
+  // them from Go's edge-geometry store lagged a round-trip behind the node body (which
+  // already reads local node.position via nodeWorldPos), so the wire trailed the node.
+  // Reading the same local port positions the node body uses keeps the wire attached.
+  // The pulse bead rides this SAME live segment at Go's fractional progress t.
+  const tubeMeshRef = useRef<THREE.Mesh>(null);
+  const haloMeshRef = useRef<THREE.Mesh>(null);
+  // Live endpoints recomputed each frame; shared with PulseBead by ref so it lerps
+  // Go's fraction over the exact segment the tube draws.
+  const startRef = useRef(new THREE.Vector3());
+  const endRef = useRef(new THREE.Vector3());
 
-  // Stable key over Go's streamed endpoints — rebuild the tube only when they
-  // change (e.g. a drag re-streams them).
-  const segKey = seg
-    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
-    : "";
-  const { tubeGeo, haloGeo } = useMemo(() => {
-    if (!seg) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
-    const start = new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z);
-    const end = new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z);
-    // Wire is a straight line: P(t) = Start + t*(End-Start).
-    const tubeCurve = new THREE.LineCurve3(start, end);
-    const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 1, 1.5, 6, false);
-    // Halo: concentric tube on the same segment, larger radius — reads as a glow around the core.
-    const _haloGeo = new THREE.TubeGeometry(tubeCurve, 1, 5, 6, false);
-    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segKey]);
+  // One reusable tube/halo geometry pair, rebuilt in place each frame from the live
+  // endpoints (a straight LineCurve3 segment). TubeGeometry has no in-place setter, so
+  // we dispose+swap the buffer geometry when the endpoints move.
+  const lastKeyRef = useRef("");
 
-  // Until Go streams this edge's segment, draw nothing (geometry arrives on load).
-  if (!tubeGeo || !haloGeo) {
-    return <>{!faded && <PulseBead edgeId={edgeId} />}</>;
-  }
+  useFrame(() => {
+    startRef.current.copy(portWorldPos(source, sourceHandle, false));
+    endRef.current.copy(portWorldPos(target, targetHandle, true));
+    const s = startRef.current, e = endRef.current;
+    const key = `${s.x},${s.y},${s.z}:${e.x},${e.y},${e.z}`;
+    if (key === lastKeyRef.current) return;
+    lastKeyRef.current = key;
+    const curve = new THREE.LineCurve3(s.clone(), e.clone());
+    const tubeMesh = tubeMeshRef.current, haloMesh = haloMeshRef.current;
+    if (tubeMesh) {
+      tubeMesh.geometry.dispose();
+      tubeMesh.geometry = new THREE.TubeGeometry(curve, 1, 1.5, 6, false);
+    }
+    if (haloMesh) {
+      haloMesh.geometry.dispose();
+      haloMesh.geometry = new THREE.TubeGeometry(curve, 1, 5, 6, false);
+    }
+  });
 
   return (
     <>
       {/* Always-lit base tube — emissive so it reads at any camera angle */}
-      <mesh geometry={tubeGeo} userData={{ edgeId }}>
+      <mesh ref={tubeMeshRef} userData={{ edgeId }}>
         <meshStandardMaterial
           key={faded ? "faded" : "solid"}
           color={SHADING_PARAM_TUBE_COLOR}
@@ -470,7 +500,7 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
       {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
           can hit anywhere within the halo radius; painted only when selected (opacity 0
           otherwise — an opacity-0 visible mesh is still raycast-hittable). */}
-      <mesh geometry={haloGeo} userData={{ edgeId }}>
+      <mesh ref={haloMeshRef} userData={{ edgeId }}>
         <meshBasicMaterial
           color="#ff5a00"
           transparent
@@ -479,8 +509,8 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
           depthWrite={false}
         />
       </mesh>
-      {/* Pulse bead: plotted at Go's streamed position (Phase 2). */}
-      {!faded && <PulseBead edgeId={edgeId} />}
+      {/* Pulse bead: placed at Go's fractional progress on the live local endpoints. */}
+      {!faded && <PulseBead edgeId={edgeId} startRef={startRef} endRef={endRef} />}
     </>
   );
 }
@@ -497,12 +527,24 @@ export function GraphEdges({
   return (
     <>
       {edges.map((e) => {
-        // Endpoints still gate rendering (a dangling edge with a missing node draws
-        // nothing), but the tube SHAPE comes from Go's streamed curve, not from these.
+        // Endpoints gate rendering (a dangling edge with a missing node draws nothing)
+        // AND now source the live wire segment: the tube + bead track the local node
+        // port positions, so a dragged node carries the wire with it (no Go round-trip).
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} />;
+        return (
+          <SingleEdgeTube
+            key={e.id}
+            edgeId={e.id}
+            source={s}
+            target={t}
+            sourceHandle={e.sourceHandle ?? ""}
+            targetHandle={e.targetHandle ?? ""}
+            faded={!!e.data?.faded}
+            selected={e.id === selectedId}
+          />
+        );
       })}
     </>
   );

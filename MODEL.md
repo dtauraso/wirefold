@@ -76,9 +76,19 @@ A node places a bead on its outgoing wire whenever its own rule says to. It does
 - Wire geometry sets in-flight traversal time:
   `inFlightTime = arcLength / pulseSpeed`. Geometry has no other effect.
 - A geometry edit re-derives traversal time. While a bead is in flight,
-  the new arc length and the distance already covered give the remaining
-  time. If the new arc length is below the distance covered, the
-  traversal completes immediately.
+  the in-flight revision PRESERVES the bead's FRACTIONAL progress `t` (its
+  proportion along the wire) — NOT the absolute distance covered. On the
+  edit the bead stays at the same fraction `t`, and the remaining time is
+  recomputed from the NEW arc length at the uniform pulse speed:
+  `remaining = (1−t)·newArc/pulseSpeed`. So the bead rides smoothly at the
+  same proportion as the wire reshapes (no t-swing race as a node is
+  dragged), and a longer or shorter wire still traverses at constant
+  world-speed. (Preserving distance instead would let `t` jump as the arc
+  length changes.)
+- Go owns the bead's PROGRESS (the fraction `t`, timed on the one clock);
+  the editor owns the live node positions during a drag and PLACES the
+  bead at `lerp(liveStart, liveEnd, t)` on its local node-port endpoints.
+  Go emits `t` on the position trace event for this placement.
 - Traversal time is the only duration the network tracks.
 ## Driver
 

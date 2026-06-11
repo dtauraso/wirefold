@@ -4,10 +4,12 @@
 //   (a) node-move re-derives geometry: a move on an endpoint recomputes the edge's
 //       source-Out control points AND arc length to match the new port-to-port
 //       curve (Go is the authoritative holder of node positions + per-edge curves).
-//   (b) in-flight re-derive (MODEL.md "Geometry and time"): with distanceCovered =
-//       pulseSpeed × elapsed, a mid-flight geometry edit re-derives the remaining
-//       delivery time from (newArc − covered)/pulseSpeed — and delivers immediately
-//       when newArc ≤ covered.
+//   (b) in-flight re-derive (MODEL.md "Geometry and time"): a mid-flight geometry edit
+//       PRESERVES the bead's fractional progress t (its proportion along the wire) and
+//       re-derives the remaining delivery time from the NEW arc at uniform pulse speed:
+//       remaining = (1−t)·newArc/pulseSpeed. The fraction does NOT change as the wire
+//       lengthens or shrinks (no t-swing race); only the world-time to traverse the
+//       remaining (1−t) proportion scales with the new arc length.
 //   (c) delete-mid-flight: deleting an edge while a bead is in flight cancels the
 //       clock-delivery (no delivery ever lands) and emits a pulse-cancelled event
 //       so the renderer drops the sprite.
@@ -147,8 +149,9 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 }
 
 // TestInFlightRederiveLengthen is verifier group (b), lengthen case: place a bead,
-// advance the clock so distanceCovered = ~half the arc, then revise to a LONGER
-// arc; the remaining delivery time must re-derive from (newArc − covered)/pulseSpeed.
+// advance the clock to the half-way point (t = 0.5), then revise to a LONGER arc; the
+// fraction t is PRESERVED (stays 0.5) and the remaining delivery time re-derives at
+// uniform pulse speed from the NEW arc: remaining = (1−t)·newArc/pulseSpeed.
 func TestInFlightRederiveLengthen(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	clk := NewFakeClock()
@@ -165,19 +168,16 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}
 
-	// Advance to the half-way point: covered = pulseSpeed * 25 = arc0/2.
+	// Advance to the half-way point: covered = arc0/2 ⇒ fraction t = 0.5.
 	clk.Advance(25 * time.Millisecond)
-	covered := PulseSpeedWuPerMs * 25.0
-	if !approxEq(covered, arc0/2) {
-		t.Fatalf("setup: covered=%v, want arc0/2=%v", covered, arc0/2)
-	}
 
-	// Revise to a LONGER arc (double). Remaining = (newArc - covered)/pulseSpeed.
+	// Revise to a LONGER arc (double). Fraction t stays 0.5; remaining =
+	// (1−t)·newArc/pulseSpeed = 0.5·8/0.08 = 50 ms.
 	newArc := arc0 * 2
 	pw.ReviseInFlightGeometry(newArc, seg)
-	wantRemainingMs := (newArc - covered) / PulseSpeedWuPerMs // = (8-2)/0.08 = 75 ms
+	wantRemainingMs := 0.5 * newArc / PulseSpeedWuPerMs // = 50 ms
 
-	// One ms short of (25 + remaining): still in flight.
+	// One ms short of (revise + remaining): still in flight.
 	clk.Advance(time.Duration(wantRemainingMs-1) * time.Millisecond)
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
@@ -193,10 +193,12 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 	}
 }
 
-// TestInFlightRederiveShrinkImmediate is verifier group (b), shrink case: when the
-// revised arc is BELOW the distance already covered, the traversal completes
-// immediately (no further clock advance needed).
-func TestInFlightRederiveShrinkImmediate(t *testing.T) {
+// TestInFlightRederiveShrinkPreservesFraction is verifier group (b), shrink case:
+// shrinking the arc mid-flight PRESERVES the bead's fraction t (it does NOT jump to
+// the end / deliver immediately, which the old distance-preserving model did). The
+// remaining time re-derives at uniform speed from the smaller arc:
+// remaining = (1−t)·newArc/pulseSpeed.
+func TestInFlightRederiveShrinkPreservesFraction(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	clk := NewFakeClock()
 	pw.SetClock(clk)
@@ -211,24 +213,29 @@ func TestInFlightRederiveShrinkImmediate(t *testing.T) {
 		t.Fatal("TryPlace rejected on fresh wire")
 	}
 
-	// Advance to half: covered = arc0/2.
+	// Advance to half: fraction t = 0.5.
 	clk.Advance(25 * time.Millisecond)
-	covered := PulseSpeedWuPerMs * 25.0
 
-	// Revise to an arc BELOW covered → traversal completes immediately, with NO
-	// further Advance (the re-derived deadline is already behind the current clock).
-	newArc := covered * 0.5
-	if !(newArc < covered) {
-		t.Fatalf("setup: newArc %v must be < covered %v", newArc, covered)
-	}
+	// Revise to a SHORTER arc (0.8×). Fraction t stays 0.5 (NOT delivered immediately);
+	// remaining = 0.5·newArc/pulseSpeed = 0.5·3.2/0.08 = 20 ms.
+	newArc := arc0 * 0.8
 	pw.ReviseInFlightGeometry(newArc, seg)
+	wantRemainingMs := 0.5 * newArc / PulseSpeedWuPerMs // = 20 ms
 
-	waitNotInFlight(t, pw) // delivers without any Advance
+	// One ms short of the re-derived deadline: still in flight (no immediate delivery).
+	clk.Advance(time.Duration(wantRemainingMs-1) * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+	if !pw.InFlight() {
+		t.Fatalf("shrink delivered early: fraction must be preserved, remaining %.3f ms", wantRemainingMs)
+	}
+
+	// The final ms reaches the re-derived deadline → delivery.
+	clk.Advance(1 * time.Millisecond)
+	waitNotInFlight(t, pw)
 	v, ok := pw.PollRecv()
 	if !ok || v != 22 {
-		t.Fatalf("shrink: expected immediate delivery of bead 22, got (%v, ok=%v)", v, ok)
+		t.Fatalf("shrink: expected delivery of bead 22 at re-derived deadline, got (%v, ok=%v)", v, ok)
 	}
-	_ = arc0
 }
 
 // TestDeleteMidFlightCancels is verifier group (c): deleting an edge while a bead

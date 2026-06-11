@@ -37,9 +37,12 @@ export type WebviewToHostMsg =
 // {"recv","fire","send","done","position","geometry","pulse-cancelled"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
 // when the Go side has resolved it (currently omitted — raw form only).
-// position (Phase 2) carries the bead's Go-computed 3-D world position (x,y,z),
-// keyed by source node+port like send so the renderer routes it by
-// source+sourceHandle; TS plots it directly and computes no geometry.
+// position (Phase 2) carries the bead's Go-computed 3-D world position (x,y,z) plus
+// its FRACTIONAL progress t along the wire (f, 0..1), keyed by source node+port like
+// send so the renderer routes it by source+sourceHandle. Go owns progress; the editor
+// places the bead at lerp(liveStart, liveEnd, f) on its LOCAL (dragged) node port
+// positions so the bead rides the live wire with no round-trip lag (it does not
+// compute geometry — it places a Go-owned fraction on editor-owned node positions).
 // geometry (Phase 3) carries an edge's authoritative straight-segment endpoints
 // (sx/sy/sz = Start, ex/ey/ez = End), keyed by edge (== the edge id), so the
 // renderer draws the wire tube from Go's segment. pulse-cancelled (Phase 3) tells the renderer to drop an
@@ -48,7 +51,7 @@ export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
   | { step: number; kind: "send"; node: string; port?: string; edge?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
   | { step: number; kind: "done"; node: string; port: string }
-  | { step: number; kind: "position"; node: string; port: string; value?: number; x: number; y: number; z: number }
+  | { step: number; kind: "position"; node: string; port: string; value?: number; x: number; y: number; z: number; f: number }
   | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
   | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number }
   | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] };

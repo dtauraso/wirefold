@@ -81,7 +81,7 @@ describe("trace-event-fields contract", () => {
     expect(typeof (e as Extract<TraceEvent, { kind: "done" }> & { port?: string }).port).toBe("string");
   });
 
-  it("position event has step, kind, node, port, x, y, z (Phase 2)", () => {
+  it("position event has step, kind, node, port, x, y, z, f (Phase 2)", () => {
     const e = events.find((ev) => ev.kind === "position")! as Extract<TraceEvent, { kind: "position" }>;
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("position");
@@ -90,6 +90,7 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.x).toBe("number");
     expect(typeof e.y).toBe("number");
     expect(typeof e.z).toBe("number");
+    expect(typeof e.f).toBe("number");
   });
 
   it("geometry event has step, kind, edge, and six segment-endpoint coords (Phase 3)", () => {

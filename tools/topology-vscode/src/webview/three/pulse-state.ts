@@ -9,9 +9,11 @@
 // useFrame), so updates mutate the map without triggering a commit. That keeps the
 // 60 Hz position stream off React's render path entirely.
 //
-// Key: edge id. Value: { value, simStep, target, targetHandle, pos }.
-//   pos is the latest Go-supplied world position, or null until the first
-//   position event arrives (PulseBead stays hidden while pos is null).
+// Key: edge id. Value: { value, simStep, target, targetHandle, pos, frac }.
+//   pos is the latest Go-supplied world position; frac is the bead's Go-owned
+//   fractional progress t (0..1). Both null until the first position event arrives
+//   (PulseBead stays hidden while frac is null). PulseBead places the bead at
+//   lerp(liveStart, liveEnd, frac) on the editor's LOCAL node port positions.
 //
 // The wire-tube curve is NOT here: it is Go-authoritative and lives in
 // edge-geometry.ts (Phase 3), written by pump.ts from Go's geometry stream.
@@ -26,18 +28,23 @@ export interface PulseData {
   /** Go-computed bead world position (Phase 2 position stream); null until the
    *  first position event for this pulse arrives. TS never computes this. */
   pos: { x: number; y: number; z: number } | null;
+  /** Go-owned FRACTIONAL progress t (0..1) of the bead along its wire, from the
+   *  position event. The editor places the bead at lerp(liveStart, liveEnd, frac)
+   *  on its LOCAL (dragged) node port positions so the bead rides the live wire
+   *  with no round-trip lag. null until the first position event arrives. */
+  frac: number | null;
 }
 
 export type PulseMap = ReadonlyMap<string, PulseData>;
 
 let _current: Map<string, PulseData> = new Map();
 
-export function setPulse(edgeId: string, data: Omit<PulseData, "pos">) {
+export function setPulse(edgeId: string, data: Omit<PulseData, "pos" | "frac">) {
   // Records the in-flight bead and its routing identity (target/targetHandle) on
-  // the send event. The position is filled in by setPulsePos as Go's stream
-  // arrives; until then pos stays null and PulseBead stays hidden.
+  // the send event. The position + fraction are filled in by setPulsePos as Go's
+  // stream arrives; until then frac stays null and PulseBead stays hidden.
   const next = new Map(_current);
-  next.set(edgeId, { ...data, pos: null });
+  next.set(edgeId, { ...data, pos: null, frac: null });
   _current = next;
 }
 
@@ -45,10 +52,11 @@ export function setPulse(edgeId: string, data: Omit<PulseData, "pos">) {
  *  Called ~16 ms; mutates in place (no React commit). If a position arrives
  *  before the send event created the entry, it is dropped — the send event is
  *  what establishes routing identity. */
-export function setPulsePos(edgeId: string, x: number, y: number, z: number) {
+export function setPulsePos(edgeId: string, x: number, y: number, z: number, frac: number) {
   const existing = _current.get(edgeId);
   if (!existing) return;
   existing.pos = { x, y, z };
+  existing.frac = frac;
 }
 
 export function clearPulse(edgeId: string) {

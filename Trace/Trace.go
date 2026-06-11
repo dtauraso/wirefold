@@ -97,6 +97,11 @@ type Event struct {
 	// position from an unset one so marshalEvent always emits all three.
 	X, Y, Z float64
 	hasPos  bool
+	// F carries the bead's FRACTIONAL progress t along its wire (0..1) on position
+	// events. Go owns progress (timing/clock); the editor places the bead in space
+	// at lerp(liveStart, liveEnd, F) on its LOCAL (dragged) node port positions, so
+	// the bead rides the live wire with no round-trip lag and no t-swing race.
+	F float64
 	// SX/SY/SZ and EX/EY/EZ carry an edge's authoritative straight-segment endpoints
 	// on geometry events (KindGeometry): Start = source OUT-port world pos,
 	// End = dest IN-port world pos. Go owns these; the renderer draws the wire tube
@@ -212,13 +217,16 @@ func (t *Trace) Done(node, port string) {
 // SOURCE node id + output port — the same identity carried by the send event, so
 // the renderer routes the position to the right edge(s) by source+sourceHandle
 // (fan-out). value echoes the bead value; x/y/z is the bead's evaluated 3-D world
-// position on its own edge curve. The wire's delivery goroutine calls this every
-// ~16 ms while the bead is in flight, and once more at t==1 just before delivery.
-func (t *Trace) Position(node, port string, value int, x, y, z float64) {
+// position on its own edge curve; f is the bead's FRACTIONAL progress t (0..1)
+// along the wire, which the editor uses to place the bead on its LOCAL (dragged)
+// node port positions (Go owns progress, the editor owns live placement). The
+// wire's delivery goroutine calls this every ~16 ms while the bead is in flight,
+// and once more at t==1 just before delivery.
+func (t *Trace) Position(node, port string, value int, x, y, z, f float64) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, hasValue: true, X: x, Y: y, Z: z, hasPos: true}
+	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, hasValue: true, X: x, Y: y, Z: z, hasPos: true, F: f}
 }
 
 // Geometry emits an edge's authoritative straight-segment endpoints (Phase 3),
@@ -425,6 +433,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		X     float64 `json:"x"`
 		Y     float64 `json:"y"`
 		Z     float64 `json:"z"`
+		F     float64 `json:"f"`
 	}
 	type geometry struct {
 		Step int     `json:"step"`
@@ -475,7 +484,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port})
 	case KindPosition:
 		// All three coordinates always emitted (0,0,0 is a valid position).
-		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
+		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z, F: e.F})
 	case KindGeometry:
 		// All six segment-endpoint coordinates always emitted (0 is valid).
 		return json.Marshal(geometry{Step: e.Step, Kind: e.Kind, Edge: e.Edge,

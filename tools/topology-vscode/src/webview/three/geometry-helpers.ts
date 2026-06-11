@@ -135,6 +135,23 @@ function portDirLocal(node: RFNode<NodeData>, portName: string, isInput: boolean
   return dir.normalize();
 }
 
+/**
+ * World position of a port sphere on the node surface: node center + port unit
+ * direction × node radius. This is the SAME placement the port-sphere meshes use
+ * in scene-content.tsx (position={[dir.x*r, dir.y*r, dir.z*r]} relative to the node
+ * group at nodeWorldPos). Because nodeWorldPos reads the editor's LIVE local node
+ * position, this tracks a dragged node immediately (no Go round-trip). Returns the
+ * node center if the port direction is unknown. Used as the live wire endpoint AND
+ * as the live anchor for placing Go's fractional-progress bead.
+ */
+export function portWorldPos(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 {
+  const center = nodeWorldPos(node);
+  const dir = portDir(node, portName, isInput);
+  if (!dir) return center;
+  const r = nodeRadius(node);
+  return new THREE.Vector3(center.x + dir.x * r, center.y + dir.y * r, center.z + dir.z * r);
+}
+
 /** World position for the top of the node sphere (center.y + radius). */
 export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   const center = nodeWorldPos(node);

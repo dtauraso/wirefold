@@ -76,13 +76,16 @@ export function handleTraceEvent(event: TraceEvent): void {
       // Go's per-frame bead position (Phase 2). Match ALL edges by source node id
       // + sourceHandle (fan-out), same key as send, and set the bead's world
       // position directly — TS plots, computes no geometry.
-      const { node, port, x, y, z } = event as Extract<TraceEvent, { kind: "position" }>;
+      const { node, port, x, y, z, f } = event as Extract<TraceEvent, { kind: "position" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
       );
       for (const edge of matched) {
-        setPulsePos(edge.id, x, y, z);
+        // x/y/z is Go's fallback world position; f is the bead's fractional progress.
+        // PulseBead places the bead at lerp(liveStart, liveEnd, f) on the editor's
+        // LOCAL node port positions so it rides the live wire during a drag.
+        setPulsePos(edge.id, x, y, z, f);
       }
       return;
     }

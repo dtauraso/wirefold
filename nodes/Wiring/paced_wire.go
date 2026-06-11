@@ -438,7 +438,11 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 					t = 1
 				}
 				pos := lerp(seg.Start, seg.End, t)
-				tr.Position(node, port, beadVal, pos.X, pos.Y, pos.Z)
+				// Emit the bead's fractional progress t alongside the world position:
+				// Go owns progress; the editor places the bead at lerp(liveStart,
+				// liveEnd, t) on its LOCAL (dragged) node port positions so the bead
+				// rides the live wire with no round-trip lag.
+				tr.Position(node, port, beadVal, pos.X, pos.Y, pos.Z, t)
 			}
 
 			if final {
@@ -459,22 +463,49 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 
 // ReviseInFlightGeometry re-derives an in-flight bead's remaining travel after a
 // geometry edit (node-move) changed the bead's edge (MODEL.md "Geometry and time").
-// It updates the held arc + segment and relaunches the walker so the deadline is
-// recomputed from the NEW arc and the distance ALREADY covered: remaining =
-// (newArc − covered)/pulseSpeed, delivered immediately when newArc ≤ covered. The
-// covered distance is preserved automatically — it is pulseSpeed × elapsed-since-
-// placement on the one clock, untouched by the edit. No-op when no bead is in
-// flight (the new geometry is read off the source Out by the next placement) or the
-// wire is deleted. The position stream now evaluates the new segment, so the bead
-// tracks the re-drawn wire.
+// It preserves the bead's FRACTIONAL progress t (its proportion along the wire),
+// NOT the absolute distance covered: on a geometry change the bead stays at the same
+// fraction t and the remaining time is recomputed from the NEW arc so UNIFORM PULSE
+// SPEED is preserved — remaining = (1−t)·newArc/pulseSpeed. Preserving distance
+// instead would let t swing as the arc length changes, racing the bead up/down the
+// wire as the user drags a node.
+//
+// Implementation: capture the current fraction t (= covered/oldArc on the one clock),
+// then rebase inFlightPlacement to Now() − t·newArc/pulseSpeed. After the rebase the
+// walker's distance-based arithmetic (covered = pulseSpeed×elapsed, t = covered/arc,
+// deadline = placement + arc/pulseSpeed) reproduces the SAME fraction t against the
+// new arc and a deadline (1−t)·newArc/pulseSpeed out — uniform speed, no t swing.
+//
+// No-op when no bead is in flight (the new geometry is read off the source Out by the
+// next placement) or the wire is deleted. The position stream now evaluates the new
+// segment, so the bead tracks the re-drawn wire at the same fraction.
 func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	if pw.deleted || !pw.inFlight {
 		return
 	}
+	// Capture the bead's current fraction t along the OLD arc before revising.
+	oldArc := pw.inFlightArc
+	t := 0.0
+	if oldArc > 0 && pw.pulseSpeed > 0 {
+		covered := pw.pulseSpeed * float64(pw.clock.Now()-pw.inFlightPlacement) / float64(time.Millisecond)
+		t = covered / oldArc
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
+	}
 	pw.inFlightArc = newArc
 	pw.inFlightSegment = newSeg
+	// Rebase placement so elapsed-since-placement maps to the same fraction t on the
+	// NEW arc: covered' = t·newArc ⇒ placement' = Now() − (t·newArc/pulseSpeed).
+	if pw.pulseSpeed > 0 {
+		coveredNew := t * newArc
+		pw.inFlightPlacement = pw.clock.Now() - time.Duration(coveredNew/pw.pulseSpeed*float64(time.Millisecond))
+	}
 	pw.relaunchDeliveryLocked()
 }
 
