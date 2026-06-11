@@ -8,37 +8,35 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-11 — branch `task/go-backend-ts-frontend-fixes` MERGED TO MAIN; no task in flight)
+## State at handoff (2026-06-11 — on `main`, clean, no task in flight)
 
-This branch's work is **complete and merged**. The next session starts fresh on `main` with no in-flight task.
+All task branches deleted. Latest main: `8e397d34` (merge of dead-code removal). Fresh session starts on `main`.
 
-### What this branch delivered (all committed, merged)
-
-- **Post-decentralization cleanup (`a18fa000`).** Removed `dbg.flushmove` + `edit-update-forward` breadcrumbs, the thin `applyNodeMove` test shim, and the unused `reg` param in `applyEdit` (`stdin_reader.go`).
-- **Fade trace event: added then REMOVED.** `5cf8c14a` added `Trace.Fade` (emitted in `node_move.go` edgeMover fade branch, TS pump + `trace-kinds.ts` + `messages.ts` updated in parity). `169404ce` reverted it — used only to confirm behavior was clean, then removed as unneeded bridge surface. Net: **no fade trace in the bridge**. `PacedWire.SetFaded` gating `Send` is unchanged. The `arrive` test-fixture fix that rode in with that commit is kept.
-- **Doc-drift audit (`baa59460`, `0f5a6d10`, `cd1532b5`).** Corrected per-node SPEC.md port tables + firing rules; fixed two false "geometry-only at this phase" claims; regenerated `node-defs.ts`; deleted the rejected item-chain HTML page; corrected `go-authoritative-clock/index.html` to the MoveDispatch model and marked items 1–2 DONE.
-- **Branch-local docs stripped (`65c870a6`).** `chain-model-two-nodes.md` + `ownership-audit.html` removed via `tools/strip-branch-local-docs.sh`.
-
-### Investigation note
-
-A reported node render anomaly around fade was traced via logs — Go's stream is clean (continuous drag path, fades independent of drag frames, no anomaly in position/geometry data). Any residual is TS render-layer (node mesh store / raycast / camera). User believes it may already be fixed; left unconfirmed, low priority. If it resurfaces, fix is in TS, not Go.
-
-### The settled architecture (complete — no open items)
+### Settled architecture (complete — no open items)
 
 - **Go** owns the running model: one clock, pacing/timing, bead transport+delivery, bead **progress (fraction t)**, node-local held state, firing rules, node positions (held, re-emitted on move), per-edge geometry, shading. Self-scheduling per-goroutine nodes + wires; **no central coordinator** — node-move AND fade both via key→channel dispatch through `MoveDispatch`. Zero central fan-out.
 - **TS** is render-only (viewpoint): camera, projection, raycast picking, GPU render; places the bead at Go's fraction along Go's segment. Sends fire-and-forget `edit` (create/update/delete/fade) + play/pause. Owns interaction, NOT position data. Geometry helpers are store-readers with startup-only local fallback.
 - **Bridge:** Go→TS trace stream (9 active kinds, no fade trace); TS→Go fire-and-forget. The MoveDispatch reader is a pure mail-sorter.
-- **MODEL.md + CLAUDE.md confirmed drift-free this session.**
+- **MODEL.md + CLAUDE.md confirmed drift-free.**
 
-### Active experimental network — 3 edges
+### This session's work (all merged to main)
 
-`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate. File is skip-worktree.
+**Dead-code removal F1–F4 (net −277 lines):**
 
-### NEXT
+- **F1:** Deleted orphaned canonical/edge-keyed trace resolver (`Trace/Resolve.go`, `WriteCanonicalJSONL`, `marshalCanonicalEvent`) — the TS-simulator consumer was gone. `Event.Edge` was **kept** (live for geometry events).
+- **F2:** Removed write-only `Event.hasValue` (all 6 set-sites deleted; no read-sites existed).
+- **F3:** Removed dead `arrowStyle`/`concurrent` wire props + corresponding `specEdge` fields — never read downstream.
+- **F4:** Dropped orphan `NODE_DEFS` fields from per-kind-component and required-input-enforcement eras via generator + regen. `isMulti` **kept** (live consumer).
+- Dropped audit scaffolding (planning md + HTML report).
 
-**No in-flight task.** Start fresh on `main` from user-reported friction (log to `docs/planning/visual-editor/session-log.md`, open a fresh `task/<short-kebab>`).
+**Branch hygiene:** deleted all merged task branches (`editor-3d-plan`, `full-code-audit`, `inhibitright-pseudo`, `partial-feature-audit`). Only `main` remains.
 
-If the node render-layer anomaly resurfaces: fix is TS-side (node mesh store / raycast / camera), not Go.
+**Memory recorded:** `project_superseded_arch_orphans` — orphaned old-architecture plumbing is drift bait; delete-don't-revive.
+
+### Key lessons from this session
+
+- **Dead-on-main ≠ patch-applies-cleanly.** A stale removal branch had to be brought current (merge main in, finish F2's extra sites, regen F4) rather than cherry-picked.
+- **Verify the real build independently.** Mid-merge IDE diagnostics were stale LSP cache; subagent "all green" was double-checked against an actual `go build`/`go test`.
 
 ### Carry-forward facts
 
@@ -50,6 +48,18 @@ If the node render-layer anomaly resurfaces: fix is TS-side (node mesh store / r
 - **Two-process editor:** changing extension-host code (`messages.ts`/`handle-message.ts`/`extension.ts`) needs **Developer: Reload Window**; webview-only changes refresh on reopen. See `feedback_two_process_editor_reload`.
 - **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; straightness is non-local → O(N²) follow latency.
 - **Probe logs** (`.probe/*.jsonl`) accumulate across sessions; clear them (`: > file`) for a clean diagnostic read.
+
+### Unconfirmed thread (low priority)
+
+A possible TS render-layer node issue was noted — Go's stream is clean (continuous drag path, fades independent of drag frames, no anomaly in position/geometry data). Any residual is TS-side (node mesh store / raycast / camera). Low priority; may already be resolved. If it resurfaces, fix is in TS, not Go.
+
+### NEXT
+
+**No in-flight task.** Start fresh on `main` from user-reported friction (log to `docs/planning/visual-editor/session-log.md`, open a fresh `task/<short-kebab>`).
+
+### Active experimental network — 3 edges
+
+`topology.json`: `in08` (Input init `[0,1]`), `i0` (ChainInhibitor), `i1` (ChainInhibitor). Edges `in08→i0`, `i0→i1`, `i0→in08` (feedback). All animate. File is skip-worktree.
 
 ### Dev-loop
 
