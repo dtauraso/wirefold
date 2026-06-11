@@ -5,6 +5,7 @@ import { BuildAndRunRunner } from "./runCommand";
 import type { HostToWebviewMsg } from "./messages";
 import { buildWebviewHtml } from "./extension/html";
 import { handleMessage } from "./extension/handle-message";
+import { structuralKey } from "./extension/structural-key";
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
@@ -38,6 +39,10 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
     // breaks on no-op resaves (the same text fires a change event
     // whose version bumps); version comparison handles those correctly.
     let lastAppliedVersion = document.version;
+    // Structural fingerprint (everything except `view`) of the last document
+    // we acted on. A view-only external change leaves this unchanged, so we
+    // skip the reload+restart and the running animation stays undisturbed.
+    let lastStructuralKey = structuralKey(document.getText());
     const scenePath = path.join(path.dirname(document.uri.fsPath), "topology.scene.json");
     const readSceneText = (): string | undefined => {
       try { return fs.readFileSync(scenePath, "utf8"); } catch { return undefined; }
@@ -54,6 +59,9 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
     const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document.uri.toString() !== document.uri.toString()) return;
       if (e.document.version <= lastAppliedVersion) return;
+      const nextKey = structuralKey(e.document.getText());
+      if (nextKey === lastStructuralKey) return; // view-only change: don't jolt the animation
+      lastStructuralKey = nextKey;
       send();
       if (runner.isRunning()) {
         if (restartTimer) clearTimeout(restartTimer);
@@ -118,6 +126,7 @@ class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
         post,
         send,
         setLastAppliedVersion: (v) => { lastAppliedVersion = v; },
+        syncStructuralKey: () => { lastStructuralKey = structuralKey(document.getText()); },
       }),
     );
   }
