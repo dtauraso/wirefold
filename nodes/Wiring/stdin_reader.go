@@ -59,10 +59,6 @@ type NodeMoveRegistry struct {
 	destWire map[string]*PacedWire
 	// destEdges: destKey → edgeIds feeding that destination port.
 	destEdges map[string][]string
-	// edgeChain: edgeId → the per-edge visual *BeadChain. Populated by the loader at
-	// chain-construction time (SetEdgeChain). Used by node-move to move the chain's
-	// anchors so the bead chain follows the moved node.
-	edgeChain map[string]*BeadChain
 	// tr streams the re-derived edge curve (KindGeometry) on node-move so the
 	// renderer redraws the wire tube from Go's control points. Set by the loader.
 	tr *T.Trace
@@ -90,7 +86,6 @@ func NewNodeMoveRegistry(geoms map[string]nodeGeom, edgeNodes map[string]EdgeEnd
 		edgeOut:   map[string]*Out{},
 		destWire:  map[string]*PacedWire{},
 		destEdges: destEdges,
-		edgeChain: map[string]*BeadChain{},
 	}
 }
 
@@ -110,15 +105,6 @@ func (nmr *NodeMoveRegistry) SetEdgeOuts(outSink map[string]*Out, slotReg SlotRe
 			nmr.destWire[destKey] = pw
 		}
 	}
-}
-
-// SetEdgeChain registers the per-edge visual *BeadChain so node-move can move the
-// chain's anchors (left = source out-port, right = dest in-port) when a node moves.
-// Call once per edge at chain-construction time (loader). nil-safe.
-func (nmr *NodeMoveRegistry) SetEdgeChain(edgeID string, chain *BeadChain) {
-	nmr.mu.Lock()
-	defer nmr.mu.Unlock()
-	nmr.edgeChain[edgeID] = chain
 }
 
 // EdgeOut returns the source *Out bound to the given edge label, or nil if the
@@ -199,13 +185,6 @@ func (nmr *NodeMoveRegistry) applyNodeMove(nodeId string, x, y, z float64) {
 		// dest wire owns the bead; ReviseInFlightGeometry is a no-op if none in flight.
 		if pw := nmr.destWire[ep.Target+"."+ep.TargetHandle]; pw != nil {
 			pw.ReviseInFlightGeometry(arc, seg)
-		}
-		// Move the per-edge bead chain's anchors to the recomputed endpoints so the
-		// chain (and its interior items) follow the moved node. Left anchor = source
-		// out-port, right anchor = dest in-port. nil-safe if a chain is missing.
-		if chain := nmr.edgeChain[eid]; chain != nil {
-			chain.MoveAnchor(sideLeft, seg.Start)
-			chain.MoveAnchor(sideRight, seg.End)
 		}
 		// Stream the new segment so the renderer redraws the wire from Go's endpoints.
 		nmr.tr.Geometry(eid,

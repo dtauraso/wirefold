@@ -21,49 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
-
-// chainRenderCadence is the throttle window for chain-bead position emits: bead
-// positions are coalesced (latest-wins per bead) and flushed once per window so
-// machine-speed relaxation does not flood stdout.
-const chainRenderCadence = 16 * time.Millisecond
-
-// drainChainGeometry reads a bead-chain's geometry observer and emits chain-bead
-// trace events at chainRenderCadence. It coalesces per-bead positions (latest-wins)
-// between flushes; retired beads (Alive=false) are emitted at their last position
-// then dropped so the renderer can remove them.
-func drainChainGeometry(edge string, obs chan ItemReport, tr *T.Trace) {
-	pending := map[int]ItemReport{} // bead id → latest report since last flush
-	ticker := time.NewTicker(chainRenderCadence)
-	defer ticker.Stop()
-
-	flush := func() {
-		for id, r := range pending {
-			tr.ChainBead(edge, id, r.Pos.X, r.Pos.Y, r.Pos.Z)
-			delete(pending, id)
-		}
-	}
-
-	closing := tr.Closing()
-	for {
-		select {
-		case <-closing:
-			// Trace is closing; stop emitting (the chain goroutines outlive node run).
-			return
-		case r, ok := <-obs:
-			if !ok {
-				flush()
-				return
-			}
-			pending[r.ID] = r
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
 
 // specPosition is the 3-D canvas position of a node as stored in view.nodes.
 type specPosition struct {
@@ -406,47 +366,6 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 			return nil, nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
 		nodes = append(nodes, nd)
-	}
-
-	// Build one visual bead-chain per edge between the source OUT-port world pos and
-	// the dest IN-port world pos (the segment endpoints already computed above). The
-	// chain shares the one Clock (so its pulse hop freezes on global pause) and a
-	// pulseObserver. Geometry (bead positions) is drained throttled to ~16ms cadence;
-	// pulse-lit events are drained directly (low rate). The source Out's Chain is set
-	// so each send injects a value-bead pulse alongside PacedWire delivery.
-	for _, e := range spec.Edges {
-		seg := edgeSegments[e.Label]
-		geomObs := make(chan ItemReport, 1024)
-		pulseObs := make(chan PulseReport, 256)
-		chain := NewBeadChainWithPulse(seg.Start, seg.End, geomObs, clk, pulseObs)
-		// Register the chain so node-move can move its anchors (chain follows node).
-		nmr.SetEdgeChain(e.Label, chain)
-
-		edge := e.Label
-		// Geometry drain: coalesce per-bead positions and flush at a render cadence
-		// so micro-relaxation steps don't flood stdout.
-		go drainChainGeometry(edge, geomObs, tr)
-		// Pulse drain: low-rate, emit directly.
-		go func() {
-			closing := tr.Closing()
-			for {
-				select {
-				case <-closing:
-					return
-				case pr, ok := <-pulseObs:
-					if !ok {
-						return
-					}
-					tr.PulseLit(edge, pr.ID, pr.Value, pr.Lit)
-				}
-			}
-		}()
-
-		// Hook the source Out so a send injects the visual pulse.
-		ep := edgeEndpoints[e.Label]
-		if o, ok := outSink[ep.Source+"."+ep.SourceHandle]; ok {
-			o.Chain = chain
-		}
 	}
 
 	// Index per-edge source Outs and dest wires into the move registry so

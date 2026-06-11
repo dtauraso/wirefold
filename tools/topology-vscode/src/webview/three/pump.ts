@@ -31,8 +31,6 @@ import { postLog } from "../log/post";
 import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useNodeGeometryStore } from "./node-geometry";
-import { useChainBeadStore } from "./chain-bead-geometry";
-import { usePulseLitStore } from "./pulse-lit";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -129,25 +127,6 @@ export function handleTraceEvent(event: TraceEvent): void {
           dir: { x: p.dx, y: p.dy, z: p.dz },
         })),
       );
-      return;
-    }
-    case "chain-bead": {
-      // One chain bead-item's Go-streamed world position (chain-of-beads wire
-      // model). Pure store-write — no geometry math here (drift rule). The renderer
-      // (next step) plots one sphere per bead from this store.
-      const e = event as Extract<TraceEvent, { kind: "chain-bead" }>;
-      useChainBeadStore.getState().setChainBead(e.edge, e.bead, {
-        x: e.x,
-        y: e.y,
-        z: e.z,
-      });
-      return;
-    }
-    case "pulse-lit": {
-      // A chain bead's pulse highlight turned on/off as the value-bead pulse hopped
-      // (Go owns the hop timing). Pure store-write — no timing/geometry here.
-      const e = event as Extract<TraceEvent, { kind: "pulse-lit" }>;
-      usePulseLitStore.getState().setPulseLit(e.edge, e.bead, e.value ?? 0, e.lit);
       return;
     }
     // PUMP_DONE_HANDLER

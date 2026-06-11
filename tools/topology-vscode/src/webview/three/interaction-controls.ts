@@ -11,7 +11,6 @@ import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
-import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -187,7 +186,6 @@ export function useInteractionControls(
       // Check for port hit → start port-to-port wiring.
       const portHit = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
       if (portHit !== null) {
-        postLog("dbg.pointerdown", { hitId: portHit, classified: "port", nodeDragSet: false });
         wiringRef.current = parsePortId(portHit);
         s.phase = "pending";
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
@@ -209,13 +207,7 @@ export function useInteractionControls(
             rfPosAtStart: { x: node.position.x, y: node.position.y },
           };
         }
-        postLog("dbg.pointerdown", {
-          hitId,
-          classified: node ? "node" : "edge",
-          nodeDragSet: nodeDragRef.current !== null,
-        });
       } else {
-        postLog("dbg.pointerdown", { hitId: null, classified: "empty", nodeDragSet: false });
         // Empty-space pointerdown: capture arcball pivot once.
         const selId = selectedIdRef.current;
         const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
@@ -278,13 +270,7 @@ export function useInteractionControls(
             const newCenterY = planePoint.y + (nd.nodeCenterAtStart.y - nd.planePointAtStart.y);
             const newPosX = newCenterX - w / 2;
             const newPosY = -newCenterY - h / 2;
-            postLog("dbg.dragmove", { nodeId: nd.nodeId, newPosX, newPosY });
             onMoveNode(nd.nodeId, newPosX, newPosY);
-            postLog("dbg.dragmove-applied", {
-              nodeId: nd.nodeId,
-              local: { x: newPosX, y: newPosY },
-              sentToGo: true,
-            });
             scheduleNodeMove(nd.nodeId, newPosX, newPosY);
           }
         }
