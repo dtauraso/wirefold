@@ -1330,7 +1330,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       </div>
     </div>
 
-    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Until this lands, the spec and MODEL.md disagree on who triggers delivery. Treat MODEL.md as current for existing code; treat this spec as the target.</div>
+    <div class="note" style="margin-top:1.25rem;"><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="docs:note1">☐</button>Go-authoritative delivery is the current model. Each <code style="font-family:var(--mono)">PacedWire</code> times its own delivery on the one clock; no central scheduler or TS delivery signal exists. The per-goroutine node-move model (<code style="font-family:var(--mono)">MoveDispatch</code>) and per-goroutine fade are also fully shipped. This spec and MODEL.md are consistent.</div>
 
     <h2><button type="button" class="chk-btn heading-chk" aria-pressed="false" data-chk="issues:h2">☐</button>Inconsistencies to resolve.</h2>
     <p>A cross-tab audit. No open items remain; everything is resolved and recorded in git history and handoff.md.</p>
@@ -1340,9 +1340,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
   <!-- TAB: What's left -->
   <div class="panel" id="panel-todo" role="tabpanel">
     <h2>What's left to do.</h2>
-    <p>Open work on <code style="font-family:var(--mono);color:var(--go-hue)">task/go-backend-ts-frontend</code>.
-    Edge-curve geometry already moved to Go (Phase 3, commit <code style="font-family:var(--mono);color:var(--go-hue)">8e4b6532</code>);
-    node/port-position geometry is still in TS. This is the remaining Go work plus cleanups.</p>
+    <p>Open work remaining. Edge-curve geometry and node-move/fade are now fully per-goroutine (items 3–4 done, this session); node/port-position geometry is still in TS (items 1–2 open). Item 6 (merge) is blocked on items 1–2 plus sign-off.</p>
     <table style="table-layout:fixed;width:100%;border-collapse:collapse;margin-top:1rem;">
       <colgroup>
         <col style="width:3%">
@@ -1374,14 +1372,14 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
         <tr>
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">3</td>
           <td style="padding:5px 8px;vertical-align:top"><strong>Move central edge-curve emitter into per-goroutine emission</strong></td>
-          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere"><code style="font-family:var(--mono)">loader.go:212</code> (<code style="font-family:var(--mono)">load</code>) currently emits all curves centrally; route to per-goroutine.</td>
-          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">NOT STARTED (separate later step)</td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. Each <code style="font-family:var(--mono)">edgeMover</code> goroutine (<code style="font-family:var(--mono)">node_move.go</code>) emits its own edge geometry (<code style="font-family:var(--mono)">tr.Geometry</code>) on every node-move that touches either endpoint. The loader no longer has a central curve-emit loop.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
         </tr>
         <tr style="background:rgba(255,255,255,0.03)">
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">4</td>
-          <td style="padding:5px 8px;vertical-align:top"><strong>Route node-move to the owning node goroutine</strong></td>
-          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere"><code style="font-family:var(--mono)">stdin_reader.go</code> <code style="font-family:var(--mono)">applyNodeMove</code> (~L190) / <code style="font-family:var(--mono)">NodeMoveRegistry</code> applies node-move centrally; route to the node's goroutine ("TS sends, the goroutine picks up").</td>
-          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">NOT STARTED (separate later step)</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Route node-move to the owning node/edge goroutine</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. <code style="font-family:var(--mono)">applyNodeMove</code> and <code style="font-family:var(--mono)">NodeMoveRegistry</code> are gone. The loader builds a <code style="font-family:var(--mono)">MoveDispatch</code> — a pure key&rarr;inbox-channel registry keyed by BOTH node ids AND edge ids. The stdin reader mail-sorts each <code style="font-family:var(--mono)">(key,value)</code> entry from a node-move message onto <code style="font-family:var(--mono)">channels[key]</code>; no recompute lives in the reader. Each <code style="font-family:var(--mono)">nodeMover</code> goroutine owns one node's geometry and re-emits its own node-geometry on a move. Each <code style="font-family:var(--mono)">edgeMover</code> goroutine owns one edge: on a move of either endpoint it recomputes its own segment/arc, writes them onto the source <code style="font-family:var(--mono)">Out</code>, revises any in-flight bead via <code style="font-family:var(--mono)">ReviseInFlightGeometry</code>, emits its own edge geometry, and updates the dest port's <code style="font-family:var(--mono)">MaxIncomingSimLatencyMs</code> aggregate. Fade also routes through <code style="font-family:var(--mono)">MoveDispatch</code>: each <code style="font-family:var(--mono)">edgeMover</code> calls <code style="font-family:var(--mono)">SetFaded</code> on its own <code style="font-family:var(--mono)">PacedWire</code> — no central fan-out.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
         </tr>
         <tr>
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">5</td>
