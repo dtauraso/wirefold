@@ -329,7 +329,7 @@ After:   working[] (pop from end) backed by backup[]; refill working &larr; back
     </table>
 
     <div class="assume"><span class="tag">Assumption — confirm</span> The wire from node 1 to node 2 is referred to as <code>1To2</code> in this spec. Confirm the actual channel/edge name in the live graph; the spec's mechanics do not depend on the exact string, only on "node 1's single value output."</div>
-    <div class="assume"><span class="tag">Assumption — confirm</span> This design <em>replaces</em> the wrapping-index <code>i</code> read-head model on the feedback path with the pop/refill model. Confirm the plain (non-feedback) emit path is either left as-is or migrated identically — see the Go changes tab.</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Confirmed</span> The wrapping-index <code>i</code> read-head model is <strong>removed</strong>; the pop-from-end / refill array-state model replaces it. <strong>The index removal is settled.</strong> Still open: the plain (non-feedback) emit path must also drop indexing — confirm its exact behavior with no <code>i</code> (e.g. straight pop-from-end on each emit) if genuinely undecided.</div>
   </div>
 
   <!-- TAB: Array mechanics -->
@@ -464,12 +464,15 @@ emit(v) on 1To2                         <span class="cmt">// popped value rides 
 
   <!-- TAB: Formulas & geometry -->
   <div class="panel" id="panel-formulas" role="tabpanel">
-    <h2>The i rule, array ops, slot positions, drop-down — computed in Go's Update().</h2>
+    <h2>No index i — array state, pop-from-end, slot positions, drop-down — computed in Go's Update().</h2>
     <p>This project is <strong>Go-authoritative for geometry</strong>: TS computes no positions. Node 1's <code>Update()</code> does the array mutations <em>and</em> the geometric calculation of the 4 interior bead positions, then streams them. The formulas below are <strong>proposed</strong> and use real code-tied names.</p>
 
-    <div class="subheading">1 · Pop decision from feedback i</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Removed</span> <strong>The persistent index variable <code>i</code> is gone.</strong> There is no read-head counter and no wrapping formula (<code>i % len</code>) anywhere in <code>Update()</code>. The <strong>working array IS the state</strong>: the end of the array is the next value to emit. Pop-from-end replaces indexed access; the feedback signal gates pops directly against array length; nothing about an index persists between ticks.</div>
+
+    <div class="subheading">1 · Pop decision from feedback signal (no index)</div>
+    <p>The feedback signal gates a pop directly against the array — no counter is read or advanced:</p>
     <div class="formula">s := FeedbackIn.TryRecv()       <span class="cmt">// downstream step, 0 or 1</span>
-if s == 1 {                     <span class="cmt">// pop &amp; send one</span>
+if s == 1 {                     <span class="cmt">// pop &amp; send one — no index, the end is the value</span>
     v := working[len(working)-1]
     working = working[:len(working)-1]
     ToReadGate.TryEmit(v)       <span class="cmt">// bead rides out on 1To2</span>
@@ -515,12 +518,15 @@ TS computes no slot positions, no drop interpolation, no present/empty decision 
     <h2>What nodes/input/node.go needs.</h2>
     <p>All changes are local to the <code>Input</code> node and its trace emission. Ports and the feedback wiring are <strong>unchanged</strong> — only the meaning of the feedback step and the interior state/geometry are new.</p>
 
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Removed</span> <strong>Delete the persistent index <code>i</code> from <code>nodes/input/node.go</code>.</strong> Remove the <code>i</code>/index field from the <code>Node</code> struct and every <code>i % len(Init)</code> / index-advance line from the <code>Update()</code> loop. The <code>working</code> and <code>backup</code> arrays are the <em>only</em> emission state — there is no counter to persist or wrap.</div>
+
     <table class="spec-table">
       <caption>Input node changes</caption>
       <thead><tr><th style="width:24%">Area</th><th style="width:76%">Change</th></tr></thead>
       <tbody>
+        <tr><td>Remove index</td><td><strong>Delete the persistent index <code>i</code></strong> from the <code>Node</code> struct and from the <code>Update()</code> loop (no <code>i % len(Init)</code>, no index advance). The <code>working</code>/<code>backup</code> arrays are the only emission state.</td></tr>
         <tr><td>State</td><td>Add <code>working []int</code> and <code>backup []int</code> to the <code>Node</code> struct. At load, <code>backup = copy(Init)</code> and <code>working = copy(backup)</code>. (See order assumption in the Array tab.)</td></tr>
-        <tr><td>Pop / send</td><td>On feedback step <code>s == 1</code>: pop <code>working[len-1]</code>, emit it via <code>ToReadGate</code> on <code>1To2</code>. On <code>s == 0</code>: do nothing.</td></tr>
+        <tr><td>Pop / send</td><td>On feedback step <code>s == 1</code>: pop <code>working[len-1]</code> (the end IS the next value — no index lookup), emit it via <code>ToReadGate</code> on <code>1To2</code>. On <code>s == 0</code>: do nothing.</td></tr>
         <tr><td>Refill</td><td>After a pop (or before, per the chosen timing): if <code>len(working) == 0</code>, <code>working &larr; backup</code>. <code>backup</code> never mutates.</td></tr>
         <tr><td>Geometry calc</td><td>In <code>Update()</code>, compute the 4 interior slot positions and the drop-down transition <code>t</code> (formulas tab) alongside the array mutation. No TS-side geometry.</td></tr>
         <tr><td>New stream</td><td>Emit the interior-bead position/state events (extend the existing position trace stream — likely via <code>EmitGeometry</code> or a sibling emitter). TS pump renders them.</td></tr>
@@ -582,7 +588,7 @@ TS computes no slot positions, no drop interpolation, no present/empty decision 
       <thead><tr><th style="width:6%">#</th><th style="width:28%">Topic</th><th style="width:66%">Assumption made</th></tr></thead>
       <tbody>
         <tr><td>1</td><td>Output wire name</td><td>Node 1's value output is referred to as <code>1To2</code>; mechanics don't depend on the exact string — confirm the real edge name.</td></tr>
-        <tr><td>2</td><td>Model replacement</td><td>Pop/refill replaces the wrapping read-index <code>i</code> model on the feedback path; plain (non-feedback) emit path migration is TBD.</td></tr>
+        <tr><td>2</td><td>Model replacement <strong>(CONFIRMED)</strong></td><td><strong>Confirmed:</strong> the persistent index <code>i</code> is removed and pop-from-end / refill is the emission model. The index removal is settled. Still open: the plain (non-feedback) emit path must also drop indexing — confirm its exact no-index behavior.</td></tr>
         <tr><td>3</td><td>Refill timing</td><td>Refill happens <em>after</em> the pop that empties <code>working</code> (vs. lazy refill before a pop). One-frame difference.</td></tr>
         <tr><td>4</td><td>Pop order vs. emitted sequence</td><td>Pop-from-end emits <code>working</code> reversed; if forward emit order is wanted, store <code>backup</code> reversed. Confirm intended value order.</td></tr>
         <tr><td>5</td><td>Backup length vs. 4 beads</td><td>Diagrams assume <code>len(backup) == 4</code>; if not, the column needs a windowing/padding rule.</td></tr>
