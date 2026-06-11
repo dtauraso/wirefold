@@ -1340,7 +1340,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
   <!-- TAB: What's left -->
   <div class="panel" id="panel-todo" role="tabpanel">
     <h2>What's left to do.</h2>
-    <p>Open work remaining. Edge-curve geometry and node-move/fade are now fully per-goroutine (items 3–4 done, this session); node/port-position geometry is still in TS (items 1–2 open). Item 6 (merge) is blocked on items 1–2 plus sign-off.</p>
+    <p>Items 1–4 are done. Node/port-position geometry is Go-authoritative (items 1–2 shipped); edge-curve geometry and node-move/fade are fully per-goroutine (items 3–4 done). Item 5 is cosmetic and open. Item 6 (merge) is gated on explicit sign-off only.</p>
     <table style="table-layout:fixed;width:100%;border-collapse:collapse;margin-top:1rem;">
       <colgroup>
         <col style="width:3%">
@@ -1359,15 +1359,15 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
       <tbody>
         <tr>
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">1</td>
-          <td style="padding:5px 8px;vertical-align:top"><strong>Per-goroutine node/port world-position emission</strong> — NEXT Go step</td>
-          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Add trace-kind <code style="font-family:var(--mono);color:var(--go-hue)">KindNodeGeometry</code> (<code style="font-family:var(--mono)">"node-geometry"</code>) in <code style="font-family:var(--mono)">Trace.go</code> (const ~L52 + append <code style="font-family:var(--mono)">TraceEventKinds</code> ~L58 + Event fields + emit method following <code style="font-family:var(--mono)">Geometry()</code> ~L205 + <code style="font-family:var(--mono)">marshalEvent</code> case). <code style="font-family:var(--mono)">pump.ts</code>: add <code style="font-family:var(--mono)">case "node-geometry"</code> → new node-geometry store. Each node's goroutine emits its node center + per-port world positions/dirs.</td>
-          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">NOT STARTED</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Per-goroutine node/port world-position emission</strong></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. <code style="font-family:var(--mono);color:var(--go-hue)">KindNodeGeometry</code> / <code style="font-family:var(--mono)">"node-geometry"</code> exists in <code style="font-family:var(--mono)">Trace/Trace.go</code>. <code style="font-family:var(--mono)">emitNodeGeometry</code> in <code style="font-family:var(--mono)">nodes/Wiring/builders.go</code> streams each node's center + per-port world positions/dirs as a trace event. On node-move, <code style="font-family:var(--mono)">nodeMover</code> and <code style="font-family:var(--mono)">edgeMover</code> goroutines in <code style="font-family:var(--mono)">node_move.go</code> re-emit node-geometry and edge geometry per-goroutine. <code style="font-family:var(--mono)">pump.ts</code> handles <code style="font-family:var(--mono)">case "node-geometry"</code> → <code style="font-family:var(--mono)">useNodeGeometryStore</code>.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
         </tr>
         <tr style="background:rgba(255,255,255,0.03)">
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">2</td>
-          <td style="padding:5px 8px;vertical-align:top"><strong>Repoint/delete the 4 TS geometry helpers</strong> in <code style="font-family:var(--mono)">geometry-helpers.ts</code></td>
-          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere"><code style="font-family:var(--mono);color:var(--go-hue)">nodeWorldPos</code> (callers in <code style="font-family:var(--mono)">interaction-controls.ts</code>) and <code style="font-family:var(--mono);color:var(--go-hue)">portDir</code> are LIVE → flip to thin readers of the new store. <code style="font-family:var(--mono);color:var(--go-hue)">nodeTopWorldPos</code> — LIVE, caller: <code style="font-family:var(--mono)">scene-content.tsx</code> → flip to reader. <code style="font-family:var(--mono);color:var(--go-hue)">boundingBox</code> — LIVE, caller: <code style="font-family:var(--mono)">scene-content.tsx</code> → flip to reader.</td>
-          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">NOT STARTED</td>
+          <td style="padding:5px 8px;vertical-align:top"><strong>Repoint the 4 TS geometry helpers</strong> in <code style="font-family:var(--mono)">geometry-helpers.ts</code></td>
+          <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Done. All four helpers read Go's store via <code style="font-family:var(--mono)">getNodeGeometry</code> and fall back to local compute only pre-emit (startup race before Go's first emission). <code style="font-family:var(--mono);color:var(--go-hue)">nodeWorldPos</code>: reads <code style="font-family:var(--mono)">g.center</code>; falls back to <code style="font-family:var(--mono)">nodeWorldPosLocal</code>. <code style="font-family:var(--mono);color:var(--go-hue)">portDir</code>: reads <code style="font-family:var(--mono)">g.ports</code> by name+isInput; falls back to <code style="font-family:var(--mono)">portDirLocal</code>. <code style="font-family:var(--mono);color:var(--go-hue)">nodeTopWorldPos</code>: delegates to <code style="font-family:var(--mono)">nodeWorldPos</code> (inherits store read). <code style="font-family:var(--mono);color:var(--go-hue)">boundingBox</code>: delegates to <code style="font-family:var(--mono)">nodeWorldPos</code> per node (inherits store read). No helper computes geometry independently when the store entry is present.</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">DONE</td>
         </tr>
         <tr>
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">3</td>
@@ -1391,7 +1391,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td style="padding:5px 8px;vertical-align:top;font-family:var(--mono);color:var(--go-hue)">6</td>
           <td style="padding:5px 8px;vertical-align:top"><strong>Merge to main</strong></td>
           <td style="padding:5px 8px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere">Run <code style="font-family:var(--mono)">tools/strip-branch-local-docs.sh task/go-backend-ts-frontend</code> — NO exceptions; this redesign doc is branch-local scratch and gets stripped. Needs explicit sign-off.</td>
-          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">Blocked on items 1–4 + sign-off</td>
+          <td style="padding:5px 8px;vertical-align:top;white-space:nowrap">Blocked on sign-off only</td>
         </tr>
       </tbody>
     </table>
