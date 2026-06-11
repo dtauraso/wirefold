@@ -23,6 +23,9 @@ export type MessageCtx = {
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
   send: () => Thenable<boolean>;
   setLastAppliedVersion: (v: number) => void;
+  // Keep the external-change structural fingerprint in sync after an own save,
+  // so a later external view-only edit isn't mistaken for a structural change.
+  syncStructuralKey: () => void;
 };
 
 export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void> {
@@ -76,6 +79,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         await applyEdit(document, merged);
         await document.save();
         ctx.setLastAppliedVersion(document.version);
+        ctx.syncStructuralKey();
       } catch (err) {
         post({ type: "save-error", message: toErrorMessage(err) });
       }
@@ -114,6 +118,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
           await applyEdit(document, merged);
           await document.save();
           ctx.setLastAppliedVersion(document.version);
+          ctx.syncStructuralKey();
         }
       } catch (err) {
         console.error("topology editor: run pre-write failed", err);
