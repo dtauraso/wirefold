@@ -198,6 +198,18 @@ type Out struct {
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
+	// Chain is this edge's visual bead-chain (chain-of-beads wire model). When set
+	// (by the loader), each successful send injects a value-bead pulse so the visual
+	// pulse rides ALONGSIDE PacedWire delivery. Nil-safe; nil = no visual chain.
+	Chain *BeadChain
+}
+
+// injectChainPulse rides the visual bead-chain pulse alongside PacedWire delivery
+// (nil-safe). It never affects delivery — purely the visual layer.
+func (o *Out) injectChainPulse(v int) {
+	if o.Chain != nil {
+		o.Chain.InjectPulse(v)
+	}
 }
 
 // placement builds the per-bead beadPlacement this Out hands to the wire: the
@@ -237,6 +249,7 @@ func (o *Out) TrySend(v int) bool {
 		if err := o.pw.Send(o.ctx, v, o.placement()); err != nil {
 			return false
 		}
+		o.injectChainPulse(v)
 		return true
 	}
 	if o.ch == nil {
@@ -267,6 +280,7 @@ func (o *Out) TryEmit(v int) bool {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		o.injectChainPulse(v)
 		return true
 	}
 	if o.ch == nil {

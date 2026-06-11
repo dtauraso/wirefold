@@ -54,13 +54,21 @@ const (
 	// startup via its injected EmitGeometry closure — the node owns its own
 	// geometry emission (wires still own bead-position emission). Keyed by node id.
 	KindNodeGeometry = "node-geometry"
+	// KindChainBead carries one chain bead-item's world position (the chain-of-beads
+	// wire model). The wire's geometry-drain goroutine emits these at a render-cadence
+	// throttle while items relax/are born/retired. Keyed by edge label + bead id.
+	KindChainBead = "chain-bead"
+	// KindPulseLit carries a chain bead's pulse highlight turning on or off as the
+	// value-bead pulse hops item-to-item. Keyed by edge label + bead id; value echoes
+	// the transported value, lit is the highlight state.
+	KindPulseLit = "pulse-lit"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindChainBead, KindPulseLit}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -108,6 +116,11 @@ type Event struct {
 	// Keyed by Node (the node id). Set on node-geometry events only.
 	NX, NY, NZ float64
 	Ports      []PortGeom
+	// Bead is the chain bead-item id on chain-bead / pulse-lit events (keyed by
+	// Edge + Bead). Lit is the pulse highlight state on pulse-lit events. chain-bead
+	// reuses X/Y/Z for the bead's world position; pulse-lit reuses Value.
+	Bead int
+	Lit  bool
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -117,10 +130,27 @@ type Event struct {
 type Trace struct {
 	ch     chan Event
 	done   chan struct{}
+	// stop is closed at the START of Close (before ch is closed) so background
+	// emitters (e.g. the bead-chain geometry/pulse drains, which outlive the node
+	// run) can stop selecting on it and never send on the closed ch. Closing()
+	// exposes it.
+	stop   chan struct{}
 	mu     sync.Mutex
 	events []Event
 	closed bool
 	sink   io.Writer // if non-nil, each event is written as JSONL in real time
+}
+
+// Closing returns a channel closed when Close begins (before the emit channel
+// closes). Background emitters that outlive node execution should select on it and
+// stop emitting once it is closed, avoiding a send-on-closed-channel panic.
+func (t *Trace) Closing() <-chan struct{} {
+	if t == nil {
+		// A nil trace never closes; return a never-closed channel so a select on it
+		// is inert (and ChainBead/etc. are already no-ops on nil).
+		return make(chan struct{})
+	}
+	return t.stop
 }
 
 // New allocates a Trace with a buffered emit channel. buf controls
@@ -141,6 +171,7 @@ func NewWithSink(buf int, sink io.Writer) *Trace {
 	t := &Trace{
 		ch:   make(chan Event, buf),
 		done: make(chan struct{}),
+		stop: make(chan struct{}),
 		sink: sink,
 	}
 	go t.drain()
@@ -248,6 +279,40 @@ func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom
 	t.ch <- Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Ports: ports}
 }
 
+// ChainBead emits one chain bead-item's world position (chain-of-beads wire model),
+// keyed by edge label + bead id. The geometry-drain goroutine calls this at a render
+// cadence while items relax / are born / retired; the renderer plots the bead chain.
+func (t *Trace) ChainBead(edge string, bead int, x, y, z float64) {
+	if t == nil {
+		return
+	}
+	t.emitFromBackground(Event{Kind: KindChainBead, Edge: edge, Bead: bead, X: x, Y: y, Z: z, hasPos: true})
+}
+
+// emitFromBackground sends an event from a goroutine that may outlive Close (the
+// bead-chain drains). It guards the send with the closed flag under the mutex so a
+// post-Close emit is dropped instead of panicking on the closed channel. The drain
+// goroutine receives without taking the mutex, so holding it across the buffered
+// send does not deadlock (the channel is large-buffered; a full buffer is drained).
+func (t *Trace) emitFromBackground(e Event) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return
+	}
+	t.ch <- e
+}
+
+// PulseLit emits a chain bead's pulse highlight turning on/off as the value-bead
+// pulse hops along the chain, keyed by edge label + bead id. value echoes the
+// transported value; lit is the highlight state.
+func (t *Trace) PulseLit(edge string, bead, value int, lit bool) {
+	if t == nil {
+		return
+	}
+	t.emitFromBackground(Event{Kind: KindPulseLit, Edge: edge, Bead: bead, Value: value, hasValue: true, Lit: lit})
+}
+
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
 // keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
 // emits it when a wire drops a bead mid-flight (edge deleted during traversal).
@@ -305,6 +370,7 @@ func (t *Trace) Close() {
 		return
 	}
 	t.closed = true
+	close(t.stop)
 	close(t.ch)
 	t.mu.Unlock()
 	<-t.done
@@ -463,6 +529,23 @@ func marshalEvent(e Event) ([]byte, error) {
 		NZ    float64        `json:"nz"`
 		Ports []portGeomJSON `json:"ports"`
 	}
+	type chainBead struct {
+		Step int     `json:"step"`
+		Kind string  `json:"kind"`
+		Edge string  `json:"edge"`
+		Bead int     `json:"bead"`
+		X    float64 `json:"x"`
+		Y    float64 `json:"y"`
+		Z    float64 `json:"z"`
+	}
+	type pulseLit struct {
+		Step  int    `json:"step"`
+		Kind  string `json:"kind"`
+		Edge  string `json:"edge"`
+		Bead  int    `json:"bead"`
+		Value int    `json:"value"`
+		Lit   bool   `json:"lit"`
+	}
 	switch e.Kind {
 	case KindFire:
 		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
@@ -489,6 +572,10 @@ func marshalEvent(e Event) ([]byte, error) {
 			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
 		}
 		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Ports: ports})
+	case KindChainBead:
+		return json.Marshal(chainBead{Step: e.Step, Kind: e.Kind, Edge: e.Edge, Bead: e.Bead, X: e.X, Y: e.Y, Z: e.Z})
+	case KindPulseLit:
+		return json.Marshal(pulseLit{Step: e.Step, Kind: e.Kind, Edge: e.Edge, Bead: e.Bead, Value: e.Value, Lit: e.Lit})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}
