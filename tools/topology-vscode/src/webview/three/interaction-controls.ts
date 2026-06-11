@@ -12,6 +12,7 @@ import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleSave, scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
+import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -125,6 +126,7 @@ export function useInteractionControls(
         entries[e.id] = entry;
       }
     }
+    postLog("dbg.flushmove", { nodeId, entryKeys: Object.keys(entries), posted: true });
     vscode.postMessage({ type: "edit", op: "update", entries });
   }, [edgesRef]);
 

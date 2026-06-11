@@ -89,10 +89,20 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       return typeof m.target === "string" && typeof m.targetHandle === "string"
         ? (m as unknown as WebviewToHostMsg)
         : undefined;
-    case "update":
-      return typeof m.nodeId === "string" && typeof m.x === "number" && typeof m.y === "number"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
+    case "update": {
+      // Entries-shaped node-move (decentralized): a non-empty map of routing key →
+      // MoveEntry{nodeId,x,y,z}. Validate the map and at least one well-formed entry.
+      const entries = m.entries;
+      if (!entries || typeof entries !== "object") return undefined;
+      const vals = Object.values(entries as Record<string, unknown>);
+      if (vals.length === 0) return undefined;
+      const ok = vals.every((v) => {
+        if (!v || typeof v !== "object") return false;
+        const e = v as Record<string, unknown>;
+        return typeof e.nodeId === "string" && typeof e.x === "number" && typeof e.y === "number";
+      });
+      return ok ? (m as unknown as WebviewToHostMsg) : undefined;
+    }
     case "fade":
       return Array.isArray(m.edges) && m.edges.every((e) => typeof e === "string")
         ? (m as unknown as WebviewToHostMsg)
