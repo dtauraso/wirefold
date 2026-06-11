@@ -294,7 +294,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="animation">Interior animation</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="formulas">Formulas &amp; geometry</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-panel="go">Go changes</button>
-    <button class="tab-btn" role="tab" aria-selected="false" data-panel="open">Open questions</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-panel="open">Resolved</button>
   </div>
 
   <!-- TAB: Overview -->
@@ -304,41 +304,45 @@
     <code>Init</code> array (e.g. <code>[0,1]</code>) and, in the feedback ring, advances a read index <code>i</code> by the downstream
     feedback step (0 = hold, 1 = advance, wrapping) and emits <code>Init[i]</code> on its output wire <code>1To2</code>. The interior of the
     node body is currently inert.</p>
-    <p>The <strong>new design</strong> turns the interior into a visible <strong>depleting / refilling buffer</strong> backed by two arrays
-    (a <em>working</em> array and a <em>backup</em> array) and renders <strong>4 beads</strong> stacked in a vertical column inside the node
-    body. Sending pops the end of the working array (the popped value rides out as a bead on <code>1To2</code>); when the working array empties
-    it is refilled from the backup. The 4 interior beads are a faithful, frame-accurate view of the working array's contents.</p>
+    <p>The <strong>new design</strong> turns the interior into a visible <strong>double-buffer</strong>: two arrays, each <code>[1,0]</code> — a
+    <em>working</em> array (the bottom 2 beads) and a <em>backup</em> array (the top 2 beads), <strong>4 beads</strong> total, stacked in a
+    vertical column inside the node body. Sending pops the END of the working array (the popped value rides out as a bead on <code>1To2</code>).
+    "Empty" means the <em>working</em> array (length 2) is empty — not all 4 beads gone. When working empties (after its 2 pops) the 2 backup
+    beads <strong>slide down</strong> into the working slots and 2 new beads appear at the top — an animated refill, back to 4. The 4 interior
+    beads are a faithful, frame-accurate view of the buffer's contents.</p>
 
-    <div class="contract-box">Before:  Init[i] with a wrapping read index; interior inert.
-After:   working[] (pop from end) backed by backup[]; refill working &larr; backup when empty.
-         Interior column of 4 beads = live view of working[]; beads disappear on pop, reappear on refill.
-         Go computes the array ops AND the 4 interior bead positions in Update(); TS renders the streamed positions.</div>
+    <div class="contract-box">Double-buffer: working=[1,0] (bottom 2) + backup=[1,0] (top 2) = 4 beads.
+Pop:    on feedback i==1, pop the END of working[] → one bead removed, its value launches on 1To2. i==0 = hold.
+        End-popping [1,0] sends 0 first, then 1 (intended; array stored [1,0] for this). No reversed backup.
+Empty:  "empty" = working (length 2) is empty, after its 2 pops.
+Refill: backup slides DOWN into the working slots + 2 new beads appear at the TOP — animated at human speed on Go's clock.
+Geometry: Input.Update() does the array mutation AND the interior bead geometry in ONE coupled step,
+          then streams the INCREMENTAL changes; TS renders them and computes no geometry.</div>
 
     <div class="subheading">Before / after at a glance</div>
     <table class="spec-table">
       <caption>Node 1 behavior</caption>
       <thead><tr><th style="width:22%">Aspect</th><th style="width:39%">Before (today)</th><th style="width:39%">After (this spec)</th></tr></thead>
       <tbody>
-        <tr><td>Source data</td><td><code>Init []int</code>, read via wrapping index <code>i</code></td><td><code>working []int</code> popped from the end, backed by <code>backup []int</code></td></tr>
-        <tr><td>Send op</td><td>emit <code>Init[i % len]</code></td><td>pop the last element of <code>working</code>, emit it on <code>1To2</code></td></tr>
+        <tr><td>Source data</td><td><code>Init []int</code>, read via wrapping index <code>i</code></td><td>double-buffer: <code>working=[1,0]</code> (bottom 2) + <code>backup=[1,0]</code> (top 2)</td></tr>
+        <tr><td>Send op</td><td>emit <code>Init[i % len]</code></td><td>pop the END of <code>working</code>, emit it on <code>1To2</code> (0 first, then 1)</td></tr>
         <tr><td>Feedback <code>i</code> meaning</td><td>0 = hold index, 1 = advance index (mod len)</td><td>1 = pop &amp; send one; 0 = hold (do nothing)</td></tr>
-        <tr><td>Exhaustion</td><td>index wraps; never empties</td><td><code>working</code> empties &rarr; refill <code>working &larr; backup</code></td></tr>
-        <tr><td>Interior visual</td><td>inert node body</td><td>4-bead column, live view of <code>working</code></td></tr>
-        <tr><td>Geometry owner</td><td>Go (wire/bead positions)</td><td>Go (wire/bead positions <strong>+ the 4 interior bead slot positions</strong>)</td></tr>
+        <tr><td>Exhaustion</td><td>index wraps; never empties</td><td><code>working</code> (length 2) empties &rarr; backup slides down + 2 new at top</td></tr>
+        <tr><td>Interior visual</td><td>inert node body</td><td>4-bead column; bottom 2 = working, top 2 = backup</td></tr>
+        <tr><td>Geometry owner</td><td>Go (wire/bead positions)</td><td>Go (wire/bead positions <strong>+ the 4 interior bead positions, streamed incrementally</strong>)</td></tr>
       </tbody>
     </table>
 
-    <div class="assume"><span class="tag">Assumption — confirm</span> The wire from node 1 to node 2 is referred to as <code>1To2</code> in this spec. Confirm the actual channel/edge name in the live graph; the spec's mechanics do not depend on the exact string, only on "node 1's single value output."</div>
-    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Confirmed</span> The wrapping-index <code>i</code> read-head model is <strong>removed</strong>; the pop-from-end / refill array-state model replaces it. <strong>The index removal is settled.</strong> Still open: the plain (non-feedback) emit path must also drop indexing — confirm its exact behavior with no <code>i</code> (e.g. straight pop-from-end on each emit) if genuinely undecided.</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled</span> The design is <strong>locked</strong>: double-buffer (working <code>[1,0]</code> + backup <code>[1,0]</code>), pop-the-end on <code>i==1</code> (sends 0 then 1), refill = backup slides down + 2 new at top (animated, human speed), index <code>i</code> removed, and <code>Update()</code> computes the interior geometry coupled to the array mutation and streams the incremental change. The one remaining detail is the trace <strong>event kind name</strong> (see Formulas tab).</div>
   </div>
 
   <!-- TAB: Array mechanics -->
   <div class="panel" id="panel-array" role="tabpanel">
-    <h2>Working array, backup array, pop-from-end, refill-when-empty.</h2>
-    <p>Two arrays back the buffer:</p>
+    <h2>Double-buffer: working [1,0] + backup [1,0], pop-from-end, slide-down refill.</h2>
+    <p>Two arrays, each <code>[1,0]</code>, back the buffer — 4 beads total:</p>
     <ul class="tight">
-      <li><code>working []int</code> — the live, depleting array. <strong>Sending pops its last element</strong> (the end), and that popped value is emitted as a bead on <code>1To2</code>.</li>
-      <li><code>backup []int</code> — holds the <strong>initial data</strong> (a copy of <code>Init</code>). It is never popped; it is the source for refills.</li>
+      <li><code>working = [1,0]</code> — the live, depleting array (the <strong>bottom 2 beads</strong>). <strong>Sending pops its last element</strong> (the end), and that popped value is emitted as a bead on <code>1To2</code>. End-popping <code>[1,0]</code> sends <code>0</code> first, then <code>1</code> — intended; the array is stored <code>[1,0]</code> precisely so end-pop yields that order. <strong>No reversed-backup trick is needed.</strong></li>
+      <li><code>backup = [1,0]</code> — the <strong>top 2 beads</strong>. On refill it slides down into the working slots; 2 new beads (<code>[1,0]</code> again) appear at the top.</li>
     </ul>
 
     <div class="subheading">The driving signal — feedback value <code>i</code></div>
@@ -351,115 +355,120 @@ i == 0  &rarr;  do nothing (hold)                                     <span clas
 working = working[:len(working)-1]      <span class="cmt">// shrink by one</span>
 emit(v) on 1To2                         <span class="cmt">// popped value rides out as a bead</span></div>
 
-    <div class="subheading">Refill — when working is empty</div>
-    <p>When the working array becomes <strong>empty</strong>, it is refilled from the backup's initial data:</p>
-    <div class="formula">if len(working) == 0:
-    working = copy(backup)              <span class="cmt">// working &larr; backup (the initial data)</span>
-    <span class="cmt">// backup is unchanged; it always holds the initial data</span></div>
+    <div class="subheading">Refill — when working (length 2) is empty</div>
+    <p>"Empty" means the <strong>working</strong> array is empty (after its 2 pops) — not all 4 beads gone. When that happens, the backup slides down into the working slots and a fresh backup appears at the top:</p>
+    <div class="formula">if len(working) == 0:                   <span class="cmt">// working's 2 beads both popped</span>
+    working = backup                    <span class="cmt">// backup beads slide DOWN into working slots</span>
+    backup  = [1,0]                     <span class="cmt">// 2 NEW beads appear at the TOP</span>
+    <span class="cmt">// back to 4 beads; the slide is animated at human speed (see Animation tab)</span></div>
 
-    <div class="assume"><span class="tag">Assumption — confirm</span> <strong>Refill timing.</strong> This spec refills <em>after</em> a pop that empties <code>working</code> (so the next <code>i==1</code> pops from a freshly full array). The alternative is to refill <em>before</em> a pop when empty (lazy/just-in-time). These differ by one frame in when the top-2 beads reappear. Pick one.</div>
-    <div class="assume"><span class="tag">Assumption — confirm</span> <strong>Pop order vs. emitted sequence.</strong> Popping from the END emits <code>working</code> in reverse of its stored order. If the desired emitted sequence is the initial data in <em>forward</em> order, <code>backup</code> must be stored reversed (or working pushed in reverse at refill). Confirm the intended emitted value order.</div>
-    <div class="assume"><span class="tag">Assumption — confirm</span> <strong>Backup length vs. 4 beads.</strong> The interior shows exactly 4 beads. If <code>len(backup) &ne; 4</code>, the column needs a rule (show last 4 of working? pad empty slots?). This spec's diagrams assume <code>len(backup) == 4</code>.</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled — pop order.</span> Each array is stored <code>[1,0]</code> and end-popped, so the emitted sequence is <code>0</code> then <code>1</code>. This is the intended order; the storage <code>[1,0]</code> is chosen specifically so end-pop yields it. <strong>No reversed-backup is required.</strong></div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled — refill.</span> Refill triggers the moment <strong>working</strong> (length 2) empties. The 2 backup beads slide down; 2 new beads (<code>[1,0]</code>) appear at the top. Both arrays are length 2, so the buffer is always 4 beads.</div>
   </div>
 
   <!-- TAB: Interior animation -->
   <div class="panel" id="panel-animation" role="tabpanel">
-    <h2>4 beads: consume bottom 2 &rarr; top 2 drop down &rarr; top 2 refill.</h2>
-    <p>The node body shows <strong>4 beads in a vertical column</strong>. Slots are indexed top (slot 0) to bottom (slot 3). The buffer is consumed from the <strong>bottom</strong>; the bottom slot (slot 3) corresponds to the end of <code>working</code> — the element that pops next.</p>
+    <h2>4 beads: consume bottom 2 (working) &rarr; backup slides down &rarr; new backup at top.</h2>
+    <p>The node body shows <strong>4 beads in a vertical column</strong>. Slots are indexed top (slot 0) to bottom (slot 3). The <strong>bottom 2 slots are the working array</strong> (<code>[1,0]</code>); the <strong>top 2 slots are the backup array</strong> (<code>[1,0]</code>). The buffer is consumed from the bottom; the bottom slot (slot 3) corresponds to the end of <code>working</code> — the element that pops next.</p>
     <ul class="tight">
-      <li>As the bottom <strong>2 beads are consumed</strong> (two pops, <code>i==1</code> twice), the bottom 2 slots empty.</li>
-      <li>The <strong>top 2 beads drop down</strong> into the vacated bottom slots.</li>
-      <li>The now-empty <strong>top 2 slots are refilled</strong> — beads reappear from the backup / initial data.</li>
+      <li>As the bottom <strong>2 working beads are consumed</strong> (two pops, <code>i==1</code> twice — sending <code>0</code> then <code>1</code>), the bottom 2 slots empty and working is empty.</li>
+      <li>The <strong>2 backup beads slide down</strong> into the vacated working slots (this slide IS the refill).</li>
+      <li>2 <strong>new backup beads appear at the top</strong> — backup back to <code>[1,0]</code>. Buffer is 4 again.</li>
     </ul>
-    <p>Beads <strong>disappear on pop</strong> and <strong>reappear on refill</strong>, and this must coincide exactly with <code>working</code>'s contents and length at each step. The column is a faithful render of the array state — never a free-running animation.</p>
+    <p>Beads <strong>disappear on pop</strong> and the <strong>slide-down refill</strong> happens the moment working empties. This must coincide exactly with the buffer's contents and length at each step. The column is a faithful render of the array state — never a free-running animation. The slide is <strong>animated at human speed</strong>, timed on Go's clock with the <strong>same human-speed slowdown used for in-flight beads</strong>.</p>
 
-    <div class="subheading">Lifecycle frame strip — full(4) &rarr; pop(3) &rarr; pop(2) &rarr; drop &rarr; refilled(4)</div>
+    <div class="subheading">Lifecycle frame strip — full(4) &rarr; pop sends 0 (3) &rarr; pop sends 1 (2: backup only) &rarr; slide down + new backup &rarr; full(4)</div>
     <div class="diagram">
-<svg width="1080" height="430" viewBox="0 0 1080 430" xmlns="http://www.w3.org/2000/svg" aria-label="Frame strip of the 4-bead interior column. Frame A full with 4 beads. Frame B after one pop, 3 beads, bottom slot empty. Frame C after a second pop, 2 beads in the top two slots. Frame D the top 2 beads drop into the bottom 2 slots. Frame E the top 2 slots refilled from backup, back to 4 beads. Under each frame the working and backup array contents are shown.">
+<svg width="1080" height="430" viewBox="0 0 1080 430" xmlns="http://www.w3.org/2000/svg" aria-label="Frame strip of the 4-bead double-buffer column. Frame A full: working [1,0] bottom two beads, backup [1,0] top two beads. Frame B after one pop, working sends 0, 3 beads, bottom slot empty. Frame C after a second pop, working sends 1, working empty, only the 2 backup beads remain at the top. Frame D the 2 backup beads slide down into the working slots and 2 new backup beads appear at the top, animated. Frame E full again, back to 4 beads. Under each frame the working and backup array contents are shown.">
   <defs>
     <marker id="drop" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#7c9ef8"/></marker>
   </defs>
   <!-- column template: node body 5 frames at x = 40,250,460,670,880 ; body 150 wide, 230 tall, top y=30 -->
   <!-- slot centers y: 70, 120, 170, 220 ; radius 18 ; x center = bodyX+75 -->
+  <!-- top 2 slots (70,120) = backup [1,0] ; bottom 2 slots (170,220) = working [1,0] -->
+  <!-- working stored [1,0], end-popped: bottom slot (220) = 0 (white), pops first; slot 170 = 1 (black) -->
 
   <!-- ===================== FRAME A : full(4) ===================== -->
   <g>
     <rect x="40" y="30" width="150" height="220" rx="12" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
     <text x="115" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#5ec4a0">A · full (4)</text>
-    <!-- slot 0..3 ; values bottom-up are the working end. working=[w0,w1,w2,w3], bottom slot = last -->
-    <circle cx="115" cy="70"  r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="115" cy="120" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="115" cy="170" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="115" cy="220" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
-    <text x="115" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[0,1,0,1]</text>
-    <text x="115" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[0,1,0,1]</text>
-    <text x="115" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#808090">pop next &darr;</text>
+    <!-- backup [1,0] top: slot0=1(black), slot1=0(white) -->
+    <circle cx="115" cy="70"  r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="115" cy="120" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <!-- working [1,0] bottom: slot2=1(black), slot3=0(white, pops next) -->
+    <circle cx="115" cy="170" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="115" cy="220" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <text x="115" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[1,0]</text>
+    <text x="115" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[1,0]</text>
+    <text x="115" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#808090">pop next &darr; (0)</text>
   </g>
 
-  <!-- ===================== FRAME B : pop(3) ===================== -->
+  <!-- ===================== FRAME B : pop sends 0 (3) ===================== -->
   <g>
     <rect x="250" y="30" width="150" height="220" rx="12" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-    <text x="325" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#5ec4a0">B · pop (3)</text>
-    <circle cx="325" cy="70"  r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="325" cy="120" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="325" cy="170" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <!-- bottom slot 3 now empty -->
+    <text x="325" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#5ec4a0">B · pop &rarr; 0 (3)</text>
+    <circle cx="325" cy="70"  r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="325" cy="120" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="325" cy="170" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <!-- bottom working slot now empty (0 popped) -->
     <circle cx="325" cy="220" r="18" fill="none" stroke="#2a2a30" stroke-width="2" stroke-dasharray="4 4"/>
-    <text x="325" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[0,1,0]</text>
-    <text x="325" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[0,1,0,1]</text>
-    <text x="325" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#c47c5e">sent: 1 &rarr; bead on 1To2</text>
+    <text x="325" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[1]</text>
+    <text x="325" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[1,0]</text>
+    <text x="325" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#c47c5e">sent: 0 &rarr; bead on 1To2</text>
   </g>
 
-  <!-- ===================== FRAME C : pop(2) ===================== -->
+  <!-- ===================== FRAME C : pop sends 1 (2: backup only) ===================== -->
   <g>
     <rect x="460" y="30" width="150" height="220" rx="12" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-    <text x="535" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#5ec4a0">C · pop (2)</text>
-    <circle cx="535" cy="70"  r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="535" cy="120" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <text x="535" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#5ec4a0">C · pop &rarr; 1 (2)</text>
+    <!-- only backup [1,0] remains at top; working empty -->
+    <circle cx="535" cy="70"  r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="535" cy="120" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
     <circle cx="535" cy="170" r="18" fill="none" stroke="#2a2a30" stroke-width="2" stroke-dasharray="4 4"/>
     <circle cx="535" cy="220" r="18" fill="none" stroke="#2a2a30" stroke-width="2" stroke-dasharray="4 4"/>
-    <text x="535" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[0,1]</text>
-    <text x="535" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[0,1,0,1]</text>
-    <text x="535" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#c47c5e">sent: 0 &rarr; bead on 1To2</text>
+    <text x="535" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[] (empty)</text>
+    <text x="535" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[1,0]</text>
+    <text x="535" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#c47c5e">sent: 1 &rarr; bead on 1To2</text>
   </g>
 
-  <!-- ===================== FRAME D : drop ===================== -->
+  <!-- ===================== FRAME D : slide down + new backup (animated) ===================== -->
   <g>
     <rect x="670" y="30" width="150" height="220" rx="12" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-    <text x="745" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#7c9ef8">D · top 2 drop</text>
-    <!-- top 2 slots now empty -->
-    <circle cx="745" cy="70"  r="18" fill="none" stroke="#2a2a30" stroke-width="2" stroke-dasharray="4 4"/>
-    <circle cx="745" cy="120" r="18" fill="none" stroke="#2a2a30" stroke-width="2" stroke-dasharray="4 4"/>
-    <!-- the two surviving beads in mid-drop into slots 2,3 -->
-    <circle cx="745" cy="170" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="745" cy="220" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
-    <!-- drop arrows -->
+    <text x="745" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#7c9ef8">D · slide down</text>
+    <!-- new backup [1,0] appearing at top -->
+    <circle cx="745" cy="70"  r="18" fill="#000000" stroke="#000000" stroke-width="2.5" opacity="0.45"/>
+    <circle cx="745" cy="120" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5" opacity="0.45"/>
+    <!-- the 2 backup beads mid-slide into working slots 2,3 -->
+    <circle cx="745" cy="170" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="745" cy="220" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <!-- slide arrows -->
     <line x1="700" y1="78"  x2="700" y2="162" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#drop)"/>
     <line x1="700" y1="128" x2="700" y2="212" stroke="#7c9ef8" stroke-width="1.5" marker-end="url(#drop)"/>
-    <text x="745" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[0,1]</text>
-    <text x="745" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[0,1,0,1]</text>
-    <text x="745" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#7c9ef8">survivors slide to bottom</text>
+    <text x="745" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working &larr; backup</text>
+    <text x="745" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup &larr; new [1,0]</text>
+    <text x="745" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#7c9ef8">animated · human speed</text>
   </g>
 
-  <!-- ===================== FRAME E : refilled(4) ===================== -->
+  <!-- ===================== FRAME E : full(4) ===================== -->
   <g>
     <rect x="880" y="30" width="150" height="220" rx="12" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="1.5"/>
-    <text x="955" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#3db87a">E · refilled (4)</text>
-    <!-- top 2 reappear from backup -->
-    <circle cx="955" cy="70"  r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="955" cy="120" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="955" cy="170" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
-    <circle cx="955" cy="220" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
-    <text x="955" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[0,1,0,1]</text>
-    <text x="955" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[0,1,0,1]</text>
-    <text x="955" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#3db87a">working &larr; backup</text>
+    <text x="955" y="22" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="11" fill="#3db87a">E · full (4)</text>
+    <!-- new backup [1,0] settled at top -->
+    <circle cx="955" cy="70"  r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="955" cy="120" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <!-- working [1,0] now in bottom slots -->
+    <circle cx="955" cy="170" r="18" fill="#000000" stroke="#000000" stroke-width="2.5"/>
+    <circle cx="955" cy="220" r="18" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <text x="955" y="278" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#5ec4a0">working=[1,0]</text>
+    <text x="955" y="294" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#808090">backup=[1,0]</text>
+    <text x="955" y="318" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" fill="#3db87a">back to 4</text>
   </g>
 </svg>
     </div>
-    <div class="note"><strong>Legend.</strong> Solid bead = present (value 0 = white fill / black ring; value 1 = black fill / black ring). Dashed ring = empty slot. Blue arrows in frame D = the drop-down transition. The <code>working</code> / <code>backup</code> contents under each frame ARE the source of truth — the column never shows a bead the array does not hold.</div>
+    <div class="note"><strong>Legend.</strong> Solid bead = present (value 0 = white fill / black ring; value 1 = black fill / black ring). Dashed ring = empty slot. Top 2 slots = backup, bottom 2 = working. Blue arrows in frame D = the slide-down refill (the backup beads sliding into the working slots; new backup fading in at the top). The <code>working</code> / <code>backup</code> contents under each frame ARE the source of truth — the column never shows a bead the buffer does not hold.</div>
 
-    <div class="assume"><span class="tag">Assumption — confirm</span> <strong>"Consume bottom 2 then drop".</strong> The frame strip shows the drop+refill happening after <em>two</em> pops (bottom two emptied). Confirm whether the drop/refill triggers on the 2-empty condition specifically, or simply whenever <code>working</code> empties (which, with 4 beads and pop-from-end, would be after 4 pops, not 2). The "bottom 2 → top 2 drop" wording implies a half-buffer refill; the "refill when empty" rule implies a full-buffer refill. These are different triggers — pick one.</div>
-    <div class="assume"><span class="tag">Assumption — confirm</span> <strong>Drop is a visual transition only.</strong> The drop-down is an interpolation of slot positions; the array already holds the post-drop contents. Confirm the drop has a duration (animated slide) vs. being instantaneous (snap). Diagram assumes an animated slide whose positions Go streams per frame.</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled — trigger.</span> The slide-down refill triggers the moment the <strong>working</strong> array (length 2) empties — i.e. after its 2 pops, not 4. Working and backup are each length 2; the buffer is a double-buffer, so 2 pops drain working and the backup slides down.</div>
+    <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled — animated slide.</span> The slide-down is <strong>animated at human speed</strong>, timed on Go's clock with the same human-speed slowdown used for in-flight beads. The refill IS this slide, begun the moment working empties. Go streams the moving beads' positions per frame over the slide duration.</div>
   </div>
 
   <!-- TAB: Formulas & geometry -->
@@ -478,39 +487,50 @@ if s == 1 {                     <span class="cmt">// pop &amp; send one — no i
     ToReadGate.TryEmit(v)       <span class="cmt">// bead rides out on 1To2</span>
 }                                <span class="cmt">// s == 0: hold, do nothing</span></div>
 
-    <div class="subheading">2 · Refill condition</div>
-    <div class="formula">if len(working) == 0 {
-    working = append(working[:0], backup...)   <span class="cmt">// working &larr; backup (initial data)</span>
-}                                               <span class="cmt">// backup &larr; initial data, set once at load</span></div>
+    <div class="subheading">2 · Refill condition — slide down + new backup</div>
+    <div class="formula">if len(working) == 0 {              <span class="cmt">// working (length 2) drained by its 2 pops</span>
+    working = backup                <span class="cmt">// backup slides DOWN into the working slots</span>
+    backup  = []int{1, 0}           <span class="cmt">// 2 NEW beads at the TOP</span>
+}                                    <span class="cmt">// each array is length 2; buffer is always 4 beads</span></div>
 
-    <div class="subheading">3 · Slot-position formula (4 beads)</div>
-    <p>Let the node body center be <code>(cx, cy, cz)</code>, the column vertical span be <code>H</code>, and <code>N = 4</code> slots indexed <code>k = 0..3</code> top to bottom. Each present bead sits at its slot center:</p>
+    <div class="subheading">3 · Slot-position formula (4 beads = backup[0..1] + working[0..1])</div>
+    <p>Let the node body center be <code>(cx, cy, cz)</code>, the column vertical span be <code>H</code>, and <code>N = 4</code> slots indexed <code>k = 0..3</code> top to bottom. <strong>Top 2 slots (k=0,1) are backup; bottom 2 slots (k=2,3) are working.</strong> Each present bead sits at its slot center:</p>
     <div class="formula">slotY(k) = cy + H/2 - (k + 0.5) * (H / N)     <span class="cmt">// k=0 top … k=3 bottom</span>
 slotPos(k) = (cx, slotY(k), cz)
-<span class="cmt">// bottom slot k=3 == end of working (pops next)</span>
-<span class="cmt">// a bead is present at slot k iff k maps to a live working[] element</span></div>
-    <p>Mapping array index to slot: with the bottom slot as the working end, the present beads occupy the <strong>bottom <code>len(working)</code> slots</strong>:</p>
-    <div class="formula">present(k)  = (k &ge; N - len(working))            <span class="cmt">// bottom-aligned fill</span>
-valueAt(k)  = working[len(working) - (N - k)]    <span class="cmt">// when present(k)</span></div>
+<span class="cmt">// slots 0,1 = backup[0],backup[1] ; slots 2,3 = working[0],working[1]</span>
+<span class="cmt">// bottom slot k=3 == end of working (pops next); working stored [1,0] → pops 0 then 1</span></div>
+    <p>Present-and-value per slot — working occupies the bottom 2 slots, bottom-aligned as it depletes; backup occupies the top 2:</p>
+    <div class="formula">present(k=0,1) = (k &lt; len(backup))                  <span class="cmt">// backup slots</span>
+present(k=2,3) = (k - 2 &ge; 2 - len(working))       <span class="cmt">// working, bottom-aligned</span>
+valueAt(backup slot k)  = backup[k]
+valueAt(working slot k) = working[len(working) - (4 - k)]</div>
 
-    <div class="subheading">4 · Drop-down transition</div>
-    <p>On refill, surviving beads move from their old slot to a lower slot, and refilled beads appear in the top slots. With a transition parameter <code>t &isin; [0,1]</code> (driven by Go's clock, like wire beads):</p>
+    <div class="subheading">4 · Slide-down transition (refill)</div>
+    <p>On refill, the 2 backup beads slide from the top slots into the working slots, and 2 new backup beads appear at the top. The slide is animated at <strong>human speed</strong> with a transition parameter <code>t &isin; [0,1]</code> advanced by Go's clock — the <strong>same human-speed slowdown used for in-flight wire beads</strong>:</p>
     <div class="formula">beadY(t) = lerp(slotY(kFrom), slotY(kTo), t)
-<span class="cmt">// kFrom = slot before drop, kTo = slot after drop</span>
-<span class="cmt">// refilled top beads: fade/appear at slotY(kTo) (kFrom = kTo, t snaps)</span>
-<span class="cmt">// Go advances t each Update tick from the same clock that paces wire beads</span></div>
+<span class="cmt">// backup bead slot 0 → slot 2, slot 1 → slot 3 (kFrom → kTo, slide down)</span>
+<span class="cmt">// new backup beads fade/appear at slotY(0), slotY(1)</span>
+<span class="cmt">// Go advances t each Update tick from the same clock that paces wire beads (human-speed)</span>
+<span class="cmt">// the refill IS this slide, begun the moment working empties</span></div>
 
     <div class="subheading">5 · Bead value &rarr; style (existing convention, unchanged)</div>
     <p>Reuse <code>VALUE_BEAD_STYLE</code> in <code>scene-content.tsx</code>: value <code>0</code> = <code>{fill:#ffffff, ring:#000000}</code> (white fill, black ring); value <code>1</code> = <code>{fill:#000000, ring:#000000}</code> (black fill, black ring). The interior beads carry the same value field, so TS styles them identically with no new style table.</p>
 
     <h2 class="spaced">The Go-authoritative streaming contract.</h2>
-    <p>Go streams the interior bead positions/states the same way it streams wire-bead positions and node-geometry today; TS renders them and computes no geometry. This implies a <strong>new (or extended) trace event</strong>:</p>
-    <div class="contract-box">Go &rarr; TS  (extend the position trace stream)
-  interior-bead event  { nodeId, beadIndex k (0..3), pos (x,y,z), value (0|1), present (bool) }
-  emitted from Input.Update() per tick, alongside the existing node-geometry / pulse position events.
-TS renders each present interior bead at the streamed pos with the value-styled material.
-TS computes no slot positions, no drop interpolation, no present/empty decision — all of that is in Go.</div>
-    <div class="assume"><span class="tag">Assumption — confirm</span> <strong>New trace event shape.</strong> The exact event kind name and payload (one event per bead vs. one event per node carrying 4 bead slots) is a design point. Per-node batching (one <code>interior</code> event with a 4-slot array) is likely cheaper and keeps the column atomic per frame. Confirm preferred shape and where it slots into the existing trace stream / pump.ts switch.</div>
+    <p>Node 1's <code>Update()</code> does the <strong>geometric calculation of the interior bead positions in the SAME step as the array mutation</strong> (pop / refill) — the array change and the geometry change are <strong>one coupled operation</strong>. Go then sends those geometric changes to TS. This is the <strong>same Go-authoritative-geometry pattern</strong> as node-geometry, edge-geometry, and the wire-bead position stream — just extended to node 1's interior:</p>
+    <div class="contract-box">Go &rarr; TS  (extend the position trace stream — INCREMENTAL, not a re-broadcast of all 4)
+  On a pop:    array shrinks by one → Update recomputes interior geometry
+               (popped bead gone, remainder repositioned) → sends the CHANGE.
+  On a refill: Update computes the SLIDE geometry and streams the moving beads'
+               positions OVER the slide duration on Go's clock — per-frame, human-speed,
+               exactly like the existing in-flight wire-bead position stream.
+  Go sends ONLY what changed — NOT a per-node "send all 4 beads every frame" batch.
+TS RENDERS the interior beads from this stream. TS computes NO geometry, no interpolation,
+  no interior layout math (consistent with check-ts-computes-no-geometry).
+Implied trace event: an interior-bead geometry/position event keyed by node id + slot,
+  payload = bead value (0|1) + position. Slots into the trace stream + pump.ts like the
+  other geometry/position events.</div>
+    <div class="assume"><span class="tag">One open detail</span> <strong>Event kind name.</strong> The only remaining open detail is the exact KIND NAME of the interior-bead geometry/position trace event (keyed by node id + slot, payload = value 0/1 + position). Everything else — the per-slot keying, the incremental semantics, and where it slots into the trace stream / pump.ts — is settled.</div>
   </div>
 
   <!-- TAB: Go changes -->
@@ -525,13 +545,12 @@ TS computes no slot positions, no drop interpolation, no present/empty decision 
       <thead><tr><th style="width:24%">Area</th><th style="width:76%">Change</th></tr></thead>
       <tbody>
         <tr><td>Remove index</td><td><strong>Delete the persistent index <code>i</code></strong> from the <code>Node</code> struct and from the <code>Update()</code> loop (no <code>i % len(Init)</code>, no index advance). The <code>working</code>/<code>backup</code> arrays are the only emission state.</td></tr>
-        <tr><td>State</td><td>Add <code>working []int</code> and <code>backup []int</code> to the <code>Node</code> struct. At load, <code>backup = copy(Init)</code> and <code>working = copy(backup)</code>. (See order assumption in the Array tab.)</td></tr>
-        <tr><td>Pop / send</td><td>On feedback step <code>s == 1</code>: pop <code>working[len-1]</code> (the end IS the next value — no index lookup), emit it via <code>ToReadGate</code> on <code>1To2</code>. On <code>s == 0</code>: do nothing.</td></tr>
-        <tr><td>Refill</td><td>After a pop (or before, per the chosen timing): if <code>len(working) == 0</code>, <code>working &larr; backup</code>. <code>backup</code> never mutates.</td></tr>
-        <tr><td>Geometry calc</td><td>In <code>Update()</code>, compute the 4 interior slot positions and the drop-down transition <code>t</code> (formulas tab) alongside the array mutation. No TS-side geometry.</td></tr>
-        <tr><td>New stream</td><td>Emit the interior-bead position/state events (extend the existing position trace stream — likely via <code>EmitGeometry</code> or a sibling emitter). TS pump renders them.</td></tr>
+        <tr><td>State</td><td>Add <code>working []int</code> and <code>backup []int</code> to the <code>Node</code> struct, each <code>[1,0]</code> (working = bottom 2 beads, backup = top 2). At load, <code>working = [1,0]</code> and <code>backup = [1,0]</code>.</td></tr>
+        <tr><td>Pop / send</td><td>On feedback step <code>s == 1</code>: pop <code>working[len-1]</code> (the END IS the next value — no index lookup), emit it via <code>ToReadGate</code> on <code>1To2</code>. Stored <code>[1,0]</code> end-pops <code>0</code> then <code>1</code>. On <code>s == 0</code>: do nothing.</td></tr>
+        <tr><td>Refill</td><td>When <code>len(working) == 0</code> (working's 2 beads popped): <code>working = backup</code> (slide down), <code>backup = [1,0]</code> (new top). Buffer always 4 beads.</td></tr>
+        <tr><td>Geometry calc (coupled)</td><td>In <code>Update()</code>, compute the interior bead positions and the slide transition <code>t</code> (formulas tab) <strong>in the same step as the array mutation</strong> — pop/refill and geometry are ONE coupled operation. No TS-side geometry.</td></tr>
+        <tr><td>Incremental stream</td><td>Stream only the CHANGED interior geometry: on a pop, the shrunk/repositioned beads; on a refill, the sliding beads' positions over the slide duration on Go's clock (per-frame, human-speed, like the wire-bead stream). <strong>Not</strong> a "send all 4 every frame" batch. Extend the existing position trace stream (via <code>EmitGeometry</code> or a sibling emitter); TS pump renders.</td></tr>
         <tr><td>Ports / feedback</td><td><strong>Unchanged.</strong> <code>FeedbackIn</code> and <code>ToReadGate</code> stay; only the step's <em>meaning</em> (1 = pop/send, 0 = hold) is redefined.</td></tr>
-        <tr><td>Plain emit path</td><td>The non-feedback path (<code>FeedbackIn</code> not wired) — decide whether to migrate it to pop/refill or leave it on the current index model. See assumption.</td></tr>
       </tbody>
     </table>
 
@@ -553,9 +572,9 @@ TS computes no slot positions, no drop interpolation, no present/empty decision 
   <rect x="290" y="80" width="240" height="140" rx="12" fill="#0e1e1a" stroke="#5ec4a0" stroke-width="2"/>
   <text x="410" y="108" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="13" font-weight="700" fill="#5ec4a0">Input.Update()</text>
   <text x="410" y="132" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">pop working[end] / send</text>
-  <text x="410" y="150" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">refill working &larr; backup</text>
-  <text x="410" y="168" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">compute 4 slot positions</text>
-  <text x="410" y="186" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">compute drop-down t</text>
+  <text x="410" y="150" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">refill: backup slides down</text>
+  <text x="410" y="168" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">+ compute interior geometry</text>
+  <text x="410" y="186" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9bd6bf">(array + geom = one step)</text>
 
   <!-- feedback -> update -->
   <line x1="190" y1="150" x2="288" y2="150" stroke="#d4a017" stroke-width="1.5" marker-end="url(#aG)"/>
@@ -573,7 +592,7 @@ TS computes no slot positions, no drop interpolation, no present/empty decision 
   <text x="850" y="234" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a06bd0">from streamed interior-bead</text>
   <text x="850" y="250" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a06bd0">positions · computes no geometry</text>
   <line x1="530" y1="180" x2="698" y2="222" stroke="#c07ef8" stroke-width="1.5" marker-end="url(#aV)"/>
-  <text x="600" y="216" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">stream interior geom</text>
+  <text x="600" y="216" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="10" fill="#c07ef8">stream incremental geom</text>
 </svg>
     </div>
     <div class="note"><strong>Legend.</strong> Yellow = downstream feedback signal; green = Go <code>Update()</code> doing array + geometry work; blue = bead emitted onto the wire (paced by the existing PacedWire); purple = the new interior-bead geometry stream that TS renders. The bridge stays fire-and-forget; Go owns all timing and positions.</div>
@@ -581,23 +600,25 @@ TS computes no slot positions, no drop interpolation, no present/empty decision 
 
   <!-- TAB: Open questions -->
   <div class="panel" id="panel-open" role="tabpanel">
-    <h2>Open questions / assumptions to red-line.</h2>
-    <p>Every flagged assumption from the other tabs, collected. Confirm or correct each before implementation.</p>
+    <h2>Resolved — design is locked.</h2>
+    <p>The design questions that were open are now <strong>settled</strong>. One small naming detail remains.</p>
     <table class="spec-table">
-      <caption>Assumptions — confirm</caption>
-      <thead><tr><th style="width:6%">#</th><th style="width:28%">Topic</th><th style="width:66%">Assumption made</th></tr></thead>
+      <caption>Resolved decisions</caption>
+      <thead><tr><th style="width:6%">#</th><th style="width:28%">Topic</th><th style="width:66%">Decision (settled)</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td>Output wire name</td><td>Node 1's value output is referred to as <code>1To2</code>; mechanics don't depend on the exact string — confirm the real edge name.</td></tr>
-        <tr><td>2</td><td>Model replacement <strong>(CONFIRMED)</strong></td><td><strong>Confirmed:</strong> the persistent index <code>i</code> is removed and pop-from-end / refill is the emission model. The index removal is settled. Still open: the plain (non-feedback) emit path must also drop indexing — confirm its exact no-index behavior.</td></tr>
-        <tr><td>3</td><td>Refill timing</td><td>Refill happens <em>after</em> the pop that empties <code>working</code> (vs. lazy refill before a pop). One-frame difference.</td></tr>
-        <tr><td>4</td><td>Pop order vs. emitted sequence</td><td>Pop-from-end emits <code>working</code> reversed; if forward emit order is wanted, store <code>backup</code> reversed. Confirm intended value order.</td></tr>
-        <tr><td>5</td><td>Backup length vs. 4 beads</td><td>Diagrams assume <code>len(backup) == 4</code>; if not, the column needs a windowing/padding rule.</td></tr>
-        <tr><td>6</td><td>Drop trigger</td><td>"Consume bottom 2 → top 2 drop" implies a half-buffer (2-pop) refill; "refill when empty" implies a full (4-pop) refill. These are different triggers — pick one.</td></tr>
-        <tr><td>7</td><td>Drop is visual-only / duration</td><td>Drop interpolates slot positions over a Go-clock-driven <code>t</code>; confirm animated slide vs. instant snap.</td></tr>
-        <tr><td>8</td><td>New trace event shape</td><td>Per-bead vs. per-node-batched interior-bead event; exact kind name and payload, and where it slots into the trace stream / pump.ts.</td></tr>
+        <tr><td>1</td><td>Structure</td><td><strong>Double-buffer.</strong> Two arrays, each <code>[1,0]</code>: working (bottom 2 beads) + backup (top 2 beads) = 4 beads. "Empty" = working (length 2) empty, not all 4 gone.</td></tr>
+        <tr><td>2</td><td>Index <code>i</code></td><td><strong>Removed.</strong> Working-array end-pop is the emission model; no index counter persists between ticks.</td></tr>
+        <tr><td>3</td><td>Pop semantics</td><td>On <code>i==1</code>, pop the END of working — exactly ONE bead removed, its value launches on <code>1To2</code>. <code>i==0</code> = hold.</td></tr>
+        <tr><td>4</td><td>Pop order</td><td>Each array stored <code>[1,0]</code>; end-pop sends <code>0</code> first, then <code>1</code> (intended). <strong>No reversed-backup needed.</strong></td></tr>
+        <tr><td>5</td><td>Refill</td><td>When working empties (after its 2 pops): backup slides DOWN into the working slots + 2 NEW beads at the TOP (backup back to <code>[1,0]</code>). Back to 4.</td></tr>
+        <tr><td>6</td><td>Refill trigger</td><td>Triggers the moment <strong>working</strong> (length 2) empties — 2 pops, not 4. The refill IS the slide.</td></tr>
+        <tr><td>7</td><td>Animation</td><td>The slide is <strong>animated at human speed</strong>, timed on Go's clock with the same human-speed slowdown used for in-flight beads.</td></tr>
+        <tr><td>8</td><td>Geometry ownership</td><td><code>Input.Update()</code> does the interior-bead geometry IN THE SAME STEP as the array mutation (coupled). Go streams the INCREMENTAL change; TS renders, computes no geometry.</td></tr>
+        <tr><td>9</td><td>Stream shape</td><td>Incremental — Go sends what changed, keyed by node id + slot (value 0/1 + position), like the wire-bead position stream. NOT a per-node "send all 4" batch.</td></tr>
       </tbody>
     </table>
-    <div class="assume" style="margin-top:1.5rem;"><span class="tag">Note</span> This page is a <strong>design artifact</strong> — no Go or TS code changes accompany this commit. It is tagged branch-local (HTML comment on line 1) and will be stripped before any merge to main.</div>
+    <div class="assume" style="margin-top:1.5rem;"><span class="tag">One open detail</span> The exact trace <strong>event KIND NAME</strong> for the interior-bead geometry/position event (keyed by node id + slot, payload = value 0/1 + position) is the one small naming detail still to settle. It slots into the trace stream + <code>pump.ts</code> like the other geometry/position events.</div>
+    <div class="assume" style="margin-top:1rem;"><span class="tag">Note</span> This page is a <strong>design artifact</strong> — no Go or TS code changes accompany this commit. It is tagged branch-local (HTML comment on line 1) and will be stripped before any merge to main.</div>
   </div>
 </div>
 
