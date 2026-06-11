@@ -72,13 +72,13 @@
   ],
   "edges": [
     {
-      "id": "in08ToReadGate1",
-      "source": "in08",
+      "id": "1ToReadGate1",
+      "source": "1",
       "sourceHandle": "ToReadGate",
       "target": "readGate1",
       "targetHandle": "FromInput",
       "kind": "chain",
-      "label": "in08ToReadGate1",
+      "label": "1ToReadGate1",
       "data": {
         "slots": 1
       }
@@ -96,45 +96,45 @@
       }
     },
     {
-      "id": "readGate1ToI0",
+      "id": "readGate1To2",
       "source": "readGate1",
       "sourceHandle": "ToChainInhibitor",
-      "target": "i0",
+      "target": "2",
       "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
-      "label": "readGate1ToI0",
+      "label": "readGate1To2",
       "data": {
         "slots": 1
       }
     },
     {
-      "id": "i1ToInhibitRight0",
-      "source": "i1",
+      "id": "3ToInhibitRight0",
+      "source": "3",
       "sourceHandle": "ToNext0",
       "target": "inhibitRight0",
       "targetHandle": "FromRight",
       "kind": "inhibit-in",
-      "label": "i1ToInhibitRight0",
+      "label": "3ToInhibitRight0",
       "data": {
         "slots": 1
       }
     },
     {
-      "id": "i1ToReadGate1",
-      "source": "i1",
+      "id": "3ToReadGate1",
+      "source": "3",
       "sourceHandle": "ToNext1",
       "target": "readGate1",
       "targetHandle": "FromChainInhibitor",
       "kind": "chain",
-      "label": "i1ToReadGate1",
+      "label": "3ToReadGate1",
       "data": {
         "slots": 1,
         "route": "below"
       }
     },
     {
-      "id": "i0.ToNext1->inhibitRight0.FromLeft",
-      "source": "i0",
+      "id": "2.ToNext1->inhibitRight0.FromLeft",
+      "source": "2",
       "sourceHandle": "ToNext1",
       "target": "inhibitRight0",
       "targetHandle": "FromLeft",
