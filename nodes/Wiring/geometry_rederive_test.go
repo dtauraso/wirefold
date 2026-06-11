@@ -238,6 +238,132 @@ func TestInFlightRederiveShrinkPreservesFraction(t *testing.T) {
 	}
 }
 
+// posFracs extracts the F (fractional progress) values from the position events of
+// a drained trace, in emission order.
+func posFracs(events []T.Event) []float64 {
+	var out []float64
+	for _, e := range events {
+		if e.Kind == T.KindPosition {
+			out = append(out, e.F)
+		}
+	}
+	return out
+}
+
+// TestDragDoesNotResetInFlightFraction is the regression guard for the node-drag
+// bead-racing bug: a fast continuous drag fires MANY ReviseInFlightGeometry calls
+// per second. Each revise rebases inFlightPlacement into the past; the delivery
+// walker must resume at the bead's REAL fraction, not replay the traversal from
+// t≈0. Place a bead, advance to t≈0.5, then fire many revisions in a row (small
+// arc changes simulating a drag) and assert the streamed fraction stays ≈0.5 and
+// never jumps backward.
+func TestDragDoesNotResetInFlightFraction(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	clk := NewFakeClock()
+	pw.SetClock(clk)
+	tr := T.New(256)
+	pw.Trace = tr
+
+	const inFlightMs = 50.0
+	arc0 := inFlightMs * PulseSpeedWuPerMs
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
+	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "o"}
+	if !pw.TryPlace(77, bp) {
+		t.Fatal("TryPlace rejected on fresh wire")
+	}
+
+	// Advance to ~half: fraction t ≈ 0.5.
+	clk.Advance(25 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+
+	// Simulate a drag: many revisions in a row with small arc changes around arc0,
+	// advancing the clock a tiny bit between each (continuous drag). The fraction
+	// must hold near 0.5 throughout — never snapping back toward the wire start.
+	arc := arc0
+	for i := 0; i < 40; i++ {
+		// jitter the arc ±10% like a node wobbling under the cursor
+		if i%2 == 0 {
+			arc = arc0 * 1.1
+		} else {
+			arc = arc0 * 0.9
+		}
+		pw.ReviseInFlightGeometry(arc, seg)
+		// Tiny clock advance every few revisions: a real drag fires far more
+		// revisions than clock-ticks, so the fraction should barely move.
+		if i%8 == 0 {
+			clk.Advance(time.Millisecond)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	tr.Close()
+	fracs := posFracs(tr.Events())
+	if len(fracs) == 0 {
+		t.Fatal("no position events streamed during the drag")
+	}
+	// Every emission at/after the half-way point must stay near 0.5 (the bead barely
+	// moved: only ~5 ms of clock advanced across the whole drag) and NEVER jump
+	// backward — the pre-fix walker replayed each revise from t≈0, snapping the bead
+	// back to the wire start over and over.
+	// Once the bead has reached ~0.5 (the drag's start), NO subsequent emission may
+	// drop back below it — the pre-fix walker replayed each revise from t≈0,
+	// emitting fractions like 0.32 then climbing, snapping the bead to the wire
+	// start over and over. We track the running max and forbid any meaningful drop.
+	const reachedHalf = 0.45
+	const hi = 0.65
+	maxSeen := 0.0
+	pastHalf := false
+	for i, f := range fracs {
+		if f >= reachedHalf {
+			pastHalf = true
+		}
+		if !pastHalf {
+			// Pre-half emissions (the bead climbing to 0.5 before the drag) are fine.
+			continue
+		}
+		if f > hi {
+			t.Fatalf("frac[%d]=%.4f above band — bead overshot during drag", i, f)
+		}
+		if f < maxSeen-0.02 {
+			t.Fatalf("frac jumped backward: max=%.4f -> %.4f (idx %d) — node-move reset the bead to the wire start", maxSeen, f, i)
+		}
+		if f > maxSeen {
+			maxSeen = f
+		}
+	}
+}
+
+// TestReviseNoInFlightIsNoOp guards that ReviseInFlightGeometry on a wire with NO
+// bead in flight emits nothing and does not spawn/deliver a phantom bead.
+func TestReviseNoInFlightIsNoOp(t *testing.T) {
+	pw := NewPacedWire(100, PulseSpeedWuPerMs)
+	clk := NewFakeClock()
+	pw.SetClock(clk)
+	tr := T.New(64)
+	pw.Trace = tr
+
+	if pw.InFlight() {
+		t.Fatal("fresh wire reports a bead in flight")
+	}
+	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{8, 0, 0}}
+	for i := 0; i < 10; i++ {
+		pw.ReviseInFlightGeometry(8.0, seg)
+		clk.Advance(5 * time.Millisecond)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	if pw.InFlight() {
+		t.Fatal("revise on an empty wire spawned a phantom in-flight bead")
+	}
+	if _, ok := pw.PollRecv(); ok {
+		t.Fatal("revise on an empty wire delivered a phantom bead into the slot")
+	}
+	tr.Close()
+	if fr := posFracs(tr.Events()); len(fr) != 0 {
+		t.Fatalf("revise on an empty wire emitted %d position events, want 0", len(fr))
+	}
+}
+
 // TestDeleteMidFlightCancels is verifier group (c): deleting an edge while a bead
 // is in flight cancels the clock-delivery (no delivery ever lands, even after
 // advancing past the original deadline) and emits a pulse-cancelled event keyed by

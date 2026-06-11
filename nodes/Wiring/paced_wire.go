@@ -374,6 +374,7 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 	tr := pw.Trace
 	placement := pw.inFlightPlacement
 	pulseSpeed := pw.pulseSpeed
+	startNow := pw.clock.Now()
 
 	// Cancel any prior walker's parked WaitUntil, then install a fresh context.
 	if pw.deliverCancel != nil {
@@ -384,8 +385,18 @@ func (pw *PacedWire) relaunchDeliveryLocked() {
 
 	go func() {
 		interval := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
-		// next is the active-elapsed instant of the upcoming ~16 ms tick.
+		// next is the active-elapsed instant of the upcoming ~16 ms tick. Tick
+		// boundaries are anchored to placement (so steady-state ticks land on a
+		// stable grid), but the FIRST tick must be at or after the relaunch's Now()
+		// — otherwise a mid-flight ReviseInFlightGeometry rebases placement into the
+		// past and the walker would replay the whole traversal from t≈0 (the bead
+		// racing back to the wire's start on every node-move). Advance next past
+		// startNow so it resumes at the bead's real fraction, not the rebased origin.
 		next := placement + interval
+		if next <= startNow {
+			steps := (startNow-placement)/interval + 1
+			next = placement + steps*interval
+		}
 		for {
 			// Read the live arc/curve: a mid-flight geometry edit relaunches this
 			// walker after revising them, but a tick that races the relaunch still
