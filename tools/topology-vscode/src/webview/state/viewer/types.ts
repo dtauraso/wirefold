@@ -108,8 +108,26 @@ export function parseViewerState(text: string | undefined): ViewerState {
   return out;
 }
 
+// Re-emit a ViewerState with `view.nodes` keys in a stable, deterministic
+// order (node id, lexicographically sorted). The in-memory `nodes` object
+// inherits whatever insertion order parse + node-move mutation produced: a
+// node drag reassigns `v.nodes[id]`, and merging active+preserved positions
+// reorders incidentally. JSON.stringify emits keys in insertion order, so
+// that incidental order leaked into topology.json#view and made load→save
+// produce a no-op diff (key churn). Sorting by id makes the serialization a
+// pure function of the data: identical data → identical bytes, regardless of
+// how the in-memory object was built. Go reads view.nodes by key lookup, so
+// order is irrelevant to it. Only `nodes` (incidental order) is stabilized;
+// fadeEdgeOrder is semantically ordered and left untouched.
+function withStableViewOrder(s: ViewerState): ViewerState {
+  if (!s.nodes) return s;
+  const sorted: Record<string, NodeView> = {};
+  for (const id of Object.keys(s.nodes).sort()) sorted[id] = s.nodes[id];
+  return { ...s, nodes: sorted };
+}
+
 export function serializeViewerState(s: ViewerState): string {
-  return JSON.stringify(s, null, 2) + "\n";
+  return JSON.stringify(withStableViewOrder(s), null, 2) + "\n";
 }
 
 // Scene-only fields (camera, camera3d, labelsGlobalHidden) — for topology.scene.json.
