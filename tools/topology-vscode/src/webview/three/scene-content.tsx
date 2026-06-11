@@ -445,6 +445,11 @@ export function EdgeBeadChain({ edgeId, faded }: { edgeId: string; faded: boolea
       ref={meshRef}
       args={[undefined, undefined, count]}
       userData={{ edgeId }}
+      // Beads are a pure position-stream plot, not a pick target. Without this
+      // they sit in front of the node spheres and steal node-drag/select picks
+      // (classified as an edgeHit and winning on nearest-distance), which broke
+      // node dragging. The edge's real pick target is the SingleEdgeTube halo.
+      raycast={() => null}
     >
       <sphereGeometry args={[4, 8, 8]} />
       <meshStandardMaterial
