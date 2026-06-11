@@ -11,10 +11,7 @@
 //
 // Wire format note: this package emits `send` events keyed by
 // (Node, Port), NOT by edge ID. Edge IDs are a Wiring/spec-level
-// concept the node doesn't have. Chunk 4 will add a spec-aware
-// resolver that normalizes raw Go traces to the canonical edge-keyed
-// form expected by chain-cascade.trace.jsonl. The on-disk Go trace
-// is "raw"; the canonical form is what the parity test compares.
+// concept the node doesn't have. The on-disk Go trace is raw form.
 
 package Trace
 
@@ -86,10 +83,7 @@ type Event struct {
 	Kind      string `json:"kind"`
 	Node      string `json:"node"`
 	Port      string `json:"port,omitempty"`      // recv: input port; send: output port
-	Edge      string `json:"edge,omitempty"`      // canonical send only; set by Resolve
 	Value     int    `json:"value,omitempty"`     // recv/send only
-	// hasValue distinguishes "value 0" from "no value" for send/recv events.
-	hasValue bool
 	// Wire geometry fields — populated on send events when the outgoing port
 	// is backed by a PacedWire. Zero values are omitted from JSON output.
 	// ArriveStep is omitted: Go has no global ms-per-step cadence,
@@ -111,6 +105,10 @@ type Event struct {
 	// at lerp(liveStart, liveEnd, F) on its LOCAL (dragged) node port positions, so
 	// the bead rides the live wire with no round-trip lag and no t-swing race.
 	F float64
+	// Edge carries the edge's id on geometry events (KindGeometry).
+	// This is the TS edge id — the renderer routes the segment to the right wire.
+	// Not set on any other event kind.
+	Edge string `json:"edge,omitempty"`
 	// SX/SY/SZ and EX/EY/EZ carry an edge's authoritative straight-segment endpoints
 	// on geometry events (KindGeometry): Start = source OUT-port world pos,
 	// End = dest IN-port world pos. Go owns these; the renderer draws the wire tube
@@ -180,7 +178,7 @@ func (t *Trace) Recv(node, port string, value int) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindRecv, Node: node, Port: port, Value: value, hasValue: true}
+	t.ch <- Event{Kind: KindRecv, Node: node, Port: port, Value: value}
 }
 
 // Fire emits a fire event for `node`. Called once per handler
@@ -198,7 +196,7 @@ func (t *Trace) Send(node, port string, value int) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value}
 }
 
 // SendWire emits a send event like Send, additionally carrying the wire geometry
@@ -209,7 +207,7 @@ func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs f
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, hasValue: true, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
+	t.ch <- Event{Kind: KindSend, Node: node, Port: port, Value: value, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle}
 }
 
 // Done emits a done event for `(node, port)` when the receiver has finished
@@ -235,7 +233,7 @@ func (t *Trace) Position(node, port string, value int, x, y, z, f float64) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, hasValue: true, X: x, Y: y, Z: z, hasPos: true, F: f}
+	t.ch <- Event{Kind: KindPosition, Node: node, Port: port, Value: value, X: x, Y: y, Z: z, hasPos: true, F: f}
 }
 
 // Geometry emits an edge's authoritative straight-segment endpoints (Phase 3),
@@ -273,7 +271,7 @@ func (t *Trace) Arrive(node, port string, value int) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindArrive, Node: node, Port: port, Value: value, hasValue: true}
+	t.ch <- Event{Kind: KindArrive, Node: node, Port: port, Value: value}
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -283,7 +281,7 @@ func (t *Trace) PulseCancelled(node, port string, value int) {
 	if t == nil {
 		return
 	}
-	t.ch <- Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value, hasValue: true}
+	t.ch <- Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value}
 }
 
 // Breadcrumb writes a free-form diagnostic line directly to the sink
@@ -353,23 +351,11 @@ func (t *Trace) Events() []Event {
 
 // WriteJSONL serializes all recorded events as JSON-lines (one
 // object per line, trailing newline) onto w. Emits raw form: send
-// events carry node+port. For canonical (edge-keyed) output, run
-// the events through Resolve first then call WriteCanonicalJSONL.
-// Call after Close.
+// events carry node+port. Call after Close.
 func (t *Trace) WriteJSONL(w io.Writer) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return writeAll(t.events, w, marshalEvent)
-}
-
-// WriteCanonicalJSONL emits the chunk-1 canonical wire format: send
-// events use the `edge` field instead of node+port. Caller must have
-// run events through Resolve first; send events without an Edge will
-// produce malformed output. Standalone function (not a method)
-// because the canonical events are typically the *result* of
-// Resolve, not the trace's own buffer.
-func WriteCanonicalJSONL(events []Event, w io.Writer) error {
-	return writeAll(events, w, marshalCanonicalEvent)
 }
 
 func writeAll(events []Event, w io.Writer, marshal func(Event) ([]byte, error)) error {
@@ -526,40 +512,3 @@ func marshalEvent(e Event) ([]byte, error) {
 	}
 }
 
-// marshalCanonicalEvent emits the chunk-1 wire-format shape:
-//
-//	{"step":N,"kind":"recv","node":"X","port":"Y","value":V}
-//	{"step":N,"kind":"fire","node":"X"}
-//	{"step":N,"kind":"send","edge":"E","value":V}
-//
-// Send events carry `edge` (set by Resolve) and drop `node`/`port`.
-// recv and fire are identical to the raw form.
-func marshalCanonicalEvent(e Event) ([]byte, error) {
-	type recv struct {
-		Step  int    `json:"step"`
-		Kind  string `json:"kind"`
-		Node  string `json:"node"`
-		Port  string `json:"port"`
-		Value int    `json:"value"`
-	}
-	type fire struct {
-		Step int    `json:"step"`
-		Kind string `json:"kind"`
-		Node string `json:"node"`
-	}
-	type send struct {
-		Step  int    `json:"step"`
-		Kind  string `json:"kind"`
-		Edge  string `json:"edge"`
-		Value int    `json:"value"`
-	}
-	switch e.Kind {
-	case KindRecv:
-		return json.Marshal(recv{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
-	case KindFire:
-		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
-	case KindSend:
-		return json.Marshal(send{Step: e.Step, Kind: e.Kind, Edge: e.Edge, Value: e.Value})
-	}
-	return json.Marshal(e)
-}
