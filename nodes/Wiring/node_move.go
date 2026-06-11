@@ -258,6 +258,28 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 	}
 }
 
+// ResendGeometry re-emits the full current geometry from the movers' held
+// authoritative state: each node's node-geometry (emitNodeGeometry) and each edge's
+// segment (tr.Geometry), recomputed from the edge's held endpoint geoms/handles. This
+// reproduces exactly what a fresh load streams on startup, so a freshly-(re)mounted
+// webview that lost its module-level edge-geometry store can rebuild it without
+// restarting Go. Safe to call repeatedly and while running: it only reads each mover's
+// held geom and emits — no inbox writes, no recompute side effects on Outs/wires.
+func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
+	if tr == nil {
+		return
+	}
+	for _, nm := range md.nodeMovers {
+		emitNodeGeometry(tr, nm.id, nm.geom)
+	}
+	for _, em := range md.edgeMovers {
+		seg := segmentBetweenPorts(em.srcGeom, em.srcH, em.dstGeom, em.dstH)
+		tr.Geometry(em.edgeID,
+			seg.Start.X, seg.Start.Y, seg.Start.Z,
+			seg.End.X, seg.End.Y, seg.End.Z)
+	}
+}
+
 // EdgeOut returns the source *Out bound to the given edge label, or nil if unknown.
 // Read-only accessor for out-of-package verifiers (the headless cascade reads an
 // edge's per-edge in-flight time from the loaded geometry).

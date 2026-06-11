@@ -65,12 +65,22 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
 async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
   const { document, runner, post } = ctx;
   switch (msg.type) {
-    case "ready":
+    case "ready": {
       ctx.send();
       // Spawn Go immediately so edges render from geometry events before the
       // user presses Run. Go starts HALTED — the clock won't tick until play().
+      // A remount (hot-reload after npm run build) resets the webview's module-level
+      // edge-geometry store but leaves Go running; run() is then idempotent (no-op),
+      // so geometry is never re-streamed and edges vanish until Reload Window.
+      // If Go was ALREADY running before this run(), request a geometry resend so the
+      // remounted webview rebuilds its store. A just-spawned Go needs no resend — it
+      // emits startup geometry on its own — so this also dodges any post-spawn
+      // stdin-readiness race (we only send resend when stdin was already live).
+      const wasRunning = runner.isRunning();
       runner.run();
+      if (wasRunning) runner.resend();
       return;
+    }
     case "save":
       try {
         const viewText = extractViewText(document.getText());

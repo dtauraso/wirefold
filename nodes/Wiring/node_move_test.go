@@ -143,3 +143,62 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatal("edge 'e0' did not re-emit its re-derived segment on move")
 	}
 }
+
+// TestResendGeometry locks the remount-recovery path: ResendGeometry re-emits a
+// node-geometry event for every node and an edge-geometry event for every edge from
+// the held authoritative state, identical to what startup streams — so a remounted
+// webview can rebuild its edge-geometry store without restarting Go.
+func TestResendGeometry(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(256)
+	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+
+	// Safe to call repeatedly; call twice to lock idempotency-while-running.
+	md.ResendGeometry(tr)
+	md.ResendGeometry(tr)
+
+	tr.Close()
+	events := tr.Events()
+	nodeGeoms := map[string]bool{}
+	edgeGeoms := map[string]bool{}
+	for _, e := range events {
+		if e.Kind == T.KindNodeGeometry {
+			nodeGeoms[e.Node] = true
+		}
+		if e.Kind == T.KindGeometry {
+			edgeGeoms[e.Edge] = true
+		}
+	}
+	for _, n := range []string{"src", "dst"} {
+		if !nodeGeoms[n] {
+			t.Fatalf("ResendGeometry did not re-emit node-geometry for %q", n)
+		}
+	}
+	if !edgeGeoms["e0"] {
+		t.Fatal("ResendGeometry did not re-emit edge-geometry for 'e0'")
+	}
+}
