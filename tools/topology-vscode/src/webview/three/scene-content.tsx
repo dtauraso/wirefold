@@ -20,6 +20,7 @@ import {
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useChainBeadStore } from "./chain-bead-geometry";
 import { usePulseLitStore } from "./pulse-lit";
+import { postLog } from "../log/post";
 import type { PickOptions } from "./interaction-controls";
 // Shading PARAMETER values are Go-authoritative (MODEL.md / Phase 4). They are
 // generated from nodes/Wiring/shading_params.go into ../../schema/shading-params.
@@ -813,16 +814,32 @@ export function RaycasterHelper({
         }
       }
 
+      // Node-favoring margin: the wide invisible edge selection-halo runs node→node,
+      // so over a node the halo surface is at/closer than the node sphere. Without a
+      // bias the edge would win and node-drag would silently break. An edge only wins
+      // when it is clearly closer than the node by this margin (world units).
+      const EDGE_BIAS = 2;
+
       // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
+      let picked: string | null = null;
       if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
-        return portHit.id;
+        picked = portHit.id;
+      } else if (edgeHit && nodeHit) {
+        picked = edgeHit.dist < nodeHit.dist - EDGE_BIAS ? edgeHit.id : nodeHit.id;
+      } else if (edgeHit) {
+        picked = edgeHit.id;
+      } else if (nodeHit) {
+        picked = nodeHit.id;
       }
-      if (edgeHit && nodeHit) {
-        return edgeHit.dist <= nodeHit.dist ? edgeHit.id : nodeHit.id;
-      }
-      if (edgeHit) return edgeHit.id;
-      if (nodeHit) return nodeHit.id;
-      return null;
+
+      postLog("dbg.pick", {
+        hits: hits.length,
+        portDist: portHit?.dist ?? null,
+        edgeDist: edgeHit?.dist ?? null,
+        nodeDist: nodeHit?.dist ?? null,
+        returned: picked,
+      });
+      return picked;
     };
   }, [camera, scene, nodes]);
 
