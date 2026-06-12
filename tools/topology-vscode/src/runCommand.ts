@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
 import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
+import { buildBinary, maxGoMtime } from "./goBuild";
 
 export type { RunStatus };
 
@@ -71,43 +72,17 @@ function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
-// Directories excluded from the .go-mtime walk — mirrors the repo's bash-hygiene
-// exclusions so the walk stays fast and never touches node_modules.
-const GO_WALK_EXCLUDE = new Set([
-  "node_modules", ".git", "out", ".probe", ".wirefold-cache", "handoff-archive",
-]);
-
-// maxGoMtime walks the repo collecting the newest mtime among *.go source files.
-// Returns 0 if none found. The Go tree is small, so a plain recursive walk is fine.
-function maxGoMtime(dir: string): number {
-  let max = 0;
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return max;
-  }
-  for (const ent of entries) {
-    const full = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      if (GO_WALK_EXCLUDE.has(ent.name)) continue;
-      const sub = maxGoMtime(full);
-      if (sub > max) max = sub;
-    } else if (ent.isFile() && ent.name.endsWith(".go")) {
-      try {
-        const m = fs.statSync(full).mtimeMs;
-        if (m > max) max = m;
-      } catch { /* skip */ }
-    }
-  }
-  return max;
-}
-
 // ensureBinaryBuilt builds the Go binary at binPath if it's missing or stale.
 // A rebuild is needed when binPath does not exist OR any *.go source under
 // repoRoot is newer than binPath. Up-to-date → no build, returns ok. This
 // replaces `go run .` (which relinks a throwaway binary every launch) with a
 // single prebuilt binary reused across animation start/restart.
+//
+// Lazy safety net: even with the eager .go watcher (see extension.ts) keeping
+// the binary fresh, this still rebuilds at launch when the watcher missed an
+// event or wasn't armed. It delegates to the guarded buildBinary, so if the
+// watcher is mid-build this call coalesces (busy → ok) wait-free and never
+// blocks run().
 function ensureBinaryBuilt(
   repoRoot: string,
   binPath: string,
@@ -118,14 +93,8 @@ function ensureBinaryBuilt(
   } catch { /* missing → rebuild */ }
   const needsRebuild = binMtime < 0 || maxGoMtime(repoRoot) > binMtime;
   if (!needsRebuild) return { ok: true };
-  try {
-    fs.mkdirSync(path.dirname(binPath), { recursive: true });
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
-  const res = cp.spawnSync("go", ["build", "-o", binPath, "."], { cwd: repoRoot, encoding: "utf8" });
-  if (res.error) return { ok: false, error: res.error.message };
-  if (res.status !== 0) return { ok: false, error: res.stderr || `go build exited ${res.status}` };
+  const res = buildBinary(repoRoot, binPath);
+  if (!res.ok) return res;
   return { ok: true };
 }
 
