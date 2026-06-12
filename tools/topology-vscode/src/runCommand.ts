@@ -71,6 +71,64 @@ function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
+// Directories excluded from the .go-mtime walk — mirrors the repo's bash-hygiene
+// exclusions so the walk stays fast and never touches node_modules.
+const GO_WALK_EXCLUDE = new Set([
+  "node_modules", ".git", "out", ".probe", ".wirefold-cache", "handoff-archive",
+]);
+
+// maxGoMtime walks the repo collecting the newest mtime among *.go source files.
+// Returns 0 if none found. The Go tree is small, so a plain recursive walk is fine.
+function maxGoMtime(dir: string): number {
+  let max = 0;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return max;
+  }
+  for (const ent of entries) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      if (GO_WALK_EXCLUDE.has(ent.name)) continue;
+      const sub = maxGoMtime(full);
+      if (sub > max) max = sub;
+    } else if (ent.isFile() && ent.name.endsWith(".go")) {
+      try {
+        const m = fs.statSync(full).mtimeMs;
+        if (m > max) max = m;
+      } catch { /* skip */ }
+    }
+  }
+  return max;
+}
+
+// ensureBinaryBuilt builds the Go binary at binPath if it's missing or stale.
+// A rebuild is needed when binPath does not exist OR any *.go source under
+// repoRoot is newer than binPath. Up-to-date → no build, returns ok. This
+// replaces `go run .` (which relinks a throwaway binary every launch) with a
+// single prebuilt binary reused across animation start/restart.
+function ensureBinaryBuilt(
+  repoRoot: string,
+  binPath: string,
+): { ok: true } | { ok: false; error: string } {
+  let binMtime = -1;
+  try {
+    binMtime = fs.statSync(binPath).mtimeMs;
+  } catch { /* missing → rebuild */ }
+  const needsRebuild = binMtime < 0 || maxGoMtime(repoRoot) > binMtime;
+  if (!needsRebuild) return { ok: true };
+  try {
+    fs.mkdirSync(path.dirname(binPath), { recursive: true });
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  const res = cp.spawnSync("go", ["build", "-o", binPath, "."], { cwd: repoRoot, encoding: "utf8" });
+  if (res.error) return { ok: false, error: res.error.message };
+  if (res.status !== 0) return { ok: false, error: res.stderr || `go build exited ${res.status}` };
+  return { ok: true };
+}
+
 export class BuildAndRunRunner {
   private proc: cp.ChildProcess | undefined;
   // Explicit cancel flag — distinguishing cancellation by signal name races
@@ -110,17 +168,32 @@ export class BuildAndRunRunner {
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);
+    const repoRoot = folder.uri.fsPath;
+    const binPath = path.join(repoRoot, ".wirefold-cache", "wirefold");
     const topArgs = this.topologyPath ? ["-topology", this.topologyPath] : [];
-    this.channel.appendLine("$ go run . " + topArgs.join(" "));
+    // Build the binary once (and only rebuild when a .go source changed) instead of
+    // relinking a throwaway binary via `go run .` on every start/restart.
+    const built = ensureBinaryBuilt(repoRoot, binPath);
+    if (!built.ok) {
+      this.channel.appendLine(`\n[build error: ${built.error}]`);
+      if (this.goErrorsFile) {
+        try {
+          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: built.error }) + "\n", "utf8");
+        } catch { /* swallow */ }
+      }
+      this.looping = false;
+      this.post({ state: "error", message: built.error });
+      return;
+    }
+    this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
     // Do NOT post "running" here — Go starts HALTED. The clock state drives status:
     // idle-on-spawn → running-on-play() → paused-on-pause().
-    // detached: true makes the child the leader of a new process group, so
-    // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
-    // SIGTERM hits the `go` driver but leaves the compiled binary orphaned
-    // on macOS.
-    this.proc = cp.spawn("go", ["run", ".", ...topArgs], { cwd: folder.uri.fsPath, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    // detached: true makes the child the leader of a new process group; the
+    // prebuilt binary is the sole group member, so kill(-pid) reaches it
+    // directly. Without this, SIGTERM could leave it orphaned on macOS.
+    this.proc = cp.spawn(binPath, [...topArgs], { cwd: repoRoot, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
