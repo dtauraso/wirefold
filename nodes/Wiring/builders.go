@@ -490,9 +490,11 @@ func emitHeldBead(tr *T.Trace, nodeName string, held int) {
 	tr.NodeBead(nodeName, 0, 0, held != -1, held, 0, 0, 0)
 }
 
-// interiorSlideDurationMul stretches the refill-slide duration past raw pulse
-// speed so the short row-pitch slide is readable (~0.9s instead of ~0.15s).
-const interiorSlideDurationMul = 6.0
+// interiorSlideDurationMul scales the refill-slide duration relative to raw
+// pulse speed. At 1.0 the slide runs at the base pulse speed with no extra
+// multiplier — the same constant speed as the wire beads. (Knob retained so
+// the slide speed can still be tuned independently if needed.)
+const interiorSlideDurationMul = 1.0
 
 // emitRefillSlide runs the clock-paced animated refill for the Input node's
 // interior buffer: the OLD backup row (row 0, top) slides DOWN into the working
@@ -515,9 +517,8 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	row0Y := interiorSlotOffset(0, 0).Y
 	row1Y := interiorSlotOffset(1, 0).Y
 	rowPitch := row0Y - row1Y // downward translation distance (local y, positive)
-	// The slide distance (one row pitch) is tiny next to a wire, so at raw pulse
-	// speed it finishes in ~150ms (too fast to read). interiorSlideDurationMul
-	// stretches it to a watchable pace; the clock is still pause-aware.
+	// Slide runs at the base pulse speed (interiorSlideDurationMul = 1.0), the
+	// same constant speed as the wire beads; the clock is still pause-aware.
 	durationMs := rowPitch / PulseSpeedWuPerMs * interiorSlideDurationMul
 	duration := time.Duration(durationMs * float64(time.Millisecond))
 	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))

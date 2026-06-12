@@ -18,7 +18,7 @@ import "math"
 // duration) derive timing from this value.
 //
 // Matches PULSE_SPEED_WU_PER_MS in the generated curve-params.ts.
-const CurveParamPulseSpeedWuPerMs = 0.08
+const CurveParamPulseSpeedWuPerMs = 0.04
 
 // CurveParamMinArcLength is the minimum arc length in world units.
 // Prevents zero-duration pulses when two nodes are co-located.

@@ -2,7 +2,7 @@
 // Source: nodes/Wiring/curve_params.go CurveParam* constants.
 // Regenerate with: npm run gen:node-defs
 
-export const CURVE_PARAM_PULSE_SPEED_WU_PER_MS = 0.08;
+export const CURVE_PARAM_PULSE_SPEED_WU_PER_MS = 0.04;
 export const CURVE_PARAM_MIN_ARC_LENGTH = 1.0;
 export const CURVE_PARAM_NODE_RADIUS_DIVISOR = 4;
 export const CURVE_PARAM_SLOT_PCT0 = 25;
