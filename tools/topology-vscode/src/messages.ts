@@ -25,7 +25,21 @@ export type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   | { type: "edit"; op: "update"; entries: Record<string, MoveEntry> }
-  | { type: "edit"; op: "fade"; edges: Record<string, boolean> };
+  | { type: "edit"; op: "fade"; edges: Record<string, boolean> }
+  // Port-anchor (phase 1): move a port along its node's ring. node/port identify the
+  // port, isInput selects the input vs output list, anchor is the new direction offset
+  // from the node center. keys lists the routing keys Go mail-sorts the update to — the
+  // node id AND each incident edge id (source===node || target===node), same fan-out
+  // shape as op="update". The webview computes the incident edges from its RF graph.
+  | {
+      type: "edit";
+      op: "port-anchor";
+      node: string;
+      port: string;
+      isInput: boolean;
+      anchor: { x: number; y: number; z: number };
+      keys: string[];
+    };
 
 export type WebviewToHostMsg =
   | { type: "ready" }
@@ -107,6 +121,26 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
         return typeof e.nodeId === "string" && typeof e.x === "number" && typeof e.y === "number";
       });
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
+    }
+    case "port-anchor": {
+      // node/port strings, isInput boolean, anchor {x,y,z} numbers, keys non-empty string[].
+      const a = m.anchor;
+      const okAnchor =
+        !!a &&
+        typeof a === "object" &&
+        typeof (a as Record<string, unknown>).x === "number" &&
+        typeof (a as Record<string, unknown>).y === "number" &&
+        typeof (a as Record<string, unknown>).z === "number";
+      const keys = m.keys;
+      const okKeys =
+        Array.isArray(keys) && keys.length > 0 && keys.every((k) => typeof k === "string");
+      return typeof m.node === "string" &&
+        typeof m.port === "string" &&
+        typeof m.isInput === "boolean" &&
+        okAnchor &&
+        okKeys
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
     }
     case "fade": {
       // edges is Record<string, boolean>: edgeId → desired faded state.

@@ -23,6 +23,12 @@ type portGeom struct {
 	Name string
 	Side string // "left" | "right" | "top" | "bottom"; "" → default by direction
 	Slot *int   // 0|1|2, or nil for auto-spacing
+	// Anchor is an optional continuous direction offset from the node center.
+	// When non-nil it OVERRIDES side+slot: the port direction is normalize(Anchor)
+	// and the port still sits on the sphere surface at nodeRadius in that direction
+	// (the magnitude is normalized; the drag in phase 2 constrains the anchor to the
+	// ring, and Go uses only the direction). nil → fall back to side+slot placement.
+	Anchor *vec3
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
@@ -144,6 +150,19 @@ func portDir(g nodeGeom, portName string, isInput bool) (vec3, bool) {
 		return vec3{}, false
 	}
 	port := list[idx]
+
+	// Anchor override: a non-nil anchor gives a continuous direction from center.
+	// The port sits on the sphere surface (nodeRadius) in that direction — magnitude
+	// normalized — bypassing the side/slot computation entirely.
+	if port.Anchor != nil {
+		d := port.Anchor.normalize()
+		if d.length() == 0 {
+			// Degenerate anchor (zero vector): fall through to side/slot below.
+		} else {
+			return d, true
+		}
+	}
+
 	side := defaultSide(port.Side, isInput)
 
 	// Ports sharing this resolved side, in list order.
