@@ -148,6 +148,14 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
+    case "node-bead": {
+      // Interior bead of node 1's 2x2 buffer (Go-computed slot position, keyed by
+      // node + row/col). STUB — Phase 3 renders the interior grid from this stream.
+      // pump computes no geometry (Go owns the slot positions); nothing to do yet.
+      // TODO(phase3): write Go's slot position into an interior-bead store and
+      // render the 4-bead grid inside the node body.
+      return;
+    }
     // PUMP_DONE_HANDLER
     case "done": {
       // The consumer finished USING the held value (node's firing rule ran). Held

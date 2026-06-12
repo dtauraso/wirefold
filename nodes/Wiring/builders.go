@@ -154,7 +154,8 @@ var (
 	tInPtr    = reflect.TypeFor[*In]()
 	tOutPtr   = reflect.TypeFor[*Out]()
 	tOutMulti = reflect.TypeFor[OutMulti]()
-	tFireFunc = reflect.TypeFor[func()]()
+	tFireFunc      = reflect.TypeFor[func()]()
+	tEmitBeadsFunc = reflect.TypeFor[func(working, backup []int)]()
 )
 
 // lowerFirst returns s with its first byte lowercased.
@@ -238,6 +239,20 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 						o.End.X, o.End.Y, o.End.Z)
 				}
 			}
+		}))
+	}
+
+	// Inject EmitNodeBeads closure if the struct has an `EmitNodeBeads
+	// func(working, backup []int)` field (node 1's interior buffer). The closure
+	// captures this node's id + nodeGeom and emits one node-bead event per present
+	// interior bead, computing each slot position from the node center + grid gaps.
+	// Same per-goroutine pattern as EmitGeometry: the node's Update calls it with the
+	// LIVE working/backup contents whenever the arrays change.
+	if f := v.FieldByName("EmitNodeBeads"); f.IsValid() && f.CanSet() && f.Type() == tEmitBeadsFunc {
+		nodeName := name
+		g := geom
+		f.Set(reflect.ValueOf(func(working, backup []int) {
+			emitNodeBeads(tr, nodeName, g, working, backup)
 		}))
 	}
 
@@ -401,6 +416,23 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 		appendPort(p.Name, false)
 	}
 	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
+}
+
+// emitNodeBeads streams node 1's interior 2x2 buffer as one node-bead event per
+// PRESENT bead, computed with interiorSlotPos (no TS-side geometry). backup is the
+// top row (row 0), working is the bottom row (row 1); within a row, col is the
+// index into the slice. A popped (absent) bead is simply omitted — its slot has no
+// event this snapshot. Discrete positions only (beads snap to slots; no slide yet).
+// Called from the node's injected EmitNodeBeads closure whenever the arrays change.
+func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []int) {
+	emitRow := func(row int, slice []int) {
+		for col, v := range slice {
+			p := interiorSlotPos(g, row, col)
+			tr.NodeBead(nodeName, row, col, v, p.X, p.Y, p.Z)
+		}
+	}
+	emitRow(0, backup)  // top row = backup
+	emitRow(1, working) // bottom row = working
 }
 
 // NodeBuilder is the public-facing type consumed by the loader.

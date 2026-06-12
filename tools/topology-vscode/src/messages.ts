@@ -66,7 +66,8 @@ export type TraceEvent =
   | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
   | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number }
   | { step: number; kind: "arrive"; node: string; port: string; value?: number }
-  | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] };
+  | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
+  | { step: number; kind: "node-bead"; node: string; row: number; col: number; value: number; x: number; y: number; z: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }

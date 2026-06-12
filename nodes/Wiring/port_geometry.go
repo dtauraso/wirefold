@@ -33,6 +33,37 @@ type nodeGeom struct {
 	Outputs  []portGeom
 }
 
+// Interior 2x2 grid pitch as fractions of the node body dimensions. The grid is
+// centered on the node: two columns split horizontally and two rows split
+// vertically, each gap a fraction of the body's width/height so the four beads sit
+// comfortably inside the node.
+const (
+	interiorColGapFrac = 0.40 // column pitch = width  * frac
+	interiorRowGapFrac = 0.40 // row pitch    = height * frac
+)
+
+// interiorSlotPos returns the world position of the 2x2 interior grid slot at
+// (row, col): row 0 = top/backup, row 1 = bottom/working; col 0 = left, col 1 =
+// right. Mirrors the spec slotPos(row,col):
+//
+//	x = cx + (col - 0.5) * colGap
+//	y = cy + (0.5 - row) * rowGap
+//	z = cz
+//
+// where (cx,cy,cz) is the node center (nodeWorldPos) and colGap/rowGap derive from
+// the node body dimensions. Discrete — beads snap to these slot centers.
+func interiorSlotPos(g nodeGeom, row, col int) vec3 {
+	w, h := kindWidthHeight(g.Kind)
+	colGap := w * interiorColGapFrac
+	rowGap := h * interiorRowGapFrac
+	center := nodeWorldPos(g)
+	return vec3{
+		X: center.X + (float64(col)-0.5)*colGap,
+		Y: center.Y + (0.5-float64(row))*rowGap,
+		Z: center.Z,
+	}
+}
+
 // kindWidthHeight returns the render width/height for a kind, mirroring the
 // TS defaults (width ?? 110, height ?? 60) when the kind is unknown.
 func kindWidthHeight(kind string) (float64, float64) {

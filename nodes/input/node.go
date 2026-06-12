@@ -9,6 +9,11 @@ import (
 type Node struct {
 	Fire         func()
 	EmitGeometry func()
+	// EmitNodeBeads streams the live interior buffer (2x2 grid) as node-bead
+	// events — one per present bead. Injected by Wiring.reflectBuild (captures this
+	// node's geometry). Called whenever working/backup change so the emitted set
+	// always reflects the live arrays. Discrete positions only this phase.
+	EmitNodeBeads func(working, backup []int)
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
 	ToReadGate  *Wiring.Out
@@ -47,6 +52,16 @@ func (n *Node) Update(ctx context.Context) {
 	working := append([]int(nil), init...)
 	backup := append([]int(nil), init...)
 
+	// emitBeads streams the live interior buffer as a discrete node-bead snapshot
+	// (present beads only). Called on the initial full state and after every array
+	// mutation (each pop, each refill) so the emitted set tracks working/backup.
+	emitBeads := func() {
+		if n.EmitNodeBeads != nil {
+			n.EmitNodeBeads(working, backup)
+		}
+	}
+	emitBeads() // initial full(4) state
+
 	if n.FeedbackIn.Wired() {
 		// Feedback ring: SEED then READ. The first pop+send is unconditional so
 		// the ring is bootstrapped (no t=0 deadlock) — without it, nothing emits
@@ -77,6 +92,7 @@ func (n *Node) Update(ctx context.Context) {
 
 			n.Fire()
 			v := popEnd(&working, &backup, init)
+			emitBeads() // array changed (pop, maybe refill) → restream interior
 			if n.ToReadGate.Gated() {
 				if n.ToReadGate.TrySend(v) {
 					if !n.ToReadGate.WaitConsumed() {
@@ -99,6 +115,7 @@ func (n *Node) Update(ctx context.Context) {
 		}
 		n.Fire()
 		v := popEnd(&working, &backup, init)
+		emitBeads() // array changed (pop, maybe refill) → restream interior
 		if n.ToReadGate.Gated() {
 			if n.ToReadGate.TrySend(v) {
 				if !n.ToReadGate.WaitConsumed() {
