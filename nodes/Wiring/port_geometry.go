@@ -38,7 +38,7 @@ type nodeGeom struct {
 // center on each axis, so a corner bead center lands at r*frac*√2 ≈ 0.64r — well
 // inside the radius-r sphere even after adding the bead radius. Square grid:
 // colPitch = rowPitch = 2 * r * frac.
-const interiorSlotFrac = 0.40
+const interiorSlotFrac = 0.36
 
 // interiorSlotPos returns the world position of the 2x2 interior grid slot at
 // (row, col): row 0 = top/backup, row 1 = bottom/working; col 0 = left, col 1 =
