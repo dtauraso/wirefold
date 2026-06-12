@@ -41,7 +41,7 @@ type nodeGeom struct {
 const (
 	interiorBeadR         = 5.0  // sphere radius (INTERIOR_BEAD_R)
 	interiorTorusTubeFrac = 0.12 // torus tube fraction; outer radius = r*(1+frac)
-	interiorBeadGap       = 0.6  // small gap BETWEEN adjacent toruses
+	interiorBeadGap       = 0.2  // small gap BETWEEN adjacent toruses
 )
 
 // interiorTorusOuterR is the torus outer radius — the bead's true visual extent.
