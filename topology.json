@@ -32,7 +32,7 @@
       "type": "ChainInhibitor",
       "data": {
         "state": {
-          "held": 0
+          "held": -1
         },
         "sendRules": {
           "ToNext1": "fireAndForget"
