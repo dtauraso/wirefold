@@ -48,6 +48,8 @@ On each value received from FromPrevChainInhibitorNode:
 
 The node parks if any ToNext output wire is still occupied (bead in flight or unconsumed), to prevent drops when output transit time exceeds the input rate.
 
+**Output invariant:** -1 (the empty-Held sentinel) is never sent on an output channel. A fire whose Held is -1 emits nothing on that channel — Held still updates to the received value, only the send is suppressed. FeedbackOut sends a step (0 or 1), never Held, so it is never -1.
+
 ## Runtime status
 
 - Loader-registered: yes

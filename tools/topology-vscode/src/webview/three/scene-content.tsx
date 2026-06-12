@@ -75,9 +75,12 @@ const VALUE_BEAD_STYLE: Record<number, { fill: string; ring: string }> = {
   0: { fill: "#ffffff", ring: "#000000" },
   1: { fill: "#000000", ring: "#000000" },
 };
-const DEFAULT_BEAD_STYLE = { fill: "#888888", ring: "#000000" };
-function beadStyleForValue(v: number): { fill: string; ring: string } {
-  return VALUE_BEAD_STYLE[v] ?? DEFAULT_BEAD_STYLE;
+// Only 0 and 1 are valid bead values. A value outside the map (including a
+// missing/undefined value) returns undefined — the caller hides the bead rather
+// than drawing a grey/fake fallback. With Go no longer placing -1 on a wire, a
+// non-0/1 bead is a bug, not a colour to paint.
+function beadStyleForValue(v: number | null | undefined): { fill: string; ring: string } | undefined {
+  return v == null ? undefined : VALUE_BEAD_STYLE[v];
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +413,12 @@ export function PulseBead({
       seg.start.z + f * (seg.end.z - seg.start.z),
     );
     // Color the bead by the value it carries — same map as the static init beads.
-    const style = beadStyleForValue(pulse.value ?? 0);
+    // A non-0/1 value has no style → hide rather than paint a fallback.
+    const style = beadStyleForValue(pulse.value);
+    if (!style) {
+      group.visible = false;
+      return;
+    }
     sphereMatRef.current?.color.set(style.fill);
     torusMatRef.current?.color.set(style.ring);
     group.visible = true;
@@ -462,7 +470,12 @@ function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; c
       return;
     }
     group.position.set(slot.pos.x, slot.pos.y, slot.pos.z);
-    const style = beadStyleForValue(slot.value ?? 0);
+    // A non-0/1 value has no style → hide rather than paint a fallback.
+    const style = beadStyleForValue(slot.value);
+    if (!style) {
+      group.visible = false;
+      return;
+    }
     sphereMatRef.current?.color.set(style.fill);
     torusMatRef.current?.color.set(style.ring);
     group.visible = true;
