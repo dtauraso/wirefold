@@ -72,15 +72,15 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 	}
 }
 
-// TestInteriorSlotPosFormula pins the radius-based slotPos(row,col) formula:
+// TestInteriorSlotPosFormula pins the torus-aware slotPos(row,col) formula:
 //
-//	slot  = r * interiorSlotFrac ; pitch = 2*slot
+//	slot  = interiorTorusOuterR + interiorBeadGap/2 ; pitch = 2*slot
 //	x = cx + (col-0.5)*pitch ; y = cy + (0.5-row)*pitch ; z = cz
 //
-// with r = nodeRadius("Input") and (cx,cy,cz) = nodeWorldPos.
+// with (cx,cy,cz) = nodeWorldPos. Pitch follows bead size, not node radius.
 func TestInteriorSlotPosFormula(t *testing.T) {
 	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 5}}
-	pitch := 2 * nodeRadius("Input") * interiorSlotFrac
+	pitch := 2 * interiorSlot
 	c := nodeWorldPos(g)
 
 	cases := []struct{ row, col int }{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
@@ -94,26 +94,32 @@ func TestInteriorSlotPosFormula(t *testing.T) {
 	}
 }
 
-// TestInteriorBeadsInsideSphere asserts each of the 4 interior bead CENTERS sits
-// far enough inside the node sphere that the whole bead (radius INTERIOR_BEAD_R)
-// stays within the surface: dist(center, slot) ≤ r - INTERIOR_BEAD_R. Uses the
-// real Input dims + divisor.
+// TestInteriorBeadsInsideSphere asserts each of the 4 interior bead's TORUS reach
+// stays inside the node sphere: dist(center, slot) + interiorTorusOuterR ≤ r.
+// The torus (outer radius rt), not the sphere, is the bead's true visual extent.
 func TestInteriorBeadsInsideSphere(t *testing.T) {
-	const interiorBeadR = 5.0 // mirrors INTERIOR_BEAD_R in scene-content.tsx
+	rt := interiorTorusOuterR
 	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 0}}
 	r := nodeRadius("Input")
 	center := nodeWorldPos(g)
-	limit := r - interiorBeadR
-	if limit <= 0 {
-		t.Fatalf("node radius %v too small for bead radius %v", r, interiorBeadR)
-	}
 	cases := []struct{ row, col int }{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
 	for _, tc := range cases {
 		p := interiorSlotPos(g, tc.row, tc.col)
 		dx, dy, dz := p.X-center.X, p.Y-center.Y, p.Z-center.Z
 		dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
-		if dist > limit {
-			t.Errorf("slot(%d,%d): center dist %v > r-beadR %v (r=%v) — bead pokes outside sphere", tc.row, tc.col, dist, limit, r)
+		reach := dist + rt
+		if reach > r {
+			t.Errorf("slot(%d,%d): torus reach %v > r %v — ring pokes outside sphere", tc.row, tc.col, reach, r)
 		}
+	}
+}
+
+// TestInteriorTorusesDoNotOverlap asserts adjacent same-row/col toruses keep a
+// non-negative gap: pitch (2*slot) ≥ 2*rt, i.e. torus-to-torus gap ≥ 0.
+func TestInteriorTorusesDoNotOverlap(t *testing.T) {
+	pitch := 2 * interiorSlot
+	gap := pitch - 2*interiorTorusOuterR
+	if gap < 0 {
+		t.Errorf("adjacent toruses overlap: pitch %v < 2*rt %v (gap %v)", pitch, 2*interiorTorusOuterR, gap)
 	}
 }

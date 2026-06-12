@@ -33,27 +33,42 @@ type nodeGeom struct {
 	Outputs  []portGeom
 }
 
-// interiorSlotFrac sets the 2x2 grid half-pitch as a fraction of the node SPHERE
-// RADIUS (not the box): a slot center sits at ±(r*interiorSlotFrac) from the node
-// center on each axis, so a corner bead center lands at r*frac*√2 ≈ 0.64r — well
-// inside the radius-r sphere even after adding the bead radius. Square grid:
-// colPitch = rowPitch = 2 * r * frac.
-const interiorSlotFrac = 0.36
+// Interior bead render dimensions — mirror scene-content.tsx INTERIOR_BEAD_R +
+// torus tube fraction; keep in sync. Each interior bead draws a sphere of radius
+// interiorBeadR PLUS a torus ring whose OUTER radius is
+// interiorBeadR*(1+interiorTorusTubeFrac). The slot pitch must space by the torus
+// outer radius (the larger extent), not the sphere, so adjacent rings don't touch.
+const (
+	interiorBeadR         = 5.0  // sphere radius (INTERIOR_BEAD_R)
+	interiorTorusTubeFrac = 0.12 // torus tube fraction; outer radius = r*(1+frac)
+	interiorBeadGap       = 0.6  // small gap BETWEEN adjacent toruses
+)
+
+// interiorTorusOuterR is the torus outer radius — the bead's true visual extent.
+const interiorTorusOuterR = interiorBeadR * (1 + interiorTorusTubeFrac) // 5.6
+
+// interiorSlot is the 2x2 grid half-pitch, computed TORUS-AWARE from the bead's
+// torus outer radius plus half the desired inter-torus gap. Adjacent same-row
+// beads are 2*interiorSlot apart, so torus-to-torus gap = 2*interiorSlot -
+// 2*rt = interiorBeadGap. Pitch follows bead size (beads are a fixed visual
+// size), NOT the node radius — nodeRadius is used only for the wall-fit guarantee.
+const interiorSlot = interiorTorusOuterR + interiorBeadGap/2 // 5.9
 
 // interiorSlotPos returns the world position of the 2x2 interior grid slot at
 // (row, col): row 0 = top/backup, row 1 = bottom/working; col 0 = left, col 1 =
-// right. The grid is derived from the node SPHERE RADIUS so the four beads always
-// sit inside the rendered sphere with margin:
+// right. The grid is sized by the bead's TORUS OUTER RADIUS so adjacent rings
+// keep a small gap and never overlap:
 //
-//	slot    = r * interiorSlotFrac      (r = min(w,h)/CurveParamNodeRadiusDivisor)
+//	slot    = interiorTorusOuterR + interiorBeadGap/2
 //	x = cx + (col - 0.5) * 2*slot
 //	y = cy + (0.5 - row) * 2*slot
 //	z = cz
 //
 // where (cx,cy,cz) is the node center (nodeWorldPos). Discrete — beads snap to
-// these slot centers.
+// these slot centers. The corner bead's torus reach (slot*√2 + rt) must stay
+// inside the node sphere radius r (see TestInteriorBeadsInsideSphere).
 func interiorSlotPos(g nodeGeom, row, col int) vec3 {
-	slot := nodeRadius(g.Kind) * interiorSlotFrac
+	slot := interiorSlot
 	pitch := 2 * slot
 	center := nodeWorldPos(g)
 	return vec3{
