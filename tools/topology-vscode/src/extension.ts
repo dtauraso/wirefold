@@ -15,6 +15,19 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
+// Truncate probe logs on each editor open so each session's trace is clean (cross-session accumulation was misleading).
+function resetProbeLogs(repoRoot: string): void {
+  try {
+    const probeDir = path.join(repoRoot, ".probe");
+    fs.mkdirSync(probeDir, { recursive: true });
+    for (const name of ["ts.jsonl", "ts-errors.jsonl", "go.jsonl", "go-errors.jsonl"]) {
+      fs.writeFileSync(path.join(probeDir, name), "");
+    }
+  } catch {
+    // Swallow: logging reset must never block opening the editor.
+  }
+}
+
 function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode.Uri): void {
   // Resolve topology folder path. Command can be invoked from explorer context
   // menu (folderUri is the topology/ dir) or command palette (no uri).
@@ -29,6 +42,11 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
       if (fs.existsSync(candidate)) topologyPath = candidate;
     }
   }
+
+  // Reset probe logs early: same workspace root the runner (.probe/go*.jsonl) and
+  // appendWebviewLog (.probe/ts*.jsonl) write to, before any log can be appended.
+  const probeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (probeRoot) resetProbeLogs(probeRoot);
 
   const panel = vscode.window.createWebviewPanel(
     "topology.editor",
