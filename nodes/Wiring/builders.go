@@ -468,6 +468,10 @@ func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []i
 	emitRow(1, working) // bottom row = working
 }
 
+// interiorSlideDurationMul stretches the refill-slide duration past raw pulse
+// speed so the short row-pitch slide is readable (~0.9s instead of ~0.15s).
+const interiorSlideDurationMul = 6.0
+
 // emitRefillSlide runs the clock-paced animated refill for the Input node's
 // interior buffer: the OLD backup row (row 0, top) slides DOWN into the working
 // row (row 1, bottom) at human speed (the same wire-bead pulse speed), so a paused
@@ -489,7 +493,10 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	row0Y := interiorSlotOffset(0, 0).Y
 	row1Y := interiorSlotOffset(1, 0).Y
 	rowPitch := row0Y - row1Y // downward translation distance (local y, positive)
-	durationMs := rowPitch / PulseSpeedWuPerMs
+	// The slide distance (one row pitch) is tiny next to a wire, so at raw pulse
+	// speed it finishes in ~150ms (too fast to read). interiorSlideDurationMul
+	// stretches it to a watchable pace; the clock is still pause-aware.
+	durationMs := rowPitch / PulseSpeedWuPerMs * interiorSlideDurationMul
 	duration := time.Duration(durationMs * float64(time.Millisecond))
 	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
 
