@@ -30,6 +30,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -99,7 +101,7 @@ type SlotRegistry map[string]*PacedWire
 // fade ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock, treeRoot string) {
 	sc := bufio.NewScanner(r)
 	done := ctx.Done()
 	lineCh := make(chan string, 8)
@@ -132,7 +134,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			//   "resend" — re-emit full current node + edge geometry (remount recovery).
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, slotReg, md, tr)
+				applyEdit(msg, slotReg, md, tr, treeRoot)
 			case "play":
 				if clk != nil {
 					clk.Resume()
@@ -165,7 +167,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 //     md.dispatch; each wire sets its own flag.
 //
 // Unknown ops are ignored (forward-compat).
-func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
+func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 	switch {
 	case msg.Op == "create":
 		if msg.Target == "" || msg.TargetHandle == "" {
@@ -208,6 +210,15 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 				ch <- moveMsg{NodeID: e.NodeId, X: e.X, Y: e.Y, Z: e.Z}
 			}
 		}
+		if treeRoot != "" {
+			seen := map[string]bool{}
+			for _, e := range msg.Entries {
+				if !seen[e.NodeId] {
+					seen[e.NodeId] = true
+					_ = writeViewNode(treeRoot, e.NodeId, specPosition{X: e.X, Y: e.Y, Z: e.Z})
+				}
+			}
+		}
 	case msg.Op == "port-anchor":
 		// Mail-sort an anchor update to the owning node + each incident edge inbox.
 		// Each owning goroutine mutates its OWN held port direction and re-emits/recomputes
@@ -229,6 +240,21 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 				}
 			}
 		}
+		if treeRoot != "" {
+			side := "inputs"
+			if !msg.IsInput {
+				side = "outputs"
+			}
+			portPath := filepath.Join(treeRoot, "nodes", msg.Node, side, msg.Port+".json")
+			var p specPort
+			if raw, err := os.ReadFile(portPath); err == nil {
+				_ = json.Unmarshal(raw, &p)
+			}
+			p.Name = msg.Port
+			anchor := specVec3{X: msg.Anchor.X, Y: msg.Anchor.Y, Z: msg.Anchor.Z}
+			p.Anchor = &anchor
+			_ = writePort(treeRoot, msg.Node, msg.Port, msg.IsInput, p)
+		}
 	case msg.Op == "fade":
 		// Mail-sort: push each (edgeId, faded) entry to its edge's inbox. Each
 		// edgeMover sets its OWN wire's faded flag — no central fan-out. Unknown
@@ -240,6 +266,9 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			if ch, ok := md.dispatch[edgeID]; ok {
 				ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
 			}
+		}
+		if treeRoot != "" {
+			_ = mergeFades(treeRoot, msg.Edges)
 		}
 	}
 }
