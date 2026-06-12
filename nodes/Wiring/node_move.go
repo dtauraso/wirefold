@@ -36,8 +36,9 @@ import (
 
 // moveMsgKind discriminates moveMsg payloads.
 const (
-	moveMsgKindMove = "move" // default (zero-value "" is also treated as move)
-	moveMsgKindFade = "fade"
+	moveMsgKindMove   = "move" // default (zero-value "" is also treated as move)
+	moveMsgKindFade   = "fade"
+	moveMsgKindAnchor = "anchor" // per-port anchor update (drag along the ring)
 )
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
@@ -51,7 +52,30 @@ type moveMsg struct {
 	NodeID  string
 	X, Y, Z float64
 	Faded   bool
+	// Anchor payload (Kind == "anchor"): identify the port whose anchor changed.
+	// Port/IsInput name the port on NodeID; Anchor is the new direction offset.
+	Port    string
+	IsInput bool
+	Anchor  vec3
 	ack     chan struct{}
+}
+
+// setPortAnchor sets the Anchor on the named port within the given geom, returning
+// true if the port was found and mutated. The geom is mutated in place (its slice
+// elements are addressable). Used by both movers to apply an anchor update.
+func setPortAnchor(g *nodeGeom, port string, isInput bool, anchor vec3) bool {
+	list := g.Outputs
+	if isInput {
+		list = g.Inputs
+	}
+	for i := range list {
+		if list[i].Name == port {
+			a := anchor
+			list[i].Anchor = &a
+			return true
+		}
+	}
+	return false
 }
 
 // nodeMover owns one node's geometry. It reads its inbox in its own goroutine and,
@@ -70,6 +94,17 @@ func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
 // handle applies one move to this node: update held position, re-emit node-geometry.
 func (m *nodeMover) handle(msg moveMsg) {
 	if msg.NodeID != m.id {
+		return
+	}
+	if msg.Kind == moveMsgKindAnchor {
+		// Per-port anchor update: mutate this node's held port direction and re-emit
+		// node-geometry so the renderer redraws the port on its new ring position.
+		if !setPortAnchor(&m.geom, msg.Port, msg.IsInput, msg.Anchor) {
+			return
+		}
+		if m.tr != nil {
+			emitNodeGeometry(m.tr, m.id, m.geom)
+		}
 		return
 	}
 	m.geom.Pos = vec3{X: msg.X, Y: msg.Y, Z: msg.Z}
@@ -137,6 +172,25 @@ func (m *edgeMover) handle(msg moveMsg) {
 		}
 		return
 	}
+	if msg.Kind == moveMsgKindAnchor {
+		// A port-anchor change recomputes this edge's segment/arc only if the changed
+		// port is one of THIS edge's endpoints (matching node id, port name, direction).
+		// Source endpoint is an OUTPUT (isInput==false); target endpoint is an INPUT.
+		switch {
+		case msg.NodeID == m.srcID && !msg.IsInput && msg.Port == m.srcH:
+			if !setPortAnchor(&m.srcGeom, msg.Port, false, msg.Anchor) {
+				return
+			}
+		case msg.NodeID == m.dstID && msg.IsInput && msg.Port == m.dstH:
+			if !setPortAnchor(&m.dstGeom, msg.Port, true, msg.Anchor) {
+				return
+			}
+		default:
+			return
+		}
+		m.recomputeGeometry()
+		return
+	}
 	switch msg.NodeID {
 	case m.srcID:
 		m.srcGeom.Pos = vec3{X: msg.X, Y: msg.Y, Z: msg.Z}
@@ -146,6 +200,14 @@ func (m *edgeMover) handle(msg moveMsg) {
 		return
 	}
 
+	m.recomputeGeometry()
+}
+
+// recomputeGeometry re-derives this edge's segment/arc/latency from its held endpoint
+// geoms+handles and propagates them: write onto the source Out, revise any in-flight
+// bead (fraction-preserving), update the dest port window aggregate, and emit the new
+// segment so the renderer redraws the wire. Shared by node-move and port-anchor handling.
+func (m *edgeMover) recomputeGeometry() {
 	seg := segmentBetweenPorts(m.srcGeom, m.srcH, m.dstGeom, m.dstH)
 	arc := arcLengthBetweenPorts(m.srcGeom, m.srcH, m.dstGeom, m.dstH)
 	lat := arc / PulseSpeedWuPerMs

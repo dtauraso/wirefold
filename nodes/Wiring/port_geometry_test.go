@@ -198,3 +198,56 @@ func TestChordLength(t *testing.T) {
 		t.Fatalf("chordLength co-located = %v, want floor %v", g, CurveParamMinArcLength)
 	}
 }
+
+// TestPortAnchorOverridesSideSlot verifies that a non-nil Anchor makes portDir
+// return normalize(anchor) (bypassing side+slot) and portWorldPos places the port
+// at center + normalize(anchor)*nodeRadius. Without an anchor the side+slot path is
+// unchanged. Uses a kind from the registry so dims/radius are well-defined.
+func TestPortAnchorOverridesSideSlot(t *testing.T) {
+	// Pick any registered kind for stable dims; geometry math is kind-agnostic.
+	var kind string
+	for k := range kindDims {
+		kind = k
+		break
+	}
+	if kind == "" {
+		t.Skip("no kinds in kindDims")
+	}
+
+	anchor := vec3{X: 0, Y: 1, Z: 0} // straight up — top of the ring
+	g := nodeGeom{
+		Kind:   kind,
+		Pos:    vec3{X: 10, Y: 20, Z: 0},
+		Inputs: []portGeom{{Name: "In", Anchor: &anchor}},
+		Outputs: []portGeom{
+			{Name: "Out"}, // no anchor → side+slot path
+		},
+	}
+
+	// Anchored input: direction == normalize(anchor).
+	dir, ok := portDir(g, "In", true)
+	if !ok {
+		t.Fatal("portDir(In) not found")
+	}
+	want := anchor.normalize()
+	if math.Abs(dir.X-want.X) > 1e-9 || math.Abs(dir.Y-want.Y) > 1e-9 || math.Abs(dir.Z-want.Z) > 1e-9 {
+		t.Fatalf("anchored portDir = %v, want normalize(anchor) %v", dir, want)
+	}
+
+	// Anchored input world pos == center + dir*nodeRadius.
+	center := nodeWorldPos(g)
+	wantPos := center.add(want.scale(nodeRadius(kind)))
+	gotPos := portWorldPos(g, "In", true)
+	if math.Abs(gotPos.X-wantPos.X) > 1e-9 || math.Abs(gotPos.Y-wantPos.Y) > 1e-9 || math.Abs(gotPos.Z-wantPos.Z) > 1e-9 {
+		t.Fatalf("anchored portWorldPos = %v, want %v", gotPos, wantPos)
+	}
+
+	// Un-anchored output: matches the reference side+slot reimplementation.
+	refDir, _ := portDir(g, "Out", false)
+	refPos := refPortWorldPos(kind, g.Pos.X, g.Pos.Y, g.Pos.Z, g.Outputs, "Out", false)
+	gotOut := portWorldPos(g, "Out", false)
+	if math.Abs(gotOut.X-refPos.X) > 1e-9 || math.Abs(gotOut.Y-refPos.Y) > 1e-9 || math.Abs(gotOut.Z-refPos.Z) > 1e-9 {
+		t.Fatalf("un-anchored Out portWorldPos = %v, want side+slot ref %v", gotOut, refPos)
+	}
+	_ = refDir
+}

@@ -165,6 +165,24 @@ export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
 // position any more (enforced by tools/check-ts-computes-no-geometry.sh).
 // ---------------------------------------------------------------------------
 
+/**
+ * Port-anchor ring projection (interaction input, NOT wire/bead geometry).
+ * Given a node center and a world-space pointer hit on the node's ring plane,
+ * return the node-center-relative anchor direction CONSTRAINED to the ring (z=0):
+ * the in-plane (x,y) vector from center to hit, z zeroed. Magnitude is left as-is
+ * (Go normalizes it); returns null if the hit lands exactly on the center (zero
+ * in-plane direction) so the caller can ignore that frame.
+ */
+export function pointerRingAnchor(
+  center: THREE.Vector3,
+  hit: THREE.Vector3,
+): { x: number; y: number; z: number } | null {
+  const dx = hit.x - center.x;
+  const dy = hit.y - center.y;
+  if (dx === 0 && dy === 0) return null;
+  return { x: dx, y: dy, z: 0 };
+}
+
 // ---------------------------------------------------------------------------
 // Camera geometry
 // ---------------------------------------------------------------------------

@@ -67,6 +67,22 @@ type stdinMsg struct {
 	TargetHandle string               `json:"targetHandle"`
 	Edges        map[string]bool      `json:"edges"`
 	Entries      map[string]moveEntry `json:"entries"`
+	// Port-anchor op (op=="port-anchor"): identify the dragged port and its new anchor.
+	// Node/Port name the port; IsInput selects the input vs output list; Anchor is the
+	// new direction offset. Keys lists the routing keys (the node id AND each incident
+	// edge id) the reader mail-sorts the anchor update to — same fan-out shape as a move.
+	Node    string     `json:"node"`
+	Port    string     `json:"port"`
+	IsInput bool       `json:"isInput"`
+	Anchor  *anchorVec `json:"anchor"`
+	Keys    []string   `json:"keys"`
+}
+
+// anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
+type anchorVec struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
@@ -190,6 +206,27 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		for key, e := range msg.Entries {
 			if ch, ok := md.dispatch[key]; ok {
 				ch <- moveMsg{NodeID: e.NodeId, X: e.X, Y: e.Y, Z: e.Z}
+			}
+		}
+	case msg.Op == "port-anchor":
+		// Mail-sort an anchor update to the owning node + each incident edge inbox.
+		// Each owning goroutine mutates its OWN held port direction and re-emits/recomputes
+		// (node re-streams node-geometry; edges recompute segment/arc). No central recompute.
+		// Unknown keys are ignored (forward-compat).
+		if md == nil || msg.Node == "" || msg.Port == "" || msg.Anchor == nil || len(msg.Keys) == 0 {
+			return
+		}
+		tr.Breadcrumb("edit-port-anchor-recv", msg.Node, msg.Port, "")
+		a := vec3{X: msg.Anchor.X, Y: msg.Anchor.Y, Z: msg.Anchor.Z}
+		for _, key := range msg.Keys {
+			if ch, ok := md.dispatch[key]; ok {
+				ch <- moveMsg{
+					Kind:    moveMsgKindAnchor,
+					NodeID:  msg.Node,
+					Port:    msg.Port,
+					IsInput: msg.IsInput,
+					Anchor:  a,
+				}
 			}
 		}
 	case msg.Op == "fade":
