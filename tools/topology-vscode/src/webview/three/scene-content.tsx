@@ -9,6 +9,7 @@ import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
 import { useThreeStore } from "./store";
+import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
 import {
   nodeRadius,
   boundingBox,
@@ -165,9 +166,14 @@ function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
 export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeData>[]; hasRestoredCamera?: boolean }) {
   const { camera, size } = useThree();
   const loadEpoch = useThreeStore((s) => s.loadEpoch);
+  // Subscribe to the Go node-geometry store so the effect re-runs when Go's
+  // node-geometry trace stream populates centers after load (it lands ~1 frame
+  // AFTER store:load). The first fit must wait for this, or it frames the
+  // pre-emit fallback coords instead of the real Go-streamed centers.
+  const geoms = useNodeGeometryStore((s) => s.geoms);
   // Track the last epoch we actually fitted for. The effect may run several
-  // times as size/nodes settle on first load; we fit only the first time
-  // everything is ready for a given epoch, and never again until the next load.
+  // times as size/nodes/geometry settle on first load; we fit only the first
+  // time everything is ready for a given epoch, and never again until the next load.
   const lastFittedEpoch = useRef<number>(-1);
   useEffect(() => {
     // Already fitted for this load epoch (e.g. a node drag re-triggered us).
@@ -177,15 +183,25 @@ export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeD
     if (size.width === 0 || size.height === 0) return;
     // Skip auto-fit when the saved camera is being restored.
     if (hasRestoredCamera) return;
+    // Wait until Go geometry has landed for EVERY current node, so we frame the
+    // ACTUAL rendered centers (g.center) and not the pre-emit fallback. Re-runs
+    // when `geoms` gains the last node's center. (geoms read so the dep is live.)
+    void geoms;
+    if (!nodes.every((n) => getNodeGeometry(n.id) !== undefined)) return;
     lastFittedEpoch.current = loadEpoch;
-    postLog("lifecycle", { phase: "camera-fit", nodeCount: nodes.length });
     const persp = camera as THREE.PerspectiveCamera;
     const PAD = 80;
+    // boundingBox reads nodeWorldPos (Go g.center, already Three y-up world
+    // coords) — the SAME source GraphNode renders the node group from. So the
+    // center is used DIRECTLY with no y-negation: negating here (the old bug)
+    // framed the mirror-image y and pushed the nodes off-screen until manual Fit.
+    // This now matches HomeButton's math (camera-ui.tsx), which works.
     const { minX, maxX, minY, maxY } = boundingBox(nodes);
     const gw = (maxX - minX) + 2 * PAD;
     const gh = (maxY - minY) + 2 * PAD;
     const cx = (minX + maxX) / 2;
-    const cy = -(minY + maxY) / 2; // RF y-down → negate
+    const cy = (minY + maxY) / 2; // nodeWorldPos is already y-up world — no negate
+    postLog("lifecycle", { phase: "camera-fit", nodeCount: nodes.length, cx, cy, minX, maxX, minY, maxY });
     const aspect = size.width / size.height;
     // Choose z so the graph fills the view.
     const fovRad = (persp.fov * Math.PI) / 180;
@@ -198,10 +214,10 @@ export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeD
     persp.near = 0.1;
     persp.far = 20000;
     persp.updateProjectionMatrix();
-  // Re-run when size/nodes settle; the lastFittedEpoch ref makes it fit once
-  // per load epoch and never on drag.
+  // Re-run when size/nodes/geometry settle; the lastFittedEpoch ref makes it fit
+  // once per load epoch and never on drag (same epoch).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadEpoch, size.width, size.height, nodes.length]);
+  }, [loadEpoch, size.width, size.height, nodes.length, geoms]);
   return null;
 }
 
