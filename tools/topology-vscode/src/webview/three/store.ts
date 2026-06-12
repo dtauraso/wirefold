@@ -10,7 +10,7 @@ import { parseViewerState, mergeSceneIntoViewerState } from "../state/viewer/typ
 import { markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
 import { postLog } from "../log/post";
 import { vscode } from "../vscode-api";
-import { clearPulse } from "./pulse-state";
+import { clearPulse, clearAllPulses } from "./pulse-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
@@ -67,6 +67,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
 
   load(text: string, sceneText?: string) {
     try {
+      // Run-start boundary: wipe any transient bead left in the store by the prior
+      // run's process. Go is killed + re-spawned fresh (zero in-flight beads) every
+      // run/restart, but a bead past "send" yet before "arrive" when stop hit never
+      // got its clearing "arrive" event — it survives here. This is the ONLY reset:
+      // pause does not call load(), so beads correctly persist across pause.
+      clearAllPulses();
       const raw = JSON.parse(text);
       const spec = parseSpec(raw);
       // Diagram view: positions + fades from topology.json#view (Go reads view.nodes).

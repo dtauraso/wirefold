@@ -73,6 +73,17 @@ export function clearPulse(edgeId: string) {
   postLog("clearPulse", { edgeId, removed: true, keysBefore, keysAfter: [...next.keys()] });
 }
 
+/** Wipe every in-flight bead. Called at run-start (store.load) so a fresh run's
+ *  process (zero in-flight beads in Go) does not inherit a zombie bead left in
+ *  the store from a prior run that was stopped after "send" but before "arrive".
+ *  Mirrors clearPulse: swaps _current for a fresh Map — PulseBead polls getPulseMap
+ *  in useFrame, so the next frame draws no beads (no version counter/listeners here). */
+export function clearAllPulses() {
+  const count = _current.size;
+  _current = new Map();
+  postLog("lifecycle", { phase: "pulse-reset", cleared: count });
+}
+
 export function getPulseMap(): PulseMap {
   return _current;
 }
