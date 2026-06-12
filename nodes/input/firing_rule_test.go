@@ -81,10 +81,12 @@ func sendFeedback(t *testing.T, pw *Wiring.PacedWire, v int) {
 	}
 }
 
-// Feedback ring: working/backup = [1,0]; end-pop sends 0 then 1, then refills
-// and repeats. s==1 pops & sends, s==0 holds (sends nothing). The first emit is
-// the unconditional seed that bootstraps the ring (no t=0 deadlock).
-func TestFeedbackPopAndHold(t *testing.T) {
+// Feedback ring: action/backup = [1,0]. SENDING peeks the end (no pop), so the
+// first send is the normal loop body (peek+send) — it self-starts the ring with
+// no seed. The buffer depletes ONLY on s==1: a pop advances the peeked end, so
+// the send sequence across s==1 signals is 0, 1, 0, 1, ... (refill resets to 0).
+// s==0 holds: same last bead sent again next loop, no pop.
+func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 	toRG := make(chan int, 16)
@@ -108,33 +110,88 @@ func TestFeedbackPopAndHold(t *testing.T) {
 	go func() { defer wg.Done(); node.Update(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
 
-	// Seed pop fires immediately (unconditional) → emits 0 (end of [1,0]).
+	// First loop body: peek the end of [1,0] = 0 and send (no pop, no seed).
 	if got := recv(t, toRG); got != 0 {
-		t.Fatalf("seed emit: expected 0, got %d", got)
+		t.Fatalf("first send: expected peek 0, got %d", got)
 	}
 
-	// Each 1 step pops the next value. Expected after seed (0): 1, 0, 1, 0.
+	// Each s==1 pops, advancing the peeked end. Send sequence after the first
+	// (0): pop→[1] so next send peeks 1; pop→[] refill→[1,0] so next send peeks
+	// 0; then 1; then 0.
 	want := []int{1, 0, 1, 0}
 	for i, w := range want {
 		sendFeedback(t, fbPW, 1)
 		if got := recv(t, toRG); got != w {
-			t.Errorf("after 1-step %d: expected emit %d, got %d", i, w, got)
+			t.Errorf("after 1-step %d: expected send %d, got %d", i, w, got)
 		}
 	}
 
-	// A hold step (0) must NOT emit.
+	// A hold step (s==0) does NOT pop — the SAME last bead is sent next loop.
+	// Buffer just refilled-then-popped to [1] (peek 1) above; current peek is
+	// the value after those four pops. Sending peeks, so a send still happens,
+	// but the value must equal the prior peek (no advance).
 	sendFeedback(t, fbPW, 0)
-	select {
-	case v := <-toRG:
-		t.Fatalf("hold step (s==0) emitted %d, expected nothing", v)
-	case <-time.After(50 * time.Millisecond):
+	if got := recv(t, toRG); got != want[len(want)-1] {
+		t.Errorf("hold step: expected same bead %d resent, got %d", want[len(want)-1], got)
+	}
+}
+
+// With NO feedback delivered after the first send, the node blocks on the
+// feedback read: it has sent exactly once (peek, no pop) and the interior stays
+// FULL (4 beads) — sending did not consume the buffer.
+func TestFeedbackSendDoesNotDeplete(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
+	toRG := make(chan int, 16)
+
+	var mu sync.Mutex
+	var snaps []beadSnapshot
+
+	fbPW := Wiring.NewPacedWire(8, Wiring.PulseSpeedWuPerMs)
+	fbPW.Target = "in"
+	fbPW.TargetHandle = "FeedbackIn"
+	fbPW.Trace = tr
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := &Node{
+		Fire:       func() { tr.Fire("in") },
+		Init:       []int{1, 0},
+		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),
+		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
+		EmitNodeBeads: func(working, backup []int) {
+			mu.Lock()
+			snaps = append(snaps, beadSnapshot{
+				working: append([]int(nil), working...),
+				backup:  append([]int(nil), backup...),
+			})
+			mu.Unlock()
+		},
 	}
 
-	// A following 1 step resumes popping. After seed(0) + pops 1,0,1,0 (working
-	// just refilled to [1,0]), the next end-pop yields 1.
-	sendFeedback(t, fbPW, 1)
-	if got := recv(t, toRG); got != 1 {
-		t.Errorf("resume after hold: expected 1, got %d", got)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+
+	// First send happens (peek 0). No feedback is delivered, so the node blocks
+	// on the feedback read — no pop occurs.
+	if got := recv(t, toRG); got != 0 {
+		t.Fatalf("first send: expected peek 0, got %d", got)
+	}
+
+	// Give the blocked read time to (not) do anything.
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Only the initial full(4) emit happened — no pop emit.
+	if len(snaps) != 1 {
+		t.Fatalf("got %d interior snapshots, want 1 (no pop without feedback): %+v", len(snaps), snaps)
+	}
+	got := snaps[0]
+	if len(got.working)+len(got.backup) != 4 {
+		t.Errorf("interior = %+v, want FULL 4 beads (send peeked, did not pop)", got)
 	}
 }
 

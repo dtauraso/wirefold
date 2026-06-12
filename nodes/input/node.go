@@ -63,36 +63,31 @@ func (n *Node) Update(ctx context.Context) {
 	emitBeads() // initial full(4) state
 
 	if n.FeedbackIn.Wired() {
-		// Feedback ring: SEED then READ. The first pop+send is unconditional so
-		// the ring is bootstrapped (no t=0 deadlock) — without it, nothing emits
-		// and the downstream ChainInhibitor never produces a feedback step.
-		// Thereafter FeedbackIn gates pops: s == 1 -> pop the end and send;
-		// s == 0 -> hold (send nothing this step).
-		seeded := false
+		// Feedback ring: PEEK+SEND then READ. Sending does NOT deplete the
+		// buffer — each iteration peeks the END of action (working) and launches
+		// that bead; the buffer stays full (4) at rest. The FIRST send is just the
+		// normal loop body (peek+send) running before any feedback is read, so the
+		// ring self-starts with no special seed and no t=0 deadlock.
+		//
+		// After sending, READ node 2's feedback s on FeedbackIn:
+		//   s == 1 -> POP the end (the "change the bead" action); refill on empty.
+		//   s == 0 -> hold: do nothing, keep sending the same last bead next loop.
 		for {
 			if ctx.Err() != nil {
 				return
 			}
-			s := 1
-			if seeded {
-				// READ: block until ChainInhibitor sends the step on FeedbackIn.
-				step, ok := n.FeedbackIn.TryRecv()
-				if !ok {
-					return
-				}
-				n.FeedbackIn.Done()
-				s = step
-			}
-			seeded = true
 
-			if s != 1 {
-				// Hold: send nothing this step.
-				continue
+			// Guard: never peek an empty slice. Refill keeps action non-empty,
+			// but be safe.
+			if len(working) == 0 {
+				working = backup
+				backup = append([]int(nil), init...)
+				emitBeads()
 			}
 
+			// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
+			v := working[len(working)-1]
 			n.Fire()
-			v := popEnd(&working, &backup, init)
-			emitBeads() // array changed (pop, maybe refill) → restream interior
 			if n.ToReadGate.Gated() {
 				if n.ToReadGate.TrySend(v) {
 					if !n.ToReadGate.WaitConsumed() {
@@ -102,6 +97,25 @@ func (n *Node) Update(ctx context.Context) {
 			} else {
 				n.ToReadGate.TryEmit(v)
 			}
+
+			// READ: block until ChainInhibitor sends the step on FeedbackIn.
+			step, ok := n.FeedbackIn.TryRecv()
+			if !ok {
+				return
+			}
+			n.FeedbackIn.Done()
+			if step != 1 {
+				// Hold: buffer unchanged, send the same last bead next loop.
+				continue
+			}
+
+			// s == 1: POP the end (change the bead); refill when action empties.
+			working = working[:len(working)-1]
+			if len(working) == 0 {
+				working = backup
+				backup = append([]int(nil), init...)
+			}
+			emitBeads() // array changed (pop, maybe refill) → restream interior
 		}
 	}
 
