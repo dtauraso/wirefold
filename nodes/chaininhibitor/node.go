@@ -10,6 +10,7 @@ import (
 type Node struct {
 	Fire                       func()
 	EmitGeometry               func()
+	EmitHeldBead               func(held int)
 	Held                       int `wire:"data.state"`
 	FromPrevChainInhibitorNode *Wiring.In
 	ToNext                     Wiring.OutMulti
@@ -24,6 +25,11 @@ func (in *Node) Update(ctx context.Context) {
 	// -1 is the sentinel meaning "no value seen yet"; real values are non-negative
 	// indices, so -1 never collides with a legitimate Init index.
 	held := -1
+	// Emit the initial interior bead state: held == -1 → present=false (empty
+	// interior). The bead is re-emitted only when held actually changes below.
+	if in.EmitHeldBead != nil {
+		in.EmitHeldBead(held)
+	}
 
 	for {
 		select {
@@ -51,6 +57,16 @@ func (in *Node) Update(ctx context.Context) {
 			in.Fire()
 			in.FromPrevChainInhibitorNode.Done()
 
+			// Interior held-value bead: emit only when the held value changes
+			// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the
+			// received value; the wired-feedback branch below also reads it for the
+			// step computation, so update it once here at recv time.
+			heldChanged := value != held
+			held = value
+			if heldChanged && in.EmitHeldBead != nil {
+				in.EmitHeldBead(value)
+			}
+
 			if in.FeedbackOut.Wired() {
 				// Send feedback step BEFORE forwarding on ToNext so the Input
 				// node unblocks (ordered: feedback send precedes next recv).
@@ -58,10 +74,9 @@ func (in *Node) Update(ctx context.Context) {
 				// repeats (hold index). held == -1 on the first recv so the
 				// first value always counts as a change.
 				var step int
-				if value != held {
+				if heldChanged {
 					step = 1
 				}
-				held = value
 				if in.FeedbackOut.Gated() {
 					if in.FeedbackOut.TrySend(step) {
 						in.FeedbackOut.WaitConsumed()

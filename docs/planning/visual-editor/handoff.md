@@ -8,13 +8,14 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-11 — node-1 interior-activity COMPLETE, MERGING to main)
+## State at handoff (2026-06-11 — node-2 interior held-bead COMPLETE, MERGING to main)
 
-The node-1 interior-activity feature on `task/node1-interior-activity-animation` is
-**COMPLETE and being merged to main now.** After the merge there is **NO task in
-flight** — the next session starts fresh on `main`, friction-driven. The branch-local
-spec page (`docs/node1-interior-activity/index.html`) is stripped at merge by
-`tools/strip-branch-local-docs.sh task/node1-interior-activity-animation`.
+The node-2 interior held-bead feature on `task/node2-interior-activity-animation` is
+**COMPLETE and being merged to main now.** It builds on the already-merged node-1
+interior work (below). With node 2 done, **BOTH node 1 (2×2 depleting/refilling buffer +
+animated slide) and node 2 (single centered held bead) interiors are Go-authoritative
+via the shared `node-bead` stream.** After this merge there is **NO task in flight** —
+the next session starts fresh on `main`, friction-driven.
 
 ### Settled architecture (already on main — keep short)
 
@@ -42,9 +43,27 @@ beads) and their geometry; TS renders Go's stream and sends CRUD.
    (`{type:"resend"}` on webview ready when Go already running → edges survive
    hot-reload/remount).
 
-### THE NODE-1 FEATURE (this branch, merging) — interior depleting/refilling buffer + activity animation
+### THE NODE-2 FEATURE (this branch, merging) — interior held-value bead
 
-Node `1` (Input) interior is now a depleting/refilling **double-buffer with an animated
+Node `2` (ChainInhibitor) interior shows its **HELD VALUE as a single centered bead**,
+reusing the node-1 infra (`node-bead` trace kind, the per-node `InteriorSlotBead`
+renderer, the value→style convention). What shipped:
+
+- **One bead at the node center** (offset `0,0,0`), value-colored (0 = white/black,
+  1 = black/black). `present = (held != -1)`, so the interior is **EMPTY when `held=-1`**
+  — i.e. before node 2 receives its first value from node 1. Held path: `-1 → 0 → 1 → 0 …`.
+- **Go emits via an injected `EmitHeldBead func(held int)` closure** (mirroring how Input
+  gets `EmitNodeBeads`). Called once at startup (`held=-1`, `present=false`) and on each
+  held change ONLY — only on an actual change, no per-tick spam. The inhibitor's
+  firing/forwarding logic is unchanged.
+- **No TS change needed:** the existing node-bead renderer (`InteriorSlotBead` per
+  `GraphNode`) handles a single centered bead and hides the absent slots.
+- `topology.json`: node `2` `data.state.held` changed `0 → -1` so node 2 starts with no
+  value (empty interior).
+
+### THE NODE-1 FEATURE (already merged to main) — interior depleting/refilling buffer + activity animation
+
+Node `1` (Input) interior is a depleting/refilling **double-buffer with an animated
 interior, fully Go-authoritative.** What shipped:
 
 - **Trace kinds renamed/added:** the on-wire bead trace kind `position` → `edge-bead`;

@@ -162,6 +162,7 @@ var (
 	tOutMulti = reflect.TypeFor[OutMulti]()
 	tFireFunc      = reflect.TypeFor[func()]()
 	tEmitBeadsFunc = reflect.TypeFor[func(working, backup []int)]()
+	tEmitHeldFunc  = reflect.TypeFor[func(held int)]()
 	tRefillSlideFunc = reflect.TypeFor[func(beads []int)]()
 )
 
@@ -260,6 +261,17 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		g := geom
 		f.Set(reflect.ValueOf(func(working, backup []int) {
 			emitNodeBeads(tr, nodeName, g, working, backup)
+		}))
+	}
+
+	// Inject EmitHeldBead closure if the struct has an `EmitHeldBead func(held int)`
+	// field (ChainInhibitor's interior held-value bead). The closure captures this
+	// node's id and emits a SINGLE centered node-bead (slot 0,0 at offset 0,0,0)
+	// colored by the held value; held == -1 → present=false (empty interior).
+	if f := v.FieldByName("EmitHeldBead"); f.IsValid() && f.CanSet() && f.Type() == tEmitHeldFunc {
+		nodeName := name
+		f.Set(reflect.ValueOf(func(held int) {
+			emitHeldBead(tr, nodeName, held)
 		}))
 	}
 
@@ -466,6 +478,16 @@ func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []i
 	}
 	emitRow(0, backup)  // top row = backup
 	emitRow(1, working) // bottom row = working
+}
+
+// emitHeldBead streams the ChainInhibitor node's interior as a SINGLE centered
+// bead (row 0, col 0) at the node center (offset 0,0,0). The bead is PRESENT when
+// held != -1 and colored by the held value (0 = white, 1 = black per the existing
+// node-bead convention); held == -1 (no value seen yet) → present=false so the
+// interior renders empty. Called from the node's injected EmitHeldBead closure
+// only when the held value changes.
+func emitHeldBead(tr *T.Trace, nodeName string, held int) {
+	tr.NodeBead(nodeName, 0, 0, held != -1, held, 0, 0, 0)
 }
 
 // interiorSlideDurationMul stretches the refill-slide duration past raw pulse
