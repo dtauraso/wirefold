@@ -7,7 +7,7 @@ import { parseSpec } from "../../schema";
 import { specToFlow } from "../state/adapter/spec-to-flow";
 import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
 import { parseViewerState, mergeSceneIntoViewerState } from "../state/viewer/types";
-import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
+import { markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
 import { postLog } from "../log/post";
 import { vscode } from "../vscode-api";
 import { clearPulse } from "./pulse-state";
@@ -96,7 +96,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         directlyFadedEdges: restoredFadedEdges,
         fadeEdgeOrder,
       });
-      setSpecMeta(spec);
       // Phase 3: TS computes NO edge geometry. Go holds node positions + per-edge
       // control points and streams them (geometry trace) on load and on every move;
       // SingleEdgeTube draws the tube from the edge-geometry store. The store no
@@ -104,6 +103,14 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
       console.error("[ThreeStore] load failed", err);
+      // Permanent diagnostic: surface the throw to .probe/ts-errors.jsonl so a
+      // silent parse failure (blank diagram, no store:load) is observable.
+      // "load-error" must stay in ERROR_LABELS (extension/webview-log.ts).
+      const e = err as { message?: string; stack?: string };
+      postLog("load-error", {
+        message: e?.message ?? String(err),
+        stack: e?.stack ?? null,
+      });
     }
   },
 
@@ -141,7 +148,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       target: result.newEdge.target,
       targetHandle: result.newEdge.targetHandle ?? "",
     });
-    scheduleSave();
     return result.id;
   },
 
@@ -168,7 +174,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     clearPulse(id);
     // Drop Go's streamed segment for this edge so no stale tube can draw.
     useEdgeGeometryStore.getState().removeEdgeSegment(id);
-    scheduleSave();
   },
 
   moveNode(id, x, y) {
@@ -187,7 +192,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   },
 
   saveSpec() {
-    scheduleSave();
+    /* no-op: Go persists topology from edit ops */
   },
 
   toggleFade(target) {

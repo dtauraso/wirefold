@@ -26,7 +26,7 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	defer cancel()
 
 	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, slotReg, nil, nil, nil)
+	go RunStdinReader(ctx, r, slotReg, nil, nil, nil, "")
 
 	// Place a bead with a 50ms in-flight time; delivery is timed by the clock.
 	const inFlightMs = 50
@@ -69,7 +69,7 @@ func TestRunStdinReaderUnknownTargetIgnored(t *testing.T) {
 
 	// Unknown slot on a delete edit → no panic, reader exits cleanly on ctx cancel.
 	r := strings.NewReader(`{"type":"edit","op":"delete","target":"unknown","targetHandle":"in"}` + "\n")
-	RunStdinReader(ctx, r, slotReg, nil, nil, nil) // should return without hanging
+	RunStdinReader(ctx, r, slotReg, nil, nil, nil, "") // should return without hanging
 }
 
 // TestRunStdinReaderEditDeleteCancelsInFlight drives a delete through the NEW
@@ -90,7 +90,7 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, slotReg, nil, tr, nil)
+	go RunStdinReader(ctx, r, slotReg, nil, tr, nil, "")
 
 	// Place a bead with full position-stream identity, advance partway (in flight).
 	const inFlightMs = 50.0

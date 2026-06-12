@@ -1,110 +1,55 @@
 import { viewerState } from "./state/viewer-state";
-import { serializeViewerState, serializeSceneState } from "./state/viewer/types";
-import type { Spec } from "../schema";
+import { serializeSceneState } from "./state/viewer/types";
 import { vscode } from "./vscode-api";
-import { useThreeStore } from "./three/store";
-import { flowToSpec } from "./state/adapter/flow-to-spec";
-import { postLog } from "./log/post";
 
 const status = document.getElementById("status")!;
 
-// Top-level spec metadata that flowToSpec passes through verbatim.
-// Updated on each load so saves preserve fields that aren't carried in RF node/edge data.
-let _specMeta: Spec = { nodes: [], edges: [] };
-export function setSpecMeta(s: Spec) { _specMeta = s; };
-
 let lastViewSyncedText: string | undefined;
 
-// Debounced timing lives in <SaveLifecycle /> (useDebouncedCallback).
-// schedule()/flush() bridge module-level callers to the component's
-// debouncer; null until the component mounts.
-type Saver = { schedule: () => void; flush: () => void };
-let saveImpl: Saver | null = null;
-let viewSaveImpl: Saver | null = null;
-
-export function registerSavers(save: Saver, viewSave: Saver) {
-  saveImpl = save;
-  viewSaveImpl = viewSave;
-}
+// Module-level debounce timer for scene persistence.
+let _sceneTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function setStatus(dirty: boolean) {
   status.textContent = dirty ? "saving…" : "saved";
   status.className = dirty ? "dirty" : "clean";
 }
 
-// Surface a save failure in the status bar (reuses the .dirty red styling) and
-// log it. Called when performSave refuses to write a structurally-invalid spec.
 export function setStatusError(msg: string) {
   status.textContent = `save blocked: ${msg}`;
   status.className = "dirty";
 }
 
-// Pure send-now helpers — invoked by the debouncer in <SaveLifecycle />
-// after the trailing edge fires, or directly via flushSave/flushViewSave.
-export function performSave() {
-  const { nodes, edges } = useThreeStore.getState();
-  // Derive spec from RF state. If RF is not yet mounted (nodes/edges empty),
-  // there is nothing to save — skip silently.
-  if (nodes.length === 0 && edges.length === 0) return;
-  let text: string;
-  try {
-    const derived = flowToSpec(nodes, edges, _specMeta);
-    text = JSON.stringify(derived, null, 2) + "\n";
-  } catch (err) {
-    // A structurally-invalid spec (e.g. a node with empty kind) must NEVER be
-    // written: it would crash-loop Go's loader. Refuse the write, keep the good
-    // file on disk, and surface the error instead of posting the save message.
-    const msg = err instanceof Error ? err.message : String(err);
-    postLog("save-refused", { reason: msg });
-    setStatusError(msg);
-    return;
-  }
-  vscode.postMessage({ type: "save", text });
-  setStatus(false);
-}
-
-export function performViewSave() {
-  // Race guard: until load has been processed (markViewSynced called),
-  // viewerState lacks the persisted positions from topology.json#view. Saving
-  // in that window serializes empty state and clobbers the file on disk.
+function _sendScene() {
   if (lastViewSyncedText === undefined) return;
-  // Diagram fields (positions + the 3 fade arrays) → injected into
-  // topology.json#view by the host. serializeViewerState includes scene keys,
-  // but injectViewText strips them, so this stays diagram-only on disk.
-  const text = serializeViewerState(viewerState);
-  // Scene fields (camera, camera3d, labelsGlobalHidden) → topology.scene.json.
   const sceneText = serializeSceneState(viewerState);
-  if (text.trim() === "null") { return; }
-  // Guard key combines both payloads so a change to either retriggers a save.
-  const synced = text + "\u0000" + sceneText;
-  if (synced === lastViewSyncedText) return;
-  lastViewSyncedText = synced;
-  vscode.postMessage({ type: "view-save", text, sceneText });
-}
-
-// Build the combined guard key from a viewer state (positions/fades + scene).
-// Must match the key performViewSave compares against so an initial load does
-// not immediately retrigger an identical save.
-export function viewSyncedKey(s: import("./state/viewer/types").ViewerState): string {
-  return serializeViewerState(s) + "\u0000" + serializeSceneState(s);
-}
-
-export function scheduleSave() {
-  setStatus(true);
-  saveImpl?.schedule();
-}
-
-export function flushSave() {
-  saveImpl?.flush();
+  if (sceneText === lastViewSyncedText) return;
+  lastViewSyncedText = sceneText;
+  let scene: unknown;
+  try { scene = JSON.parse(sceneText); } catch { return; }
+  vscode.postMessage({ type: "edit", op: "scene", scene });
 }
 
 export function scheduleViewSave() {
   if (lastViewSyncedText === undefined) return;
-  viewSaveImpl?.schedule();
+  if (_sceneTimer !== null) clearTimeout(_sceneTimer);
+  _sceneTimer = setTimeout(() => {
+    _sceneTimer = null;
+    _sendScene();
+  }, 400);
 }
 
 export function flushViewSave() {
-  viewSaveImpl?.flush();
+  if (_sceneTimer !== null) {
+    clearTimeout(_sceneTimer);
+    _sceneTimer = null;
+  }
+  _sendScene();
+}
+
+// Build the guard key from a viewer state's scene fields.
+// Must match the key used in store.ts markViewSynced so initial load does not retrigger a save.
+export function viewSyncedKey(s: import("./state/viewer/types").ViewerState): string {
+  return serializeSceneState(s);
 }
 
 export function markViewSynced(text: string) {

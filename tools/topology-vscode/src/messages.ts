@@ -39,13 +39,12 @@ export type EditMsg =
       isInput: boolean;
       anchor: { x: number; y: number; z: number };
       keys: string[];
-    };
+    }
+  | { type: "edit"; op: "scene"; scene: unknown };
 
 export type WebviewToHostMsg =
   | { type: "ready" }
-  | { type: "save"; text: string }
-  | { type: "view-save"; text: string; sceneText: string }
-  | { type: "run"; text?: string }
+  | { type: "run" }
   | { type: "run-cancel" }
   | { type: "play" }
   | { type: "pause" }
@@ -91,7 +90,7 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "save", "view-save", "run", "run-cancel", "play", "pause", "resume", "resend", "stop", "webview-log", "edit",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "resend", "stop", "webview-log", "edit",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
@@ -151,6 +150,8 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       );
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }
+    case "scene":
+      return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
     default:
       return undefined;
   }
@@ -164,16 +165,8 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   }
   const m = raw as Record<string, unknown>;
   switch (t) {
-    case "save":
-      return typeof m.text === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "view-save":
-      return typeof m.text === "string" && typeof m.sceneText === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
     case "run":
-      return m.text === undefined || typeof m.text === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
+      return m as unknown as WebviewToHostMsg;
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "edit":

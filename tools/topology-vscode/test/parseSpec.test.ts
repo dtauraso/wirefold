@@ -115,6 +115,71 @@ describe("parseSpec view orphan-edge-key detection", () => {
   });
 });
 
+describe("parseSpec accepts the Go tree-loader emission shape", () => {
+  // Shape captured from `go run . -topology topology` (EmitSpecLine): ports
+  // omit `kind` (vestigial, not stored on disk), edges carry both `id` and
+  // `label`, and positions live only in view.nodes (no inline capital-P
+  // "Position"). Regression for the silent store.load() throw that produced a
+  // blank diagram.
+  const goEmission = {
+    kind: "spec",
+    nodes: [
+      {
+        id: "1", type: "Input",
+        data: { init: [1, 0], repeat: true },
+        inputs: [{ name: "FeedbackIn", side: "bottom", slot: 1 }],
+        outputs: [{ name: "ToReadGate", side: "right", slot: 1 }],
+      },
+      {
+        id: "2", type: "ChainInhibitor",
+        data: { state: { held: -1 }, sendRules: { ToNext1: "fireAndForget" } },
+        inputs: [{ name: "FromPrevChainInhibitorNode", side: "left", slot: 1 }],
+        outputs: [
+          { name: "FeedbackOut", side: "top", slot: 1 },
+          { name: "ToNext0", side: "bottom", slot: 1 },
+          { name: "ToNext1", side: "left", slot: 2 },
+        ],
+      },
+      {
+        id: "3", type: "ChainInhibitor",
+        data: { state: { held: 0 } },
+        inputs: [{ name: "FromPrevChainInhibitorNode", side: "left", slot: 1 }],
+        outputs: [{ name: "FeedbackOut", side: "top", slot: 1 }],
+      },
+    ],
+    edges: [
+      { id: "1To2", label: "1To2", kind: "chain", source: "1", sourceHandle: "ToReadGate", target: "2", targetHandle: "FromPrevChainInhibitorNode" },
+      { id: "2FeedbackTo1", label: "2FeedbackTo1", kind: "chain", source: "2", sourceHandle: "FeedbackOut", target: "1", targetHandle: "FeedbackIn" },
+      { id: "2To3", label: "2To3", kind: "chain", source: "2", sourceHandle: "ToNext0", target: "3", targetHandle: "FromPrevChainInhibitorNode" },
+    ],
+    view: {
+      nodes: {
+        "1": { x: 21.6, y: 316.1, z: 0 },
+        "2": { x: 170.3, y: 353.6, z: 0 },
+        "3": { x: 300.0, y: 400.0, z: 0 },
+      },
+    },
+  };
+
+  it("parses to 3 nodes / 3 edges with kind defaulted on ports", () => {
+    const s = parseSpec(goEmission);
+    expect(s.nodes).toHaveLength(3);
+    expect(s.edges).toHaveLength(3);
+    // port kind defaulted (omitted by Go), still a valid EdgeKind
+    expect(s.nodes[0].inputs?.[0].kind).toBe("signal");
+    // edge id preserved from emission
+    expect(s.edges.map((e) => e.id)).toEqual(["1To2", "2FeedbackTo1", "2To3"]);
+  });
+
+  it("tolerates an inline capital-P Position field if Go ever re-leaks it", () => {
+    const withLeak = {
+      ...goEmission,
+      nodes: goEmission.nodes.map((n) => ({ ...n, Position: { x: 1, y: 2, z: 0 } })),
+    };
+    expect(() => parseSpec(withLeak)).not.toThrow();
+  });
+});
+
 describe("parseSpec accepts", () => {
   it("a minimal valid spec", () => {
     const s = parseSpec({ nodes: [okNode], edges: [] });

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -58,7 +59,7 @@ type specNode struct {
 	Data     *NodeData  `json:"data,omitempty"`
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
-	Position specPosition // populated from view.nodes after JSON parse
+	Position specPosition `json:"-"` // populated from view.nodes after JSON parse; internal-only, never emitted
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
@@ -151,6 +152,18 @@ type WireRegistry map[string]*PacedWire
 // times its own delivery on it (MODEL.md: exactly one clock). Production passes a
 // RealClock; tests pass a FakeClock they advance deterministically.
 func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
+	// If jsonPath is a directory, use the tree reader instead of the monolithic JSON reader.
+	if info, err2 := os.Stat(jsonPath); err2 == nil && info.IsDir() {
+		spec, err := loadTree(jsonPath)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		if err := validateSpec(&spec); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		return buildFromSpec(ctx, spec, tr, clk)
+	}
+
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -170,6 +183,12 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		}
 	}
 
+	return buildFromSpec(ctx, spec, tr, clk)
+}
+
+// buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
+// and validated topoSpec (with Position pre-populated on each specNode).
+func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
 	// Build id→position and id→geometry maps for arc-length computation at wire
 	// construction. nodeGeom carries kind/dims/port side+slot so the Go arc
 	// length mirrors buildPortCurve (3-D port-to-port) exactly.
@@ -378,4 +397,65 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 	md.Bind(outSink, SlotRegistry(destWire))
 
 	return nodes, SlotRegistry(destWire), edgeWire, md, nil
+}
+
+// readTopologySpec reads and parses the topology spec at jsonPath (JSON file or
+// directory tree) without building nodes or wires. Used to emit the spec to
+// the TS webview on startup.
+func readTopologySpec(jsonPath string) (topoSpec, error) {
+	if info, err := os.Stat(jsonPath); err == nil && info.IsDir() {
+		spec, err := loadTree(jsonPath)
+		if err != nil {
+			return topoSpec{}, err
+		}
+		return spec, nil
+	}
+	raw, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return topoSpec{}, fmt.Errorf("readTopologySpec: read %s: %w", jsonPath, err)
+	}
+	var spec topoSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return topoSpec{}, fmt.Errorf("readTopologySpec: parse %s: %w", jsonPath, err)
+	}
+	for i := range spec.Nodes {
+		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
+			spec.Nodes[i].Position = pos
+		}
+	}
+	return spec, nil
+}
+
+// EmitSpecLine reads the topology spec at jsonPath and writes a single
+// {"kind":"spec","nodes":[...],"edges":[...],"view":{...}} JSON line to w.
+// Called by main.go before node goroutines start so the TS webview receives
+// the full spec on startup without reading topology/ files directly.
+func EmitSpecLine(w io.Writer, jsonPath string) error {
+	spec, err := readTopologySpec(jsonPath)
+	if err != nil {
+		return err
+	}
+	// emitEdge adds the canonical "id" field (== label) that parseSpec requires
+	// for edge identity. specEdge itself carries only label (the on-disk tree
+	// shape), so we widen it here at the bridge boundary.
+	type emitEdge struct {
+		ID string `json:"id"`
+		specEdge
+	}
+	edges := make([]emitEdge, len(spec.Edges))
+	for i, e := range spec.Edges {
+		edges[i] = emitEdge{ID: e.Label, specEdge: e}
+	}
+	type specMsg struct {
+		Kind  string     `json:"kind"`
+		Nodes []specNode `json:"nodes"`
+		Edges []emitEdge `json:"edges"`
+		View  topoView   `json:"view"`
+	}
+	b, err := json.Marshal(specMsg{Kind: "spec", Nodes: spec.Nodes, Edges: edges, View: spec.View})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "%s\n", b)
+	return err
 }

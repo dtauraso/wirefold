@@ -7,25 +7,18 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
-import { extractViewText, injectViewText, serializeSceneText, parseSceneText } from "../sidecar";
 import {
   parseWebviewToHost,
   type HostToWebviewMsg,
   type WebviewToHostMsg,
 } from "../messages";
-import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
-import { toErrorMessage } from "../utils/error";
 
 export type MessageCtx = {
-  document: vscode.TextDocument;
+  logUri: vscode.Uri;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
   send: () => Thenable<boolean>;
-  setLastAppliedVersion: (v: number) => void;
-  // Keep the external-change structural fingerprint in sync after an own save,
-  // so a later external view-only edit isn't mistaken for a structural change.
-  syncStructuralKey: () => void;
 };
 
 export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void> {
@@ -63,7 +56,7 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
 }
 
 async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
-  const { document, runner, post } = ctx;
+  const { logUri, runner, post } = ctx;
   switch (msg.type) {
     case "ready": {
       ctx.send();
@@ -81,60 +74,11 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       if (wasRunning) runner.resend();
       return;
     }
-    case "save":
-      try {
-        const viewText = extractViewText(document.getText());
-        const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
-        ctx.setLastAppliedVersion(document.version + 1);
-        await applyEdit(document, merged);
-        await document.save();
-        ctx.setLastAppliedVersion(document.version);
-        ctx.syncStructuralKey();
-      } catch (err) {
-        post({ type: "save-error", message: toErrorMessage(err) });
-      }
-      return;
-    case "view-save":
-      // Two persistences, both fire on every view-save:
-      //   1. Diagram-view fields (node positions + the 3 fade arrays) → injected
-      //      into topology.json#view (injectViewText strips scene keys). Go reads
-      //      view.nodes from here, so this is what survives drags/fades on reload.
-      //   2. Scene fields (camera, camera3d, labelsGlobalHidden) → topology.scene.json (flat).
-      try {
-        const merged = injectViewText(document.getText(), msg.text);
-        ctx.setLastAppliedVersion(document.version + 1);
-        await applyEdit(document, merged);
-        await document.save();
-        ctx.setLastAppliedVersion(document.version);
-
-        const sceneFields = parseSceneText(msg.sceneText);
-        const sceneText = serializeSceneText(sceneFields);
-        const scenePath = path.join(path.dirname(document.uri.fsPath), "topology.scene.json");
-        fs.writeFileSync(scenePath, sceneText, "utf8");
-      }
-      catch (err) { post({ type: "save-error", message: toErrorMessage(err) }); }
-      return;
     case "run":
       // Primary path: Go is already spawned on open (case "ready") and the user is
       // starting the clock for the first time, or resuming after a stop+restart.
       // runner.run() is idempotent (no-op if already running), so it is safe to call
-      // unconditionally before play(). Pre-write the document text if the webview sent
-      // a diff (same as before so unsaved spec edits reach Go before the clock starts).
-      try {
-        if (msg.text !== undefined) {
-          const viewText = extractViewText(document.getText());
-          const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
-          ctx.setLastAppliedVersion(document.version + 1);
-          await applyEdit(document, merged);
-          await document.save();
-          ctx.setLastAppliedVersion(document.version);
-          ctx.syncStructuralKey();
-        }
-      } catch (err) {
-        console.error("topology editor: run pre-write failed", err);
-        post({ type: "save-error", message: toErrorMessage(err) });
-        return;
-      }
+      // unconditionally before play().
       runner.run();
       runner.play();
       return;
@@ -154,7 +98,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       runner.stop();
       return;
     case "webview-log":
-      await appendWebviewLog(msg.entry, document.uri);
+      await appendWebviewLog(msg.entry, logUri);
       return;
     case "edit":
       // Single geometry-CRUD bridge: forward the edit to Go's stdin verbatim by op.
@@ -162,7 +106,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
       // only); the writeStdin send itself is non-blocking. z defaults to 0.
       if (msg.op === "create" || msg.op === "delete") {
-        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), logUri);
         runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op, target: msg.target, targetHandle: msg.targetHandle }));
       } else if (msg.op === "update") {
         // Forward the node-move entries map verbatim (keyed by moved node id + each
@@ -178,6 +122,8 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         // the routing keys (node id + each incident edge id) Go mail-sorts to. Forward
         // verbatim, fire-and-forget — same fan-out shape as op="update".
         runner.writeStdin(JSON.stringify({ type: "edit", op: "port-anchor", node: msg.node, port: msg.port, isInput: msg.isInput, anchor: msg.anchor, keys: msg.keys }));
+      } else if (msg.op === "scene") {
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "scene", scene: msg.scene }));
       }
       return;
   }

@@ -5,129 +5,114 @@ import { BuildAndRunRunner } from "./runCommand";
 import type { HostToWebviewMsg } from "./messages";
 import { buildWebviewHtml } from "./extension/html";
 import { handleMessage } from "./extension/handle-message";
-import { structuralKey } from "./extension/structural-key";
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
-    vscode.window.registerCustomEditorProvider(
-      "topology.editor",
-      new TopologyEditorProvider(context),
-      { webviewOptions: { retainContextWhenHidden: true } },
-    ),
+    vscode.commands.registerCommand("topology.openEditor", (uri?: vscode.Uri) => {
+      openTopologyEditor(context, uri);
+    }),
   );
 }
 
-class TopologyEditorProvider implements vscode.CustomTextEditorProvider {
-  constructor(private readonly context: vscode.ExtensionContext) {}
-
-  async resolveCustomTextEditor(
-    document: vscode.TextDocument,
-    panel: vscode.WebviewPanel,
-  ): Promise<void> {
-    const outDir = vscode.Uri.file(path.join(this.context.extensionPath, "out"));
-    panel.webview.options = { enableScripts: true, localResourceRoots: [outDir] };
-    panel.webview.html = buildWebviewHtml(panel.webview, this.context.extensionPath);
-
-    const post = (msg: HostToWebviewMsg) => panel.webview.postMessage(msg);
-    const runner = new BuildAndRunRunner(
-      (status) => post({ type: "run-status", ...status }),
-      (event) => post({ type: "trace-event", event }),
-    );
-
-    // Suppress the `onDidChangeTextDocument` fire we trigger ourselves
-    // by tracking the document version we last applied. Text-equality
-    // breaks on no-op resaves (the same text fires a change event
-    // whose version bumps); version comparison handles those correctly.
-    let lastAppliedVersion = document.version;
-    // Structural fingerprint (everything except `view`) of the last document
-    // we acted on. A view-only external change leaves this unchanged, so we
-    // skip the reload+restart and the running animation stays undisturbed.
-    let lastStructuralKey = structuralKey(document.getText());
-    const scenePath = path.join(path.dirname(document.uri.fsPath), "topology.scene.json");
-    const readSceneText = (): string | undefined => {
-      try { return fs.readFileSync(scenePath, "utf8"); } catch { return undefined; }
-    };
-    const send = (): Thenable<boolean> => {
-      const sceneText = readSceneText();
-      const msg: HostToWebviewMsg = sceneText !== undefined
-        ? { type: "load", text: document.getText(), sceneText }
-        : { type: "load", text: document.getText() };
-      return post(msg);
-    };
-
-    let restartTimer: ReturnType<typeof setTimeout> | undefined;
-    const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.document.uri.toString() !== document.uri.toString()) return;
-      if (e.document.version <= lastAppliedVersion) return;
-      const nextKey = structuralKey(e.document.getText());
-      if (nextKey === lastStructuralKey) return; // view-only change: don't jolt the animation
-      lastStructuralKey = nextKey;
-      send();
-      if (runner.isRunning()) {
-        if (restartTimer) clearTimeout(restartTimer);
-        restartTimer = setTimeout(() => { void (async () => { await runner.stopAndAwait(); runner.run(); })(); }, 300);
-      }
-    });
-    const viewStateSub = panel.onDidChangeViewState(() => {
-      if (!panel.visible) post({ type: "flush" });
-    });
-
-    // Hot-reload of the webview bundle (dev-loop). Gated on extension
-    // mode rather than relying on the silent quirk that absolute-path
-    // GlobPatterns never match for installed users.
-    // RelativePattern rooted at the extension's `out` dir — absolute
-    // string globs silently fail to match, which is why the watcher
-    // appeared dead in dev.
-    const bundleWatcher =
-      this.context.extensionMode === vscode.ExtensionMode.Development
-        ? vscode.workspace.createFileSystemWatcher(
-            new vscode.RelativePattern(
-              vscode.Uri.file(path.join(this.context.extensionPath, "out")),
-              "webview.js",
-            ),
-          )
-        : undefined;
-    if (bundleWatcher) {
-      console.log("[topology] bundleWatcher armed for", path.join(this.context.extensionPath, "out", "webview.js"));
-      // Re-render the HTML in place. The `?v=<mtime>` cache-buster
-      // baked into buildWebviewHtml's script/style URIs forces the
-      // webview to fetch the fresh bundle instead of serving the
-      // cached one. Debounced to absorb esbuild's multi-write builds.
-      let pending: NodeJS.Timeout | undefined;
-      const reload = (kind: string) => () => {
-        console.log("[topology] bundleWatcher fired:", kind);
-        if (pending) clearTimeout(pending);
-        pending = setTimeout(() => {
-          console.log("[topology] hot-reload: re-rendering webview.html");
-          panel.webview.html = buildWebviewHtml(panel.webview, this.context.extensionPath);
-        }, 150);
-      };
-      bundleWatcher.onDidChange(reload("change"));
-      bundleWatcher.onDidCreate(reload("create"));
-    } else {
-      console.log("[topology] bundleWatcher NOT armed — extensionMode:", this.context.extensionMode);
+function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode.Uri): void {
+  // Resolve topology folder path. Command can be invoked from explorer context
+  // menu (folderUri is the topology/ dir) or command palette (no uri).
+  let topologyPath: string | undefined;
+  if (folderUri) {
+    topologyPath = folderUri.fsPath;
+  } else {
+    // Fallback: find topology/ dir in workspace root
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder) {
+      const candidate = path.join(folder.uri.fsPath, "topology");
+      if (fs.existsSync(candidate)) topologyPath = candidate;
     }
-
-    this.context.subscriptions.push(docSub, viewStateSub, runner);
-    if (bundleWatcher) this.context.subscriptions.push(bundleWatcher);
-
-    panel.onDidDispose(() => {
-      if (restartTimer) clearTimeout(restartTimer);
-      docSub.dispose();
-      bundleWatcher?.dispose();
-      viewStateSub.dispose();
-      runner.dispose();
-    });
-
-    panel.webview.onDidReceiveMessage((raw) =>
-      handleMessage(raw, {
-        document,
-        runner,
-        post,
-        send,
-        setLastAppliedVersion: (v) => { lastAppliedVersion = v; },
-        syncStructuralKey: () => { lastStructuralKey = structuralKey(document.getText()); },
-      }),
-    );
   }
+
+  const panel = vscode.window.createWebviewPanel(
+    "topology.editor",
+    "Topology Editor",
+    vscode.ViewColumn.One,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, "out"))],
+    },
+  );
+  panel.webview.options = {
+    enableScripts: true,
+    localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, "out"))],
+  };
+  panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
+
+  const post = (msg: HostToWebviewMsg) => panel.webview.postMessage(msg);
+  let lastSpec: { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined;
+  const runner = new BuildAndRunRunner(
+    (status) => post({ type: "run-status", ...status }),
+    (event) => post({ type: "trace-event", event }),
+    (spec) => {
+      // Go emitted the spec on startup — cache it and send it to the webview as a load message.
+      lastSpec = spec;
+      post({ type: "load", text: JSON.stringify(spec) });
+    },
+  );
+
+  const viewStateSub = panel.onDidChangeViewState(() => {
+    if (!panel.visible) post({ type: "flush" });
+  });
+
+  // Hot-reload of the webview bundle (dev-loop).
+  const bundleWatcher =
+    context.extensionMode === vscode.ExtensionMode.Development
+      ? vscode.workspace.createFileSystemWatcher(
+          new vscode.RelativePattern(
+            vscode.Uri.file(path.join(context.extensionPath, "out")),
+            "webview.js",
+          ),
+        )
+      : undefined;
+  if (bundleWatcher) {
+    console.log("[topology] bundleWatcher armed for", path.join(context.extensionPath, "out", "webview.js"));
+    let pending: NodeJS.Timeout | undefined;
+    const reload = (kind: string) => () => {
+      console.log("[topology] bundleWatcher fired:", kind);
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        console.log("[topology] hot-reload: re-rendering webview.html");
+        panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
+      }, 150);
+    };
+    bundleWatcher.onDidChange(reload("change"));
+    bundleWatcher.onDidCreate(reload("create"));
+  } else {
+    console.log("[topology] bundleWatcher NOT armed — extensionMode:", context.extensionMode);
+  }
+
+  context.subscriptions.push(viewStateSub, runner);
+  if (bundleWatcher) context.subscriptions.push(bundleWatcher);
+
+  panel.onDidDispose(() => {
+    bundleWatcher?.dispose();
+    viewStateSub.dispose();
+    runner.dispose();
+  });
+
+  panel.webview.onDidReceiveMessage((raw) => {
+    // If the webview just mounted and we have a cached spec, replay it so the
+    // diagram renders even when Go's one-shot startup emission beat the listener.
+    if (typeof raw === "object" && raw !== null && (raw as { type?: string }).type === "ready" && lastSpec !== undefined) {
+      post({ type: "load", text: JSON.stringify(lastSpec) });
+    }
+    const workspaceFolder = folderUri ? vscode.workspace.getWorkspaceFolder(folderUri) : undefined;
+    const logUri = workspaceFolder?.uri ?? (folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("."));
+    handleMessage(raw, {
+      logUri,
+      runner,
+      post,
+      send: () => Promise.resolve(true), // no-op: Go sends spec on startup
+    });
+  });
+
+  // Spawn Go immediately (halted); it emits spec on startup which triggers load.
+  runner.run(topologyPath);
 }

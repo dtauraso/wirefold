@@ -18,6 +18,37 @@ Append-only log of friction surfaced while driving the visual editor. Newest fir
 
 ---
 
+## 2026-06-12 — topology-tree / Go-owns-persistence redesign: live bringup (task/persist-geometry-from-go-stream)
+
+**Observation:** The 4-phase redesign (tree reader, tree writer, command-launched panel,
+flowToSpec retirement) was built and statically verified last session but had not been
+exercised in the live editor.
+
+**Scope:** Bring the redesign up in the live editor; confirm the original branch goal
+(port anchor survives reload) end to end.
+
+**Five real fixes needed after the build:**
+1. Startup load-race — Go's one-shot spec line beat the webview listener; fixed by caching
+   `lastSpec` in the extension host and replaying `"load"` on webview `"ready"`.
+2. Dead document-gate — `handle-message.ts` gated webview-log on the removed custom-editor
+   `document`; fixed by threading a `logUri` into `MessageCtx` and removing the gates.
+3. parseSpec schema mismatch — tree `EmitSpecLine` dropped port `kind` and edge `id` that
+   `parseSpec` required; fixed by emitting edge `id`, applying `json:"-"` to
+   `specNode.Position`, defaulting `kind` in `parsePort`, and adding a load-error breadcrumb
+   to surface silent `store.load` throws to `ts-errors.jsonl`.
+4. Auto-fit not firing / wrong framing — `CameraFitter` bailed before Go geometry was
+   present; fixed to fit once-per-epoch gated on full Go geometry; dropped y-negation to
+   match manual Fit.
+5. `tree_writer` now emits compact single-line JSON matching the fixtures.
+
+**Outcome:** Live-verified persistence round-trip: dragging a node wrote
+`topology/view/nodes/<id>.json`; dragging a port anchor wrote
+`topology/nodes/<id>/inputs/<port>.json` with an `"anchor"` field; on reload the spec
+stream carried both the moved position AND the port anchor. The original branch goal
+confirmed. Redesign complete; merging to `main` this session.
+
+---
+
 ## 2026-06-01 — InhibitRightGate window verified live (no task branch)
 
 **Observation:** handoff open-item #2 asked whether InhibitRightGate's coincidence window had ever been validated against actual input alignment in the live ring, or whether the ring was merely "not starved."

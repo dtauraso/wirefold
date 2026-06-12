@@ -10,7 +10,7 @@ import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers"
 import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
-import { scheduleSave, scheduleViewSave } from "../save";
+import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
 
 // ---------------------------------------------------------------------------
@@ -471,7 +471,6 @@ export function useInteractionControls(
             pendingAnchor.current = null;
             anchorRafPending.current = false;
             flushPortAnchor({ nodeId: pm.nodeId, portName: pm.portName, isInput: pm.isInput, anchor });
-            scheduleSave();
           }
         }
         portMoveRef.current = null;
@@ -492,7 +491,6 @@ export function useInteractionControls(
             v.nodes[node.id] = { ...(existing ?? {}), x: node.position.x, y: node.position.y };
           });
           scheduleViewSave();
-          scheduleSave();
           pendingNodeMove.current = null;
           rafPending.current = false;
           flushNodeMove(node.id, node.position.x, node.position.y);

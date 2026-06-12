@@ -8,22 +8,54 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-11 — on `main`, clean, NO task in flight)
+## State at handoff (2026-06-12 — on `task/persist-geometry-from-go-stream`, COMPLETE + LIVE-VERIFIED, merging now)
 
-Node-1 + node-2 interior features and the pulse-speed change are all **merged to main**
-(latest `a2f920e7`). **BOTH node 1 (2×2 depleting/refilling buffer + animated slide) and
-node 2 (single centered held bead) interiors are Go-authoritative via the shared
-`node-bead` stream.** There is **NO task in flight** — the next session starts fresh on
-`main`, friction-driven.
+Active branch **`task/persist-geometry-from-go-stream`** — all 4 phases built, monolith
+files removed (`topology.json`, `topology.scene.json`, `topology.inactive.json` — the last
+relocated to `topology/inactive/` tree), LIVE-VERIFIED end to end. This session is doing
+the merge to `main`.
+
+### Editor-bringup debugging chain (after build, all real fixes)
+
+1. **Startup load-race:** Go's one-shot spec line was posted before the webview listener
+   attached → host now caches `lastSpec` and replays `"load"` on webview `"ready"` (`extension.ts`).
+2. **Dead document-gate:** `handle-message.ts` still gated webview-log (and breadcrumbs) on
+   the removed custom-editor `document` → threaded a `logUri` into `MessageCtx`, removed
+   the gates; restored ts-webview logging.
+3. **parseSpec schema mismatch:** tree-based `EmitSpecLine` dropped port `kind` and edge
+   `id` that `parseSpec` required → Go now emits edge `id`; `specNode.Position` got
+   `json:"-"`; `parsePort` defaults `kind`; added a load-error breadcrumb (in
+   `ERROR_LABELS`) so silent `store.load` throws surface to `ts-errors.jsonl`.
+4. **Auto-fit not firing / framing wrong:** `CameraFitter` only depended on `loadEpoch` and
+   bailed if nodes/canvas not ready, and negated `cy` while `nodeWorldPos` was y-up → fixed
+   to fit once-per-epoch gated on Go geometry present for all nodes, dropped the y negation
+   to match manual Fit (HomeButton). Diagram now appears framed on open.
+5. **Compact JSON writes:** `tree_writer` now emits compact single-line JSON matching the
+   fixtures.
+
+### Live verification (this session)
+
+Editor opens framed; dragging a node wrote `topology/view/nodes/<id>.json`; dragging a
+port anchor wrote `topology/nodes/<id>/inputs/<port>.json` with an `"anchor"` field; on
+reload Go re-read the tree and the spec stream carried both the moved position AND the port
+anchor — the original branch goal (port anchor survives reload) is confirmed working.
+
+### NEXT (post-merge)
+
+Branch merged + deleted this session; new work is friction-driven from live editor use.
+Deferred follow-ups: external hand-edit handling (manual relaunch vs a future in-process
+reload op); long-running suspended dev `go run` processes from earlier sessions exist —
+restart the live editor against the merged build to pick up compact writes.
 
 ### Settled architecture (already on main — keep short)
 
-Go-authoritative per-goroutine model: one clock; node-move + fade via `MoveDispatch`
-(zero central fan-out); node/port position, edge-curve geometry, and bead positions all
-Go-authoritative and streamed; TS renders Go's stream and computes no geometry (guard:
-`check-ts-computes-no-geometry`). TS owns only the SCENE (camera, gitignored
-`topology.scene.json`). **Go owns the node and ALL its children** (body, ring, interior
-beads) and their geometry; TS renders Go's stream and sends CRUD.
+Go-authoritative per-goroutine model: one clock; node-move + fade + port-anchor via
+`MoveDispatch` (decentralized key→inbox, zero central fan-out); node/port position,
+edge-curve geometry, node radius, and interior beads all Go-streamed; TS renders Go's
+stream and computes no geometry (guard: `check-ts-computes-no-geometry`). TS owns only
+the SCENE (camera, gitignored `view/scene.json`). One constant pulse speed
+`CurveParamPulseSpeedWuPerMs = 0.04` wu/ms (half), uniform across ALL bead animations
+(wire beads AND node-1 refill slide).
 
 ### Earlier work already merged to main (background — one line each)
 
@@ -32,99 +64,52 @@ beads) and their geometry; TS renders Go's stream and sends CRUD.
 2. **Deterministic `view.nodes` serialization** (idempotent load→save, kills churn).
 3. **Reload gating:** external `topology.json` change reloads + restarts Go only on
    STRUCTURAL change, not view-only (`structuralKey`).
-4. **Node rename** `in08`/`i0`/`i1` → `1`/`2`/`3` (edge labels
-   `1To2`/`2To3`/`2FeedbackTo1`).
-5. **Animated bead colored by value + torus** (`VALUE_BEAD_STYLE`).
-6. **Removed per-node value-display overlay.**
-7. **4 robustness fixes:** Trace close race (no more "send on closed channel" panic —
-   stop-signal, not `close(ch)`); empty-kind save guard (`flowToSpec` refuses to write
-   a node with empty type); NUL-byte → ` ` delimiter in `save.ts`; geometry resend
-   (`{type:"resend"}` on webview ready when Go already running → edges survive
-   hot-reload/remount).
+4. **Node rename** `1`/`2`/`3` (edges `1To2`/`2To3`/`2FeedbackTo1`).
+5. **Animated bead colored by value + torus; removed per-node value-display overlay.**
+6. **4 robustness fixes:** Trace close race (stop-signal, not `close(ch)`); empty-kind
+   save guard; NUL-byte → ` ` delimiter; geometry resend on webview ready.
+7. **Node-1 interior:** depleting/refilling 2×2 double-buffer, value-colored sphere+torus,
+   Go-streamed local offsets (children of node group), animated refill SLIDE; peek-send /
+   pop-on-feedback, NO seed/bootstrap. Node body/ring center+radius Go-owned.
+8. **Node-2 interior:** single centered held-value bead, empty when `held=-1`, emitted via
+   injected `EmitHeldBead` closure on held-change only.
+9. **Pulse speed 0.04 + slide unified** at the base speed (`interiorSlideDurationMul=1.0`).
+10. **Dead-code sweep (−78 lines); `strip-branch-local-docs.sh` scans all of `docs/`.**
 
-### THE NODE-2 FEATURE (merged) — interior held-value bead
+### PORT-DRAG (merged — gap now closed by this branch)
 
-Node `2` (ChainInhibitor) interior shows its **HELD VALUE as a single centered bead**,
-reusing the node-1 infra (`node-bead` trace kind, the per-node `InteriorSlotBead`
-renderer, the value→style convention). What shipped:
-
-- **One bead at the node center** (offset `0,0,0`), value-colored (0 = white/black,
-  1 = black/black). `present = (held != -1)`, so the interior is **EMPTY when `held=-1`**
-  — i.e. before node 2 receives its first value from node 1. Held path: `-1 → 0 → 1 → 0 …`.
-- **Go emits via an injected `EmitHeldBead func(held int)` closure** (mirroring how Input
-  gets `EmitNodeBeads`). Called once at startup (`held=-1`, `present=false`) and on each
-  held change ONLY — only on an actual change, no per-tick spam. The inhibitor's
-  firing/forwarding logic is unchanged.
-- **No TS change needed:** the existing node-bead renderer (`InteriorSlotBead` per
-  `GraphNode`) handles a single centered bead and hides the absent slots.
-- `topology.json`: node `2` `data.state.held` changed `0 → -1` so node 2 starts with no
-  value (empty interior).
-
-### THE NODE-1 FEATURE (already merged to main) — interior depleting/refilling buffer + activity animation
-
-Node `1` (Input) interior is a depleting/refilling **double-buffer with an animated
-interior, fully Go-authoritative.** What shipped:
-
-- **Trace kinds renamed/added:** the on-wire bead trace kind `position` → `edge-bead`;
-  a new `node-bead` trace kind for interior beads (keyed by node id + row/col; payload =
-  node-LOCAL offset + value + present).
-- **Node 1 is a pure double-buffer:** action (working, bottom row) + backup (top row),
-  each from spec init `[1,0]` = 4 beads. It PEEK-sends the last bead of working (no pop)
-  and POPS only on node 2's feedback `1` (`0` holds); when working empties it refills
-  from backup and restocks backup. NO seed/bootstrap — the first peek-send naturally
-  starts the ring. At rest the buffer shows the full 4.
-- **Interior beads render as a 2×2 grid** inside the node body, value-colored
-  (0 = white/black, 1 = black/black) sphere + torus, torus-aware spacing (fit inside the
-  sphere, small even gaps). They are CHILDREN of the node group at Go-streamed local
-  offsets, so they ride the node on drag (no re-emit needed).
-- **Node body/ring geometry is Go-owned:** Go streams the node center AND radius
-  (node-geometry event gained a `radius` field); TS reads both from the stream with a
-  dims-based fallback only in the pre-first-emit startup window. TS computes no node
-  geometry in steady state.
-- **Animated refill SLIDE:** when working empties, the top row slides DOWN into the
-  working position, clock-paced at human speed (pause-aware via the clock injected into
-  the Input node), then the new top row appears. `interiorSlideDurationMul` is now `1.0`,
-  so the slide runs at the base pulse speed with no extra multiplier.
-
-**Uniform pulse speed (merged):** the one constant `CurveParamPulseSpeedWuPerMs = 0.04`
-wu/ms (was 0.08 — half speed) drives ALL bead animation — wire beads AND node 1's refill
-slide — at one constant speed. Note: `curve-params.ts` is a GENERATED mirror of Go's
-`CurveParam*` constants, but TS does **not** actually consume the pulse-speed constant —
-Go owns timing and streams bead positions; TS plots. So pulse speed is driven entirely by
-the Go constant; the TS mirror is unused/vestigial (minor dead-mirror surface, not
-cleaned up).
-
-`topology.json`: node `1` `init` is `[1,0]` (so end-pop sends 0 then 1). Active network
-nodes `1`/`2`/`3`, edges `1To2`, `2To3`, `2FeedbackTo1` (feedback ring).
-
-### NEXT
-
-Friction-driven, **no task in flight.** Next session starts fresh on `main`; justify new
-work from real editor-use friction logged in `session-log.md`.
+You can drag a **connected** edge port along its node's ring to reposition it; the edge
+follows. `Port.anchor` is wired through Go (`portDir` uses `normalize(anchor)`, applied via
+`MoveDispatch`); a `port-anchor` edit op flows webview → handle-message → Go stdin. The
+anchor previously did **not** survive reload (TS was the sole writer; Go only READ
+`topology.json`). This branch closes that gap.
 
 ### Carry-forward facts
 
 - **Two bead trace kinds:** `node-bead` (interior, node-LOCAL offsets, children of the
-  node group) and `edge-bead` (on-wire). Node geometry (center + radius + ports +
-  interior beads) is Go-streamed; TS renders, computes none.
-- **`topology.json` is tracked normally** (not skip-worktree). The gitignored
-  `topology.scene.json` holds camera/labels and reconstitutes to defaults when absent.
-- **Fading a load-bearing ring edge stalls the whole ring** (token dropped); **unfade
-  does NOT revive** — restart re-seeds from node `1`'s Input init. EXPECTED model
-  behavior, not a bug.
-- **Node editing requires Go alive** (positions Go-authoritative): if Go is
-  stopped/crashed, NO node moves until restart.
-- **Two-process editor:** extension-host changes
-  (`extension.ts`/`handle-message.ts`/`messages.ts`/`runCommand.ts`) need **Developer:
-  Reload Window**; webview-only changes hot-reload on build (and keep edges via node
-  geometry resend). See `feedback_two_process_editor_reload`.
-- **Parser-parity trap:** when changing a TS↔Go message shape, update `messages.ts`
-  parser AND the Go stdin-reader in lockstep; trace-kinds + message-kinds tracked in
-  LOCKSTEP. Guards: `check-message-kind-parity`, `check-trace-kind-parity`. See
-  `feedback_schema_parser_parity`.
-- **Subagent commit hygiene:** subagents have repeatedly swept incidental
-  `topology.json` autosave churn into commits — instruct them to `git add` specific
-  paths only, and spot-check net diffs before merge.
+  node group) and `edge-bead` (on-wire). Node geometry (center + radius + ports + interior
+  beads) is Go-streamed; TS renders, computes none.
+- **`topology/` tree tracked normally**; **`topology/view/scene.json` gitignored**
+  (camera/labels, reconstitutes to defaults when absent).
+- **Fading a load-bearing ring edge stalls the whole ring** (token dropped); unfade does
+  NOT revive — restart re-seeds from node `1`'s Input init. EXPECTED model behavior.
+- **Node editing requires Go alive** (positions Go-authoritative): if Go is stopped/crashed,
+  NO node moves until restart.
+- **Two-process editor:** extension-host changes need **Developer: Reload Window**;
+  webview-only changes hot-reload on build (edges survive via geometry resend). The
+  reload/restart loop for spec changes is gone — topology is a directory tree; the default
+  `-topology` flag is the `topology/` dir. See `feedback_two_process_editor_reload`.
+- **Parser/message-kind + trace-kind parity in LOCKSTEP:** changing a TS↔Go message shape
+  updates `messages.ts` parser AND the Go stdin-reader together. Guards:
+  `check-message-kind-parity`, `check-trace-kind-parity`. See `feedback_schema_parser_parity`.
+- **A new edit op must be forwarded in THREE places:** `messages.ts`, `handle-message.ts`
+  `case "edit"` per-op forward, and the Go `stdin_reader`. The port-anchor bug was a missing
+  handle-message forward.
+- **Subagent commit hygiene:** subagents have repeatedly swept incidental `topology.json`
+  autosave churn into commits — instruct them to `git add` specific paths only, and
+  spot-check net diffs before merge.
+- **React Flow is fully removed;** `RF`-named code (`RFNode`/`RFEdge`/`flowToSpec`/
+  `specToFlow`) was vestigial and is retired by this branch.
 - **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't
   re-propose; O(N²) follow latency.
 
@@ -135,7 +120,7 @@ work from real editor-use friction logged in `session-log.md`.
   `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-message-kind-parity`,
   `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
 - Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file
-  for webview-only.
+  for webview-only. No reload/restart loop for spec changes (topology is a directory tree).
 - No merge to main without explicit sign-off. Delete merged branches without re-asking.
 
 ## ALWAYS clause

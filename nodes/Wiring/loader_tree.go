@@ -1,0 +1,219 @@
+// loader_tree.go — directory-tree topology reader.
+//
+// loadTree reads a topology laid out as a directory tree:
+//
+//	<root>/nodes/<id>/meta.json        — id, type
+//	<root>/nodes/<id>/data.json        — NodeData (optional)
+//	<root>/nodes/<id>/inputs/<name>.json  — specPort
+//	<root>/nodes/<id>/outputs/<name>.json — specPort
+//	<root>/edges/<label>.json          — specEdge
+//	<root>/view/nodes/<id>.json        — specPosition
+//
+// It returns a topoSpec equivalent to what json.Unmarshal would produce from
+// the monolithic topology.json, enabling LoadTopology to accept either form.
+
+package Wiring
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// jsonPos is a local unmarshal helper for view/nodes JSON files whose keys are
+// lowercase (x, y, z). specPosition already carries json tags so this alias is
+// not strictly needed, but it makes the intent explicit.
+type jsonPos struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
+}
+
+// jsonPort is a local unmarshal helper for port JSON files (lowercase keys).
+// specPort already has json tags with the same lowercase names, so we reuse
+// specPort directly; this type documents the expected shape.
+// (kept as a comment — see readPort below which unmarshals directly into specPort)
+
+// jsonMeta is the shape of nodes/<id>/meta.json.
+type jsonMeta struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+}
+
+// loadTree reads the directory-tree topology rooted at root and assembles a
+// topoSpec.  All subdirectory entries are sorted so the result is deterministic.
+func loadTree(root string) (topoSpec, error) {
+	var spec topoSpec
+
+	// ── nodes ────────────────────────────────────────────────────────────────
+	nodesDir := filepath.Join(root, "nodes")
+	nodeDirs, err := readDirNames(nodesDir)
+	if err != nil {
+		return spec, fmt.Errorf("loadTree: list nodes dir %s: %w", nodesDir, err)
+	}
+	sort.Strings(nodeDirs)
+
+	for _, nodeID := range nodeDirs {
+		nodeDir := filepath.Join(nodesDir, nodeID)
+
+		// meta.json — required
+		metaPath := filepath.Join(nodeDir, "meta.json")
+		metaRaw, err := os.ReadFile(metaPath)
+		if err != nil {
+			return spec, fmt.Errorf("loadTree: node %q meta: %w", nodeID, err)
+		}
+		var meta jsonMeta
+		if err := json.Unmarshal(metaRaw, &meta); err != nil {
+			return spec, fmt.Errorf("loadTree: node %q meta parse: %w", nodeID, err)
+		}
+
+		sn := specNode{
+			ID:   meta.ID,
+			Type: meta.Type,
+		}
+
+		// data.json — optional
+		dataPath := filepath.Join(nodeDir, "data.json")
+		if raw, err := os.ReadFile(dataPath); err == nil {
+			var nd NodeData
+			if err := json.Unmarshal(raw, &nd); err != nil {
+				return spec, fmt.Errorf("loadTree: node %q data parse: %w", nodeID, err)
+			}
+			sn.Data = &nd
+		}
+
+		// inputs/ — optional subdir
+		sn.Inputs, err = readPorts(filepath.Join(nodeDir, "inputs"))
+		if err != nil {
+			return spec, fmt.Errorf("loadTree: node %q inputs: %w", nodeID, err)
+		}
+
+		// outputs/ — optional subdir
+		sn.Outputs, err = readPorts(filepath.Join(nodeDir, "outputs"))
+		if err != nil {
+			return spec, fmt.Errorf("loadTree: node %q outputs: %w", nodeID, err)
+		}
+
+		spec.Nodes = append(spec.Nodes, sn)
+	}
+
+	// ── edges ────────────────────────────────────────────────────────────────
+	edgesDir := filepath.Join(root, "edges")
+	edgeFiles, err := readDirNames(edgesDir)
+	if err != nil {
+		return spec, fmt.Errorf("loadTree: list edges dir %s: %w", edgesDir, err)
+	}
+	sort.Strings(edgeFiles)
+
+	for _, fname := range edgeFiles {
+		if !strings.HasSuffix(fname, ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(edgesDir, fname))
+		if err != nil {
+			return spec, fmt.Errorf("loadTree: read edge file %s: %w", fname, err)
+		}
+		var e specEdge
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return spec, fmt.Errorf("loadTree: parse edge file %s: %w", fname, err)
+		}
+		spec.Edges = append(spec.Edges, e)
+	}
+
+	// ── view/nodes ───────────────────────────────────────────────────────────
+	viewNodesDir := filepath.Join(root, "view", "nodes")
+	viewFiles, err := readDirNames(viewNodesDir)
+	if err != nil {
+		return spec, fmt.Errorf("loadTree: list view/nodes dir %s: %w", viewNodesDir, err)
+	}
+	sort.Strings(viewFiles)
+
+	spec.View.Nodes = map[string]specPosition{}
+	for _, fname := range viewFiles {
+		if !strings.HasSuffix(fname, ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(viewNodesDir, fname))
+		if err != nil {
+			return spec, fmt.Errorf("loadTree: read view/nodes/%s: %w", fname, err)
+		}
+		var jp jsonPos
+		if err := json.Unmarshal(raw, &jp); err != nil {
+			return spec, fmt.Errorf("loadTree: parse view/nodes/%s: %w", fname, err)
+		}
+		id := strings.TrimSuffix(fname, ".json")
+		spec.View.Nodes[id] = specPosition{X: jp.X, Y: jp.Y, Z: jp.Z}
+	}
+
+	// ── populate Position on each specNode from view.nodes ───────────────────
+	for i := range spec.Nodes {
+		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
+			spec.Nodes[i].Position = pos
+		}
+	}
+
+	return spec, nil
+}
+
+// readPorts reads all *.json files from dir (which may not exist) and returns
+// the parsed []specPort sorted by slot (nil last) then name.
+func readPorts(dir string) ([]specPort, error) {
+	names, err := readDirNames(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+
+	var ports []specPort
+	for _, fname := range names {
+		if !strings.HasSuffix(fname, ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, fname))
+		if err != nil {
+			return nil, err
+		}
+		var p specPort
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", fname, err)
+		}
+		ports = append(ports, p)
+	}
+
+	sort.Slice(ports, func(i, j int) bool {
+		si, sj := ports[i].Slot, ports[j].Slot
+		if si == nil && sj == nil {
+			return ports[i].Name < ports[j].Name
+		}
+		if si == nil {
+			return false
+		}
+		if sj == nil {
+			return true
+		}
+		if *si != *sj {
+			return *si < *sj
+		}
+		return ports[i].Name < ports[j].Name
+	})
+	return ports, nil
+}
+
+// readDirNames returns the names (not full paths) of all entries in dir.
+func readDirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names, nil
+}

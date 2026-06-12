@@ -37,14 +37,26 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		os.Exit(1)
 	}
 
+	// Emit the full spec to the TS webview before nodes start (Go startup message).
+	// TS intercepts this line and sends { type: "load", text } to the webview — it
+	// never reads topology/ files directly.
+	if err := W.EmitSpecLine(os.Stdout, topologyPath); err != nil {
+		fmt.Fprintf(os.Stderr, "emit spec: %v\n", err)
+		// non-fatal; continue
+	}
+
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	md.Start(ctx)
 
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete/fade)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
+	treeRoot := ""
+	if info, err2 := os.Stat(topologyPath); err2 == nil && info.IsDir() {
+		treeRoot = topologyPath
+	}
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk, treeRoot)
 		cancel()
 	}()
 
@@ -92,7 +104,7 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 func main() {
 	tracePath := flag.String("trace", "", "if set, write a raw JSONL trace to this path on shutdown")
 	dur := flag.Duration("duration", 0, "if non-zero, run for this duration then exit (test mode)")
-	topologyPath := flag.String("topology", "topology.json", "path to topology JSON spec")
+	topologyPath := flag.String("topology", "topology", "path to topology JSON spec")
 	flag.Parse()
 	if *dur > 0 {
 		RunTest(*dur, *tracePath, *topologyPath)

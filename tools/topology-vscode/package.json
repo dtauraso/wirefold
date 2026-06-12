@@ -9,20 +9,25 @@
     "vscode": "^1.85.0"
   },
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:topology.openEditor"
+  ],
   "contributes": {
-    "customEditors": [
+    "commands": [
       {
-        "viewType": "topology.editor",
-        "displayName": "Topology Editor",
-        "selector": [
-          {
-            "filenamePattern": "**/*topology.json"
-          }
-        ],
-        "priority": "default"
+        "command": "topology.openEditor",
+        "title": "Topology: Open Editor"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "topology.openEditor",
+          "when": "explorerResourceIsFolder && resourceFilename == topology",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "gen:node-defs": "go run ../../tools/gen-node-defs",
