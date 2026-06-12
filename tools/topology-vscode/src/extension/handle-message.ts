@@ -15,7 +15,7 @@ import {
 import { appendWebviewLog } from "./webview-log";
 
 export type MessageCtx = {
-  document?: vscode.TextDocument;
+  logUri: vscode.Uri;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
   send: () => Thenable<boolean>;
@@ -56,7 +56,7 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
 }
 
 async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
-  const { document, runner, post } = ctx;
+  const { logUri, runner, post } = ctx;
   switch (msg.type) {
     case "ready": {
       ctx.send();
@@ -98,7 +98,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       runner.stop();
       return;
     case "webview-log":
-      if (document) await appendWebviewLog(msg.entry, document.uri);
+      await appendWebviewLog(msg.entry, logUri);
       return;
     case "edit":
       // Single geometry-CRUD bridge: forward the edit to Go's stdin verbatim by op.
@@ -106,7 +106,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
       // only); the writeStdin send itself is non-blocking. z defaults to 0.
       if (msg.op === "create" || msg.op === "delete") {
-        if (document) await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), logUri);
         runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op, target: msg.target, targetHandle: msg.targetHandle }));
       } else if (msg.op === "update") {
         // Forward the node-move entries map verbatim (keyed by moved node id + each

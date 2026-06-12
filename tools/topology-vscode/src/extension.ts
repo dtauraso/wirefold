@@ -103,7 +103,10 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     if (typeof raw === "object" && raw !== null && (raw as { type?: string }).type === "ready" && lastSpec !== undefined) {
       post({ type: "load", text: JSON.stringify(lastSpec) });
     }
+    const workspaceFolder = folderUri ? vscode.workspace.getWorkspaceFolder(folderUri) : undefined;
+    const logUri = workspaceFolder?.uri ?? (folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("."));
     handleMessage(raw, {
+      logUri,
       runner,
       post,
       send: () => Promise.resolve(true), // no-op: Go sends spec on startup
