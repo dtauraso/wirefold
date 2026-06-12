@@ -59,7 +59,7 @@ type specNode struct {
 	Data     *NodeData  `json:"data,omitempty"`
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
-	Position specPosition // populated from view.nodes after JSON parse
+	Position specPosition `json:"-"` // populated from view.nodes after JSON parse; internal-only, never emitted
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
@@ -435,13 +435,24 @@ func EmitSpecLine(w io.Writer, jsonPath string) error {
 	if err != nil {
 		return err
 	}
+	// emitEdge adds the canonical "id" field (== label) that parseSpec requires
+	// for edge identity. specEdge itself carries only label (the on-disk tree
+	// shape), so we widen it here at the bridge boundary.
+	type emitEdge struct {
+		ID string `json:"id"`
+		specEdge
+	}
+	edges := make([]emitEdge, len(spec.Edges))
+	for i, e := range spec.Edges {
+		edges[i] = emitEdge{ID: e.Label, specEdge: e}
+	}
 	type specMsg struct {
 		Kind  string     `json:"kind"`
 		Nodes []specNode `json:"nodes"`
-		Edges []specEdge `json:"edges"`
+		Edges []emitEdge `json:"edges"`
 		View  topoView   `json:"view"`
 	}
-	b, err := json.Marshal(specMsg{Kind: "spec", Nodes: spec.Nodes, Edges: spec.Edges, View: spec.View})
+	b, err := json.Marshal(specMsg{Kind: "spec", Nodes: spec.Nodes, Edges: edges, View: spec.View})
 	if err != nil {
 		return err
 	}

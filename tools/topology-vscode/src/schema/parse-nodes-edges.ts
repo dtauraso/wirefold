@@ -1,6 +1,6 @@
 // Parsers for Node, Edge, NodeSpec, SpecSegment.
 
-import { EDGE_KINDS } from "./types";
+import { EDGE_KINDS, DEFAULT_EDGE_KIND } from "./types";
 import type { Port } from "./types";
 import type {
   Edge,
@@ -28,9 +28,16 @@ const KNOWN_NODE_KINDS: ReadonlySet<string> = new Set([...RUNTIME_IMPLEMENTED_KI
 
 function parsePort(v: unknown, path: string): Port {
   const o = obj(v, path);
+  // Port `kind` is vestigial: not stored in the canonical topology tree
+  // (nodes/<id>/inputs|outputs/*.json) and has no downstream consumer — edge
+  // colour/behaviour keys off edge.kind, never port.kind. Default it when
+  // absent so the Go spec emission (which omits it) parses; still validate
+  // against EDGE_KINDS when present so a genuinely-bad value is rejected.
   const out: Port = {
     name: str(o.name, `${path}.name`),
-    kind: oneOf(o.kind, EDGE_KINDS, `${path}.kind`),
+    kind: o.kind === undefined
+      ? DEFAULT_EDGE_KIND
+      : oneOf(o.kind, EDGE_KINDS, `${path}.kind`),
   };
   if (o.required !== undefined) out.required = bool(o.required, `${path}.required`);
   if (o.side !== undefined) out.side = oneOf(o.side, ["left", "right", "top", "bottom"] as const, `${path}.side`);

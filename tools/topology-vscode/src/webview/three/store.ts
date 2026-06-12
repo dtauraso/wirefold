@@ -103,6 +103,14 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       postLog("lifecycle", { phase: "store:load", nodes: nodes.length, edges: edges.length });
     } catch (err) {
       console.error("[ThreeStore] load failed", err);
+      // Permanent diagnostic: surface the throw to .probe/ts-errors.jsonl so a
+      // silent parse failure (blank diagram, no store:load) is observable.
+      // "load-error" must stay in ERROR_LABELS (extension/webview-log.ts).
+      const e = err as { message?: string; stack?: string };
+      postLog("load-error", {
+        message: e?.message ?? String(err),
+        stack: e?.stack ?? null,
+      });
     }
   },
 

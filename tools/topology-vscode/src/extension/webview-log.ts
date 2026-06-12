@@ -15,6 +15,7 @@ import * as vscode from "vscode";
 const ERROR_LABELS = new Set([
   "window-error", "unhandled-rejection", "render-error",
   "early-window-error", "early-unhandled-rejection",
+  "load-error",
 ]);
 
 let pendingTs: Promise<void> = Promise.resolve();
