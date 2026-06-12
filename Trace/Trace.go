@@ -34,7 +34,7 @@ const (
 	// delivery goroutine emits one every ~16 ms while a bead is in flight,
 	// carrying the bead's evaluated 3-D position so the renderer plots it without
 	// computing geometry itself.
-	KindPosition       = "position"
+	KindPosition       = "edge-bead"
 	// KindGeometry carries an edge's authoritative straight-segment endpoints
 	// (Phase 3). Go owns node positions + per-edge segments; it emits one geometry
 	// event per edge on load and again whenever a node-move re-derives that edge's

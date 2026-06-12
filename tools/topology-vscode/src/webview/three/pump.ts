@@ -13,7 +13,7 @@
 //     → pulse-state.ts:setPulse  records { value, simStep, target, targetHandle }
 //       (pos starts null — bead hidden until the first position arrives)
 //
-//  2. Go emits "position" (node, port, x, y, z) every ~16 ms while in flight, and
+//  2. Go emits "edge-bead" (node, port, x, y, z) every ~16 ms while in flight, and
 //     once more at t==1 just before delivery
 //     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
 //     → pulse-state.ts:setPulsePos  sets the bead's Go-computed world position;
@@ -72,11 +72,11 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
-    case "position": {
+    case "edge-bead": {
       // Go's per-frame bead position (Phase 2). Match ALL edges by source node id
       // + sourceHandle (fan-out), same key as send, and set the bead's world
       // position directly — TS plots, computes no geometry.
-      const { node, port, x, y, z, f } = event as Extract<TraceEvent, { kind: "position" }>;
+      const { node, port, x, y, z, f } = event as Extract<TraceEvent, { kind: "edge-bead" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,

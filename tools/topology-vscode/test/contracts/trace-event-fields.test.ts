@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "position", "geometry", "pulse-cancelled", "node-geometry", "arrive"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -81,10 +81,10 @@ describe("trace-event-fields contract", () => {
     expect(typeof (e as Extract<TraceEvent, { kind: "done" }> & { port?: string }).port).toBe("string");
   });
 
-  it("position event has step, kind, node, port, x, y, z, f (Phase 2)", () => {
-    const e = events.find((ev) => ev.kind === "position")! as Extract<TraceEvent, { kind: "position" }>;
+  it("edge-bead event has step, kind, node, port, x, y, z, f (Phase 2)", () => {
+    const e = events.find((ev) => ev.kind === "edge-bead")! as Extract<TraceEvent, { kind: "edge-bead" }>;
     expect(typeof e.step).toBe("number");
-    expect(e.kind).toBe("position");
+    expect(e.kind).toBe("edge-bead");
     expect(typeof e.node).toBe("string");
     expect(typeof e.port).toBe("string");
     expect(typeof e.x).toBe("number");
