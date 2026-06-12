@@ -17,6 +17,31 @@ type Node struct {
 	FeedbackOut                *Wiring.Out
 }
 
+// fanOutHeld forwards the held value concurrently on every ToNext output.
+// Invariant: -1 (the empty-Held sentinel) is never sent on an output channel —
+// a fire whose Held is -1 emits nothing on ToNext. Only the SEND is suppressed;
+// Held still updates to the received value in the caller.
+func fanOutHeld(outs Wiring.OutMulti, held int) {
+	if held == -1 {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, out := range outs {
+		wg.Add(1)
+		go func(o *Wiring.Out) {
+			defer wg.Done()
+			if o.Gated() {
+				if o.TrySend(held) {
+					o.WaitConsumed()
+				}
+			} else {
+				o.TryEmit(held)
+			}
+		}(out)
+	}
+	wg.Wait()
+}
+
 func (in *Node) Update(ctx context.Context) {
 	if in.EmitGeometry != nil {
 		in.EmitGeometry()
@@ -68,8 +93,14 @@ func (in *Node) Update(ctx context.Context) {
 			}
 
 			if in.FeedbackOut.Wired() {
-				// Send feedback step BEFORE forwarding on ToNext so the Input
-				// node unblocks (ordered: feedback send precedes next recv).
+				// Place the feedback step BEFORE forwarding on ToNext. We only
+				// order the PLACEMENT of the feedback bead relative to the
+				// ToNext fan-out; we do NOT wait for the Input node to consume
+				// it. FeedbackOut is fire-and-forget per MODEL.md ("does not
+				// wait on the destination — no acknowledgment, no back-pressure"):
+				// the node paces naturally on its next paced TryRecv, not on the
+				// feedback round-trip, so the held value reaches ToNext at
+				// fire-time instead of behind the ~feedback-traversal latency.
 				// Step is 1 when the value changes (advance index), 0 when it
 				// repeats (hold index). held == -1 on the first recv so the
 				// first value always counts as a change.
@@ -77,47 +108,13 @@ func (in *Node) Update(ctx context.Context) {
 				if heldChanged {
 					step = 1
 				}
-				if in.FeedbackOut.Gated() {
-					if in.FeedbackOut.TrySend(step) {
-						in.FeedbackOut.WaitConsumed()
-					}
-				} else {
-					in.FeedbackOut.TryEmit(step)
-				}
+				in.FeedbackOut.TryEmit(step)
 				// Forward the current held value on the downstream chain.
-				var wg sync.WaitGroup
-				for _, out := range in.ToNext {
-					wg.Add(1)
-					go func(o *Wiring.Out) {
-						defer wg.Done()
-						if o.Gated() {
-							if o.TrySend(in.Held) {
-								o.WaitConsumed()
-							}
-						} else {
-							o.TryEmit(in.Held)
-						}
-					}(out)
-				}
-				wg.Wait()
+				fanOutHeld(in.ToNext, in.Held)
 				in.Held = value
 			} else {
 				// FeedbackOut not wired (e.g. i1): existing behavior unchanged.
-				var wg sync.WaitGroup
-				for _, out := range in.ToNext {
-					wg.Add(1)
-					go func(o *Wiring.Out) {
-						defer wg.Done()
-						if o.Gated() {
-							if o.TrySend(in.Held) {
-								o.WaitConsumed()
-							}
-						} else {
-							o.TryEmit(in.Held)
-						}
-					}(out)
-				}
-				wg.Wait()
+				fanOutHeld(in.ToNext, in.Held)
 				in.Held = value
 			}
 		}

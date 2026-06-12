@@ -52,13 +52,18 @@ func TestEmitHeldBead(t *testing.T) {
 	}
 	mu.Unlock()
 
-	// First received value 0 → held changes -1→0, emit fires with 0.
+	// First received value 0 → held changes -1→0, interior emit fires with 0.
+	// ToNext forwards the PRIOR Held (-1), which is suppressed → no output bead.
+	fromPrev <- 0
+	select {
+	case v := <-out0:
+		t.Fatalf("first fire emitted %d on ToNext; expected nothing (Held was -1)", v)
+	case <-time.After(60 * time.Millisecond):
+	}
+	// Same value 0 again → interior held unchanged; ToNext forwards Held 0.
 	fromPrev <- 0
 	recv(t, out0)
-	// Same value 0 again → held unchanged, no new emit.
-	fromPrev <- 0
-	recv(t, out0)
-	// New value 1 → held changes 0→1, emit fires with 1.
+	// New value 1 → interior emit fires with 1; ToNext forwards Held 0.
 	fromPrev <- 1
 	recv(t, out0)
 
@@ -76,5 +81,45 @@ func TestEmitHeldBead(t *testing.T) {
 		if emitted[i] != w {
 			t.Fatalf("emitted = %v, want %v", emitted, want)
 		}
+	}
+}
+
+// TestNoSentinelOnToNext asserts the output invariant: starting Held=-1, the
+// first fire emits NOTHING on ToNext (the -1 sentinel is suppressed), and once
+// Held has become a real value (0/1) a subsequent fire DOES emit on ToNext.
+func TestNoSentinelOnToNext(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
+	fromPrev := make(chan int, 1)
+	out0 := make(chan int, 1)
+
+	node := &Node{
+		Fire:                       func() { tr.Fire("ci") },
+		Held:                       -1,
+		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),
+		ToNext: Wiring.OutMulti{
+			Wiring.NewOut(out0, "ci", "ToNext", tr),
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+
+	// First recv: Held is -1, so ToNext must emit NOTHING.
+	fromPrev <- 0
+	select {
+	case v := <-out0:
+		t.Fatalf("first fire emitted %d on ToNext; expected nothing (Held was -1)", v)
+	case <-time.After(60 * time.Millisecond):
+		// no bead: correct.
+	}
+
+	// Held is now 0. Next recv forwards the real held value 0.
+	fromPrev <- 1
+	if got := recv(t, out0); got != 0 {
+		t.Fatalf("second fire ToNext: got %d, want 0", got)
 	}
 }
