@@ -197,7 +197,7 @@
   <ul>
     <li><strong>Why it restarts:</strong> Go builds its whole network at startup (<code>LoadTopology</code>) and has <em>no in-process "reload topology" command</em>. An external file change carries no diff — so the editor can only rebuild Go from scratch.</li>
     <li><strong>The damage:</strong> any writer that is not the editor (notably Go persisting geometry) trips the file-watch → reload → restart loop, causing loops and jolts.</li>
-    <li><strong>Persistence flows backwards through TS:</strong> <code>flowToSpec</code> serializes React Flow node data and the editor saves the document. Go only <code>os.ReadFile</code>s — it never writes. So TS must keep a <em>parallel copy</em> of every Go-owned value (positions, the new port <code>anchor</code>) just so the save can read it.</li>
+    <li><strong>Persistence flows backwards through TS:</strong> <code>flowToSpec</code> serializes the editor's in-memory node/edge state and the editor saves the document. Go only <code>os.ReadFile</code>s — it never writes. So TS must keep a <em>parallel copy</em> of every Go-owned value (positions, the new port <code>anchor</code>) just so the save can read it. <em>(<code>flowToSpec</code>/<code>specToFlow</code> and the <code>RFNode</code>/<code>RFEdge</code> types carry a vestigial "flow"/"RF" name left over from the removed React Flow library — React Flow is not a live dependency; rendering is done by R3F / three.js.)</em></li>
   </ul>
 
   <h2>The inversion</h2>
@@ -209,7 +209,7 @@
       <text x="20" y="22" fill="#e05252" font-size="12" font-weight="700">BEFORE</text>
       <rect x="20" y="34" width="120" height="40" rx="5" fill="#1a0e26" stroke="#c07ef8" stroke-width="1.3"/>
       <text x="80" y="52" fill="#c07ef8" font-size="11" text-anchor="middle">TS flowToSpec</text>
-      <text x="80" y="66" fill="#9a6ac0" font-size="9" text-anchor="middle">serialize+save</text>
+      <text x="80" y="66" fill="#9a6ac0" font-size="9" text-anchor="middle">serialize editor state</text>
       <line x1="140" y1="54" x2="178" y2="54" stroke="#808090" stroke-width="1.3" marker-end="url(#a)"/>
       <rect x="180" y="34" width="120" height="40" rx="5" fill="#161618" stroke="#2a2a30" stroke-width="1.3"/>
       <text x="240" y="52" fill="#d0d0e0" font-size="11" text-anchor="middle">topology.json</text>
@@ -420,6 +420,15 @@
     <tr><td>flowToSpec / save (geometry)</td><td>serialize Go-owned values back to disk</td><td>Go writes its own values directly</td></tr>
     <tr><td>manifest file</td><td>—</td><td>there is none; the tree is self-describing</td></tr>
   </table>
+
+  <h2>The React-Flow vestige is shed</h2>
+  <p>This redesign also <strong>retires the React-Flow-vestige surface</strong> — the parallel-copy seam this work eliminates is the same seam the old "flow" vocabulary named. React Flow was already fully removed from the project (not a dependency, zero <code>reactflow</code> imports); what survives are vestigial names left over from the 2D-React-Flow → 3D-R3F cutover.</p>
+  <ul>
+    <li><code>flowToSpec</code> / <code>specToFlow</code> (the editor-serializes-geometry path, a.k.a. <code>spec-to-flow-helpers</code>) is <strong>removed</strong>: Go owns persistence, so nothing serializes geometry back to disk.</li>
+    <li>The <code>RFNode</code> / <code>RFEdge</code> types and the "flow" adapter names are <strong>renamed to neutral editor-state names</strong> (the editor's in-memory node/edge state). The "RF"/"flow" prefix is a vestige of the removed React Flow library — never a live dependency — and rendering is done by R3F / three.js.</li>
+    <li>Net: the React-Flow vocabulary goes away together with the seam it named.</li>
+  </ul>
+  <div class="callout open"><strong>OPEN follow-up.</strong> The exact rename scope (which symbols → which neutral names) is a follow-up detail; the vestige itself is shed by this work.</div>
 
   <h2>Why no restart</h2>
   <p><strong>Current sequence:</strong> write → <code>onDidChangeTextDocument</code> → webview reload → ~300 ms → Go stop + respawn. It existed because of <em>two missing things</em>: an external change carried <strong>no diff</strong>, and Go had <strong>no in-process reload</strong> — so the only recovery was rebuild-from-scratch.</p>
