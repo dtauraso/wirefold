@@ -34,7 +34,7 @@ func TestRefillSlideClockPaced(t *testing.T) {
 
 	// rowPitch and duration mirror emitRefillSlide.
 	rowPitch := interiorSlotOffset(0, 0).Y - interiorSlotOffset(1, 0).Y
-	durationMs := rowPitch / PulseSpeedWuPerMs
+	durationMs := rowPitch / PulseSpeedWuPerMs * interiorSlideDurationMul
 	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
 
 	// Advance the clock past the full slide duration in 16ms steps. A couple extra
@@ -52,9 +52,12 @@ func TestRefillSlideClockPaced(t *testing.T) {
 		close(advanceDone)
 	}()
 
+	// Timeout derives from the step count (each step sleeps ~1ms) plus generous
+	// slack, so it scales with interiorSlideDurationMul rather than a fixed bound.
+	timeout := time.Duration(totalSteps)*10*time.Millisecond + 2*time.Second
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(timeout):
 		t.Fatal("emitRefillSlide did not finish")
 	}
 	<-advanceDone
