@@ -34,7 +34,7 @@ const (
 	// delivery goroutine emits one every ~16 ms while a bead is in flight,
 	// carrying the bead's evaluated 3-D position so the renderer plots it without
 	// computing geometry itself.
-	KindPosition       = "position"
+	KindPosition       = "edge-bead"
 	// KindGeometry carries an edge's authoritative straight-segment endpoints
 	// (Phase 3). Go owns node positions + per-edge segments; it emits one geometry
 	// event per edge on load and again whenever a node-move re-derives that edge's
@@ -60,13 +60,23 @@ const (
 	// pulse represents a bead in flight and must vanish on arrival, not linger at the
 	// port until the node's firing rule consumes the held value.
 	KindArrive = "arrive"
+	// KindNodeBead carries one INTERIOR slot's authoritative grid-slot state
+	// (node 1's depleting/refilling buffer). Node 1's Update computes the 2x2 grid
+	// slot positions coupled to the working/backup array mutation and emits a 4-slot
+	// SNAPSHOT (one node-bead event per slot) via its injected EmitNodeBeads closure
+	// on each array change. Keyed by node id + (row,col): row 0 = top/backup, row 1 =
+	// bottom/working; col is the index within that row. Payload = present (filled?) +
+	// value (0|1) + world position (x,y,z). A popped slot is emitted with present=false
+	// so TS clears it (absence can't be rendered, presence can).
+	// Discrete positions only this phase — beads snap to their slots (no slide yet).
+	KindNodeBead = "node-bead"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -120,6 +130,19 @@ type Event struct {
 	// Keyed by Node (the node id). Set on node-geometry events only.
 	NX, NY, NZ float64
 	Ports      []PortGeom
+	// Radius carries the node body/ring sphere radius on node-geometry events
+	// (KindNodeGeometry) — Go-owned (min(w,h)/CurveParamNodeRadiusDivisor). The
+	// renderer reads it for the body/ring instead of recomputing from node dims.
+	Radius float64
+	// Row/Col identify an interior bead's grid slot on node-bead events
+	// (KindNodeBead): Row 0 = top/backup, Row 1 = bottom/working; Col is the
+	// position in that row's slice. Keyed by Node + (Row,Col). X/Y/Z carry the
+	// slot's world position and Value the bead value (0|1). Set on node-bead only.
+	// Present marks whether the slot is FILLED: a node-bead snapshot emits ALL 4
+	// slots on each array change — Present=true (with Value+position) for filled
+	// slots, Present=false for empty (popped) slots so TS can clear them.
+	Row, Col int
+	Present  bool
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -248,8 +271,8 @@ func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
 // carries each port's world position + direction. Each node's goroutine calls this
 // once on startup via its injected EmitGeometry closure (the node owns its geometry
 // emission; wires still own bead-position emission).
-func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom) {
-	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Ports: ports})
+func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz, radius float64, ports []PortGeom) {
+	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Radius: radius, Ports: ports})
 }
 
 // Arrive marks a bead completing its traversal — delivered into the destination
@@ -258,6 +281,18 @@ func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz float64, ports []PortGeom
 // The wire's deliverLocked is the single caller; it fires exactly once per bead.
 func (t *Trace) Arrive(node, port string, value int) {
 	t.emit(Event{Kind: KindArrive, Node: node, Port: port, Value: value})
+}
+
+// NodeBead emits one interior grid SLOT's authoritative state (node 1's 2x2
+// buffer), keyed by node id + (row,col): row 0 = top/backup, row 1 =
+// bottom/working; col is the index within that row. present marks whether the slot
+// is filled; value is the bead value (0|1) and x/y/z the slot's world position
+// (meaningful when present). Node 1's Update calls this for ALL 4 slots whenever the
+// working/backup arrays change (the seed pop, each feedback pop, each refill) — a
+// 4-slot snapshot, with empty slots carrying present=false so TS clears them.
+// Discrete positions only — beads snap to their slots; no slide interpolation yet.
+func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x, y, z float64) {
+	t.emit(Event{Kind: KindNodeBead, Node: nodeID, Row: row, Col: col, Present: present, Value: value, X: x, Y: y, Z: z, hasPos: true})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -473,13 +508,26 @@ func marshalEvent(e Event) ([]byte, error) {
 		DZ      float64 `json:"dz"`
 	}
 	type nodeGeometry struct {
-		Step  int            `json:"step"`
-		Kind  string         `json:"kind"`
-		Node  string         `json:"node"`
-		NX    float64        `json:"nx"`
-		NY    float64        `json:"ny"`
-		NZ    float64        `json:"nz"`
-		Ports []portGeomJSON `json:"ports"`
+		Step   int            `json:"step"`
+		Kind   string         `json:"kind"`
+		Node   string         `json:"node"`
+		NX     float64        `json:"nx"`
+		NY     float64        `json:"ny"`
+		NZ     float64        `json:"nz"`
+		Radius float64        `json:"radius"`
+		Ports  []portGeomJSON `json:"ports"`
+	}
+	type nodeBead struct {
+		Step    int     `json:"step"`
+		Kind    string  `json:"kind"`
+		Node    string  `json:"node"`
+		Row     int     `json:"row"`
+		Col     int     `json:"col"`
+		Present bool    `json:"present"`
+		Value   int     `json:"value"`
+		X       float64 `json:"x"`
+		Y       float64 `json:"y"`
+		Z       float64 `json:"z"`
 	}
 	switch e.Kind {
 	case KindFire:
@@ -509,7 +557,10 @@ func marshalEvent(e Event) ([]byte, error) {
 		for i, p := range e.Ports {
 			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
 		}
-		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Ports: ports})
+		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, Ports: ports})
+	case KindNodeBead:
+		// row/col/present/value/position always emitted (0/false is valid for each).
+		return json.Marshal(nodeBead{Step: e.Step, Kind: e.Kind, Node: e.Node, Row: e.Row, Col: e.Col, Present: e.Present, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

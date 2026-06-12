@@ -13,7 +13,7 @@
 //     → pulse-state.ts:setPulse  records { value, simStep, target, targetHandle }
 //       (pos starts null — bead hidden until the first position arrives)
 //
-//  2. Go emits "position" (node, port, x, y, z) every ~16 ms while in flight, and
+//  2. Go emits "edge-bead" (node, port, x, y, z) every ~16 ms while in flight, and
 //     once more at t==1 just before delivery
 //     → pump.ts  filters ALL RF edges by source+sourceHandle (fan-out)
 //     → pulse-state.ts:setPulsePos  sets the bead's Go-computed world position;
@@ -29,6 +29,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
+import { setInteriorBead } from "./interior-bead-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useNodeGeometryStore } from "./node-geometry";
 
@@ -72,11 +73,11 @@ export function handleTraceEvent(event: TraceEvent): void {
       }
       return;
     }
-    case "position": {
+    case "edge-bead": {
       // Go's per-frame bead position (Phase 2). Match ALL edges by source node id
       // + sourceHandle (fan-out), same key as send, and set the bead's world
       // position directly — TS plots, computes no geometry.
-      const { node, port, x, y, z, f } = event as Extract<TraceEvent, { kind: "position" }>;
+      const { node, port, x, y, z, f } = event as Extract<TraceEvent, { kind: "edge-bead" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
@@ -123,6 +124,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       useNodeGeometryStore.getState().setNodeGeometry(
         e.node,
         { x: e.nx, y: e.ny, z: e.nz },
+        e.radius,
         e.ports.map((p) => ({
           name: p.name,
           isInput: p.isInput,
@@ -146,6 +148,16 @@ export function handleTraceEvent(event: TraceEvent): void {
       for (const edge of matched) {
         clearPulse(edge.id);
       }
+      return;
+    }
+    case "node-bead": {
+      // One slot of node 1's 2x2 interior buffer (Go-computed slot position + present
+      // flag, keyed by node + row/col). Go emits a 4-slot snapshot per array change;
+      // each event writes one slot into the interior-bead store. present=false marks
+      // the slot empty so a popped bead disappears. Pure store-write — pump computes
+      // no geometry (Go owns the slot positions); InteriorBeads renders from the store.
+      const { node, row, col, present, value, x, y, z } = event as Extract<TraceEvent, { kind: "node-bead" }>;
+      setInteriorBead(node, row, col, present, value ?? 0, { x, y, z });
       return;
     }
     // PUMP_DONE_HANDLER

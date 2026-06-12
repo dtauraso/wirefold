@@ -317,8 +317,8 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// ASSERTION 1: no position events while the clock is halted.
-	if sink.contains(`"kind":"position"`) {
-		t.Fatal("position event emitted while clock was halted; halted-start gate is broken")
+	if sink.contains(`"kind":"edge-bead"`) {
+		t.Fatal("edge-bead event emitted while clock was halted; halted-start gate is broken")
 	}
 
 	// ASSERTION 2: geometry events MUST have been emitted synchronously by
@@ -361,7 +361,7 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 	}
 
 	// ASSERTION 3: position events flowed after resume.
-	if !sink.contains(`"kind":"position"`) {
+	if !sink.contains(`"kind":"edge-bead"`) {
 		t.Fatalf("no position events emitted after Resume+Advance; delivery goroutines should emit positions.\nTrace:\n%s",
 			sink.String())
 	}

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -68,6 +69,11 @@ type PortBindings struct {
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
 	outSink map[string]*Out
+	// clock is the single monotonic clock the loader shares with every PacedWire.
+	// reflectBuild injects it into nodes that need clock-paced interior animation
+	// (the Input node's refill slide). Test builds without a loader leave it nil,
+	// and such nodes fall back to an instant refill.
+	clock Clock
 }
 
 func newPortBindings() PortBindings {
@@ -154,7 +160,9 @@ var (
 	tInPtr    = reflect.TypeFor[*In]()
 	tOutPtr   = reflect.TypeFor[*Out]()
 	tOutMulti = reflect.TypeFor[OutMulti]()
-	tFireFunc = reflect.TypeFor[func()]()
+	tFireFunc      = reflect.TypeFor[func()]()
+	tEmitBeadsFunc = reflect.TypeFor[func(working, backup []int)]()
+	tRefillSlideFunc = reflect.TypeFor[func(beads []int)]()
 )
 
 // lowerFirst returns s with its first byte lowercased.
@@ -238,6 +246,34 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 						o.End.X, o.End.Y, o.End.Z)
 				}
 			}
+		}))
+	}
+
+	// Inject EmitNodeBeads closure if the struct has an `EmitNodeBeads
+	// func(working, backup []int)` field (node 1's interior buffer). The closure
+	// captures this node's id + nodeGeom and emits one node-bead event per present
+	// interior bead, computing each slot position from the node center + grid gaps.
+	// Same per-goroutine pattern as EmitGeometry: the node's Update calls it with the
+	// LIVE working/backup contents whenever the arrays change.
+	if f := v.FieldByName("EmitNodeBeads"); f.IsValid() && f.CanSet() && f.Type() == tEmitBeadsFunc {
+		nodeName := name
+		g := geom
+		f.Set(reflect.ValueOf(func(working, backup []int) {
+			emitNodeBeads(tr, nodeName, g, working, backup)
+		}))
+	}
+
+	// Inject EmitRefillSlide closure if the struct has an `EmitRefillSlide
+	// func(beads []int)` field AND a clock is available (loader path). The closure
+	// captures this node's id + the shared clock and runs the clock-paced refill
+	// slide: the OLD backup beads slide DOWN from the top row (row 0) into the
+	// working row (row 1) at human (wire-bead) speed. Without a clock (test build
+	// with no loader) the field stays nil and the node falls back to instant refill.
+	if f := v.FieldByName("EmitRefillSlide"); f.IsValid() && f.CanSet() && f.Type() == tRefillSlideFunc && pb.clock != nil {
+		nodeName := name
+		clk := pb.clock
+		f.Set(reflect.ValueOf(func(beads []int) {
+			emitRefillSlide(ctx, tr, nodeName, clk, beads)
 		}))
 	}
 
@@ -400,7 +436,96 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 	for _, p := range g.Outputs {
 		appendPort(p.Name, false)
 	}
-	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), ports)
+}
+
+// emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one
+// node-bead event per fixed slot (rows {0,1} × cols {0,1}). The event's x/y/z
+// carry the NODE-LOCAL OFFSET (interiorSlotOffset, relative to the node center —
+// NOT a world position); TS renders each bead as a child of the node group, so
+// the node center is composed by the scene graph and the beads ride the node on
+// move (no re-emit needed). backup is the top row (row 0), working is the bottom
+// row (row 1); a slot is PRESENT when its row's slice is at least col+1 long,
+// ABSENT (popped) otherwise. Absent slots are emitted with present=false (and
+// value 0) so TS can clear them — absence can't be rendered, but an explicit empty
+// slot can. Discrete positions only (beads snap to slots; no slide yet). Called from
+// the node's injected EmitNodeBeads closure whenever the arrays change. g is no
+// longer used for geometry (offsets are node-local) but kept for signature parity.
+func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []int) {
+	_ = g
+	const cols = 2
+	emitRow := func(row int, slice []int) {
+		for col := 0; col < cols; col++ {
+			p := interiorSlotOffset(row, col)
+			if col < len(slice) {
+				tr.NodeBead(nodeName, row, col, true, slice[col], p.X, p.Y, p.Z)
+			} else {
+				tr.NodeBead(nodeName, row, col, false, 0, p.X, p.Y, p.Z)
+			}
+		}
+	}
+	emitRow(0, backup)  // top row = backup
+	emitRow(1, working) // bottom row = working
+}
+
+// interiorSlideDurationMul stretches the refill-slide duration past raw pulse
+// speed so the short row-pitch slide is readable (~0.9s instead of ~0.15s).
+const interiorSlideDurationMul = 6.0
+
+// emitRefillSlide runs the clock-paced animated refill for the Input node's
+// interior buffer: the OLD backup row (row 0, top) slides DOWN into the working
+// row (row 1, bottom) at human speed (the same wire-bead pulse speed), so a paused
+// clock freezes the slide just like every wire. beads is the OLD backup contents
+// that are becoming the new working row.
+//
+// Geometry: each bead animates from its row-0 slot offset to its row-1 slot offset
+// — a downward translation of rowPitch = row0.y − row1.y in local y. Duration at
+// human speed = rowPitch / PulseSpeedWuPerMs ms. The clock loops from t=0 to t=1 in
+// positionEmitIntervalMs (16ms) steps via WaitUntil (pause-aware). Each frame:
+//   - row 1, every col: present, value = beads[col], offset = lerp(row0,row1,t)
+//     (keyed to the DESTINATION bottom slot, sliding down from the top position).
+//   - row 0, every col: present=false (the top row is empty during the slide).
+// At t=1 the bottom beads sit exactly at their row-1 offset.
+func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Clock, beads []int) {
+	if clk == nil || len(beads) == 0 {
+		return
+	}
+	row0Y := interiorSlotOffset(0, 0).Y
+	row1Y := interiorSlotOffset(1, 0).Y
+	rowPitch := row0Y - row1Y // downward translation distance (local y, positive)
+	// The slide distance (one row pitch) is tiny next to a wire, so at raw pulse
+	// speed it finishes in ~150ms (too fast to read). interiorSlideDurationMul
+	// stretches it to a watchable pace; the clock is still pause-aware.
+	durationMs := rowPitch / PulseSpeedWuPerMs * interiorSlideDurationMul
+	duration := time.Duration(durationMs * float64(time.Millisecond))
+	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
+
+	start := clk.Now()
+	emitFrame := func(t float64) {
+		for col := 0; col < len(beads); col++ {
+			a := interiorSlotOffset(0, col)
+			b := interiorSlotOffset(1, col)
+			tr.NodeBead(nodeName, 1, col, true, beads[col],
+				a.X+(b.X-a.X)*t, a.Y+(b.Y-a.Y)*t, a.Z+(b.Z-a.Z)*t)
+		}
+		for col := 0; col < len(beads); col++ {
+			p := interiorSlotOffset(0, col)
+			tr.NodeBead(nodeName, 0, col, false, 0, p.X, p.Y, p.Z)
+		}
+	}
+
+	emitFrame(0) // initial frame: beads at the top, top row cleared
+	for target := step; ; target += step {
+		if err := clk.WaitUntil(ctx, start+target); err != nil {
+			return
+		}
+		t := float64(clk.Now()-start) / float64(duration)
+		if t >= 1 {
+			emitFrame(1) // land exactly on the bottom row
+			return
+		}
+		emitFrame(t)
+	}
 }
 
 // NodeBuilder is the public-facing type consumed by the loader.

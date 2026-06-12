@@ -45,10 +45,10 @@ export type WebviewToHostMsg =
   | EditMsg;
 
 // Mirrors Go Trace.Event shape. kind ∈
-// {"recv","fire","send","done","position","geometry","pulse-cancelled"}.
+// {"recv","fire","send","done","edge-bead","geometry","pulse-cancelled"}.
 // recv/send carry port+value; fire carries only node; send also carries edge
 // when the Go side has resolved it (currently omitted — raw form only).
-// position (Phase 2) carries the bead's Go-computed 3-D world position (x,y,z) plus
+// edge-bead (Phase 2) carries the bead's Go-computed 3-D world position (x,y,z) plus
 // its FRACTIONAL progress t along the wire (f, 0..1), keyed by source node+port like
 // send so the renderer routes it by source+sourceHandle. Go owns progress; the editor
 // places the bead at lerp(liveStart, liveEnd, f) on its LOCAL (dragged) node port
@@ -62,11 +62,12 @@ export type TraceEvent =
   | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
   | { step: number; kind: "send"; node: string; port?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
   | { step: number; kind: "done"; node: string; port: string }
-  | { step: number; kind: "position"; node: string; port: string; value?: number; x: number; y: number; z: number; f: number }
+  | { step: number; kind: "edge-bead"; node: string; port: string; value?: number; x: number; y: number; z: number; f: number }
   | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
   | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number }
   | { step: number; kind: "arrive"; node: string; port: string; value?: number }
-  | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] };
+  | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; radius: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
+  | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
