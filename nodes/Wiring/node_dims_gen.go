@@ -12,6 +12,6 @@ type kindDim struct{ Width, Height float64 }
 var kindDims = map[string]kindDim{
 	"ChainInhibitor": {Width: 90, Height: 60},
 	"InhibitRightGate": {Width: 110, Height: 36},
-	"Input": {Width: 80, Height: 60},
+	"Input": {Width: 120, Height: 120},
 	"ReadGate": {Width: 70, Height: 40},
 }

@@ -1,6 +1,7 @@
 package Wiring
 
 import (
+	"math"
 	"testing"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -71,25 +72,48 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 	}
 }
 
-// TestInteriorSlotPosFormula pins the slotPos(row,col) formula:
+// TestInteriorSlotPosFormula pins the radius-based slotPos(row,col) formula:
 //
-//	x = cx + (col-0.5)*colGap ; y = cy + (0.5-row)*rowGap ; z = cz
+//	slot  = r * interiorSlotFrac ; pitch = 2*slot
+//	x = cx + (col-0.5)*pitch ; y = cy + (0.5-row)*pitch ; z = cz
 //
-// with colGap = w*0.40, rowGap = h*0.40 and (cx,cy,cz) = nodeWorldPos.
+// with r = nodeRadius("Input") and (cx,cy,cz) = nodeWorldPos.
 func TestInteriorSlotPosFormula(t *testing.T) {
 	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 5}}
-	w, h := kindWidthHeight("Input") // 80, 60
-	colGap := w * interiorColGapFrac // 32
-	rowGap := h * interiorRowGapFrac // 24
+	pitch := 2 * nodeRadius("Input") * interiorSlotFrac
 	c := nodeWorldPos(g)
 
 	cases := []struct{ row, col int }{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
 	for _, tc := range cases {
 		got := interiorSlotPos(g, tc.row, tc.col)
-		wantX := c.X + (float64(tc.col)-0.5)*colGap
-		wantY := c.Y + (0.5-float64(tc.row))*rowGap
+		wantX := c.X + (float64(tc.col)-0.5)*pitch
+		wantY := c.Y + (0.5-float64(tc.row))*pitch
 		if got.X != wantX || got.Y != wantY || got.Z != c.Z {
 			t.Errorf("slot(%d,%d) = (%v,%v,%v), want (%v,%v,%v)", tc.row, tc.col, got.X, got.Y, got.Z, wantX, wantY, c.Z)
+		}
+	}
+}
+
+// TestInteriorBeadsInsideSphere asserts each of the 4 interior bead CENTERS sits
+// far enough inside the node sphere that the whole bead (radius INTERIOR_BEAD_R)
+// stays within the surface: dist(center, slot) ≤ r - INTERIOR_BEAD_R. Uses the
+// real Input dims + divisor.
+func TestInteriorBeadsInsideSphere(t *testing.T) {
+	const interiorBeadR = 5.0 // mirrors INTERIOR_BEAD_R in scene-content.tsx
+	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 0}}
+	r := nodeRadius("Input")
+	center := nodeWorldPos(g)
+	limit := r - interiorBeadR
+	if limit <= 0 {
+		t.Fatalf("node radius %v too small for bead radius %v", r, interiorBeadR)
+	}
+	cases := []struct{ row, col int }{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+	for _, tc := range cases {
+		p := interiorSlotPos(g, tc.row, tc.col)
+		dx, dy, dz := p.X-center.X, p.Y-center.Y, p.Z-center.Z
+		dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
+		if dist > limit {
+			t.Errorf("slot(%d,%d): center dist %v > r-beadR %v (r=%v) — bead pokes outside sphere", tc.row, tc.col, dist, limit, r)
 		}
 	}
 }

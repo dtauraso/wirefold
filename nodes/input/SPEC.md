@@ -15,8 +15,8 @@
 | shape | rect |
 | fill | #e0e0e0 |
 | stroke | #666 |
-| width | 80 |
-| height | 60 |
+| width | 120 |
+| height | 120 |
 
 ## Non-channel fields
 

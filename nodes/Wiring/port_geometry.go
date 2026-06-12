@@ -33,33 +33,32 @@ type nodeGeom struct {
 	Outputs  []portGeom
 }
 
-// Interior 2x2 grid pitch as fractions of the node body dimensions. The grid is
-// centered on the node: two columns split horizontally and two rows split
-// vertically, each gap a fraction of the body's width/height so the four beads sit
-// comfortably inside the node.
-const (
-	interiorColGapFrac = 0.40 // column pitch = width  * frac
-	interiorRowGapFrac = 0.40 // row pitch    = height * frac
-)
+// interiorSlotFrac sets the 2x2 grid half-pitch as a fraction of the node SPHERE
+// RADIUS (not the box): a slot center sits at ±(r*interiorSlotFrac) from the node
+// center on each axis, so a corner bead center lands at r*frac*√2 ≈ 0.64r — well
+// inside the radius-r sphere even after adding the bead radius. Square grid:
+// colPitch = rowPitch = 2 * r * frac.
+const interiorSlotFrac = 0.45
 
 // interiorSlotPos returns the world position of the 2x2 interior grid slot at
 // (row, col): row 0 = top/backup, row 1 = bottom/working; col 0 = left, col 1 =
-// right. Mirrors the spec slotPos(row,col):
+// right. The grid is derived from the node SPHERE RADIUS so the four beads always
+// sit inside the rendered sphere with margin:
 //
-//	x = cx + (col - 0.5) * colGap
-//	y = cy + (0.5 - row) * rowGap
+//	slot    = r * interiorSlotFrac      (r = min(w,h)/CurveParamNodeRadiusDivisor)
+//	x = cx + (col - 0.5) * 2*slot
+//	y = cy + (0.5 - row) * 2*slot
 //	z = cz
 //
-// where (cx,cy,cz) is the node center (nodeWorldPos) and colGap/rowGap derive from
-// the node body dimensions. Discrete — beads snap to these slot centers.
+// where (cx,cy,cz) is the node center (nodeWorldPos). Discrete — beads snap to
+// these slot centers.
 func interiorSlotPos(g nodeGeom, row, col int) vec3 {
-	w, h := kindWidthHeight(g.Kind)
-	colGap := w * interiorColGapFrac
-	rowGap := h * interiorRowGapFrac
+	slot := nodeRadius(g.Kind) * interiorSlotFrac
+	pitch := 2 * slot
 	center := nodeWorldPos(g)
 	return vec3{
-		X: center.X + (float64(col)-0.5)*colGap,
-		Y: center.Y + (0.5-float64(row))*rowGap,
+		X: center.X + (float64(col)-0.5)*pitch,
+		Y: center.Y + (0.5-float64(row))*pitch,
 		Z: center.Z,
 	}
 }
