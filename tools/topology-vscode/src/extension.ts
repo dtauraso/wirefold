@@ -46,11 +46,13 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
 
   const post = (msg: HostToWebviewMsg) => panel.webview.postMessage(msg);
+  let lastSpec: { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined;
   const runner = new BuildAndRunRunner(
     (status) => post({ type: "run-status", ...status }),
     (event) => post({ type: "trace-event", event }),
     (spec) => {
-      // Go emitted the spec on startup — send it to the webview as a load message.
+      // Go emitted the spec on startup — cache it and send it to the webview as a load message.
+      lastSpec = spec;
       post({ type: "load", text: JSON.stringify(spec) });
     },
   );
@@ -95,13 +97,18 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     runner.dispose();
   });
 
-  panel.webview.onDidReceiveMessage((raw) =>
+  panel.webview.onDidReceiveMessage((raw) => {
+    // If the webview just mounted and we have a cached spec, replay it so the
+    // diagram renders even when Go's one-shot startup emission beat the listener.
+    if (typeof raw === "object" && raw !== null && (raw as { type?: string }).type === "ready" && lastSpec !== undefined) {
+      post({ type: "load", text: JSON.stringify(lastSpec) });
+    }
     handleMessage(raw, {
       runner,
       post,
       send: () => Promise.resolve(true), // no-op: Go sends spec on startup
-    }),
-  );
+    });
+  });
 
   // Spawn Go immediately (halted); it emits spec on startup which triggers load.
   runner.run(topologyPath);
