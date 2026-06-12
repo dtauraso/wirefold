@@ -14,6 +14,13 @@ type Node struct {
 	// node's geometry). Called whenever working/backup change so the emitted set
 	// always reflects the live arrays. Discrete positions only this phase.
 	EmitNodeBeads func(working, backup []int)
+	// EmitRefillSlide runs the clock-paced animated refill: the OLD backup (top
+	// row) slides DOWN into the working (bottom) row at human speed. Injected by
+	// Wiring.reflectBuild (captures this node's id + geometry + the shared clock).
+	// It blocks for the slide duration (pause-aware). nil on test builds without
+	// injection — the caller then falls back to the instant refill. beads is the
+	// OLD backup contents that become the new working row.
+	EmitRefillSlide func(beads []int)
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
 	ToReadGate  *Wiring.Out
@@ -112,6 +119,12 @@ func (n *Node) Update(ctx context.Context) {
 			// s == 1: POP the end (change the bead); refill when action empties.
 			working = working[:len(working)-1]
 			if len(working) == 0 {
+				// Animated refill: the top row (backup) SLIDES DOWN into the
+				// working row at human speed (clock-paced, pause-aware). After the
+				// slide lands, the new top row appears via the full emitBeads below.
+				if n.EmitRefillSlide != nil {
+					n.EmitRefillSlide(backup)
+				}
 				working = backup
 				backup = append([]int(nil), init...)
 			}

@@ -313,6 +313,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		bind := Registry[n.Type]
 		pb := newPortBindings()
 		pb.outSink = outSink
+		pb.clock = clk // shared clock for clock-paced interior animation (Input refill slide)
 
 		for _, port := range bind.Ports {
 			switch port.Dir {
