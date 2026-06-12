@@ -23,10 +23,6 @@ export function setRunStatusImperative(next: RunStatusUI) {
   _setter?.(next);
 }
 
-export function getRunStatus(): RunStatusUI {
-  return _current;
-}
-
 export const RunStatusCtx = createContext<RunStatusUI>({ state: "idle" });
 
 export function useRunStatusCtx(): RunStatusUI {

@@ -96,8 +96,6 @@ func newPortBindings() PortBindings {
 	}
 }
 
-func (pb *PortBindings) SetSingle(name string, ch chan int) { pb.single[name] = ch }
-
 func (pb *PortBindings) SetSinglePaced(name string, pw *PacedWire) { pb.singlePaced[name] = pw }
 
 // SetSinglePacedRule binds a single paced output with its per-edge send rule,
@@ -111,10 +109,6 @@ func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule Send
 	pb.singleLatency[name] = simLatencyMs
 	pb.singleSegment[name] = seg
 	pb.singleLabel[name] = label
-}
-
-func (pb *PortBindings) AppendMulti(name string, ch chan int) {
-	pb.multi[name] = append(pb.multi[name], ch)
 }
 
 // AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact

@@ -196,8 +196,9 @@ func portDir(g nodeGeom, portName string, isInput bool) (vec3, bool) {
 	return dir.normalize(), true
 }
 
-// portWorldPos mirrors portWorldPos() in geometry-helpers.ts: the sphere-surface
-// point in the port direction, or the node center when the port is unnamed/unknown.
+// portWorldPos returns the sphere-surface point in the port direction, or the
+// node center when the port is unnamed/unknown. This is the authoritative port
+// placement (Go owns geometry); the TS renderer plots from Go's streamed segments.
 func portWorldPos(g nodeGeom, portName string, isInput bool) vec3 {
 	center := nodeWorldPos(g)
 	if portName == "" {

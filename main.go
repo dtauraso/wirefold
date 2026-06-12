@@ -89,14 +89,6 @@ func RunTest(dur time.Duration, tracePath string, topologyPath string) {
 	runTopology(ctx, cancel, tracePath, topologyPath, W.NewRealClock())
 }
 
-// RunTestClock wires the topology under the caller's context and clock, so a test
-// can drive delivery deterministically by advancing a FakeClock. It does not set
-// its own timeout — the caller's ctx governs lifetime. Returns when ctx is done
-// or all nodes exit.
-func RunTestClock(ctx context.Context, cancel context.CancelFunc, tracePath, topologyPath string, clk W.Clock) {
-	runTopology(ctx, cancel, tracePath, topologyPath, clk)
-}
-
 func main() {
 	tracePath := flag.String("trace", "", "if set, write a raw JSONL trace to this path on shutdown")
 	dur := flag.Duration("duration", 0, "if non-zero, run for this duration then exit (test mode)")

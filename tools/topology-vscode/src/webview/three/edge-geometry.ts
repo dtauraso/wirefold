@@ -39,8 +39,3 @@ export const useEdgeGeometryStore = create<EdgeGeometryState>((set) => ({
       return { segments: next };
     }),
 }));
-
-/** Non-React read of one edge's Go-streamed segment (for imperative call sites). */
-export function getEdgeSegment(edgeId: string): EdgeSegment | undefined {
-  return useEdgeGeometryStore.getState().segments[edgeId];
-}

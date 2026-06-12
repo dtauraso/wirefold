@@ -18,12 +18,3 @@ export function setViewerState(next: ViewerState) {
 export function patchViewerState(fn: (v: ViewerState) => void) {
   viewerState = produce(viewerState, fn);
 }
-
-export function mutateViewer<T>(fn: (v: ViewerState) => T): T {
-  let result!: T;
-  const next = produce(viewerState, (draft) => {
-    result = fn(draft) as T;
-  });
-  if (next !== viewerState) viewerState = next;
-  return result;
-}

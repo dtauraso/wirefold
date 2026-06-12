@@ -9,5 +9,3 @@ export const ANIMATION_FIELDS = {
   pulse:    { name: "pulse"    as const, kind: "edge" as const, type: {} as { value: number; simStep: number } },
   lastFire: { name: "lastFire" as const, kind: "node" as const, type: {} as number },
 } as const;
-
-export type AnimationFieldName = keyof typeof ANIMATION_FIELDS;
