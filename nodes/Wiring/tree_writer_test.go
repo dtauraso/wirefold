@@ -1,6 +1,7 @@
 package Wiring
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -34,6 +35,13 @@ func TestWriteViewNodeRoundTrip(t *testing.T) {
 	want := specPosition{X: 99, Y: 88, Z: 77}
 	if err := writeViewNode(root, nodeID, want); err != nil {
 		t.Fatalf("writeViewNode: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "view", "nodes", nodeID+".json"))
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if bytes.ContainsRune(raw, '\n') {
+		t.Errorf("written file is not compact (contains newline): %q", raw)
 	}
 	spec2, err := loadTree(root)
 	if err != nil {

@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 )
 
-// writeJSONAtomic marshals v with indent, writes to path+".tmp", then renames to path.
+// writeJSONAtomic marshals v compactly, writes to path+".tmp", then renames to path.
+// Output is single-line, no trailing newline, matching the fixture style.
 // Creates parent directories as needed.
 func writeJSONAtomic(path string, v any) error {
-	data, err := json.MarshalIndent(v, "", "  ")
+	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
