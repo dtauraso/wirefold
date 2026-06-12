@@ -54,27 +54,30 @@ const interiorTorusOuterR = interiorBeadR * (1 + interiorTorusTubeFrac) // 5.6
 // size), NOT the node radius — nodeRadius is used only for the wall-fit guarantee.
 const interiorSlot = interiorTorusOuterR + interiorBeadGap/2 // 5.9
 
-// interiorSlotPos returns the world position of the 2x2 interior grid slot at
-// (row, col): row 0 = top/backup, row 1 = bottom/working; col 0 = left, col 1 =
-// right. The grid is sized by the bead's TORUS OUTER RADIUS so adjacent rings
-// keep a small gap and never overlap:
+// interiorSlotOffset returns the NODE-LOCAL OFFSET of the 2x2 interior grid slot
+// at (row, col), relative to the node center (NOT a world position): row 0 =
+// top/backup, row 1 = bottom/working; col 0 = left, col 1 = right. The grid is
+// sized by the bead's TORUS OUTER RADIUS so adjacent rings keep a small gap and
+// never overlap:
 //
-//	slot    = interiorTorusOuterR + interiorBeadGap/2
-//	x = cx + (col - 0.5) * 2*slot
-//	y = cy + (0.5 - row) * 2*slot
-//	z = cz
+//	slot   = interiorTorusOuterR + interiorBeadGap/2
+//	dx = (col - 0.5) * 2*slot
+//	dy = (0.5 - row) * 2*slot
+//	dz = 0
 //
-// where (cx,cy,cz) is the node center (nodeWorldPos). Discrete — beads snap to
-// these slot centers. The corner bead's torus reach (slot*√2 + rt) must stay
-// inside the node sphere radius r (see TestInteriorBeadsInsideSphere).
-func interiorSlotPos(g nodeGeom, row, col int) vec3 {
+// The grid is centered on the node, so offsets are symmetric about (0,0). TS
+// renders the bead as a child of the node group, so its world position =
+// node center + offset is composed by the scene graph (no node center added on
+// the Go side). Discrete — beads snap to these slot centers. The corner bead's
+// torus reach (|offset| + rt) must stay inside the node sphere radius r (see
+// TestInteriorBeadsInsideSphere). The Z offset is always 0 (grid is planar).
+func interiorSlotOffset(row, col int) vec3 {
 	slot := interiorSlot
 	pitch := 2 * slot
-	center := nodeWorldPos(g)
 	return vec3{
-		X: center.X + (float64(col)-0.5)*pitch,
-		Y: center.Y + (0.5-float64(row))*pitch,
-		Z: center.Z,
+		X: (float64(col) - 0.5) * pitch,
+		Y: (0.5 - float64(row)) * pitch,
+		Z: 0,
 	}
 }
 

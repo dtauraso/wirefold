@@ -43,7 +43,7 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 		if e.Value != wantVal[s] {
 			t.Errorf("slot %+v: value=%d, want %d", s, e.Value, wantVal[s])
 		}
-		p := interiorSlotPos(g, e.Row, e.Col)
+		p := interiorSlotOffset(e.Row, e.Col)
 		if e.X != p.X || e.Y != p.Y || e.Z != p.Z {
 			t.Errorf("slot %+v: pos=(%v,%v,%v), want (%v,%v,%v)", s, e.X, e.Y, e.Z, p.X, p.Y, p.Z)
 		}
@@ -72,41 +72,38 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 	}
 }
 
-// TestInteriorSlotPosFormula pins the torus-aware slotPos(row,col) formula:
+// TestInteriorSlotOffsetFormula pins the torus-aware slotOffset(row,col) formula —
+// a NODE-LOCAL offset centered at the origin (no node center added):
 //
-//	slot  = interiorTorusOuterR + interiorBeadGap/2 ; pitch = 2*slot
-//	x = cx + (col-0.5)*pitch ; y = cy + (0.5-row)*pitch ; z = cz
+//	slot = interiorTorusOuterR + interiorBeadGap/2 ; pitch = 2*slot
+//	dx = (col-0.5)*pitch ; dy = (0.5-row)*pitch ; dz = 0
 //
-// with (cx,cy,cz) = nodeWorldPos. Pitch follows bead size, not node radius.
-func TestInteriorSlotPosFormula(t *testing.T) {
-	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 5}}
+// Pitch follows bead size, not node radius.
+func TestInteriorSlotOffsetFormula(t *testing.T) {
 	pitch := 2 * interiorSlot
-	c := nodeWorldPos(g)
 
 	cases := []struct{ row, col int }{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
 	for _, tc := range cases {
-		got := interiorSlotPos(g, tc.row, tc.col)
-		wantX := c.X + (float64(tc.col)-0.5)*pitch
-		wantY := c.Y + (0.5-float64(tc.row))*pitch
-		if got.X != wantX || got.Y != wantY || got.Z != c.Z {
-			t.Errorf("slot(%d,%d) = (%v,%v,%v), want (%v,%v,%v)", tc.row, tc.col, got.X, got.Y, got.Z, wantX, wantY, c.Z)
+		got := interiorSlotOffset(tc.row, tc.col)
+		wantX := (float64(tc.col) - 0.5) * pitch
+		wantY := (0.5 - float64(tc.row)) * pitch
+		if got.X != wantX || got.Y != wantY || got.Z != 0 {
+			t.Errorf("slot(%d,%d) = (%v,%v,%v), want (%v,%v,0)", tc.row, tc.col, got.X, got.Y, got.Z, wantX, wantY)
 		}
 	}
 }
 
 // TestInteriorBeadsInsideSphere asserts each of the 4 interior bead's TORUS reach
-// stays inside the node sphere: dist(center, slot) + interiorTorusOuterR ≤ r.
+// stays inside the node sphere: |offset| + interiorTorusOuterR ≤ r. Offsets are
+// node-local (centered at origin), so the distance is measured from the origin.
 // The torus (outer radius rt), not the sphere, is the bead's true visual extent.
 func TestInteriorBeadsInsideSphere(t *testing.T) {
 	rt := interiorTorusOuterR
-	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 0}}
 	r := nodeRadius("Input")
-	center := nodeWorldPos(g)
 	cases := []struct{ row, col int }{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
 	for _, tc := range cases {
-		p := interiorSlotPos(g, tc.row, tc.col)
-		dx, dy, dz := p.X-center.X, p.Y-center.Y, p.Z-center.Z
-		dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
+		p := interiorSlotOffset(tc.row, tc.col)
+		dist := math.Sqrt(p.X*p.X + p.Y*p.Y + p.Z*p.Z)
 		reach := dist + rt
 		if reach > r {
 			t.Errorf("slot(%d,%d): torus reach %v > r %v — ring pokes outside sphere", tc.row, tc.col, reach, r)

@@ -15,7 +15,8 @@
 export interface InteriorBeadData {
   value: number;
   present: boolean;
-  /** Go-computed slot world position. TS never computes this. */
+  /** Go-computed slot NODE-LOCAL offset (relative to node center). TS never computes
+   *  this; it places the bead as a child of the node group, so world = center + offset. */
   pos: { x: number; y: number; z: number };
 }
 

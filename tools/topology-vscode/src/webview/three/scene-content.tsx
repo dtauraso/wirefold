@@ -273,10 +273,13 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
-      {/* Interior beads are NOT rendered here: node 1's 2x2 buffer comes from the
-          live node-bead stream (Go-authoritative positions), drawn by InteriorBeads
-          in world space alongside the nodes. The old static data.init beads were
-          Input-only and are fully replaced by that stream. */}
+      {/* Interior beads: node 1's 2x2 buffer from the live node-bead stream, rendered
+          as CHILDREN of this node group at Go-given NODE-LOCAL offsets. Because they
+          inherit the group's transform, they ride the node on drag (world position =
+          node center + offset, composed by the scene graph). Every GraphNode mounts
+          the 4 slots; non-Input nodes have no store entries → each slot hides itself. */}
+      <InteriorBeads nodeId={node.id} />
+
       {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
       {(node.data?.inputs ?? []).map((port) => {
         const dir = portDir(node, port.name, true);
@@ -402,11 +405,14 @@ export function PulseBead({
 }
 
 // InteriorBeads: renders node 1's 2x2 interior buffer from the live node-bead
-// stream. Go owns the slot positions and the present/absent state; this component
-// PLOTS ONLY — it reads getInteriorBeadMap() imperatively each frame and places each
-// PRESENT slot's mesh at its Go-supplied world position, hiding empty (popped) slots.
-// TS computes no geometry (no interior layout math) — consistent with the static
-// init beads it replaces. Discrete positions this phase (beads snap; no slide yet).
+// stream as CHILDREN of the node group (mounted inside GraphNode). Go owns the slot
+// offsets (NODE-LOCAL, relative to the node center) and the present/absent state;
+// this component PLOTS ONLY — it reads getInteriorBeadMap() imperatively each frame
+// and places each PRESENT slot's mesh at its Go-supplied local offset, hiding empty
+// (popped) slots. Because the mesh is a child of the node group, its world position
+// = node center + offset is composed by the scene graph, so the beads ride the node
+// on drag with no re-emit. TS computes no geometry (no interior layout math).
+// Discrete positions this phase (beads snap; no slide yet).
 const INTERIOR_SLOTS: { row: number; col: number }[] = [
   { row: 0, col: 0 }, { row: 0, col: 1 },
   { row: 1, col: 0 }, { row: 1, col: 1 },
@@ -423,7 +429,8 @@ function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; c
     if (!group) return;
     const slot = getInteriorBeadMap().get(interiorBeadKey(nodeId, row, col));
     // Hidden until Go has streamed this slot AND it is present (popped slots carry
-    // present=false → hide). No geometry: place the mesh at Go's slot position.
+    // present=false → hide). No geometry: place the mesh at Go's NODE-LOCAL offset.
+    // The parent node group supplies the center, so this is the offset verbatim.
     if (!slot || !slot.present) {
       group.visible = false;
       return;
@@ -930,12 +937,8 @@ export function Scene({
           hoveredId={hoveredId}
         />
       ))}
-      {/* Interior beads from the live node-bead stream (Go-authoritative world
-          positions). Rendered ungrouped (world space) like PulseBead. Nodes that
-          emit no node-bead events have no store entries → nothing drawn. */}
-      {nodes.map((n) => (
-        <InteriorBeads key={`ib:${n.id}`} nodeId={n.id} />
-      ))}
+      {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
+          node-local offsets) so they ride the node on move — no top-level mount. */}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
     </ProceduralEnvProvider>
   );
