@@ -31,7 +31,7 @@
 |------|-----------|----------|-------|
 | FromPrevChainInhibitorNode | in | chain | receives value from upstream chain inhibitor |
 | ToNext | out | chain | fan-out to downstream nodes (multi-output) |
-| FeedbackOut | out | chain | sends step (1=advance, 0=hold) back to Input node; active when wired |
+| FeedbackOut | out | chain | sends step (1=advance, 0=hold) back to Input node; active when wired; fire-and-forget (no consume acknowledgment) |
 
 ## Firing rule
 
@@ -39,7 +39,7 @@ On each value received from FromPrevChainInhibitorNode:
 1. Fire.
 2. If FeedbackOut is wired:
    a. Compute step: 1 if value ≠ last seen value (or first recv), else 0.
-   b. Send step on FeedbackOut **before** forwarding on ToNext (ordered: feedback precedes next recv so Input unblocks).
+   b. Place step on FeedbackOut **before** forwarding on ToNext. FeedbackOut is **fire-and-forget**: the node emits the step and does NOT wait for the Input node to consume/acknowledge it (no back-pressure, per MODEL.md). Only the placement is ordered before the fan-out; the node does not block on the feedback round-trip, so the Held value reaches ToNext at fire-time.
    c. Fan-out the current Held value concurrently on all ToNext outputs.
    d. Update Held to value.
 3. If FeedbackOut is not wired:

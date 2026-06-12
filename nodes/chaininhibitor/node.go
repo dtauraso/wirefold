@@ -93,8 +93,14 @@ func (in *Node) Update(ctx context.Context) {
 			}
 
 			if in.FeedbackOut.Wired() {
-				// Send feedback step BEFORE forwarding on ToNext so the Input
-				// node unblocks (ordered: feedback send precedes next recv).
+				// Place the feedback step BEFORE forwarding on ToNext. We only
+				// order the PLACEMENT of the feedback bead relative to the
+				// ToNext fan-out; we do NOT wait for the Input node to consume
+				// it. FeedbackOut is fire-and-forget per MODEL.md ("does not
+				// wait on the destination — no acknowledgment, no back-pressure"):
+				// the node paces naturally on its next paced TryRecv, not on the
+				// feedback round-trip, so the held value reaches ToNext at
+				// fire-time instead of behind the ~feedback-traversal latency.
 				// Step is 1 when the value changes (advance index), 0 when it
 				// repeats (hold index). held == -1 on the first recv so the
 				// first value always counts as a change.
@@ -102,13 +108,7 @@ func (in *Node) Update(ctx context.Context) {
 				if heldChanged {
 					step = 1
 				}
-				if in.FeedbackOut.Gated() {
-					if in.FeedbackOut.TrySend(step) {
-						in.FeedbackOut.WaitConsumed()
-					}
-				} else {
-					in.FeedbackOut.TryEmit(step)
-				}
+				in.FeedbackOut.TryEmit(step)
 				// Forward the current held value on the downstream chain.
 				fanOutHeld(in.ToNext, in.Held)
 				in.Held = value
