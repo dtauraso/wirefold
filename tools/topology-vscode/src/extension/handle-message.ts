@@ -7,25 +7,18 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
-import { extractViewText, injectViewText } from "../sidecar";
 import {
   parseWebviewToHost,
   type HostToWebviewMsg,
   type WebviewToHostMsg,
 } from "../messages";
-import { applyEdit } from "./html";
 import { appendWebviewLog } from "./webview-log";
-import { toErrorMessage } from "../utils/error";
 
 export type MessageCtx = {
   document?: vscode.TextDocument;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
   send: () => Thenable<boolean>;
-  setLastAppliedVersion?: (v: number) => void;
-  // Keep the external-change structural fingerprint in sync after an own save,
-  // so a later external view-only edit isn't mistaken for a structural change.
-  syncStructuralKey?: () => void;
 };
 
 export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void> {
@@ -85,23 +78,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // Primary path: Go is already spawned on open (case "ready") and the user is
       // starting the clock for the first time, or resuming after a stop+restart.
       // runner.run() is idempotent (no-op if already running), so it is safe to call
-      // unconditionally before play(). Pre-write the document text if the webview sent
-      // a diff (same as before so unsaved spec edits reach Go before the clock starts).
-      try {
-        if (msg.text !== undefined && document) {
-          const viewText = extractViewText(document.getText());
-          const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
-          ctx.setLastAppliedVersion?.(document.version + 1);
-          await applyEdit(document, merged);
-          await document.save();
-          ctx.setLastAppliedVersion?.(document.version);
-          ctx.syncStructuralKey?.();
-        }
-      } catch (err) {
-        console.error("topology editor: run pre-write failed", err);
-        post({ type: "save-error", message: toErrorMessage(err) });
-        return;
-      }
+      // unconditionally before play().
       runner.run();
       runner.play();
       return;

@@ -44,7 +44,7 @@ export type EditMsg =
 
 export type WebviewToHostMsg =
   | { type: "ready" }
-  | { type: "run"; text?: string }
+  | { type: "run" }
   | { type: "run-cancel" }
   | { type: "play" }
   | { type: "pause" }
@@ -166,9 +166,7 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   const m = raw as Record<string, unknown>;
   switch (t) {
     case "run":
-      return m.text === undefined || typeof m.text === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
+      return m as unknown as WebviewToHostMsg;
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "edit":

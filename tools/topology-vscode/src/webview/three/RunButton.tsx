@@ -1,7 +1,5 @@
 import { createPortal } from "react-dom";
 import { vscode } from "../vscode-api";
-import { useThreeStore } from "./store";
-import { flowToSpec } from "../state/adapter/flow-to-spec";
 import { useRunStatusCtx } from "../state/run-status";
 
 export function RunButton() {
@@ -24,12 +22,8 @@ export function RunButton() {
       return;
     }
     // idle: Go is spawned but clock is halted, or process was stopped and needs
-    // a restart. Send "run" with the current spec so any unsaved edits reach Go;
-    // handle-message calls runner.run() (idempotent spawn) then runner.play().
-    const { nodes, edges } = useThreeStore.getState();
-    const spec = flowToSpec(nodes, edges, { nodes: [], edges: [] });
-    const text = JSON.stringify(spec, null, 2) + "\n";
-    vscode.postMessage({ type: "run", text });
+    // a restart. handle-message calls runner.run() (idempotent spawn) then runner.play().
+    vscode.postMessage({ type: "run" });
   };
 
   const onStop = () => {

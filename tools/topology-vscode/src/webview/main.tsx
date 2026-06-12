@@ -34,7 +34,6 @@ import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
 import { flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
-import { flowToSpec } from "./state/adapter/flow-to-spec";
 import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
 import type { RunStatusUI } from "./state/run-status";
 import { ErrorBoundary } from "./log/ErrorBoundary";
@@ -49,7 +48,6 @@ import { handleTraceEvent } from "./three/pump";
 // call from the webview, so a test can assert both the live spec and that a
 // save was posted.
 (window as unknown as { __wirefold_test: unknown }).__wirefold_test = {
-  getSpec: () => { const { nodes, edges } = useThreeStore.getState(); return flowToSpec(nodes, edges, { nodes: [], edges: [] }); },
   getSent: () =>
     (window as unknown as { __wirefold_sent?: unknown[] }).__wirefold_sent ?? [],
 };

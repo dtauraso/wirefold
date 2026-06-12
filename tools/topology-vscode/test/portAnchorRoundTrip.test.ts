@@ -1,11 +1,9 @@
 // Phase 1 port-anchor persistence: a Port.anchor set on a node's input/output must
-// survive parseSpec (validator), specToFlow → flowToSpec (save/load adapter round-trip),
-// and the messages.ts parseEdit validator for the "port-anchor" edit op.
+// survive parseSpec (validator) and the messages.ts parseEdit validator for the
+// "port-anchor" edit op.
 
 import { describe, it, expect } from "vitest";
 import { parseSpec } from "../src/schema";
-import { specToFlow } from "../src/webview/state/adapter/spec-to-flow";
-import { flowToSpec } from "../src/webview/state/adapter/flow-to-spec";
 import { parseWebviewToHost } from "../src/messages";
 import type { Spec } from "../src/schema";
 
@@ -27,13 +25,6 @@ describe("Port.anchor persistence (phase 1)", () => {
   it("parseSpec accepts and preserves anchor", () => {
     const spec = parseSpec(specWithAnchor) as Spec;
     expect(spec.nodes[0].inputs?.[0].anchor).toEqual(anchor);
-  });
-
-  it("survives specToFlow → flowToSpec round-trip", () => {
-    const spec = parseSpec(specWithAnchor) as Spec;
-    const { nodes, edges } = specToFlow(spec, {});
-    const back = flowToSpec(nodes, edges, spec);
-    expect(back.nodes[0].inputs?.[0].anchor).toEqual(anchor);
   });
 
   it("parseWebviewToHost validates the port-anchor edit op", () => {
