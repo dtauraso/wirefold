@@ -8,75 +8,44 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-12 — on `task/persist-geometry-from-go-stream`, IMPLEMENTATION COMPLETE)
+## State at handoff (2026-06-12 — on `task/persist-geometry-from-go-stream`, COMPLETE + LIVE-VERIFIED, merging now)
 
-Active branch **`task/persist-geometry-from-go-stream`** — IMPLEMENTATION COMPLETE
-(all 4 phases built + verified). **NOT yet merged. NOT yet exercised in the live editor.**
-Branched off `main`.
+Active branch **`task/persist-geometry-from-go-stream`** — all 4 phases built, monolith
+files removed (`topology.json`, `topology.scene.json`, `topology.inactive.json` — the last
+relocated to `topology/inactive/` tree), LIVE-VERIFIED end to end. This session is doing
+the merge to `main`.
 
-### Settled open items (all matched spec defaults)
+### Editor-bringup debugging chain (after build, all real fixes)
 
-- **One-file-per-port** (not a single `inputs.json` array).
-- **Split meta.json / data.json** per node.
-- **First-open** relies on Go's startup stream: Go emits a `{"kind":"spec",...}` line via
-  `EmitSpecLine` in `nodes/Wiring/loader.go`; consumed by `tryParseSpecLine` in
-  `runCommand.ts` → `"load"` post.
-- **`view/scene.json` gitignored.**
+1. **Startup load-race:** Go's one-shot spec line was posted before the webview listener
+   attached → host now caches `lastSpec` and replays `"load"` on webview `"ready"` (`extension.ts`).
+2. **Dead document-gate:** `handle-message.ts` still gated webview-log (and breadcrumbs) on
+   the removed custom-editor `document` → threaded a `logUri` into `MessageCtx`, removed
+   the gates; restored ts-webview logging.
+3. **parseSpec schema mismatch:** tree-based `EmitSpecLine` dropped port `kind` and edge
+   `id` that `parseSpec` required → Go now emits edge `id`; `specNode.Position` got
+   `json:"-"`; `parsePort` defaults `kind`; added a load-error breadcrumb (in
+   `ERROR_LABELS`) so silent `store.load` throws surface to `ts-errors.jsonl`.
+4. **Auto-fit not firing / framing wrong:** `CameraFitter` only depended on `loadEpoch` and
+   bailed if nodes/canvas not ready, and negated `cy` while `nodeWorldPos` was y-up → fixed
+   to fit once-per-epoch gated on Go geometry present for all nodes, dropped the y negation
+   to match manual Fit (HomeButton). Diagram now appears framed on open.
+5. **Compact JSON writes:** `tree_writer` now emits compact single-line JSON matching the
+   fixtures.
 
-### Tree shape (settled & built)
+### Live verification (this session)
 
-```
-topology/
-  nodes/<id>/meta.json
-             data.json
-             inputs/<port>.json
-             outputs/<port>.json
-  edges/<id>.json
-  view/nodes/<id>.json
-       fades.json
-       scene.json   ← gitignored
-```
+Editor opens framed; dragging a node wrote `topology/view/nodes/<id>.json`; dragging a
+port anchor wrote `topology/nodes/<id>/inputs/<port>.json` with an `"anchor"` field; on
+reload Go re-read the tree and the spec stream carried both the moved position AND the port
+anchor — the original branch goal (port anchor survives reload) is confirmed working.
 
-### Phases built
+### NEXT (post-merge)
 
-1. **dd02fbb4** — `loadTree` tree-reader + `topology/` fixture + round-trip test (`loader_tree.go`).
-2. **dd4f831e** — `tree_writer.go`: Go persists each edit op to the tree
-   (`writeViewNode`/`writePort`/`mergeFades`, atomic temp-rename); `applyEdit` gains
-   `treeRoot`; `main.go` detects tree mode.
-3. **df2a90e5** — command-launched `WebviewPanel` ("Topology: Open Editor" cmd +
-   explorer/context menu); `customEditors`/`onDidChangeTextDocument`/`structuralKey`/
-   restart-loop removed; Go `EmitSpecLine` on startup.
-4. **212192fc** + the final flowToSpec-retire commit — dead spec-save path deleted
-   (`save.ts` `performSave`/`scheduleSave`, `flow-to-spec.ts`, `structural-key.ts`);
-   scene/camera persisted via new edit op `op:"scene"` → Go `writeScene` →
-   `view/scene.json`; `"run"` message is now spec-less; `flowToSpec` fully retired.
-
-### Verification done
-
-`go build`, `go test -race ./nodes/Wiring`, `tsc --noEmit` (0 errors), `npm run build`,
-vitest 69/69, guards (`no-await-on-bridge`, `message-kind-parity`, `trace-kind-parity`,
-`ts-computes-no-geometry`) all green.
-
-### NEXT for a fresh session
-
-Exercise in the **LIVE editor**: Developer: Reload Window → "Topology: Open Editor" on the
-`topology/` folder. Confirm:
-
-- Panel opens; Go reads the tree and streams geometry.
-- Edits (node-move, port-anchor, fade, wire create/delete) round-trip to disk under
-  `topology/`.
-- Scene/camera persists to `view/scene.json`.
-- **Port-anchor survives reload** (the original gap that seeded this branch).
-
-On sign-off: run `tools/strip-branch-local-docs.sh task/persist-geometry-from-go-stream`
-and merge to main.
-
-### Remaining follow-ups (deferred)
-
-- **External hand-edit handling** (manual relaunch vs a future in-process reload op) —
-  still deferred.
-- **`topology.json` monolith** — file-mode read path kept; can be removed in a later
-  cleanup once the tree path is confirmed in the live editor.
+Branch merged + deleted this session; new work is friction-driven from live editor use.
+Deferred follow-ups: external hand-edit handling (manual relaunch vs a future in-process
+reload op); long-running suspended dev `go run` processes from earlier sessions exist —
+restart the live editor against the merged build to pick up compact writes.
 
 ### Settled architecture (already on main — keep short)
 
@@ -127,8 +96,9 @@ anchor previously did **not** survive reload (TS was the sole writer; Go only RE
 - **Node editing requires Go alive** (positions Go-authoritative): if Go is stopped/crashed,
   NO node moves until restart.
 - **Two-process editor:** extension-host changes need **Developer: Reload Window**;
-  webview-only changes hot-reload on build (edges survive via geometry resend). THIS
-  redesign removes the reload/restart loop. See `feedback_two_process_editor_reload`.
+  webview-only changes hot-reload on build (edges survive via geometry resend). The
+  reload/restart loop for spec changes is gone — topology is a directory tree; the default
+  `-topology` flag is the `topology/` dir. See `feedback_two_process_editor_reload`.
 - **Parser/message-kind + trace-kind parity in LOCKSTEP:** changing a TS↔Go message shape
   updates `messages.ts` parser AND the Go stdin-reader together. Guards:
   `check-message-kind-parity`, `check-trace-kind-parity`. See `feedback_schema_parser_parity`.
@@ -150,7 +120,7 @@ anchor previously did **not** survive reload (TS was the sole writer; Go only RE
   `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-message-kind-parity`,
   `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
 - Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file
-  for webview-only.
+  for webview-only. No reload/restart loop for spec changes (topology is a directory tree).
 - No merge to main without explicit sign-off. Delete merged branches without re-asking.
 
 ## ALWAYS clause
