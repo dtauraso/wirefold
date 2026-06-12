@@ -52,6 +52,63 @@ let building = false;
 // first. It is the single build entry point shared by the lazy runner
 // (ensureBinaryBuilt) and the eager .go file watcher. Guarded so only one build
 // runs at a time against the shared output path.
+// killOrphanedSims reaps leftover wirefold sim processes from prior or crashed
+// editor sessions. A normal close reaps the runner's own group, but a crash or
+// hard-quit can leave the prebuilt binary (or legacy `go run .` / compiled
+// `exe/wirefold -topology`) running. Those orphans pile up and, worse, keep
+// accepting edits on a stale binary that no longer persists.
+//
+// Single-panel assumption: this kills ALL matching wirefold sims except the
+// active one (exceptPid). If two editor panels were intentionally running sims
+// at once, the older one would be killed. That is acceptable for this
+// single-user dev tool — we do not scope per-panel.
+//
+// POSIX only: on win32 there is no `ps -axo` and the dev env is darwin, so we
+// no-op there rather than block on Windows support.
+export function killOrphanedSims(binPath: string, exceptPid?: number): { killed: number } {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    return { killed: 0 };
+  }
+  let out: string;
+  try {
+    const res = cp.spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" });
+    if (res.status !== 0 || typeof res.stdout !== "string") return { killed: 0 };
+    out = res.stdout;
+  } catch {
+    return { killed: 0 };
+  }
+  const self = process.pid;
+  let killed = 0;
+  for (const rawLine of out.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const sp = line.indexOf(" ");
+    if (sp < 0) continue;
+    const pid = Number(line.slice(0, sp));
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    const command = line.slice(sp + 1);
+    // Never touch the extension host, the active sim, or our own `ps` invocation
+    // (ps lists itself). The ps pid is excluded implicitly: its command line is
+    // `ps -axo pid=,command=`, which does not match the wirefold matcher below.
+    if (pid === self || (exceptPid !== undefined && pid === exceptPid)) continue;
+    // Match only genuine wirefold sims. Require "wirefold" AND one of:
+    //   - the prebuilt cache path (binPath, e.g. ".wirefold-cache/wirefold")
+    //   - "-topology" (legacy `go run .` and compiled `exe/wirefold -topology`
+    //     are always launched with the -topology arg)
+    // The conjunction avoids killing unrelated processes that merely contain the
+    // string (e.g. `vim wirefold.go`, gopls indexing the repo).
+    if (!command.includes("wirefold")) continue;
+    if (!command.includes(binPath) && !command.includes("-topology")) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+      killed++;
+    } catch {
+      // pid already exited or no permission — skip; reaping is best-effort.
+    }
+  }
+  return { killed };
+}
+
 export function buildBinary(repoRoot: string, binPath: string): BuildResult {
   if (building) return { ok: true, busy: true };
   building = true;

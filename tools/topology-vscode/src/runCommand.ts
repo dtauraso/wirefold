@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
 import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
-import { buildBinary, maxGoMtime } from "./goBuild";
+import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 
 export type { RunStatus };
 
@@ -153,6 +153,18 @@ export class BuildAndRunRunner {
       this.looping = false;
       this.post({ state: "error", message: built.error });
       return;
+    }
+    // Reap orphaned sims left by prior/crashed editor sessions before spawning a
+    // new one. exceptPid spares the proc this runner legitimately manages (the
+    // stop/respawn logic still owns that). Single-panel assumption documented in
+    // killOrphanedSims: this kills ALL matching sims except the active one.
+    // this.proc is guaranteed undefined here (run() returns early at the top if a
+    // proc exists), so there is no active sim to spare — exceptPid is undefined.
+    // Passing it explicitly keeps the contract honest if that guard ever changes.
+    const activePid: number | undefined = (this.proc as cp.ChildProcess | undefined)?.pid;
+    const { killed } = killOrphanedSims(binPath, activePid);
+    if (killed > 0) {
+      this.channel.appendLine(`[cleanup] killed ${killed} orphaned sim process(es)`);
     }
     this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
