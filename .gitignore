@@ -83,6 +83,9 @@ tools/topology-vscode/gen-node-defs
 # Pulse-probe dump from the visual editor's webview (workspace-local, transient)
 /.probe/
 
+# Prebuilt Go binary cache (built once by the editor runner; not for VCS)
+/.wirefold-cache/
+
 # Scene sidecar — gitignored so camera/label state does not generate commit noise.
 # Diagram state (positions, fades) stays in topology.json.
 /topology.scene.json

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "./runCommand";
+import { buildBinary } from "./goBuild";
 import type { HostToWebviewMsg } from "./messages";
 import { buildWebviewHtml } from "./extension/html";
 import { handleMessage } from "./extension/handle-message";
@@ -88,11 +89,54 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     console.log("[topology] bundleWatcher NOT armed — extensionMode:", context.extensionMode);
   }
 
+  // Eager Go-binary watcher: rebuild the prebuilt binary the moment a .go file
+  // is saved so launches stay instant (the lazy ensureBinaryBuilt in runner.run()
+  // remains the safety net for missed events). Does NOT hot-restart a running sim
+  // on .go change — it only keeps the binary fresh; the next start/restart picks
+  // it up. (Hot-restart of a live sim on .go change is a possible future
+  // enhancement, intentionally not implemented here.)
+  const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  let goWatcher: vscode.FileSystemWatcher | undefined;
+  if (repoRoot) {
+    const binPath = path.join(repoRoot, ".wirefold-cache", "wirefold");
+    const goErrorsFile = path.join(repoRoot, ".probe", "go-errors.jsonl");
+    const goChannel = vscode.window.createOutputChannel("topology go-build");
+    goWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(repoRoot, "**/*.go"),
+    );
+    let pending: NodeJS.Timeout | undefined;
+    const rebuild = () => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        const res = buildBinary(repoRoot, binPath);
+        if (res.ok) {
+          if (!res.busy) goChannel.appendLine("[go] rebuilt wirefold");
+        } else {
+          goChannel.appendLine(`[go] build error: ${res.error}`);
+          try {
+            fs.mkdirSync(path.dirname(goErrorsFile), { recursive: true });
+            fs.appendFileSync(
+              goErrorsFile,
+              JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: res.error }) + "\n",
+              "utf8",
+            );
+          } catch { /* swallow */ }
+        }
+      }, 250);
+    };
+    goWatcher.onDidChange(rebuild);
+    goWatcher.onDidCreate(rebuild);
+    goWatcher.onDidDelete(rebuild);
+    context.subscriptions.push(goWatcher, goChannel);
+    panel.onDidDispose(() => goChannel.dispose());
+  }
+
   context.subscriptions.push(viewStateSub, runner);
   if (bundleWatcher) context.subscriptions.push(bundleWatcher);
 
   panel.onDidDispose(() => {
     bundleWatcher?.dispose();
+    goWatcher?.dispose();
     viewStateSub.dispose();
     runner.dispose();
   });

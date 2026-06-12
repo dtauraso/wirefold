@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
 import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
+import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 
 export type { RunStatus };
 
@@ -71,6 +72,32 @@ function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
+// ensureBinaryBuilt builds the Go binary at binPath if it's missing or stale.
+// A rebuild is needed when binPath does not exist OR any *.go source under
+// repoRoot is newer than binPath. Up-to-date → no build, returns ok. This
+// replaces `go run .` (which relinks a throwaway binary every launch) with a
+// single prebuilt binary reused across animation start/restart.
+//
+// Lazy safety net: even with the eager .go watcher (see extension.ts) keeping
+// the binary fresh, this still rebuilds at launch when the watcher missed an
+// event or wasn't armed. It delegates to the guarded buildBinary, so if the
+// watcher is mid-build this call coalesces (busy → ok) wait-free and never
+// blocks run().
+function ensureBinaryBuilt(
+  repoRoot: string,
+  binPath: string,
+): { ok: true } | { ok: false; error: string } {
+  let binMtime = -1;
+  try {
+    binMtime = fs.statSync(binPath).mtimeMs;
+  } catch { /* missing → rebuild */ }
+  const needsRebuild = binMtime < 0 || maxGoMtime(repoRoot) > binMtime;
+  if (!needsRebuild) return { ok: true };
+  const res = buildBinary(repoRoot, binPath);
+  if (!res.ok) return res;
+  return { ok: true };
+}
+
 export class BuildAndRunRunner {
   private proc: cp.ChildProcess | undefined;
   // Explicit cancel flag — distinguishing cancellation by signal name races
@@ -110,17 +137,44 @@ export class BuildAndRunRunner {
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);
+    const repoRoot = folder.uri.fsPath;
+    const binPath = path.join(repoRoot, ".wirefold-cache", "wirefold");
     const topArgs = this.topologyPath ? ["-topology", this.topologyPath] : [];
-    this.channel.appendLine("$ go run . " + topArgs.join(" "));
+    // Build the binary once (and only rebuild when a .go source changed) instead of
+    // relinking a throwaway binary via `go run .` on every start/restart.
+    const built = ensureBinaryBuilt(repoRoot, binPath);
+    if (!built.ok) {
+      this.channel.appendLine(`\n[build error: ${built.error}]`);
+      if (this.goErrorsFile) {
+        try {
+          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: built.error }) + "\n", "utf8");
+        } catch { /* swallow */ }
+      }
+      this.looping = false;
+      this.post({ state: "error", message: built.error });
+      return;
+    }
+    // Reap orphaned sims left by prior/crashed editor sessions before spawning a
+    // new one. exceptPid spares the proc this runner legitimately manages (the
+    // stop/respawn logic still owns that). Single-panel assumption documented in
+    // killOrphanedSims: this kills ALL matching sims except the active one.
+    // this.proc is guaranteed undefined here (run() returns early at the top if a
+    // proc exists), so there is no active sim to spare — exceptPid is undefined.
+    // Passing it explicitly keeps the contract honest if that guard ever changes.
+    const activePid: number | undefined = (this.proc as cp.ChildProcess | undefined)?.pid;
+    const { killed } = killOrphanedSims(binPath, activePid);
+    if (killed > 0) {
+      this.channel.appendLine(`[cleanup] killed ${killed} orphaned sim process(es)`);
+    }
+    this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
     // Do NOT post "running" here — Go starts HALTED. The clock state drives status:
     // idle-on-spawn → running-on-play() → paused-on-pause().
-    // detached: true makes the child the leader of a new process group, so
-    // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
-    // SIGTERM hits the `go` driver but leaves the compiled binary orphaned
-    // on macOS.
-    this.proc = cp.spawn("go", ["run", ".", ...topArgs], { cwd: folder.uri.fsPath, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    // detached: true makes the child the leader of a new process group; the
+    // prebuilt binary is the sole group member, so kill(-pid) reaches it
+    // directly. Without this, SIGTERM could leave it orphaned on macOS.
+    this.proc = cp.spawn(binPath, [...topArgs], { cwd: repoRoot, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
