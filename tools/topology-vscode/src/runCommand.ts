@@ -38,6 +38,25 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
   return undefined;
 }
 
+// tryParseSpecLine recognizes the Go startup spec line {"kind":"spec","nodes":[...],...}.
+// Spec lines carry no step ordinal and are not in TRACE_EVENT_KINDS; they are handled
+// specially: intercepted before tryParseTraceEvent and forwarded via onSpecEvent.
+function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined {
+  if (!line.startsWith("{")) return undefined;
+  try {
+    const obj = JSON.parse(line);
+    if (
+      typeof obj === "object" && obj !== null &&
+      obj.kind === "spec" &&
+      Array.isArray(obj.nodes) &&
+      Array.isArray(obj.edges)
+    ) {
+      return obj as { nodes: unknown[]; edges: unknown[]; view?: unknown };
+    }
+  } catch { /* not JSON */ }
+  return undefined;
+}
+
 // tryParseBreadcrumb recognizes the Go Trace.Breadcrumb line shape
 // ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only and
 // carry no step ordinal, so tryParseTraceEvent rejects them.
@@ -69,13 +88,17 @@ export class BuildAndRunRunner {
   private tsFile: string | undefined;
   private tsErrorsFile: string | undefined;
 
+  private topologyPath: string | undefined;
+
   constructor(
     private readonly post: (s: RunStatus) => void,
     private readonly onTraceEvent?: (e: TraceEvent) => void,
+    private readonly onSpecEvent?: (spec: { nodes: unknown[]; edges: unknown[]; view?: unknown }) => void,
   ) {}
 
-  run() {
+  run(topologyPath?: string) {
     if (this.proc) return;
+    if (topologyPath) this.topologyPath = topologyPath;
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
     const probeDir = path.join(folder.uri.fsPath, ".probe");
@@ -87,7 +110,8 @@ export class BuildAndRunRunner {
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);
-    this.channel.appendLine("$ go run .");
+    const topArgs = this.topologyPath ? ["-topology", this.topologyPath] : [];
+    this.channel.appendLine("$ go run . " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
     // Do NOT post "running" here — Go starts HALTED. The clock state drives status:
@@ -96,7 +120,7 @@ export class BuildAndRunRunner {
     // a kill(-pid) reaches the inner binary `go run` spawned. Without this,
     // SIGTERM hits the `go` driver but leaves the compiled binary orphaned
     // on macOS.
-    this.proc = cp.spawn("go", ["run", "."], { cwd: folder.uri.fsPath, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    this.proc = cp.spawn("go", ["run", ".", ...topArgs], { cwd: folder.uri.fsPath, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
@@ -152,6 +176,13 @@ export class BuildAndRunRunner {
     while ((nl = this.stdoutBuf.indexOf("\n")) !== -1) {
       const line = this.stdoutBuf.slice(0, nl);
       this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
+      // Spec line — Go startup message carrying the full topology spec. Intercepted
+      // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS).
+      const spec = tryParseSpecLine(line);
+      if (spec) {
+        this.onSpecEvent?.(spec);
+        continue;
+      }
       // Breadcrumb lines (logging-only; no step ordinal, outside the closed
       // trace vocabulary) are relayed to go.jsonl but never dispatched to the
       // pump — the pump's assertNever would throw on an unknown kind.

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -396,4 +397,54 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	md.Bind(outSink, SlotRegistry(destWire))
 
 	return nodes, SlotRegistry(destWire), edgeWire, md, nil
+}
+
+// readTopologySpec reads and parses the topology spec at jsonPath (JSON file or
+// directory tree) without building nodes or wires. Used to emit the spec to
+// the TS webview on startup.
+func readTopologySpec(jsonPath string) (topoSpec, error) {
+	if info, err := os.Stat(jsonPath); err == nil && info.IsDir() {
+		spec, err := loadTree(jsonPath)
+		if err != nil {
+			return topoSpec{}, err
+		}
+		return spec, nil
+	}
+	raw, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return topoSpec{}, fmt.Errorf("readTopologySpec: read %s: %w", jsonPath, err)
+	}
+	var spec topoSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return topoSpec{}, fmt.Errorf("readTopologySpec: parse %s: %w", jsonPath, err)
+	}
+	for i := range spec.Nodes {
+		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
+			spec.Nodes[i].Position = pos
+		}
+	}
+	return spec, nil
+}
+
+// EmitSpecLine reads the topology spec at jsonPath and writes a single
+// {"kind":"spec","nodes":[...],"edges":[...],"view":{...}} JSON line to w.
+// Called by main.go before node goroutines start so the TS webview receives
+// the full spec on startup without reading topology/ files directly.
+func EmitSpecLine(w io.Writer, jsonPath string) error {
+	spec, err := readTopologySpec(jsonPath)
+	if err != nil {
+		return err
+	}
+	type specMsg struct {
+		Kind  string     `json:"kind"`
+		Nodes []specNode `json:"nodes"`
+		Edges []specEdge `json:"edges"`
+		View  topoView   `json:"view"`
+	}
+	b, err := json.Marshal(specMsg{Kind: "spec", Nodes: spec.Nodes, Edges: spec.Edges, View: spec.View})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "%s\n", b)
+	return err
 }

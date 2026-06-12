@@ -37,6 +37,14 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		os.Exit(1)
 	}
 
+	// Emit the full spec to the TS webview before nodes start (Go startup message).
+	// TS intercepts this line and sends { type: "load", text } to the webview — it
+	// never reads topology/ files directly.
+	if err := W.EmitSpecLine(os.Stdout, topologyPath); err != nil {
+		fmt.Fprintf(os.Stderr, "emit spec: %v\n", err)
+		// non-fatal; continue
+	}
+
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	md.Start(ctx)

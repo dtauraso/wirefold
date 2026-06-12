@@ -18,14 +18,14 @@ import { appendWebviewLog } from "./webview-log";
 import { toErrorMessage } from "../utils/error";
 
 export type MessageCtx = {
-  document: vscode.TextDocument;
+  document?: vscode.TextDocument;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
   send: () => Thenable<boolean>;
-  setLastAppliedVersion: (v: number) => void;
+  setLastAppliedVersion?: (v: number) => void;
   // Keep the external-change structural fingerprint in sync after an own save,
   // so a later external view-only edit isn't mistaken for a structural change.
-  syncStructuralKey: () => void;
+  syncStructuralKey?: () => void;
 };
 
 export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void> {
@@ -82,14 +82,15 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       return;
     }
     case "save":
+      if (!document) { console.warn("topology editor: save skipped (no document)"); return; }
       try {
         const viewText = extractViewText(document.getText());
         const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
-        ctx.setLastAppliedVersion(document.version + 1);
+        ctx.setLastAppliedVersion?.(document.version + 1);
         await applyEdit(document, merged);
         await document.save();
-        ctx.setLastAppliedVersion(document.version);
-        ctx.syncStructuralKey();
+        ctx.setLastAppliedVersion?.(document.version);
+        ctx.syncStructuralKey?.();
       } catch (err) {
         post({ type: "save-error", message: toErrorMessage(err) });
       }
@@ -100,12 +101,13 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       //      into topology.json#view (injectViewText strips scene keys). Go reads
       //      view.nodes from here, so this is what survives drags/fades on reload.
       //   2. Scene fields (camera, camera3d, labelsGlobalHidden) → topology.scene.json (flat).
+      if (!document) { console.warn("topology editor: view-save skipped (no document)"); return; }
       try {
         const merged = injectViewText(document.getText(), msg.text);
-        ctx.setLastAppliedVersion(document.version + 1);
+        ctx.setLastAppliedVersion?.(document.version + 1);
         await applyEdit(document, merged);
         await document.save();
-        ctx.setLastAppliedVersion(document.version);
+        ctx.setLastAppliedVersion?.(document.version);
 
         const sceneFields = parseSceneText(msg.sceneText);
         const sceneText = serializeSceneText(sceneFields);
@@ -121,14 +123,14 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // unconditionally before play(). Pre-write the document text if the webview sent
       // a diff (same as before so unsaved spec edits reach Go before the clock starts).
       try {
-        if (msg.text !== undefined) {
+        if (msg.text !== undefined && document) {
           const viewText = extractViewText(document.getText());
           const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
-          ctx.setLastAppliedVersion(document.version + 1);
+          ctx.setLastAppliedVersion?.(document.version + 1);
           await applyEdit(document, merged);
           await document.save();
-          ctx.setLastAppliedVersion(document.version);
-          ctx.syncStructuralKey();
+          ctx.setLastAppliedVersion?.(document.version);
+          ctx.syncStructuralKey?.();
         }
       } catch (err) {
         console.error("topology editor: run pre-write failed", err);
@@ -154,7 +156,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       runner.stop();
       return;
     case "webview-log":
-      await appendWebviewLog(msg.entry, document.uri);
+      if (document) await appendWebviewLog(msg.entry, document.uri);
       return;
     case "edit":
       // Single geometry-CRUD bridge: forward the edit to Go's stdin verbatim by op.
@@ -162,7 +164,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
       // only); the writeStdin send itself is non-blocking. z defaults to 0.
       if (msg.op === "create" || msg.op === "delete") {
-        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), document.uri);
+        if (document) await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), document.uri);
         runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op, target: msg.target, targetHandle: msg.targetHandle }));
       } else if (msg.op === "update") {
         // Forward the node-move entries map verbatim (keyed by moved node id + each
