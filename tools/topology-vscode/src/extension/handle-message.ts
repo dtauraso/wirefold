@@ -172,6 +172,12 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "fade") {
         // edges is Record<string, boolean>: edgeId → desired faded state. Forward verbatim.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "fade", edges: msg.edges }));
+      } else if (msg.op === "port-anchor") {
+        // Move a port along its node's ring. node/port identify the port, isInput
+        // selects input vs output list, anchor is the new direction offset, keys lists
+        // the routing keys (node id + each incident edge id) Go mail-sorts to. Forward
+        // verbatim, fire-and-forget — same fan-out shape as op="update".
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "port-anchor", node: msg.node, port: msg.port, isInput: msg.isInput, anchor: msg.anchor, keys: msg.keys }));
       }
       return;
   }
