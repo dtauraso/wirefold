@@ -341,10 +341,10 @@ Geometry: Input.Update() does the array mutation AND the interior bead geometry 
   <!-- TAB: Array mechanics -->
   <div class="panel" id="panel-array" role="tabpanel">
     <h2>Double-buffer: working [1,0] + backup [1,0], pop-from-end, slide-down refill.</h2>
-    <p>Two arrays, each <code>[1,0]</code>, back the buffer — 4 beads total:</p>
+    <p>Two Go <code>[]int</code> slices, each <code>[1,0]</code>, back the buffer — 4 beads total:</p>
     <ul class="tight">
-      <li><code>working = [1,0]</code> — the live, depleting array (the <strong>bottom row</strong> of the 2&times;2 grid). <strong>Sending pops its last element</strong> (the end), and that popped value is emitted as a bead on <code>1To2</code>. End-popping <code>[1,0]</code> sends <code>0</code> first, then <code>1</code> — intended; the array is stored <code>[1,0]</code> precisely so end-pop yields that order. <strong>No reversed-backup trick is needed.</strong></li>
-      <li><code>backup = [1,0]</code> — the <strong>top row</strong>. On refill the whole top row slides down into the bottom-row (working) slots; a new top row (<code>[1,0]</code> again) appears.</li>
+      <li><code>working []int = {1,0}</code> — the live, depleting slice (the <strong>bottom row</strong> of the 2&times;2 grid). <strong>Sending removes its end element</strong> by reslice — read the end value with <code>working[len(working)-1]</code>, then shrink with <code>working = working[:len(working)-1]</code> (guarded by <code>len(working) &gt; 0</code>) — and that value is emitted as a bead on <code>1To2</code>. Removing the end of <code>{1,0}</code> sends <code>0</code> first, then <code>1</code> — intended; the slice is stored <code>{1,0}</code> precisely so end-removal yields that order.</li>
+      <li><code>backup []int = {1,0}</code> — the <strong>top row</strong>. On refill the whole top row slides down into the bottom-row (working) slots via <code>working = backup</code>; a new top row appears via <code>backup = []int{1,0}</code>.</li>
     </ul>
 
     <div class="subheading">The driving signal — feedback value <code>i</code></div>
@@ -353,16 +353,18 @@ Geometry: Input.Update() does the array mutation AND the interior bead geometry 
 i == 0  &rarr;  do nothing (hold)                                     <span class="cmt">// hold</span></div>
 
     <div class="subheading">Pop</div>
-    <div class="formula">v       = working[len(working)-1]        <span class="cmt">// last element = "the end"</span>
-working = working[:len(working)-1]      <span class="cmt">// shrink by one</span>
-emit(v) on 1To2                         <span class="cmt">// popped value rides out as a bead</span></div>
+    <div class="formula">if len(working) &gt; 0 {                    <span class="cmt">// guard before indexing the end</span>
+    v       := working[len(working)-1]  <span class="cmt">// read the end value</span>
+    working  = working[:len(working)-1] <span class="cmt">// reslice: drop the end</span>
+    emit(v) on 1To2                     <span class="cmt">// value rides out as a bead</span>
+}</div>
 
     <div class="subheading">Refill — when working (bottom row, length 2) is empty</div>
     <p>"Empty" means the <strong>working</strong> (bottom) row is empty (after its 2 pops) — not all 4 beads gone. When that happens, the whole top row slides down into the bottom-row slots (becoming the new working row) and a fresh top row appears:</p>
-    <div class="formula">if len(working) == 0:                   <span class="cmt">// working's 2 beads both popped</span>
+    <div class="formula">if len(working) == 0 {                  <span class="cmt">// working's 2 beads both removed</span>
     working = backup                    <span class="cmt">// the whole TOP row slides DOWN into the bottom-row slots</span>
-    backup  = [1,0]                     <span class="cmt">// a NEW top row appears</span>
-    <span class="cmt">// back to 4 beads (2 rows); the slide is animated at human speed (see Animation tab)</span></div>
+    backup  = []int{1, 0}               <span class="cmt">// a NEW top row appears</span>
+}                                        <span class="cmt">// back to 4 beads (2 rows); slide animated at human speed (see Animation tab)</span></div>
 
     <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled — pop order.</span> Each array is stored <code>[1,0]</code> and end-popped, so the emitted sequence is <code>0</code> then <code>1</code>. This is the intended order; the storage <code>[1,0]</code> is chosen specifically so end-pop yields it. <strong>No reversed-backup is required.</strong></div>
     <div class="assume" style="border-color:var(--good);background:var(--good-bg);color:var(--good);"><span class="tag" style="color:var(--good);">Settled — refill.</span> Refill triggers the moment <strong>working</strong> (bottom row, length 2) empties. The whole top row slides down into the bottom-row slots; a new top row (<code>[1,0]</code>) appears. Both rows are length 2, so the buffer is always 4 beads (2 rows).</div>
@@ -482,12 +484,12 @@ emit(v) on 1To2                         <span class="cmt">// popped value rides 
 
     <div class="subheading">1 · Pop decision from feedback signal (no index)</div>
     <p>The feedback signal gates a pop directly against the array — no counter is read or advanced:</p>
-    <div class="formula">s := FeedbackIn.TryRecv()       <span class="cmt">// downstream step, 0 or 1</span>
-if s == 1 {                     <span class="cmt">// pop &amp; send one — no index, the end is the value</span>
-    v := working[len(working)-1]
-    working = working[:len(working)-1]
-    ToReadGate.TryEmit(v)       <span class="cmt">// bead rides out on 1To2</span>
-}                                <span class="cmt">// s == 0: hold, do nothing</span></div>
+    <div class="formula">s := FeedbackIn.TryRecv()                <span class="cmt">// downstream step, 0 or 1</span>
+if s == 1 &amp;&amp; len(working) &gt; 0 {           <span class="cmt">// remove the end — the end IS the value</span>
+    v := working[len(working)-1]         <span class="cmt">// read the end value (guarded)</span>
+    working = working[:len(working)-1]   <span class="cmt">// reslice: drop the end</span>
+    ToReadGate.TrySend(v)                <span class="cmt">// bead rides out on 1To2</span>
+}                                         <span class="cmt">// s == 0: hold, do nothing</span></div>
 
     <div class="subheading">2 · Refill condition — slide the top row down + new top row</div>
     <div class="formula">if len(working) == 0 {              <span class="cmt">// working (bottom row, length 2) drained by its 2 pops</span>
@@ -560,6 +562,20 @@ Trace event: <code>node-bead</code> — interior-bead geometry/position event ke
         <tr><td>Ports / feedback</td><td><strong>Unchanged.</strong> <code>FeedbackIn</code> and <code>ToReadGate</code> stay; only the step's <em>meaning</em> (1 = pop/send, 0 = hold) is redefined.</td></tr>
       </tbody>
     </table>
+
+    <div class="subheading">Confirmed Go — pop-end on i==1, refill on empty (compiles)</div>
+    <div class="formula"><span class="cmt">// emit on feedback i == 1: take the end of the working row</span>
+if i == 1 &amp;&amp; len(working) &gt; 0 {
+    v := working[len(working)-1]
+    working = working[:len(working)-1]
+    n.ToReadGate.TrySend(v)   <span class="cmt">// launches the edge-bead; v is 0 then 1</span>
+}
+<span class="cmt">// refill when the working row is empty: top row becomes working, new top row</span>
+if len(working) == 0 {
+    working = backup
+    backup = []int{1, 0}
+}</div>
+    <div class="note">Working and backup are <code>[]int</code>. Removing the end is a reslice <code>s = s[:len(s)-1]</code>; read the end first with <code>s[len(s)-1]</code>. Always guard <code>len(s) &gt; 0</code> before indexing. The refill runs in the same <code>Update</code> pass right after the pop, so the slide begins the moment the working row empties.</div>
 
     <div class="subheading">Data flow — feedback i → Update → emit bead + stream interior geometry → TS renders</div>
     <div class="diagram">
