@@ -17,6 +17,7 @@ import {
   ndcToPixel,
   portDir,
 } from "./geometry-helpers";
+import { postLog } from "../log/post";
 import { getPulseMap } from "./pulse-state";
 import { getInteriorBeadMap, interiorBeadKey } from "./interior-bead-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
@@ -164,12 +165,20 @@ function ProceduralEnvProvider({ children }: { children: React.ReactNode }) {
 export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeData>[]; hasRestoredCamera?: boolean }) {
   const { camera, size } = useThree();
   const loadEpoch = useThreeStore((s) => s.loadEpoch);
+  // Track the last epoch we actually fitted for. The effect may run several
+  // times as size/nodes settle on first load; we fit only the first time
+  // everything is ready for a given epoch, and never again until the next load.
+  const lastFittedEpoch = useRef<number>(-1);
   useEffect(() => {
-    // Skip if no content or canvas not yet sized.
+    // Already fitted for this load epoch (e.g. a node drag re-triggered us).
+    if (lastFittedEpoch.current === loadEpoch) return;
+    // Skip if no content or canvas not yet sized — re-runs when either settles.
     if (nodes.length === 0) return;
     if (size.width === 0 || size.height === 0) return;
     // Skip auto-fit when the saved camera is being restored.
     if (hasRestoredCamera) return;
+    lastFittedEpoch.current = loadEpoch;
+    postLog("lifecycle", { phase: "camera-fit", nodeCount: nodes.length });
     const persp = camera as THREE.PerspectiveCamera;
     const PAD = 80;
     const { minX, maxX, minY, maxY } = boundingBox(nodes);
@@ -189,9 +198,10 @@ export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeD
     persp.near = 0.1;
     persp.far = 20000;
     persp.updateProjectionMatrix();
-  // Re-fit whenever a load epoch completes; skip on drag.
+  // Re-run when size/nodes settle; the lastFittedEpoch ref makes it fit once
+  // per load epoch and never on drag.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadEpoch]);
+  }, [loadEpoch, size.width, size.height, nodes.length]);
   return null;
 }
 
