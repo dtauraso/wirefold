@@ -8,12 +8,41 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-12 — on `task/persist-geometry-from-go-stream`, COMPLETE + LIVE-VERIFIED, merging now)
+## State at handoff (2026-06-12 — on `main`, no task in flight; persistence redesign + 3 follow-ups merged)
 
-Active branch **`task/persist-geometry-from-go-stream`** — all 4 phases built, monolith
-files removed (`topology.json`, `topology.scene.json`, `topology.inactive.json` — the last
-relocated to `topology/inactive/` tree), LIVE-VERIFIED end to end. This session is doing
-the merge to `main`.
+The topology-tree / Go-owns-persistence redesign (`task/persist-geometry-from-go-stream`)
+is **merged to `main` and its branch deleted**: all 4 phases built, monolith files removed
+(`topology.json`, `topology.scene.json`, `topology.inactive.json` — the last relocated to
+`topology/inactive/` tree), live-verified end to end (port anchor survives reload).
+
+Since that merge, **three follow-up branches also merged + deleted**:
+
+1. **Editor-bringup fixes** — folded into the persistence merge (see the debugging chain
+   below); kept here as record.
+2. **Prebuilt-binary runner + `.go` watcher + orphan reap** (merge `6c8a1f31`, branch
+   `task/prebuilt-binary-runner`). The editor now spawns a prebuilt binary at
+   `<repoRoot>/.wirefold-cache/wirefold` (gitignored) instead of `go run .` — no per-launch
+   re-link. A lazy staleness check (`ensureBinaryBuilt`, `runCommand.ts`) rebuilds at
+   `run()` when any `.go` is newer than the binary. An eager `**/*.go` `FileSystemWatcher`
+   (`extension.ts` `openTopologyEditor`, 250ms debounce) rebuilds on save via a shared
+   `buildBinary()` in `src/goBuild.ts` (module-level `building` guard = wait-free coalesce
+   so watcher + launch never run `go build -o` concurrently). On launch
+   `killOrphanedSims()` (`goBuild.ts`) SIGKILLs leftover `wirefold` sims from prior/crashed
+   sessions (matches command containing `wirefold` AND (`-topology` OR the cache path);
+   excludes the active sim + ext-host pid). Single-panel assumption documented. First launch
+   after a fresh checkout does a one-time `go build` (binary absent, gitignored, never
+   committed); reused thereafter until a `.go` changes.
+3. **Zombie-bead-on-restart fix** (merge `f40260b8`, branch `task/clear-pulses-on-restart`).
+   The webview pulse/bead store (module-level `Map` in `webview/three/pulse-state.ts`,
+   polled by `PulseBead` in `useFrame` — no listeners/version) had no run-boundary reset. A
+   bead in-flight (past `send`, before `arrive`) when STOP killed Go survived into the next
+   run as a zombie (observed on `2To3`). Fix: `clearAllPulses()` (swaps in a fresh empty
+   `Map`; next `useFrame` draws none) called at the TOP of `store.load()`; since Go emits its
+   startup spec → `load` on every restart, each new run wipes prior transient beads. Pause
+   does NOT route through `load()`, so beads correctly persist across pause. Pure render-state
+   reset at the run boundary — NO change to wire timing, `paced_wire.go`, or the bead model.
+   Decided NOT to also clear on a bare stop (user declined) — stop-without-restart leaves
+   in-flight beads until the next run, by choice.
 
 ### Editor-bringup debugging chain (after build, all real fixes)
 
@@ -42,10 +71,10 @@ anchor — the original branch goal (port anchor survives reload) is confirmed w
 
 ### NEXT (post-merge)
 
-Branch merged + deleted this session; new work is friction-driven from live editor use.
-Deferred follow-ups: external hand-edit handling (manual relaunch vs a future in-process
-reload op); long-running suspended dev `go run` processes from earlier sessions exist —
-restart the live editor against the merged build to pick up compact writes.
+No task in flight; new work is friction-driven from live editor use. Deferred:
+external hand-edit handling (manual relaunch vs a future in-process reload op);
+optional clear-on-stop (declined for now — beads linger until next run by choice);
+optional eager binary build on panel open to remove even the first-launch ~0.5s.
 
 ### Settled architecture (already on main — keep short)
 
@@ -99,6 +128,11 @@ anchor previously did **not** survive reload (TS was the sole writer; Go only RE
   webview-only changes hot-reload on build (edges survive via geometry resend). The
   reload/restart loop for spec changes is gone — topology is a directory tree; the default
   `-topology` flag is the `topology/` dir. See `feedback_two_process_editor_reload`.
+- **Runner is a prebuilt binary**, not `go run .`: the editor spawns
+  `<repoRoot>/.wirefold-cache/wirefold` (gitignored). Webview-only changes hot-reload via
+  the bundle watcher; `.go` changes rebuild the binary via an eager `**/*.go` watcher (and
+  a lazy staleness check at `run()`). First launch after a fresh checkout does a one-time
+  `go build`. Orphaned sims from crashed sessions are SIGKILLed on launch.
 - **Parser/message-kind + trace-kind parity in LOCKSTEP:** changing a TS↔Go message shape
   updates `messages.ts` parser AND the Go stdin-reader together. Guards:
   `check-message-kind-parity`, `check-trace-kind-parity`. See `feedback_schema_parser_parity`.

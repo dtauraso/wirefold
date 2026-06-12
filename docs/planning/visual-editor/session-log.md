@@ -18,6 +18,33 @@ Append-only log of friction surfaced while driving the visual editor. Newest fir
 
 ---
 
+## 2026-06-12 — post-redesign follow-ups: prebuilt-binary runner + zombie-bead reset (2 branches)
+
+**Observation:** After the persistence redesign merged, two friction points surfaced
+driving the editor: (a) every launch re-linked via `go run .`; (b) a bead in-flight when
+STOP killed Go reappeared as a zombie in the next run (seen on `2To3`).
+
+**Decision:** two task branches, both merged + deleted.
+
+**Outcome:**
+- **Prebuilt-binary runner + `.go` watcher + orphan reap** (merge `6c8a1f31`,
+  `task/prebuilt-binary-runner`): editor spawns a prebuilt
+  `<repoRoot>/.wirefold-cache/wirefold` (gitignored) instead of `go run .`. Lazy staleness
+  check (`ensureBinaryBuilt`, `runCommand.ts`) + eager `**/*.go` `FileSystemWatcher`
+  (`extension.ts`, 250ms debounce) both rebuild via shared `buildBinary()` (`goBuild.ts`,
+  module-level `building` guard = wait-free coalesce). `killOrphanedSims()` SIGKILLs
+  leftover sims from crashed sessions on launch. First launch after fresh checkout does a
+  one-time `go build`; reused until a `.go` changes.
+- **Zombie-bead-on-restart fix** (merge `f40260b8`, `task/clear-pulses-on-restart`): added
+  `clearAllPulses()` (swaps in a fresh empty `Map` in `webview/three/pulse-state.ts`),
+  called at the TOP of `store.load()`. Go emits its startup spec → `load` on every restart,
+  so each run wipes prior transient beads; pause doesn't route through `load()` so beads
+  correctly persist across pause. Pure render-state reset at the run boundary — no change to
+  wire timing or the bead model. Clear-on-bare-stop declined (beads linger until next run by
+  choice).
+
+---
+
 ## 2026-06-12 — topology-tree / Go-owns-persistence redesign: live bringup (task/persist-geometry-from-go-stream)
 
 **Observation:** The 4-phase redesign (tree reader, tree writer, command-launched panel,
