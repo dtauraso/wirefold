@@ -151,6 +151,18 @@ type WireRegistry map[string]*PacedWire
 // times its own delivery on it (MODEL.md: exactly one clock). Production passes a
 // RealClock; tests pass a FakeClock they advance deterministically.
 func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
+	// If jsonPath is a directory, use the tree reader instead of the monolithic JSON reader.
+	if info, err2 := os.Stat(jsonPath); err2 == nil && info.IsDir() {
+		spec, err := loadTree(jsonPath)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		if err := validateSpec(&spec); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		return buildFromSpec(ctx, spec, tr, clk)
+	}
+
 	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
@@ -170,6 +182,12 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		}
 	}
 
+	return buildFromSpec(ctx, spec, tr, clk)
+}
+
+// buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
+// and validated topoSpec (with Position pre-populated on each specNode).
+func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
 	// Build id→position and id→geometry maps for arc-length computation at wire
 	// construction. nodeGeom carries kind/dims/port side+slot so the Go arc
 	// length mirrors buildPortCurve (3-D port-to-port) exactly.
