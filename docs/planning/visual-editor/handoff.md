@@ -8,14 +8,13 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-11 — node-2 interior held-bead COMPLETE, MERGING to main)
+## State at handoff (2026-06-11 — on `main`, clean, NO task in flight)
 
-The node-2 interior held-bead feature on `task/node2-interior-activity-animation` is
-**COMPLETE and being merged to main now.** It builds on the already-merged node-1
-interior work (below). With node 2 done, **BOTH node 1 (2×2 depleting/refilling buffer +
-animated slide) and node 2 (single centered held bead) interiors are Go-authoritative
-via the shared `node-bead` stream.** After this merge there is **NO task in flight** —
-the next session starts fresh on `main`, friction-driven.
+Node-1 + node-2 interior features and the pulse-speed change are all **merged to main**
+(latest `a2f920e7`). **BOTH node 1 (2×2 depleting/refilling buffer + animated slide) and
+node 2 (single centered held bead) interiors are Go-authoritative via the shared
+`node-bead` stream.** There is **NO task in flight** — the next session starts fresh on
+`main`, friction-driven.
 
 ### Settled architecture (already on main — keep short)
 
@@ -43,7 +42,7 @@ beads) and their geometry; TS renders Go's stream and sends CRUD.
    (`{type:"resend"}` on webview ready when Go already running → edges survive
    hot-reload/remount).
 
-### THE NODE-2 FEATURE (this branch, merging) — interior held-value bead
+### THE NODE-2 FEATURE (merged) — interior held-value bead
 
 Node `2` (ChainInhibitor) interior shows its **HELD VALUE as a single centered bead**,
 reusing the node-1 infra (`node-bead` trace kind, the per-node `InteriorSlotBead`
@@ -84,8 +83,16 @@ interior, fully Go-authoritative.** What shipped:
   geometry in steady state.
 - **Animated refill SLIDE:** when working empties, the top row slides DOWN into the
   working position, clock-paced at human speed (pause-aware via the clock injected into
-  the Input node), then the new top row appears. Tunable via `interiorSlideDurationMul`
-  (currently 6.0 ≈ 0.9s).
+  the Input node), then the new top row appears. `interiorSlideDurationMul` is now `1.0`,
+  so the slide runs at the base pulse speed with no extra multiplier.
+
+**Uniform pulse speed (merged):** the one constant `CurveParamPulseSpeedWuPerMs = 0.04`
+wu/ms (was 0.08 — half speed) drives ALL bead animation — wire beads AND node 1's refill
+slide — at one constant speed. Note: `curve-params.ts` is a GENERATED mirror of Go's
+`CurveParam*` constants, but TS does **not** actually consume the pulse-speed constant —
+Go owns timing and streams bead positions; TS plots. So pulse speed is driven entirely by
+the Go constant; the TS mirror is unused/vestigial (minor dead-mirror surface, not
+cleaned up).
 
 `topology.json`: node `1` `init` is `[1,0]` (so end-pop sends 0 then 1). Active network
 nodes `1`/`2`/`3`, edges `1To2`, `2To3`, `2FeedbackTo1` (feedback ring).
