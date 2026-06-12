@@ -124,6 +124,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       useNodeGeometryStore.getState().setNodeGeometry(
         e.node,
         { x: e.nx, y: e.ny, z: e.nz },
+        e.radius,
         e.ports.map((p) => ({
           name: p.name,
           isInput: p.isInput,

@@ -119,6 +119,17 @@ describe("trace-event-fields contract", () => {
     expect(typeof (e as Extract<TraceEvent, { kind: "arrive" }> & { port?: string }).port).toBe("string");
   });
 
+  it("node-geometry event has step, kind, node, nx, ny, nz, radius, ports", () => {
+    const e = events.find((ev) => ev.kind === "node-geometry")! as Extract<TraceEvent, { kind: "node-geometry" }>;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("node-geometry");
+    expect(typeof e.node).toBe("string");
+    for (const key of ["nx", "ny", "nz", "radius"] as const) {
+      expect(typeof e[key]).toBe("number");
+    }
+    expect(Array.isArray(e.ports)).toBe(true);
+  });
+
   it("node-bead event has step, kind, node, row, col, value, x, y, z (Phase 2b)", () => {
     const e = events.find((ev) => ev.kind === "node-bead")! as Extract<TraceEvent, { kind: "node-bead" }>;
     expect(typeof e.step).toBe("number");

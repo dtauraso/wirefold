@@ -22,6 +22,8 @@ export interface NodePortGeom {
 
 export interface NodeGeom {
   center: { x: number; y: number; z: number };
+  /** Go-owned node body/ring sphere radius (min(w,h)/divisor). */
+  radius: number;
   ports: NodePortGeom[];
 }
 
@@ -32,6 +34,7 @@ interface NodeGeometryState {
   setNodeGeometry: (
     nodeId: string,
     center: NodeGeom["center"],
+    radius: number,
     ports: NodePortGeom[],
   ) => void;
   /** Drop one node's geometry (on node delete) so stale geometry can't be read. */
@@ -40,8 +43,8 @@ interface NodeGeometryState {
 
 export const useNodeGeometryStore = create<NodeGeometryState>((set) => ({
   geoms: {},
-  setNodeGeometry: (nodeId, center, ports) =>
-    set((s) => ({ geoms: { ...s.geoms, [nodeId]: { center, ports } } })),
+  setNodeGeometry: (nodeId, center, radius, ports) =>
+    set((s) => ({ geoms: { ...s.geoms, [nodeId]: { center, radius, ports } } })),
   removeNodeGeometry: (nodeId) =>
     set((s) => {
       if (!(nodeId in s.geoms)) return s;

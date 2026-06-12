@@ -33,8 +33,20 @@ import { getNodeGeometry } from "./node-geometry";
 // Node geometry
 // ---------------------------------------------------------------------------
 
-/** Node sphere radius from node dimensions. */
+/**
+ * Node body/ring sphere radius — reads Go's emitted radius, falls back to local
+ * dims compute pre-emit. Go is authoritative: it streams radius on every
+ * node-geometry event (min(w,h)/divisor); the local compute is the startup fallback
+ * only (before Go's first emit), mirroring how nodeWorldPos falls back.
+ */
 export function nodeRadius(node: RFNode<NodeData>): number {
+  const g = getNodeGeometry(node.id);
+  if (g) return g.radius;
+  return nodeRadiusLocal(node);
+}
+
+/** FALLBACK: local node-radius compute from node dims. Used pre-emit only. */
+function nodeRadiusLocal(node: RFNode<NodeData>): number {
   return Math.min((node.data?.width ?? NODE_DIM_FALLBACK.width), (node.data?.height ?? NODE_DIM_FALLBACK.height)) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
 }
 
