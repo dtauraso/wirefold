@@ -29,6 +29,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
+import { setInteriorBead } from "./interior-bead-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useNodeGeometryStore } from "./node-geometry";
 
@@ -149,11 +150,13 @@ export function handleTraceEvent(event: TraceEvent): void {
       return;
     }
     case "node-bead": {
-      // Interior bead of node 1's 2x2 buffer (Go-computed slot position, keyed by
-      // node + row/col). STUB — Phase 3 renders the interior grid from this stream.
-      // pump computes no geometry (Go owns the slot positions); nothing to do yet.
-      // TODO(phase3): write Go's slot position into an interior-bead store and
-      // render the 4-bead grid inside the node body.
+      // One slot of node 1's 2x2 interior buffer (Go-computed slot position + present
+      // flag, keyed by node + row/col). Go emits a 4-slot snapshot per array change;
+      // each event writes one slot into the interior-bead store. present=false marks
+      // the slot empty so a popped bead disappears. Pure store-write — pump computes
+      // no geometry (Go owns the slot positions); InteriorBeads renders from the store.
+      const { node, row, col, present, value, x, y, z } = event as Extract<TraceEvent, { kind: "node-bead" }>;
+      setInteriorBead(node, row, col, present, value ?? 0, { x, y, z });
       return;
     }
     // PUMP_DONE_HANDLER

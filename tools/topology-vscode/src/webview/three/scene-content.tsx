@@ -1,5 +1,5 @@
 // scene-content.tsx — 3D scene render components for ThreeView.
-// CameraFitter, GraphNode, PulseBead, SingleEdgeTube, GraphEdges,
+// CameraFitter, GraphNode, PulseBead, InteriorBeads, SingleEdgeTube, GraphEdges,
 // CameraRefBridge, LabelProjector, CameraSettleDetector,
 // computeOcclusionCounts, RaycasterHelper, NearestNTracker, Scene.
 
@@ -18,6 +18,7 @@ import {
   portDir,
 } from "./geometry-helpers";
 import { getPulseMap } from "./pulse-state";
+import { getInteriorBeadMap, interiorBeadKey } from "./interior-bead-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import type { PickOptions } from "./interaction-controls";
 // Shading PARAMETER values are Go-authoritative (MODEL.md / Phase 4). They are
@@ -64,29 +65,10 @@ import {
 /** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
 export const NEAREST_N = 8;
 
-type InitPulseBeadProps = { pr: number; faded: boolean; fadeOpacityInner: number };
-
-// Shared bead renderer: a sphere of `fill`, with an optional ring of `ring`.
-function StyledPulseBead({ pr, faded, fadeOpacityInner, fill, ring }: InitPulseBeadProps & { fill: string; ring?: string }) {
-  return (
-    <>
-      <mesh raycast={() => null}>
-        <sphereGeometry args={[pr, 16, 16]} />
-        <meshStandardMaterial color={fill} emissiveIntensity={0} transparent={faded} opacity={faded ? fadeOpacityInner : 1} />
-      </mesh>
-      {ring !== undefined && (
-        <mesh raycast={() => null}>
-          <torusGeometry args={[pr, pr * 0.12, 8, 24]} />
-          <meshStandardMaterial color={ring} emissiveIntensity={0} transparent={faded} opacity={faded ? fadeOpacityInner : 1} />
-        </mesh>
-      )}
-    </>
-  );
-}
-
-// Single source of truth for value→appearance. Both the static init beads (inside
-// node 1) and the animated edge bead derive their fill/ring colors here, so they
-// cannot visually diverge.
+// Single source of truth for value→appearance. Both the interior buffer beads
+// (inside node 1) and the animated edge bead derive their fill/ring colors here, so
+// they cannot visually diverge. (The former static data.init bead components were
+// removed when node 1's interior switched to the live node-bead stream.)
 const VALUE_BEAD_STYLE: Record<number, { fill: string; ring: string }> = {
   0: { fill: "#ffffff", ring: "#000000" },
   1: { fill: "#000000", ring: "#000000" },
@@ -95,22 +77,6 @@ const DEFAULT_BEAD_STYLE = { fill: "#888888", ring: "#000000" };
 function beadStyleForValue(v: number): { fill: string; ring: string } {
   return VALUE_BEAD_STYLE[v] ?? DEFAULT_BEAD_STYLE;
 }
-
-function ValuePulseBead(value: number): React.FC<InitPulseBeadProps> {
-  const { fill, ring } = beadStyleForValue(value);
-  return (p) => <StyledPulseBead {...p} fill={fill} ring={ring} />;
-}
-const WhiteRingPulseBead = ValuePulseBead(0);
-const BlackRingPulseBead = ValuePulseBead(1);
-const DefaultPulseBead: React.FC<InitPulseBeadProps> = (p) => (
-  <StyledPulseBead {...p} fill={DEFAULT_BEAD_STYLE.fill} ring={DEFAULT_BEAD_STYLE.ring} />
-);
-
-// Map each raw init value (Go emits 0/1) to the component that renders its bead.
-const INIT_PULSE_COMPONENTS: Record<number, React.FC<InitPulseBeadProps>> = {
-  0: WhiteRingPulseBead,
-  1: BlackRingPulseBead,
-};
 
 // ---------------------------------------------------------------------------
 // Procedural environment map — offline, no CDN, no preset fetch.
@@ -307,37 +273,10 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
-      {/* Init pulses: render data.init values as small spheres inside the node body */}
-      {(() => {
-        // data.init lives in node.data.nodeData (the verbatim spec data blob)
-        const rawNodeData = node.data?.nodeData as Record<string, unknown> | undefined;
-        const init = rawNodeData?.["init"];
-        if (!Array.isArray(init) || init.length === 0) return null;
-        const n = init.length;
-        // Match pulse-bead radius (4), but scale down if the row doesn't fit within the node diameter.
-        // Layout: n spheres of radius pr with gap = pr * 0.3 between adjacent spheres.
-        // Total width = n * 2*pr + (n-1)*0.3*pr = pr * (2n + 0.3*(n-1))
-        // Constraint: total width ≤ 2*r  →  pr ≤ 2*r / (2n + 0.3*(n-1))
-        const PULSE_BEAD_R = 5;
-        const GAP_RATIO = 0.3; // gap = pr * GAP_RATIO
-        const fitFactor = 2 * r / (2 * n + GAP_RATIO * (n - 1));
-        const pr = Math.min(PULSE_BEAD_R, fitFactor);
-        const gap = pr * GAP_RATIO;
-        const totalWidth = n * 2 * pr + (n - 1) * gap;
-        const startX = -totalWidth / 2 + pr; // center of leftmost sphere
-        const zFront = 0; // beads sit on the torus center plane
-        const fadeOpacityInner = 0.25;
-        return (init as number[]).map((val: number, idx: number) => {
-          const x = startX + idx * (2 * pr + gap);
-          // Map the raw init value to its bead component; Go keeps emitting raw 0/1.
-          const Bead = INIT_PULSE_COMPONENTS[val] ?? DefaultPulseBead;
-          return (
-            <group key={idx} position={[x, 0, zFront]}>
-              <Bead pr={pr} faded={faded} fadeOpacityInner={fadeOpacityInner} />
-            </group>
-          );
-        });
-      })()}
+      {/* Interior beads are NOT rendered here: node 1's 2x2 buffer comes from the
+          live node-bead stream (Go-authoritative positions), drawn by InteriorBeads
+          in world space alongside the nodes. The old static data.init beads were
+          Input-only and are fully replaced by that stream. */}
       {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
       {(node.data?.inputs ?? []).map((port) => {
         const dir = portDir(node, port.name, true);
@@ -459,6 +398,64 @@ export function PulseBead({
         <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
       </mesh>
     </group>
+  );
+}
+
+// InteriorBeads: renders node 1's 2x2 interior buffer from the live node-bead
+// stream. Go owns the slot positions and the present/absent state; this component
+// PLOTS ONLY — it reads getInteriorBeadMap() imperatively each frame and places each
+// PRESENT slot's mesh at its Go-supplied world position, hiding empty (popped) slots.
+// TS computes no geometry (no interior layout math) — consistent with the static
+// init beads it replaces. Discrete positions this phase (beads snap; no slide yet).
+const INTERIOR_SLOTS: { row: number; col: number }[] = [
+  { row: 0, col: 0 }, { row: 0, col: 1 },
+  { row: 1, col: 0 }, { row: 1, col: 1 },
+];
+const INTERIOR_BEAD_R = 5;
+
+function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; col: number }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const sphereMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const torusMatRef = useRef<THREE.MeshStandardMaterial>(null);
+
+  useFrame(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const slot = getInteriorBeadMap().get(interiorBeadKey(nodeId, row, col));
+    // Hidden until Go has streamed this slot AND it is present (popped slots carry
+    // present=false → hide). No geometry: place the mesh at Go's slot position.
+    if (!slot || !slot.present) {
+      group.visible = false;
+      return;
+    }
+    group.position.set(slot.pos.x, slot.pos.y, slot.pos.z);
+    const style = beadStyleForValue(slot.value ?? 0);
+    sphereMatRef.current?.color.set(style.fill);
+    torusMatRef.current?.color.set(style.ring);
+    group.visible = true;
+  });
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[INTERIOR_BEAD_R, 16, 16]} />
+        <meshStandardMaterial ref={sphereMatRef} emissiveIntensity={0} />
+      </mesh>
+      <mesh raycast={() => null}>
+        <torusGeometry args={[INTERIOR_BEAD_R, INTERIOR_BEAD_R * 0.12, 8, 24]} />
+        <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
+      </mesh>
+    </group>
+  );
+}
+
+export function InteriorBeads({ nodeId }: { nodeId: string }) {
+  return (
+    <>
+      {INTERIOR_SLOTS.map((s) => (
+        <InteriorSlotBead key={`${s.row}:${s.col}`} nodeId={nodeId} row={s.row} col={s.col} />
+      ))}
+    </>
   );
 }
 
@@ -932,6 +929,12 @@ export function Scene({
           selectedId={selectedId}
           hoveredId={hoveredId}
         />
+      ))}
+      {/* Interior beads from the live node-bead stream (Go-authoritative world
+          positions). Rendered ungrouped (world space) like PulseBead. Nodes that
+          emit no node-bead events have no store entries → nothing drawn. */}
+      {nodes.map((n) => (
+        <InteriorBeads key={`ib:${n.id}`} nodeId={n.id} />
       ))}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
     </ProceduralEnvProvider>

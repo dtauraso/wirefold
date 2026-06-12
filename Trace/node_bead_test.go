@@ -11,7 +11,7 @@ import (
 
 func TestNodeBeadEmitsEvent(t *testing.T) {
 	tr := New(8)
-	tr.NodeBead("N1", 1, 0, 1, 4.5, -6.5, 0)
+	tr.NodeBead("N1", 1, 0, true, 1, 4.5, -6.5, 0)
 	tr.Close()
 
 	events := tr.Events()
@@ -22,8 +22,8 @@ func TestNodeBeadEmitsEvent(t *testing.T) {
 	if e.Kind != KindNodeBead {
 		t.Fatalf("kind = %q, want %q", e.Kind, KindNodeBead)
 	}
-	if e.Node != "N1" || e.Row != 1 || e.Col != 0 || e.Value != 1 {
-		t.Fatalf("identity mismatch: node=%q row=%d col=%d value=%d", e.Node, e.Row, e.Col, e.Value)
+	if e.Node != "N1" || e.Row != 1 || e.Col != 0 || !e.Present || e.Value != 1 {
+		t.Fatalf("identity mismatch: node=%q row=%d col=%d present=%v value=%d", e.Node, e.Row, e.Col, e.Present, e.Value)
 	}
 	if e.X != 4.5 || e.Y != -6.5 || e.Z != 0 {
 		t.Fatalf("position mismatch: (%v,%v,%v)", e.X, e.Y, e.Z)
@@ -34,19 +34,20 @@ func TestNodeBeadEmitsEvent(t *testing.T) {
 		t.Fatalf("marshalEvent: %v", err)
 	}
 	var got struct {
-		Kind  string  `json:"kind"`
-		Node  string  `json:"node"`
-		Row   int     `json:"row"`
-		Col   int     `json:"col"`
-		Value int     `json:"value"`
-		X     float64 `json:"x"`
-		Y     float64 `json:"y"`
-		Z     float64 `json:"z"`
+		Kind    string  `json:"kind"`
+		Node    string  `json:"node"`
+		Row     int     `json:"row"`
+		Col     int     `json:"col"`
+		Present bool    `json:"present"`
+		Value   int     `json:"value"`
+		X       float64 `json:"x"`
+		Y       float64 `json:"y"`
+		Z       float64 `json:"z"`
 	}
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, b)
 	}
-	if got.Kind != "node-bead" || got.Node != "N1" || got.Row != 1 || got.Col != 0 || got.Value != 1 {
+	if got.Kind != "node-bead" || got.Node != "N1" || got.Row != 1 || got.Col != 0 || !got.Present || got.Value != 1 {
 		t.Fatalf("json header mismatch: %s", b)
 	}
 	if got.X != 4.5 || got.Y != -6.5 || got.Z != 0 {

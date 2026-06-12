@@ -6,14 +6,14 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// TestEmitNodeBeadsPositions verifies that emitNodeBeads streams one node-bead
-// event per PRESENT bead with positions matching interiorSlotPos for the right
-// (row,col): top row (0) = backup, bottom row (1) = working. A popped/absent bead
-// is omitted (fewer events). Discrete positions snap to the grid slots.
+// TestEmitNodeBeadsPositions verifies that emitNodeBeads streams a 4-SLOT SNAPSHOT
+// (all rows {0,1} × cols {0,1}) with positions matching interiorSlotPos for each
+// (row,col): top row (0) = backup, bottom row (1) = working. A popped/absent slot is
+// emitted with present=false (not omitted) so TS can clear it. Always 4 events.
 func TestEmitNodeBeadsPositions(t *testing.T) {
 	g := nodeGeom{Kind: "Input", Pos: vec3{X: 100, Y: 200, Z: 0}}
 
-	// Full state: working=[1,0], backup=[1,0] → 4 beads.
+	// Full state: working=[1,0], backup=[1,0] → 4 present slots.
 	tr := T.New(0)
 	emitNodeBeads(tr, "in", g, []int{1, 0}, []int{1, 0})
 	tr.Close()
@@ -22,8 +22,8 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 		t.Fatalf("full state: got %d node-bead events, want 4", len(full))
 	}
 
-	// Each event's position must equal interiorSlotPos(row,col), and value must
-	// equal the slice value at that slot.
+	// Each event's position must equal interiorSlotPos(row,col); present must be
+	// true for every slot, and value must equal the slice value at that slot.
 	type slot struct{ row, col int }
 	wantVal := map[slot]int{
 		{0, 0}: 1, {0, 1}: 0, // backup row
@@ -36,6 +36,9 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 		}
 		s := slot{e.Row, e.Col}
 		seen[s] = true
+		if !e.Present {
+			t.Errorf("slot %+v: present=false, want true", s)
+		}
 		if e.Value != wantVal[s] {
 			t.Errorf("slot %+v: value=%d, want %d", s, e.Value, wantVal[s])
 		}
@@ -48,12 +51,23 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 		t.Fatalf("expected 4 distinct slots, got %d", len(seen))
 	}
 
-	// After one pop: working=[1] (end 0 removed) → 3 beads (working col 1 absent).
+	// After one pop: working=[1] (end 0 removed). Still a 4-slot snapshot, but the
+	// working col-1 slot is now present=false; the other 3 are present=true.
 	tr2 := T.New(0)
 	emitNodeBeads(tr2, "in", g, []int{1}, []int{1, 0})
 	tr2.Close()
-	if got := len(tr2.Events()); got != 3 {
-		t.Fatalf("after pop: got %d node-bead events, want 3", got)
+	ev := tr2.Events()
+	if len(ev) != 4 {
+		t.Fatalf("after pop: got %d node-bead events, want 4 (snapshot)", len(ev))
+	}
+	for _, e := range ev {
+		emptySlot := e.Row == 1 && e.Col == 1
+		if emptySlot && e.Present {
+			t.Errorf("popped slot (1,1): present=true, want false")
+		}
+		if !emptySlot && !e.Present {
+			t.Errorf("slot (%d,%d): present=false, want true", e.Row, e.Col)
+		}
 	}
 }
 

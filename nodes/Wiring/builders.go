@@ -418,17 +418,24 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, ports)
 }
 
-// emitNodeBeads streams node 1's interior 2x2 buffer as one node-bead event per
-// PRESENT bead, computed with interiorSlotPos (no TS-side geometry). backup is the
-// top row (row 0), working is the bottom row (row 1); within a row, col is the
-// index into the slice. A popped (absent) bead is simply omitted — its slot has no
-// event this snapshot. Discrete positions only (beads snap to slots; no slide yet).
-// Called from the node's injected EmitNodeBeads closure whenever the arrays change.
+// emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one
+// node-bead event per fixed slot (rows {0,1} × cols {0,1}), computed with
+// interiorSlotPos (no TS-side geometry). backup is the top row (row 0), working is
+// the bottom row (row 1); a slot is PRESENT when its row's slice is at least col+1
+// long, ABSENT (popped) otherwise. Absent slots are emitted with present=false (and
+// value 0) so TS can clear them — absence can't be rendered, but an explicit empty
+// slot can. Discrete positions only (beads snap to slots; no slide yet). Called from
+// the node's injected EmitNodeBeads closure whenever the arrays change.
 func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []int) {
+	const cols = 2
 	emitRow := func(row int, slice []int) {
-		for col, v := range slice {
+		for col := 0; col < cols; col++ {
 			p := interiorSlotPos(g, row, col)
-			tr.NodeBead(nodeName, row, col, v, p.X, p.Y, p.Z)
+			if col < len(slice) {
+				tr.NodeBead(nodeName, row, col, true, slice[col], p.X, p.Y, p.Z)
+			} else {
+				tr.NodeBead(nodeName, row, col, false, 0, p.X, p.Y, p.Z)
+			}
 		}
 	}
 	emitRow(0, backup)  // top row = backup
