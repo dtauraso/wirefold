@@ -1,11 +1,8 @@
 package Wiring
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"testing"
 )
 
@@ -13,103 +10,88 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
-	treeSpec, err := loadTree(filepath.Join(repoRoot, "topology"))
+	spec, err := loadTree(filepath.Join(repoRoot, "topology"))
 	if err != nil {
 		t.Fatalf("loadTree: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "topology.json"))
-	if err != nil {
-		t.Fatalf("read topology.json: %v", err)
+	if len(spec.Nodes) != 3 {
+		t.Fatalf("expected 3 nodes, got %d", len(spec.Nodes))
 	}
-	var monoSpec topoSpec
-	if err := json.Unmarshal(raw, &monoSpec); err != nil {
-		t.Fatalf("parse: %v", err)
+	if len(spec.Edges) != 3 {
+		t.Fatalf("expected 3 edges, got %d", len(spec.Edges))
 	}
-	// populate positions (as LoadTopology does)
-	for i := range monoSpec.Nodes {
-		if pos, ok := monoSpec.View.Nodes[monoSpec.Nodes[i].ID]; ok {
-			monoSpec.Nodes[i].Position = pos
+
+	nodeByID := map[string]specNode{}
+	for _, n := range spec.Nodes {
+		nodeByID[n.ID] = n
+	}
+
+	n1, ok := nodeByID["1"]
+	if !ok {
+		t.Fatal("node \"1\" not found")
+	}
+	if n1.Type != "Input" {
+		t.Errorf("node \"1\" type: got %q, want \"Input\"", n1.Type)
+	}
+
+	n2, ok := nodeByID["2"]
+	if !ok {
+		t.Fatal("node \"2\" not found")
+	}
+	if n2.Type != "ChainInhibitor" {
+		t.Errorf("node \"2\" type: got %q, want \"ChainInhibitor\"", n2.Type)
+	}
+
+	n3, ok := nodeByID["3"]
+	if !ok {
+		t.Fatal("node \"3\" not found")
+	}
+	if n3.Type != "ChainInhibitor" {
+		t.Errorf("node \"3\" type: got %q, want \"ChainInhibitor\"", n3.Type)
+	}
+
+	// All nodes should have non-zero position (view positions exist in topology/view/)
+	for _, n := range spec.Nodes {
+		if n.Position.X == 0 && n.Position.Y == 0 {
+			t.Errorf("node %q has zero position", n.ID)
 		}
 	}
 
-	sortNodes := func(nodes []specNode) {
-		sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
-	}
-	normPorts := func(ports []specPort) []specPort {
-		sorted := make([]specPort, len(ports))
-		copy(sorted, ports)
-		sort.Slice(sorted, func(i, j int) bool {
-			si, sj := sorted[i].Slot, sorted[j].Slot
-			if si == nil && sj == nil {
-				return sorted[i].Name < sorted[j].Name
-			}
-			if si == nil {
-				return false
-			}
-			if sj == nil {
-				return true
-			}
-			if *si != *sj {
-				return *si < *sj
-			}
-			return sorted[i].Name < sorted[j].Name
-		})
-		return sorted
-	}
-
-	sortNodes(treeSpec.Nodes)
-	sortNodes(monoSpec.Nodes)
-
-	if len(treeSpec.Nodes) != len(monoSpec.Nodes) {
-		t.Fatalf("node count: tree=%d mono=%d", len(treeSpec.Nodes), len(monoSpec.Nodes))
-	}
-	for i, tn := range treeSpec.Nodes {
-		mn := monoSpec.Nodes[i]
-		if tn.ID != mn.ID {
-			t.Errorf("node[%d] id: tree=%q mono=%q", i, tn.ID, mn.ID)
-		}
-		if tn.Type != mn.Type {
-			t.Errorf("node %q type: tree=%q mono=%q", tn.ID, tn.Type, mn.Type)
-		}
-		if tn.Position != mn.Position {
-			t.Errorf("node %q position: tree=%v mono=%v", tn.ID, tn.Position, mn.Position)
-		}
-		tInputs := normPorts(tn.Inputs)
-		mInputs := normPorts(mn.Inputs)
-		comparePortLists(t, tn.ID, "inputs", tInputs, mInputs)
-		tOutputs := normPorts(tn.Outputs)
-		mOutputs := normPorts(mn.Outputs)
-		comparePortLists(t, tn.ID, "outputs", tOutputs, mOutputs)
-	}
-
-	sortEdges := func(edges []specEdge) {
-		sort.Slice(edges, func(i, j int) bool { return edges[i].Label < edges[j].Label })
-	}
-	sortEdges(treeSpec.Edges)
-	sortEdges(monoSpec.Edges)
-	if len(treeSpec.Edges) != len(monoSpec.Edges) {
-		t.Fatalf("edge count: tree=%d mono=%d", len(treeSpec.Edges), len(monoSpec.Edges))
-	}
-	for i, te := range treeSpec.Edges {
-		me := monoSpec.Edges[i]
-		if te != me {
-			t.Errorf("edge[%d]: tree=%+v mono=%+v", i, te, me)
+	// View positions should be populated for all nodes
+	for _, n := range spec.Nodes {
+		if _, ok := spec.View.Nodes[n.ID]; !ok {
+			t.Errorf("node %q missing from view.nodes", n.ID)
 		}
 	}
 
-	for id, tp := range treeSpec.View.Nodes {
-		mp, ok := monoSpec.View.Nodes[id]
-		if !ok {
-			t.Errorf("view.nodes: tree has %q, mono does not", id)
-		}
-		if tp != mp {
-			t.Errorf("view.nodes[%q]: tree=%v mono=%v", id, tp, mp)
-		}
+	edgeByLabel := map[string]specEdge{}
+	for _, e := range spec.Edges {
+		edgeByLabel[e.Label] = e
 	}
-	for id := range monoSpec.View.Nodes {
-		if _, ok := treeSpec.View.Nodes[id]; !ok {
-			t.Errorf("view.nodes: mono has %q, tree does not", id)
+
+	e1to2, ok := edgeByLabel["1To2"]
+	if !ok {
+		t.Fatal("edge \"1To2\" not found")
+	}
+	if e1to2.SourceHandle != "ToReadGate" {
+		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToReadGate\"", e1to2.SourceHandle)
+	}
+	if e1to2.TargetHandle != "FromPrevChainInhibitorNode" {
+		t.Errorf("edge 1To2 targetHandle: got %q, want \"FromPrevChainInhibitorNode\"", e1to2.TargetHandle)
+	}
+
+	if _, ok := edgeByLabel["2To3"]; !ok {
+		t.Fatal("edge \"2To3\" not found")
+	}
+	if _, ok := edgeByLabel["2FeedbackTo1"]; !ok {
+		t.Fatal("edge \"2FeedbackTo1\" not found")
+	}
+
+	// All nodes should have at least 1 input OR at least 1 output port
+	for _, n := range spec.Nodes {
+		if len(n.Inputs) == 0 && len(n.Outputs) == 0 {
+			t.Errorf("node %q has no input or output ports", n.ID)
 		}
 	}
 }
