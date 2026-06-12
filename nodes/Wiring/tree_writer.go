@@ -42,6 +42,20 @@ func writeFades(root string, fades map[string]bool) error {
 	return writeJSONAtomic(path, fades)
 }
 
+// writeScene writes raw scene JSON to <root>/view/scene.json atomically.
+// The raw bytes are written verbatim (no re-marshal) so the scene's field order is preserved.
+func writeScene(root string, raw json.RawMessage) error {
+	path := filepath.Join(root, "view", "scene.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(raw), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func mergeFades(root string, delta map[string]bool) error {
 	path := filepath.Join(root, "view", "fades.json")
 	current := map[string]bool{}

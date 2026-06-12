@@ -7,7 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BuildAndRunRunner } from "../runCommand";
-import { extractViewText, injectViewText, serializeSceneText, parseSceneText } from "../sidecar";
+import { extractViewText, injectViewText } from "../sidecar";
 import {
   parseWebviewToHost,
   type HostToWebviewMsg,
@@ -81,41 +81,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       if (wasRunning) runner.resend();
       return;
     }
-    case "save":
-      if (!document) { console.warn("topology editor: save skipped (no document)"); return; }
-      try {
-        const viewText = extractViewText(document.getText());
-        const merged = viewText ? injectViewText(msg.text, viewText) : msg.text;
-        ctx.setLastAppliedVersion?.(document.version + 1);
-        await applyEdit(document, merged);
-        await document.save();
-        ctx.setLastAppliedVersion?.(document.version);
-        ctx.syncStructuralKey?.();
-      } catch (err) {
-        post({ type: "save-error", message: toErrorMessage(err) });
-      }
-      return;
-    case "view-save":
-      // Two persistences, both fire on every view-save:
-      //   1. Diagram-view fields (node positions + the 3 fade arrays) → injected
-      //      into topology.json#view (injectViewText strips scene keys). Go reads
-      //      view.nodes from here, so this is what survives drags/fades on reload.
-      //   2. Scene fields (camera, camera3d, labelsGlobalHidden) → topology.scene.json (flat).
-      if (!document) { console.warn("topology editor: view-save skipped (no document)"); return; }
-      try {
-        const merged = injectViewText(document.getText(), msg.text);
-        ctx.setLastAppliedVersion?.(document.version + 1);
-        await applyEdit(document, merged);
-        await document.save();
-        ctx.setLastAppliedVersion?.(document.version);
-
-        const sceneFields = parseSceneText(msg.sceneText);
-        const sceneText = serializeSceneText(sceneFields);
-        const scenePath = path.join(path.dirname(document.uri.fsPath), "topology.scene.json");
-        fs.writeFileSync(scenePath, sceneText, "utf8");
-      }
-      catch (err) { post({ type: "save-error", message: toErrorMessage(err) }); }
-      return;
     case "run":
       // Primary path: Go is already spawned on open (case "ready") and the user is
       // starting the clock for the first time, or resuming after a stop+restart.
@@ -180,6 +145,8 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         // the routing keys (node id + each incident edge id) Go mail-sorts to. Forward
         // verbatim, fire-and-forget — same fan-out shape as op="update".
         runner.writeStdin(JSON.stringify({ type: "edit", op: "port-anchor", node: msg.node, port: msg.port, isInput: msg.isInput, anchor: msg.anchor, keys: msg.keys }));
+      } else if (msg.op === "scene") {
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "scene", scene: msg.scene }));
       }
       return;
   }

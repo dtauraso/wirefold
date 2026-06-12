@@ -73,11 +73,12 @@ type stdinMsg struct {
 	// Node/Port name the port; IsInput selects the input vs output list; Anchor is the
 	// new direction offset. Keys lists the routing keys (the node id AND each incident
 	// edge id) the reader mail-sorts the anchor update to — same fan-out shape as a move.
-	Node    string     `json:"node"`
-	Port    string     `json:"port"`
-	IsInput bool       `json:"isInput"`
-	Anchor  *anchorVec `json:"anchor"`
-	Keys    []string   `json:"keys"`
+	Node    string          `json:"node"`
+	Port    string          `json:"port"`
+	IsInput bool            `json:"isInput"`
+	Anchor  *anchorVec      `json:"anchor"`
+	Keys    []string        `json:"keys"`
+	Scene   json.RawMessage `json:"scene"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -269,6 +270,10 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		}
 		if treeRoot != "" {
 			_ = mergeFades(treeRoot, msg.Edges)
+		}
+	case msg.Op == "scene":
+		if treeRoot != "" && len(msg.Scene) > 0 {
+			_ = writeScene(treeRoot, msg.Scene)
 		}
 	}
 }

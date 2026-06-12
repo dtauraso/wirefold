@@ -32,7 +32,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
-import { flushSave, flushViewSave } from "./save";
+import { flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
 import { flowToSpec } from "./state/adapter/flow-to-spec";
 import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
@@ -87,7 +87,6 @@ window.addEventListener("message", (e) => {
   } else if (msg.type === "flush") {
     // Host requests immediate flush of any pending debounced saves (panel
     // becoming hidden / about to dispose).
-    flushSave();
     flushViewSave();
   } else if (msg.type === "load") {
     // Feed the R3F store; topology.json text carries spec + diagram view;

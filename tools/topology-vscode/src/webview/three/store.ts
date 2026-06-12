@@ -7,7 +7,7 @@ import { parseSpec } from "../../schema";
 import { specToFlow } from "../state/adapter/spec-to-flow";
 import { viewerState, setViewerState, patchViewerState } from "../state/viewer-state";
 import { parseViewerState, mergeSceneIntoViewerState } from "../state/viewer/types";
-import { scheduleSave, setSpecMeta, markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
+import { markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
 import { postLog } from "../log/post";
 import { vscode } from "../vscode-api";
 import { clearPulse } from "./pulse-state";
@@ -96,7 +96,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         directlyFadedEdges: restoredFadedEdges,
         fadeEdgeOrder,
       });
-      setSpecMeta(spec);
       // Phase 3: TS computes NO edge geometry. Go holds node positions + per-edge
       // control points and streams them (geometry trace) on load and on every move;
       // SingleEdgeTube draws the tube from the edge-geometry store. The store no
@@ -141,7 +140,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       target: result.newEdge.target,
       targetHandle: result.newEdge.targetHandle ?? "",
     });
-    scheduleSave();
     return result.id;
   },
 
@@ -168,7 +166,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     clearPulse(id);
     // Drop Go's streamed segment for this edge so no stale tube can draw.
     useEdgeGeometryStore.getState().removeEdgeSegment(id);
-    scheduleSave();
   },
 
   moveNode(id, x, y) {
@@ -187,7 +184,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   },
 
   saveSpec() {
-    scheduleSave();
+    /* no-op: Go persists topology from edit ops */
   },
 
   toggleFade(target) {
