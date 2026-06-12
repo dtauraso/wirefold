@@ -6,7 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
-import { nodeWorldPos, pixelToNDC } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
 import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
@@ -43,7 +43,7 @@ const MOVE_SLOP_PX = 6;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring";
+  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring" | "port-move";
   // Pointer-down snapshot
   downX: number;
   downY: number;
@@ -106,8 +106,18 @@ export function useInteractionControls(
     rfPosAtStart: { x: number; y: number };
   } | null>(null);
 
-  // Wiring state: set when pointer-down lands on a port sphere.
+  // Wiring state: set when pointer-down lands on an UNCONNECTED port sphere
+  // (drag port→port creates an edge).
   const wiringRef = useRef<{ nodeId: string; portName: string; isInput: boolean } | null>(null);
+
+  // Port-move state: set when pointer-down lands on a CONNECTED port sphere
+  // (drag slides the port along its node's ring; the incident edge follows).
+  const portMoveRef = useRef<{
+    nodeId: string;
+    portName: string;
+    isInput: boolean;
+    nodeCenter: THREE.Vector3;
+  } | null>(null);
 
   // Throttle node-move IPC: one message per animation frame during drag.
   const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number } | null>(null);
@@ -142,6 +152,68 @@ export function useInteractionControls(
       });
     }
   }, [flushNodeMove]);
+
+  // Edge ids incident on a specific port (output → source/sourceHandle, input →
+  // target/targetHandle). Used both to decide connected-vs-unconnected and to build
+  // the port-anchor `keys` fan-out.
+  const incidentEdgeIds = useCallback(
+    (nodeId: string, portName: string, isInput: boolean): string[] => {
+      const ids: string[] = [];
+      for (const e of edgesRef.current) {
+        const hit = isInput
+          ? e.target === nodeId && (e.targetHandle ?? null) === portName
+          : e.source === nodeId && (e.sourceHandle ?? null) === portName;
+        if (hit) ids.push(e.id);
+      }
+      return ids;
+    },
+    [edgesRef],
+  );
+
+  // Throttle port-anchor IPC: one message per animation frame during a port drag.
+  const pendingAnchor = useRef<{
+    nodeId: string;
+    portName: string;
+    isInput: boolean;
+    anchor: { x: number; y: number; z: number };
+  } | null>(null);
+  const anchorRafPending = useRef(false);
+
+  const flushPortAnchor = useCallback(
+    (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => {
+      // Decentralized port-anchor: mail-sort to the owning node + each edge incident
+      // on this port. Go's per-node/per-edge goroutines own the recompute + re-emit.
+      const keys = [p.nodeId, ...incidentEdgeIds(p.nodeId, p.portName, p.isInput)];
+      vscode.postMessage({
+        type: "edit",
+        op: "port-anchor",
+        node: p.nodeId,
+        port: p.portName,
+        isInput: p.isInput,
+        anchor: p.anchor,
+        keys,
+      });
+    },
+    [incidentEdgeIds],
+  );
+
+  const schedulePortAnchor = useCallback(
+    (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => {
+      pendingAnchor.current = p;
+      if (!anchorRafPending.current) {
+        anchorRafPending.current = true;
+        requestAnimationFrame(() => {
+          anchorRafPending.current = false;
+          const q = pendingAnchor.current;
+          if (q) {
+            flushPortAnchor(q);
+            pendingAnchor.current = null;
+          }
+        });
+      }
+    },
+    [flushPortAnchor],
+  );
 
   // ------ helpers ------
 
@@ -190,15 +262,32 @@ export function useInteractionControls(
       // Clear previous drag/wiring state.
       nodeDragRef.current = null;
       wiringRef.current = null;
+      portMoveRef.current = null;
 
       // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
 
-      // Check for port hit → start port-to-port wiring.
+      // Check for port hit. A CONNECTED port (has an incident edge) drags to MOVE the
+      // port along its node's ring; an UNCONNECTED port drags port→port to WIRE a new
+      // edge. Both resolve from a "pending" phase on first move past the slop.
       const portHit = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
       if (portHit !== null) {
-        wiringRef.current = parsePortId(portHit);
+        const p = parsePortId(portHit);
+        const connected = incidentEdgeIds(p.nodeId, p.portName, p.isInput).length > 0;
+        if (connected) {
+          const node = nodesRef.current.find((n) => n.id === p.nodeId);
+          if (node) {
+            portMoveRef.current = {
+              nodeId: p.nodeId,
+              portName: p.portName,
+              isInput: p.isInput,
+              nodeCenter: nodeWorldPos(node),
+            };
+          }
+        } else {
+          wiringRef.current = p;
+        }
         s.phase = "pending";
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         return;
@@ -245,7 +334,7 @@ export function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, unprojectToPlane],
+    [cameraRef, nodesRef, pickRequest, unprojectToPlane, incidentEdgeIds],
   );
 
   const onPointerMove = useCallback(
@@ -258,7 +347,9 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        if (wiringRef.current) {
+        if (portMoveRef.current) {
+          s.phase = "port-move";
+        } else if (wiringRef.current) {
           s.phase = "wiring";
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
@@ -290,6 +381,30 @@ export function useInteractionControls(
         s.prevY = e.clientY;
       }
 
+      if (s.phase === "port-move" && portMoveRef.current) {
+        // Slide the port along its node's ring: project the pointer ray onto the
+        // z=0 plane through the node center, take the in-plane direction from center
+        // to the hit, constrain to the ring (z=0). The port sphere AND the incident
+        // edge follow ~1 frame behind via Go's re-emit (node-geometry + edge-geometry
+        // streams) — same optimistic-follow path node-drag uses for the node body.
+        const pm = portMoveRef.current;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        const planePoint = unprojectToPlane(e.clientX, e.clientY, rect);
+        if (planePoint) {
+          const anchor = pointerRingAnchor(pm.nodeCenter, planePoint);
+          if (anchor) {
+            schedulePortAnchor({
+              nodeId: pm.nodeId,
+              portName: pm.portName,
+              isInput: pm.isInput,
+              anchor,
+            });
+          }
+        }
+        s.prevX = e.clientX;
+        s.prevY = e.clientY;
+      }
+
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
@@ -313,7 +428,7 @@ export function useInteractionControls(
         }
       }
     },
-    [cameraRef, nodesRef, onMoveNode, scheduleNodeMove, unprojectToPlane],
+    [cameraRef, nodesRef, onMoveNode, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -339,6 +454,27 @@ export function useInteractionControls(
           }
         }
         wiringRef.current = null;
+        s.phase = "idle";
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+        return;
+      }
+
+      // Port-move completed: flush the final anchor (Go persists it; Phase 1 made
+      // anchor round-trip through save). Reset throttle so the last frame isn't dropped.
+      if (s.phase === "port-move" && portMoveRef.current) {
+        const pm = portMoveRef.current;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        const planePoint = unprojectToPlane(e.clientX, e.clientY, rect);
+        if (planePoint) {
+          const anchor = pointerRingAnchor(pm.nodeCenter, planePoint);
+          if (anchor) {
+            pendingAnchor.current = null;
+            anchorRafPending.current = false;
+            flushPortAnchor({ nodeId: pm.nodeId, portName: pm.portName, isInput: pm.isInput, anchor });
+            scheduleSave();
+          }
+        }
+        portMoveRef.current = null;
         s.phase = "idle";
         (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
         return;
@@ -391,7 +527,7 @@ export function useInteractionControls(
 
       s.phase = "idle";
     },
-    [flushNodeMove, onMoveNode, onSelect, pickRequest, storeCreateEdge],
+    [flushNodeMove, flushPortAnchor, onMoveNode, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
   );
 
   // Exposed so ThreeView can attach a non-passive native listener.
