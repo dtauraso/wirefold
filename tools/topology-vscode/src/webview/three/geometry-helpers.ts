@@ -141,23 +141,6 @@ function portDirLocal(node: RFNode<NodeData>, portName: string, isInput: boolean
   return dir.normalize();
 }
 
-/**
- * World position of a port sphere on the node surface: node center + port unit
- * direction × node radius. This is the SAME placement the port-sphere meshes use
- * in scene-content.tsx (position={[dir.x*r, dir.y*r, dir.z*r]} relative to the node
- * group at nodeWorldPos). Because nodeWorldPos reads Go's emitted center, this tracks
- * a dragged node ~1 frame behind via the stream. Returns the node center if the port
- * direction is unknown. Used for the port-sphere meshes; wire endpoints + bead are
- * sourced from Go's edge-geometry / position streams, not from here.
- */
-export function portWorldPos(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 {
-  const center = nodeWorldPos(node);
-  const dir = portDir(node, portName, isInput);
-  if (!dir) return center;
-  const r = nodeRadius(node);
-  return new THREE.Vector3(center.x + dir.x * r, center.y + dir.y * r, center.z + dir.z * r);
-}
-
 /** World position for the top of the node sphere (center.y + radius). */
 export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   const center = nodeWorldPos(node);
@@ -209,16 +192,6 @@ export function camToPlaneDistance(cam: THREE.PerspectiveCamera): number {
     return Math.max(Math.abs(-cam.position.z / fwdZ), 10);
   }
   return Math.max(Math.abs(cam.position.z), 10);
-}
-
-/**
- * World-units-per-pixel for panning in the camera's screen plane.
- * Computed from the perpendicular distance to the content plane and the camera FOV.
- */
-export function worldPerPixel(cam: THREE.PerspectiveCamera, canvasH: number): number {
-  const d = camToPlaneDistance(cam);
-  const fovRad = (cam.fov * Math.PI) / 180;
-  return (2 * d * Math.tan(fovRad / 2)) / canvasH;
 }
 
 // ---------------------------------------------------------------------------

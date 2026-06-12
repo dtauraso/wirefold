@@ -13,8 +13,6 @@ export const WIRE_PROPS: Record<string, WirePropDef> = {
   kind:        { tsType: "EdgeKind",  required: true },
 };
 
-export type WirePropName = keyof typeof WIRE_PROPS;
-
 // Derived from WIRE_PROPS — do not hand-edit. Consumed by Edge and EdgeData.
 export type WireProps = {
   label?: string;

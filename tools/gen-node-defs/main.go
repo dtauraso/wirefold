@@ -1015,8 +1015,6 @@ func writeWireDefs(outPath string, props []wireProp) error {
 	}
 	fmt.Fprintln(w, `};`)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, `export type WirePropName = keyof typeof WIRE_PROPS;`)
-	fmt.Fprintln(w)
 	fmt.Fprintln(w, `// Derived from WIRE_PROPS — do not hand-edit. Consumed by Edge and EdgeData.`)
 	fmt.Fprintln(w, `export type WireProps = {`)
 	for _, p := range props {

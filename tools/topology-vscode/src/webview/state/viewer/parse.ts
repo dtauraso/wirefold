@@ -41,16 +41,6 @@ export function parseCamera3d(v: unknown): Camera3D | undefined {
   };
 }
 
-export function collect<T>(v: unknown, parse: (x: unknown) => T | undefined): T[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const out: T[] = [];
-  for (const item of v) {
-    const p = parse(item);
-    if (p) out.push(p);
-  }
-  return out;
-}
-
 export function parseNodeViews(v: unknown): Record<string, NodeView> | undefined {
   if (!isObj(v)) return undefined;
   const out: Record<string, NodeView> = {};
