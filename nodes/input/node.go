@@ -15,6 +15,22 @@ type Node struct {
 	FeedbackIn  *Wiring.In
 }
 
+// popEnd reads and removes the END element of working, refilling from backup
+// when working empties. working/backup are the double-buffer: each is a fresh
+// copy of init, and end-popping [1,0] yields 0 then 1. Returns the popped value.
+// Caller guarantees len(working) > 0 (refill keeps it non-empty when init != nil).
+func popEnd(working, backup *[]int, init []int) int {
+	v := (*working)[len(*working)-1]
+	*working = (*working)[:len(*working)-1]
+	if len(*working) == 0 {
+		// Refill: the top row (backup) slides down to become the new working
+		// row; a fresh top row appears.
+		*working = *backup
+		*backup = append([]int(nil), init...)
+	}
+	return v
+}
+
 func (n *Node) Update(ctx context.Context) {
 	if n.EmitGeometry != nil {
 		n.EmitGeometry()
@@ -23,60 +39,77 @@ func (n *Node) Update(ctx context.Context) {
 		return
 	}
 
+	// Double-buffer derived from the spec init: working (bottom row) and backup
+	// (top row), each a fresh copy of init. The working array IS the emission
+	// state — no persistent index. End-popping is the read: end of working is
+	// the next value out.
+	init := append([]int(nil), n.Init...)
+	working := append([]int(nil), init...)
+	backup := append([]int(nil), init...)
+
 	if n.FeedbackIn.Wired() {
-		// Feedback ring: SEND then READ each iteration so the first emit (i=0)
-		// is the ring seed and there is no t=0 deadlock. FeedbackIn delivers the
-		// step (0 = same index, 1 = advance) from the downstream ChainInhibitor.
-		i := 0
-		for n.Repeat || i < len(n.Init) {
+		// Feedback ring: SEED then READ. The first pop+send is unconditional so
+		// the ring is bootstrapped (no t=0 deadlock) — without it, nothing emits
+		// and the downstream ChainInhibitor never produces a feedback step.
+		// Thereafter FeedbackIn gates pops: s == 1 -> pop the end and send;
+		// s == 0 -> hold (send nothing this step).
+		seeded := false
+		for {
 			if ctx.Err() != nil {
 				return
 			}
+			s := 1
+			if seeded {
+				// READ: block until ChainInhibitor sends the step on FeedbackIn.
+				step, ok := n.FeedbackIn.TryRecv()
+				if !ok {
+					return
+				}
+				n.FeedbackIn.Done()
+				s = step
+			}
+			seeded = true
+
+			if s != 1 {
+				// Hold: send nothing this step.
+				continue
+			}
+
 			n.Fire()
-			// SEND: place current Init value before waiting for feedback.
+			v := popEnd(&working, &backup, init)
 			if n.ToReadGate.Gated() {
-				if n.ToReadGate.TrySend(n.Init[i%len(n.Init)]) {
+				if n.ToReadGate.TrySend(v) {
 					if !n.ToReadGate.WaitConsumed() {
 						return
 					}
 				}
 			} else {
-				n.ToReadGate.TryEmit(n.Init[i%len(n.Init)])
+				n.ToReadGate.TryEmit(v)
 			}
-			// READ: block until ChainInhibitor sends the step on FeedbackIn.
-			s, ok := n.FeedbackIn.TryRecv()
-			if !ok {
-				return
-			}
-			n.FeedbackIn.Done()
-			i = (i + s) % len(n.Init)
 		}
-		return
 	}
 
-	// Plain emit path (FeedbackIn not wired): existing behavior preserved.
-	for i := 0; n.Repeat || i < len(n.Init); {
+	// Plain emit path (FeedbackIn not wired): pop the end every iteration,
+	// refilling on empty. With Repeat the buffer refills forever; without it,
+	// emit exactly len(init) values (one working drain) then stop.
+	emitted := 0
+	for n.Repeat || emitted < len(init) {
 		if ctx.Err() != nil {
 			return
 		}
 		n.Fire()
+		v := popEnd(&working, &backup, init)
 		if n.ToReadGate.Gated() {
-			if n.ToReadGate.TrySend(n.Init[i%len(n.Init)]) {
+			if n.ToReadGate.TrySend(v) {
 				if !n.ToReadGate.WaitConsumed() {
 					return
 				}
-				i++
-				if !n.Repeat && i >= len(n.Init) {
-					return
-				}
+				emitted++
 			}
 		} else {
 			// fire-and-forget: advance unconditionally after TryEmit (no wait).
-			n.ToReadGate.TryEmit(n.Init[i%len(n.Init)])
-			i++
-			if !n.Repeat && i >= len(n.Init) {
-				return
-			}
+			n.ToReadGate.TryEmit(v)
+			emitted++
 		}
 	}
 }
