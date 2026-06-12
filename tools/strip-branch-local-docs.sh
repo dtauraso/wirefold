@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # strip-branch-local-docs.sh <branch>
-# Removes planning docs tagged with branch: <branch> in either form within the first 10 lines:
+# Scans ALL of docs/ and removes docs tagged with branch: <branch> in either form within the first 10 lines:
 #   Markdown frontmatter: `branch: <branch>`
 #   HTML comment:         `<!-- branch: <branch> -->` (flexible inner whitespace)
 # Run before merging a task branch to main.
@@ -13,7 +13,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 BRANCH="$1"
-DOCS_DIR="docs/planning"
+DOCS_DIR="docs"
 
 if [[ ! -d "$DOCS_DIR" ]]; then
   echo "Error: $DOCS_DIR not found. Run from repo root." >&2
