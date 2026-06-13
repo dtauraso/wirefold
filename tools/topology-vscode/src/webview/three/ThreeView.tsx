@@ -255,7 +255,6 @@ export function ThreeView() {
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>
-            <div style={{ whiteSpace: "nowrap", fontSize: 9, opacity: 0.6 }}>{n.data?.type}</div>
           </div>
         );
       })}
