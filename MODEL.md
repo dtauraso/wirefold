@@ -96,6 +96,8 @@ A node places a bead on its outgoing wire whenever its own rule says to. It does
 and wire is a goroutine; they coordinate through channels. A single
 global gate halts or resumes wire animation. There is no central walker.
 
+**Each node (and wire) is its own independent goroutine with its own local timing.** The only shared timing is the one clock, and it is shared solely so the global play/pause gate freezes and resumes every goroutine together. No node's timing may couple to another's: wrong local timing in one node must not change how another node runs.
+
 Each wire times its OWN delivery on the one clock: when `inFlightTime`
 has elapsed the wire puts the bead on the channel to the destination
 node. Delivery is not triggered by the renderer — there is no
