@@ -159,6 +159,7 @@ var (
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
 	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
+	tNowFunc            = reflect.TypeFor[func() time.Duration]()
 )
 
 // lowerFirst returns s with its first byte lowercased.
@@ -293,6 +294,17 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		f.Set(reflect.ValueOf(func(beads []int) {
 			emitRefillSlide(ctx, tr, nodeName, clk, beads)
 		}))
+	}
+
+	// Inject Now closure if the struct has a `Now func() time.Duration` field AND
+	// a clock is available (loader path). The closure reads active-elapsed sim time
+	// (pause-aware) off the same shared clock the PacedWires use, so a node that
+	// times a coincidence window / fire dwell (AndGate) freezes on pause and resumes
+	// on resume instead of timing out mid-pause. Without a clock (test build with no
+	// loader) the field stays nil and the node falls back to a monotonic wall-clock.
+	if f := v.FieldByName("Now"); f.IsValid() && f.CanSet() && f.Type() == tNowFunc && pb.clock != nil {
+		clk := pb.clock
+		f.Set(reflect.ValueOf(func() time.Duration { return clk.Now() }))
 	}
 
 	// Wire port fields with traced wrappers.

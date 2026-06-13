@@ -24,6 +24,12 @@ type Node struct {
 	Fire           func()
 	EmitGeometry   func()
 	EmitInputBeads func(left, right int)
+	// Now returns active-elapsed sim time (pause-aware) from the same clock the
+	// PacedWire/train use. Injected by the loader (builders.go) from pb.clock.
+	// The window and dwell are measured against it so they freeze on pause and
+	// resume on resume — never timing out mid-pause. If unset (unit tests with no
+	// loader), it falls back to a monotonic wall-clock so timing still progresses.
+	Now            func() time.Duration
 	Left           int
 	HasLeft        bool
 	Right          int
@@ -63,9 +69,19 @@ func (g *Node) Update(ctx context.Context) {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
 	}
-	var t0 time.Time
+
+	// now reads active-elapsed sim time (pause-aware) from the injected clock so
+	// the window and dwell freeze on pause. Fall back to a monotonic wall-clock
+	// when no clock was injected (unit tests with no loader).
+	now := g.Now
+	if now == nil {
+		start := time.Now()
+		now = func() time.Duration { return time.Since(start) }
+	}
+
+	var t0 time.Duration
 	var t0Set bool
-	var dwellStart time.Time
+	var dwellStart time.Duration
 	var dwellSet bool
 
 	emitInputs := func() {
@@ -107,7 +123,7 @@ func (g *Node) Update(ctx context.Context) {
 
 		// Window opens on the first input that arrives.
 		if (g.HasLeft || g.HasRight) && !t0Set {
-			t0 = time.Now()
+			t0 = now()
 			t0Set = true
 		}
 
@@ -116,10 +132,10 @@ func (g *Node) Update(ctx context.Context) {
 			// before the gate resolves. Once committed to the dwell, the
 			// window-timeout below is gated off so it can't clip the fire.
 			if !dwellSet {
-				dwellStart = time.Now()
+				dwellStart = now()
 				dwellSet = true
 			}
-			if time.Since(dwellStart) >= fireDwellMs*time.Millisecond {
+			if now()-dwellStart >= fireDwellMs*time.Millisecond {
 				// AND gate: fires 1 when both inputs are 1, else 0.
 				result := 0
 				if g.Left == 1 && g.Right == 1 {
@@ -142,7 +158,7 @@ func (g *Node) Update(ctx context.Context) {
 		// time out while still waiting for the second input; once both are held
 		// we are committed to firing after the dwell, so the dwell can't be
 		// clipped by the window even if it outlasts W.
-		if t0Set && !(g.HasLeft && g.HasRight) && time.Since(t0) > g.windowMs() {
+		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > g.windowMs() {
 			g.clear(&t0Set)
 			emitInputs()
 		}
