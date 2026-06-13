@@ -1,4 +1,4 @@
-package inhibitrightgate
+package andgate
 
 import (
 	"context"
@@ -120,8 +120,9 @@ func (g *Node) Update(ctx context.Context) {
 				dwellSet = true
 			}
 			if time.Since(dwellStart) >= fireDwellMs*time.Millisecond {
+				// AND gate: fires 1 when both inputs are 1, else 0.
 				result := 0
-				if g.Left == 1 && g.Right == 0 {
+				if g.Left == 1 && g.Right == 1 {
 					result = 1
 				}
 				g.Fire()
@@ -164,5 +165,5 @@ func (g *Node) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("InhibitRightGate", func() any { return &Node{} })
+	Wiring.Register("AndGate", func() any { return &Node{} })
 }

@@ -271,7 +271,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	}
 
 	// Inject EmitInputBeads closure if the struct has an `EmitInputBeads
-	// func(left, right int)` field (InhibitRightGate's two-sided held-input beads).
+	// func(left, right int)` field (AndGate's two-sided held-input beads).
 	// The closure captures this node's id and emits the LEFT input on the left of
 	// the node and the RIGHT input on the right; -1 = not held → present=false.
 	if f := v.FieldByName("EmitInputBeads"); f.IsValid() && f.CanSet() && f.Type() == tEmitInputBeadsFunc {
