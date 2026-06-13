@@ -244,6 +244,11 @@ export function GraphNode({
   hoveredId?: string | null;
 }) {
   const envTex = useContext(EnvTexContext);
+  // Subscribe reactively so GraphNode re-renders when Go streams node-geometry for
+  // this node (portDir / nodeWorldPos / nodeRadius all call getNodeGeometry internally;
+  // without this the component never re-renders after the Go stream arrives and ports
+  // stay at their default side/slot fallback positions).
+  useNodeGeometryStore((s) => s.geoms[node.id]);
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
   const fillHex = node.data?.fill ?? "#ffffff";
