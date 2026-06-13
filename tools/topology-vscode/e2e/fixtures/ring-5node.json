@@ -4,7 +4,7 @@
     { "id": "readGate1", "type": "ReadGate", "x": 300, "y": 280, "inputs": [{ "name": "value", "kind": "chain" }, { "name": "ack", "kind": "chain" }] },
     { "id": "i0", "type": "ChainInhibitor", "x": 520, "y": 280, "data": { "seed": 0 } },
     { "id": "i1", "type": "ChainInhibitor", "x": 820, "y": 280, "data": { "seed": 0 } },
-    { "id": "inhibitRight0", "type": "AndGate", "x": 720, "y": 180 }
+    { "id": "inhibitRight0", "type": "WindowAndGate", "x": 720, "y": 180 }
   ],
   "edges": [
     {
