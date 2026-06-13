@@ -1,4 +1,4 @@
-package andgate
+package windowandgate
 
 import (
 	"context"
