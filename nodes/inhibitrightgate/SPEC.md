@@ -15,8 +15,8 @@
 | shape | rect |
 | fill | #fce4ec |
 | stroke | #880e4f |
-| width | 110 |
-| height | 36 |
+| width | 80 |
+| height | 60 |
 
 ## Ports
 

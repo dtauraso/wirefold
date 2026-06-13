@@ -53,18 +53,18 @@ type PortBindings struct {
 	single           map[string]chan int
 	multi            map[string][]chan int
 	singlePaced      map[string]*PacedWire
-	singleRule       map[string]SendRule   // per-port send rule for singlePaced
-	singleArc        map[string]float64    // per-edge arc length for singlePaced Out
-	singleLatency    map[string]float64    // per-edge sim latency for singlePaced Out
+	singleRule       map[string]SendRule    // per-port send rule for singlePaced
+	singleArc        map[string]float64     // per-edge arc length for singlePaced Out
+	singleLatency    map[string]float64     // per-edge sim latency for singlePaced Out
 	singleSegment    map[string]wireSegment // per-edge segment endpoints for singlePaced Out
 	singleLabel      map[string]string      // per-edge TS edge id for singlePaced Out
 	multiPaced       map[string][]*PacedWire
-	multiPacedHandle map[string][]string    // per-element source handle for multiPaced
-	multiRule        map[string][]SendRule  // per-element send rule for multiPaced
-	multiArc         map[string][]float64   // per-element arc length for multiPaced Out
-	multiLatency     map[string][]float64   // per-element sim latency for multiPaced Out
+	multiPacedHandle map[string][]string      // per-element source handle for multiPaced
+	multiRule        map[string][]SendRule    // per-element send rule for multiPaced
+	multiArc         map[string][]float64     // per-element arc length for multiPaced Out
+	multiLatency     map[string][]float64     // per-element sim latency for multiPaced Out
 	multiSegment     map[string][]wireSegment // per-element segment endpoints for multiPaced Out
-	multiLabel       map[string][]string    // per-element TS edge id for multiPaced Out
+	multiLabel       map[string][]string      // per-element TS edge id for multiPaced Out
 	// outSink, when non-nil, collects every paced *Out built for this node keyed
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
@@ -151,13 +151,14 @@ func (pb *PortBindings) OutSlice(name string) []chan<- int {
 }
 
 var (
-	tInPtr    = reflect.TypeFor[*In]()
-	tOutPtr   = reflect.TypeFor[*Out]()
-	tOutMulti = reflect.TypeFor[OutMulti]()
-	tFireFunc      = reflect.TypeFor[func()]()
-	tEmitBeadsFunc = reflect.TypeFor[func(working, backup []int)]()
-	tEmitHeldFunc  = reflect.TypeFor[func(held int)]()
-	tRefillSlideFunc = reflect.TypeFor[func(beads []int)]()
+	tInPtr              = reflect.TypeFor[*In]()
+	tOutPtr             = reflect.TypeFor[*Out]()
+	tOutMulti           = reflect.TypeFor[OutMulti]()
+	tFireFunc           = reflect.TypeFor[func()]()
+	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
+	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
+	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
+	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
 )
 
 // lowerFirst returns s with its first byte lowercased.
@@ -266,6 +267,17 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		nodeName := name
 		f.Set(reflect.ValueOf(func(held int) {
 			emitHeldBead(tr, nodeName, held)
+		}))
+	}
+
+	// Inject EmitInputBeads closure if the struct has an `EmitInputBeads
+	// func(left, right int)` field (InhibitRightGate's two-sided held-input beads).
+	// The closure captures this node's id and emits the LEFT input on the left of
+	// the node and the RIGHT input on the right; -1 = not held → present=false.
+	if f := v.FieldByName("EmitInputBeads"); f.IsValid() && f.CanSet() && f.Type() == tEmitInputBeadsFunc {
+		nodeName := name
+		f.Set(reflect.ValueOf(func(left, right int) {
+			emitInputBeads(tr, nodeName, left, right)
 		}))
 	}
 
@@ -484,6 +496,16 @@ func emitHeldBead(tr *T.Trace, nodeName string, held int) {
 	tr.NodeBead(nodeName, 0, 0, held != -1, held, 0, 0, 0)
 }
 
+// emitInputBeads streams a gate's two held inputs as interior beads: the LEFT
+// input on the left of the node (negative x), the RIGHT input on the right
+// (positive x), vertically centered. -1 = not held → present=false. Slot keys
+// (0,0)=left, (0,1)=right. Offsets use interiorSlot so they sit inside the sphere.
+func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
+	s := interiorSlot
+	tr.NodeBead(nodeName, 0, 0, left != -1, left, -s, 0, 0)
+	tr.NodeBead(nodeName, 0, 1, right != -1, right, s, 0, 0)
+}
+
 // interiorSlideDurationMul scales the refill-slide duration relative to raw
 // pulse speed. At 1.0 the slide runs at the base pulse speed with no extra
 // multiplier — the same constant speed as the wire beads. (Knob retained so
@@ -503,6 +525,7 @@ const interiorSlideDurationMul = 1.0
 //   - row 1, every col: present, value = beads[col], offset = lerp(row0,row1,t)
 //     (keyed to the DESTINATION bottom slot, sliding down from the top position).
 //   - row 0, every col: present=false (the top row is empty during the slide).
+//
 // At t=1 the bottom beads sit exactly at their row-1 offset.
 func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Clock, beads []int) {
 	if clk == nil || len(beads) == 0 {
@@ -573,4 +596,3 @@ func init() {
 		}
 	}
 }
-

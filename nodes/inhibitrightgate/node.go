@@ -16,15 +16,16 @@ const windowFactor = 1.5
 const pollInterval = 5 * time.Millisecond
 
 type Node struct {
-	Fire         func()
-	EmitGeometry func()
-	Left     int
-	HasLeft  bool
-	Right    int
-	HasRight bool
-	FromLeft  *Wiring.In
-	FromRight *Wiring.In
-	ToPassed  *Wiring.Out
+	Fire           func()
+	EmitGeometry   func()
+	EmitInputBeads func(left, right int)
+	Left           int
+	HasLeft        bool
+	Right          int
+	HasRight       bool
+	FromLeft       *Wiring.In
+	FromRight      *Wiring.In
+	ToPassed       *Wiring.Out
 }
 
 // windowMs derives the coincidence window W from the node's current input wires:
@@ -60,6 +61,20 @@ func (g *Node) Update(ctx context.Context) {
 	var t0 time.Time
 	var t0Set bool
 
+	emitInputs := func() {
+		l, r := -1, -1
+		if g.HasLeft {
+			l = g.Left
+		}
+		if g.HasRight {
+			r = g.Right
+		}
+		if g.EmitInputBeads != nil {
+			g.EmitInputBeads(l, r)
+		}
+	}
+	emitInputs() // initial empty interior
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,6 +86,7 @@ func (g *Node) Update(ctx context.Context) {
 			if v, ok := g.FromLeft.PollRecv(); ok {
 				g.Left = v
 				g.HasLeft = true
+				emitInputs()
 			}
 		}
 
@@ -78,6 +94,7 @@ func (g *Node) Update(ctx context.Context) {
 			if v, ok := g.FromRight.PollRecv(); ok {
 				g.Right = v
 				g.HasRight = true
+				emitInputs()
 			}
 		}
 
@@ -99,6 +116,7 @@ func (g *Node) Update(ctx context.Context) {
 			g.HasLeft = false
 			g.HasRight = false
 			t0Set = false
+			emitInputs()
 			if g.ToPassed.Gated() {
 				if g.ToPassed.TrySend(result) {
 					if !g.ToPassed.WaitConsumed() {
@@ -114,6 +132,7 @@ func (g *Node) Update(ctx context.Context) {
 		// A partial combination has been open longer than W → clear it.
 		if t0Set && time.Since(t0) > g.windowMs() {
 			g.clear(&t0Set)
+			emitInputs()
 		}
 
 		// Short park between polls to avoid busy-spin.
