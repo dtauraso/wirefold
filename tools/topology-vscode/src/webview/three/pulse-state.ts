@@ -21,56 +21,82 @@
 import { postLog } from "../log/post";
 
 export interface PulseData {
+  /** The edge this bead is traversing. The map key is `${edgeId}:${beadID}` so a
+   *  wire can hold N beads at once (a clock-paced train); renderers read this to
+   *  find the edge segment they ride. */
+  edgeId: string;
   value: number;
-  simStep: number;
-  target: string;
-  targetHandle: string;
-  /** Go-computed bead world position (Phase 2 position stream); null until the
-   *  first position event for this pulse arrives. TS never computes this. */
-  pos: { x: number; y: number; z: number } | null;
+  /** Go-computed bead world position (Phase 2 position stream). The slot is only
+   *  created from a position event, so this is always set. TS never computes it. */
+  pos: { x: number; y: number; z: number };
   /** Go-owned FRACTIONAL progress t (0..1) of the bead along its wire, from the
    *  position event. The editor places the bead at lerp(liveStart, liveEnd, frac)
    *  on its LOCAL (dragged) node port positions so the bead rides the live wire
-   *  with no round-trip lag. null until the first position event arrives. */
-  frac: number | null;
+   *  with no round-trip lag. Always set (slot established from a position event). */
+  frac: number;
 }
 
 export type PulseMap = ReadonlyMap<string, PulseData>;
 
 let _current: Map<string, PulseData> = new Map();
 
-export function setPulse(edgeId: string, data: Omit<PulseData, "pos" | "frac">) {
-  // Records the in-flight bead and its routing identity (target/targetHandle) on
-  // the send event. The position + fraction are filled in by setPulsePos as Go's
-  // stream arrives; until then frac stays null and PulseBead stays hidden.
+/** Composite map key: a wire (edgeId) may carry N beads at once, each with a
+ *  distinct per-wire id (beadID = Go's gen). Keying by edge alone collapsed N
+ *  beads to one sprite; keying by `${edgeId}:${beadID}` lets them coexist. */
+export function pulseKey(edgeId: string, beadID: number): string {
+  return `${edgeId}:${beadID}`;
+}
+
+/** Set/refresh one bead's Go-computed world position + fraction from a position
+ *  (edge-bead) trace event. The position stream is the per-bead ESTABLISHER:
+ *  with a clock-paced train one send fires but N beads stream their own
+ *  positions, so the first position event for a (edge, bead) pair creates the
+ *  slot (carrying its value). Called ~16 ms; mutates in place (no React commit). */
+export function setPulsePos(edgeId: string, beadID: number, value: number, x: number, y: number, z: number, frac: number) {
+  const key = pulseKey(edgeId, beadID);
+  const existing = _current.get(key);
+  if (existing) {
+    existing.value = value;
+    existing.pos = { x, y, z };
+    existing.frac = frac;
+    return;
+  }
+  // First position for this bead — establish its slot (new Map so a future
+  // structural change is observable; per-frame pos updates mutate in place).
   const next = new Map(_current);
-  next.set(edgeId, { ...data, pos: null, frac: null });
+  next.set(key, { edgeId, value, pos: { x, y, z }, frac });
   _current = next;
 }
 
-/** Set the bead's Go-computed world position from a position trace event.
- *  Called ~16 ms; mutates in place (no React commit). If a position arrives
- *  before the send event created the entry, it is dropped — the send event is
- *  what establishes routing identity. */
-export function setPulsePos(edgeId: string, x: number, y: number, z: number, frac: number) {
-  const existing = _current.get(edgeId);
-  if (!existing) return;
-  existing.pos = { x, y, z };
-  existing.frac = frac;
-}
-
-export function clearPulse(edgeId: string) {
+export function clearPulse(edgeId: string, beadID: number) {
+  const key = pulseKey(edgeId, beadID);
   const keysBefore = [..._current.keys()];
-  if (!_current.has(edgeId)) {
+  if (!_current.has(key)) {
     // Asked to clear a bead that isn't in-flight — log so a delete capture
     // shows we did NOT drop a bead (and which keys were present instead).
-    postLog("clearPulse", { edgeId, removed: false, keysBefore });
+    postLog("clearPulse", { edgeId, beadID, removed: false, keysBefore });
     return;
   }
   const next = new Map(_current);
-  next.delete(edgeId);
+  next.delete(key);
   _current = next;
-  postLog("clearPulse", { edgeId, removed: true, keysBefore, keysAfter: [...next.keys()] });
+  postLog("clearPulse", { edgeId, beadID, removed: true, keysBefore, keysAfter: [...next.keys()] });
+}
+
+/** Drop EVERY in-flight bead on one edge (all `${edgeId}:*` entries). Used by
+ *  edge-level actions (delete edge, fade edge) where the whole wire's beads must
+ *  vanish at once — distinct from the pump's per-bead clearPulse (arrive/cancel). */
+export function clearPulsesForEdge(edgeId: string) {
+  let removed = 0;
+  const next = new Map(_current);
+  for (const [key, e] of _current) {
+    if (e.edgeId === edgeId) {
+      next.delete(key);
+      removed++;
+    }
+  }
+  if (removed > 0) _current = next;
+  postLog("clearPulsesForEdge", { edgeId, removed });
 }
 
 /** Wipe every in-flight bead. Called at run-start (store.load) so a fresh run's

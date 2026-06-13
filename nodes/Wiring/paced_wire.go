@@ -432,7 +432,7 @@ func (pw *PacedWire) launchWalkerLocked(gen uint64) {
 					t = 1
 				}
 				pos := lerp(seg.Start, seg.End, t)
-				tr.Position(b.node, b.port, b.val, pos.X, pos.Y, pos.Z, t)
+				tr.Position(b.node, b.port, b.val, pos.X, pos.Y, pos.Z, t, b.gen)
 			}
 
 			if final {
@@ -460,7 +460,7 @@ func (pw *PacedWire) launchWalkerLocked(gen uint64) {
 				pw.inflight = pw.inflight[1:]
 				pw.delivered = append(pw.delivered, db.val)
 				pw.cond.Broadcast()
-				ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val}
+				ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
 				pw.mu.Unlock()
 				pw.emitArrive(ai)
 				return
@@ -550,13 +550,14 @@ type arriveInfo struct {
 	emit       bool
 	node, port string
 	value      int
+	gen        uint64 // the delivered/dropped bead's per-wire id (renderer bead key)
 }
 
 // emitArrive sends the traversal-complete trace for a delivered bead. Called by
 // the walker AFTER releasing pw.mu (trace channel send off the lock).
 func (pw *PacedWire) emitArrive(ai arriveInfo) {
 	if ai.emit {
-		pw.Trace.Arrive(ai.node, ai.port, ai.value)
+		pw.Trace.Arrive(ai.node, ai.port, ai.value, ai.gen)
 	}
 }
 
@@ -577,7 +578,7 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	var cancelled []arriveInfo
 	for i := range pw.inflight {
 		b := pw.inflight[i]
-		cancelled = append(cancelled, arriveInfo{emit: true, node: b.node, port: b.port, value: b.val})
+		cancelled = append(cancelled, arriveInfo{emit: true, node: b.node, port: b.port, value: b.val, gen: b.gen})
 	}
 	pw.inflight = nil
 	pw.delivered = nil
@@ -621,7 +622,7 @@ func (pw *PacedWire) Delete() {
 	pw.mu.Unlock()
 
 	for _, ai := range cancelled {
-		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value)
+		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
 	}
 }
 

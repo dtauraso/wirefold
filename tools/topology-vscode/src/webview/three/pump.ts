@@ -28,7 +28,7 @@ import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
-import { setPulse, setPulsePos, clearPulse } from "./pulse-state";
+import { setPulsePos, clearPulse } from "./pulse-state";
 import { setInteriorBead } from "./interior-bead-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useNodeGeometryStore } from "./node-geometry";
@@ -49,35 +49,19 @@ export function handleTraceEvent(event: TraceEvent): void {
     case "fire":
       return;
     case "send": {
-      // Match ALL edges by source node id + sourceHandle (fan-out).
-      // RF edges store source/sourceHandle; trace send events carry node/port.
-      // The send event ESTABLISHES the in-flight bead (value + routing identity);
-      // its world position is filled in by the position stream (Go-computed). TS
-      // no longer derives any timing/geometry from the send event.
-      const { node, port, value, target: goTarget, targetHandle: goTargetHandle } = event as Extract<TraceEvent, { kind: "send" }>;
-      const edges = useThreeStore.getState().edges;
-      const matched = edges.filter(
-        (e) => e.source === node && e.sourceHandle === port,
-      );
-      for (const edge of matched) {
-        postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null, edgeId: edge.id });
-        // Prefer Go-provided slot identity (target, targetHandle) — these are
-        // authoritative from PacedWire and are not derived from edge data, which
-        // can be empty for live-re-added edges.
-        setPulse(edge.id, {
-          value: value ?? 0,
-          simStep: step,
-          target: (goTarget != null && goTarget !== "") ? goTarget : (edge.target ?? ""),
-          targetHandle: (goTargetHandle != null && goTargetHandle !== "") ? goTargetHandle : (edge.targetHandle ?? ""),
-        });
-      }
+      // A fire starts a clock-paced train: ONE send fires but N beads ride the
+      // wire, each minted (and keyed) by Go's per-bead gen. The per-bead slot is
+      // therefore established by the edge-bead (position) stream, not the send —
+      // the send no longer carries a bead id and creates no slot. Logged only.
+      const { node, port } = event as Extract<TraceEvent, { kind: "send" }>;
+      postLog("phase4.pump", { layer: "pump", step, node, port: port ?? null });
       return;
     }
     case "edge-bead": {
       // Go's per-frame bead position (Phase 2). Match ALL edges by source node id
       // + sourceHandle (fan-out), same key as send, and set the bead's world
       // position directly — TS plots, computes no geometry.
-      const { node, port, x, y, z, f } = event as Extract<TraceEvent, { kind: "edge-bead" }>;
+      const { node, port, value, x, y, z, f, bead } = event as Extract<TraceEvent, { kind: "edge-bead" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
@@ -85,8 +69,10 @@ export function handleTraceEvent(event: TraceEvent): void {
       for (const edge of matched) {
         // x/y/z is Go's fallback world position; f is the bead's fractional progress.
         // PulseBead places the bead at lerp(liveStart, liveEnd, f) on the editor's
-        // LOCAL node port positions so it rides the live wire during a drag.
-        setPulsePos(edge.id, x, y, z, f);
+        // LOCAL node port positions so it rides the live wire during a drag. bead
+        // keys this position to the right in-flight bead (N beads per wire); this
+        // position event establishes the bead's slot the first time it is seen.
+        setPulsePos(edge.id, bead ?? 0, value ?? 0, x, y, z, f);
       }
       return;
     }
@@ -106,13 +92,13 @@ export function handleTraceEvent(event: TraceEvent): void {
       // edges by source node id + sourceHandle (fan-out, same key as send/position)
       // and remove the bead sprite. The edge itself may already be gone from the
       // store (deleteEdge removes it locally); clearPulse is a safe no-op then.
-      const { node, port } = event as Extract<TraceEvent, { kind: "pulse-cancelled" }>;
+      const { node, port, bead } = event as Extract<TraceEvent, { kind: "pulse-cancelled" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
       );
       for (const edge of matched) {
-        clearPulse(edge.id);
+        clearPulse(edge.id, bead ?? 0);
       }
       return;
     }
@@ -140,13 +126,13 @@ export function handleTraceEvent(event: TraceEvent): void {
       // as send/position/pulse-cancelled) and clear the transit pulse: the in-flight
       // bead vanishes the instant it arrives, NOT when the node later consumes the
       // held value (that's "done"). deliverLocked fires arrive exactly once per bead.
-      const { node, port } = event as Extract<TraceEvent, { kind: "arrive" }>;
+      const { node, port, bead } = event as Extract<TraceEvent, { kind: "arrive" }>;
       const edges = useThreeStore.getState().edges;
       const matched = edges.filter(
         (e) => e.source === node && e.sourceHandle === port,
       );
       for (const edge of matched) {
-        clearPulse(edge.id);
+        clearPulse(edge.id, bead ?? 0);
       }
       return;
     }

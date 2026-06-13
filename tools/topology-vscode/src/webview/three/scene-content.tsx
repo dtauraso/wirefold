@@ -376,70 +376,81 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
   return nodeWorldPos(node);
 }
 
-// PulseBead: a bright sphere drawn ON the wire at its Go-owned fractional progress.
-// Go owns the clock and the bead's fraction along the wire; this component PLOTS ONLY —
-// each frame it reads pulse.frac (the bead's progress t, 0..1) from getPulseMap() and
-// places the bead at lerp(start, end, frac) on the SAME segment SingleEdgeTube draws,
-// read from useEdgeGeometryStore (Go's wireSegment Start/End, re-emitted on every
-// node-move). Because bead and tube share one segment source, the bead is provably on
-// the line every frame and rides the wire as the node moves — no lag, no drift.
-// No curve sampling beyond the linear lerp, no clock, no delivery message: the renderer
-// is told where the bead is (segment + fraction), never asked when it arrived (MODEL.md).
-// pulse.frac is now LIVE — it is the progress used to place the bead on the live wire.
-// Go's emitted x,y,z on the position event (pulse.pos) is now unused by the bead; it is
-// left on the bridge for now (no Go/bridge churn).
+// PulseBead: draws the in-flight beads ON a wire at their Go-owned fractional progress.
+// A wire may carry MULTIPLE beads at once (a clock-paced train): getPulseMap() is keyed
+// by `${edgeId}:${beadID}`, so each in-flight bead on this edge is its own map entry.
+// Go owns the clock and each bead's fraction; this component PLOTS ONLY — each frame it
+// reads every map entry whose edgeId === this edge and places one sprite at
+// lerp(start, end, frac) on the SAME segment SingleEdgeTube draws (Go's wireSegment from
+// useEdgeGeometryStore). Because beads and tube share one segment source, every bead is
+// provably on the line and rides the wire as the node moves — no lag, no drift. No curve
+// sampling beyond the linear lerp, no clock, no delivery message (MODEL.md).
+//
+// Imperative pool: PULSE_POOL bead groups are mounted once; each frame we map the edge's
+// live entries onto pool slots (placed/colored/visible) and hide the unused slots. No
+// React state per bead — placement is pure useFrame mutation, off React's render path.
+const PULSE_POOL = 16;
+
 export function PulseBead({
   edgeId,
 }: {
   edgeId: string;
 }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const sphereMatRef = useRef<THREE.MeshStandardMaterial>(null);
-  const torusMatRef = useRef<THREE.MeshStandardMaterial>(null);
-  // SAME source SingleEdgeTube subscribes to — bead and tube cannot diverge.
+  const slotRefs = useRef<(THREE.Group | null)[]>([]);
+  const sphereMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  const torusMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  // SAME source SingleEdgeTube subscribes to — beads and tube cannot diverge.
   const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
 
   useFrame(() => {
-    const pulse = getPulseMap().get(edgeId);
-    const group = groupRef.current;
-    if (!group) return;
-    // Hidden until there is a pulse with a fraction AND Go has streamed this edge's
-    // segment (startup race: no segment yet → render nothing, no crash).
-    if (!pulse || pulse.frac == null || !seg) {
-      group.visible = false;
-      return;
+    const slots = slotRefs.current;
+    // Gather this edge's live beads (one map entry per in-flight bead on this wire).
+    // No segment yet (startup race) → hide all, no crash.
+    let slot = 0;
+    if (seg) {
+      for (const pulse of getPulseMap().values()) {
+        if (pulse.edgeId !== edgeId) continue;
+        if (slot >= PULSE_POOL) break; // pool exhausted — extra beads wait a frame
+        const g = slots[slot];
+        if (!g) { slot++; continue; }
+        // A non-0/1 value has no style → leave this slot hidden.
+        const style = beadStyleForValue(pulse.value);
+        if (!style) { g.visible = false; slot++; continue; }
+        // Place at the Go-supplied fraction along the Go-supplied segment.
+        const f = pulse.frac;
+        g.position.set(
+          seg.start.x + f * (seg.end.x - seg.start.x),
+          seg.start.y + f * (seg.end.y - seg.start.y),
+          seg.start.z + f * (seg.end.z - seg.start.z),
+        );
+        sphereMatRefs.current[slot]?.color.set(style.fill);
+        torusMatRefs.current[slot]?.color.set(style.ring);
+        g.visible = true;
+        slot++;
+      }
     }
-    // Render placement of Go-owned values: place the bead at its Go-supplied fraction
-    // along the Go-supplied segment. Same exception class as nodeWorldPos.
-    const f = pulse.frac;
-    group.position.set(
-      seg.start.x + f * (seg.end.x - seg.start.x),
-      seg.start.y + f * (seg.end.y - seg.start.y),
-      seg.start.z + f * (seg.end.z - seg.start.z),
-    );
-    // Color the bead by the value it carries — same map as the static init beads.
-    // A non-0/1 value has no style → hide rather than paint a fallback.
-    const style = beadStyleForValue(pulse.value);
-    if (!style) {
-      group.visible = false;
-      return;
+    // Hide any pool slots not claimed this frame.
+    for (let i = slot; i < PULSE_POOL; i++) {
+      const g = slots[i];
+      if (g) g.visible = false;
     }
-    sphereMatRef.current?.color.set(style.fill);
-    torusMatRef.current?.color.set(style.ring);
-    group.visible = true;
   });
 
   return (
-    <group ref={groupRef} visible={false}>
-      <mesh raycast={() => null}>
-        <sphereGeometry args={[4, 16, 16]} />
-        <meshStandardMaterial ref={sphereMatRef} emissiveIntensity={0} />
-      </mesh>
-      <mesh raycast={() => null}>
-        <torusGeometry args={[4, 4 * 0.12, 8, 24]} />
-        <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
-      </mesh>
-    </group>
+    <>
+      {Array.from({ length: PULSE_POOL }, (_, i) => (
+        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[4, 16, 16]} />
+            <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[4, 4 * 0.12, 8, 24]} />
+            <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+        </group>
+      ))}
+    </>
   );
 }
 
