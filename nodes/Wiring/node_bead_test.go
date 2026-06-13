@@ -111,6 +111,21 @@ func TestInteriorBeadsInsideSphere(t *testing.T) {
 	}
 }
 
+// TestInputBeadsInsideSphere asserts the two InhibitRightGate side beads (at
+// ±interiorSlot on x, vertically centered) keep their torus reach inside the
+// node sphere: |offset| + interiorTorusOuterR ≤ nodeRadius("InhibitRightGate").
+func TestInputBeadsInsideSphere(t *testing.T) {
+	rt := interiorTorusOuterR
+	r := nodeRadius("InhibitRightGate")
+	for _, x := range []float64{-interiorSlot, interiorSlot} {
+		dist := math.Abs(x)
+		reach := dist + rt
+		if reach > r {
+			t.Errorf("side bead x=%v: torus reach %v > r %v — ring pokes outside sphere", x, reach, r)
+		}
+	}
+}
+
 // TestInteriorTorusesDoNotOverlap asserts adjacent same-row/col toruses keep a
 // non-negative gap: pitch (2*slot) ≥ 2*rt, i.e. torus-to-torus gap ≥ 0.
 func TestInteriorTorusesDoNotOverlap(t *testing.T) {

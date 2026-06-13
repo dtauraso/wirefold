@@ -33,7 +33,7 @@ func run(left, right int) (int, error) {
 		cancel()
 		wg.Wait()
 		return v, nil
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(1000 * time.Millisecond):
 		cancel()
 		wg.Wait()
 		return -1, nil

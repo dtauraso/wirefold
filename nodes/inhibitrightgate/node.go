@@ -15,16 +15,22 @@ const windowFactor = 1.5
 // parks on a short timeout (or ctx cancel) instead of spinning.
 const pollInterval = 5 * time.Millisecond
 
+// fireDwellMs holds both inputs visible (interior beads present) for this long
+// once both are held, before the gate fires + clears. Without it the
+// second-arriving interior bead only flashes for ~1ms before the fire clears it.
+const fireDwellMs = 800
+
 type Node struct {
-	Fire         func()
-	EmitGeometry func()
-	Left     int
-	HasLeft  bool
-	Right    int
-	HasRight bool
-	FromLeft  *Wiring.In
-	FromRight *Wiring.In
-	ToPassed  *Wiring.Out
+	Fire           func()
+	EmitGeometry   func()
+	EmitInputBeads func(left, right int)
+	Left           int
+	HasLeft        bool
+	Right          int
+	HasRight       bool
+	FromLeft       *Wiring.In
+	FromRight      *Wiring.In
+	ToPassed       *Wiring.Out
 }
 
 // windowMs derives the coincidence window W from the node's current input wires:
@@ -59,6 +65,22 @@ func (g *Node) Update(ctx context.Context) {
 	}
 	var t0 time.Time
 	var t0Set bool
+	var dwellStart time.Time
+	var dwellSet bool
+
+	emitInputs := func() {
+		l, r := -1, -1
+		if g.HasLeft {
+			l = g.Left
+		}
+		if g.HasRight {
+			r = g.Right
+		}
+		if g.EmitInputBeads != nil {
+			g.EmitInputBeads(l, r)
+		}
+	}
+	emitInputs() // initial empty interior
 
 	for {
 		select {
@@ -71,6 +93,7 @@ func (g *Node) Update(ctx context.Context) {
 			if v, ok := g.FromLeft.PollRecv(); ok {
 				g.Left = v
 				g.HasLeft = true
+				emitInputs()
 			}
 		}
 
@@ -78,6 +101,7 @@ func (g *Node) Update(ctx context.Context) {
 			if v, ok := g.FromRight.PollRecv(); ok {
 				g.Right = v
 				g.HasRight = true
+				emitInputs()
 			}
 		}
 
@@ -88,32 +112,46 @@ func (g *Node) Update(ctx context.Context) {
 		}
 
 		if g.HasLeft && g.HasRight {
-			// All inputs present within W → keep and fire.
-			result := 0
-			if g.Left == 1 && g.Right == 0 {
-				result = 1
+			// Both inputs held: dwell so both interior beads are visible
+			// before the gate resolves. Once committed to the dwell, the
+			// window-timeout below is gated off so it can't clip the fire.
+			if !dwellSet {
+				dwellStart = time.Now()
+				dwellSet = true
 			}
-			g.Fire()
-			g.FromLeft.Done()
-			g.FromRight.Done()
-			g.HasLeft = false
-			g.HasRight = false
-			t0Set = false
-			if g.ToPassed.Gated() {
-				if g.ToPassed.TrySend(result) {
-					if !g.ToPassed.WaitConsumed() {
-						return
-					}
+			if time.Since(dwellStart) >= fireDwellMs*time.Millisecond {
+				result := 0
+				if g.Left == 1 && g.Right == 0 {
+					result = 1
 				}
-			} else {
-				g.ToPassed.TryEmit(result)
+				g.Fire()
+				g.FromLeft.Done()
+				g.FromRight.Done()
+				g.HasLeft = false
+				g.HasRight = false
+				t0Set = false
+				dwellSet = false
+				emitInputs()
+				if g.ToPassed.Gated() {
+					if g.ToPassed.TrySend(result) {
+						if !g.ToPassed.WaitConsumed() {
+							return
+						}
+					}
+				} else {
+					g.ToPassed.TryEmit(result)
+				}
+				continue
 			}
-			continue
 		}
 
-		// A partial combination has been open longer than W → clear it.
-		if t0Set && time.Since(t0) > g.windowMs() {
+		// A partial combination has been open longer than W → clear it. Only
+		// time out while still waiting for the second input; once both are held
+		// we are committed to firing after the dwell, so the dwell can't be
+		// clipped by the window even if it outlasts W.
+		if t0Set && !(g.HasLeft && g.HasRight) && time.Since(t0) > g.windowMs() {
 			g.clear(&t0Set)
+			emitInputs()
 		}
 
 		// Short park between polls to avoid busy-spin.
