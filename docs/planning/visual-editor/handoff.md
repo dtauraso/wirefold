@@ -29,7 +29,7 @@ model. **NOT ready to merge** (foundational change with known open issues below)
 - `33cce656` clock-gate Recv: a node consumes at most one bead per `recvGateMs=2000`
   window, dropping the rest of a train — an N-bead train collapses to ONE fire (refractory
   `lastConsumed` on the wire, active-elapsed clock).
-- `af77fcc4` `WindowAndGate` window+dwell run on the pause-aware sim clock (injected
+- `af77fcc4` `WindowAndGate` window+dwell run on the pause-aware clock (the one human-speed clock) (injected
   `Now func() time.Duration`, like `EmitGeometry`).
 - `c4e624f7` + `a8ef268e` rename `AndGate → WindowAndGate` (`c4e624f7` half-committed — left
   in-file edits uncommitted; `a8ef268e` fixed HEAD).
@@ -54,7 +54,7 @@ incoming train to one fire (nodes 2/3/4 verified by user); window/dwell are paus
    (2→3→4→5). Local to node 5.
 3. **`WindowAndGate` poll loop (`node.go:170`)** still uses wall-clock
    `time.After(pollInterval=5ms)` — not pause-aware; the window/dwell CHECKS are pause-aware,
-   only the poll wake isn't. Minor; convert to the sim clock.
+   only the poll wake isn't. Minor; convert to read the one clock.
 
 ### Active design direction (reference = `timing-spec.html`, NOT MODEL.md — user removed the MODEL.md version)
 
@@ -66,12 +66,6 @@ incoming train to one fire (nodes 2/3/4 verified by user); window/dwell are paus
   DISTANCES at pulseSpeed (e.g. dwell 32 wu, train 80 wu, spacing 16 wu, recvGate 80 wu) read
   off the active-elapsed clock — human-speed AND pausing together. (`timing-spec.html`
   "Target (distance)" tab.)
-- **NEW concept to add:** node input→output PROCESSING is itself a per-node distance (today
-  it's instant — recv/fire/send same tick). A node should hold its input for a per-node
-  `processingDistance` against the clock before emitting (the bead "travels through" the node
-  like a stretch of wire). Per-node, human-speed, pausable. `timing-spec.html` "Node
-  Processing" tab has a per-node table with TBD processing distances.
-
 ### Uncommitted (intentionally left)
 
 Topology layout autosaves — `topology/view/nodes/{2,3,4,5}.json` and
@@ -119,9 +113,8 @@ Topology layout autosaves — `topology/view/nodes/{2,3,4,5}.json` and
   fire-and-forget (consume-gates stripped). All on the one active-elapsed clock (pauses
   cleanly).
 - **Timing-as-distance is the design target:** per-node local durations expressed as
-  distances at pulseSpeed off the shared clock — human-speed + locality + one-button pause.
-  Node processing should also become a per-node distance (currently instant). Reference:
-  `timing-spec.html`. Do NOT put this in MODEL.md (user reverted that).
+  distances at pulseSpeed off the one clock — human-speed + locality + one-button pause.
+  Reference: `timing-spec.html`. Do NOT put this in MODEL.md (user reverted that).
 - **Subagent half-commit trap (recurrence):** the `AndGate → WindowAndGate` rename
   (`c4e624f7`) committed the file move + generated refs but left the
   package-decl/Register/SPEC edits uncommitted, leaving HEAD inconsistent (built only in the
