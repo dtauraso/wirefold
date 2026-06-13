@@ -7,9 +7,12 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// windowFactor scales the max input-wire latency into the coincidence window W.
-// W = windowFactor * max(simLatencyMs over the node's current input wires).
-const windowFactor = 1.5
+// windowWu is the fixed per-node coincidence window expressed as a distance in
+// world units. At the one pulseSpeed (0.04 wu/ms) this equals 3000 ms — enough
+// to exceed the same-cycle input skew (~69 ms measured) while staying under the
+// input cadence (~3104 ms). It is a property of the node, like a neuron's
+// membrane time constant, and does NOT depend on input-wire geometry.
+const windowWu = 120
 
 // pollInterval bounds the busy-spin of the window loop: between polls the loop
 // parks on a short timeout (or ctx cancel) instead of spinning.
@@ -39,15 +42,12 @@ type Node struct {
 	ToPassed       *Wiring.Out
 }
 
-// windowMs derives the coincidence window W from the node's current input wires:
-// W = windowFactor * max(simLatencyMs over input wires). Recomputed from live
-// wire geometry (via In.SimLatencyMs) so node moves / reconnects are reflected.
+// windowMs returns the fixed coincidence window as a duration by converting the
+// distance windowWu to time via the one pulseSpeed. This is pure distance-based
+// timing — independent of input-wire geometry and pause-aware because the caller
+// reads it against now() (the injected pause-aware clock).
 func (g *Node) windowMs() time.Duration {
-	maxLat := g.FromLeft.SimLatencyMs()
-	if r := g.FromRight.SimLatencyMs(); r > maxLat {
-		maxLat = r
-	}
-	return time.Duration(windowFactor*maxLat) * time.Millisecond
+	return time.Duration(windowWu/Wiring.PulseSpeedWuPerMs) * time.Millisecond
 }
 
 // clear discards both held inputs without firing: Done drains each upstream wire

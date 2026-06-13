@@ -208,10 +208,10 @@
           <td>Refractory window — one consume allowed per window; collapses a bead train to a single fire</td>
         </tr>
         <tr>
-          <td><code>windowFactor</code></td>
-          <td>1.5</td>
-          <td>×</td>
-          <td>Coincidence window = 1.5 × max input-wire latency (WindowAndGate)</td>
+          <td><code>windowWu</code></td>
+          <td>120</td>
+          <td>wu</td>
+          <td>Fixed per-node coincidence window (WindowAndGate); 120 wu ÷ 0.04 wu/ms = 3000 ms</td>
         </tr>
         <tr>
           <td><code>fireDwellMs</code></td>
@@ -249,8 +249,8 @@
         </tr>
         <tr>
           <td>Window (WindowAndGate)</td>
-          <td><code>1.5 × max(SimLatencyMs)</code>; <code>SimLatencyMs = arcLength/pulseSpeed</code></td>
-          <td>✅ effectively distance</td>
+          <td>fixed 120 wu (~3000 ms); <code>windowWu / pulseSpeed</code></td>
+          <td>✅ pure distance</td>
           <td>✅</td>
         </tr>
         <tr>
