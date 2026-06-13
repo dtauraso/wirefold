@@ -8,73 +8,36 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-12 — on `main`, no task in flight; persistence redesign + 3 follow-ups merged)
+## State at handoff (2026-06-13 — on `main`, no task in flight; inhibitRight0 + port-anchor-render + layout merges)
 
-The topology-tree / Go-owns-persistence redesign (`task/persist-geometry-from-go-stream`)
-is **merged to `main` and its branch deleted**: all 4 phases built, monolith files removed
-(`topology.json`, `topology.scene.json`, `topology.inactive.json` — the last relocated to
-`topology/inactive/` tree), live-verified end to end (port anchor survives reload).
+`main` is current; no task in flight. **Three branches merged + deleted this session:**
 
-Since that merge, **three follow-up branches also merged + deleted**:
+1. **Port-anchor render-reactivity fix** (merge `7b6d3891`, branch
+   `task/fix-port-anchor-render`). `GraphNode` in `scene-content.tsx` read node geometry via
+   the non-reactive `getNodeGeometry()` snapshot, so Go-streamed anchored port directions
+   never re-rendered and ports reverted to default side/slot on reload. Fix: added a
+   `useNodeGeometryStore((s) => s.geoms[node.id])` selector (mirrors `CameraFit`). Go side was
+   already correct (reads/streams the anchor); the break was TS-only.
+2. **Promote `inhibitRight0`** (merge `3a7b429f`, branch `task/add-inhibitright-node`).
+   `inhibitRight0` (kind `InhibitRightGate`) moved from the inactive tree into the active
+   `topology/` diagram, fed by `2.ToNext1 -> FromLeft` and `3.ToNext0 -> FromRight` (edges
+   `topology/edges/2ToInhibitRight0.json`, `3ToInhibitRight0.json`). Color inherited from the
+   `InhibitRightGate` NODE_DEF (`#fce4ec`/`#880e4f`) via `meta.type` — no per-node override.
+   Note: the RF-era node had a distinct inhibit-port accent (`#f48fb1` on `FromRight`); the
+   current generic sphere-port renderer has no per-port handle colors, so that accent is not
+   reproduced (would be a render feature, not topology data).
+3. **Persist layout edits** (merge `d225a73b`, branch `task/persist-layout-edits`). Persisted
+   an editor layout pass — port anchors + node positions for nodes `1`,`2`,`3` and
+   `inhibitRight0`, and moved `inhibitRight0`'s `ToPassed` output port to `side:top slot:0`.
 
-1. **Editor-bringup fixes** — folded into the persistence merge (see the debugging chain
-   below); kept here as record.
-2. **Prebuilt-binary runner + `.go` watcher + orphan reap** (merge `6c8a1f31`, branch
-   `task/prebuilt-binary-runner`). The editor now spawns a prebuilt binary at
-   `<repoRoot>/.wirefold-cache/wirefold` (gitignored) instead of `go run .` — no per-launch
-   re-link. A lazy staleness check (`ensureBinaryBuilt`, `runCommand.ts`) rebuilds at
-   `run()` when any `.go` is newer than the binary. An eager `**/*.go` `FileSystemWatcher`
-   (`extension.ts` `openTopologyEditor`, 250ms debounce) rebuilds on save via a shared
-   `buildBinary()` in `src/goBuild.ts` (module-level `building` guard = wait-free coalesce
-   so watcher + launch never run `go build -o` concurrently). On launch
-   `killOrphanedSims()` (`goBuild.ts`) SIGKILLs leftover `wirefold` sims from prior/crashed
-   sessions (matches command containing `wirefold` AND (`-topology` OR the cache path);
-   excludes the active sim + ext-host pid). Single-panel assumption documented. First launch
-   after a fresh checkout does a one-time `go build` (binary absent, gitignored, never
-   committed); reused thereafter until a `.go` changes.
-3. **Zombie-bead-on-restart fix** (merge `f40260b8`, branch `task/clear-pulses-on-restart`).
-   The webview pulse/bead store (module-level `Map` in `webview/three/pulse-state.ts`,
-   polled by `PulseBead` in `useFrame` — no listeners/version) had no run-boundary reset. A
-   bead in-flight (past `send`, before `arrive`) when STOP killed Go survived into the next
-   run as a zombie (observed on `2To3`). Fix: `clearAllPulses()` (swaps in a fresh empty
-   `Map`; next `useFrame` draws none) called at the TOP of `store.load()`; since Go emits its
-   startup spec → `load` on every restart, each new run wipes prior transient beads. Pause
-   does NOT route through `load()`, so beads correctly persist across pause. Pure render-state
-   reset at the run boundary — NO change to wire timing, `paced_wire.go`, or the bead model.
-   Decided NOT to also clear on a bare stop (user declined) — stop-without-restart leaves
-   in-flight beads until the next run, by choice.
-
-### Editor-bringup debugging chain (after build, all real fixes)
-
-1. **Startup load-race:** Go's one-shot spec line was posted before the webview listener
-   attached → host now caches `lastSpec` and replays `"load"` on webview `"ready"` (`extension.ts`).
-2. **Dead document-gate:** `handle-message.ts` still gated webview-log (and breadcrumbs) on
-   the removed custom-editor `document` → threaded a `logUri` into `MessageCtx`, removed
-   the gates; restored ts-webview logging.
-3. **parseSpec schema mismatch:** tree-based `EmitSpecLine` dropped port `kind` and edge
-   `id` that `parseSpec` required → Go now emits edge `id`; `specNode.Position` got
-   `json:"-"`; `parsePort` defaults `kind`; added a load-error breadcrumb (in
-   `ERROR_LABELS`) so silent `store.load` throws surface to `ts-errors.jsonl`.
-4. **Auto-fit not firing / framing wrong:** `CameraFitter` only depended on `loadEpoch` and
-   bailed if nodes/canvas not ready, and negated `cy` while `nodeWorldPos` was y-up → fixed
-   to fit once-per-epoch gated on Go geometry present for all nodes, dropped the y negation
-   to match manual Fit (HomeButton). Diagram now appears framed on open.
-5. **Compact JSON writes:** `tree_writer` now emits compact single-line JSON matching the
-   fixtures.
-
-### Live verification (this session)
-
-Editor opens framed; dragging a node wrote `topology/view/nodes/<id>.json`; dragging a
-port anchor wrote `topology/nodes/<id>/inputs/<port>.json` with an `"anchor"` field; on
-reload Go re-read the tree and the spec stream carried both the moved position AND the port
-anchor — the original branch goal (port anchor survives reload) is confirmed working.
+**Dropped, unmerged:** `task/multi-bead-wire` (deleted local + remote). The multi-bead
+PacedWire experiment was abandoned per user; the apparent "port anchors reset" regression it
+seemed to cause was actually the long-standing TS reactivity bug fixed in (1) above — not
+caused by that branch.
 
 ### NEXT (post-merge)
 
-No task in flight; new work is friction-driven from live editor use. Deferred:
-external hand-edit handling (manual relaunch vs a future in-process reload op);
-optional clear-on-stop (declined for now — beads linger until next run by choice);
-optional eager binary build on panel open to remove even the first-launch ~0.5s.
+No task in flight; new work is friction-driven from live editor use.
 
 ### Settled architecture (already on main — keep short)
 
@@ -146,6 +109,10 @@ anchor previously did **not** survive reload (TS was the sole writer; Go only RE
   `specToFlow`) was vestigial and is retired by this branch.
 - **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't
   re-propose; O(N²) follow latency.
+- **Port slots are `0|1|2` per side** (top/bottom/left/right each hold at most 3 ports).
+  The webview parser (`parse-nodes-edges.ts`) throws a `load-error` on slot 3+, which blanks
+  the whole diagram (chrome renders, graph does not; Fit does nothing). Surfaces in
+  `.probe/ts-errors.jsonl` as `spec.nodes[N].outputs[M].slot: expected 0|1|2, got 3`.
 
 ### Dev-loop
 
