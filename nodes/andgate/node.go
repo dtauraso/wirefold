@@ -133,15 +133,7 @@ func (g *Node) Update(ctx context.Context) {
 				t0Set = false
 				dwellSet = false
 				emitInputs()
-				if g.ToPassed.Gated() {
-					if g.ToPassed.TrySend(result) {
-						if !g.ToPassed.WaitConsumed() {
-							return
-						}
-					}
-				} else {
-					g.ToPassed.TryEmit(result)
-				}
+				g.ToPassed.TryEmit(result)
 				continue
 			}
 		}

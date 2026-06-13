@@ -30,13 +30,7 @@ func fanOutHeld(outs Wiring.OutMulti, held int) {
 		wg.Add(1)
 		go func(o *Wiring.Out) {
 			defer wg.Done()
-			if o.Gated() {
-				if o.TrySend(held) {
-					o.WaitConsumed()
-				}
-			} else {
-				o.TryEmit(held)
-			}
+			o.TryEmit(held)
 		}(out)
 	}
 	wg.Wait()

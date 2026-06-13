@@ -64,15 +64,7 @@ func (g *Node) Update(ctx context.Context) {
 			g.In.Done()
 			g.HasValue = false
 			g.In.Breadcrumb("hold_flip", "")
-			if g.Out.Gated() {
-				if g.Out.TrySend(result) {
-					if !g.Out.WaitConsumed() {
-						return
-					}
-				}
-			} else {
-				g.Out.TryEmit(result)
-			}
+			g.Out.TryEmit(result)
 			continue
 		}
 
