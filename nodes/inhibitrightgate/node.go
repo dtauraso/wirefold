@@ -18,7 +18,7 @@ const pollInterval = 5 * time.Millisecond
 // fireDwellMs holds both inputs visible (interior beads present) for this long
 // once both are held, before the gate fires + clears. Without it the
 // second-arriving interior bead only flashes for ~1ms before the fire clears it.
-const fireDwellMs = 400
+const fireDwellMs = 800
 
 type Node struct {
 	Fire           func()
