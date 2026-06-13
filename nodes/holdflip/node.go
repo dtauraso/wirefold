@@ -15,6 +15,8 @@ type Node struct {
 	Fire         func()
 	EmitGeometry func()
 	EmitHeldBead func(held int)
+	Now          func() time.Duration                                   // injected one-clock Now; nil in test builds → wall-clock fallback
+	WaitUntil    func(ctx context.Context, target time.Duration) error  // pause-aware park on the one clock; nil in test/no-loader builds → wall-clock fallback
 	Value        int
 	HasValue     bool
 	In           *Wiring.In
@@ -24,6 +26,27 @@ type Node struct {
 func (g *Node) Update(ctx context.Context) {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
+	}
+
+	// now reads active-elapsed sim time (pause-aware) from the injected clock so
+	// the poll park freezes on pause. Fall back to a monotonic wall-clock when no
+	// clock was injected (unit tests with no loader).
+	now := g.Now
+	if now == nil {
+		start := time.Now()
+		now = func() time.Duration { return time.Since(start) }
+	}
+
+	park := g.WaitUntil
+	if park == nil {
+		park = func(ctx context.Context, _ time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(pollInterval):
+				return nil
+			}
+		}
 	}
 
 	// held tracks the last received INPUT value displayed inside the node sphere.
@@ -68,11 +91,9 @@ func (g *Node) Update(ctx context.Context) {
 			continue
 		}
 
-		// Short park between polls to avoid busy-spin.
-		select {
-		case <-ctx.Done():
+		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).
+		if park(ctx, now()+pollInterval) != nil {
 			return
-		case <-time.After(pollInterval):
 		}
 	}
 }

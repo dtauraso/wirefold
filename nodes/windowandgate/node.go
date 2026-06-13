@@ -33,6 +33,7 @@ type Node struct {
 	// resume on resume — never timing out mid-pause. If unset (unit tests with no
 	// loader), it falls back to a monotonic wall-clock so timing still progresses.
 	Now            func() time.Duration
+	WaitUntil      func(ctx context.Context, target time.Duration) error // pause-aware park on the one clock; nil in test/no-loader builds → wall-clock fallback
 	Left           int
 	HasLeft        bool
 	Right          int
@@ -77,6 +78,18 @@ func (g *Node) Update(ctx context.Context) {
 	if now == nil {
 		start := time.Now()
 		now = func() time.Duration { return time.Since(start) }
+	}
+
+	park := g.WaitUntil
+	if park == nil {
+		park = func(ctx context.Context, _ time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(pollInterval):
+				return nil
+			}
+		}
 	}
 
 	var t0 time.Duration
@@ -163,11 +176,9 @@ func (g *Node) Update(ctx context.Context) {
 			emitInputs()
 		}
 
-		// Short park between polls to avoid busy-spin.
-		select {
-		case <-ctx.Done():
+		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).
+		if park(ctx, now()+pollInterval) != nil {
 			return
-		case <-time.After(pollInterval):
 		}
 	}
 }

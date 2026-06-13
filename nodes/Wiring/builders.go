@@ -307,6 +307,20 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		f.Set(reflect.ValueOf(func() time.Duration { return clk.Now() }))
 	}
 
+	// Inject WaitUntil closure if the struct has a `WaitUntil func(context.Context,
+	// time.Duration) error` field AND a clock is available (loader path). The closure
+	// parks on the same shared clock the PacedWires use, so poll loops freeze on
+	// pause and resume on resume instead of advancing on wall-clock time. Without a
+	// clock (test build with no loader) the field stays nil and the node falls back
+	// to a wall-clock time.After park.
+	tWaitFunc := reflect.TypeFor[func(context.Context, time.Duration) error]()
+	if f := v.FieldByName("WaitUntil"); f.IsValid() && f.CanSet() && f.Type() == tWaitFunc && pb.clock != nil {
+		clk := pb.clock
+		f.Set(reflect.ValueOf(func(ctx context.Context, target time.Duration) error {
+			return clk.WaitUntil(ctx, target)
+		}))
+	}
+
 	// Wire port fields with traced wrappers.
 	ports := reflectPorts(nodePtr)
 	for _, port := range ports {
