@@ -111,6 +111,18 @@ type PacedWire struct {
 	Target          string   // destination node id — authoritative slot identity
 	TargetHandle    string   // destination input-port name — authoritative slot identity
 	Trace           *T.Trace // injected by loader; used for breadcrumb diagnostics only
+
+	// Paced emission train (MODEL.md "Sending"): a node fire starts/refreshes a
+	// clock-paced train on this wire — the fired value placed every beadSpacingMs
+	// for trainDurationMs. Exactly one pacer goroutine runs while a train is
+	// active; a re-fire refreshes value+window in place (no second overlapping
+	// pacer). All guarded by pw.mu.
+	trainActive   bool
+	trainValue    int
+	trainBP       beadPlacement // placement (geometry/identity) the train places with
+	trainStart    time.Duration // clock active-elapsed reading the current window began
+	trainNext     time.Duration // clock active-elapsed reading of the next scheduled placement
+	trainRunning  bool          // a pacer goroutine is live (placing or parked on the clock)
 }
 
 // NewPacedWire creates an empty PacedWire. arcLength is the straight-line
@@ -213,6 +225,120 @@ func (pw *PacedWire) placeBead(value any, bp beadPlacement) bool {
 	pw.launchWalkerLocked(b.gen)
 	pw.mu.Unlock()
 	return true
+}
+
+// StartTrain begins (or refreshes) a clock-paced emission train on this wire.
+// On a fire a node calls this instead of placing a single bead: the first bead
+// is placed IMMEDIATELY (no initial delay), then the same value is placed every
+// beadSpacingMs for trainDurationMs — ~trainDurationMs/beadSpacingMs + 1 beads
+// riding the multi-bead wire. A re-fire (even same value) REFRESHES the train:
+// it sets the new value+placement and resets the trainDurationMs window from the
+// current clock reading, so the in-flight pacer extends/replaces the window
+// rather than stacking a second pacer. The pacer is timed on the ONE clock
+// (pw.clock — the same active-elapsed reading the bead walkers use) via
+// WaitUntil, so the global pause gate freezes the train exactly as it freezes
+// delivery. Faded/deleted wires place nothing.
+// Returns true if the train was started (the first bead placed), false if the
+// wire is faded/deleted (nothing placed).
+func (pw *PacedWire) StartTrain(value any, bp beadPlacement) bool {
+	pw.mu.Lock()
+	if pw.faded || pw.deleted {
+		pw.mu.Unlock()
+		return false
+	}
+	beadVal, _ := value.(int)
+	now := pw.clock.Now()
+	pw.trainActive = true
+	pw.trainValue = beadVal
+	pw.trainBP = bp
+	pw.trainStart = now
+	pw.trainNext = now // first bead places immediately
+	launch := !pw.trainRunning
+	if launch {
+		pw.trainRunning = true
+	}
+	pw.mu.Unlock()
+
+	// Place the first bead synchronously so a fire always lands a bead at once,
+	// even if the pacer goroutine has not been scheduled yet.
+	pw.placeBead(beadVal, bp)
+
+	if launch {
+		pw.runTrain()
+	}
+	return true
+}
+
+// runTrain is the single pacer goroutine for this wire. It re-reads the LIVE
+// train state each iteration (so a refresh's new value/window/placement are
+// picked up), parks on the one clock until the next scheduled placement, places
+// the bead, and stops once the window (trainStart + trainDurationMs) has passed.
+// The first placement is handled by StartTrain; this loop owns every subsequent
+// one. It exits with trainRunning=false so the next fire relaunches it.
+func (pw *PacedWire) runTrain() {
+	clk := pw.clock
+	go func() {
+		for {
+			pw.mu.Lock()
+			if !pw.trainActive || pw.deleted {
+				pw.trainRunning = false
+				pw.mu.Unlock()
+				return
+			}
+			windowEnd := pw.trainStart + trainDurationMs*time.Millisecond
+			next := pw.trainNext + beadSpacingMs*time.Millisecond
+			pw.trainNext = next
+			ctx := pw.walkerCtx
+			pw.mu.Unlock()
+
+			if next > windowEnd {
+				// Window exhausted: no more placements for this train.
+				pw.mu.Lock()
+				// A refresh may have moved the window forward while we computed;
+				// only stop if the window is still exhausted relative to the live
+				// start. Re-check against the LIVE window end.
+				live := pw.trainStart + trainDurationMs*time.Millisecond
+				if next > live {
+					pw.trainActive = false
+					pw.trainRunning = false
+					pw.mu.Unlock()
+					return
+				}
+				pw.mu.Unlock()
+			}
+
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			if err := clk.WaitUntil(ctx, next); err != nil {
+				// Context canceled by teardown — stop the pacer.
+				pw.mu.Lock()
+				pw.trainRunning = false
+				pw.mu.Unlock()
+				return
+			}
+
+			pw.mu.Lock()
+			if !pw.trainActive || pw.faded || pw.deleted {
+				pw.trainActive = false
+				pw.trainRunning = false
+				pw.mu.Unlock()
+				return
+			}
+			// Re-check the window against the LIVE start (a refresh may have moved
+			// it); only place while inside [trainStart, trainStart+trainDurationMs].
+			if pw.clock.Now() > pw.trainStart+trainDurationMs*time.Millisecond {
+				pw.trainActive = false
+				pw.trainRunning = false
+				pw.mu.Unlock()
+				return
+			}
+			val := pw.trainValue
+			bp := pw.trainBP
+			pw.mu.Unlock()
+			pw.placeBead(val, bp)
+		}
+	}()
 }
 
 // findInflightLocked returns the index of the bead with this gen, or -1.
@@ -455,6 +581,10 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	}
 	pw.inflight = nil
 	pw.delivered = nil
+	// Stop the paced emission train: a Reset/Delete clears the wire, so the pacer
+	// must not keep placing. The pacer goroutine observes trainActive=false (or the
+	// canceled walkerCtx) and exits.
+	pw.trainActive = false
 	// Invalidate every outstanding walker at once and wake any parked WaitUntil.
 	pw.teardownGen = pw.nextGen + 1
 	if pw.deliverCancel != nil {

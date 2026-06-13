@@ -24,6 +24,18 @@ const CurveParamPulseSpeedWuPerMs = 0.04
 // Prevents zero-duration pulses when two nodes are co-located.
 const CurveParamMinArcLength = 1.0
 
+// trainDurationMs / beadSpacingMs define the paced emission train a node fire
+// starts on an Out: the fired value is placed every beadSpacingMs for
+// trainDurationMs, so ~trainDurationMs/beadSpacingMs + 1 beads ride the
+// multi-bead wire at once (the first places immediately on fire). Spacing
+// (400 ms) × pulse speed (0.04 wu/ms) = 16 wu — 2× the 8 wu bead diameter, so
+// the beads never intersect. Timed on the one clock (the same active-elapsed
+// reading the wire walkers use); the pause gate freezes the pacer with them.
+const (
+	trainDurationMs = 2000
+	beadSpacingMs   = 400
+)
+
 // CurveParamNodeRadiusDivisor is the divisor applied to min(width,height)
 // to obtain the node sphere radius.  Matches nodeRadius in geometry-helpers.ts
 // (Math.min(width, height) / 4); port endpoints sit on this sphere surface.

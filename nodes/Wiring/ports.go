@@ -232,9 +232,9 @@ func (o *Out) TrySend(v int) bool {
 		// (o.SimLatencyMs is this edge's per-bead in-flight time), not by a TS
 		// "delivered" reply — Send returns once the bead is placed.
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		if err := o.pw.Send(o.ctx, v, o.placement()); err != nil {
-			return false
-		}
+		// A fire starts a clock-paced train on this Out (see PacedWire.StartTrain):
+		// the value is placed every beadSpacingMs for trainDurationMs, not just once.
+		o.pw.StartTrain(v, o.placement())
 		return true
 	}
 	if o.ch == nil {
@@ -261,7 +261,10 @@ func (o *Out) TryEmit(v int) bool {
 		// o.SimLatencyMs is this edge's per-bead in-flight time; the wire times
 		// delivery on Go's clock from it. The placement also carries this edge's
 		// curve so the wire streams the bead's position.
-		if !o.pw.TryPlace(v, o.placement()) {
+		// A fire starts a clock-paced train on this Out (see PacedWire.StartTrain):
+		// the value is placed every beadSpacingMs for trainDurationMs, not just once.
+		// A faded/deleted wire places nothing — mirror TryPlace's drop (no trace).
+		if !o.pw.StartTrain(v, o.placement()) {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
