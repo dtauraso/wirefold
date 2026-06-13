@@ -59,25 +59,38 @@ func TestEmitsInitValues(t *testing.T) {
 	}
 }
 
-// sendFeedback places a feedback step on the paced FeedbackIn wire and drives
-// Go's clock past the bead's in-flight time so it lands in the slot, where the
-// node's blocking TryRecv picks it up. Mirrors the paced-wire send helper used
-// by the other node tests.
-func sendFeedback(t *testing.T, pw *Wiring.PacedWire, v int) {
+// feedbackSender installs ONE FakeClock on the paced FeedbackIn wire and returns
+// a send function that advances that single clock cumulatively. Each call first
+// steps the clock past recvGateMs so the Recv-side refractory gate treats this
+// feedback step as a DISTINCT signal (its own train) and accepts it — without the
+// step the gate would collapse successive feedback steps into one and the node
+// would block. It then places the bead and drives the clock past the bead's
+// in-flight time so it lands in the slot for the node's blocking TryRecv.
+//
+// Why one clock (not a fresh clock per send, as before): the refractory gate
+// measures elapsed time on the wire's clock between accepted beads. Resetting the
+// clock to 0 each send made every step look like it landed inside the prior step's
+// window, so the gate dropped them all. A single monotonically-advanced clock
+// models real time correctly.
+func feedbackSender(t *testing.T, pw *Wiring.PacedWire) func(v int) {
 	t.Helper()
 	clk := Wiring.NewFakeClock()
 	pw.SetClock(clk)
 	const inFlightMs = 10
-	if err := pw.SendDeliverOnly(context.Background(), v, inFlightMs); err != nil {
-		t.Fatalf("SendDeliverOnly: %v", err)
-	}
-	clk.Advance(inFlightMs * time.Millisecond)
-	deadline := time.Now().Add(time.Second)
-	for pw.InFlight() {
-		if time.Now().After(deadline) {
-			t.Fatal("clock delivery did not fill feedback slot")
+	return func(v int) {
+		// Step past the refractory window so this distinct step opens a new fire.
+		clk.Advance(Wiring.RecvGateMs * time.Millisecond)
+		if err := pw.SendDeliverOnly(context.Background(), v, inFlightMs); err != nil {
+			t.Fatalf("SendDeliverOnly: %v", err)
 		}
-		time.Sleep(time.Millisecond)
+		clk.Advance(inFlightMs * time.Millisecond)
+		deadline := time.Now().Add(time.Second)
+		for pw.InFlight() {
+			if time.Now().After(deadline) {
+				t.Fatal("clock delivery did not fill feedback slot")
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 
@@ -110,6 +123,11 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	go func() { defer wg.Done(); node.Update(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
 
+	// Each feedback step is a DISTINCT signal; the sender steps the one clock past
+	// the Recv refractory window between steps so the gate accepts each as its own
+	// fire (instead of collapsing the sequence into one train).
+	send := feedbackSender(t, fbPW)
+
 	// First loop body: peek the end of [1,0] = 0 and send (no pop, no seed).
 	if got := recv(t, toRG); got != 0 {
 		t.Fatalf("first send: expected peek 0, got %d", got)
@@ -120,7 +138,7 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	// 0; then 1; then 0.
 	want := []int{1, 0, 1, 0}
 	for i, w := range want {
-		sendFeedback(t, fbPW, 1)
+		send(1)
 		if got := recv(t, toRG); got != w {
 			t.Errorf("after 1-step %d: expected send %d, got %d", i, w, got)
 		}
@@ -130,7 +148,7 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	// Buffer just refilled-then-popped to [1] (peek 1) above; current peek is
 	// the value after those four pops. Sending peeks, so a send still happens,
 	// but the value must equal the prior peek (no advance).
-	sendFeedback(t, fbPW, 0)
+	send(0)
 	if got := recv(t, toRG); got != want[len(want)-1] {
 		t.Errorf("hold step: expected same bead %d resent, got %d", want[len(want)-1], got)
 	}

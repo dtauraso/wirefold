@@ -85,6 +85,15 @@ type PacedWire struct {
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.
 	inflight  []inflightBead
 	delivered []int
+	// lastConsumed is the clock active-elapsed reading when Recv/PollRecv last
+	// ACCEPTED (returned) a bead; -1 means "never consumed". A node fire emits a
+	// train of beads (trainDurationMs); the receiver must collapse that train to
+	// ONE fire, so once a bead is accepted every further bead that is read within
+	// recvGateMs of lastConsumed is DROPPED (discarded from delivered, never
+	// returned) until the refractory window elapses. Measured on pw.clock — the
+	// same active-elapsed reading the walkers/train use — so it freezes on pause.
+	// Reset to -1 on teardown so a restarted edge fires on its first new bead.
+	lastConsumed time.Duration
 	// nextGen mints a unique id for each placed bead (walker self-cancel key) and
 	// is also bumped on teardown to invalidate ALL outstanding walkers at once.
 	nextGen uint64
@@ -133,6 +142,8 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 		MaxIncomingSimLatencyMs: arcLength / pulseSpeed,
 		pulseSpeed:              pulseSpeed,
 		clock:                   NewRealClock(),
+		// -1 = never consumed: the first bead is accepted (fires) with no refractory.
+		lastConsumed: -1,
 	}
 	pw.cond = sync.NewCond(&pw.mu)
 	return pw
@@ -478,17 +489,28 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 	defer close(done)
 
 	pw.mu.Lock()
-	for len(pw.delivered) == 0 && ctx.Err() == nil {
-		pw.cond.Wait()
-	}
-	if len(pw.delivered) == 0 {
+	for {
+		for len(pw.delivered) == 0 && ctx.Err() == nil {
+			pw.cond.Wait()
+		}
+		if len(pw.delivered) == 0 {
+			pw.mu.Unlock()
+			return nil, ErrCanceled
+		}
+		v := pw.delivered[0]
+		pw.delivered = pw.delivered[1:]
+		// Refractory gate: collapse a train to one fire. If a bead was accepted
+		// within recvGateMs, this bead belongs to the same train — drop it (it is
+		// already popped off delivered) and loop to wait for/drop the next one.
+		// The first-ever consume (lastConsumed < 0) and any bead past the window are
+		// accepted. Measured on the one clock (active-elapsed) so pause freezes it.
+		if pw.lastConsumed >= 0 && pw.clock.Now() < pw.lastConsumed+recvGateMs*time.Millisecond {
+			continue
+		}
+		pw.lastConsumed = pw.clock.Now()
 		pw.mu.Unlock()
-		return nil, ErrCanceled
+		return v, nil
 	}
-	v := pw.delivered[0]
-	pw.delivered = pw.delivered[1:]
-	pw.mu.Unlock()
-	return v, nil
 }
 
 // PollRecv is the non-blocking variant of Recv. It pops and returns the front
@@ -497,12 +519,19 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 func (pw *PacedWire) PollRecv() (any, bool) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	if len(pw.delivered) == 0 {
-		return nil, false
+	// Same refractory gate as Recv: drop train-follower beads that arrive within
+	// recvGateMs of the last accepted bead, so a windowed node also collapses one
+	// train to one consumed bead. Loop because several followers may be queued.
+	for len(pw.delivered) > 0 {
+		v := pw.delivered[0]
+		pw.delivered = pw.delivered[1:]
+		if pw.lastConsumed >= 0 && pw.clock.Now() < pw.lastConsumed+recvGateMs*time.Millisecond {
+			continue
+		}
+		pw.lastConsumed = pw.clock.Now()
+		return v, true
 	}
-	v := pw.delivered[0]
-	pw.delivered = pw.delivered[1:]
-	return v, true
+	return nil, false
 }
 
 // ReviseInFlightGeometry re-derives EVERY in-flight bead's remaining travel after a
@@ -582,6 +611,10 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	}
 	pw.inflight = nil
 	pw.delivered = nil
+	// Re-arm the refractory gate: -1 means "never consumed", so a restarted edge
+	// fires on its first new bead instead of being throttled against a stale
+	// lastConsumed from before teardown.
+	pw.lastConsumed = -1
 	// Stop the paced emission train: a Reset/Delete clears the wire, so the pacer
 	// must not keep placing. The pacer goroutine observes trainActive=false (or the
 	// canceled walkerCtx) and exits.
