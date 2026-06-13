@@ -14,6 +14,7 @@ const pollInterval = 5 * time.Millisecond
 type Node struct {
 	Fire         func()
 	EmitGeometry func()
+	EmitHeldBead func(held int)
 	Value        int
 	HasValue     bool
 	In           *Wiring.In
@@ -23,6 +24,14 @@ type Node struct {
 func (g *Node) Update(ctx context.Context) {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
+	}
+
+	// held tracks the last received INPUT value displayed inside the node sphere.
+	// -1 is the sentinel meaning "no value seen yet" → empty interior. The bead is
+	// re-emitted only when held actually changes below.
+	held := -1
+	if g.EmitHeldBead != nil {
+		g.EmitHeldBead(held)
 	}
 
 	for {
@@ -40,6 +49,15 @@ func (g *Node) Update(ctx context.Context) {
 		}
 
 		if g.HasValue {
+			// Display the INPUT value inside the node sphere. Re-emit only when it
+			// changes; the held display persists (it is NOT cleared after firing)
+			// until a new input replaces it. The Out wire still carries 1-value.
+			heldChanged := g.Value != held
+			held = g.Value
+			if heldChanged && g.EmitHeldBead != nil {
+				g.EmitHeldBead(g.Value)
+			}
+
 			// Single value held → fire immediately, emit the inverted value.
 			result := 1 - g.Value
 			g.Fire()
