@@ -8,73 +8,74 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-13 — on `main`, no task in flight; inhibitRight0 + port-anchor-render + layout merges)
+## State at handoff (2026-06-13 — branch `task/sustained-bead-train` IN FLIGHT, NOT merged)
 
-`main` is current; no task in flight. **Three branches merged + deleted this session:**
+Branch `task/sustained-bead-train`, **not merged**. `main` is at `0c25f1bf`. This branch
+builds a **sustained bead train** feature — a foundational change to the wire/send/recv
+model. **NOT ready to merge** (foundational change with known open issues below).
 
-1. **Port-anchor render-reactivity fix** (merge `7b6d3891`, branch
-   `task/fix-port-anchor-render`). `GraphNode` in `scene-content.tsx` read node geometry via
-   the non-reactive `getNodeGeometry()` snapshot, so Go-streamed anchored port directions
-   never re-rendered and ports reverted to default side/slot on reload. Fix: added a
-   `useNodeGeometryStore((s) => s.geoms[node.id])` selector (mirrors `CameraFit`). Go side was
-   already correct (reads/streams the anchor); the break was TS-only.
-2. **Promote `inhibitRight0`** (merge `3a7b429f`, branch `task/add-inhibitright-node`).
-   `inhibitRight0` (kind `InhibitRightGate`) moved from the inactive tree into the active
-   `topology/` diagram, fed by `2.ToNext1 -> FromLeft` and `3.ToNext0 -> FromRight` (edges
-   `topology/edges/2ToInhibitRight0.json`, `3ToInhibitRight0.json`). Color inherited from the
-   `InhibitRightGate` NODE_DEF (`#fce4ec`/`#880e4f`) via `meta.type` — no per-node override.
-   Note: the RF-era node had a distinct inhibit-port accent (`#f48fb1` on `FromRight`); the
-   current generic sphere-port renderer has no per-port handle colors, so that accent is not
-   reproduced (would be a render feature, not topology data).
-3. **Persist layout edits** (merge `d225a73b`, branch `task/persist-layout-edits`). Persisted
-   an editor layout pass — port anchors + node positions for nodes `1`,`2`,`3` and
-   `inhibitRight0`, and moved `inhibitRight0`'s `ToPassed` output port to `side:top slot:0`.
+### Commits (oldest → newest)
 
-**Dropped, unmerged:** `task/multi-bead-wire` (deleted local + remote). The multi-bead
-PacedWire experiment was abandoned per user; the apparent "port anchors reset" regression it
-seemed to cause was actually the long-standing TS reactivity bug fixed in (1) above — not
-caused by that branch.
+- `b34bce0c` multi-bead `PacedWire` — carries a slice of concurrent in-flight beads, FIFO
+  delivery, per-bead `t` preserved across geometry edits.
+- `8b471087` paced 2s/400ms emission train at the send layer: a fire starts a clock-paced
+  train (places the value every `beadSpacingMs=400` for `trainDurationMs=2000`; first bead
+  immediate; re-fire refreshes value+window; pacer freezes on pause).
+- `f020cdef` per-bead trace id (`bead` field); webview renders N beads/edge (pulse store
+  keyed by `(edge, bead)`).
+- `d0314540` strip consume-gates — all node sends are fire-and-forget `TryEmit`. The
+  `Gated/TrySend/WaitConsumed` handshake's `if !WaitConsumed(){return}` was killing gated
+  nodes after one fire.
+- `33cce656` clock-gate Recv: a node consumes at most one bead per `recvGateMs=2000`
+  window, dropping the rest of a train — an N-bead train collapses to ONE fire (refractory
+  `lastConsumed` on the wire, active-elapsed clock).
+- `af77fcc4` `WindowAndGate` window+dwell run on the pause-aware sim clock (injected
+  `Now func() time.Duration`, like `EmitGeometry`).
+- `c4e624f7` + `a8ef268e` rename `AndGate → WindowAndGate` (`c4e624f7` half-committed — left
+  in-file edits uncommitted; `a8ef268e` fixed HEAD).
+- `23de196c` reverted `7ff9cb87` (a MODEL.md locality paragraph the user asked to remove —
+  do NOT re-add to MODEL.md).
+- `bf0d74bd` `docs/planning/visual-editor/timing-spec.html` — tabbed timing-model reference
+  (Model, Constants, Timers-current, Target-distance, Node-processing).
 
-### NEXT (post-merge)
+### What works
 
-No task in flight; new work is friction-driven from live editor use.
+Nodes 1,2,3,4 emit uniform trains and process correctly; the recv-gate collapses each
+incoming train to one fire (nodes 2/3/4 verified by user); window/dwell are pause-aware.
 
-### Settled architecture (already on main — keep short)
+### Open issues (all must respect locality — fix LOCALLY per node, NOT via shared/global constants)
 
-Go-authoritative per-goroutine model: one clock; node-move + fade + port-anchor via
-`MoveDispatch` (decentralized key→inbox, zero central fan-out); node/port position,
-edge-curve geometry, node radius, and interior beads all Go-streamed; TS renders Go's
-stream and computes no geometry (guard: `check-ts-computes-no-geometry`). TS owns only
-the SCENE (camera, gitignored `view/scene.json`). One constant pulse speed
-`CurveParamPulseSpeedWuPerMs = 0.04` wu/ms (half), uniform across ALL bead animations
-(wire beads AND node-1 refill slide).
+1. **Cadence slow (~10–40 s/cycle):** three ~2 s delays stack per hop (wire latency +
+   `recvGate` 2000 + train 2000). Speeding up must be PER-NODE, not by lowering the global
+   `trainDurationMs`/`recvGateMs` (those couple all nodes).
+2. **Node 5 (`WindowAndGate`) never fires:** its coincidence window mis-phases — opens on a
+   stale `FromLeft` and clears ~8 ms before the matching `FromRight` lands (inputs arrived
+   67 ms apart but the window had just cleared). `FromRight` also lags via the longer path
+   (2→3→4→5). Local to node 5.
+3. **`WindowAndGate` poll loop (`node.go:170`)** still uses wall-clock
+   `time.After(pollInterval=5ms)` — not pause-aware; the window/dwell CHECKS are pause-aware,
+   only the poll wake isn't. Minor; convert to the sim clock.
 
-### Earlier work already merged to main (background — one line each)
+### Active design direction (reference = `timing-spec.html`, NOT MODEL.md — user removed the MODEL.md version)
 
-1. **Scene split:** `topology.json` = diagram (tracked) / `topology.scene.json` = scene
-   (gitignored, camera/labels); `topology.json` no longer skip-worktree.
-2. **Deterministic `view.nodes` serialization** (idempotent load→save, kills churn).
-3. **Reload gating:** external `topology.json` change reloads + restarts Go only on
-   STRUCTURAL change, not view-only (`structuralKey`).
-4. **Node rename** `1`/`2`/`3` (edges `1To2`/`2To3`/`2FeedbackTo1`).
-5. **Animated bead colored by value + torus; removed per-node value-display overlay.**
-6. **4 robustness fixes:** Trace close race (stop-signal, not `close(ch)`); empty-kind
-   save guard; NUL-byte → ` ` delimiter; geometry resend on webview ready.
-7. **Node-1 interior:** depleting/refilling 2×2 double-buffer, value-colored sphere+torus,
-   Go-streamed local offsets (children of node group), animated refill SLIDE; peek-send /
-   pop-on-feedback, NO seed/bootstrap. Node body/ring center+radius Go-owned.
-8. **Node-2 interior:** single centered held-value bead, empty when `held=-1`, emitted via
-   injected `EmitHeldBead` closure on held-change only.
-9. **Pulse speed 0.04 + slide unified** at the base speed (`interiorSlideDurationMul=1.0`).
-10. **Dead-code sweep (−78 lines); `strip-branch-local-docs.sh` scans all of `docs/`.**
+- **Time = distance ÷ one `pulseSpeed` (0.04 wu/ms).** Each node AND wire is its own
+  independent goroutine with its OWN local timing distance. Human speed = every distance
+  advances at the same pulseSpeed. Play/pause = one button freezing all per-node timers (the
+  one shared clock — the ONLY shared timing).
+- **Free-floating ms timers** (dwell 800, poll 5, train 2000, recvGate 2000) should become
+  DISTANCES at pulseSpeed (e.g. dwell 32 wu, train 80 wu, spacing 16 wu, recvGate 80 wu) read
+  off the active-elapsed clock — human-speed AND pausing together. (`timing-spec.html`
+  "Target (distance)" tab.)
+- **NEW concept to add:** node input→output PROCESSING is itself a per-node distance (today
+  it's instant — recv/fire/send same tick). A node should hold its input for a per-node
+  `processingDistance` against the clock before emitting (the bead "travels through" the node
+  like a stretch of wire). Per-node, human-speed, pausable. `timing-spec.html` "Node
+  Processing" tab has a per-node table with TBD processing distances.
 
-### PORT-DRAG (merged — gap now closed by this branch)
+### Uncommitted (intentionally left)
 
-You can drag a **connected** edge port along its node's ring to reposition it; the edge
-follows. `Port.anchor` is wired through Go (`portDir` uses `normalize(anchor)`, applied via
-`MoveDispatch`); a `port-anchor` edit op flows webview → handle-message → Go stdin. The
-anchor previously did **not** survive reload (TS was the sole writer; Go only READ
-`topology.json`). This branch closes that gap.
+Topology layout autosaves — `topology/view/nodes/{2,3,4,5}.json` and
+`topology/nodes/4/inputs/In.json`, `outputs/Out.json`. Leave them or commit as a chore.
 
 ### Carry-forward facts
 
@@ -113,6 +114,19 @@ anchor previously did **not** survive reload (TS was the sole writer; Go only RE
   The webview parser (`parse-nodes-edges.ts`) throws a `load-error` on slot 3+, which blanks
   the whole diagram (chrome renders, graph does not; Fit does nothing). Surfaces in
   `.probe/ts-errors.jsonl` as `spec.nodes[N].outputs[M].slot: expected 0|1|2, got 3`.
+- **Sustained-train model:** a fire emits a 2s/400ms train (multi-bead wire); the receiver
+  clock-gates Recv so a train collapses to ONE fire (`recvGateMs` window). Sends are
+  fire-and-forget (consume-gates stripped). All on the one active-elapsed clock (pauses
+  cleanly).
+- **Timing-as-distance is the design target:** per-node local durations expressed as
+  distances at pulseSpeed off the shared clock — human-speed + locality + one-button pause.
+  Node processing should also become a per-node distance (currently instant). Reference:
+  `timing-spec.html`. Do NOT put this in MODEL.md (user reverted that).
+- **Subagent half-commit trap (recurrence):** the `AndGate → WindowAndGate` rename
+  (`c4e624f7`) committed the file move + generated refs but left the
+  package-decl/Register/SPEC edits uncommitted, leaving HEAD inconsistent (built only in the
+  dirty working tree). Fixed in `a8ef268e`. After any subagent rename, check `git status` for
+  leftover in-file edits before trusting HEAD. Reinforces `feedback_verify_subagent_commits`.
 
 ### Dev-loop
 
