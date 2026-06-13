@@ -1,4 +1,4 @@
-package inhibitrightgate
+package andgate
 
 import (
 	"context"
@@ -40,24 +40,32 @@ func run(left, right int) (int, error) {
 	}
 }
 
-// left=1, right=0 → passes (1).
-func TestPassWhenLeftOnlyActive(t *testing.T) {
-	got, _ := run(1, 0)
+// AND(1,1)=1.
+func TestAndBothActive(t *testing.T) {
+	got, _ := run(1, 1)
 	if got != 1 {
 		t.Fatalf("expected 1, got %d", got)
 	}
 }
 
-// left=1, right=1 → inhibited (0).
-func TestInhibitedWhenRightActive(t *testing.T) {
-	got, _ := run(1, 1)
+// AND(1,0)=0.
+func TestAndLeftOnly(t *testing.T) {
+	got, _ := run(1, 0)
 	if got != 0 {
 		t.Fatalf("expected 0, got %d", got)
 	}
 }
 
-// left=0, right=0 → 0.
-func TestZeroWhenLeftInactive(t *testing.T) {
+// AND(0,1)=0.
+func TestAndRightOnly(t *testing.T) {
+	got, _ := run(0, 1)
+	if got != 0 {
+		t.Fatalf("expected 0, got %d", got)
+	}
+}
+
+// AND(0,0)=0.
+func TestAndNeitherActive(t *testing.T) {
 	got, _ := run(0, 0)
 	if got != 0 {
 		t.Fatalf("expected 0, got %d", got)

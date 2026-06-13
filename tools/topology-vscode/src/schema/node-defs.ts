@@ -19,17 +19,17 @@ export interface NodeDef {
 // PascalCase Go kind names that have a Go runtime.
 // Single source of truth — derived from Wiring.Register calls.
 export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
+  "AndGate",
   "ChainInhibitor",
   "HoldFlip",
-  "InhibitRightGate",
   "Input",
   "ReadGate",
 ]);
 
 export const NODE_DEFS: Record<string, NodeDef> = {
+  AndGate: { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "and-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
   ChainInhibitor: { bg: "#fff3e0", border: "#e65100", text: "#bf360c", minWidth: 90, role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }, { name: "FeedbackOut", kind: "chain" }] },
   HoldFlip: { bg: "#eceff1", border: "#263238", text: "#263238", minWidth: 36, role: "hold-flip", shape: "rect", fill: "#eceff1", stroke: "#263238", width: 36, height: 36, inputs: [{ name: "In", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }] },
-  InhibitRightGate: { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
   Input: { bg: "#e0e0e0", border: "#666", text: "#1a1a1a", minWidth: 90, role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, inputs: [{ name: "FeedbackIn", kind: "chain" }], outputs: [{ name: "ToReadGate", kind: "chain" }] },
   ReadGate: { bg: "#f3e5f5", border: "#7b1fa2", text: "#4a148c", minWidth: 70, role: "and-gate", shape: "rect", fill: "#f3e5f5", stroke: "#7b1fa2", width: 70, height: 40, inputs: [{ name: "FromInput", kind: "chain" }, { name: "FromChainInhibitor", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }] },
 };

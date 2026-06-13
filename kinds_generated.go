@@ -3,9 +3,9 @@
 package main
 
 import (
+	_ "github.com/dtauraso/wirefold/nodes/andgate"
 	_ "github.com/dtauraso/wirefold/nodes/chaininhibitor"
 	_ "github.com/dtauraso/wirefold/nodes/holdflip"
-	_ "github.com/dtauraso/wirefold/nodes/inhibitrightgate"
 	_ "github.com/dtauraso/wirefold/nodes/input"
 	_ "github.com/dtauraso/wirefold/nodes/readgate"
 )
