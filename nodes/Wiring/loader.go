@@ -124,7 +124,6 @@ type specEdge struct {
 	SourceHandle   string  `json:"sourceHandle"`
 	Target         string  `json:"target"`
 	TargetHandle   string  `json:"targetHandle"`
-	Persistent     bool    `json:"persistent,omitempty" wire:"prop,optional,tsType:boolean"`
 }
 
 // topoView is the viewer-state block inside the JSON (view.nodes carries positions).

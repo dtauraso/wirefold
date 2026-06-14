@@ -11,12 +11,10 @@ export interface WirePropDef {
 export const WIRE_PROPS: Record<string, WirePropDef> = {
   label:       { tsType: "string",    required: false },
   kind:        { tsType: "EdgeKind",  required: true },
-  persistent:  { tsType: "boolean",   required: false },
 };
 
 // Derived from WIRE_PROPS — do not hand-edit. Consumed by Edge and EdgeData.
 export type WireProps = {
   label?: string;
   kind: EdgeKind;
-  persistent?: boolean;
 };
