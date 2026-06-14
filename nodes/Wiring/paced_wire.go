@@ -10,6 +10,14 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
+// deliveredBead pairs the arrived value with the train sequence number that
+// produced it. Recv/PollRecv use the seq to dedup: only the first bead from
+// each train (lowest seq not yet accepted) is returned; followers are dropped.
+type deliveredBead struct {
+	val int
+	seq uint64
+}
+
 // PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs for call sites that
 // pass it to NewPacedWire.  The canonical value lives in curve_params.go so
 // the codegen tool can export it to TS.
@@ -61,6 +69,7 @@ type inflightBead struct {
 	port      string        // source output port — the position/cancel routing key
 	streams   bool          // whether this bead carries position-stream context
 	gen       uint64        // per-bead id; the bead's walker self-cancels on mismatch
+	seq       uint64        // per-train sequence; receiver dedups by it
 }
 
 // PacedWire is a multi-bead FIFO transport. A wire may carry more than one bead
@@ -84,16 +93,16 @@ type PacedWire struct {
 	// inflight holds beads traversing the wire, in send order. delivered holds
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.
 	inflight  []inflightBead
-	delivered []int
-	// lastConsumed is the clock active-elapsed reading when Recv/PollRecv last
-	// ACCEPTED (returned) a bead; -1 means "never consumed". A node fire emits a
-	// train of beads (trainDurationMs); the receiver must collapse that train to
-	// ONE fire, so once a bead is accepted every further bead that is read within
-	// recvGateMs of lastConsumed is DROPPED (discarded from delivered, never
-	// returned) until the refractory window elapses. Measured on pw.clock — the
-	// same active-elapsed reading the walkers/train use — so it freezes on pause.
-	// Reset to -1 on teardown so a restarted edge fires on its first new bead.
-	lastConsumed time.Duration
+	delivered []deliveredBead
+	// trainSeq is bumped on every new fire (StartTrain or bare placeBead), minting
+	// a fresh train identity. All beads within one fire carry the same seq; Recv
+	// drops any bead whose seq <= lastAcceptedSeq (train-follower or stale).
+	// Reset to 0 on teardown so a restarted edge fires on its first new bead.
+	trainSeq uint64
+	// lastAcceptedSeq is the highest train seq Recv/PollRecv has accepted (0 = none).
+	// Receiver dedup: drop if b.seq <= lastAcceptedSeq; accept and bump otherwise.
+	// No clock measurement — immune to timing coupling between nodes.
+	lastAcceptedSeq uint64
 	// nextGen mints a unique id for each placed bead (walker self-cancel key) and
 	// is also bumped on teardown to invalidate ALL outstanding walkers at once.
 	nextGen uint64
@@ -142,8 +151,8 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 		MaxIncomingSimLatencyMs: arcLength / pulseSpeed,
 		pulseSpeed:              pulseSpeed,
 		clock:                   NewRealClock(),
-		// -1 = never consumed: the first bead is accepted (fires) with no refractory.
-		lastConsumed: -1,
+		// trainSeq/lastAcceptedSeq start at 0; the first fire bumps trainSeq to 1,
+		// which exceeds lastAcceptedSeq (0), so the first bead is always accepted.
 	}
 	pw.cond = sync.NewCond(&pw.mu)
 	return pw
@@ -210,13 +219,27 @@ func (pw *PacedWire) TryPlace(value any, bp beadPlacement) bool {
 // placeBead is the single placement path. Appends an inflightBead under the lock,
 // launches its clock-timed walker, and returns true (false only when faded/deleted,
 // where nothing is placed). Never blocks, never drops on a busy wire.
+// bumpSeq: when true (bare Send/TryPlace outside a train), mint a new trainSeq so
+// this standalone fire gets a unique identity at the receiver. When false (called
+// from runTrain's subsequent placements), reuse the current trainSeq so all beads
+// of one train share the same identity and the receiver deduplicates them to one fire.
 func (pw *PacedWire) placeBead(value any, bp beadPlacement) bool {
+	return pw.placeBeadSeq(value, bp, true)
+}
+
+// placeBeadSeq is the internal placement path. bumpSeq=true mints a fresh trainSeq
+// (every bare Send/TryPlace and the first bead of every StartTrain); bumpSeq=false
+// reuses the current trainSeq (runTrain followers within the same fire).
+func (pw *PacedWire) placeBeadSeq(value any, bp beadPlacement, bumpSeq bool) bool {
 	pw.mu.Lock()
 	if pw.faded || pw.deleted {
 		pw.mu.Unlock()
 		return false
 	}
 	beadVal, _ := value.(int)
+	if bumpSeq {
+		pw.trainSeq++
+	}
 	pw.nextGen++
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
@@ -230,6 +253,7 @@ func (pw *PacedWire) placeBead(value any, bp beadPlacement) bool {
 		port:      bp.Port,
 		streams:   bp.streams(),
 		gen:       pw.nextGen,
+		seq:       pw.trainSeq,
 	}
 	pw.inflight = append(pw.inflight, b)
 	pw.cond.Broadcast()
@@ -259,6 +283,11 @@ func (pw *PacedWire) StartTrain(value any, bp beadPlacement) bool {
 	}
 	beadVal, _ := value.(int)
 	now := pw.clock.Now()
+	// Mint a new train identity at fire time. All beads in this train (the first one
+	// placed immediately below + every runTrain follower) share this seq. The receiver
+	// deduplicates the train to exactly one fire by dropping beads with seq <=
+	// lastAcceptedSeq.
+	pw.trainSeq++
 	pw.trainActive = true
 	pw.trainValue = beadVal
 	pw.trainBP = bp
@@ -271,8 +300,9 @@ func (pw *PacedWire) StartTrain(value any, bp beadPlacement) bool {
 	pw.mu.Unlock()
 
 	// Place the first bead synchronously so a fire always lands a bead at once,
-	// even if the pacer goroutine has not been scheduled yet.
-	pw.placeBead(beadVal, bp)
+	// even if the pacer goroutine has not been scheduled yet. bumpSeq=false because
+	// we already bumped trainSeq above under the lock.
+	pw.placeBeadSeq(beadVal, bp, false)
 
 	if launch {
 		pw.runTrain()
@@ -347,7 +377,9 @@ func (pw *PacedWire) runTrain() {
 			val := pw.trainValue
 			bp := pw.trainBP
 			pw.mu.Unlock()
-			pw.placeBead(val, bp)
+			// bumpSeq=false: follower beads reuse the train's seq so the receiver
+			// treats all beads of one fire as the same train identity.
+			pw.placeBeadSeq(val, bp, false)
 		}
 	}()
 }
@@ -469,7 +501,7 @@ func (pw *PacedWire) launchWalkerLocked(gen uint64) {
 				}
 				db := pw.inflight[0]
 				pw.inflight = pw.inflight[1:]
-				pw.delivered = append(pw.delivered, db.val)
+				pw.delivered = append(pw.delivered, deliveredBead{val: db.val, seq: db.seq})
 				pw.cond.Broadcast()
 				ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
 				pw.mu.Unlock()
@@ -497,19 +529,18 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 			pw.mu.Unlock()
 			return nil, ErrCanceled
 		}
-		v := pw.delivered[0]
+		b := pw.delivered[0]
 		pw.delivered = pw.delivered[1:]
-		// Refractory gate: collapse a train to one fire. If a bead was accepted
-		// within recvGateMs, this bead belongs to the same train — drop it (it is
-		// already popped off delivered) and loop to wait for/drop the next one.
-		// The first-ever consume (lastConsumed < 0) and any bead past the window are
-		// accepted. Measured on the one clock (active-elapsed) so pause freezes it.
-		if pw.lastConsumed >= 0 && pw.clock.Now() < pw.lastConsumed+recvGateMs*time.Millisecond {
+		// Identity dedup: collapse a train to one fire. All beads in a train share
+		// the same seq (minted once per StartTrain / bare Send). If b.seq <=
+		// lastAcceptedSeq, this bead is a train-follower or stale — drop it (already
+		// popped) and loop. No time measurement: immune to cross-node timing coupling.
+		if b.seq <= pw.lastAcceptedSeq {
 			continue
 		}
-		pw.lastConsumed = pw.clock.Now()
+		pw.lastAcceptedSeq = b.seq
 		pw.mu.Unlock()
-		return v, nil
+		return b.val, nil
 	}
 }
 
@@ -519,17 +550,16 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 func (pw *PacedWire) PollRecv() (any, bool) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	// Same refractory gate as Recv: drop train-follower beads that arrive within
-	// recvGateMs of the last accepted bead, so a windowed node also collapses one
-	// train to one consumed bead. Loop because several followers may be queued.
+	// Same identity dedup as Recv: drop train-follower beads (same seq as an already
+	// accepted bead). Loop because several followers may be queued up.
 	for len(pw.delivered) > 0 {
-		v := pw.delivered[0]
+		b := pw.delivered[0]
 		pw.delivered = pw.delivered[1:]
-		if pw.lastConsumed >= 0 && pw.clock.Now() < pw.lastConsumed+recvGateMs*time.Millisecond {
+		if b.seq <= pw.lastAcceptedSeq {
 			continue
 		}
-		pw.lastConsumed = pw.clock.Now()
-		return v, true
+		pw.lastAcceptedSeq = b.seq
+		return b.val, true
 	}
 	return nil, false
 }
@@ -611,10 +641,11 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	}
 	pw.inflight = nil
 	pw.delivered = nil
-	// Re-arm the refractory gate: -1 means "never consumed", so a restarted edge
-	// fires on its first new bead instead of being throttled against a stale
-	// lastConsumed from before teardown.
-	pw.lastConsumed = -1
+	// Re-arm identity dedup: reset seq counters so a restarted edge accepts its
+	// first new bead. trainSeq is reset to 0; the next fire bumps it to 1, which
+	// exceeds lastAcceptedSeq (0), so the first bead is always accepted.
+	pw.trainSeq = 0
+	pw.lastAcceptedSeq = 0
 	// Stop the paced emission train: a Reset/Delete clears the wire, so the pacer
 	// must not keep placing. The pacer goroutine observes trainActive=false (or the
 	// canceled walkerCtx) and exits.

@@ -60,26 +60,17 @@ func TestEmitsInitValues(t *testing.T) {
 }
 
 // feedbackSender installs ONE FakeClock on the paced FeedbackIn wire and returns
-// a send function that advances that single clock cumulatively. Each call first
-// steps the clock past recvGateMs so the Recv-side refractory gate treats this
-// feedback step as a DISTINCT signal (its own train) and accepts it — without the
-// step the gate would collapse successive feedback steps into one and the node
-// would block. It then places the bead and drives the clock past the bead's
-// in-flight time so it lands in the slot for the node's blocking TryRecv.
-//
-// Why one clock (not a fresh clock per send, as before): the refractory gate
-// measures elapsed time on the wire's clock between accepted beads. Resetting the
-// clock to 0 each send made every step look like it landed inside the prior step's
-// window, so the gate dropped them all. A single monotonically-advanced clock
-// models real time correctly.
+// a send function. Each call places a bead via SendDeliverOnly (which calls
+// placeBead → bumps trainSeq), giving it a unique train identity. The receiver
+// deduplicates by seq, so successive feedback steps are each accepted as distinct
+// fires without any clock advance between them. The clock is advanced only past the
+// bead's in-flight time so it lands in the slot for the node's blocking TryRecv.
 func feedbackSender(t *testing.T, pw *Wiring.PacedWire) func(v int) {
 	t.Helper()
 	clk := Wiring.NewFakeClock()
 	pw.SetClock(clk)
 	const inFlightMs = 10
 	return func(v int) {
-		// Step past the refractory window so this distinct step opens a new fire.
-		clk.Advance(Wiring.RecvGateMs * time.Millisecond)
 		if err := pw.SendDeliverOnly(context.Background(), v, inFlightMs); err != nil {
 			t.Fatalf("SendDeliverOnly: %v", err)
 		}

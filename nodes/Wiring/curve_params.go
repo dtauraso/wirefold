@@ -36,20 +36,10 @@ const (
 	beadSpacingMs   = 400
 )
 
-// recvGateMs is the Recv-side refractory window. A node fire emits a train of
-// beads (trainDurationMs long); without a gate the receiver would consume EACH
-// bead and fire once per bead, so an N-bead train caused N fires (the ring
-// thrashed, feedback values flipped mid-train). After a bead is consumed, Recv
-// DROPS every further bead that arrives within recvGateMs, so one incoming train
-// collapses to exactly one consumed bead (one fire). The window matches the train
-// duration (2000 ms) — the span over which one train's beads arrive — so a single
-// train yields a single fire and the next train (after the window) fires again.
-// Measured on the one clock (active-elapsed), so it freezes on pause.
-const recvGateMs = trainDurationMs
-
-// RecvGateMs exports the refractory window for cross-package node tests that drive
-// the feedback wire and must step the clock past it between distinct signals.
-const RecvGateMs = recvGateMs
+// Receiver dedup: the Recv-side refractory window (recvGateMs / RecvGateMs) has
+// been removed. Recv/PollRecv now collapse a train to one fire using per-train
+// sequence numbers (inflightBead.seq / deliveredBead.seq) stamped at send time.
+// trainDurationMs / beadSpacingMs remain sender-side constants only.
 
 // CurveParamNodeRadiusDivisor is the divisor applied to min(width,height)
 // to obtain the node sphere radius.  Matches nodeRadius in geometry-helpers.ts

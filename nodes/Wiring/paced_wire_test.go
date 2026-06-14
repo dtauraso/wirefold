@@ -74,13 +74,9 @@ func TestMultiBeadFIFO(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// Recv is now refractory-gated (one accepted bead per recvGateMs train window):
-	// beads read back-to-back within the window collapse to one fire. To verify the
-	// transport FIFO still hands values back in SEND ORDER with none dropped in
-	// transport, advance the clock past recvGateMs before each Recv so every bead
-	// falls in its own window and is accepted.
+	// Identity dedup: each Send mints a new trainSeq, so all three beads are distinct
+	// trains. Recv accepts all three in SEND ORDER without needing any clock advance.
 	for _, want := range []int{10, 20, 30} {
-		clk.Advance(recvGateMs * time.Millisecond)
 		v, err := pw.Recv(ctx)
 		if err != nil || v != want {
 			t.Fatalf("Recv: v=%v err=%v want %d", v, err, want)
@@ -216,10 +212,8 @@ func TestMultipleSendsNoDrop(t *testing.T) {
 
 	clk.Advance(testInFlightMs * time.Millisecond)
 	v1, err1 := pw.Recv(ctx)
-	// Recv is refractory-gated: the second bead, read within recvGateMs of the
-	// first, would collapse into the same fire. Advance past the window so both
-	// distinct values are accepted, proving transport dropped neither.
-	clk.Advance(recvGateMs * time.Millisecond)
+	// Identity dedup: each Send mints a distinct trainSeq, so both beads are
+	// accepted back-to-back without needing a clock advance between them.
 	v2, err2 := pw.Recv(ctx)
 	if err1 != nil || err2 != nil || v1 != 1 || v2 != 2 {
 		t.Fatalf("Recv order: v1=%v v2=%v err1=%v err2=%v", v1, v2, err1, err2)
@@ -523,21 +517,21 @@ func TestRestoreUnsilencesWire(t *testing.T) {
 	}
 }
 
-// TestRecvGateCollapsesTrain: a node fire emits a TRAIN of same-value beads; the
-// receiver must collapse that train to exactly ONE fire. Feed ~5 same-value beads
-// spaced ~400 ms apart (the real train cadence) on a FakeClock and assert Recv
-// accepts exactly ONE within the recvGateMs window, dropping the rest — then, once
-// the clock passes the window, a fresh train's first bead is accepted again.
+// TestRecvGateCollapsesTrain: a node fire emits multiple beads all sharing one seq
+// (via placeBeadSeq bumpSeq=false); the receiver must collapse that train to exactly
+// ONE fire. Then a new fire mints a fresh seq and its first bead is accepted.
+//
+// All beads in a test train use the SAME short in-flight time so the FIFO ordering
+// constraint (a bead delivers only at head of inflight) is satisfied — the first
+// bead placed is the first to deliver, and followers arrive next.
 func TestRecvGateCollapsesTrain(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	// Place a 5-bead train, one bead every beadSpacingMs (400 ms), all same value.
-	// Advance the clock by each bead's in-flight time after placement so it lands in
-	// delivered, then by the remaining spacing to reach the next placement instant.
 	const trainVal = 7
-	const beads = 5
-	waitDelivered := func(want int) {
+
+	waitDeliveredLocal := func(want int) {
+		t.Helper()
 		dl := time.Now().Add(time.Second)
 		for {
 			pw.mu.Lock()
@@ -547,55 +541,54 @@ func TestRecvGateCollapsesTrain(t *testing.T) {
 				return
 			}
 			if time.Now().After(dl) {
-				t.Fatalf("only %d/%d beads delivered", n, want)
+				t.Fatalf("only %d beads delivered (want %d)", n, want)
 			}
 			time.Sleep(time.Millisecond)
 		}
 	}
 
-	// First train bead: place, deliver, accept (lastConsumed == never).
-	if err := pw.Send(ctx, trainVal, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	clk.Advance(testInFlightMs * time.Millisecond)
-	waitDelivered(1)
-	if v, err := pw.Recv(ctx); err != nil || v != trainVal {
-		t.Fatalf("first train bead: v=%v err=%v want %d", v, err, trainVal)
+	// Manually bump trainSeq to 1 then place 3 beads with the same seq. This
+	// simulates a StartTrain + two runTrain followers, all sharing seq=1.
+	pw.mu.Lock()
+	pw.trainSeq = 1
+	pw.mu.Unlock()
+
+	for i := 0; i < 3; i++ {
+		pw.placeBeadSeq(trainVal, beadPlacement{InFlightMs: testInFlightMs}, false)
 	}
 
-	// Remaining 4 train beads arrive within recvGateMs (spacing 400 ms ≪ 2000 ms
-	// window). Each must be DROPPED by the refractory gate. Drive them through
-	// PollRecv (the windowed-node path), which returns false because every bead is
-	// inside the window.
-	for i := 1; i < beads; i++ {
-		// Advance one spacing interval (still inside recvGateMs) and place+deliver.
-		clk.Advance(beadSpacingMs * time.Millisecond)
-		if err := pw.Send(ctx, trainVal, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-			t.Fatalf("Send %d: %v", i, err)
-		}
-		clk.Advance(testInFlightMs * time.Millisecond)
-		waitDelivered(1)
-		if v, ok := pw.PollRecv(); ok {
-			t.Fatalf("train follower #%d accepted (v=%v) — refractory gate did not collapse the train", i, v)
-		}
-		// Confirm the gate consumed/dropped it (delivered drained, not parked).
-		pw.mu.Lock()
-		n := len(pw.delivered)
-		pw.mu.Unlock()
-		if n != 0 {
-			t.Fatalf("train follower #%d left %d beads in delivered (should be dropped)", i, n)
-		}
+	// All 3 beads are in-flight. Advance past the deadline so they deliver in order.
+	clk.Advance(testInFlightMs * time.Millisecond)
+	waitDeliveredLocal(3)
+
+	// PollRecv: seq=1 > lastAcceptedSeq=0 → first bead ACCEPTED. lastAcceptedSeq=1.
+	v, ok := pw.PollRecv()
+	if !ok || v != trainVal {
+		t.Fatalf("first train bead: expected accepted v=%d, got v=%v ok=%v", trainVal, v, ok)
 	}
 
-	// After the window elapses, a NEW train fires again: place a fresh bead past
-	// recvGateMs from the last accept and assert it IS accepted.
-	clk.Advance(recvGateMs * time.Millisecond)
-	if err := pw.Send(ctx, 9, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send next-train: %v", err)
+	// Followers 2 and 3 both have seq=1 <= lastAcceptedSeq=1 → must be DROPPED.
+	if v2, ok2 := pw.PollRecv(); ok2 {
+		t.Fatalf("train follower #2 accepted (v=%v) — identity dedup did not collapse", v2)
 	}
+	if v3, ok3 := pw.PollRecv(); ok3 {
+		t.Fatalf("train follower #3 accepted (v=%v) — identity dedup did not collapse", v3)
+	}
+
+	// Verify delivered queue is empty (followers were consumed-and-dropped, not parked).
+	pw.mu.Lock()
+	n := len(pw.delivered)
+	pw.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("train followers left %d beads in delivered (should be empty)", n)
+	}
+
+	// Second fire: bump trainSeq to 2. The first bead (seq=2 > lastAcceptedSeq=1)
+	// must be accepted — no clock manipulation needed between trains.
+	pw.placeBeadSeq(9, beadPlacement{InFlightMs: testInFlightMs}, true) // bumpSeq=true = new fire
 	clk.Advance(testInFlightMs * time.Millisecond)
-	waitDelivered(1)
-	if v, err := pw.Recv(ctx); err != nil || v != 9 {
-		t.Fatalf("next train first bead: v=%v err=%v want 9 (gate must re-open after window)", v, err)
+	waitDeliveredLocal(1)
+	if v4, err := pw.Recv(ctx); err != nil || v4 != 9 {
+		t.Fatalf("second train first bead: v=%v err=%v want 9 (new seq must be accepted)", v4, err)
 	}
 }
