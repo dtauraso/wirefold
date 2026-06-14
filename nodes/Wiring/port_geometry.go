@@ -17,6 +17,8 @@
 
 package Wiring
 
+import "math"
+
 // portGeom is one port's layout descriptor: its name, resolved side, and
 // optional snap slot (nil = auto-spaced along the side).
 type portGeom struct {
@@ -29,6 +31,10 @@ type portGeom struct {
 	// (the magnitude is normalized; the drag in phase 2 constrains the anchor to the
 	// ring, and Go uses only the direction). nil → fall back to side+slot placement.
 	Anchor *vec3
+	// AnchorId is an optional index into the flat ring-anchor array. When non-nil it
+	// takes HIGHEST priority over Anchor and side+slot. The ring has N evenly-spaced
+	// slots computed from the node's radius (see ringAnchorDir). nil → fall through.
+	AnchorId *int
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
@@ -131,6 +137,39 @@ func defaultSide(side string, isInput bool) string {
 	return "right"
 }
 
+// Ring-anchor geometry constants. These are Go-local until the TS side adopts them.
+// d = anchor diameter, p = padding between anchors along the circumference.
+const (
+	ringAnchorDiameter = 8.0 // port anchor circle diameter (pixels)
+	ringAnchorPadding  = 2.0 // gap between adjacent anchors along the ring
+)
+
+// ringAnchorCount returns the number of evenly-spaced anchors that fit around a
+// node's ring given radius R: N = floor(2*pi*R / (d+p)), minimum 1.
+func ringAnchorCount(R float64) int {
+	pitch := ringAnchorDiameter + ringAnchorPadding
+	n := int(2 * math.Pi * R / pitch)
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// ringAnchorDir returns the unit direction (in the y-up, z-forward plane — the
+// same XY plane the side/slot directions live in) for anchor index i in a ring
+// of N evenly-spaced slots around a node of radius R. The angle for slot i is:
+//
+//	theta_i = i * 2*pi / N
+//
+// and maps to direction (cos theta_i, sin theta_i, 0) in the node-local XY plane.
+// i is taken mod N so out-of-range indices wrap safely.
+func ringAnchorDir(R float64, i int) vec3 {
+	N := ringAnchorCount(R)
+	i = ((i % N) + N) % N // safe mod
+	theta := float64(i) * 2 * math.Pi / float64(N)
+	return vec3{X: math.Cos(theta), Y: math.Sin(theta), Z: 0}
+}
+
 // portDir mirrors portDir() in geometry-helpers.ts: the unit direction (in the
 // y-up frame, z=0) from node center toward the named port, derived from
 // side + slot/auto-spacing. Returns (zeroVec, false) if the port is not found.
@@ -150,6 +189,14 @@ func portDir(g nodeGeom, portName string, isInput bool) (vec3, bool) {
 		return vec3{}, false
 	}
 	port := list[idx]
+
+	// AnchorId (highest priority): index into the flat ring-anchor array. The ring
+	// has N evenly-spaced slots sized from the node radius; this bypasses both the
+	// Anchor direction and the side/slot computation.
+	if port.AnchorId != nil {
+		R := nodeRadius(g.Kind)
+		return ringAnchorDir(R, *port.AnchorId), true
+	}
 
 	// Anchor override: a non-nil anchor gives a continuous direction from center.
 	// The port sits on the sphere surface (nodeRadius) in that direction — magnitude

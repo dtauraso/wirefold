@@ -38,10 +38,11 @@ type specPosition struct {
 // tools/topology-vscode/src/schema/types.ts. Slot is a pointer so an absent
 // slot (auto-spacing) is distinguishable from slot 0.
 type specPort struct {
-	Name   string    `json:"name"`
-	Side   string    `json:"side,omitempty"`
-	Slot   *int      `json:"slot,omitempty"`
-	Anchor *specVec3 `json:"anchor,omitempty"` // optional continuous direction; overrides side+slot
+	Name     string    `json:"name"`
+	Side     string    `json:"side,omitempty"`
+	Slot     *int      `json:"slot,omitempty"`
+	Anchor   *specVec3 `json:"anchor,omitempty"`  // optional continuous direction; overrides side+slot
+	AnchorId *int      `json:"anchorId,omitempty"` // optional ring-anchor index (flat array); highest priority
 }
 
 // specVec3 mirrors the Port.anchor {x,y,z} shape in topology.json.
@@ -95,7 +96,7 @@ func (n specNode) toNodeGeom() nodeGeom {
 func specPortsToGeom(ports []specPort) []portGeom {
 	out := make([]portGeom, 0, len(ports))
 	for _, p := range ports {
-		pg := portGeom{Name: p.Name, Side: p.Side, Slot: p.Slot}
+		pg := portGeom{Name: p.Name, Side: p.Side, Slot: p.Slot, AnchorId: p.AnchorId}
 		if p.Anchor != nil {
 			pg.Anchor = &vec3{X: p.Anchor.X, Y: p.Anchor.Y, Z: p.Anchor.Z}
 		}
