@@ -282,6 +282,34 @@ func (o *Out) TryEmit(v int) bool {
 	}
 }
 
+// EmitOne places a single bead with a fresh train identity (bumpSeq=true) and
+// no pacer — the bead is delivered once, not repeated. It always succeeds
+// (no back-pressure check) and emits the same SendWire trace as TryEmit.
+// Use this when the caller controls its own pacing and needs exactly one bead
+// per call without starting a clock-paced train.
+func (o *Out) EmitOne(v int) bool {
+	if o == nil {
+		return false
+	}
+	if o.pw != nil {
+		if !o.pw.placeBeadSeq(v, o.placement(), true) {
+			return false
+		}
+		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		return true
+	}
+	if o.ch == nil {
+		return false
+	}
+	select {
+	case o.ch <- v:
+		o.trace.Send(o.node, o.port, v)
+		return true
+	default:
+		return false
+	}
+}
+
 // Wired reports whether this Out port is bound to a real edge (paced-wire
 // mode). Returns false for a nil Out or a dead-end chan port (unwired).
 // Nodes gate optional feedback sends on Wired() so unwired ports are never
