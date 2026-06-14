@@ -8,51 +8,51 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — branch `task/node-runs-own-edges` IN FLIGHT, NOT merged — full-fold COMPLETE)
+## State at handoff (2026-06-14 — branch `task/port-ring-anchors` IN FLIGHT, NO commits yet — DESIGN phase)
 
-Context: `main` at `a6fc29ea`. This branch took the network from the multi-bead sustained train to ONE BEAD PER FIRE where each node DRIVES its own outbound bead(s) to delivery on ITS OWN goroutine — no train, no seq, no persistent flag, and now NO per-bead walker goroutine. The production bead path spawns zero goroutines; nodes drive synchronously on the one clock.
+Context:
+- `main` is at `e699cc17` (last merge: task/cleanup-inactive-node-kinds — removed the ReadGate kind, the parked topology/inactive subtree, and renamed Input's port ToReadGate -> ToChainInhibitor).
+- Branch `task/port-ring-anchors` was just created off main; NO commits yet. This is a DESIGN task to redesign the physical layout of node ports. No spec written yet — write it first (HTML tabs, usual layout, like node-edges-goroutine-spec.html / timing-spec.html) once the one open question below is answered.
 
-### What's DONE & VERIFIED
-- Emit collapsed to one bead (StartTrain/runTrain/trainSeq/lastAcceptedSeq/persistent all deleted; Recv is plain FIFO, no dedup).
-- All node kinds drive their own outbound beads: Input, HoldFlip, WindowAndGate via `Out.EmitOneDriven(ctx,v)`; ChainInhibitor (nodes 2 & 3) via place-all-then-`DriveAll` (concurrent fan-out 2→{3,5} + feedback 2→1); ReadGate via EmitOneDriven.
-- Per-bead walker (`launchWalkerLocked`) + dead non-driven methods (`placeBead`, `Send`, `SendDeliverOnly`, `TryPlace`, `Out.TryEmit`/`TrySend`/`EmitOne`) DELETED. `placeBeadNoWalker` + the driven loop (`DriveBeadsToDelivery`/`DriveBeadToDelivery`/`DriveAll`, per-frame `advanceBeadLocked`) survive.
-- `ReviseInFlightGeometry` keeps its arc/seg rebase but no longer relaunches walkers (driven loop re-reads live arc/seg each frame).
-- User confirmed the live network (nodes 1–5: 1→2→{3,5}, 3→4→5, 2→1 feedback ring) animates correctly after each stage. go build + go test -race green throughout (8 packages).
+### The redesign (user-pinned model)
+Replace today's port placement (a `side` + `slot(0|1|2)` grid — 4 sides x 3 slots — PLUS ad-hoc free `anchor` 3D vectors that override side/slot) with a UNIFORM RING-OF-ANCHORS model:
+- Each node has a torus (the ring around it). **R = the torus MAJOR radius** = the radius of the circle traced by the CENTER OF THE TUBE around the node. Circumference **C = 2*pi*R**.
+- Each port anchor has diameter **d** plus small padding **p**. The number of evenly-spaced anchor positions that fit is **N = floor( C / (d + p) )**, and **N IS the number of ports** on the node. They are spaced EVENLY around the ring.
+- Interaction change: the old "free dragging a port to any continuous angle around the torus" is REPLACED by SWITCHING which discrete evenly-spaced position an edge's port occupies (snap between the N positions, not slide). This retires BOTH the free `anchor` vector AND the `side`+`slot` grid.
+- Proposed (tunable) defaults pending confirmation: **d = 8 wu** (the existing bead diameter), **p = 2 wu** padding.
 
-### Key commits (this branch, oldest→newest, abbrev)
-bcbc34f8 spec; 70571cf8 node1 EmitOne; 7be25ae3 node2 EmitOne+drop persistent 2→5; (node3 persistent drop); 7fecc889 node4; 033bdba5 handoff; 3a940de0 collapse to one-bead (delete train+seq); f3cac3eb remove persistent plumbing; 671f2ad2 extract advanceBeadLocked; a539cdeb node1 driven (no walker); 2d73ead4 node2 concurrent driven; 3e0051bd one-goroutine fan-out drive; 461e5caa fix node2 serial-blocking (DriveAll); 9eb4099e node4 driven; 2d387d18 node5 driven; 88fd0dc readgate driven; 4bf000be DELETE walker + dead emit paths.
+### THE OPEN QUESTION (blocks the spec — affects Go node logic, not just rendering)
+The N ring positions are anonymous evenly-spaced slots, but some kinds need SEMANTIC ports (WindowAndGate must distinguish FromLeft vs FromRight; ChainInhibitor must distinguish FeedbackOut vs ToNext). Which model:
+- **(a)** Ports keep named roles (FromLeft, ToNext0, FeedbackOut…); each role OCCUPIES one of the N ring positions; N is the capacity cap; node logic still addresses ports by name. Switching = move a role to a different ring slot.
+- **(b)** Ports become pure positions 0..N-1; node logic addresses inputs/outputs by INDEX/order around the ring; no names (WindowAndGate defines e.g. "left = lower index").
+User has NOT yet answered. Get this answer first, then write the spec, then implement.
 
-### Warts / things to scrutinize (carry forward)
-- `PlaceAndDrive` / `PlaceAndDriveDeliverOnly` (paced_wire.go ~164): PUBLIC methods that spawn a goroutine, used ONLY by tests (replacing the old exported test-only SendDeliverOnly). Zero production callers. A test-only public goroutine-spawner — candidate to make package-private or restructure if it bothers you.
-- The walker-delete commit also added (production) `inflightBead.startedAt` + a deadline-cap on `minNext` in DriveBeadsToDelivery — added to keep geometry/anchor behavior equivalent when tests moved onto the shared driven loop. Reviewed and accepted; re-scrutinize if geometry-edit-during-flight looks off.
-- Tests run CHAN-MODE and do NOT exercise the synchronous paced drive loop — green tests do not prove runtime drive behavior. Editor eyeball is the real check for any drive change.
+### Why the redesign (motivation)
+Current layout is inconsistent + ad-hoc: the SAME kind has different per-instance layouts (nodes 2 & 3 are both ChainInhibitor but their ports sit on different sides/slots), and most ports carry authored `anchor` vectors that bypass the side/slot grid entirely (port_geometry.go:157 — a non-nil anchor overrides side+slot).
 
-### Open / next
-- Branch is a coherent, working, verified milestone — READY TO MERGE pending sign-off (run tools/strip-branch-local-docs.sh task/node-runs-own-edges first; the spec html node-edges-goroutine-spec.html is branch-local).
-- The general INPUT-vs-TIMER two-source wake was never needed: every node turned out sequential at the input level (feedback ring + anyOccupied/HasValue guards keep a node from accepting new input while its outbound bead is mid-drive). If a future topology has a node that CAN receive while driving, that wake must be designed (spec Open Q2/Q3 in node-edges-goroutine-spec.html).
+### Code map (where port layout lives today — from a fresh audit)
+- Port schema (side|slot|anchor): tools/topology-vscode/src/schema/types.ts:22-36. Slot 0|1|2 validation throws in parse-nodes-edges.ts:44-48.
+- Go port struct: nodes/Wiring/loader.go:40-45 (specPort: Name, Side, Slot *int, Anchor *specVec3 — "anchor overrides side+slot").
+- Go port-direction computation (AUTHORITATIVE): nodes/Wiring/port_geometry.go:136-216 (portDir): anchor override at :157; else side+slot; slot %s 25/50/75 from curve_params.go:52-56 (CurveParamSlotPct0/1/2).
+- Node dims (per-kind W/H, feeds node size/radius): nodes/Wiring/node_dims_gen.go:12-17 (GENERATED by tools/gen-node-defs from nodes/<Kind>/SPEC.md View section; regen: cd tools/topology-vscode && npm run gen:node-defs). TS fallback node-dims.ts NODE_DIM_FALLBACK.
+- TS render fallback (pre-emit only): tools/topology-vscode/src/webview/three/geometry-helpers.ts:101-142 (portDirLocal mirrors Go). Go streams authoritative geometry via node-geometry trace; node-geometry.ts / useNodeGeometryStore consume it; fallback disabled after first event.
+- Per-instance port data authored in topology/nodes/<id>/inputs/*.json and outputs/*.json (each: name, side, slot, anchor).
 
-### Carry-forward facts
+### Current per-node port placement (snapshot, for reference)
+- node1 Input: in FeedbackIn (bottom,1, anchored); out ToChainInhibitor (right,1, anchored).
+- node2 ChainInhibitor: in FromPrevChainInhibitorNode (left,1); out ToNext0 (bottom,1), ToNext1 (left,2), FeedbackOut (top,1).
+- node3 ChainInhibitor: in FromPrevChainInhibitorNode (top,1); out ToNext0 (left,0), ToNext1 (bottom,2 — DANGLING, no active edge after inactive-subtree removal).
+- node4 HoldFlip: in In (right,0); out Out (left,0).
+- node5 WindowAndGate: in FromLeft (top,1), FromRight (top,2); out ToPassed (top,0).
 
-- **Two bead trace kinds:** `node-bead` (interior, node-LOCAL offsets, children of the node group) and `edge-bead` (on-wire). Node geometry (center + radius + ports + interior beads) is Go-streamed; TS renders, computes none.
-- **`topology/` tree tracked normally**; **`topology/view/scene.json` gitignored** (camera/labels, reconstitutes to defaults when absent).
-- **Fading a load-bearing ring edge stalls the whole ring** (token dropped); unfade does NOT revive — restart re-seeds from node `1`'s Input init. EXPECTED model behavior.
-- **Node editing requires Go alive** (positions Go-authoritative): if Go is stopped/crashed, NO node moves until restart.
-- **Two-process editor:** extension-host changes need **Developer: Reload Window**; webview-only changes hot-reload on build (edges survive via geometry resend).
-- **Runner is a prebuilt binary**, not `go run .`: the editor spawns `<repoRoot>/.wirefold-cache/wirefold` (gitignored). Webview-only changes hot-reload via the bundle watcher; `.go` changes rebuild the binary via an eager `**/*.go` watcher. First launch after a fresh checkout does a one-time `go build`. Orphaned sims from crashed sessions are SIGKILLed on launch.
-- **Parser/message-kind + trace-kind parity in LOCKSTEP:** changing a TS↔Go message shape updates `messages.ts` parser AND the Go stdin-reader together. Guards: `check-message-kind-parity`, `check-trace-kind-parity`.
-- **A new edit op must be forwarded in THREE places:** `messages.ts`, `handle-message.ts` `case "edit"` per-op forward, and the Go `stdin_reader`.
-- **Subagent commit hygiene:** subagents have repeatedly swept incidental `topology.json` autosave churn into commits — instruct them to `git add` specific paths only, and spot-check net diffs before merge.
-- **React Flow is fully removed;** `RF`-named code was vestigial and retired.
-- **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; O(N²) follow latency.
-- **Port slots are `0|1|2` per side** (top/bottom/left/right each hold at most 3 ports). The webview parser throws a `load-error` on slot 3+, blanking the whole diagram.
-- **Locality invariant:** one node must NOT affect another's timing. Do not reintroduce time-window recv gating or cross-node timing dependencies.
-- **Timing-as-distance is the design target:** per-node local durations expressed as distances at pulseSpeed off the one clock — human-speed + locality + one-button pause. Do NOT put this in MODEL.md.
+### Next step
+1. Get the user's answer to THE OPEN QUESTION (a vs b) and confirm d/p defaults.
+2. Write the spec HTML (tabs: Model, Geometry/formula, Was (side+slot+anchor), Target (ring), Interaction (snap-switch vs free-drag), Migration, Open Qs) — usual layout, branch-local (note branch in meta line).
+3. Then implement in Go (port_geometry.go owns the N evenly-spaced positions; retire side/slot/anchor), regenerate, update the editor interaction (snap-switch), and the topology port JSONs.
 
-### Dev-loop
-
-- Go: `go build ./...` + `go test -race ./...`. TS (from `tools/topology-vscode/`): `npm run build` (rebuilds extension.js + webview.js) + `npx tsc --noEmit` + `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-message-kind-parity`, `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
-- Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file for webview-only.
-- No merge to main without explicit sign-off. Delete merged branches without re-asking.
+### Carry-forward
+- This is GEOMETRY = Go-owned; pump/TS is a plotter (MODEL.md / CLAUDE.md). Go computes the N positions and streams them; TS renders, computes none.
+- Branch hygiene caution from THIS session: a background Agent dispatch fan-out into a ~20-agent swarm that duplicated commits and committed one unrequested change (empty data.json for nodes 4/5, since reverted). Keep subagents FOREGROUND for this branch; spot-check git log for stray commits.
 
 ## ALWAYS clause
 
