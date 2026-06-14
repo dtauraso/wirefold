@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Camera Navigation</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --border: #d2d2d7;
+    --accent: #0071e3;
+    --tab-active: #0071e3;
+    --code-bg: #e8e8ed;
+    --table-head: #f0f0f5;
+    --table-zebra: #f9f9fb;
+    --eq-bg: #e8f0fb;
+    --eq-border: #b3c9f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --card-bg: #2c2c2e;
+      --text: #f5f5f7;
+      --text-muted: #8e8e93;
+      --border: #3a3a3c;
+      --accent: #4da3ff;
+      --tab-active: #4da3ff;
+      --code-bg: #3a3a3c;
+      --table-head: #3a3a3c;
+      --table-zebra: #252527;
+      --eq-bg: #1e2d45;
+      --eq-border: #2d4a7a;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem 1rem 4rem;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 1.25rem 0 0.6rem; }
+  .meta { font-size: 0.78rem; color: var(--text-muted); }
+  nav { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 1.75rem; flex-wrap: wrap; }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--tab-active); border-bottom-color: var(--tab-active); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  p { margin-bottom: 0.85rem; }
+  ul { padding-left: 1.4rem; margin-bottom: 0.85rem; }
+  li { margin-bottom: 0.4rem; }
+  code, .mono {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 0.84em;
+    background: var(--code-bg);
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+  }
+  .eq-block {
+    background: var(--eq-bg);
+    border: 1px solid var(--eq-border);
+    border-radius: 6px;
+    padding: 1rem 1.5rem;
+    margin: 1rem 0 1.2rem;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 1rem;
+    line-height: 2;
+  }
+  .eq-block .eq-line { display: block; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.875rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+  th {
+    background: var(--table-head);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: var(--table-zebra); }
+  td code { font-size: 0.82em; }
+  .note {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-top: -0.5rem;
+    margin-bottom: 1rem;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+  /* Diagram extras */
+  .diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 1.25rem 0 1.5rem;
+  }
+  .diagram svg {
+    max-width: 100%;
+    height: auto;
+  }
+  figcaption, .diagram-caption {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    text-align: center;
+  }
+  .diagrams-row {
+    display: flex;
+    gap: 1.25rem;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin: 1.25rem 0 1.5rem;
+  }
+  .diagrams-row .diagram {
+    flex: 1 1 240px;
+    min-width: 200px;
+    margin: 0;
+  }
+  .flow-steps {
+    counter-reset: step;
+    padding-left: 0;
+    list-style: none;
+    margin-bottom: 1.25rem;
+  }
+  .flow-steps li {
+    counter-increment: step;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+  }
+  .flow-steps li::before {
+    content: counter(step);
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.1rem;
+  }
+  .absent-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--code-bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.05em 0.4em;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>3D Camera Navigation</h1>
+    <div class="meta">branch: task/camera-nav-doc &nbsp;·&nbsp; tools/topology-vscode/src/webview/three/ — editor camera controls</div>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" data-tab="controls">Controls</button>
+    <button class="tab-btn" data-tab="camera-model">Camera model</button>
+    <button class="tab-btn" data-tab="motions">Motions</button>
+    <button class="tab-btn" data-tab="fit-persistence">Fit &amp; persistence</button>
+    <button class="tab-btn" data-tab="design">Design</button>
+  </nav>
+
+  <!-- TAB 1: CONTROLS -->
+  <div id="controls" class="panel active">
+    <p>
+      All navigation is handled by a <strong>custom controller</strong> in
+      <code>interaction-controls.ts</code> — no OrbitControls. There are no
+      left/right/middle-button distinctions; the controller is pointer-button-agnostic.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Action</th>
+          <th>Input</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Orbit</strong> (arcball rotate)</td>
+          <td>Drag on empty space</td>
+          <td>Horizontal → world Y axis; vertical → world X axis. <code>ROT_SPEED = 0.005</code> rad/px. Pivot = selected node or screen-center on z=0.</td>
+        </tr>
+        <tr>
+          <td><strong>Pan</strong></td>
+          <td>Mouse wheel / two-finger scroll <em>without</em> Ctrl</td>
+          <td>Translates camera on the z=0 plane. World-space delta between plane point under cursor before and after scroll.</td>
+        </tr>
+        <tr>
+          <td><strong>Dolly</strong> (zoom)</td>
+          <td>Wheel/pinch <em>with</em> Ctrl (or Cmd / trackpad pinch)</td>
+          <td><code>factor = Math.pow(1.01, e.deltaY)</code>. <code>deltaY &gt; 0</code> zooms out, <code>&lt; 0</code> zooms in.</td>
+        </tr>
+        <tr>
+          <td><strong>Fit</strong> ("Home")</td>
+          <td>Home button in <code>camera-ui.tsx</code></td>
+          <td>Frames all nodes, resets to square-on. No keyboard shortcut.</td>
+        </tr>
+        <tr>
+          <td><strong>Roll</strong></td>
+          <td><span class="absent-badge">NOT IMPLEMENTED</span></td>
+          <td>The arcball math can produce roll via composed quaternions, but no dedicated roll input exists. Documented-but-absent DOF.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="note">
+      The only modifier key is <strong>Ctrl / Cmd</strong> (on the wheel/pinch event) to
+      switch pan → dolly. No other modifiers are used.
+    </p>
+
+    <!-- Input map diagram -->
+    <div class="diagram">
+      <svg width="640" height="320" viewBox="0 0 640 320" fill="none"
+           xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Input map: trackpad and mouse gesture callouts">
+
+        <!-- Trackpad body -->
+        <rect x="200" y="80" width="240" height="160" rx="18"
+              stroke="currentColor" stroke-width="2" fill="var(--card-bg)" opacity="0.9"/>
+        <text x="320" y="170" text-anchor="middle" font-size="11" fill="var(--text-muted)" font-family="inherit">trackpad / mouse</text>
+
+        <!-- Drag arrow (orbit) -->
+        <line x1="260" y1="130" x2="320" y2="145" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+        <polygon points="320,145 310,138 313,149" fill="var(--accent)"/>
+
+        <!-- Callout: Orbit -->
+        <line x1="260" y1="125" x2="100" y2="90" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <rect x="10" y="60" width="88" height="44" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1"/>
+        <text x="54" y="79" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor" font-family="inherit">ORBIT</text>
+        <text x="54" y="93" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">drag empty space</text>
+
+        <!-- Two-finger scroll arrows (pan) -->
+        <line x1="310" y1="195" x2="310" y2="175" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+        <polygon points="310,173 305,183 315,183" fill="var(--accent)"/>
+        <line x1="330" y1="195" x2="330" y2="175" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+        <polygon points="330,173 325,183 335,183" fill="var(--accent)"/>
+
+        <!-- Callout: Pan -->
+        <line x1="320" y1="180" x2="420" y2="90" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <rect x="421" y="58" width="104" height="44" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1"/>
+        <text x="473" y="77" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor" font-family="inherit">PAN</text>
+        <text x="473" y="91" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">2-finger scroll (no Ctrl)</text>
+
+        <!-- Ctrl+scroll pinch symbol -->
+        <text x="320" y="230" text-anchor="middle" font-size="13" fill="var(--text-muted)" font-family="monospace">⌃ + scroll / pinch</text>
+
+        <!-- Callout: Dolly -->
+        <line x1="320" y1="235" x2="420" y2="260" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <rect x="421" y="245" width="104" height="44" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1"/>
+        <text x="473" y="264" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor" font-family="inherit">DOLLY</text>
+        <text x="473" y="278" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">Ctrl/Cmd + scroll</text>
+
+        <!-- Home button -->
+        <rect x="220" y="255" width="56" height="28" rx="6"
+              fill="var(--accent)" opacity="0.15" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="248" y="274" text-anchor="middle" font-size="10" font-weight="600" fill="var(--accent)" font-family="inherit">Home</text>
+
+        <!-- Callout: Fit -->
+        <line x1="220" y1="269" x2="100" y2="260" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <rect x="10" y="246" width="88" height="44" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1"/>
+        <text x="54" y="265" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor" font-family="inherit">FIT</text>
+        <text x="54" y="279" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">Home button</text>
+      </svg>
+      <div class="diagram-caption">Input map — gestures and their camera actions. Roll has no input binding today.</div>
+    </div>
+
+    <h2>Gesture discrimination</h2>
+    <p>
+      <code>pointerdown</code> enters a <em>pending</em> state. If the pointer is released
+      within <code>CLICK_MAX_MS = 150 ms</code> and moves less than
+      <code>MOVE_SLOP_PX = 6 px</code>, it resolves as a <strong>click</strong> (select).
+      Beyond those thresholds it resolves as a drag. What the drag does depends on what
+      was hit:
+    </p>
+    <ul>
+      <li><strong>Empty space</strong> — orbit.</li>
+      <li><strong>Node body</strong> — move node.</li>
+      <li><strong>Connected port</strong> — slide port to a new ring anchor (Go snaps).</li>
+      <li><strong>Unconnected port</strong> — begin drawing a wire.</li>
+    </ul>
+  </div>
+
+  <!-- TAB 2: CAMERA MODEL -->
+  <div id="camera-model" class="panel">
+    <h2>PerspectiveCamera parameters</h2>
+    <table>
+      <thead>
+        <tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Type</td><td><code>THREE.PerspectiveCamera</code></td><td>Created in <code>ThreeView.tsx</code></td></tr>
+        <tr><td><code>fov</code></td><td>50°</td><td>Vertical field of view</td></tr>
+        <tr><td><code>near</code></td><td>0.1</td><td>Near clip plane</td></tr>
+        <tr><td><code>far</code></td><td>20 000</td><td>Far clip plane</td></tr>
+        <tr><td>Initial position</td><td>[0, 0, 500]</td><td>Overridden on load by saved camera or auto-fit</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Camera3D state</h2>
+    <div class="card">
+      <p>Stored in <code>viewer/types.ts</code>:</p>
+      <div class="eq-block">
+        <span class="eq-line">Camera3D = {"{"}  position: [x, y, z],  quaternion: [x, y, z, w]  {"}"}</span>
+      </div>
+      <p class="note" style="margin:0">Six degrees of freedom captured as position + unit quaternion. No Euler angles — quaternion composition avoids gimbal lock during arcball rotation.</p>
+    </div>
+
+    <!-- Arcball diagram -->
+    <h2>Arcball pivot diagram</h2>
+    <div class="diagram">
+      <svg width="540" height="300" viewBox="0 0 540 300" fill="none"
+           xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Arcball pivot: camera arcs around pivot on world-fixed X and Y axes">
+
+        <!-- World axes -->
+        <!-- Y axis -->
+        <line x1="270" y1="260" x2="270" y2="40" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5,4" opacity="0.4"/>
+        <polygon points="270,36 265,48 275,48" fill="currentColor" opacity="0.4"/>
+        <text x="278" y="46" font-size="11" fill="currentColor" opacity="0.6" font-family="inherit">World Y</text>
+
+        <!-- X axis -->
+        <line x1="80" y1="200" x2="460" y2="200" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5,4" opacity="0.4"/>
+        <polygon points="464,200 452,195 452,205" fill="currentColor" opacity="0.4"/>
+        <text x="462" y="216" font-size="11" fill="currentColor" opacity="0.6" font-family="inherit">World X</text>
+
+        <!-- z=0 plane hint -->
+        <ellipse cx="270" cy="200" rx="130" ry="28" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,4" fill="none" opacity="0.6"/>
+        <text x="408" y="236" font-size="10" fill="var(--text-muted)" font-family="inherit">z = 0 plane</text>
+
+        <!-- Pivot point -->
+        <circle cx="270" cy="200" r="6" fill="var(--accent)" opacity="0.9"/>
+        <text x="280" y="196" font-size="10.5" font-weight="600" fill="var(--accent)" font-family="inherit">pivot</text>
+        <text x="280" y="210" font-size="9" fill="var(--text-muted)" font-family="inherit">(selected node or screen-center)</text>
+
+        <!-- Camera arc around pivot (horizontal — world Y rotation) -->
+        <path d="M 165,200 A 105,105 0 0 1 375,200" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6,3" fill="none" opacity="0.6"/>
+        <!-- Camera icon at arc end -->
+        <rect x="150" y="187" width="22" height="16" rx="3" stroke="var(--accent)" stroke-width="1.8" fill="var(--card-bg)"/>
+        <polygon points="172,191 180,187 180,203 172,199" stroke="var(--accent)" stroke-width="1.5" fill="var(--card-bg)"/>
+        <text x="115" y="183" font-size="9.5" fill="var(--text-muted)" font-family="inherit" text-anchor="middle">cam start</text>
+
+        <!-- Camera icon at arc other end -->
+        <rect x="368" y="187" width="22" height="16" rx="3" stroke="var(--accent)" stroke-width="1.8" fill="var(--card-bg)"/>
+        <polygon points="390,191 398,187 398,203 390,199" stroke="var(--accent)" stroke-width="1.5" fill="var(--card-bg)"/>
+        <text x="408" y="183" font-size="9.5" fill="var(--text-muted)" font-family="inherit" text-anchor="middle">cam end</text>
+
+        <!-- Horizontal drag label -->
+        <text x="270" y="148" text-anchor="middle" font-size="10.5" fill="var(--accent)" font-family="inherit">horizontal drag → rotate about World Y</text>
+
+        <!-- Camera arc (vertical — world X rotation) -->
+        <path d="M 270,95 A 105,105 0 0 1 270,200" stroke="#e65" stroke-width="2" stroke-dasharray="6,3" fill="none" opacity="0.7"/>
+        <!-- Camera icon top -->
+        <rect x="259" y="80" width="22" height="16" rx="3" stroke="#e65" stroke-width="1.8" fill="var(--card-bg)"/>
+        <polygon points="281,84 289,80 289,96 281,92" stroke="#e65" stroke-width="1.5" fill="var(--card-bg)"/>
+
+        <!-- Vertical drag label -->
+        <text x="370" y="148" font-size="10.5" fill="#e65" font-family="inherit">vertical drag →</text>
+        <text x="370" y="162" font-size="10.5" fill="#e65" font-family="inherit">rotate about World X</text>
+
+        <!-- ROT_SPEED label -->
+        <text x="270" y="282" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">ROT_SPEED = 0.005 rad/px — pivot fixed for entire gesture</text>
+      </svg>
+      <div class="diagram-caption">
+        Arcball model — camera orbits around a fixed pivot on world-fixed X/Y axes.
+        Pivot is the selected node's world position, or screen-center projected to z=0 if nothing is selected.
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: MOTIONS -->
+  <div id="motions" class="panel">
+    <p>Three independent camera motions, each with its own input and math:</p>
+
+    <div class="diagrams-row">
+
+      <!-- ORBIT diagram -->
+      <div class="diagram">
+        <svg width="220" height="200" viewBox="0 0 220 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Pivot -->
+          <circle cx="110" cy="120" r="5" fill="var(--accent)"/>
+          <text x="110" y="145" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">pivot</text>
+
+          <!-- Arc -->
+          <path d="M 30,120 A 80,80 0 0 1 190,120" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5,3" fill="none"/>
+
+          <!-- Camera at start -->
+          <rect x="16" y="110" width="18" height="13" rx="2" stroke="var(--accent)" stroke-width="1.5" fill="var(--card-bg)"/>
+          <polygon points="34,112 41,109 41,123 34,120" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="1.2"/>
+
+          <!-- Camera at end -->
+          <rect x="186" y="110" width="18" height="13" rx="2" stroke="var(--accent)" stroke-width="1.5" fill="var(--card-bg)"/>
+          <polygon points="204,112 211,109 211,123 204,120" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="1.2"/>
+
+          <!-- Arrow along arc -->
+          <path d="M 48,72 Q 110,40 172,72" stroke="var(--accent)" stroke-width="1.5" fill="none" marker-end="url(#arrow-orbit)"/>
+          <defs>
+            <marker id="arrow-orbit" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <!-- Label -->
+          <text x="110" y="25" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="inherit">ORBIT</text>
+          <text x="110" y="40" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">drag empty space</text>
+        </svg>
+        <div class="diagram-caption">
+          Arcball rotate — camera arcs around fixed pivot.<br>
+          <code>ROT_SPEED = 0.005 rad/px</code>
+        </div>
+      </div>
+
+      <!-- PAN diagram -->
+      <div class="diagram">
+        <svg width="220" height="200" viewBox="0 0 220 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow-pan" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#5a9"/>
+            </marker>
+          </defs>
+
+          <!-- z=0 plane -->
+          <ellipse cx="110" cy="150" rx="90" ry="20" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3" fill="none"/>
+          <text x="110" y="178" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">z = 0 plane</text>
+
+          <!-- Camera before -->
+          <rect x="50" y="88" width="18" height="13" rx="2" stroke="#5a9" stroke-width="1.5" fill="var(--card-bg)"/>
+          <polygon points="68,90 76,87 76,101 68,99" fill="var(--card-bg)" stroke="#5a9" stroke-width="1.2"/>
+          <line x1="59" y1="101" x2="59" y2="148" stroke="#5a9" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
+
+          <!-- Camera after -->
+          <rect x="140" y="88" width="18" height="13" rx="2" stroke="#5a9" stroke-width="1.5" fill="var(--card-bg)"/>
+          <polygon points="158,90 166,87 166,101 158,99" fill="var(--card-bg)" stroke="#5a9" stroke-width="1.2"/>
+          <line x1="149" y1="101" x2="149" y2="148" stroke="#5a9" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
+
+          <!-- Arrow between cameras -->
+          <line x1="85" y1="94" x2="133" y2="94" stroke="#5a9" stroke-width="2" marker-end="url(#arrow-pan)"/>
+
+          <text x="110" y="25" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="inherit">PAN</text>
+          <text x="110" y="40" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">scroll without Ctrl</text>
+          <text x="110" y="76" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">camera slides on z=0 plane</text>
+        </svg>
+        <div class="diagram-caption">
+          Pan — camera translates parallel to z=0.<br>World-space delta under cursor before/after scroll.
+        </div>
+      </div>
+
+      <!-- DOLLY diagram -->
+      <div class="diagram">
+        <svg width="220" height="200" viewBox="0 0 220 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow-in" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#e8a"/>
+            </marker>
+            <marker id="arrow-out" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto-start-reverse">
+              <path d="M8,0 L8,6 L0,3 z" fill="#e8a"/>
+            </marker>
+          </defs>
+
+          <!-- Target node placeholder -->
+          <circle cx="110" cy="148" r="12" fill="none" stroke="var(--border)" stroke-width="2"/>
+          <text x="110" y="152" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">scene</text>
+
+          <!-- View axis -->
+          <line x1="110" y1="40" x2="110" y2="136" stroke="currentColor" stroke-width="1" stroke-dasharray="4,3" opacity="0.35"/>
+
+          <!-- Camera far -->
+          <rect x="96" y="28" width="18" height="13" rx="2" stroke="#e8a" stroke-width="1.5" fill="var(--card-bg)"/>
+          <polygon points="114,30 122,27 122,41 114,39" fill="var(--card-bg)" stroke="#e8a" stroke-width="1.2"/>
+          <!-- Camera near -->
+          <rect x="96" y="68" width="18" height="13" rx="2" stroke="#e8a" stroke-width="1.5" fill="var(--card-bg)"/>
+          <polygon points="114,70 122,67 122,81 114,79" fill="var(--card-bg)" stroke="#e8a" stroke-width="1.2"/>
+
+          <!-- In/out arrows -->
+          <line x1="110" y1="45" x2="110" y2="65" stroke="#e8a" stroke-width="2" marker-end="url(#arrow-in)"/>
+          <text x="122" y="58" font-size="8.5" fill="#e8a" font-family="inherit">zoom in (−ΔY)</text>
+
+          <line x1="80" y1="65" x2="80" y2="45" stroke="#e8a" stroke-width="2" marker-end="url(#arrow-out)"/>
+          <text x="8" y="58" font-size="8.5" fill="#e8a" font-family="inherit">zoom out (+ΔY)</text>
+
+          <text x="110" y="20" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="inherit">DOLLY</text>
+          <text x="110" y="180" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">Ctrl/Cmd + scroll or trackpad pinch</text>
+        </svg>
+        <div class="diagram-caption">
+          Dolly — camera moves along view axis.<br>
+          <code>factor = Math.pow(1.01, deltaY)</code> — exponential, base <code>1.01</code>.
+        </div>
+      </div>
+
+    </div><!-- end diagrams-row -->
+
+    <div class="card">
+      <h2 style="margin-top:0">Constants</h2>
+      <table style="margin-bottom:0">
+        <thead><tr><th>Constant</th><th>Value</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><code>ROT_SPEED</code></td><td>0.005 rad/px</td><td>Orbit — maps drag pixels to quaternion rotation angle</td></tr>
+          <tr><td>Dolly base</td><td><code>1.01</code></td><td>Dolly — <code>Math.pow(1.01, deltaY)</code> per wheel event</td></tr>
+          <tr><td><code>CLICK_MAX_MS</code></td><td>150 ms</td><td>Gesture discrimination — click vs drag time threshold</td></tr>
+          <tr><td><code>MOVE_SLOP_PX</code></td><td>6 px</td><td>Gesture discrimination — click vs drag motion threshold</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TAB 4: FIT & PERSISTENCE -->
+  <div id="fit-persistence" class="panel">
+
+    <h2>Fit algorithm ("Home" button)</h2>
+    <p>Implemented in <code>camera-ui.tsx</code>. Triggered by the Home button — no keyboard shortcut.</p>
+    <ol class="flow-steps">
+      <li>Compute bounding box of all node centers ± node radius.</li>
+      <li>Derive the required camera distance from the bbox dimensions and the camera's <code>fov</code>.</li>
+      <li>Apply <strong>1.2× padding</strong> factor so nodes aren't flush against the viewport edges.</li>
+      <li>Reset to <strong>square-on</strong>: <code>cam.up = [0, 1, 0]</code>, <code>lookAt(center)</code> — zero roll, zero tilt. Quaternion is the identity for the look direction toward center.</li>
+    </ol>
+
+    <h2>Save / restore flow</h2>
+
+    <!-- Flow diagram as inline SVG -->
+    <div class="diagram">
+      <svg width="620" height="90" viewBox="0 0 620 90" fill="none" xmlns="http://www.w3.org/2000/svg"
+           role="img" aria-label="Camera save/restore data flow">
+        <defs>
+          <marker id="arr-flow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L7,3 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- Nodes -->
+        <!-- gesture-end -->
+        <rect x="2" y="28" width="92" height="34" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1.2"/>
+        <text x="48" y="46" text-anchor="middle" font-size="9.5" font-weight="600" fill="currentColor" font-family="inherit">gesture end</text>
+        <text x="48" y="58" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">commitCamera</text>
+
+        <!-- arrow -->
+        <line x1="94" y1="45" x2="116" y2="45" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr-flow)"/>
+
+        <!-- scheduleViewSave -->
+        <rect x="118" y="28" width="110" height="34" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1.2"/>
+        <text x="173" y="46" text-anchor="middle" font-size="9.5" font-weight="600" fill="currentColor" font-family="inherit">scheduleViewSave</text>
+        <text x="173" y="58" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">400 ms debounce</text>
+
+        <!-- arrow -->
+        <line x1="228" y1="45" x2="252" y2="45" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr-flow)"/>
+
+        <!-- scene edit -->
+        <rect x="254" y="28" width="100" height="34" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1.2"/>
+        <text x="304" y="46" text-anchor="middle" font-size="9.5" font-weight="600" fill="currentColor" font-family="inherit">scene edit → Go</text>
+        <text x="304" y="58" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">save.ts</text>
+
+        <!-- arrow -->
+        <line x1="354" y1="45" x2="374" y2="45" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr-flow)"/>
+
+        <!-- topology scene.json -->
+        <rect x="376" y="28" width="110" height="34" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1.2"/>
+        <text x="431" y="46" text-anchor="middle" font-size="9.5" font-weight="600" fill="currentColor" font-family="inherit">topology</text>
+        <text x="431" y="58" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">scene.json camera3d</text>
+
+        <!-- Restore legend -->
+        <text x="2" y="85" font-size="8.5" fill="var(--text-muted)" font-family="inherit">
+          load → CameraRefBridge (saved camera3d? apply : square-on) → CameraFitter (auto-fit once only if no saved camera)
+        </text>
+      </svg>
+      <div class="diagram-caption">Camera save flow (top). Restore path on load described in caption.</div>
+    </div>
+
+    <h2>Restore on load</h2>
+    <ol class="flow-steps">
+      <li><strong>CameraRefBridge</strong> (in <code>scene-content.tsx</code>) checks <code>viewerState.camera3d</code>. If present, applies saved position + quaternion directly. Otherwise sets square-on default.</li>
+      <li><strong>CameraFitter</strong> fires auto-fit <em>once per load epoch</em> — only when there is <strong>no</strong> saved camera state. Prevents fit from overriding a restored camera.</li>
+      <li><strong>CameraSettleDetector</strong> fires ~250 ms after motion stops. Used to recompute occlusion only — does <em>not</em> gate interaction or trigger saves.</li>
+    </ol>
+
+    <div class="card">
+      <p class="note" style="margin:0">
+        <code>viewerState.camera3d</code> flows through the store into the bridge. Debounce (400 ms) prevents
+        rapid-fire saves during a pan or orbit gesture. The Go-side write is fire-and-forget (no
+        await, no ack).
+      </p>
+    </div>
+  </div>
+
+  <!-- TAB 5: DESIGN -->
+  <div id="design" class="panel">
+    <h2>Why no OrbitControls</h2>
+    <p>
+      Interaction control is classified as <strong>substance</strong>, not medium (per project design memory).
+      Three.js <code>OrbitControls</code> is a medium default that encodes wrong constraints:
+    </p>
+    <ul>
+      <li><strong>Fixed up-vector</strong> — OrbitControls prevents roll by locking the up-axis, trading full 6-DOF for convenience. The wirefold editor needs all 6 degrees available.</li>
+      <li><strong>Constrained pivot</strong> — OrbitControls orbits around a single fixed target point. The custom controller picks the pivot per-gesture (selected node or screen-center on z=0), keeping the view framed on what the user is working on.</li>
+      <li><strong>Roll reachability</strong> — the arcball math (quaternion composition from world-axis rotations) can naturally produce roll as a side effect of combined rotations. Roll is reachable in the math today; it simply has no dedicated input binding yet.</li>
+    </ul>
+
+    <div class="card">
+      <p style="margin-bottom:0.4rem">
+        The test: <em>"can you recover full control from any pose on a device with only a single pointer?"</em>
+        OrbitControls fails this (roll is unrecoverable). The custom arcball passes.
+      </p>
+    </div>
+
+    <h2>Arcball vs OrbitControls</h2>
+    <table>
+      <thead>
+        <tr><th></th><th>OrbitControls</th><th>Custom arcball (wirefold)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Rotation axes</td>
+          <td>Spherical (azimuth + elevation), up-locked</td>
+          <td>World-fixed X and Y; quaternion composition</td>
+        </tr>
+        <tr>
+          <td>Roll</td>
+          <td>Locked (by design)</td>
+          <td>Reachable in math; no input binding yet</td>
+        </tr>
+        <tr>
+          <td>Pivot</td>
+          <td>Fixed target (set once)</td>
+          <td>Per-gesture: selected node or screen-center on z=0</td>
+        </tr>
+        <tr>
+          <td>Pan</td>
+          <td>Built-in, up-aligned</td>
+          <td>World-space z=0 plane delta under cursor</td>
+        </tr>
+        <tr>
+          <td>Dolly</td>
+          <td>Along view axis</td>
+          <td>Exponential (<code>1.01^deltaY</code>) along view axis</td>
+        </tr>
+        <tr>
+          <td>6-DOF recoverable</td>
+          <td>No</td>
+          <td>Yes</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Roll status</h2>
+    <p>
+      Roll is currently <span class="absent-badge">NOT IMPLEMENTED</span> as a user input.
+      A design comment exists acknowledging it as a future DOF. The arcball quaternion
+      math does not prevent roll — composed horizontal+vertical rotations can produce
+      incidental roll — but there is no deliberate roll gesture or keyboard shortcut today.
+    </p>
+
+    <h2>Source files</h2>
+    <table>
+      <thead>
+        <tr><th>File</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>tools/topology-vscode/src/webview/three/interaction-controls.ts</code></td><td>All gestures: orbit, pan, dolly, gesture discrimination</td></tr>
+        <tr><td><code>tools/topology-vscode/src/webview/three/camera-ui.tsx</code></td><td>Home/Fit button, fit algorithm</td></tr>
+        <tr><td><code>tools/topology-vscode/src/webview/three/scene-content.tsx</code></td><td>CameraRefBridge, CameraFitter, CameraSettleDetector</td></tr>
+        <tr><td><code>tools/topology-vscode/src/webview/three/ThreeView.tsx</code></td><td>PerspectiveCamera creation, fov/near/far</td></tr>
+        <tr><td><code>tools/topology-vscode/src/webview/viewer/types.ts</code></td><td>Camera3D type definition</td></tr>
+        <tr><td><code>tools/topology-vscode/src/webview/save.ts</code></td><td>scheduleViewSave — 400 ms debounce, fire-and-forget to Go</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- .page -->
+
+<script>
+  (function () {
+    var buttons = document.querySelectorAll('.tab-btn');
+    var panels  = document.querySelectorAll('.panel');
+
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = btn.getAttribute('data-tab');
+
+        buttons.forEach(function (b) { b.classList.remove('active'); });
+        panels.forEach(function (p)  { p.classList.remove('active'); });
+
+        btn.classList.add('active');
+        var panel = document.getElementById(target);
+        if (panel) { panel.classList.add('active'); }
+      });
+    });
+  })();
+</script>
+</body>
+</html>
