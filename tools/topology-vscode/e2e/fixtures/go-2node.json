@@ -13,7 +13,7 @@
     },
     {
       "id": "readGate1",
-      "type": "ReadGate"
+      "type": "ChainInhibitor"
     }
   ],
   "edges": [
@@ -22,7 +22,7 @@
       "source": "in08",
       "sourceHandle": "out",
       "target": "readGate1",
-      "targetHandle": "value",
+      "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
       "label": "inputToReadGate",
       "data": {

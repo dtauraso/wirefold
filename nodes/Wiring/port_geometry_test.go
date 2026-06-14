@@ -111,16 +111,16 @@ func almostEqual(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 func TestPortWorldPosMirrorsReference(t *testing.T) {
 	slot1 := 1
 	g := nodeGeom{
-		Kind: "ReadGate",
+		Kind: "HoldFlip",
 		Pos:  vec3{X: 100, Y: 200, Z: 30},
 		Inputs: []portGeom{
-			{Name: "FromInput", Side: "left", Slot: &slot1},
-			{Name: "FromChainInhibitor", Side: "bottom"},
+			{Name: "In", Side: "left", Slot: &slot1},
+			{Name: "In2", Side: "bottom"},
 		},
-		Outputs: []portGeom{{Name: "ToChainInhibitor", Side: "top"}},
+		Outputs: []portGeom{{Name: "Out", Side: "top"}},
 	}
-	got := portWorldPos(g, "FromInput", true)
-	want := refPortWorldPos(g.Kind, g.Pos.X, g.Pos.Y, g.Pos.Z, g.Inputs, "FromInput", true)
+	got := portWorldPos(g, "In", true)
+	want := refPortWorldPos(g.Kind, g.Pos.X, g.Pos.Y, g.Pos.Z, g.Inputs, "In", true)
 	if !almostEqual(got.X, want.X, 1e-9) || !almostEqual(got.Y, want.Y, 1e-9) || !almostEqual(got.Z, want.Z, 1e-9) {
 		t.Fatalf("portWorldPos = %+v, want %+v", got, want)
 	}
@@ -136,13 +136,13 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 		tgtH string
 	}{
 		{
-			name: "input-to-readgate-2d",
+			name: "input-to-holdflip-2d",
 			src: nodeGeom{Kind: "Input", Pos: vec3{X: 25, Y: 318},
-				Outputs: []portGeom{{Name: "ToReadGate", Side: "right", Slot: &slot1}}},
-			srcH: "ToReadGate",
-			tgt: nodeGeom{Kind: "ReadGate", Pos: vec3{X: 169, Y: 335},
-				Inputs: []portGeom{{Name: "FromInput", Side: "left", Slot: &slot1}}},
-			tgtH: "FromInput",
+				Outputs: []portGeom{{Name: "ToHoldFlip", Side: "right", Slot: &slot1}}},
+			srcH: "ToHoldFlip",
+			tgt: nodeGeom{Kind: "HoldFlip", Pos: vec3{X: 169, Y: 335},
+				Inputs: []portGeom{{Name: "In", Side: "left", Slot: &slot1}}},
+			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",

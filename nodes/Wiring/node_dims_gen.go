@@ -13,6 +13,5 @@ var kindDims = map[string]kindDim{
 	"ChainInhibitor": {Width: 90, Height: 60},
 	"HoldFlip": {Width: 36, Height: 36},
 	"Input": {Width: 80, Height: 60},
-	"ReadGate": {Width: 70, Height: 40},
 	"WindowAndGate": {Width: 80, Height: 60},
 }
