@@ -117,7 +117,7 @@ func (g *Node) Update(ctx context.Context) {
 			g.HasValue = false
 			g.HasChainInhibitor = false
 			t0Set = false
-			g.ToChainInhibitor.TryEmit(g.Value)
+			g.ToChainInhibitor.EmitOneDriven(ctx, g.Value)
 			continue
 		}
 
