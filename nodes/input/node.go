@@ -95,15 +95,7 @@ func (n *Node) Update(ctx context.Context) {
 			// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
 			v := working[len(working)-1]
 			n.Fire()
-			if n.ToReadGate.Gated() {
-				if n.ToReadGate.TrySend(v) {
-					if !n.ToReadGate.WaitConsumed() {
-						return
-					}
-				}
-			} else {
-				n.ToReadGate.TryEmit(v)
-			}
+			n.ToReadGate.TryEmit(v)
 
 			// READ: block until ChainInhibitor sends the step on FeedbackIn.
 			step, ok := n.FeedbackIn.TryRecv()
@@ -143,18 +135,9 @@ func (n *Node) Update(ctx context.Context) {
 		n.Fire()
 		v := popEnd(&working, &backup, init)
 		emitBeads() // array changed (pop, maybe refill) → restream interior
-		if n.ToReadGate.Gated() {
-			if n.ToReadGate.TrySend(v) {
-				if !n.ToReadGate.WaitConsumed() {
-					return
-				}
-				emitted++
-			}
-		} else {
-			// fire-and-forget: advance unconditionally after TryEmit (no wait).
-			n.ToReadGate.TryEmit(v)
-			emitted++
-		}
+		// fire-and-forget: advance unconditionally after TryEmit (no wait).
+		n.ToReadGate.TryEmit(v)
+		emitted++
 	}
 }
 

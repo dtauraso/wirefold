@@ -18,6 +18,8 @@ const pollInterval = 5 * time.Millisecond
 type Node struct {
 	Fire               func()
 	EmitGeometry       func()
+	Now                func() time.Duration                                   // injected one-clock Now; nil in test builds → wall-clock fallback
+	WaitUntil          func(ctx context.Context, target time.Duration) error  // pause-aware park on the one clock; nil in test/no-loader builds → wall-clock fallback
 	Value              int
 	HasValue           bool
 	HasChainInhibitor  bool
@@ -56,7 +58,29 @@ func (g *Node) Update(ctx context.Context) {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
 	}
-	var t0 time.Time
+
+	// now reads active-elapsed sim time (pause-aware) from the injected clock so
+	// the window freezes on pause. Fall back to a monotonic wall-clock when no
+	// clock was injected (unit tests with no loader).
+	now := g.Now
+	if now == nil {
+		start := time.Now()
+		now = func() time.Duration { return time.Since(start) }
+	}
+
+	park := g.WaitUntil
+	if park == nil {
+		park = func(ctx context.Context, _ time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(pollInterval):
+				return nil
+			}
+		}
+	}
+
+	var t0 time.Duration
 	var t0Set bool
 
 	for {
@@ -81,7 +105,7 @@ func (g *Node) Update(ctx context.Context) {
 
 		// Window opens on the first input that arrives.
 		if (g.HasValue || g.HasChainInhibitor) && !t0Set {
-			t0 = time.Now()
+			t0 = now()
 			t0Set = true
 		}
 
@@ -93,28 +117,18 @@ func (g *Node) Update(ctx context.Context) {
 			g.HasValue = false
 			g.HasChainInhibitor = false
 			t0Set = false
-			if g.ToChainInhibitor.Gated() {
-				if g.ToChainInhibitor.TrySend(g.Value) {
-					if !g.ToChainInhibitor.WaitConsumed() {
-						return
-					}
-				}
-			} else {
-				g.ToChainInhibitor.TryEmit(g.Value)
-			}
+			g.ToChainInhibitor.TryEmit(g.Value)
 			continue
 		}
 
 		// A partial combination has been open longer than W → clear it.
-		if t0Set && time.Since(t0) > g.windowMs() {
+		if t0Set && now()-t0 > g.windowMs() {
 			g.clear(&t0Set)
 		}
 
-		// Short park between polls to avoid busy-spin.
-		select {
-		case <-ctx.Done():
+		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).
+		if park(ctx, now()+pollInterval) != nil {
 			return
-		case <-time.After(pollInterval):
 		}
 	}
 }

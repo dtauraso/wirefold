@@ -392,8 +392,8 @@ func TestDeleteMidFlightCancels(t *testing.T) {
 	clk.Advance(inFlightMs * time.Millisecond)
 	time.Sleep(10 * time.Millisecond)
 	pw.mu.Lock()
-	hasSend := pw.hasSend
-	inFlight := pw.inFlight
+	hasSend := len(pw.delivered) > 0
+	inFlight := len(pw.inflight) > 0
 	pw.mu.Unlock()
 	if hasSend {
 		t.Fatal("delete-mid-flight delivered the bead; delete must cancel clock-delivery")

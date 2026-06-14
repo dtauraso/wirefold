@@ -1,4 +1,4 @@
-package andgate
+package windowandgate
 
 import (
 	"context"
@@ -7,9 +7,12 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// windowFactor scales the max input-wire latency into the coincidence window W.
-// W = windowFactor * max(simLatencyMs over the node's current input wires).
-const windowFactor = 1.5
+// windowWu is the fixed per-node coincidence window expressed as a distance in
+// world units. At the one pulseSpeed (0.04 wu/ms) this equals 3000 ms — enough
+// to exceed the same-cycle input skew (~69 ms measured) while staying under the
+// input cadence (~3104 ms). It is a property of the node, like a neuron's
+// membrane time constant, and does NOT depend on input-wire geometry.
+const windowWu = 120
 
 // pollInterval bounds the busy-spin of the window loop: between polls the loop
 // parks on a short timeout (or ctx cancel) instead of spinning.
@@ -24,6 +27,13 @@ type Node struct {
 	Fire           func()
 	EmitGeometry   func()
 	EmitInputBeads func(left, right int)
+	// Now returns active-elapsed sim time (pause-aware) from the same clock the
+	// PacedWire/train use. Injected by the loader (builders.go) from pb.clock.
+	// The window and dwell are measured against it so they freeze on pause and
+	// resume on resume — never timing out mid-pause. If unset (unit tests with no
+	// loader), it falls back to a monotonic wall-clock so timing still progresses.
+	Now            func() time.Duration
+	WaitUntil      func(ctx context.Context, target time.Duration) error // pause-aware park on the one clock; nil in test/no-loader builds → wall-clock fallback
 	Left           int
 	HasLeft        bool
 	Right          int
@@ -33,15 +43,12 @@ type Node struct {
 	ToPassed       *Wiring.Out
 }
 
-// windowMs derives the coincidence window W from the node's current input wires:
-// W = windowFactor * max(simLatencyMs over input wires). Recomputed from live
-// wire geometry (via In.SimLatencyMs) so node moves / reconnects are reflected.
+// windowMs returns the fixed coincidence window as a duration by converting the
+// distance windowWu to time via the one pulseSpeed. This is pure distance-based
+// timing — independent of input-wire geometry and pause-aware because the caller
+// reads it against now() (the injected pause-aware clock).
 func (g *Node) windowMs() time.Duration {
-	maxLat := g.FromLeft.SimLatencyMs()
-	if r := g.FromRight.SimLatencyMs(); r > maxLat {
-		maxLat = r
-	}
-	return time.Duration(windowFactor*maxLat) * time.Millisecond
+	return time.Duration(windowWu/Wiring.PulseSpeedWuPerMs) * time.Millisecond
 }
 
 // clear discards both held inputs without firing: Done drains each upstream wire
@@ -63,9 +70,31 @@ func (g *Node) Update(ctx context.Context) {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
 	}
-	var t0 time.Time
+
+	// now reads active-elapsed sim time (pause-aware) from the injected clock so
+	// the window and dwell freeze on pause. Fall back to a monotonic wall-clock
+	// when no clock was injected (unit tests with no loader).
+	now := g.Now
+	if now == nil {
+		start := time.Now()
+		now = func() time.Duration { return time.Since(start) }
+	}
+
+	park := g.WaitUntil
+	if park == nil {
+		park = func(ctx context.Context, _ time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(pollInterval):
+				return nil
+			}
+		}
+	}
+
+	var t0 time.Duration
 	var t0Set bool
-	var dwellStart time.Time
+	var dwellStart time.Duration
 	var dwellSet bool
 
 	emitInputs := func() {
@@ -107,7 +136,7 @@ func (g *Node) Update(ctx context.Context) {
 
 		// Window opens on the first input that arrives.
 		if (g.HasLeft || g.HasRight) && !t0Set {
-			t0 = time.Now()
+			t0 = now()
 			t0Set = true
 		}
 
@@ -116,10 +145,10 @@ func (g *Node) Update(ctx context.Context) {
 			// before the gate resolves. Once committed to the dwell, the
 			// window-timeout below is gated off so it can't clip the fire.
 			if !dwellSet {
-				dwellStart = time.Now()
+				dwellStart = now()
 				dwellSet = true
 			}
-			if time.Since(dwellStart) >= fireDwellMs*time.Millisecond {
+			if now()-dwellStart >= fireDwellMs*time.Millisecond {
 				// AND gate: fires 1 when both inputs are 1, else 0.
 				result := 0
 				if g.Left == 1 && g.Right == 1 {
@@ -133,15 +162,7 @@ func (g *Node) Update(ctx context.Context) {
 				t0Set = false
 				dwellSet = false
 				emitInputs()
-				if g.ToPassed.Gated() {
-					if g.ToPassed.TrySend(result) {
-						if !g.ToPassed.WaitConsumed() {
-							return
-						}
-					}
-				} else {
-					g.ToPassed.TryEmit(result)
-				}
+				g.ToPassed.TryEmit(result)
 				continue
 			}
 		}
@@ -150,20 +171,18 @@ func (g *Node) Update(ctx context.Context) {
 		// time out while still waiting for the second input; once both are held
 		// we are committed to firing after the dwell, so the dwell can't be
 		// clipped by the window even if it outlasts W.
-		if t0Set && !(g.HasLeft && g.HasRight) && time.Since(t0) > g.windowMs() {
+		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > g.windowMs() {
 			g.clear(&t0Set)
 			emitInputs()
 		}
 
-		// Short park between polls to avoid busy-spin.
-		select {
-		case <-ctx.Done():
+		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).
+		if park(ctx, now()+pollInterval) != nil {
 			return
-		case <-time.After(pollInterval):
 		}
 	}
 }
 
 func init() {
-	Wiring.Register("AndGate", func() any { return &Node{} })
+	Wiring.Register("WindowAndGate", func() any { return &Node{} })
 }

@@ -1,7 +1,8 @@
-package andgate
+package windowandgate
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,28 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
+
+// clearSink is a thread-safe io.Writer that counts window_clear breadcrumbs
+// written to the trace sink, so a test can observe sim-time window timeouts.
+type clearSink struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (s *clearSink) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), "window_clear") {
+		s.mu.Lock()
+		s.n++
+		s.mu.Unlock()
+	}
+	return len(p), nil
+}
+
+func (s *clearSink) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n
+}
 
 func run(left, right int) (int, error) {
 	tr := T.New(0)
@@ -107,12 +130,117 @@ func send(t *testing.T, pw *Wiring.PacedWire, v int) {
 	}
 }
 
+// TestPauseFreezesWindowAndDwell drives the window + dwell off an injected
+// active-elapsed clock and asserts:
+//   - while the clock does NOT advance (paused), a single held input does NOT
+//     time out, even though real wall-time passes well past W;
+//   - advancing the clock past W with only one input held DOES clear it
+//     (window_clear), proving the timeout is measured in sim time;
+//   - the dwell only completes once the clock advances past fireDwellMs.
+func TestPauseFreezesWindowAndDwell(t *testing.T) {
+	// Sink the trace so we can observe the window_clear breadcrumb (breadcrumbs
+	// are sink-only, not buffered events). cleared counts how many fired.
+	var clears clearSink
+	tr := T.NewWithSink(0, &clears)
+	defer tr.Close()
+
+	// arcLength 8 (SimLatencyMs irrelevant; W is fixed at 3000ms = 120wu/0.04).
+	left := newInputWire(8, tr, "irg", "FromLeft")
+	right := newInputWire(8, tr, "irg", "FromRight")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Sim clock the node times against. It stays PAUSED (no Advance) until we
+	// choose to step it, while real wall-time keeps running underneath.
+	simClk := Wiring.NewFakeClock()
+
+	fired := make(chan struct{}, 4)
+	node := &Node{
+		Fire:      func() { fired <- struct{}{} },
+		Now:       func() time.Duration { return simClk.Now() },
+		FromLeft:  Wiring.NewInPaced(left, ctx, "irg", "FromLeft", tr),
+		FromRight: Wiring.NewInPaced(right, ctx, "irg", "FromRight", tr),
+		ToPassed:  Wiring.NewOut(make(chan int, 4), "irg", "ToPassed", tr),
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+
+	// One input held; sim clock frozen. A window_clear breadcrumb signals a timeout.
+	send(t, left, 1)
+
+	// Real wall-time elapses well past W (150ms), but sim time is frozen → no clear.
+	time.Sleep(400 * time.Millisecond)
+	if clears.count() != 0 {
+		t.Fatal("window cleared while sim clock was paused (timed on wall-clock)")
+	}
+	select {
+	case <-fired:
+		t.Fatal("node fired with only one input")
+	default:
+	}
+
+	// Advance sim time past W (3000ms = 120wu/0.04) with one input held → must clear.
+	simClk.Advance(3500 * time.Millisecond)
+	deadline := time.Now().Add(1 * time.Second)
+	for clears.count() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("window did not clear after sim clock advanced past W")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	cancel()
+	wg.Wait()
+
+	// Now exercise the dwell on a fresh node/wires: deliver a full pair, then
+	// prove the fire waits on the sim clock advancing past fireDwellMs (800ms),
+	// not on wall-time. The window-timeout is gated off once both inputs are held,
+	// so a frozen clock holds the dwell open indefinitely without clearing.
+	dctx, dcancel := context.WithCancel(context.Background())
+	dClk := Wiring.NewFakeClock()
+	dLeft := newInputWire(8, tr, "irg2", "FromLeft")
+	dRight := newInputWire(8, tr, "irg2", "FromRight")
+	dFired := make(chan struct{}, 4)
+	dNode := &Node{
+		Fire:      func() { dFired <- struct{}{} },
+		Now:       func() time.Duration { return dClk.Now() },
+		FromLeft:  Wiring.NewInPaced(dLeft, dctx, "irg2", "FromLeft", tr),
+		FromRight: Wiring.NewInPaced(dRight, dctx, "irg2", "FromRight", tr),
+		ToPassed:  Wiring.NewOut(make(chan int, 4), "irg2", "ToPassed", tr),
+	}
+	var dwg sync.WaitGroup
+	dwg.Add(1)
+	go func() { defer dwg.Done(); dNode.Update(dctx) }()
+	defer func() { dcancel(); dwg.Wait() }()
+
+	send(t, dLeft, 1)
+	send(t, dRight, 1)
+
+	// Both held, sim clock frozen → dwell never completes despite wall-time.
+	select {
+	case <-dFired:
+		t.Fatal("node fired before sim clock advanced past fireDwellMs")
+	case <-time.After(300 * time.Millisecond):
+		// good: dwell not satisfied while sim time held below 800ms
+	}
+
+	// Advance sim time past fireDwellMs (800ms) → the dwell completes and fires.
+	dClk.Advance((fireDwellMs + 50) * time.Millisecond)
+	select {
+	case <-dFired:
+		// good: dwell completed once sim time crossed fireDwellMs
+	case <-time.After(1 * time.Second):
+		t.Fatal("node did not fire after sim clock advanced past fireDwellMs")
+	}
+}
+
 // TestWindowFire: both inputs delivered within W → node fires once, both consumed.
 func TestWindowFire(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 
-	// arcLength 100 → SimLatencyMs = 100/0.08 = 1250ms → W = 1.5*1250 = 1875ms.
+	// arcLength 100 (SimLatencyMs irrelevant; W is fixed at 3000ms).
 	left := newInputWire(100, tr, "irg", "FromLeft")
 	right := newInputWire(100, tr, "irg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -157,14 +285,18 @@ func TestWindowClear(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 
-	// arcLength 8 → SimLatencyMs = 8/0.08 = 100ms → W = 150ms (fast clear).
 	left := newInputWire(8, tr, "irg", "FromLeft")
 	right := newInputWire(8, tr, "irg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Drive the window off an injected sim clock so we can step past W (3000ms)
+	// without the test sleeping for 3 real seconds.
+	simClk := Wiring.NewFakeClock()
+
 	fired := make(chan struct{}, 4)
 	node := &Node{
 		Fire:      func() { fired <- struct{}{} },
+		Now:       func() time.Duration { return simClk.Now() },
 		FromLeft:  Wiring.NewInPaced(left, ctx, "irg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "irg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "irg", "ToPassed", tr),
@@ -179,6 +311,9 @@ func TestWindowClear(t *testing.T) {
 	send(t, left, 1)
 	consumed := make(chan struct{}, 1)
 	go func() { left.WaitConsumed(ctx); consumed <- struct{}{} }()
+
+	// Advance sim clock past W (3000ms = 120wu / 0.04 wu/ms) → clear must fire.
+	simClk.Advance(3500 * time.Millisecond)
 
 	select {
 	case <-fired:
@@ -196,9 +331,13 @@ func TestWindowClear(t *testing.T) {
 	default:
 	}
 
-	// A subsequent fresh pair fires normally (flags reset).
+	// A subsequent fresh pair fires normally (flags reset). Give the node loop
+	// a few polls to pick up both inputs (it parks on pollInterval=5ms), then
+	// advance the sim clock past fireDwellMs (800ms) so the dwell completes.
 	send(t, left, 1)
 	send(t, right, 0)
+	time.Sleep(50 * time.Millisecond) // let node loop poll both inputs
+	simClk.Advance((fireDwellMs + 50) * time.Millisecond)
 	select {
 	case <-fired:
 	case <-time.After(2 * time.Second):

@@ -112,8 +112,11 @@ func TestDecentralizedNodeMove(t *testing.T) {
 
 	// In-flight bead's geometry was revised to the new segment (still in flight).
 	pw.mu.Lock()
-	revisedSeg := pw.inFlightSegment
-	stillInFlight := pw.inFlight
+	var revisedSeg wireSegment
+	stillInFlight := len(pw.inflight) > 0
+	if stillInFlight {
+		revisedSeg = pw.inflight[0].seg
+	}
 	pw.mu.Unlock()
 	if !stillInFlight {
 		t.Fatal("bead left flight unexpectedly during move")

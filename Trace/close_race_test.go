@@ -24,7 +24,7 @@ func TestCloseRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < iters; i++ {
-				tr.Position("node", "out", i, 1, 2, 3, 0.5)
+				tr.Position("node", "out", i, 1, 2, 3, 0.5, uint64(i))
 				tr.Emit(Event{Kind: KindFire, Node: "node"})
 				tr.Send("node", "out", i)
 			}

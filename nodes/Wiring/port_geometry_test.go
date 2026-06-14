@@ -155,10 +155,10 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 		},
 		{
 			name: "slot0-and-slot2-with-z",
-			src: nodeGeom{Kind: "AndGate", Pos: vec3{X: 225, Y: 333, Z: 12},
+			src: nodeGeom{Kind: "WindowAndGate", Pos: vec3{X: 225, Y: 333, Z: 12},
 				Outputs: []portGeom{{Name: "ToPassed", Side: "right", Slot: &slot0}}},
 			srcH: "ToPassed",
-			tgt: nodeGeom{Kind: "AndGate", Pos: vec3{X: 500, Y: 100, Z: 90},
+			tgt: nodeGeom{Kind: "WindowAndGate", Pos: vec3{X: 500, Y: 100, Z: 90},
 				Inputs: []portGeom{{Name: "FromRight", Side: "right", Slot: &slot2}}},
 			tgtH: "FromRight",
 		},

@@ -1,17 +1,17 @@
-# AndGateNode
+# WindowAndGateNode
 
 ## View
 
 | Field | Value |
 |-------|-------|
-| kind | andGate |
+| kind | windowAndGate |
 | bg | #fce4ec |
 | border | #880e4f |
 | text | #880e4f |
 | accent | #880e4f |
 | minWidth | 110 |
-| defaultLabel | andGate |
-| role | and-gate |
+| defaultLabel | windowAndGate |
+| role | window-and-gate |
 | shape | rect |
 | fill | #fce4ec |
 | stroke | #880e4f |
@@ -28,7 +28,7 @@
 
 ## Firing rule
 
-Coincidence-window AND gate. Polls both inputs concurrently. The window W opens on the first arrival and equals `1.5 × max(SimLatencyMs over input wires)`, recomputed live from current wire geometry.
+Window AND gate (AND gate with a coincidence window). Polls both inputs concurrently. The window W opens on the first arrival and equals `1.5 × max(SimLatencyMs over input wires)`, recomputed live from current wire geometry.
 
 - If both FromLeft and FromRight arrive within W: hold both for the ~800ms fire dwell (both interior beads visible), then Fire, consume both, compute result = 1 if Left=1 AND Right=1, else 0. Send result on ToPassed. Reset window. Continue.
 - If the window expires before both arrive: Done both held inputs without firing. Reset window. Continue.

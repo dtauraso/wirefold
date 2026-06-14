@@ -94,6 +94,11 @@ type Event struct {
 	Node      string `json:"node"`
 	Port      string `json:"port,omitempty"`      // recv: input port; send: output port
 	Value     int    `json:"value,omitempty"`     // recv/send only
+	// Bead is the per-wire monotonic bead id (paced_wire.go gen). Set on the four
+	// wire-bead events (send, edge-bead/position, arrive, pulse-cancelled) so the
+	// renderer keys each in-flight bead independently and a wire can show N beads at
+	// once. Always emitted on those kinds (bead 0 is valid); unset on other kinds.
+	Bead uint64 `json:"bead,omitempty"`
 	// Wire geometry fields — populated on send events when the outgoing port
 	// is backed by a PacedWire. Zero values are omitted from JSON output.
 	// ArriveStep is omitted: Go has no global ms-per-step cadence,
@@ -250,8 +255,10 @@ func (t *Trace) Done(node, port string) {
 // node port positions (Go owns progress, the editor owns live placement). The
 // wire's delivery goroutine calls this every ~16 ms while the bead is in flight,
 // and once more at t==1 just before delivery.
-func (t *Trace) Position(node, port string, value int, x, y, z, f float64) {
-	t.emit(Event{Kind: KindPosition, Node: node, Port: port, Value: value, X: x, Y: y, Z: z, hasPos: true, F: f})
+// bead is the per-wire bead id (paced_wire.go gen): a wire may carry N beads at
+// once (a clock-paced train), so the renderer keys each in-flight bead by it.
+func (t *Trace) Position(node, port string, value int, x, y, z, f float64, bead uint64) {
+	t.emit(Event{Kind: KindPosition, Node: node, Port: port, Value: value, X: x, Y: y, Z: z, hasPos: true, F: f, Bead: bead})
 }
 
 // Geometry emits an edge's authoritative straight-segment endpoints (Phase 3),
@@ -279,8 +286,8 @@ func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz, radius float64, ports []
 // slot. Keyed by the bead's SOURCE node+port (the same routing key as send/
 // position/pulse-cancelled), so the renderer clears the transit pulse on arrival.
 // The wire's deliverLocked is the single caller; it fires exactly once per bead.
-func (t *Trace) Arrive(node, port string, value int) {
-	t.emit(Event{Kind: KindArrive, Node: node, Port: port, Value: value})
+func (t *Trace) Arrive(node, port string, value int, bead uint64) {
+	t.emit(Event{Kind: KindArrive, Node: node, Port: port, Value: value, Bead: bead})
 }
 
 // NodeBead emits one interior grid SLOT's authoritative state (node 1's 2x2
@@ -298,8 +305,8 @@ func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
 // keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
 // emits it when a wire drops a bead mid-flight (edge deleted during traversal).
-func (t *Trace) PulseCancelled(node, port string, value int) {
-	t.emit(Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value})
+func (t *Trace) PulseCancelled(node, port string, value int, bead uint64) {
+	t.emit(Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value, Bead: bead})
 }
 
 // Breadcrumb writes a free-form diagnostic line directly to the sink
@@ -478,6 +485,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		Y     float64 `json:"y"`
 		Z     float64 `json:"z"`
 		F     float64 `json:"f"`
+		Bead  uint64  `json:"bead,omitempty"`
 	}
 	type geometry struct {
 		Step int     `json:"step"`
@@ -496,6 +504,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		Node  string `json:"node"`
 		Port  string `json:"port"`
 		Value int    `json:"value"`
+		Bead  uint64 `json:"bead,omitempty"`
 	}
 	type portGeomJSON struct {
 		Name    string  `json:"name"`
@@ -541,17 +550,17 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port})
 	case KindPosition:
 		// All three coordinates always emitted (0,0,0 is a valid position).
-		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z, F: e.F})
+		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z, F: e.F, Bead: e.Bead})
 	case KindGeometry:
 		// All six segment-endpoint coordinates always emitted (0 is valid).
 		return json.Marshal(geometry{Step: e.Step, Kind: e.Kind, Edge: e.Edge,
 			SX: e.SX, SY: e.SY, SZ: e.SZ,
 			EX: e.EX, EY: e.EY, EZ: e.EZ})
 	case KindPulseCancelled:
-		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead})
 	case KindArrive:
-		// Same wire shape as pulse-cancelled: source node+port+value routing key.
-		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+		// Same wire shape as pulse-cancelled: source node+port+value+bead routing key.
+		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead})
 	case KindNodeGeometry:
 		ports := make([]portGeomJSON, len(e.Ports))
 		for i, p := range e.Ports {

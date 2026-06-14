@@ -10,7 +10,7 @@ import { parseViewerState, mergeSceneIntoViewerState } from "../state/viewer/typ
 import { markViewSynced, scheduleViewSave, viewSyncedKey } from "../save";
 import { postLog } from "../log/post";
 import { vscode } from "../vscode-api";
-import { clearPulse, clearAllPulses } from "./pulse-state";
+import { clearPulsesForEdge, clearAllPulses } from "./pulse-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
@@ -177,7 +177,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     }
     const nextEdges = edges.filter((ed) => ed.id !== id);
     set({ edges: nextEdges });
-    clearPulse(id);
+    clearPulsesForEdge(id);
     // Drop Go's streamed segment for this edge so no stale tube can draw.
     useEdgeGeometryStore.getState().removeEdgeSegment(id);
   },
@@ -210,7 +210,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
 
     // Clear pulse state for any edge that is NEWLY faded this toggle.
     for (const edgeId of result.newlyFadedEdgeIds) {
-      clearPulse(edgeId);
+      clearPulsesForEdge(edgeId);
     }
 
     set({
