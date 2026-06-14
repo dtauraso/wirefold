@@ -219,6 +219,129 @@ func (pw *PacedWire) placeBead(value any, bp beadPlacement) bool {
 	return true
 }
 
+// placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
+// returning the bead's gen so the caller can drive delivery synchronously.
+// Returns (0, false) when faded/deleted (nothing placed).
+func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64, ok bool) {
+	pw.mu.Lock()
+	if pw.faded || pw.deleted {
+		pw.mu.Unlock()
+		return 0, false
+	}
+	beadVal, _ := value.(int)
+	pw.nextGen++
+	if pw.nextGen < pw.teardownGen {
+		pw.nextGen = pw.teardownGen
+	}
+	b := inflightBead{
+		val:       beadVal,
+		placement: pw.clock.Now(),
+		arc:       bp.InFlightMs * pw.pulseSpeed,
+		seg:       wireSegment{Start: bp.Start, End: bp.End},
+		node:      bp.Node,
+		port:      bp.Port,
+		streams:   bp.streams(),
+		gen:       pw.nextGen,
+	}
+	pw.inflight = append(pw.inflight, b)
+	pw.cond.Broadcast()
+	gen = b.gen
+	pw.mu.Unlock()
+	return gen, true
+}
+
+// DriveBeadToDelivery runs the same per-frame loop the walker would run for
+// the bead identified by gen, but SYNCHRONOUSLY on the caller's goroutine.
+// ctx is the caller's context (canceled by node teardown). Blocks until the
+// bead is delivered or ctx is canceled / the wire is torn down.
+func (pw *PacedWire) DriveBeadToDelivery(ctx context.Context, gen uint64) {
+	clk := pw.clock
+	tr := pw.Trace
+	pulseSpeed := pw.pulseSpeed
+
+	pw.mu.Lock()
+	idx := pw.findInflightLocked(gen)
+	if idx < 0 {
+		pw.mu.Unlock()
+		return
+	}
+	placement := pw.inflight[idx].placement
+	startNow := clk.Now()
+	pw.mu.Unlock()
+
+	interval := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
+	next := placement + interval
+	if next <= startNow {
+		steps := (startNow-placement)/interval + 1
+		next = placement + steps*interval
+	}
+	for {
+		pw.mu.Lock()
+		if gen < pw.teardownGen {
+			pw.mu.Unlock()
+			return
+		}
+		i := pw.findInflightLocked(gen)
+		if i < 0 {
+			pw.mu.Unlock()
+			return
+		}
+		b := pw.inflight[i]
+		arc := b.arc
+		placement = b.placement
+		pw.mu.Unlock()
+
+		deadline := placement
+		if pulseSpeed > 0 {
+			deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
+		}
+
+		target := next
+		final := false
+		if target >= deadline {
+			target = deadline
+			final = true
+		}
+		if err := clk.WaitUntil(ctx, target); err != nil {
+			return
+		}
+
+		pw.mu.Lock()
+		emit, posArgs, isFinal := pw.advanceBeadLocked(gen, target)
+		// advanceBeadLocked released pw.mu.
+		if emit {
+			tr.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
+		}
+		if final || isFinal {
+			pw.mu.Lock()
+			for {
+				if gen < pw.teardownGen {
+					pw.mu.Unlock()
+					return
+				}
+				i := pw.findInflightLocked(gen)
+				if i < 0 {
+					pw.mu.Unlock()
+					return
+				}
+				if i == 0 {
+					break
+				}
+				pw.cond.Wait()
+			}
+			db := pw.inflight[0]
+			pw.inflight = pw.inflight[1:]
+			pw.delivered = append(pw.delivered, deliveredBead{val: db.val})
+			pw.cond.Broadcast()
+			ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
+			pw.mu.Unlock()
+			pw.emitArrive(ai)
+			return
+		}
+		next += interval
+	}
+}
+
 // findInflightLocked returns the index of the bead with this gen, or -1.
 func (pw *PacedWire) findInflightLocked(gen uint64) int {
 	for i := range pw.inflight {

@@ -296,6 +296,36 @@ func (o *Out) EmitOne(v int) bool {
 	}
 }
 
+// EmitOneDriven places one bead WITHOUT spawning a walker goroutine, emits the
+// same SendWire trace as EmitOne, then drives the bead to delivery synchronously
+// on the caller's goroutine. Blocks until delivered or ctx is canceled.
+// Use this when the node drives its own outbound edge (no walker goroutine).
+func (o *Out) EmitOneDriven(ctx context.Context, v int) bool {
+	if o == nil {
+		return false
+	}
+	if o.pw != nil {
+		gen, ok := o.pw.placeBeadNoWalker(v, o.placement())
+		if !ok {
+			return false
+		}
+		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		o.pw.DriveBeadToDelivery(ctx, gen)
+		return true
+	}
+	// chan mode (tests): fall back to EmitOne behavior (no drive needed).
+	if o.ch == nil {
+		return false
+	}
+	select {
+	case o.ch <- v:
+		o.trace.Send(o.node, o.port, v)
+		return true
+	default:
+		return false
+	}
+}
+
 // Wired reports whether this Out port is bound to a real edge (paced-wire
 // mode). Returns false for a nil Out or a dead-end chan port (unwired).
 // Nodes gate optional feedback sends on Wired() so unwired ports are never
