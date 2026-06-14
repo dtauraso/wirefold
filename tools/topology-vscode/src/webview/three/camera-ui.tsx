@@ -27,10 +27,12 @@ function commitCamera(cam: THREE.PerspectiveCamera) {
 export function HomeButton({
   cameraRef,
   nodesRef,
+  targetRef,
   aspect,
 }: {
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>;
+  targetRef: React.MutableRefObject<THREE.Vector3>;
   aspect: number;
 }) {
   const onClick = useCallback((e: React.MouseEvent) => {
@@ -63,8 +65,11 @@ export function HomeButton({
     cam.position.copy(newPos);
     cam.up.set(0, 1, 0);
     cam.lookAt(center);
+    // Seed the persistent pivot to the framed scene center so subsequent
+    // orbit/pan/dolly operate around what Fit just framed to.
+    targetRef.current.copy(center);
     commitCamera(cam);
-  }, [cameraRef, nodesRef, aspect]);
+  }, [cameraRef, nodesRef, targetRef, aspect]);
 
   return (
     <div

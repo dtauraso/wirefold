@@ -86,6 +86,7 @@ export function useInteractionControls(
   storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
   selectedIdRef: React.MutableRefObject<string | null>,
   edgesRef: React.MutableRefObject<RFEdge<EdgeData>[]>,
+  targetRef: React.MutableRefObject<THREE.Vector3>,
 ) {
   const state = useRef<ControlState>({
     phase: "idle",
@@ -233,6 +234,59 @@ export function useInteractionControls(
     [cameraRef],
   );
 
+  /**
+   * Bounding-box center of all node world positions. Bounded scene-focus point
+   * used as a fallback anchor when the z=0 plane hit diverges (grazing view).
+   * Returns (0,0,0) when there are no nodes.
+   */
+  const sceneCenter = useCallback((): THREE.Vector3 => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.length === 0) return new THREE.Vector3(0, 0, 0);
+    const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+    const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    let any = false;
+    for (const n of nodes) {
+      const p = nodeWorldPos(n);
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+      min.min(p);
+      max.max(p);
+      any = true;
+    }
+    if (!any) return new THREE.Vector3(0, 0, 0);
+    return min.add(max).multiplyScalar(0.5);
+  }, [nodesRef]);
+
+  /**
+   * Ensure the persistent orbit/pan/dolly pivot (targetRef) is a finite world
+   * point before a camera gesture. When uninitialized (NaN) or non-finite, seed
+   * it by projecting sceneCenter() onto the camera's forward ray: target sits at
+   * scene depth along the actual view direction. Fall back to sceneCenter(), then
+   * the origin. Defined purely from (camera pose, scene) — no z=0 raycast.
+   */
+  const ensureTarget = useCallback(
+    (cam: THREE.PerspectiveCamera): THREE.Vector3 => {
+      const t = targetRef.current;
+      if (Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z)) return t;
+      const TARGET_MIN = 10; // minimum forward depth so target never sits on the camera
+      cam.updateMatrixWorld(true);
+      const forward = new THREE.Vector3();
+      cam.getWorldDirection(forward); // unit vector
+      const center = sceneCenter();
+      const proj = forward.dot(center.clone().sub(cam.position));
+      const depth = Number.isFinite(proj) ? Math.max(proj, TARGET_MIN) : TARGET_MIN;
+      const seed = cam.position.clone().add(forward.multiplyScalar(depth));
+      if (Number.isFinite(seed.x) && Number.isFinite(seed.y) && Number.isFinite(seed.z)) {
+        t.copy(seed);
+      } else if (Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
+        t.copy(center);
+      } else {
+        t.set(0, 0, 0);
+      }
+      return t;
+    },
+    [targetRef, sceneCenter],
+  );
+
   // ------ helpers ------
 
   /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
@@ -309,21 +363,20 @@ export function useInteractionControls(
           };
         }
       } else {
-        // Empty-space pointerdown: capture arcball pivot once.
+        // Empty-space pointerdown: capture arcball pivot once from the persistent
+        // target. Orbit is a TOTAL operation over (camera pose, target) — both
+        // finite — so no z=0 raycast and no grazing singularity. If a node is
+        // selected, orbit around it (preserves the selection-pivot UX).
+        const cam0 = cameraRef.current;
         const selId = selectedIdRef.current;
         const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
         if (selNode) {
           s.arcballPivot = nodeWorldPos(selNode);
-        } else {
-          // No selection: pivot on the point at screen center projected to the z=0 plane,
-          // so the view stays framed instead of swinging around an off-screen world origin.
-          const cx = rect.left + rect.width / 2;
-          const cy = rect.top + rect.height / 2;
-          const centerOnPlane = unprojectToPlane(cx, cy, rect);
-          s.arcballPivot = centerOnPlane ? centerOnPlane.clone() : new THREE.Vector3(0, 0, 0);
+          if (cam0) targetRef.current.copy(s.arcballPivot);
+        } else if (cam0) {
+          s.arcballPivot = ensureTarget(cam0).clone();
         }
         // Snapshot camera state for the anchored two-cylinder rotation.
-        const cam0 = cameraRef.current;
         if (cam0) {
           cam0.updateMatrixWorld(true);
           s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
@@ -334,7 +387,7 @@ export function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, unprojectToPlane, incidentEdgeIds],
+    [cameraRef, nodesRef, pickRequest, unprojectToPlane, incidentEdgeIds, ensureTarget, selectedIdRef, targetRef],
   );
 
   const onPointerMove = useCallback(
@@ -537,36 +590,58 @@ export function useInteractionControls(
       e.preventDefault();
 
       if (e.ctrlKey) {
-        // Pinch-to-zoom toward the cursor: multiplicatively scale the camera's
-        // distance to the world point under the cursor on the z=0 plane, keeping
-        // that point fixed on screen. Exponential (uniform per step). >1 deltaY
-        // (pinch out) zooms out. Works at any tilt and stays consistent with the
-        // arcball, which also anchors on a plane point.
+        // DOLLY toward the persistent target: scale the camera's offset from the
+        // target multiplicatively. Defined purely from (camera pose, target) — both
+        // finite — so it's a total operation with no z=0 raycast. >1 deltaY zooms
+        // out. MIN_DIST floors |offset| so the camera never reaches/crosses target.
+        const target = ensureTarget(cam);
         const ZOOM_BASE = 1.01;
-        let factor = Math.pow(ZOOM_BASE, e.deltaY);
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const target = unprojectToPlane(e.clientX, e.clientY, rect);
-        if (target) {
-          const minHeight = 5; // never cross/touch the plane
-          if (cam.position.z * factor < minHeight) factor = minHeight / cam.position.z;
-          cam.position.sub(target).multiplyScalar(factor).add(target);
+        const MIN_DIST = 5;
+        const factor = Math.pow(ZOOM_BASE, e.deltaY);
+        const offset = cam.position.clone().sub(target);
+        const len = offset.length();
+        if (Number.isFinite(len) && len > 1e-9) {
+          let f = factor;
+          if (len * f < MIN_DIST) f = MIN_DIST / len;
+          if (Number.isFinite(f)) {
+            cam.position.copy(target).add(offset.multiplyScalar(f));
+          }
         }
       } else {
-        // Two-finger scroll pans along the z=0 plane: translate the camera by the
-        // world-space vector between the plane point under the cursor and the point
-        // under cursor+scroll-delta. Stays in the plane, tilt-aware (equals the old
-        // direct x/y pan when square-on).
+        // PAN = pure 2D screen-space translation along the camera's own right/up
+        // basis, translating BOTH the camera AND the persistent target by the same
+        // vector (target rides along, so the look-direction is preserved). The only
+        // depth is `dist` = |camPos - target| — finite, stable for the whole gesture,
+        // no z=0 raycast. Defined purely from (camera pose, target).
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const a = unprojectToPlane(e.clientX, e.clientY, rect);
-        const b = unprojectToPlane(e.clientX + e.deltaX, e.clientY + e.deltaY, rect);
-        if (a && b) {
-          cam.position.add(b.sub(a));
-        }
+        const target = ensureTarget(cam);
+
+        // Camera basis in world space (orientation unchanged by pan).
+        const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+
+        const dist = cam.position.distanceTo(target);
+
+        // Perspective world units per screen pixel at `dist` (vertical FOV).
+        const fovRad = (cam.fov * Math.PI) / 180;
+        const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / rect.height;
+
+        // deltaY positive = scroll down. Slide camera + target along the view plane.
+        // These two signs are the per-axis flip point if a direction still feels wrong.
+        const delta = right
+          .multiplyScalar(e.deltaX * worldPerPixel)
+          .add(up.multiplyScalar(-e.deltaY * worldPerPixel));
+        cam.position.add(delta);
+        target.add(delta);
+
+        // Square-on check: cam looks down -z, so right=(1,0,0), up=(0,1,0). Then this
+        // is a world-XY translation scaled by worldPerPixel at the look-distance —
+        // exactly the prior square-on behavior (a flat 2D slide in the z=0 plane).
       }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, nodesRef, unprojectToPlane],
+    [cameraRef, ensureTarget],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };

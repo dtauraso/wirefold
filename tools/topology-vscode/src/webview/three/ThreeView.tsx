@@ -46,6 +46,9 @@ export function ThreeView() {
   const selectedIdRef = useRef<string | null>(selectedId);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  // Persistent orbit/pan/dolly pivot in world space. NaN = uninitialized;
+  // ensureTarget (interaction-controls) / Fit (camera-ui) seed it on first use.
+  const targetRef = useRef<THREE.Vector3>(new THREE.Vector3(NaN, NaN, NaN));
   const pickRequest = useRef<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const captureRef = useRef<HTMLDivElement | null>(null);
@@ -118,6 +121,7 @@ export function ThreeView() {
     storeCreateEdge,
     selectedIdRef,
     edgesRef,
+    targetRef,
   );
 
   // Bind wheel listener as non-passive so e.preventDefault() actually works.
@@ -295,7 +299,7 @@ export function ThreeView() {
       })}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
-      <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} aspect={canvasSize.w / canvasSize.h} />
+      <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
 
     </div>
