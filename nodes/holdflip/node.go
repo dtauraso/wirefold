@@ -87,7 +87,7 @@ func (g *Node) Update(ctx context.Context) {
 			g.In.Done()
 			g.HasValue = false
 			g.In.Breadcrumb("hold_flip", "")
-			g.Out.TryEmit(result)
+			g.Out.EmitOneDriven(ctx, result)
 			continue
 		}
 

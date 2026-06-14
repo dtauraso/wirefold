@@ -80,8 +80,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	// Place a bead on the wire so the move must revise it in flight.
 	seg0 := wireSegment{Start: out.Start, End: out.End}
 	bp := beadPlacement{InFlightMs: out.SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
-	if !pw.TryPlace(7, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 7, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
 	// Move src — delivered per-goroutine (no central registry).

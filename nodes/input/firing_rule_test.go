@@ -60,19 +60,17 @@ func TestEmitsInitValues(t *testing.T) {
 }
 
 // feedbackSender installs ONE FakeClock on the paced FeedbackIn wire and returns
-// a send function. Each call places a bead via SendDeliverOnly (which calls
-// placeBead → bumps trainSeq), giving it a unique train identity. The receiver
-// deduplicates by seq, so successive feedback steps are each accepted as distinct
-// fires without any clock advance between them. The clock is advanced only past the
-// bead's in-flight time so it lands in the slot for the node's blocking TryRecv.
+// a send function. Each call places a delivery-only bead (no position stream) via
+// PlaceAndDriveDeliverOnly, giving it a unique gen. The clock is advanced only
+// past the bead's in-flight time so it lands in the slot for the node's blocking TryRecv.
 func feedbackSender(t *testing.T, pw *Wiring.PacedWire) func(v int) {
 	t.Helper()
 	clk := Wiring.NewFakeClock()
 	pw.SetClock(clk)
 	const inFlightMs = 10
 	return func(v int) {
-		if err := pw.SendDeliverOnly(context.Background(), v, inFlightMs); err != nil {
-			t.Fatalf("SendDeliverOnly: %v", err)
+		if !pw.PlaceAndDriveDeliverOnly(context.Background(), v, inFlightMs) {
+			t.Fatalf("PlaceAndDriveDeliverOnly returned false")
 		}
 		clk.Advance(inFlightMs * time.Millisecond)
 		deadline := time.Now().Add(time.Second)

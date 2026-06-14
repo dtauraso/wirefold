@@ -10,12 +10,10 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// deliveredBead pairs the arrived value with the train sequence number that
-// produced it. Recv/PollRecv use the seq to dedup: only the first bead from
-// each train (lowest seq not yet accepted) is returned; followers are dropped.
+// deliveredBead is a value that has arrived at the wire's destination and is waiting
+// to be read by Recv or PollRecv. Recv/PollRecv consume on read (no separate Done).
 type deliveredBead struct {
 	val int
-	seq uint64
 }
 
 // PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs for call sites that
@@ -63,30 +61,32 @@ func (bp beadPlacement) streams() bool {
 type inflightBead struct {
 	val       int
 	placement time.Duration // clock active-elapsed reading when placed
-	arc       float64       // current arc length of this bead's edge
-	seg       wireSegment   // current straight-segment endpoints of this bead's edge
-	node      string        // source node id — the position/cancel routing key
-	port      string        // source output port — the position/cancel routing key
-	streams   bool          // whether this bead carries position-stream context
-	gen       uint64        // per-bead id; the bead's walker self-cancels on mismatch
-	seq       uint64        // per-train sequence; receiver dedups by it
+	startedAt time.Duration // clock reading when the driver goroutine anchors its first tick;
+	// set to placement time so the driver's first tick is always placement+interval
+	// regardless of when the goroutine actually starts executing.
+	arc     float64     // current arc length of this bead's edge
+	seg     wireSegment // current straight-segment endpoints of this bead's edge
+	node    string      // source node id — the position/cancel routing key
+	port    string      // source output port — the position/cancel routing key
+	streams bool        // whether this bead carries position-stream context
+	gen     uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
 }
 
-// PacedWire is a multi-bead FIFO transport. A wire may carry more than one bead
-// at once (MODEL.md "Sending"): each Send/TryPlace appends a bead and returns
-// immediately — the source never waits on the destination, no acknowledgment,
-// no back-pressure, no drop. Each bead's clock-timed walker delivers it into the
-// `delivered` FIFO at its own deadline; Recv pops `delivered` in send order and
-// CONSUMES on read (no separate Done step).
+// PacedWire is a multi-bead FIFO transport. Beads are placed via placeBeadNoWalker
+// and delivered by the owning node's goroutine driving DriveBeadsToDelivery — no
+// per-bead goroutine. The source never waits on the destination; each bead is placed
+// immediately and driven to the `delivered` FIFO on the caller's goroutine at its own
+// deadline. Recv pops `delivered` in send order and CONSUMES on read (no separate
+// Done step).
 //
 // Clock-driven delivery: the wire times its own delivery on the one monotonic
 // clock (MODEL.md). When a bead is placed, the wire records the placement elapsed
-// reading and starts a walker that calls clock.WaitUntil(placement + arc/pulseSpeed).
-// When that pause-aware deadline is reached, the walker moves the bead from
-// `inflight` to `delivered`. There is no TS "delivered" signal and no central
-// scheduler — every wire reads the same clock independently. Pause freezes the
-// arithmetic (WaitUntil does not advance while halted); Reset/Delete cancel all
-// pending walkers.
+// reading; the driven loop calls clock.WaitUntil(placement + arc/pulseSpeed). When
+// that pause-aware deadline is reached, the driven loop moves the bead from `inflight`
+// to `delivered`. There is no TS "delivered" signal and no central scheduler — every
+// wire reads the same clock independently. Pause freezes the arithmetic (WaitUntil
+// does not advance while halted); Reset/Delete bump teardownGen so the driven loop
+// drops the bead.
 type PacedWire struct {
 	mu   sync.Mutex
 	cond *sync.Cond
@@ -94,32 +94,16 @@ type PacedWire struct {
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.
 	inflight  []inflightBead
 	delivered []deliveredBead
-	// trainSeq is bumped on every new fire (StartTrain or bare placeBead), minting
-	// a fresh train identity. All beads within one fire carry the same seq; Recv
-	// drops any bead whose seq <= lastAcceptedSeq (train-follower or stale).
-	// Reset to 0 on teardown so a restarted edge fires on its first new bead.
-	trainSeq uint64
-	// lastAcceptedSeq is the highest train seq Recv/PollRecv has accepted (0 = none).
-	// Receiver dedup: drop if b.seq <= lastAcceptedSeq; accept and bump otherwise.
-	// No clock measurement — immune to timing coupling between nodes.
-	lastAcceptedSeq uint64
 	// nextGen mints a unique id for each placed bead (walker self-cancel key) and
 	// is also bumped on teardown to invalidate ALL outstanding walkers at once.
 	nextGen uint64
 	// teardownGen: a walker whose bead gen is < teardownGen is invalidated wholesale
 	// (Reset/Delete). Beads placed after a teardown get gen >= teardownGen.
 	teardownGen uint64
-	faded       bool // when true, Send/TryPlace place nothing
+	faded       bool // when true, placeBeadNoWalker places nothing
 	deleted     bool // when true, the edge was deleted; source places no beads
 	// clock is the one monotonic clock this wire reads to time its own delivery.
-	clock Clock
-	// deliverCancel cancels the context all current walkers wait on, so Reset/Delete
-	// wake them promptly instead of leaving them parked on the clock. A fresh context
-	// is installed each time a walker is (re)launched; bumping teardownGen + canceling
-	// stops every outstanding walker.
-	deliverCancel context.CancelFunc
-	// walkerCtx is the context all current walkers wait on; canceled by teardown.
-	walkerCtx  context.Context
+	clock      Clock
 	pulseSpeed float64
 	// MaxIncomingSimLatencyMs is the per-port aggregate max(SimLatencyMs) over
 	// every edge feeding this destination port. Read only by In.SimLatencyMs().
@@ -129,22 +113,6 @@ type PacedWire struct {
 	Target          string   // destination node id — authoritative slot identity
 	TargetHandle    string   // destination input-port name — authoritative slot identity
 	Trace           *T.Trace // injected by loader; used for breadcrumb diagnostics only
-
-	// Paced emission train (MODEL.md "Sending"): a node fire starts/refreshes a
-	// clock-paced train on this wire — the fired value placed every beadSpacingMs
-	// for trainDurationMs. Exactly one pacer goroutine runs while a train is
-	// active; a re-fire refreshes value+window in place (no second overlapping
-	// pacer). All guarded by pw.mu.
-	trainActive   bool
-	trainValue    int
-	trainBP       beadPlacement // placement (geometry/identity) the train places with
-	trainStart    time.Duration // clock active-elapsed reading the current window began
-	trainNext     time.Duration // clock active-elapsed reading of the next scheduled placement
-	trainRunning  bool          // a pacer goroutine is live (placing or parked on the clock)
-	// persistent: when true, runTrain never expires — at each trainDurationMs window
-	// rollover it mints a fresh train seq and re-sends the held trainValue.
-	// Sender-side only; does not affect receiver dedup logic.
-	persistent bool
 }
 
 // NewPacedWire creates an empty PacedWire. arcLength is the straight-line
@@ -155,8 +123,6 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 		MaxIncomingSimLatencyMs: arcLength / pulseSpeed,
 		pulseSpeed:              pulseSpeed,
 		clock:                   NewRealClock(),
-		// trainSeq/lastAcceptedSeq start at 0; the first fire bumps trainSeq to 1,
-		// which exceeds lastAcceptedSeq (0), so the first bead is always accepted.
 	}
 	pw.cond = sync.NewCond(&pw.mu)
 	return pw
@@ -194,220 +160,249 @@ func (pw *PacedWire) SetFaded(v bool) {
 	pw.mu.Unlock()
 }
 
-// Send places a bead on the wire and returns immediately. Multi-bead model: the
-// wire may already carry other beads — Send never parks and never drops. It
-// appends the bead, schedules its clock-timed delivery at placement+bp.InFlightMs,
-// and returns. If the wire is faded or deleted, Send returns nil immediately
-// without placing a bead. The ctx is retained only for symmetry; Send no longer
-// blocks, so it never returns ErrCanceled.
-func (pw *PacedWire) Send(ctx context.Context, value any, bp beadPlacement) error {
-	pw.placeBead(value, bp)
-	return nil
+
+// PlaceAndDrive places a bead and drives it to delivery on a new goroutine.
+// Returns false if the wire is faded/deleted (nothing placed). This is the
+// public entry point used by cross-package tests and by placeAndDrive in the
+// Wiring-internal test helper.
+func (pw *PacedWire) PlaceAndDrive(ctx context.Context, value any, bp beadPlacement) bool {
+	gen, ok := pw.placeBeadNoWalker(value, bp)
+	if !ok {
+		return false
+	}
+	go pw.DriveBeadToDelivery(ctx, gen)
+	return true
 }
 
-// SendDeliverOnly places a bead timed for delivery at placement+inFlightMs with
-// NO position stream. It exists for cross-package tests (node firing-rule tests,
-// the headless cascade) that exercise delivery timing only.
-func (pw *PacedWire) SendDeliverOnly(ctx context.Context, value any, inFlightMs float64) error {
-	return pw.Send(ctx, value, beadPlacement{InFlightMs: inFlightMs})
+// PlaceAndDriveDeliverOnly places a delivery-only bead (no position stream) and
+// drives it on a background goroutine. Equivalent to the deleted SendDeliverOnly
+// for cross-package tests that only exercise delivery timing.
+func (pw *PacedWire) PlaceAndDriveDeliverOnly(ctx context.Context, value any, inFlightMs float64) bool {
+	return pw.PlaceAndDrive(ctx, value, beadPlacement{InFlightMs: inFlightMs})
 }
 
-// TryPlace is the non-blocking placement used by the fire-and-forget send rule.
-// Multi-bead model: it never blocks and never drops on a busy wire — it always
-// places the bead and returns true (unless the wire is faded/deleted, where it
-// returns false and places nothing). Kept as a bool for signature compatibility.
-func (pw *PacedWire) TryPlace(value any, bp beadPlacement) bool {
-	return pw.placeBead(value, bp)
-}
-
-// placeBead is the single placement path. Appends an inflightBead under the lock,
-// launches its clock-timed walker, and returns true (false only when faded/deleted,
-// where nothing is placed). Never blocks, never drops on a busy wire.
-// bumpSeq: when true (bare Send/TryPlace outside a train), mint a new trainSeq so
-// this standalone fire gets a unique identity at the receiver. When false (called
-// from runTrain's subsequent placements), reuse the current trainSeq so all beads
-// of one train share the same identity and the receiver deduplicates them to one fire.
-func (pw *PacedWire) placeBead(value any, bp beadPlacement) bool {
-	return pw.placeBeadSeq(value, bp, true)
-}
-
-// placeBeadSeq is the internal placement path. bumpSeq=true mints a fresh trainSeq
-// (every bare Send/TryPlace and the first bead of every StartTrain); bumpSeq=false
-// reuses the current trainSeq (runTrain followers within the same fire).
-func (pw *PacedWire) placeBeadSeq(value any, bp beadPlacement, bumpSeq bool) bool {
+// placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
+// returning the bead's gen so the caller can drive delivery synchronously.
+// Returns (0, false) when faded/deleted (nothing placed).
+func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64, ok bool) {
 	pw.mu.Lock()
 	if pw.faded || pw.deleted {
 		pw.mu.Unlock()
-		return false
+		return 0, false
 	}
 	beadVal, _ := value.(int)
-	if bumpSeq {
-		pw.trainSeq++
-	}
 	pw.nextGen++
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
 	}
+	now := pw.clock.Now()
 	b := inflightBead{
 		val:       beadVal,
-		placement: pw.clock.Now(),
+		placement: now,
+		startedAt: now, // anchor first tick to placement time, not goroutine-start time
 		arc:       bp.InFlightMs * pw.pulseSpeed,
 		seg:       wireSegment{Start: bp.Start, End: bp.End},
 		node:      bp.Node,
 		port:      bp.Port,
 		streams:   bp.streams(),
 		gen:       pw.nextGen,
-		seq:       pw.trainSeq,
 	}
 	pw.inflight = append(pw.inflight, b)
 	pw.cond.Broadcast()
-	pw.launchWalkerLocked(b.gen)
+	gen = b.gen
 	pw.mu.Unlock()
-	return true
+	return gen, true
 }
 
-// StartTrain begins (or refreshes) a clock-paced emission train on this wire.
-// On a fire a node calls this instead of placing a single bead: the first bead
-// is placed IMMEDIATELY (no initial delay), then the same value is placed every
-// beadSpacingMs for trainDurationMs — ~trainDurationMs/beadSpacingMs + 1 beads
-// riding the multi-bead wire. A re-fire (even same value) REFRESHES the train:
-// it sets the new value+placement and resets the trainDurationMs window from the
-// current clock reading, so the in-flight pacer extends/replaces the window
-// rather than stacking a second pacer. The pacer is timed on the ONE clock
-// (pw.clock — the same active-elapsed reading the bead walkers use) via
-// WaitUntil, so the global pause gate freezes the train exactly as it freezes
-// delivery. Faded/deleted wires place nothing.
-// Returns true if the train was started (the first bead placed), false if the
-// wire is faded/deleted (nothing placed).
-func (pw *PacedWire) StartTrain(value any, bp beadPlacement) bool {
-	pw.mu.Lock()
-	if pw.faded || pw.deleted {
-		pw.mu.Unlock()
-		return false
-	}
-	beadVal, _ := value.(int)
-	now := pw.clock.Now()
-	// Mint a new train identity at fire time. All beads in this train (the first one
-	// placed immediately below + every runTrain follower) share this seq. The receiver
-	// deduplicates the train to exactly one fire by dropping beads with seq <=
-	// lastAcceptedSeq.
-	pw.trainSeq++
-	pw.trainActive = true
-	pw.trainValue = beadVal
-	pw.trainBP = bp
-	pw.trainStart = now
-	pw.trainNext = now // first bead places immediately
-	launch := !pw.trainRunning
-	if launch {
-		pw.trainRunning = true
-	}
-	pw.mu.Unlock()
-
-	// Place the first bead synchronously so a fire always lands a bead at once,
-	// even if the pacer goroutine has not been scheduled yet. bumpSeq=false because
-	// we already bumped trainSeq above under the lock.
-	pw.placeBeadSeq(beadVal, bp, false)
-
-	if launch {
-		pw.runTrain()
-	}
-	return true
+// driveItem carries one bead's context for DriveBeadsToDelivery.
+type driveItem struct {
+	pw  *PacedWire
+	gen uint64
 }
 
-// runTrain is the single pacer goroutine for this wire. It re-reads the LIVE
-// train state each iteration (so a refresh's new value/window/placement are
-// picked up), parks on the one clock until the next scheduled placement, places
-// the bead, and stops once the window (trainStart + trainDurationMs) has passed.
-// The first placement is handled by StartTrain; this loop owns every subsequent
-// one. It exits with trainRunning=false so the next fire relaunches it.
-func (pw *PacedWire) runTrain() {
-	clk := pw.clock
-	go func() {
-		for {
-			pw.mu.Lock()
-			if !pw.trainActive || pw.deleted {
-				pw.trainRunning = false
-				pw.mu.Unlock()
-				return
-			}
-			windowEnd := pw.trainStart + trainDurationMs*time.Millisecond
-			next := pw.trainNext + beadSpacingMs*time.Millisecond
-			pw.trainNext = next
-			ctx := pw.walkerCtx
-			pw.mu.Unlock()
+// DriveBeadsToDelivery drives multiple beads on different PacedWires in lockstep
+// on the calling goroutine — no additional goroutines. Each ~16 ms frame it
+// advances every not-yet-final bead, emits position traces, and marks delivered
+// items done. Blocks until all items are delivered or ctx is canceled.
+func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
+	if len(items) == 0 {
+		return
+	}
 
-			if next > windowEnd {
-				// Window exhausted: no more placements for this train.
-				pw.mu.Lock()
-				// A refresh may have moved the window forward while we computed;
-				// only stop if the window is still exhausted relative to the live
-				// start. Re-check against the LIVE window end.
-				live := pw.trainStart + trainDurationMs*time.Millisecond
-				if next > live {
-					if pw.persistent && !pw.faded && !pw.deleted {
-						now := pw.clock.Now()
-						pw.trainSeq++
-						pw.trainStart = now
-						pw.trainNext = now
-						val := pw.trainValue
-						bp := pw.trainBP
-						pw.mu.Unlock()
-						pw.placeBeadSeq(val, bp, false)
-						continue
-					}
-					pw.trainActive = false
-					pw.trainRunning = false
-					pw.mu.Unlock()
-					return
-				}
-				pw.mu.Unlock()
-			}
+	// Per-item state: done marks items that have finished delivery.
+	done := make([]bool, len(items))
+	remaining := len(items)
 
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			if err := clk.WaitUntil(ctx, next); err != nil {
-				// Context canceled by teardown — stop the pacer.
-				pw.mu.Lock()
-				pw.trainRunning = false
-				pw.mu.Unlock()
-				return
-			}
+	interval := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
 
-			pw.mu.Lock()
-			if !pw.trainActive || pw.faded || pw.deleted {
-				pw.trainActive = false
-				pw.trainRunning = false
-				pw.mu.Unlock()
-				return
-			}
-			// Re-check the window against the LIVE start (a refresh may have moved
-			// it); only place while inside [trainStart, trainStart+trainDurationMs].
-			if pw.clock.Now() > pw.trainStart+trainDurationMs*time.Millisecond {
-				if pw.persistent && !pw.faded && !pw.deleted {
-					now := pw.clock.Now()
-					pw.trainSeq++
-					pw.trainStart = now
-					pw.trainNext = now
-					val := pw.trainValue
-					bp := pw.trainBP
-					pw.mu.Unlock()
-					pw.placeBeadSeq(val, bp, false)
-					continue
-				}
-				pw.trainActive = false
-				pw.trainRunning = false
-				pw.mu.Unlock()
-				return
-			}
-			val := pw.trainValue
-			bp := pw.trainBP
-			pw.mu.Unlock()
-			// bumpSeq=false: follower beads reuse the train's seq so the receiver
-			// treats all beads of one fire as the same train identity.
-			pw.placeBeadSeq(val, bp, false)
+	// Compute the first tick target for each item anchored to its placement.
+	nexts := make([]time.Duration, len(items))
+	for i, it := range items {
+		if done[i] {
+			continue
 		}
-	}()
+		it.pw.mu.Lock()
+		idx := it.pw.findInflightLocked(it.gen)
+		var placement, startedAt time.Duration
+		if idx >= 0 {
+			placement = it.pw.inflight[idx].placement
+			startedAt = it.pw.inflight[idx].startedAt
+		}
+		it.pw.mu.Unlock()
+
+		if idx < 0 {
+			done[i] = true
+			remaining--
+			continue
+		}
+		// Anchor the first tick to startedAt (= clock reading at placement time).
+		// This ensures intermediate position ticks are emitted even when the driver
+		// goroutine starts late (after the test advances the clock past the deadline).
+		next := placement + interval
+		if next <= startedAt {
+			steps := (startedAt-placement)/interval + 1
+			next = placement + steps*interval
+		}
+		nexts[i] = next
+	}
+
+	// Use the clock from the first live item (all items share the same clock).
+	var clk Clock
+	for i, it := range items {
+		if !done[i] {
+			clk = it.pw.clock
+			break
+		}
+	}
+	if clk == nil || remaining == 0 {
+		return
+	}
+
+	for remaining > 0 {
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Find the minimum next tick across live items, capping each item's next
+		// at its bead's deadline so we never park past the delivery point.
+		var minNext time.Duration
+		first := true
+		for i, it := range items {
+			if done[i] {
+				continue
+			}
+			// Cap nexts[i] at the bead's delivery deadline so WaitUntil never
+			// parks past the point where final=true would be set.
+			it.pw.mu.Lock()
+			idx := it.pw.findInflightLocked(it.gen)
+			if idx >= 0 {
+				b := it.pw.inflight[idx]
+				if it.pw.pulseSpeed > 0 {
+					dl := b.placement + time.Duration(b.arc/it.pw.pulseSpeed*float64(time.Millisecond))
+					if nexts[i] > dl {
+						nexts[i] = dl
+					}
+				}
+			}
+			it.pw.mu.Unlock()
+			if first || nexts[i] < minNext {
+				minNext = nexts[i]
+				first = false
+			}
+		}
+
+		if err := clk.WaitUntil(ctx, minNext); err != nil {
+			return
+		}
+
+		// Advance all items whose next tick is at or before minNext.
+		for i, it := range items {
+			if done[i] || nexts[i] > minNext {
+				continue
+			}
+
+			it.pw.mu.Lock()
+			if it.gen < it.pw.teardownGen {
+				it.pw.mu.Unlock()
+				done[i] = true
+				remaining--
+				continue
+			}
+			idx := it.pw.findInflightLocked(it.gen)
+			if idx < 0 {
+				it.pw.mu.Unlock()
+				done[i] = true
+				remaining--
+				continue
+			}
+			b := it.pw.inflight[idx]
+			arc := b.arc
+			placement := b.placement
+			it.pw.mu.Unlock()
+
+			pulseSpeed := it.pw.pulseSpeed
+			deadline := placement
+			if pulseSpeed > 0 {
+				deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
+			}
+
+			target := nexts[i]
+			final := false
+			if target >= deadline {
+				target = deadline
+				final = true
+			}
+
+			it.pw.mu.Lock()
+			emit, posArgs, isFinal := it.pw.advanceBeadLocked(it.gen, target)
+			// advanceBeadLocked released the lock.
+			if emit {
+				it.pw.Trace.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
+			}
+			if final || isFinal {
+				it.pw.mu.Lock()
+				for {
+					if it.gen < it.pw.teardownGen {
+						it.pw.mu.Unlock()
+						done[i] = true
+						remaining--
+						goto nextItem
+					}
+					j := it.pw.findInflightLocked(it.gen)
+					if j < 0 {
+						it.pw.mu.Unlock()
+						done[i] = true
+						remaining--
+						goto nextItem
+					}
+					if j == 0 {
+						break
+					}
+					it.pw.cond.Wait()
+				}
+				db := it.pw.inflight[0]
+				it.pw.inflight = it.pw.inflight[1:]
+				it.pw.delivered = append(it.pw.delivered, deliveredBead{val: db.val})
+				it.pw.cond.Broadcast()
+				ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
+				it.pw.mu.Unlock()
+				it.pw.emitArrive(ai)
+				done[i] = true
+				remaining--
+				goto nextItem
+			}
+			nexts[i] += interval
+		nextItem:
+		}
+	}
+}
+
+// DriveBeadToDelivery runs the same per-frame loop the walker would run for
+// the bead identified by gen, but SYNCHRONOUSLY on the caller's goroutine.
+// ctx is the caller's context (canceled by node teardown). Blocks until the
+// bead is delivered or ctx is canceled / the wire is torn down.
+func (pw *PacedWire) DriveBeadToDelivery(ctx context.Context, gen uint64) {
+	DriveBeadsToDelivery(ctx, []driveItem{{pw: pw, gen: gen}})
 }
 
 // findInflightLocked returns the index of the bead with this gen, or -1.
@@ -420,124 +415,6 @@ func (pw *PacedWire) findInflightLocked(gen uint64) int {
 	return -1
 }
 
-// launchWalkerLocked spawns the clock-timed walker for the bead identified by gen.
-// Must be called with pw.mu held. The walker re-reads its bead's LIVE arc/seg each
-// tick (so a mid-flight ReviseInFlightGeometry is picked up), emits position traces
-// at ~16 ms cadence, and at the deadline moves the bead from inflight to delivered.
-// It self-cancels if its gen disappears (delivered/removed) or the wire is torn down
-// (teardownGen advanced past it).
-func (pw *PacedWire) launchWalkerLocked(gen uint64) {
-	clk := pw.clock
-	tr := pw.Trace
-	pulseSpeed := pw.pulseSpeed
-
-	// Ensure there is a live cancel context all walkers share; install one if absent.
-	if pw.deliverCancel == nil {
-		dctx, cancel := context.WithCancel(context.Background())
-		pw.deliverCancel = cancel
-		pw.walkerCtx = dctx
-	}
-	dctx := pw.walkerCtx
-
-	idx := pw.findInflightLocked(gen)
-	if idx < 0 {
-		return
-	}
-	placement := pw.inflight[idx].placement
-	startNow := clk.Now()
-
-	go func() {
-		interval := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
-		// Anchor ticks to placement (stable grid) but never replay the past: the
-		// first tick is at or after startNow so a ReviseInFlightGeometry rebase does
-		// not race the bead back to t≈0.
-		next := placement + interval
-		if next <= startNow {
-			steps := (startNow-placement)/interval + 1
-			next = placement + steps*interval
-		}
-		for {
-			pw.mu.Lock()
-			if gen < pw.teardownGen {
-				pw.mu.Unlock()
-				return
-			}
-			i := pw.findInflightLocked(gen)
-			if i < 0 {
-				// Bead delivered or removed by another path.
-				pw.mu.Unlock()
-				return
-			}
-			b := pw.inflight[i]
-			arc := b.arc
-			seg := b.seg
-			placement = b.placement
-			stream := b.streams && tr != nil && arc > 0
-			pw.mu.Unlock()
-
-			deadline := placement
-			if pulseSpeed > 0 {
-				deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
-			}
-
-			target := next
-			final := false
-			if target >= deadline {
-				target = deadline
-				final = true
-			}
-			if err := clk.WaitUntil(dctx, target); err != nil {
-				// Context canceled by teardown — stop, do not emit, do not deliver.
-				return
-			}
-
-			if stream {
-				covered := pulseSpeed * float64(target-placement) / float64(time.Millisecond)
-				t := 0.0
-				if arc > 0 {
-					t = covered / arc
-				}
-				if t > 1 {
-					t = 1
-				}
-				pos := lerp(seg.Start, seg.End, t)
-				tr.Position(b.node, b.port, b.val, pos.X, pos.Y, pos.Z, t, b.gen)
-			}
-
-			if final {
-				pw.mu.Lock()
-				// FIFO: a bead delivers only once it is at the head of inflight, so
-				// Recv sees values in SEND order even when a later bead's deadline
-				// (shorter arc) would otherwise overtake an earlier one. Wait until
-				// this gen is index 0; teardown (gen < teardownGen) or removal aborts.
-				for {
-					if gen < pw.teardownGen {
-						pw.mu.Unlock()
-						return
-					}
-					i := pw.findInflightLocked(gen)
-					if i < 0 {
-						pw.mu.Unlock()
-						return
-					}
-					if i == 0 {
-						break
-					}
-					pw.cond.Wait()
-				}
-				db := pw.inflight[0]
-				pw.inflight = pw.inflight[1:]
-				pw.delivered = append(pw.delivered, deliveredBead{val: db.val, seq: db.seq})
-				pw.cond.Broadcast()
-				ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
-				pw.mu.Unlock()
-				pw.emitArrive(ai)
-				return
-			}
-			next += interval
-		}
-	}()
-}
 
 // Recv blocks until a delivered value is available, then pops and returns it
 // (FIFO, in send order). Recv CONSUMES on read — there is no separate Done step.
@@ -547,27 +424,17 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 	defer close(done)
 
 	pw.mu.Lock()
-	for {
-		for len(pw.delivered) == 0 && ctx.Err() == nil {
-			pw.cond.Wait()
-		}
-		if len(pw.delivered) == 0 {
-			pw.mu.Unlock()
-			return nil, ErrCanceled
-		}
-		b := pw.delivered[0]
-		pw.delivered = pw.delivered[1:]
-		// Identity dedup: collapse a train to one fire. All beads in a train share
-		// the same seq (minted once per StartTrain / bare Send). If b.seq <=
-		// lastAcceptedSeq, this bead is a train-follower or stale — drop it (already
-		// popped) and loop. No time measurement: immune to cross-node timing coupling.
-		if b.seq <= pw.lastAcceptedSeq {
-			continue
-		}
-		pw.lastAcceptedSeq = b.seq
-		pw.mu.Unlock()
-		return b.val, nil
+	for len(pw.delivered) == 0 && ctx.Err() == nil {
+		pw.cond.Wait()
 	}
+	if len(pw.delivered) == 0 {
+		pw.mu.Unlock()
+		return nil, ErrCanceled
+	}
+	b := pw.delivered[0]
+	pw.delivered = pw.delivered[1:]
+	pw.mu.Unlock()
+	return b.val, nil
 }
 
 // PollRecv is the non-blocking variant of Recv. It pops and returns the front
@@ -576,15 +443,9 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 func (pw *PacedWire) PollRecv() (any, bool) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	// Same identity dedup as Recv: drop train-follower beads (same seq as an already
-	// accepted bead). Loop because several followers may be queued up.
-	for len(pw.delivered) > 0 {
+	if len(pw.delivered) > 0 {
 		b := pw.delivered[0]
 		pw.delivered = pw.delivered[1:]
-		if b.seq <= pw.lastAcceptedSeq {
-			continue
-		}
-		pw.lastAcceptedSeq = b.seq
 		return b.val, true
 	}
 	return nil, false
@@ -595,8 +456,9 @@ func (pw *PacedWire) PollRecv() (any, bool) {
 // preserves each bead's FRACTIONAL progress t (its proportion along the wire), NOT
 // the absolute distance covered: each bead stays at the same fraction t and the
 // remaining time is recomputed from the NEW arc so UNIFORM PULSE SPEED holds —
-// remaining = (1−t)·newArc/pulseSpeed. Relaunches each bead's walker so the new
-// arc/seg take effect. No-op when no bead is in flight or the wire is deleted.
+// remaining = (1−t)·newArc/pulseSpeed. The driven loop re-reads each bead's live
+// arc/seg every frame, so the new geometry takes effect without any relaunch.
+// No-op when no bead is in flight or the wire is deleted.
 func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
@@ -625,7 +487,9 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) 
 			coveredNew := t * newArc
 			b.placement = now - time.Duration(coveredNew/pw.pulseSpeed*float64(time.Millisecond))
 		}
-		pw.launchWalkerLocked(b.gen)
+		// Update startedAt to now so the driver's next tick is anchored to the
+		// rebase point (avoids replaying the traversal from the old startedAt).
+		b.startedAt = now
 	}
 }
 
@@ -638,12 +502,87 @@ type arriveInfo struct {
 	gen        uint64 // the delivered/dropped bead's per-wire id (renderer bead key)
 }
 
+// posEmitArgs holds the arguments for a deferred tr.Position call, returned by
+// advanceBeadLocked so the caller can emit off the lock.
+type posEmitArgs struct {
+	node, port  string
+	val         int
+	x, y, z, t float64
+	gen         uint64
+}
+
 // emitArrive sends the traversal-complete trace for a delivered bead. Called by
 // the walker AFTER releasing pw.mu (trace channel send off the lock).
 func (pw *PacedWire) emitArrive(ai arriveInfo) {
 	if ai.emit {
 		pw.Trace.Arrive(ai.node, ai.port, ai.value, ai.gen)
 	}
+}
+
+// advanceBeadLocked performs one frame's work for the in-flight bead identified by
+// gen at clock reading now (the scheduled tick time). Caller must hold pw.mu on
+// entry; this method always releases it before returning.
+//
+// Returns:
+//   - emit=true if a Position trace should be sent (tr.Position) after this call;
+//     pos contains the arguments.
+//   - final=true if the bead has reached or passed its deadline at now, meaning the
+//     caller should proceed with the FIFO-head delivery loop.
+//
+// If the bead is missing or the wire torn down, all zero/false values are returned
+// and pw.mu is still released.
+//
+// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here; the
+// walker's FIFO-head wait loop does that after this returns when final=true. This
+// keeps the two locking phases (trace-emit window vs. delivery window) unchanged.
+func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool, pos posEmitArgs, final bool) {
+	tr := pw.Trace
+	pulseSpeed := pw.pulseSpeed
+
+	if gen < pw.teardownGen {
+		pw.mu.Unlock()
+		return
+	}
+	i := pw.findInflightLocked(gen)
+	if i < 0 {
+		pw.mu.Unlock()
+		return
+	}
+	b := pw.inflight[i]
+	arc := b.arc
+	seg := b.seg
+	placement := b.placement
+	stream := b.streams && tr != nil && arc > 0
+	pw.mu.Unlock()
+
+	deadline := placement
+	if pulseSpeed > 0 {
+		deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
+	}
+
+	target := now
+	if now >= deadline {
+		target = deadline
+		final = true
+	}
+
+	if stream {
+		covered := pulseSpeed * float64(target-placement) / float64(time.Millisecond)
+		t := 0.0
+		if arc > 0 {
+			t = covered / arc
+		}
+		if t > 1 {
+			t = 1
+		}
+		p := lerp(seg.Start, seg.End, t)
+		emit = true
+		pos = posEmitArgs{
+			node: b.node, port: b.port, val: b.val,
+			x: p.X, y: p.Y, z: p.Z, t: t, gen: b.gen,
+		}
+	}
+	return
 }
 
 // Done is a PHASE-1 SHIM: removed in phase 2 (gate strip). Recv/PollRecv now
@@ -667,22 +606,8 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	}
 	pw.inflight = nil
 	pw.delivered = nil
-	// Re-arm identity dedup: reset seq counters so a restarted edge accepts its
-	// first new bead. trainSeq is reset to 0; the next fire bumps it to 1, which
-	// exceeds lastAcceptedSeq (0), so the first bead is always accepted.
-	pw.trainSeq = 0
-	pw.lastAcceptedSeq = 0
-	// Stop the paced emission train: a Reset/Delete clears the wire, so the pacer
-	// must not keep placing. The pacer goroutine observes trainActive=false (or the
-	// canceled walkerCtx) and exits.
-	pw.trainActive = false
-	// Invalidate every outstanding walker at once and wake any parked WaitUntil.
+	// Invalidate every outstanding driven loop at once and wake any parked WaitUntil.
 	pw.teardownGen = pw.nextGen + 1
-	if pw.deliverCancel != nil {
-		pw.deliverCancel()
-		pw.deliverCancel = nil
-		pw.walkerCtx = nil
-	}
 	pw.cond.Broadcast()
 	return cancelled
 }
@@ -733,15 +658,9 @@ func (pw *PacedWire) InFlight() bool {
 
 // Occupied reports whether the wire is non-empty: a bead is in flight or a
 // delivered value is waiting to be read.
-// Persistent wires always carry beads by design; counting them as occupied
-// would stall senders indefinitely waiting for the wire to clear.
 func (pw *PacedWire) Occupied() bool {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	if pw.persistent {
-		return false // a persistent wire is intentionally always carrying beads;
-		// the sender must not block waiting for it to clear.
-	}
 	return len(pw.inflight) > 0 || len(pw.delivered) > 0
 }
 

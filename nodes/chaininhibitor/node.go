@@ -2,7 +2,6 @@ package chaininhibitor
 
 import (
 	"context"
-	"sync"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -17,23 +16,18 @@ type Node struct {
 	FeedbackOut                *Wiring.Out
 }
 
-// fanOutHeld forwards the held value concurrently on every ToNext output.
-// Invariant: -1 (the empty-Held sentinel) is never sent on an output channel —
-// a fire whose Held is -1 emits nothing on ToNext. Only the SEND is suppressed;
-// Held still updates to the received value in the caller.
-func fanOutHeld(outs Wiring.OutMulti, held int) {
+// placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving
+// them, returning the extended set. Invariant: -1 (the empty-Held sentinel) is
+// never sent on an output channel — a fire whose Held is -1 places nothing on
+// ToNext. Only the SEND is suppressed; Held still updates to the received value in
+// the caller. The caller drives these together with the feedback bead in ONE
+// Wiring.DriveAll so every outbound bead animates concurrently and the node
+// goroutine blocks once (for the fan-out flight) rather than once per edge.
+func placeHeld(outs Wiring.OutMulti, held int, items []Wiring.DriveItem) []Wiring.DriveItem {
 	if held == -1 {
-		return
+		return items
 	}
-	var wg sync.WaitGroup
-	for _, out := range outs {
-		wg.Add(1)
-		go func(o *Wiring.Out) {
-			defer wg.Done()
-			o.TryEmit(held)
-		}(out)
-	}
-	wg.Wait()
+	return outs.PlaceDrivenAll(held, items)
 }
 
 func (in *Node) Update(ctx context.Context) {
@@ -86,31 +80,32 @@ func (in *Node) Update(ctx context.Context) {
 				in.EmitHeldBead(value)
 			}
 
+			// Drive every outbound bead concurrently on THIS goroutine: place the
+			// feedback step (when wired) and the ToNext fan-out beads WITHOUT
+			// walkers, then drive them all together in one Wiring.DriveAll. This
+			// is the key to throughput: a per-edge EmitOneDriven/EmitManyDriven
+			// blocks the goroutine for each edge's full traversal in turn, so a
+			// node with a long feedback edge and a long ToNext edge would block ~2×
+			// the flight time per fire (the regression that stalled output). One
+			// combined drive blocks ONCE for the longest edge and the beads animate
+			// in parallel — matching the old walker concurrency with no walkers.
+			//
+			// Placement order: feedback is placed BEFORE the ToNext fan-out (we
+			// order only the PLACEMENT, not consumption — FeedbackOut is
+			// fire-and-forget per MODEL.md). Step is 1 when the value changes
+			// (advance index), 0 when it repeats (hold index); held == -1 on the
+			// first recv so the first value always counts as a change.
+			var items []Wiring.DriveItem
 			if in.FeedbackOut.Wired() {
-				// Place the feedback step BEFORE forwarding on ToNext. We only
-				// order the PLACEMENT of the feedback bead relative to the
-				// ToNext fan-out; we do NOT wait for the Input node to consume
-				// it. FeedbackOut is fire-and-forget per MODEL.md ("does not
-				// wait on the destination — no acknowledgment, no back-pressure"):
-				// the node paces naturally on its next paced TryRecv, not on the
-				// feedback round-trip, so the held value reaches ToNext at
-				// fire-time instead of behind the ~feedback-traversal latency.
-				// Step is 1 when the value changes (advance index), 0 when it
-				// repeats (hold index). held == -1 on the first recv so the
-				// first value always counts as a change.
 				var step int
 				if heldChanged {
 					step = 1
 				}
-				in.FeedbackOut.TryEmit(step)
-				// Forward the current held value on the downstream chain.
-				fanOutHeld(in.ToNext, in.Held)
-				in.Held = value
-			} else {
-				// FeedbackOut not wired (e.g. i1): existing behavior unchanged.
-				fanOutHeld(in.ToNext, in.Held)
-				in.Held = value
+				items = append(items, in.FeedbackOut.PlaceDriven(step))
 			}
+			items = placeHeld(in.ToNext, in.Held, items)
+			in.Held = value
+			Wiring.DriveAll(ctx, items)
 		}
 	}
 }

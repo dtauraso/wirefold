@@ -21,6 +21,13 @@ func newFakeWire() (*PacedWire, *FakeClock) {
 	return pw, clk
 }
 
+// placeAndDrive places a bead WITHOUT a walker and drives it to delivery on a
+// background goroutine — the test-side replacement for the deleted walker. clk.Advance
+// then moves the bead into the delivered FIFO exactly as before.
+func placeAndDrive(pw *PacedWire, val int, bp beadPlacement) bool {
+	return pw.PlaceAndDrive(context.Background(), val, bp)
+}
+
 // waitDelivered advances clk past one bead's in-flight time and waits until at
 // least `want` values sit in the delivered FIFO (a bead landed). timeout guards
 // against a missed wake.
@@ -50,8 +57,8 @@ func TestMultiBeadFIFO(t *testing.T) {
 	ctx := context.Background()
 
 	for _, v := range []int{10, 20, 30} {
-		if err := pw.Send(ctx, v, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-			t.Fatalf("Send %d: %v", v, err)
+		if !placeAndDrive(pw, v, beadPlacement{InFlightMs: testInFlightMs}) {
+			t.Fatalf("placeAndDrive %d: returned false", v)
 		}
 	}
 	if !pw.InFlight() {
@@ -74,8 +81,7 @@ func TestMultiBeadFIFO(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// Identity dedup: each Send mints a new trainSeq, so all three beads are distinct
-	// trains. Recv accepts all three in SEND ORDER without needing any clock advance.
+	// Recv returns all three in FIFO send order.
 	for _, want := range []int{10, 20, 30} {
 		v, err := pw.Recv(ctx)
 		if err != nil || v != want {
@@ -84,22 +90,14 @@ func TestMultiBeadFIFO(t *testing.T) {
 	}
 }
 
-// TestSendNeverBlocks: Send 5 with no Recv. All 5 are placed (inflight grows,
-// none dropped) and each Send returns immediately.
+// TestSendNeverBlocks: place 5 beads with no Recv. All 5 are placed (inflight grows,
+// none dropped) and each placeAndDrive returns immediately.
 func TestSendNeverBlocks(t *testing.T) {
 	pw, _ := newFakeWire()
-	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		done := make(chan error, 1)
-		go func() { done <- pw.Send(ctx, i, beadPlacement{InFlightMs: testInFlightMs}) }()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatalf("Send %d: %v", i, err)
-			}
-		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("Send %d blocked — wire must never park", i)
+		if !placeAndDrive(pw, i, beadPlacement{InFlightMs: testInFlightMs}) {
+			t.Fatalf("placeAndDrive %d returned false — wire must never park", i)
 		}
 	}
 
@@ -116,15 +114,8 @@ func TestSendRecvClockDelivery(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	sendDone := make(chan error, 1)
-	go func() { sendDone <- pw.Send(ctx, 42, beadPlacement{InFlightMs: testInFlightMs}) }()
-	select {
-	case err := <-sendDone:
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Send did not return after placing bead")
+	if !placeAndDrive(pw, 42, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 
 	recvDone := make(chan any, 1)
@@ -173,10 +164,9 @@ func TestPollRecvEmpty(t *testing.T) {
 // consume on read — there is no Done step.
 func TestPollRecvConsumes(t *testing.T) {
 	pw, clk := newFakeWire()
-	ctx := context.Background()
 
-	if err := pw.Send(ctx, 7, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send: %v", err)
+	if !placeAndDrive(pw, 7, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 	waitDelivered(t, pw, clk, 1)
 
@@ -197,11 +187,11 @@ func TestMultipleSendsNoDrop(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("first Send: %v", err)
+	if !placeAndDrive(pw, 1, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("first placeAndDrive returned false")
 	}
-	if err := pw.Send(ctx, 2, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("second Send: %v", err)
+	if !placeAndDrive(pw, 2, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("second placeAndDrive returned false")
 	}
 	pw.mu.Lock()
 	n := len(pw.inflight)
@@ -212,8 +202,6 @@ func TestMultipleSendsNoDrop(t *testing.T) {
 
 	clk.Advance(testInFlightMs * time.Millisecond)
 	v1, err1 := pw.Recv(ctx)
-	// Identity dedup: each Send mints a distinct trainSeq, so both beads are
-	// accepted back-to-back without needing a clock advance between them.
 	v2, err2 := pw.Recv(ctx)
 	if err1 != nil || err2 != nil || v1 != 1 || v2 != 2 {
 		t.Fatalf("Recv order: v1=%v v2=%v err1=%v err2=%v", v1, v2, err1, err2)
@@ -256,20 +244,13 @@ func TestRecvCancelUnblocks(t *testing.T) {
 	}
 }
 
-// TestClockDeliveryGate: Recv is gated on the clock advance, not on Send.
+// TestClockDeliveryGate: Recv is gated on the clock advance, not on placement.
 func TestClockDeliveryGate(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	sendDone := make(chan error, 1)
-	go func() { sendDone <- pw.Send(ctx, 5, beadPlacement{InFlightMs: testInFlightMs}) }()
-	select {
-	case err := <-sendDone:
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Send did not return after placing bead")
+	if !placeAndDrive(pw, 5, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 
 	recvResult := make(chan any, 1)
@@ -295,30 +276,23 @@ func TestClockDeliveryGate(t *testing.T) {
 	}
 }
 
-// TestFadedSendSkips: a faded wire returns nil from Send immediately without
-// placing a bead.
+// TestFadedSendSkips: a faded wire returns false from placeAndDrive immediately
+// without placing a bead.
 func TestFadedSendSkips(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	pw.SetFaded(true)
 
-	sendErr := make(chan error, 1)
-	go func() { sendErr <- pw.Send(context.Background(), 99, beadPlacement{InFlightMs: testInFlightMs}) }()
-	select {
-	case err := <-sendErr:
-		if err != nil {
-			t.Fatalf("Send on faded wire: expected nil, got %v", err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Send on faded wire did not return immediately")
+	if placeAndDrive(pw, 99, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("faded placed a bead")
 	}
 
 	if pw.InFlight() {
-		t.Fatal("faded Send placed a bead")
+		t.Fatal("faded placeAndDrive placed a bead")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	if _, err := pw.Recv(ctx); err != ErrCanceled {
-		t.Fatalf("Recv after faded Send: expected ErrCanceled, got %v", err)
+		t.Fatalf("Recv after faded placeAndDrive: expected ErrCanceled, got %v", err)
 	}
 }
 
@@ -329,8 +303,8 @@ func TestUnfadedAfterSetFaded(t *testing.T) {
 	pw.SetFaded(false)
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 11, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send: %v", err)
+	if !placeAndDrive(pw, 11, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 	waitDelivered(t, pw, clk, 1)
 	v, err := pw.Recv(ctx)
@@ -345,8 +319,8 @@ func TestPauseFreezesDelivery(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 5, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send: %v", err)
+	if !placeAndDrive(pw, 5, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 
 	clk.Halt()
@@ -370,8 +344,8 @@ func TestDeliveryAtExactInFlightTime(t *testing.T) {
 	pw, clk := newFakeWire()
 	ctx := context.Background()
 
-	if err := pw.Send(ctx, 9, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send: %v", err)
+	if !placeAndDrive(pw, 9, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 
 	clk.Advance((testInFlightMs - 1) * time.Millisecond)
@@ -387,16 +361,16 @@ func TestDeliveryAtExactInFlightTime(t *testing.T) {
 	}
 }
 
-// TestTryPlaceNeverDrops: TryPlace always places (multi-bead model) — a second
-// TryPlace on a busy wire still succeeds and both beads are in flight.
-func TestTryPlaceNeverDrops(t *testing.T) {
+// TestPlaceNeverDrops: placeAndDrive always places (multi-bead model) — a second
+// place on a busy wire still succeeds and both beads are in flight.
+func TestPlaceNeverDrops(t *testing.T) {
 	pw, _ := newFakeWire()
 
-	if !pw.TryPlace(1, beadPlacement{InFlightMs: testInFlightMs}) {
-		t.Fatal("TryPlace on clear wire: expected true")
+	if !placeAndDrive(pw, 1, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive on clear wire: expected true")
 	}
-	if !pw.TryPlace(2, beadPlacement{InFlightMs: testInFlightMs}) {
-		t.Fatal("TryPlace on busy wire: expected true (multi-bead, no drop)")
+	if !placeAndDrive(pw, 2, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive on busy wire: expected true (multi-bead, no drop)")
 	}
 	pw.mu.Lock()
 	n := len(pw.inflight)
@@ -406,18 +380,15 @@ func TestTryPlaceNeverDrops(t *testing.T) {
 	}
 }
 
-// TestTryEmitFireAndForget: an Out with RuleFireAndForget places each bead; a
-// second emit on a busy wire is NOT dropped (multi-bead model).
-func TestTryEmitFireAndForget(t *testing.T) {
+// TestPlaceDrivenFanout: PlaceDriven places each bead on a paced Out; a second
+// placement on a busy wire is NOT dropped (multi-bead model). This test only
+// asserts placement — beads are not driven to delivery.
+func TestPlaceDrivenFanout(t *testing.T) {
 	pw, _ := newFakeWire()
 	o := NewOutPaced(pw, context.Background(), "n", "p", T.New(16), RuleFireAndForget, 100, 100/PulseSpeedWuPerMs, wireSegment{}, "")
 
-	if !o.TryEmit(7) {
-		t.Fatal("first TryEmit: expected true")
-	}
-	if !o.TryEmit(8) {
-		t.Fatal("second TryEmit: expected true (multi-bead, no drop)")
-	}
+	o.PlaceDriven(7)
+	o.PlaceDriven(8)
 	pw.mu.Lock()
 	n := len(pw.inflight)
 	pw.mu.Unlock()
@@ -426,24 +397,23 @@ func TestTryEmitFireAndForget(t *testing.T) {
 	}
 }
 
-// TestDeleteSilencesWire: after Delete(), Send/TryPlace place no bead.
+// TestDeleteSilencesWire: after Delete(), placeAndDrive places no bead.
 func TestDeleteSilencesWire(t *testing.T) {
 	pw, _ := newFakeWire()
-	ctx := context.Background()
 
 	pw.Delete()
 
-	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send after Delete: got err %v, want nil", err)
+	if placeAndDrive(pw, 1, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatalf("placeAndDrive after Delete placed a bead")
 	}
 	if pw.InFlight() {
-		t.Fatalf("Send after Delete placed a bead")
+		t.Fatalf("placeAndDrive after Delete placed a bead")
 	}
-	if pw.TryPlace(2, beadPlacement{InFlightMs: testInFlightMs}) {
-		t.Fatalf("TryPlace after Delete: got true, want false")
+	if placeAndDrive(pw, 2, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatalf("placeAndDrive after Delete: got true, want false")
 	}
 	if pw.InFlight() {
-		t.Fatalf("TryPlace after Delete placed a bead")
+		t.Fatalf("second placeAndDrive after Delete placed a bead")
 	}
 }
 
@@ -451,10 +421,9 @@ func TestDeleteSilencesWire(t *testing.T) {
 // must be a no-op — nothing is delivered.
 func TestDeleteCancelsClockDelivery(t *testing.T) {
 	pw, clk := newFakeWire()
-	ctx := context.Background()
 
-	if err := pw.Send(ctx, 42, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send: %v", err)
+	if !placeAndDrive(pw, 42, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive returned false")
 	}
 	pw.Delete()
 
@@ -473,11 +442,10 @@ func TestDeleteCancelsClockDelivery(t *testing.T) {
 // all and none are delivered after the deadline.
 func TestDeleteCancelsAllInFlight(t *testing.T) {
 	pw, clk := newFakeWire()
-	ctx := context.Background()
 
 	for _, v := range []int{1, 2, 3} {
-		if err := pw.Send(ctx, v, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-			t.Fatalf("Send %d: %v", v, err)
+		if !placeAndDrive(pw, v, beadPlacement{InFlightMs: testInFlightMs}) {
+			t.Fatalf("placeAndDrive %d returned false", v)
 		}
 	}
 	pw.Delete()
@@ -494,101 +462,71 @@ func TestDeleteCancelsAllInFlight(t *testing.T) {
 
 func TestRestoreUnsilencesWire(t *testing.T) {
 	pw, _ := newFakeWire()
-	ctx := context.Background()
 
 	pw.Delete()
 	pw.Restore()
 
-	if err := pw.Send(ctx, 1, beadPlacement{InFlightMs: testInFlightMs}); err != nil {
-		t.Fatalf("Send after Restore: got err %v, want nil", err)
+	if !placeAndDrive(pw, 1, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive after Restore returned false")
 	}
 	if !pw.InFlight() {
-		t.Fatalf("Send after Restore did not place a bead")
+		t.Fatalf("placeAndDrive after Restore did not place a bead")
 	}
 
 	pw2, _ := newFakeWire()
 	pw2.Delete()
 	pw2.Restore()
-	if !pw2.TryPlace(2, beadPlacement{InFlightMs: testInFlightMs}) {
-		t.Fatalf("TryPlace after Restore: got false, want true")
+	if !placeAndDrive(pw2, 2, beadPlacement{InFlightMs: testInFlightMs}) {
+		t.Fatal("placeAndDrive after Restore (pw2): got false, want true")
 	}
 	if !pw2.InFlight() {
-		t.Fatalf("TryPlace after Restore did not place a bead")
+		t.Fatalf("placeAndDrive after Restore (pw2) did not place a bead")
 	}
 }
 
-// TestRecvGateCollapsesTrain: a node fire emits multiple beads all sharing one seq
-// (via placeBeadSeq bumpSeq=false); the receiver must collapse that train to exactly
-// ONE fire. Then a new fire mints a fresh seq and its first bead is accepted.
-//
-// All beads in a test train use the SAME short in-flight time so the FIFO ordering
-// constraint (a bead delivers only at head of inflight) is satisfied — the first
-// bead placed is the first to deliver, and followers arrive next.
-func TestRecvGateCollapsesTrain(t *testing.T) {
+// TestMultipleBeadsAllDelivered: placing multiple beads delivers ALL of them in FIFO
+// order — no dedup, no drop. This replaces the old train-collapse test.
+func TestMultipleBeadsAllDelivered(t *testing.T) {
 	pw, clk := newFakeWire()
-	ctx := context.Background()
 
-	const trainVal = 7
+	// Place 3 beads via placeAndDrive (no walker goroutines; driven on background goroutines).
+	for _, v := range []int{7, 7, 9} {
+		placeAndDrive(pw, v, beadPlacement{InFlightMs: testInFlightMs})
+	}
 
-	waitDeliveredLocal := func(want int) {
-		t.Helper()
-		dl := time.Now().Add(time.Second)
-		for {
-			pw.mu.Lock()
-			n := len(pw.delivered)
-			pw.mu.Unlock()
-			if n >= want {
-				return
-			}
-			if time.Now().After(dl) {
-				t.Fatalf("only %d beads delivered (want %d)", n, want)
-			}
-			time.Sleep(time.Millisecond)
+	// All 3 in-flight.
+	pw.mu.Lock()
+	n := len(pw.inflight)
+	pw.mu.Unlock()
+	if n != 3 {
+		t.Fatalf("expected 3 in-flight beads, got %d", n)
+	}
+
+	// Advance clock past all deadlines.
+	clk.Advance(testInFlightMs * time.Millisecond)
+	deadline := time.Now().Add(time.Second)
+	for {
+		pw.mu.Lock()
+		n = len(pw.delivered)
+		pw.mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of 3 beads delivered", n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// All 3 beads are delivered in send order — NO dedup.
+	for i, want := range []int{7, 7, 9} {
+		v, ok := pw.PollRecv()
+		if !ok || v != want {
+			t.Fatalf("bead %d: got v=%v ok=%v, want v=%d ok=true", i, v, ok, want)
 		}
 	}
-
-	// Manually bump trainSeq to 1 then place 3 beads with the same seq. This
-	// simulates a StartTrain + two runTrain followers, all sharing seq=1.
-	pw.mu.Lock()
-	pw.trainSeq = 1
-	pw.mu.Unlock()
-
-	for i := 0; i < 3; i++ {
-		pw.placeBeadSeq(trainVal, beadPlacement{InFlightMs: testInFlightMs}, false)
-	}
-
-	// All 3 beads are in-flight. Advance past the deadline so they deliver in order.
-	clk.Advance(testInFlightMs * time.Millisecond)
-	waitDeliveredLocal(3)
-
-	// PollRecv: seq=1 > lastAcceptedSeq=0 → first bead ACCEPTED. lastAcceptedSeq=1.
-	v, ok := pw.PollRecv()
-	if !ok || v != trainVal {
-		t.Fatalf("first train bead: expected accepted v=%d, got v=%v ok=%v", trainVal, v, ok)
-	}
-
-	// Followers 2 and 3 both have seq=1 <= lastAcceptedSeq=1 → must be DROPPED.
-	if v2, ok2 := pw.PollRecv(); ok2 {
-		t.Fatalf("train follower #2 accepted (v=%v) — identity dedup did not collapse", v2)
-	}
-	if v3, ok3 := pw.PollRecv(); ok3 {
-		t.Fatalf("train follower #3 accepted (v=%v) — identity dedup did not collapse", v3)
-	}
-
-	// Verify delivered queue is empty (followers were consumed-and-dropped, not parked).
-	pw.mu.Lock()
-	n := len(pw.delivered)
-	pw.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("train followers left %d beads in delivered (should be empty)", n)
-	}
-
-	// Second fire: bump trainSeq to 2. The first bead (seq=2 > lastAcceptedSeq=1)
-	// must be accepted — no clock manipulation needed between trains.
-	pw.placeBeadSeq(9, beadPlacement{InFlightMs: testInFlightMs}, true) // bumpSeq=true = new fire
-	clk.Advance(testInFlightMs * time.Millisecond)
-	waitDeliveredLocal(1)
-	if v4, err := pw.Recv(ctx); err != nil || v4 != 9 {
-		t.Fatalf("second train first bead: v=%v err=%v want 9 (new seq must be accepted)", v4, err)
+	// Queue is empty.
+	if v, ok := pw.PollRecv(); ok {
+		t.Fatalf("unexpected extra bead: v=%v", v)
 	}
 }

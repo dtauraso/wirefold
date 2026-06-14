@@ -64,8 +64,8 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 	}
 
 	// Place the bead (non-blocking placement; fresh wire so it is accepted).
-	if !pw.TryPlace(7, bp) {
-		t.Fatal("TryPlace: expected the fresh wire to accept the bead")
+	if !placeAndDrive(pw, 7, bp) {
+		t.Fatal("placeAndDrive: expected the fresh wire to accept the bead")
 	}
 
 	// Drive the whole in-flight walk past the deadline in one Advance. The
@@ -166,8 +166,8 @@ func TestPositionStreamCadence(t *testing.T) {
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{80, 40, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "a", Port: "o"}
 
-	if !pw.TryPlace(3, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 3, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 	clk.Advance(time.Duration(inFlightMs) * time.Millisecond)
 
@@ -215,8 +215,8 @@ func TestPositionStreamHaltedNoEmit(t *testing.T) {
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{100, 50, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "p"}
 
-	if !pw.TryPlace(9, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 9, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
 	// Halt, then attempt to advance: a halted FakeClock ignores Advance, so no

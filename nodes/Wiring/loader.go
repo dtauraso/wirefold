@@ -124,7 +124,6 @@ type specEdge struct {
 	SourceHandle   string  `json:"sourceHandle"`
 	Target         string  `json:"target"`
 	TargetHandle   string  `json:"targetHandle"`
-	Persistent     bool    `json:"persistent,omitempty" wire:"prop,optional,tsType:boolean"`
 }
 
 // topoView is the viewer-state block inside the JSON (view.nodes carries positions).
@@ -242,9 +241,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			// Fan-in: raise the per-port window aggregate to the max over all
 			// edges feeding this destination port.
 			pw.MaxIncomingSimLatencyMs = simLatencyMs
-		}
-		if e.Persistent {
-			pw.persistent = true
 		}
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
