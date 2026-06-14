@@ -27,10 +27,10 @@ type portGeom struct {
 
 // nodeGeom carries everything the port-curve math needs for one node.
 type nodeGeom struct {
-	Kind     string
-	Pos      vec3
-	Inputs   []portGeom
-	Outputs  []portGeom
+	Kind    string
+	Pos     vec3
+	Inputs  []portGeom
+	Outputs []portGeom
 }
 
 // Interior bead render dimensions — mirror scene-content.tsx INTERIOR_BEAD_R +
@@ -91,14 +91,11 @@ func kindWidthHeight(kind string) (float64, float64) {
 }
 
 // nodeRadius mirrors nodeRadius() in geometry-helpers.ts:
-//   min(width, height) / CurveParamNodeRadiusDivisor
+//
+//	min(width, height) / CurveParamNodeRadiusDivisor
 func nodeRadius(kind string) float64 {
 	w, h := kindWidthHeight(kind)
-	m := w
-	if h < m {
-		m = h
-	}
-	return m / float64(CurveParamNodeRadiusDivisor)
+	return min(w, h) / float64(CurveParamNodeRadiusDivisor)
 }
 
 // nodeWorldPos mirrors nodeWorldPos() in geometry-helpers.ts: the RF y-down →
@@ -159,7 +156,7 @@ func snapToRingAnchorIndex(kind string, dir vec3) int {
 	}
 	best := -1
 	bestDot := -2.0
-	for i := 0; i < N; i++ {
+	for i := range N {
 		d := ringAnchorDir(R, i)
 		dot := nd.X*d.X + nd.Y*d.Y + nd.Z*d.Z
 		if dot > bestDot {

@@ -95,16 +95,3 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		}
 	}
 }
-
-func comparePortLists(t *testing.T, nodeID, dir string, a, b []specPort) {
-	t.Helper()
-	if len(a) != len(b) {
-		t.Errorf("node %q %s: len tree=%d mono=%d", nodeID, dir, len(a), len(b))
-		return
-	}
-	for i := range a {
-		if a[i].Name != b[i].Name {
-			t.Errorf("node %q %s[%d] name: %q vs %q", nodeID, dir, i, a[i].Name, b[i].Name)
-		}
-	}
-}

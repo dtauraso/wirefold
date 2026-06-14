@@ -12,7 +12,7 @@ import (
 func TestRingAnchorCount(t *testing.T) {
 	pitch := ringAnchorDiameter + ringAnchorPadding // 10.0
 	cases := []struct {
-		R    float64
+		R     float64
 		wantN int
 	}{
 		{R: 20.0, wantN: int(2 * math.Pi * 20.0 / pitch)}, // ~12
@@ -31,7 +31,7 @@ func TestRingAnchorCount(t *testing.T) {
 func TestRingAnchorDirUnitLength(t *testing.T) {
 	R := 25.0
 	N := ringAnchorCount(R)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		d := ringAnchorDir(R, i)
 		length := math.Sqrt(d.X*d.X + d.Y*d.Y + d.Z*d.Z)
 		if math.Abs(length-1.0) > 1e-9 {
