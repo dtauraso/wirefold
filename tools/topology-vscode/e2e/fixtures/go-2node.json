@@ -12,19 +12,19 @@
       }
     },
     {
-      "id": "readGate1",
+      "id": "chainInhibitor1",
       "type": "ChainInhibitor"
     }
   ],
   "edges": [
     {
-      "id": "in0.out->readGate.value",
+      "id": "in0.out->chainInhibitor1.value",
       "source": "in08",
       "sourceHandle": "out",
-      "target": "readGate1",
+      "target": "chainInhibitor1",
       "targetHandle": "FromPrevChainInhibitorNode",
       "kind": "chain",
-      "label": "inputToReadGate",
+      "label": "inputToChainInhibitor",
       "data": {
         "slots": 1
       }

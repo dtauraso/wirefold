@@ -20,7 +20,7 @@ declare global {
 // React Flow renders edges as <g class="react-flow__edge"> elements. The
 // edge SVG path has class react-flow__edge-path. Use aria-label to find
 // the specific edge — RF sets aria-label="Edge from <source> to <target>".
-const EDGE_ARIA = "Edge from in08 to readGate1";
+const EDGE_ARIA = "Edge from in08 to chainInhibitor1";
 
 test("wire-survives-drag: dragging a node keeps its edge in the DOM", async ({ page }) => {
   const fixture = readFileSync(resolve(HERE, "fixtures/go-2node.json"), "utf-8");

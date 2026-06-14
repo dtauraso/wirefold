@@ -14,7 +14,7 @@ import {
 // Node keys deliberately out of sorted order, including inactive-style ids.
 const FIXTURE = JSON.stringify({
   nodes: {
-    readGate1: { x: 3, y: 3 },
+    windowAndGate1: { x: 3, y: 3 },
     bootstrap_rg: { x: 1, y: 1 },
     inhibitRight0: { x: 2, y: 2 },
     aNode: { x: 0, y: 0 },
@@ -30,7 +30,7 @@ function nodeKeyOrder(text: string): string[] {
 describe("serializeViewerState — stable view.nodes order", () => {
   it("emits node keys sorted by id regardless of insertion order", () => {
     const out = serializeViewerState(parseViewerState(FIXTURE));
-    expect(nodeKeyOrder(out)).toEqual(["aNode", "bootstrap_rg", "inhibitRight0", "readGate1"]);
+    expect(nodeKeyOrder(out)).toEqual(["aNode", "bootstrap_rg", "inhibitRight0", "windowAndGate1"]);
   });
 
   it("is idempotent: a second parse→serialize is byte-identical", () => {
@@ -50,7 +50,7 @@ describe("serializeViewerState — stable view.nodes order", () => {
     // the key to the end in the in-memory object and caused the churn).
     state.nodes!["bootstrap_rg"] = { x: 99, y: 99 };
     const out = serializeViewerState(state);
-    expect(nodeKeyOrder(out)).toEqual(["aNode", "bootstrap_rg", "inhibitRight0", "readGate1"]);
+    expect(nodeKeyOrder(out)).toEqual(["aNode", "bootstrap_rg", "inhibitRight0", "windowAndGate1"]);
     expect((JSON.parse(out) as ViewerState).nodes!["bootstrap_rg"]).toEqual({ x: 99, y: 99 });
   });
 });
