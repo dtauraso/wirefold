@@ -74,8 +74,8 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("edge \"1To2\" not found")
 	}
-	if e1to2.SourceHandle != "ToReadGate" {
-		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToReadGate\"", e1to2.SourceHandle)
+	if e1to2.SourceHandle != "ToChainInhibitor" {
+		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToChainInhibitor\"", e1to2.SourceHandle)
 	}
 	if e1to2.TargetHandle != "FromPrevChainInhibitorNode" {
 		t.Errorf("edge 1To2 targetHandle: got %q, want \"FromPrevChainInhibitorNode\"", e1to2.TargetHandle)
