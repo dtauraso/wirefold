@@ -2,7 +2,6 @@ package chaininhibitor
 
 import (
 	"context"
-	"sync"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -21,19 +20,11 @@ type Node struct {
 // Invariant: -1 (the empty-Held sentinel) is never sent on an output channel —
 // a fire whose Held is -1 emits nothing on ToNext. Only the SEND is suppressed;
 // Held still updates to the received value in the caller.
-func fanOutHeld(outs Wiring.OutMulti, held int) {
+func fanOutHeld(ctx context.Context, outs Wiring.OutMulti, held int) {
 	if held == -1 {
 		return
 	}
-	var wg sync.WaitGroup
-	for _, out := range outs {
-		wg.Add(1)
-		go func(o *Wiring.Out) {
-			defer wg.Done()
-			o.EmitOne(held)
-		}(out)
-	}
-	wg.Wait()
+	outs.EmitManyDriven(ctx, held)
 }
 
 func (in *Node) Update(ctx context.Context) {
@@ -102,13 +93,13 @@ func (in *Node) Update(ctx context.Context) {
 				if heldChanged {
 					step = 1
 				}
-				in.FeedbackOut.EmitOne(step)
+				in.FeedbackOut.EmitOneDriven(ctx, step)
 				// Forward the current held value on the downstream chain.
-				fanOutHeld(in.ToNext, in.Held)
+				fanOutHeld(ctx, in.ToNext, in.Held)
 				in.Held = value
 			} else {
 				// FeedbackOut not wired (e.g. i1): existing behavior unchanged.
-				fanOutHeld(in.ToNext, in.Held)
+				fanOutHeld(ctx, in.ToNext, in.Held)
 				in.Held = value
 			}
 		}

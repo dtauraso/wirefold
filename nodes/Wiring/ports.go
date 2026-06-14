@@ -19,6 +19,7 @@ package Wiring
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -375,6 +376,47 @@ func (o *Out) WaitConsumed() bool {
 
 // OutMulti is a fanout port: a slice of Outs sharing one logical name.
 type OutMulti []*Out
+
+// EmitManyDriven places one bead on EVERY Out in the set WITHOUT spawning walker
+// goroutines, emits the SendWire trace for each, then drives ALL beads to delivery
+// concurrently (one goroutine per wire) and waits until every bead is delivered or
+// ctx is canceled. In chan mode (tests), falls back to EmitOne on each Out.
+// If the set is empty or all placements fail, returns immediately.
+func (outs OutMulti) EmitManyDriven(ctx context.Context, v int) {
+	type wireGen struct {
+		pw  *PacedWire
+		gen uint64
+	}
+	var driven []wireGen
+	for _, o := range outs {
+		if o == nil {
+			continue
+		}
+		if o.pw != nil {
+			gen, ok := o.pw.placeBeadNoWalker(v, o.placement())
+			if !ok {
+				continue
+			}
+			o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+			driven = append(driven, wireGen{pw: o.pw, gen: gen})
+		} else {
+			// chan mode (tests): no drive needed, use EmitOne fallback.
+			o.EmitOne(v)
+		}
+	}
+	if len(driven) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, d := range driven {
+		wg.Add(1)
+		go func(pw *PacedWire, gen uint64) {
+			defer wg.Done()
+			pw.DriveBeadToDelivery(ctx, gen)
+		}(d.pw, d.gen)
+	}
+	wg.Wait()
+}
 
 // NewIn / NewOut are exported for tests that construct nodes directly
 // without going through reflectBuild. Uses chan mode.
