@@ -6,9 +6,6 @@ import type { RFNode, NodeData } from "../types";
 import { NODE_DIM_FALLBACK } from "../state/node-dims";
 import {
   CURVE_PARAM_NODE_RADIUS_DIVISOR,
-  CURVE_PARAM_SLOT_PCT0,
-  CURVE_PARAM_SLOT_PCT1,
-  CURVE_PARAM_SLOT_PCT2,
 } from "../../schema/curve-params";
 import { getNodeGeometry } from "./node-geometry";
 
@@ -92,11 +89,14 @@ function nodeWorldPosLocal(node: RFNode<NodeData>): THREE.Vector3 {
 // Port geometry
 // ---------------------------------------------------------------------------
 
-const SLOT_PCT = [CURVE_PARAM_SLOT_PCT0, CURVE_PARAM_SLOT_PCT1, CURVE_PARAM_SLOT_PCT2] as const;
+// Ring geometry constants — must match Go's port ring computation exactly.
+// N = floor(2 * PI * R / (BEAD_DIAM + BEAD_PAD)), direction_i = (cos(i*2PI/N), sin(i*2PI/N), 0)
+const PORT_RING_BEAD_DIAM = 8;
+const PORT_RING_BEAD_PAD = 2;
 
 /**
  * Unit direction (z=0 plane) from node center toward the given port's position,
- * derived from side/slot like the 2D handle layout. Returns null if port not found.
+ * derived from the ring anchor index (anchorId). Returns null if port not found.
  */
 export function portDir(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
   const g = getNodeGeometry(node.id);
@@ -110,35 +110,23 @@ export function portDir(node: RFNode<NodeData>, portName: string, isInput: boole
 
 /**
  * FALLBACK: local port-direction compute. Used pre-emit only.
- * Unit direction (z=0 plane) from node center toward the given port's position,
- * derived from side/slot like the 2D handle layout. Returns null if port not found.
+ * Mirrors Go's ring anchor computation exactly:
+ *   R = min(w,h) / RADIUS_DIVISOR
+ *   N = floor(2 * PI * R / (d + p)),  d=8, p=2
+ *   direction = (cos(i * 2PI / N), sin(i * 2PI / N), 0),  i = port.anchorId ?? 0
  */
 function portDirLocal(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
   const list = (isInput ? node.data?.inputs : node.data?.outputs) ?? [];
-  const idx = list.findIndex((p) => p.name === portName);
-  if (idx < 0) return null;
-  const port = list[idx];
-  const side = port.side ?? (isInput ? "left" : "right");
-  // ports sharing this resolved side, in list order:
-  const sameSide = list.filter((p) => (p.side ?? (isInput ? "left" : "right")) === side);
-  const onSideIdx = sameSide.findIndex((p) => p === port);
-  const pct = port.slot !== undefined ? SLOT_PCT[port.slot] : ((onSideIdx + 1) * 100) / (sameSide.length + 1);
-  const w = node.data?.width ?? NODE_DIM_FALLBACK.width, h = node.data?.height ?? NODE_DIM_FALLBACK.height;
-  // local border point offset from center (y-up): pct measured from top for left/right, from left for top/bottom
-  let bx = 0, by = 0;
-  if (side === "left")        { bx = -w / 2; by = h * (0.5 - pct / 100); }
-  else if (side === "right")  { bx =  w / 2; by = h * (0.5 - pct / 100); }
-  else if (side === "top")    { by =  h / 2; bx = w * (pct / 100 - 0.5); }
-  else                        { by = -h / 2; bx = w * (pct / 100 - 0.5); } // bottom
-  const dir = new THREE.Vector3(bx, by, 0);
-  if (dir.lengthSq() === 0) {
-    // exact center fallback: cardinal by side
-    if (side === "left")       dir.set(-1, 0, 0);
-    else if (side === "right") dir.set( 1, 0, 0);
-    else if (side === "top")   dir.set( 0, 1, 0);
-    else                       dir.set( 0,-1, 0);
-  }
-  return dir.normalize();
+  const port = list.find((p) => p.name === portName);
+  if (!port) return null;
+  const w = node.data?.width ?? NODE_DIM_FALLBACK.width;
+  const h = node.data?.height ?? NODE_DIM_FALLBACK.height;
+  const R = Math.min(w, h) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
+  const N = Math.floor(2 * Math.PI * R / (PORT_RING_BEAD_DIAM + PORT_RING_BEAD_PAD));
+  const i = port.anchorId ?? 0;
+  const safeN = N > 0 ? N : 1;
+  const angle = i * 2 * Math.PI / safeN;
+  return new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
 }
 
 /** World position for the top of the node sphere (center.y + radius). */
