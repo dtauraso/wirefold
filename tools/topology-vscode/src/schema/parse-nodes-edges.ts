@@ -40,25 +40,12 @@ function parsePort(v: unknown, path: string): Port {
       : oneOf(o.kind, EDGE_KINDS, `${path}.kind`),
   };
   if (o.required !== undefined) out.required = bool(o.required, `${path}.required`);
-  if (o.side !== undefined) out.side = oneOf(o.side, ["left", "right", "top", "bottom"] as const, `${path}.side`);
-  if (o.slot !== undefined) {
-    if (o.slot !== 0 && o.slot !== 1 && o.slot !== 2) {
-      throw new Error(`${path}.slot: expected 0|1|2, got ${JSON.stringify(o.slot)}`);
+  if (o.anchorId !== undefined) {
+    const id = num(o.anchorId, `${path}.anchorId`);
+    if (!Number.isInteger(id) || id < 0) {
+      throw new Error(`${path}.anchorId: expected non-negative integer, got ${JSON.stringify(o.anchorId)}`);
     }
-    out.slot = o.slot;
-  }
-  if (o.anchor !== undefined) {
-    const a = o.anchor;
-    if (
-      a === null || typeof a !== "object" || Array.isArray(a) ||
-      typeof (a as Record<string, unknown>).x !== "number" ||
-      typeof (a as Record<string, unknown>).y !== "number" ||
-      typeof (a as Record<string, unknown>).z !== "number"
-    ) {
-      throw new Error(`${path}.anchor: expected {x,y,z} numbers, got ${JSON.stringify(o.anchor)}`);
-    }
-    const ar = a as Record<string, unknown>;
-    out.anchor = { x: ar.x as number, y: ar.y as number, z: ar.z as number };
+    out.anchorId = id;
   }
   return out;
 }

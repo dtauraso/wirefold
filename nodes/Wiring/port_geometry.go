@@ -17,18 +17,12 @@
 
 package Wiring
 
-// portGeom is one port's layout descriptor: its name, resolved side, and
-// optional snap slot (nil = auto-spaced along the side).
+import "math"
+
+// portGeom is one port's layout descriptor: its name and optional ring-anchor index.
 type portGeom struct {
-	Name string
-	Side string // "left" | "right" | "top" | "bottom"; "" → default by direction
-	Slot *int   // 0|1|2, or nil for auto-spacing
-	// Anchor is an optional continuous direction offset from the node center.
-	// When non-nil it OVERRIDES side+slot: the port direction is normalize(Anchor)
-	// and the port still sits on the sphere surface at nodeRadius in that direction
-	// (the magnitude is normalized; the drag in phase 2 constrains the anchor to the
-	// ring, and Go uses only the direction). nil → fall back to side+slot placement.
-	Anchor *vec3
+	Name     string
+	AnchorId *int // optional index into the flat ring-anchor array; nil → ring slot 0
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
@@ -119,16 +113,64 @@ func nodeWorldPos(g nodeGeom) vec3 {
 	}
 }
 
-// defaultSide returns the resolved side for a port given its direction, matching
-// `port.side ?? (isInput ? "left" : "right")` in portDir().
-func defaultSide(side string, isInput bool) string {
-	if side != "" {
-		return side
+// Ring-anchor geometry constants. These are Go-local until the TS side adopts them.
+// d = anchor diameter, p = padding between anchors along the circumference.
+const (
+	ringAnchorDiameter = 8.0 // port anchor circle diameter (pixels)
+	ringAnchorPadding  = 2.0 // gap between adjacent anchors along the ring
+)
+
+// ringAnchorCount returns the number of evenly-spaced anchors that fit around a
+// node's ring given radius R: N = floor(2*pi*R / (d+p)), minimum 1.
+func ringAnchorCount(R float64) int {
+	pitch := ringAnchorDiameter + ringAnchorPadding
+	n := int(2 * math.Pi * R / pitch)
+	if n < 1 {
+		n = 1
 	}
-	if isInput {
-		return "left"
+	return n
+}
+
+// ringAnchorDir returns the unit direction (in the y-up, z-forward plane — the
+// same XY plane the side/slot directions live in) for anchor index i in a ring
+// of N evenly-spaced slots around a node of radius R. The angle for slot i is:
+//
+//	theta_i = i * 2*pi / N
+//
+// and maps to direction (cos theta_i, sin theta_i, 0) in the node-local XY plane.
+// i is taken mod N so out-of-range indices wrap safely.
+func ringAnchorDir(R float64, i int) vec3 {
+	N := ringAnchorCount(R)
+	i = ((i % N) + N) % N // safe mod
+	theta := float64(i) * 2 * math.Pi / float64(N)
+	return vec3{X: math.Cos(theta), Y: math.Sin(theta), Z: 0}
+}
+
+// snapToRingAnchorIndex returns the ring-anchor index (0..N-1) whose direction
+// best matches the given direction vector for a node of the given kind. The
+// winning index i maximises dot(normalize(dir), ringAnchorDir(R, i)). If dir is
+// the zero vector, 0 is returned as a safe default.
+func snapToRingAnchorIndex(kind string, dir vec3) int {
+	R := nodeRadius(kind)
+	N := ringAnchorCount(R)
+	nd := dir.normalize()
+	if nd.length() == 0 {
+		return 0
 	}
-	return "right"
+	best := -1
+	bestDot := -2.0
+	for i := 0; i < N; i++ {
+		d := ringAnchorDir(R, i)
+		dot := nd.X*d.X + nd.Y*d.Y + nd.Z*d.Z
+		if dot > bestDot {
+			bestDot = dot
+			best = i
+		}
+	}
+	if best < 0 {
+		return 0
+	}
+	return best
 }
 
 // portDir mirrors portDir() in geometry-helpers.ts: the unit direction (in the
@@ -151,68 +193,13 @@ func portDir(g nodeGeom, portName string, isInput bool) (vec3, bool) {
 	}
 	port := list[idx]
 
-	// Anchor override: a non-nil anchor gives a continuous direction from center.
-	// The port sits on the sphere surface (nodeRadius) in that direction — magnitude
-	// normalized — bypassing the side/slot computation entirely.
-	if port.Anchor != nil {
-		d := port.Anchor.normalize()
-		if d.length() == 0 {
-			// Degenerate anchor (zero vector): fall through to side/slot below.
-		} else {
-			return d, true
-		}
+	// AnchorId: index into the flat ring-anchor array. nil → ring slot 0 as default.
+	anchorIdx := 0
+	if port.AnchorId != nil {
+		anchorIdx = *port.AnchorId
 	}
-
-	side := defaultSide(port.Side, isInput)
-
-	// Ports sharing this resolved side, in list order.
-	var sameSide []portGeom
-	onSideIdx := -1
-	for _, p := range list {
-		if defaultSide(p.Side, isInput) == side {
-			if p.Name == port.Name {
-				onSideIdx = len(sameSide)
-			}
-			sameSide = append(sameSide, p)
-		}
-	}
-
-	var pct float64
-	if port.Slot != nil {
-		pct = slotPct(*port.Slot)
-	} else {
-		pct = float64(onSideIdx+1) * 100 / float64(len(sameSide)+1)
-	}
-
-	w, h := kindWidthHeight(g.Kind)
-	// Local border point offset from center (y-up): pct measured from top for
-	// left/right, from left for top/bottom.
-	var bx, by float64
-	switch side {
-	case "left":
-		bx, by = -w/2, h*(0.5-pct/100)
-	case "right":
-		bx, by = w/2, h*(0.5-pct/100)
-	case "top":
-		by, bx = h/2, w*(pct/100-0.5)
-	default: // bottom
-		by, bx = -h/2, w*(pct/100-0.5)
-	}
-	dir := vec3{X: bx, Y: by}
-	if dir.length() == 0 {
-		// Exact center fallback: cardinal by side.
-		switch side {
-		case "left":
-			dir = vec3{X: -1}
-		case "right":
-			dir = vec3{X: 1}
-		case "top":
-			dir = vec3{Y: 1}
-		default:
-			dir = vec3{Y: -1}
-		}
-	}
-	return dir.normalize(), true
+	R := nodeRadius(g.Kind)
+	return ringAnchorDir(R, anchorIdx), true
 }
 
 // portWorldPos returns the sphere-surface point in the port direction, or the

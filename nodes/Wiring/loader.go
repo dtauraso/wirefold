@@ -34,21 +34,10 @@ type specPosition struct {
 }
 
 // specPort mirrors the per-node inputs/outputs entries in topology.json.
-// Side/Slot drive port placement; they mirror Port.side / Port.slot in
-// tools/topology-vscode/src/schema/types.ts. Slot is a pointer so an absent
-// slot (auto-spacing) is distinguishable from slot 0.
+// AnchorId is the only placement field; side/slot/anchor have been removed.
 type specPort struct {
-	Name   string    `json:"name"`
-	Side   string    `json:"side,omitempty"`
-	Slot   *int      `json:"slot,omitempty"`
-	Anchor *specVec3 `json:"anchor,omitempty"` // optional continuous direction; overrides side+slot
-}
-
-// specVec3 mirrors the Port.anchor {x,y,z} shape in topology.json.
-type specVec3 struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-	Z float64 `json:"z"`
+	Name     string `json:"name"`
+	AnchorId *int   `json:"anchorId,omitempty"` // optional ring-anchor index (flat array); highest priority
 }
 
 // specNode mirrors the JSON node shape.
@@ -95,11 +84,7 @@ func (n specNode) toNodeGeom() nodeGeom {
 func specPortsToGeom(ports []specPort) []portGeom {
 	out := make([]portGeom, 0, len(ports))
 	for _, p := range ports {
-		pg := portGeom{Name: p.Name, Side: p.Side, Slot: p.Slot}
-		if p.Anchor != nil {
-			pg.Anchor = &vec3{X: p.Anchor.X, Y: p.Anchor.Y, Z: p.Anchor.Z}
-		}
-		out = append(out, pg)
+		out = append(out, portGeom{Name: p.Name, AnchorId: p.AnchorId})
 	}
 	return out
 }

@@ -106,13 +106,5 @@ func comparePortLists(t *testing.T, nodeID, dir string, a, b []specPort) {
 		if a[i].Name != b[i].Name {
 			t.Errorf("node %q %s[%d] name: %q vs %q", nodeID, dir, i, a[i].Name, b[i].Name)
 		}
-		if a[i].Side != b[i].Side {
-			t.Errorf("node %q %s[%d] side: %q vs %q", nodeID, dir, i, a[i].Side, b[i].Side)
-		}
-		as, bs := a[i].Slot, b[i].Slot
-		slotMismatch := (as == nil) != (bs == nil) || (as != nil && bs != nil && *as != *bs)
-		if slotMismatch {
-			t.Errorf("node %q %s[%d] slot mismatch", nodeID, dir, i)
-		}
 	}
 }

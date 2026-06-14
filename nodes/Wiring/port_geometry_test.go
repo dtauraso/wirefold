@@ -5,10 +5,8 @@ import (
 	"testing"
 )
 
-// refPortWorldPos is an independent reimplementation of the geometry-helpers.ts
-// portWorldPos algorithm, used to lock the production code's output. It mirrors
-// nodeWorldPos / nodeRadius / portDir line-for-line so a structural edit to the
-// production path that changes the result breaks this test.
+// refPortWorldPos is an independent reimplementation of the portWorldPos algorithm,
+// used to lock the production code's output. Now uses the ring path exclusively.
 func refPortWorldPos(kind string, x, y, z float64, ports []portGeom, name string, isInput bool) vec3 {
 	w, h := kindWidthHeight(kind)
 	cx := x + w/2
@@ -18,7 +16,6 @@ func refPortWorldPos(kind string, x, y, z float64, ports []portGeom, name string
 	if name == "" {
 		return center
 	}
-	// find port
 	idx := -1
 	for i, p := range ports {
 		if p.Name == name {
@@ -30,67 +27,13 @@ func refPortWorldPos(kind string, x, y, z float64, ports []portGeom, name string
 		return center
 	}
 	port := ports[idx]
-	side := port.Side
-	if side == "" {
-		if isInput {
-			side = "left"
-		} else {
-			side = "right"
-		}
+	anchorIdx := 0
+	if port.AnchorId != nil {
+		anchorIdx = *port.AnchorId
 	}
-	var same []portGeom
-	onSide := -1
-	for _, p := range ports {
-		ps := p.Side
-		if ps == "" {
-			if isInput {
-				ps = "left"
-			} else {
-				ps = "right"
-			}
-		}
-		if ps == side {
-			if p.Name == port.Name {
-				onSide = len(same)
-			}
-			same = append(same, p)
-		}
-	}
-	var pct float64
-	if port.Slot != nil {
-		pct = []float64{25, 50, 75}[*port.Slot]
-	} else {
-		pct = float64(onSide+1) * 100 / float64(len(same)+1)
-	}
-	var bx, by float64
-	switch side {
-	case "left":
-		bx, by = -w/2, h*(0.5-pct/100)
-	case "right":
-		bx, by = w/2, h*(0.5-pct/100)
-	case "top":
-		by, bx = h/2, w*(pct/100-0.5)
-	default:
-		by, bx = -h/2, w*(pct/100-0.5)
-	}
-	dir := vec3{bx, by, 0}
-	l := math.Sqrt(dir.X*dir.X + dir.Y*dir.Y + dir.Z*dir.Z)
-	if l == 0 {
-		switch side {
-		case "left":
-			dir = vec3{-1, 0, 0}
-		case "right":
-			dir = vec3{1, 0, 0}
-		case "top":
-			dir = vec3{0, 1, 0}
-		default:
-			dir = vec3{0, -1, 0}
-		}
-		l = 1
-	}
-	dir = vec3{dir.X / l, dir.Y / l, dir.Z / l}
-	r := nodeRadius(kind)
-	return vec3{center.X + dir.X*r, center.Y + dir.Y*r, center.Z + dir.Z*r}
+	R := nodeRadius(kind)
+	dir := ringAnchorDir(R, anchorIdx)
+	return vec3{center.X + dir.X*R, center.Y + dir.Y*R, center.Z + dir.Z*R}
 }
 
 // refChordLength is the reference chord-distance formula (straight-segment model):
@@ -109,15 +52,15 @@ func refChordLength(p0, p2 vec3) float64 {
 func almostEqual(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 
 func TestPortWorldPosMirrorsReference(t *testing.T) {
-	slot1 := 1
+	anchorId1 := 1
 	g := nodeGeom{
 		Kind: "HoldFlip",
 		Pos:  vec3{X: 100, Y: 200, Z: 30},
 		Inputs: []portGeom{
-			{Name: "In", Side: "left", Slot: &slot1},
-			{Name: "In2", Side: "bottom"},
+			{Name: "In", AnchorId: &anchorId1},
+			{Name: "In2"},
 		},
-		Outputs: []portGeom{{Name: "Out", Side: "top"}},
+		Outputs: []portGeom{{Name: "Out"}},
 	}
 	got := portWorldPos(g, "In", true)
 	want := refPortWorldPos(g.Kind, g.Pos.X, g.Pos.Y, g.Pos.Z, g.Inputs, "In", true)
@@ -127,7 +70,7 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 }
 
 func TestArcLengthBetweenPortsCases(t *testing.T) {
-	slot0, slot1, slot2 := 0, 1, 2
+	anchorId0, anchorId1, anchorId2 := 0, 1, 2
 	cases := []struct {
 		name string
 		src  nodeGeom
@@ -138,28 +81,28 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 		{
 			name: "input-to-holdflip-2d",
 			src: nodeGeom{Kind: "Input", Pos: vec3{X: 25, Y: 318},
-				Outputs: []portGeom{{Name: "ToHoldFlip", Side: "right", Slot: &slot1}}},
+				Outputs: []portGeom{{Name: "ToHoldFlip", AnchorId: &anchorId1}}},
 			srcH: "ToHoldFlip",
 			tgt: nodeGeom{Kind: "HoldFlip", Pos: vec3{X: 169, Y: 335},
-				Inputs: []portGeom{{Name: "In", Side: "left", Slot: &slot1}}},
+				Inputs: []portGeom{{Name: "In", AnchorId: &anchorId1}}},
 			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",
 			src: nodeGeom{Kind: "ChainInhibitor", Pos: vec3{X: 340, Y: 302, Z: 40},
-				Outputs: []portGeom{{Name: "ToNext0", Side: "bottom", Slot: &slot1}}},
+				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
 			tgt: nodeGeom{Kind: "ChainInhibitor", Pos: vec3{X: 327, Y: 356, Z: -25},
-				Inputs: []portGeom{{Name: "FromPrevChainInhibitorNode", Side: "top", Slot: &slot1}}},
+				Inputs: []portGeom{{Name: "FromPrevChainInhibitorNode", AnchorId: &anchorId1}}},
 			tgtH: "FromPrevChainInhibitorNode",
 		},
 		{
-			name: "slot0-and-slot2-with-z",
+			name: "anchorid0-and-anchorid2-with-z",
 			src: nodeGeom{Kind: "WindowAndGate", Pos: vec3{X: 225, Y: 333, Z: 12},
-				Outputs: []portGeom{{Name: "ToPassed", Side: "right", Slot: &slot0}}},
+				Outputs: []portGeom{{Name: "ToPassed", AnchorId: &anchorId0}}},
 			srcH: "ToPassed",
 			tgt: nodeGeom{Kind: "WindowAndGate", Pos: vec3{X: 500, Y: 100, Z: 90},
-				Inputs: []portGeom{{Name: "FromRight", Side: "right", Slot: &slot2}}},
+				Inputs: []portGeom{{Name: "FromRight", AnchorId: &anchorId2}}},
 			tgtH: "FromRight",
 		},
 	}
@@ -199,12 +142,9 @@ func TestChordLength(t *testing.T) {
 	}
 }
 
-// TestPortAnchorOverridesSideSlot verifies that a non-nil Anchor makes portDir
-// return normalize(anchor) (bypassing side+slot) and portWorldPos places the port
-// at center + normalize(anchor)*nodeRadius. Without an anchor the side+slot path is
-// unchanged. Uses a kind from the registry so dims/radius are well-defined.
-func TestPortAnchorOverridesSideSlot(t *testing.T) {
-	// Pick any registered kind for stable dims; geometry math is kind-agnostic.
+// TestPortAnchorIdRingPath verifies that AnchorId selects the correct ring slot and
+// that a nil AnchorId falls back to ring slot 0.
+func TestPortAnchorIdRingPath(t *testing.T) {
 	var kind string
 	for k := range kindDims {
 		kind = k
@@ -214,40 +154,40 @@ func TestPortAnchorOverridesSideSlot(t *testing.T) {
 		t.Skip("no kinds in kindDims")
 	}
 
-	anchor := vec3{X: 0, Y: 1, Z: 0} // straight up — top of the ring
+	anchorId1 := 1
 	g := nodeGeom{
-		Kind:   kind,
-		Pos:    vec3{X: 10, Y: 20, Z: 0},
-		Inputs: []portGeom{{Name: "In", Anchor: &anchor}},
-		Outputs: []portGeom{
-			{Name: "Out"}, // no anchor → side+slot path
-		},
+		Kind:    kind,
+		Pos:     vec3{X: 10, Y: 20, Z: 0},
+		Inputs:  []portGeom{{Name: "In", AnchorId: &anchorId1}},
+		Outputs: []portGeom{{Name: "Out"}}, // nil AnchorId → ring slot 0
 	}
 
-	// Anchored input: direction == normalize(anchor).
+	// Anchored input: direction == ringAnchorDir(R, 1)
+	R := nodeRadius(kind)
 	dir, ok := portDir(g, "In", true)
 	if !ok {
 		t.Fatal("portDir(In) not found")
 	}
-	want := anchor.normalize()
+	want := ringAnchorDir(R, 1)
 	if math.Abs(dir.X-want.X) > 1e-9 || math.Abs(dir.Y-want.Y) > 1e-9 || math.Abs(dir.Z-want.Z) > 1e-9 {
-		t.Fatalf("anchored portDir = %v, want normalize(anchor) %v", dir, want)
+		t.Fatalf("portDir(In, anchorId=1) = %v, want %v", dir, want)
 	}
 
-	// Anchored input world pos == center + dir*nodeRadius.
+	// Output with nil AnchorId → ring slot 0
+	dir0, ok := portDir(g, "Out", false)
+	if !ok {
+		t.Fatal("portDir(Out) not found")
+	}
+	want0 := ringAnchorDir(R, 0)
+	if math.Abs(dir0.X-want0.X) > 1e-9 || math.Abs(dir0.Y-want0.Y) > 1e-9 || math.Abs(dir0.Z-want0.Z) > 1e-9 {
+		t.Fatalf("portDir(Out, nil anchorId) = %v, want ring[0] %v", dir0, want0)
+	}
+
+	// World pos == center + dir*nodeRadius
 	center := nodeWorldPos(g)
-	wantPos := center.add(want.scale(nodeRadius(kind)))
+	wantPos := center.add(want.scale(R))
 	gotPos := portWorldPos(g, "In", true)
 	if math.Abs(gotPos.X-wantPos.X) > 1e-9 || math.Abs(gotPos.Y-wantPos.Y) > 1e-9 || math.Abs(gotPos.Z-wantPos.Z) > 1e-9 {
-		t.Fatalf("anchored portWorldPos = %v, want %v", gotPos, wantPos)
+		t.Fatalf("portWorldPos(In) = %v, want %v", gotPos, wantPos)
 	}
-
-	// Un-anchored output: matches the reference side+slot reimplementation.
-	refDir, _ := portDir(g, "Out", false)
-	refPos := refPortWorldPos(kind, g.Pos.X, g.Pos.Y, g.Pos.Z, g.Outputs, "Out", false)
-	gotOut := portWorldPos(g, "Out", false)
-	if math.Abs(gotOut.X-refPos.X) > 1e-9 || math.Abs(gotOut.Y-refPos.Y) > 1e-9 || math.Abs(gotOut.Z-refPos.Z) > 1e-9 {
-		t.Fatalf("un-anchored Out portWorldPos = %v, want side+slot ref %v", gotOut, refPos)
-	}
-	_ = refDir
 }

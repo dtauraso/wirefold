@@ -8,51 +8,35 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — branch `task/node-runs-own-edges` IN FLIGHT, NOT merged — full-fold COMPLETE)
+## State at handoff (2026-06-14 — branch `task/port-ring-anchors` IN FLIGHT, NOT merged — IMPLEMENTATION COMPLETE & VERIFIED)
 
-Context: `main` at `a6fc29ea`. This branch took the network from the multi-bead sustained train to ONE BEAD PER FIRE where each node DRIVES its own outbound bead(s) to delivery on ITS OWN goroutine — no train, no seq, no persistent flag, and now NO per-bead walker goroutine. The production bead path spawns zero goroutines; nodes drive synchronously on the one clock.
+Context: `main` at `e699cc17`. Branch `task/port-ring-anchors` redesigned node port PHYSICAL LAYOUT: replaced the directional `side`x`slot` grid (four independently-sized buckets) + ad-hoc free `anchor` vectors with ONE FLAT ARRAY of evenly-spaced ring anchors. A port is a single `anchorId` index into that array. Spec: docs/planning/visual-editor/port-ring-anchors-spec.html (6 tabs). All 5 implementation steps DONE; user confirmed it works in the editor.
 
-### What's DONE & VERIFIED
-- Emit collapsed to one bead (StartTrain/runTrain/trainSeq/lastAcceptedSeq/persistent all deleted; Recv is plain FIFO, no dedup).
-- All node kinds drive their own outbound beads: Input, HoldFlip, WindowAndGate via `Out.EmitOneDriven(ctx,v)`; ChainInhibitor (nodes 2 & 3) via place-all-then-`DriveAll` (concurrent fan-out 2→{3,5} + feedback 2→1); ReadGate via EmitOneDriven.
-- Per-bead walker (`launchWalkerLocked`) + dead non-driven methods (`placeBead`, `Send`, `SendDeliverOnly`, `TryPlace`, `Out.TryEmit`/`TrySend`/`EmitOne`) DELETED. `placeBeadNoWalker` + the driven loop (`DriveBeadsToDelivery`/`DriveBeadToDelivery`/`DriveAll`, per-frame `advanceBeadLocked`) survive.
-- `ReviseInFlightGeometry` keeps its arc/seg rebase but no longer relaunches walkers (driven loop re-reads live arc/seg each frame).
-- User confirmed the live network (nodes 1–5: 1→2→{3,5}, 3→4→5, 2→1 feedback ring) animates correctly after each stage. go build + go test -race green throughout (8 packages).
+### What's done & VERIFIED
+- One flat array per node: N = floor(2*pi*R/(d+p)) evenly-spaced anchors; R = nodeRadius (node size, per kind) so N varies by kind; d=8, p=2 (tunable consts in port_geometry.go). Anchor i at angle i*2pi/N (XY plane).
+- Per-port data: each topology port json is now `{ name, anchorId }` (side/slot/anchor removed). 14 ports migrated by snapping each port's old direction to the nearest ring index (distinct per node).
+- Go: nodes/Wiring/port_geometry.go portDir resolves ONLY via the ring (ringAnchorCount/ringAnchorDir/nodeRadius/snapToRingAnchorIndex). The old side/slot/anchor branch + specPort.Side/Slot/Anchor + CurveParamSlotPct0/1/2 are DELETED. specPort.AnchorId is *int (nil => index 0).
+- TS: schema (types.ts Port: anchorId, no side/slot/anchor), parser (parse-nodes-edges.ts: parses anchorId, slot-0|1|2 throw removed), render fallback (geometry-helpers.ts portDirLocal mirrors Go ring math). Authoritative geometry still Go-streamed; fallback pre-emit only.
+- Editing: dragging a port reuses the existing `port-anchor` edit op (parity: messages.ts / handle-message.ts / stdin_reader.go). TS unprojects the pointer to a world-space direction and sends it (no local geometry, no anchor naming); Go snaps it to the nearest ring anchor index (snapToRingAnchorIndex), writes port.AnchorId, clears old anchor, re-streams. Same shape as node-move. Fire-and-forget; bridge still 4 ops.
+- go build + go test -race green (7 pkgs); tsc clean; vitest at baseline (~67 pass + 1 pre-existing topology-data-paths failure re: missing nodes/4/data.json). Bridge/parity guards clean. User VERIFIED in editor: ports render at ring positions, network runs, drag snaps a port to a discrete anchor and the edge follows.
 
-### Key commits (this branch, oldest→newest, abbrev)
-bcbc34f8 spec; 70571cf8 node1 EmitOne; 7be25ae3 node2 EmitOne+drop persistent 2→5; (node3 persistent drop); 7fecc889 node4; 033bdba5 handoff; 3a940de0 collapse to one-bead (delete train+seq); f3cac3eb remove persistent plumbing; 671f2ad2 extract advanceBeadLocked; a539cdeb node1 driven (no walker); 2d73ead4 node2 concurrent driven; 3e0051bd one-goroutine fan-out drive; 461e5caa fix node2 serial-blocking (DriveAll); 9eb4099e node4 driven; 2d387d18 node5 driven; 88fd0dc readgate driven; 4bf000be DELETE walker + dead emit paths.
+### Commits (this branch, newest first)
+c955e09c remove dead side/slot/anchor path (ring is only model); 54ad71c7 port drag -> world target, Go snaps to anchorId; 7aecbf6a TS schema+parser+fallback on anchorId; c8dc95d3 migrate topology ports to anchorId; 52e65d49 Go ring geometry (additive). Plus the spec/handoff doc commits (b8fdabb2, d14fd2ae, 06c1b3f9, 011f26fc, e5b4f51f..da440dfc, 83a56f6f).
 
-### Warts / things to scrutinize (carry forward)
-- `PlaceAndDrive` / `PlaceAndDriveDeliverOnly` (paced_wire.go ~164): PUBLIC methods that spawn a goroutine, used ONLY by tests (replacing the old exported test-only SendDeliverOnly). Zero production callers. A test-only public goroutine-spawner — candidate to make package-private or restructure if it bothers you.
-- The walker-delete commit also added (production) `inflightBead.startedAt` + a deadline-cap on `minNext` in DriveBeadsToDelivery — added to keep geometry/anchor behavior equivalent when tests moved onto the shared driven loop. Reviewed and accepted; re-scrutinize if geometry-edit-during-flight looks off.
-- Tests run CHAN-MODE and do NOT exercise the synchronous paced drive loop — green tests do not prove runtime drive behavior. Editor eyeball is the real check for any drive change.
+### Optional cleanups (non-blocking)
+- Lint: unused test helper comparePortLists (loader_tree_test.go), an unused-const-set warning in curve_params.go (verify CurveParamSlotPct removal was complete), unused param isInput (port_geometry_test.go), a few modernization hints (max/range-over-int, tagged switch in stdin_reader.go). Cosmetic.
+- d/p (8/2) and R (nodeRadius) are tunable by eye in the editor if anchor spacing wants adjusting.
 
-### Open / next
-- Branch is a coherent, working, verified milestone — READY TO MERGE pending sign-off (run tools/strip-branch-local-docs.sh task/node-runs-own-edges first; the spec html node-edges-goroutine-spec.html is branch-local).
-- The general INPUT-vs-TIMER two-source wake was never needed: every node turned out sequential at the input level (feedback ring + anyOccupied/HasValue guards keep a node from accepting new input while its outbound bead is mid-drive). If a future topology has a node that CAN receive while driving, that wake must be designed (spec Open Q2/Q3 in node-edges-goroutine-spec.html).
+### Ready to merge
+Branch is a coherent, verified milestone. Before merge: run tools/strip-branch-local-docs.sh task/port-ring-anchors (NOTE: the spec html port-ring-anchors-spec.html is branch-local by convention but NOT frontmatter-tagged, so the script won't catch it — decide at merge whether the spec rides to main or is removed). Then --no-ff merge, push, delete branch.
 
-### Carry-forward facts
+### Carry-forward
+- GEOMETRY IS GO-OWNED: Go computes the ring + the snap; TS only unprojects the pointer (camera/input) and renders Go's stream.
+- SWARM CAUTION (this session): a background Agent dispatch fanned out into ~20 duplicate agents + a stray unrequested commit (reverted). Keep subagents FOREGROUND; spot-check git log before pushing.
+- IDE diagnostics were repeatedly STALE this session (phantom broken imports / unused funcs that were actually wired). Verify against `go build` / grep, not the diagnostic panel.
 
-- **Two bead trace kinds:** `node-bead` (interior, node-LOCAL offsets, children of the node group) and `edge-bead` (on-wire). Node geometry (center + radius + ports + interior beads) is Go-streamed; TS renders, computes none.
-- **`topology/` tree tracked normally**; **`topology/view/scene.json` gitignored** (camera/labels, reconstitutes to defaults when absent).
-- **Fading a load-bearing ring edge stalls the whole ring** (token dropped); unfade does NOT revive — restart re-seeds from node `1`'s Input init. EXPECTED model behavior.
-- **Node editing requires Go alive** (positions Go-authoritative): if Go is stopped/crashed, NO node moves until restart.
-- **Two-process editor:** extension-host changes need **Developer: Reload Window**; webview-only changes hot-reload on build (edges survive via geometry resend).
-- **Runner is a prebuilt binary**, not `go run .`: the editor spawns `<repoRoot>/.wirefold-cache/wirefold` (gitignored). Webview-only changes hot-reload via the bundle watcher; `.go` changes rebuild the binary via an eager `**/*.go` watcher. First launch after a fresh checkout does a one-time `go build`. Orphaned sims from crashed sessions are SIGKILLed on launch.
-- **Parser/message-kind + trace-kind parity in LOCKSTEP:** changing a TS↔Go message shape updates `messages.ts` parser AND the Go stdin-reader together. Guards: `check-message-kind-parity`, `check-trace-kind-parity`.
-- **A new edit op must be forwarded in THREE places:** `messages.ts`, `handle-message.ts` `case "edit"` per-op forward, and the Go `stdin_reader`.
-- **Subagent commit hygiene:** subagents have repeatedly swept incidental `topology.json` autosave churn into commits — instruct them to `git add` specific paths only, and spot-check net diffs before merge.
-- **React Flow is fully removed;** `RF`-named code was vestigial and retired.
-- **Bead-item chain rejected** (`project_wire_is_straight_line_not_chain`) — don't re-propose; O(N²) follow latency.
-- **Port slots are `0|1|2` per side** (top/bottom/left/right each hold at most 3 ports). The webview parser throws a `load-error` on slot 3+, blanking the whole diagram.
-- **Locality invariant:** one node must NOT affect another's timing. Do not reintroduce time-window recv gating or cross-node timing dependencies.
-- **Timing-as-distance is the design target:** per-node local durations expressed as distances at pulseSpeed off the one clock — human-speed + locality + one-button pause. Do NOT put this in MODEL.md.
-
-### Dev-loop
-
-- Go: `go build ./...` + `go test -race ./...`. TS (from `tools/topology-vscode/`): `npm run build` (rebuilds extension.js + webview.js) + `npx tsc --noEmit` + `npx vitest run`. Guards: `check-trace-kind-parity.sh`, `check-message-kind-parity`, `check-no-await-on-bridge.sh`, `check-ts-computes-no-geometry.sh`.
-- Exercise editor: **Developer: Reload Window** for extension-host changes; reopen file for webview-only.
-- No merge to main without explicit sign-off. Delete merged branches without re-asking.
+### Next step
+None required — feature complete & verified. Either merge (after strip-branch-local-docs + spec-rides-or-not decision) or do the optional lint cleanups first.
 
 ## ALWAYS clause
 
