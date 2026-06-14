@@ -162,7 +162,7 @@ func (g *Node) Update(ctx context.Context) {
 				t0Set = false
 				dwellSet = false
 				emitInputs()
-				g.ToPassed.TryEmit(result)
+				g.ToPassed.EmitOneDriven(ctx, result)
 				continue
 			}
 		}
