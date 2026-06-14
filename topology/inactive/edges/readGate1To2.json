@@ -1,1 +1,0 @@
-{"id":"readGate1To2","source":"readGate1","sourceHandle":"ToChainInhibitor","target":"2","targetHandle":"FromPrevChainInhibitorNode","kind":"chain","label":"readGate1To2","data":{"slots":1}}
