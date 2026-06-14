@@ -17,29 +17,34 @@ This branch `task/node-runs-own-edges` **REVERSES direction**: move the network 
 ### Commits on this branch (oldest → newest)
 
 - `bcbc34f8` docs(spec): `docs/planning/visual-editor/node-edges-goroutine-spec.html` — tabbed spec (Model, Was (train), Target, Invariants, Migration, Open Qs) for the one-bead/node-owned model; node-1-first rollout in Migration.
-- `70571cf8` feat: node 1 emits ONE bead per fire via new `Out.EmitOne` (`nodes/Wiring/ports.go`) instead of `TryEmit`→`StartTrain`. `EmitOne` calls `placeBeadSeq(v, placement, true)` — one bead, fresh seq, NO pacer/train; the walker still animates+delivers it. Both node-1 emit sites in `nodes/input/node.go` switched. `paced_wire.go` NOT edited. Verified: `go build` + `go test -race` green (all 10 pkgs); user confirmed it looks right in the editor (node 1 shows one bead, node 2 fires).
+- `70571cf8` feat: node 1 emits ONE bead per fire via new `Out.EmitOne` (`nodes/Wiring/ports.go`) instead of `TryEmit`→`StartTrain`. `EmitOne` calls `placeBeadSeq(v, placement, true)` — one bead, fresh seq, NO pacer/train; the walker still animates+delivers it. Both node-1 emit sites in `nodes/input/node.go` switched. `paced_wire.go` NOT edited.
+- `7be25ae3` feat: node 2 (ChainInhibitor) all outgoing emits → `EmitOne`; dropped persistent flag on 2→5.
+- (node 3, also ChainInhibitor) dropped persistent on 3→4 — Go emits already `EmitOne` via the shared kind.
+- `7fecc889` feat: node 4 (HoldFlip) emit → `EmitOne` (line 90); dropped persistent on 4→5.
 
-### What's done
+### What's done & VERIFIED
 
-- Spec committed; node 1 converted and verified.
+- Nodes 1–4 all emit ONE bead per fire via `Out.EmitOne` (one bead, fresh seq, no train pacer; walker still animates+delivers). Node 5 (WindowAndGate) is the sink — no outgoing edges, nothing to convert.
+- All three persistent flags removed (2→5, 3→4, 4→5).
+- User confirmed the full network works in the editor (one bead end-to-end across 1→2→5, 3→4→5, and the 2→1 feedback).
+- `go build` + `go test -race` green throughout. `paced_wire.go` NOT edited (read-only per constraint).
 
-### Hard constraints from this session (carry forward)
+### Hard constraints (carry forward)
 
-- **Do NOT edit `nodes/Wiring/paced_wire.go` yet** — read it for info only. Node-1's new behavior lives in `ports.go` (`EmitOne`) and `input/node.go`.
-- The wire is NOT a buffer/queue/FIFO holding beads — it is the arc geometry + position-over-time animation the source node runs before handing the one bead to the next node. Do not reintroduce slice/FIFO framing for the one-bead wires.
-- Target model: one bead, NO seq, NO count/occupancy check. BUT seq removal is DEFERRED — node 2 still receives node 1's bead through `PacedWire`'s existing `Recv` seq gate (inside `paced_wire.go`), so for now the one bead carries a fresh bumped seq to pass that gate. Full seq removal happens only when `paced_wire.go` is converted.
-- "Only the pacer (train) goroutine is removed" at this stage — the per-bead walker stays (it is the wire's animation). Folding the walker into the node goroutine is a later step.
-- Coexistence: nodes 2–5 stay on the train path (`StartTrain`); the `2→1` feedback wire (owned by node 2) is untouched. Convert outward one node at a time.
+- **`paced_wire.go` still UNEDITED** — the train apparatus (`StartTrain`/`runTrain` pacer, `trainSeq`, walker, `Recv` seq gate) is all still present, just no longer invoked by the emit path. `EmitOne` uses `placeBeadSeq(..., true)`: one bead + fresh seq + walker, no pacer.
+- The wire is the source node's arc-geometry + position-over-time animation before handing the one bead to the next node — NOT a buffer/FIFO. Don't reintroduce queue framing.
+- `seq` is still present (the bead carries a fresh bumped seq to pass `PacedWire`'s `Recv` gate). Full seq removal is part of the `paced_wire` conversion, not yet done.
 
-### Next step
+### Next step (the remaining phase)
 
-Convert node 2's outgoing emit the same way (one bead via `EmitOne`-style path), then 3, 4, 5 — one node per step, verify each. Eventually do the `paced_wire.go` conversion to remove seq + the walker and fold bead animation into the node's own goroutine (resolving spec Open Qs).
+- **`paced_wire.go` conversion** (previously deferred, now unblocked since nothing emits trains): remove the seq gate + the walker goroutine and fold the bead's position animation into the source node's own goroutine; then remove the now-dead train machinery (`StartTrain`/`runTrain`/`trainSeq`/persistent flag handling in `loader.go` + `wire-defs.ts`). This is where the true "one bead, no seq, node owns the animation" model lands. Resolve spec Open Qs (Q2 two-source wake, Q3 loop location) here.
+- Alternatively: this branch is in a coherent working state and could be merged as-is (emit path fully on one-bead) before tackling the deeper `paced_wire` conversion on a fresh branch.
 
-### Open questions (from the spec, unresolved)
+### Open questions (spec)
 
-- **Q2:** two-source wake — node goroutine waking on EITHER an input OR the earliest bead deadline (timer-as-channel vs wake-on-arm). Relevant once the walker folds into the node loop.
-- **Q3:** loop location — generic wrapper around every node's `Update()` vs inside each node kind.
-- **Q4/Q5:** fate of the just-merged `persistent` flag and `Occupied`/back-pressure once `paced_wire` is converted (both likely removed).
+- **Q2:** two-source wake (timer-as-channel vs wake-on-arm) — relevant when the walker folds into the node loop.
+- **Q3:** loop location — generic wrapper vs per-kind `Update()`.
+- Fate of persistent flag machinery (`loader.go`, `wire-defs.ts`) and `Occupied`/back-pressure once `paced_wire` is converted (both likely removed; persistent edge data already dropped).
 
 ### Carry-forward facts
 
