@@ -143,6 +143,7 @@
       <span class="eq-line">N = floor( C / (d + p) )</span>
     </div>
     <p>Where <code>R</code> = torus major radius (circle traced by the center of the tube around the node), <code>d</code> = port anchor diameter, <code>p</code> = small padding.</p>
+    <p>Ring capacity N scales with node size: because R is derived from each kind's <code>node_dims</code>, a larger node gets a larger ring and therefore more anchor ids. N varies by kind.</p>
     <p>N IS the capacity of the ring — a fixed list of visual anchor positions, each assigned an id (0..N-1). A per-node map <code>{ portName → anchorId }</code> places each named port (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …) onto one anchor id; unmapped ids are empty slots. Node logic addresses ports by name; the name resolves to an anchor id for rendering and edge attachment. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid.</p>
     <p class="note">Geometry is Go-owned — Go computes the N positions and streams them; TS renders, computes none.</p>
   </div>
@@ -153,14 +154,14 @@
         <tr><th>Symbol</th><th>Meaning</th><th>Value/source</th></tr>
       </thead>
       <tbody>
-        <tr><td><code>R</code></td><td>Torus major radius — radius of the circle traced by the tube center around the node</td><td>From node size / <code>nodeRadius</code> (<code>node_dims</code>) — TBD, see Open Qs</td></tr>
+        <tr><td><code>R</code></td><td>Torus major radius — radius of the circle traced by the tube center around the node</td><td>Derived from the node's size (<code>node_dims</code> per kind): larger node ⇒ larger ring ⇒ more anchors. N therefore varies by kind.</td></tr>
         <tr><td><code>C</code></td><td>Circumference: 2·π·R</td><td>Derived from R</td></tr>
         <tr><td><code>d</code></td><td>Port anchor diameter</td><td>PROPOSED 8 wu (= existing bead diameter), tunable</td></tr>
         <tr><td><code>p</code></td><td>Padding between anchors</td><td>PROPOSED 2 wu, tunable</td></tr>
         <tr><td><code>N</code></td><td>Number of evenly-spaced port positions: floor(C / (d + p))</td><td>Derived</td></tr>
       </tbody>
     </table>
-    <p class="note">d and p are proposed defaults pending confirmation (Open Q 2).</p>
+    <p class="note">d and p are tunable constants (defaults: d = 8 wu, p = 2 wu), adjusted by eye in the editor. The model N = floor(2·π·R / (d + p)) is parametric in d, p, and R.</p>
   </div>
 
   <div id="was" class="panel">
@@ -216,12 +217,12 @@
         <tr>
           <td>2</td>
           <td>Concrete values for d and p</td>
-          <td>Proposed: d = 8 wu (bead diameter), p = 2 wu; both tunable. Confirm.</td>
+          <td>RESOLVED — Not a design decision. d and p are tunable constants (defaults d = 8 wu, p = 2 wu), adjusted by eye in the editor. The model is parametric in d, p, R.</td>
         </tr>
         <tr>
           <td>3</td>
           <td>R source: is the torus major radius derived from each kind's node_dims (so N scales with node size), or a fixed torus radius for all nodes?</td>
-          <td>Affects whether different kinds have different N. Open.</td>
+          <td>RESOLVED — R is derived from node size (per-kind <code>node_dims</code>): larger node ⇒ larger ring ⇒ more anchors. N varies by kind. Not a single global radius.</td>
         </tr>
         <tr>
           <td>4</td>
