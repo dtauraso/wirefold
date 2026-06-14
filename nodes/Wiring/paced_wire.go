@@ -733,9 +733,15 @@ func (pw *PacedWire) InFlight() bool {
 
 // Occupied reports whether the wire is non-empty: a bead is in flight or a
 // delivered value is waiting to be read.
+// Persistent wires always carry beads by design; counting them as occupied
+// would stall senders indefinitely waiting for the wire to clear.
 func (pw *PacedWire) Occupied() bool {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
+	if pw.persistent {
+		return false // a persistent wire is intentionally always carrying beads;
+		// the sender must not block waiting for it to clear.
+	}
 	return len(pw.inflight) > 0 || len(pw.delivered) > 0
 }
 
