@@ -198,9 +198,9 @@
 
   <div id="interaction" class="panel">
     <div class="card">
-      <p>Old model = free-drag a port to any continuous angle around the torus. New model = SWITCH which discrete anchor id a port name occupies — snap between the N anchor ids, not slide.</p>
+      <p>Old model = free-drag a port to any continuous angle around the torus. New model = a port name occupies one of N discrete anchor ids — the result of a drag is that the port lands on a discrete id (not a continuous angle).</p>
     </div>
-    <p class="note">The drag gesture becomes a discrete reassign: switching an edge's port = changing that port name's <code>anchorId</code> in the <code>{ portName → anchorId }</code> map (no continuous angle). TS sends the drag; Go resolves it to the nearest ring anchor id. The bridge edit is an <code>update</code> op (no new message kind) carrying { nodeId, portName, anchorId }. Fire-and-forget.</p>
+    <p class="note">TS forwards the drag gesture and nothing else. TS does NOT compute the nearest anchor, does NOT preview a position, and does NOT reposition the port locally. Go resolves the gesture to the nearest anchor id, updates its <code>{ portName → anchorId }</code> map, and re-streams geometry; TS renders whatever Go streams, including the port's movement during the drag. There is no point where TS changes the port and doesn't tell Go — TS's only action is forwarding the gesture; all repositioning is Go re-streaming. The bridge edit is an <code>update</code> op (no new message kind) carrying { nodeId, portName, anchorId }, fire-and-forget. (CLAUDE.md drift rule: TS computes no geometry; Go owns it.)</p>
   </div>
 
   <div id="openqs" class="panel">
