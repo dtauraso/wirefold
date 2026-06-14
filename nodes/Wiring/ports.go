@@ -373,8 +373,70 @@ func (o *Out) WaitConsumed() bool {
 	return true
 }
 
+// DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
+// that drives several outbound edges on its OWN goroutine accumulates a set of
+// these (each carrying a SendWire trace already emitted at placement time) and
+// then drives them ALL concurrently in one DriveAll call, so the beads animate in
+// parallel rather than one blocking emit at a time. The zero value (placement
+// failed / chan mode) is inert and DriveAll skips it.
+type DriveItem struct {
+	item driveItem
+	live bool
+}
+
+// PlaceDriven places one bead on this Out WITHOUT spawning a walker, emits the
+// SendWire trace, and returns a DriveItem the caller drives later via DriveAll.
+// In chan mode (tests) it sends immediately (EmitOne) and returns an inert item,
+// so unit tests keep their synchronous chan semantics. A nil Out, or a failed
+// placement (faded/deleted), returns an inert item.
+func (o *Out) PlaceDriven(v int) DriveItem {
+	if o == nil {
+		return DriveItem{}
+	}
+	if o.pw != nil {
+		gen, ok := o.pw.placeBeadNoWalker(v, o.placement())
+		if !ok {
+			return DriveItem{}
+		}
+		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
+	}
+	// chan mode (tests): no drive needed, send now and return inert.
+	o.EmitOne(v)
+	return DriveItem{}
+}
+
+// DriveAll drives every live DriveItem to delivery in lockstep on the calling
+// goroutine — no extra goroutines, beads animate concurrently — and blocks until
+// all are delivered or ctx is canceled. Inert items (chan mode / failed placement)
+// are skipped. With an empty/all-inert set it returns immediately.
+func DriveAll(ctx context.Context, items []DriveItem) {
+	var live []driveItem
+	for _, di := range items {
+		if di.live {
+			live = append(live, di.item)
+		}
+	}
+	DriveBeadsToDelivery(ctx, live)
+}
+
 // OutMulti is a fanout port: a slice of Outs sharing one logical name.
 type OutMulti []*Out
+
+// PlaceDrivenAll places value v (no walker) on EVERY Out in the set, emitting the
+// SendWire trace for each, and appends a DriveItem per Out to dst. The caller
+// combines these with other ports' items and drives them together via DriveAll so
+// the whole fan-out animates concurrently. Chan-mode Outs send immediately and
+// contribute inert items.
+func (outs OutMulti) PlaceDrivenAll(v int, dst []DriveItem) []DriveItem {
+	for _, o := range outs {
+		if o == nil {
+			continue
+		}
+		dst = append(dst, o.PlaceDriven(v))
+	}
+	return dst
+}
 
 // EmitManyDriven places one bead on EVERY Out in the set WITHOUT spawning walker
 // goroutines, emits the SendWire trace for each, then drives ALL beads to delivery
@@ -382,24 +444,7 @@ type OutMulti []*Out
 // ctx is canceled. In chan mode (tests), falls back to EmitOne on each Out.
 // If the set is empty or all placements fail, returns immediately.
 func (outs OutMulti) EmitManyDriven(ctx context.Context, v int) {
-	var items []driveItem
-	for _, o := range outs {
-		if o == nil {
-			continue
-		}
-		if o.pw != nil {
-			gen, ok := o.pw.placeBeadNoWalker(v, o.placement())
-			if !ok {
-				continue
-			}
-			o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-			items = append(items, driveItem{pw: o.pw, gen: gen})
-		} else {
-			// chan mode (tests): no drive needed, use EmitOne fallback.
-			o.EmitOne(v)
-		}
-	}
-	DriveBeadsToDelivery(ctx, items)
+	DriveAll(ctx, outs.PlaceDrivenAll(v, nil))
 }
 
 // NewIn / NewOut are exported for tests that construct nodes directly
