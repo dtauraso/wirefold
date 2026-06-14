@@ -227,14 +227,8 @@ func (o *Out) TrySend(v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		// Emit the SendWire trace (the renderer animates from it) BEFORE the
-		// placement returns, then place the bead. Delivery is timed by Go's clock
-		// (o.SimLatencyMs is this edge's per-bead in-flight time), not by a TS
-		// "delivered" reply — Send returns once the bead is placed.
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		// A fire starts a clock-paced train on this Out (see PacedWire.StartTrain):
-		// the value is placed every beadSpacingMs for trainDurationMs, not just once.
-		o.pw.StartTrain(v, o.placement())
+		o.pw.placeBead(v, o.placement())
 		return true
 	}
 	if o.ch == nil {
@@ -258,13 +252,7 @@ func (o *Out) TryEmit(v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		// o.SimLatencyMs is this edge's per-bead in-flight time; the wire times
-		// delivery on Go's clock from it. The placement also carries this edge's
-		// curve so the wire streams the bead's position.
-		// A fire starts a clock-paced train on this Out (see PacedWire.StartTrain):
-		// the value is placed every beadSpacingMs for trainDurationMs, not just once.
-		// A faded/deleted wire places nothing — mirror TryPlace's drop (no trace).
-		if !o.pw.StartTrain(v, o.placement()) {
+		if !o.pw.placeBead(v, o.placement()) {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
@@ -282,17 +270,15 @@ func (o *Out) TryEmit(v int) bool {
 	}
 }
 
-// EmitOne places a single bead with a fresh train identity (bumpSeq=true) and
-// no pacer — the bead is delivered once, not repeated. It always succeeds
-// (no back-pressure check) and emits the same SendWire trace as TryEmit.
-// Use this when the caller controls its own pacing and needs exactly one bead
-// per call without starting a clock-paced train.
+// EmitOne places one bead; the wire times delivery on Go's clock. It always
+// succeeds (no back-pressure check) and emits the same SendWire trace as
+// TryEmit. Use this when the caller controls its own pacing.
 func (o *Out) EmitOne(v int) bool {
 	if o == nil {
 		return false
 	}
 	if o.pw != nil {
-		if !o.pw.placeBeadSeq(v, o.placement(), true) {
+		if !o.pw.placeBead(v, o.placement()) {
 			return false
 		}
 		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)

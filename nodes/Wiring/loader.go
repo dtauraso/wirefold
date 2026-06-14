@@ -243,9 +243,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			// edges feeding this destination port.
 			pw.MaxIncomingSimLatencyMs = simLatencyMs
 		}
-		if e.Persistent {
-			pw.persistent = true
-		}
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
