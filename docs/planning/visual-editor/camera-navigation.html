@@ -222,22 +222,22 @@
         <tr>
           <td><strong>Orbit</strong> (arcball rotate)</td>
           <td>Drag on empty space</td>
-          <td>Horizontal → world Y axis; vertical → world X axis. <code>ROT_SPEED = 0.005</code> rad/px. Pivot = selected node or screen-center on z=0.</td>
+          <td>Horizontal → world Y axis; vertical → world X axis. <code>ROT_SPEED = 0.005</code> rad/px. Pivots around the <strong>persistent target</strong> (selected node, or seeded scene-depth point).</td>
         </tr>
         <tr>
           <td><strong>Pan</strong></td>
           <td>Mouse wheel / two-finger scroll <em>without</em> Ctrl</td>
-          <td>Translates camera on the z=0 plane. World-space delta between plane point under cursor before and after scroll.</td>
+          <td>Slides the view: camera <em>and</em> target translate together along the camera right/up basis. Scale = distance to target (<code>worldPerPixel = 2·dist·tan(fov/2)/viewportHeight</code>). No z=0, no horizon-dependent scale.</td>
         </tr>
         <tr>
           <td><strong>Dolly</strong> (zoom)</td>
           <td>Wheel/pinch <em>with</em> Ctrl (or Cmd / trackpad pinch)</td>
-          <td><code>factor = Math.pow(1.01, e.deltaY)</code>. <code>deltaY &gt; 0</code> zooms out, <code>&lt; 0</code> zooms in.</td>
+          <td>Zooms toward the <strong>target</strong>: <code>offset = camPos − target</code> scaled by <code>1.01^deltaY</code>, clamped to a min distance so it never crosses the target. <code>deltaY &gt; 0</code> zooms out, <code>&lt; 0</code> zooms in.</td>
         </tr>
         <tr>
           <td><strong>Fit</strong> ("Home")</td>
           <td>Home button in <code>camera-ui.tsx</code></td>
-          <td>Frames all nodes, resets to square-on. No keyboard shortcut.</td>
+          <td>Frames all nodes square-on <em>and</em> sets the target to the framed scene center. No keyboard shortcut.</td>
         </tr>
         <tr>
           <td><strong>Roll</strong></td>
@@ -250,6 +250,13 @@
     <p class="note">
       The only modifier key is <strong>Ctrl / Cmd</strong> (on the wheel/pinch event) to
       switch pan → dolly. No other modifiers are used.
+    </p>
+    <p class="note">
+      Orbit / pan / dolly are all defined from <strong>(camera pose, persistent target)</strong> —
+      they never raycast the world z=0 plane. They are <strong>total</strong> operations: there is no
+      grazing / edge-on singularity to reach. The separate <code>unprojectToPlane</code> (z=0 raycast)
+      still exists, but only for <em>placing things on the layout</em> — node drag, port drag/anchor,
+      click-pick — never for camera gestures.
     </p>
 
     <!-- Input map diagram -->
@@ -282,7 +289,7 @@
         <line x1="320" y1="180" x2="420" y2="90" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3"/>
         <rect x="421" y="58" width="104" height="44" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1"/>
         <text x="473" y="77" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor" font-family="inherit">PAN</text>
-        <text x="473" y="91" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">2-finger scroll (no Ctrl)</text>
+        <text x="473" y="91" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">2-finger scroll · slides view</text>
 
         <!-- Ctrl+scroll pinch symbol -->
         <text x="320" y="230" text-anchor="middle" font-size="13" fill="var(--text-muted)" font-family="monospace">⌃ + scroll / pinch</text>
@@ -302,9 +309,9 @@
         <line x1="220" y1="269" x2="100" y2="260" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3"/>
         <rect x="10" y="246" width="88" height="44" rx="5" fill="var(--card-bg)" stroke="var(--border)" stroke-width="1"/>
         <text x="54" y="265" text-anchor="middle" font-size="10.5" font-weight="600" fill="currentColor" font-family="inherit">FIT</text>
-        <text x="54" y="279" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">Home button</text>
+        <text x="54" y="279" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">frames + sets target</text>
       </svg>
-      <div class="diagram-caption">Input map — gestures and their camera actions. Roll has no input binding today.</div>
+      <div class="diagram-caption">Input map — gestures and their camera actions. All gestures are defined from the persistent target, not a z=0 raycast. Roll has no input binding today.</div>
     </div>
 
     <h2>Gesture discrimination</h2>
@@ -346,6 +353,8 @@
         <span class="eq-line">Camera3D = {"{"}  position: [x, y, z],  quaternion: [x, y, z, w]  {"}"}</span>
       </div>
       <p class="note" style="margin:0">Six degrees of freedom captured as position + unit quaternion. No Euler angles — quaternion composition avoids gimbal lock during arcball rotation.</p>
+      <p style="margin:0.8rem 0 0">In addition to the persisted pose, the camera carries a <strong>persistent target</strong> — a maintained look-at / pivot point that is <strong>finite at all times</strong>. Orbit, pan, and dolly are defined purely from <strong>(pose, target)</strong>, which makes them <strong>total</strong> operations: no grazing / edge-on singularity is reachable. The target is set to the selected node when one is selected; otherwise it is seeded (when uninitialized) by projecting the scene center onto the camera's forward ray — a scene-depth point along the view direction.</p>
+      <p class="note" style="margin:0.6rem 0 0">The target is <strong>runtime-only</strong> for now — <em>not</em> yet persisted to <code>scene.json</code>; it is re-seeded on load.</p>
     </div>
 
     <!-- Arcball diagram -->
@@ -365,14 +374,10 @@
         <polygon points="464,200 452,195 452,205" fill="currentColor" opacity="0.4"/>
         <text x="462" y="216" font-size="11" fill="currentColor" opacity="0.6" font-family="inherit">World X</text>
 
-        <!-- z=0 plane hint -->
-        <ellipse cx="270" cy="200" rx="130" ry="28" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,4" fill="none" opacity="0.6"/>
-        <text x="408" y="236" font-size="10" fill="var(--text-muted)" font-family="inherit">z = 0 plane</text>
-
-        <!-- Pivot point -->
+        <!-- Target point -->
         <circle cx="270" cy="200" r="6" fill="var(--accent)" opacity="0.9"/>
-        <text x="280" y="196" font-size="10.5" font-weight="600" fill="var(--accent)" font-family="inherit">pivot</text>
-        <text x="280" y="210" font-size="9" fill="var(--text-muted)" font-family="inherit">(selected node or screen-center)</text>
+        <text x="280" y="196" font-size="10.5" font-weight="600" fill="var(--accent)" font-family="inherit">target</text>
+        <text x="280" y="210" font-size="9" fill="var(--text-muted)" font-family="inherit">(selection or seeded scene-depth point)</text>
 
         <!-- Camera arc around pivot (horizontal — world Y rotation) -->
         <path d="M 165,200 A 105,105 0 0 1 375,200" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6,3" fill="none" opacity="0.6"/>
@@ -400,11 +405,11 @@
         <text x="370" y="162" font-size="10.5" fill="#e65" font-family="inherit">rotate about World X</text>
 
         <!-- ROT_SPEED label -->
-        <text x="270" y="282" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">ROT_SPEED = 0.005 rad/px — pivot fixed for entire gesture</text>
+        <text x="270" y="282" text-anchor="middle" font-size="9.5" fill="var(--text-muted)" font-family="inherit">ROT_SPEED = 0.005 rad/px — target fixed for entire gesture</text>
       </svg>
       <div class="diagram-caption">
-        Arcball model — camera orbits around a fixed pivot on world-fixed X/Y axes.
-        Pivot is the selected node's world position, or screen-center projected to z=0 if nothing is selected.
+        Arcball model — camera orbits around the persistent target on world-fixed X/Y axes.
+        The target is the selected node's world position, or a seeded scene-depth point along the view direction when nothing is selected.
       </div>
     </div>
   </div>
@@ -420,7 +425,7 @@
         <svg width="220" height="200" viewBox="0 0 220 200" fill="none" xmlns="http://www.w3.org/2000/svg">
           <!-- Pivot -->
           <circle cx="110" cy="120" r="5" fill="var(--accent)"/>
-          <text x="110" y="145" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">pivot</text>
+          <text x="110" y="145" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">target</text>
 
           <!-- Arc -->
           <path d="M 30,120 A 80,80 0 0 1 190,120" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5,3" fill="none"/>
@@ -446,7 +451,7 @@
           <text x="110" y="40" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">drag empty space</text>
         </svg>
         <div class="diagram-caption">
-          Arcball rotate — camera arcs around fixed pivot.<br>
+          Arcball rotate — camera arcs around the persistent target.<br>
           <code>ROT_SPEED = 0.005 rad/px</code>
         </div>
       </div>
@@ -460,29 +465,33 @@
             </marker>
           </defs>
 
-          <!-- z=0 plane -->
-          <ellipse cx="110" cy="150" rx="90" ry="20" stroke="var(--border)" stroke-width="1.2" stroke-dasharray="4,3" fill="none"/>
-          <text x="110" y="178" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">z = 0 plane</text>
+          <!-- Target before -->
+          <circle cx="59" cy="150" r="4" fill="#5a9"/>
+          <!-- Target after -->
+          <circle cx="149" cy="150" r="4" fill="#5a9"/>
+          <text x="104" y="178" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">target moves with camera</text>
 
           <!-- Camera before -->
           <rect x="50" y="88" width="18" height="13" rx="2" stroke="#5a9" stroke-width="1.5" fill="var(--card-bg)"/>
           <polygon points="68,90 76,87 76,101 68,99" fill="var(--card-bg)" stroke="#5a9" stroke-width="1.2"/>
-          <line x1="59" y1="101" x2="59" y2="148" stroke="#5a9" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
+          <line x1="59" y1="101" x2="59" y2="146" stroke="#5a9" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
 
           <!-- Camera after -->
           <rect x="140" y="88" width="18" height="13" rx="2" stroke="#5a9" stroke-width="1.5" fill="var(--card-bg)"/>
           <polygon points="158,90 166,87 166,101 158,99" fill="var(--card-bg)" stroke="#5a9" stroke-width="1.2"/>
-          <line x1="149" y1="101" x2="149" y2="148" stroke="#5a9" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
+          <line x1="149" y1="101" x2="149" y2="146" stroke="#5a9" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
 
           <!-- Arrow between cameras -->
           <line x1="85" y1="94" x2="133" y2="94" stroke="#5a9" stroke-width="2" marker-end="url(#arrow-pan)"/>
+          <!-- Arrow between targets -->
+          <line x1="68" y1="150" x2="140" y2="150" stroke="#5a9" stroke-width="2" marker-end="url(#arrow-pan)"/>
 
           <text x="110" y="25" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="inherit">PAN</text>
           <text x="110" y="40" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">scroll without Ctrl</text>
-          <text x="110" y="76" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">camera slides on z=0 plane</text>
+          <text x="110" y="76" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">camera + target slide on view plane</text>
         </svg>
         <div class="diagram-caption">
-          Pan — camera translates parallel to z=0.<br>World-space delta under cursor before/after scroll.
+          Pan — camera and target slide together on the camera right/up basis.<br>Scale = distance to target (no z=0).
         </div>
       </div>
 
@@ -498,9 +507,10 @@
             </marker>
           </defs>
 
-          <!-- Target node placeholder -->
+          <!-- Target -->
           <circle cx="110" cy="148" r="12" fill="none" stroke="var(--border)" stroke-width="2"/>
-          <text x="110" y="152" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">scene</text>
+          <circle cx="110" cy="148" r="4" fill="var(--accent)"/>
+          <text x="110" y="170" text-anchor="middle" font-size="9" fill="var(--text-muted)" font-family="inherit">target</text>
 
           <!-- View axis -->
           <line x1="110" y1="40" x2="110" y2="136" stroke="currentColor" stroke-width="1" stroke-dasharray="4,3" opacity="0.35"/>
@@ -520,11 +530,11 @@
           <text x="8" y="58" font-size="8.5" fill="#e8a" font-family="inherit">zoom out (+ΔY)</text>
 
           <text x="110" y="20" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="inherit">DOLLY</text>
-          <text x="110" y="180" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">Ctrl/Cmd + scroll or trackpad pinch</text>
+          <text x="110" y="190" text-anchor="middle" font-size="8.5" fill="var(--text-muted)" font-family="inherit">Ctrl/Cmd + scroll or trackpad pinch</text>
         </svg>
         <div class="diagram-caption">
-          Dolly — camera moves along view axis.<br>
-          <code>factor = Math.pow(1.01, deltaY)</code> — exponential, base <code>1.01</code>.
+          Dolly — camera moves toward the target.<br>
+          <code>offset = (camPos − target)·1.01^deltaY</code>, clamped to a min distance (never crosses the target).
         </div>
       </div>
 
@@ -554,7 +564,13 @@
       <li>Derive the required camera distance from the bbox dimensions and the camera's <code>fov</code>.</li>
       <li>Apply <strong>1.2× padding</strong> factor so nodes aren't flush against the viewport edges.</li>
       <li>Reset to <strong>square-on</strong>: <code>cam.up = [0, 1, 0]</code>, <code>lookAt(center)</code> — zero roll, zero tilt. Quaternion is the identity for the look direction toward center.</li>
+      <li>Set the <strong>persistent target</strong> to the framed scene center, so subsequent orbit / pan / dolly pivot on the freshly-framed scene.</li>
     </ol>
+    <p class="note">
+      The target is <strong>runtime-only</strong> — it is <em>not</em> persisted to <code>scene.json</code> yet.
+      On load it is re-seeded from the scene center along the camera's forward ray. Only position +
+      quaternion round-trip through <code>scene.json</code>.
+    </p>
 
     <h2>Save / restore flow</h2>
 
@@ -624,6 +640,32 @@
 
   <!-- TAB 5: DESIGN -->
   <div id="design" class="panel">
+    <h2>Total operations, not a partial z=0 raycast</h2>
+    <p>
+      The <strong>old</strong> design derived each gesture's anchor by <strong>raycasting the world z=0 plane</strong>
+      under the cursor. That is a <strong>partial function</strong>: it is undefined when the view goes parallel to
+      the ground — the ray never intersects, or the intersection diverges as the view grazes edge-on. The result was
+      a reachable <strong>singularity</strong> (and the earlier "pan zooms / pan swings / direction reversed" symptoms).
+    </p>
+    <p>
+      The fix is <strong>representational</strong>: anchor every gesture on a camera-<strong>owned</strong>
+      <strong>target</strong> that is finite at all times. Orbit, pan, and dolly become <strong>total</strong> by
+      construction — the singularity is simply unrepresentable, because there is no plane intersection to diverge.
+    </p>
+    <p>This was chosen over two alternatives:</p>
+    <ul>
+      <li><strong>(a) Clamp the tilt</strong> so the view can never go parallel to the ground — <em>rejected</em>: full 6-DOF is <strong>substance</strong>, not a convenience to trade away.</li>
+      <li><strong>(b) A fallback band-aid</strong> when the raycast misses — <em>rejected</em>: it only masks the partial function instead of removing it.</li>
+    </ul>
+    <div class="card">
+      <p style="margin:0">
+        <strong>Industry note.</strong> OrbitControls, Blender, Maya, and CAD packages all carry a target point —
+        that is the robust part, and this project <strong>adopts the target</strong>. It does <strong>not</strong>
+        adopt OrbitControls' rotation constraints (turntable azimuth/elevation, locked up-vector, roll-clamp),
+        which it rejects: the arcball stays free 6-DOF.
+      </p>
+    </div>
+
     <h2>Why no OrbitControls</h2>
     <p>
       Interaction control is classified as <strong>substance</strong>, not medium (per project design memory).
@@ -631,7 +673,7 @@
     </p>
     <ul>
       <li><strong>Fixed up-vector</strong> — OrbitControls prevents roll by locking the up-axis, trading full 6-DOF for convenience. The wirefold editor needs all 6 degrees available.</li>
-      <li><strong>Constrained pivot</strong> — OrbitControls orbits around a single fixed target point. The custom controller picks the pivot per-gesture (selected node or screen-center on z=0), keeping the view framed on what the user is working on.</li>
+      <li><strong>Constrained rotation</strong> — OrbitControls couples its target to a turntable / locked-up rotation model. The custom controller carries a persistent target too, but orbits it with a free arcball (world-fixed X/Y quaternion composition), keeping full 6-DOF.</li>
       <li><strong>Roll reachability</strong> — the arcball math (quaternion composition from world-axis rotations) can naturally produce roll as a side effect of combined rotations. Roll is reachable in the math today; it simply has no dedicated input binding yet.</li>
     </ul>
 
@@ -659,19 +701,19 @@
           <td>Reachable in math; no input binding yet</td>
         </tr>
         <tr>
-          <td>Pivot</td>
-          <td>Fixed target (set once)</td>
-          <td>Per-gesture: selected node or screen-center on z=0</td>
+          <td>Pivot / target</td>
+          <td>Fixed target, turntable rotation</td>
+          <td>Persistent target (selection or seeded scene-depth point), free arcball rotation</td>
         </tr>
         <tr>
           <td>Pan</td>
           <td>Built-in, up-aligned</td>
-          <td>World-space z=0 plane delta under cursor</td>
+          <td>Camera + target slide on view plane; scale = distance to target</td>
         </tr>
         <tr>
           <td>Dolly</td>
           <td>Along view axis</td>
-          <td>Exponential (<code>1.01^deltaY</code>) along view axis</td>
+          <td>Exponential (<code>1.01^deltaY</code>) toward target, min-distance clamped</td>
         </tr>
         <tr>
           <td>6-DOF recoverable</td>
