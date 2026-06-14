@@ -187,19 +187,6 @@ func readPorts(dir string) ([]specPort, error) {
 	}
 
 	sort.Slice(ports, func(i, j int) bool {
-		si, sj := ports[i].Slot, ports[j].Slot
-		if si == nil && sj == nil {
-			return ports[i].Name < ports[j].Name
-		}
-		if si == nil {
-			return false
-		}
-		if sj == nil {
-			return true
-		}
-		if *si != *sj {
-			return *si < *sj
-		}
 		return ports[i].Name < ports[j].Name
 	})
 	return ports, nil

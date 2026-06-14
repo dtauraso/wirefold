@@ -64,7 +64,6 @@ func TestWritePortAnchorRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadTree: %v", err)
 	}
-	// Find a node with at least one input
 	var nodeID, portName string
 	for _, n := range spec.Nodes {
 		if len(n.Inputs) > 0 {
@@ -76,8 +75,8 @@ func TestWritePortAnchorRoundTrip(t *testing.T) {
 	if nodeID == "" {
 		t.Skip("no node with inputs in fixture")
 	}
-	anchor := &specVec3{X: 1.5, Y: 2.5, Z: 0}
-	p := specPort{Name: portName, Anchor: anchor}
+	anchorId := 3
+	p := specPort{Name: portName, AnchorId: &anchorId}
 	if err := writePort(root, nodeID, portName, true, p); err != nil {
 		t.Fatalf("writePort: %v", err)
 	}
@@ -89,11 +88,11 @@ func TestWritePortAnchorRoundTrip(t *testing.T) {
 		if n.ID == nodeID {
 			for _, inp := range n.Inputs {
 				if inp.Name == portName {
-					if inp.Anchor == nil {
-						t.Fatal("anchor is nil after write")
+					if inp.AnchorId == nil {
+						t.Fatal("anchorId is nil after write")
 					}
-					if inp.Anchor.X != anchor.X || inp.Anchor.Y != anchor.Y {
-						t.Errorf("anchor mismatch: got %+v want %+v", inp.Anchor, anchor)
+					if *inp.AnchorId != anchorId {
+						t.Errorf("anchorId mismatch: got %d want %d", *inp.AnchorId, anchorId)
 					}
 					return
 				}

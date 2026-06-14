@@ -74,7 +74,6 @@ func setPortAnchorId(g *nodeGeom, port string, isInput bool, anchorId int) bool 
 	for i := range list {
 		if list[i].Name == port {
 			list[i].AnchorId = &anchorId
-			list[i].Anchor = nil // AnchorId takes priority; clear free direction
 			return true
 		}
 	}

@@ -74,7 +74,7 @@ func TestRingAnchorDirWraps(t *testing.T) {
 }
 
 // TestPortDirAnchorIdPath verifies that a port with AnchorId set resolves via
-// the ring path, and a port with only Side/Slot still resolves via the old path.
+// the ring path.
 func TestPortDirAnchorIdPath(t *testing.T) {
 	kind := "Splitter" // any kind; we just need a stable radius
 	R := nodeRadius(kind)
@@ -86,11 +86,9 @@ func TestPortDirAnchorIdPath(t *testing.T) {
 		Pos:  vec3{},
 		Inputs: []portGeom{
 			{Name: "ring_port", AnchorId: &anchorIdx},
-			{Name: "side_port", Side: "left"},
 		},
 	}
 
-	// ring_port should return exactly ringAnchorDir(R, anchorIdx)
 	got, ok := portDir(g, "ring_port", true)
 	if !ok {
 		t.Fatal("portDir ring_port: not found")
@@ -98,14 +96,5 @@ func TestPortDirAnchorIdPath(t *testing.T) {
 	want := ringAnchorDir(R, anchorIdx)
 	if math.Abs(got.X-want.X) > 1e-9 || math.Abs(got.Y-want.Y) > 1e-9 || got.Z != want.Z {
 		t.Errorf("portDir(ring_port) = %v, want %v", got, want)
-	}
-
-	// side_port should resolve via side/slot (left side → X=-1 direction).
-	sidDir, ok := portDir(g, "side_port", true)
-	if !ok {
-		t.Fatal("portDir side_port: not found")
-	}
-	if sidDir.X >= 0 {
-		t.Errorf("side_port (left) X = %g, want negative", sidDir.X)
 	}
 }

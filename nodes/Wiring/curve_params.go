@@ -46,27 +46,6 @@ const (
 // (Math.min(width, height) / 4); port endpoints sit on this sphere surface.
 const CurveParamNodeRadiusDivisor = 4
 
-// CurveParamSlotPct0/1/2 are the percentage positions along a node side for
-// the three snap slots (0=25%, 1=50%, 2=75%).  Matches the SLOT_PCT table in
-// geometry-helpers.ts.  A port with no explicit slot is auto-spaced instead.
-const (
-	CurveParamSlotPct0 = 25
-	CurveParamSlotPct1 = 50
-	CurveParamSlotPct2 = 75
-)
-
-// slotPct returns the side-percentage for a snap slot index (0..2).
-func slotPct(slot int) float64 {
-	switch slot {
-	case 0:
-		return CurveParamSlotPct0
-	case 1:
-		return CurveParamSlotPct1
-	default:
-		return CurveParamSlotPct2
-	}
-}
-
 // vec3 is a minimal 3-D vector used by port-geometry math.
 type vec3 struct{ X, Y, Z float64 }
 

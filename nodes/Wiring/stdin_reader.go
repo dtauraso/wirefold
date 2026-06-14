@@ -256,7 +256,6 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 				_ = json.Unmarshal(raw, &p)
 			}
 			p.Name = msg.Port
-			p.Anchor = nil // clear free direction; AnchorId takes highest priority
 			p.AnchorId = &anchorId
 			_ = writePort(treeRoot, msg.Node, msg.Port, msg.IsInput, p)
 		}

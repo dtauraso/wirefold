@@ -19,22 +19,10 @@ package Wiring
 
 import "math"
 
-// portGeom is one port's layout descriptor: its name, resolved side, and
-// optional snap slot (nil = auto-spaced along the side).
+// portGeom is one port's layout descriptor: its name and optional ring-anchor index.
 type portGeom struct {
-	Name string
-	Side string // "left" | "right" | "top" | "bottom"; "" → default by direction
-	Slot *int   // 0|1|2, or nil for auto-spacing
-	// Anchor is an optional continuous direction offset from the node center.
-	// When non-nil it OVERRIDES side+slot: the port direction is normalize(Anchor)
-	// and the port still sits on the sphere surface at nodeRadius in that direction
-	// (the magnitude is normalized; the drag in phase 2 constrains the anchor to the
-	// ring, and Go uses only the direction). nil → fall back to side+slot placement.
-	Anchor *vec3
-	// AnchorId is an optional index into the flat ring-anchor array. When non-nil it
-	// takes HIGHEST priority over Anchor and side+slot. The ring has N evenly-spaced
-	// slots computed from the node's radius (see ringAnchorDir). nil → fall through.
-	AnchorId *int
+	Name     string
+	AnchorId *int // optional index into the flat ring-anchor array; nil → ring slot 0
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
@@ -125,18 +113,6 @@ func nodeWorldPos(g nodeGeom) vec3 {
 	}
 }
 
-// defaultSide returns the resolved side for a port given its direction, matching
-// `port.side ?? (isInput ? "left" : "right")` in portDir().
-func defaultSide(side string, isInput bool) string {
-	if side != "" {
-		return side
-	}
-	if isInput {
-		return "left"
-	}
-	return "right"
-}
-
 // Ring-anchor geometry constants. These are Go-local until the TS side adopts them.
 // d = anchor diameter, p = padding between anchors along the circumference.
 const (
@@ -217,76 +193,13 @@ func portDir(g nodeGeom, portName string, isInput bool) (vec3, bool) {
 	}
 	port := list[idx]
 
-	// AnchorId (highest priority): index into the flat ring-anchor array. The ring
-	// has N evenly-spaced slots sized from the node radius; this bypasses both the
-	// Anchor direction and the side/slot computation.
+	// AnchorId: index into the flat ring-anchor array. nil → ring slot 0 as default.
+	anchorIdx := 0
 	if port.AnchorId != nil {
-		R := nodeRadius(g.Kind)
-		return ringAnchorDir(R, *port.AnchorId), true
+		anchorIdx = *port.AnchorId
 	}
-
-	// Anchor override: a non-nil anchor gives a continuous direction from center.
-	// The port sits on the sphere surface (nodeRadius) in that direction — magnitude
-	// normalized — bypassing the side/slot computation entirely.
-	if port.Anchor != nil {
-		d := port.Anchor.normalize()
-		if d.length() == 0 {
-			// Degenerate anchor (zero vector): fall through to side/slot below.
-		} else {
-			return d, true
-		}
-	}
-
-	side := defaultSide(port.Side, isInput)
-
-	// Ports sharing this resolved side, in list order.
-	var sameSide []portGeom
-	onSideIdx := -1
-	for _, p := range list {
-		if defaultSide(p.Side, isInput) == side {
-			if p.Name == port.Name {
-				onSideIdx = len(sameSide)
-			}
-			sameSide = append(sameSide, p)
-		}
-	}
-
-	var pct float64
-	if port.Slot != nil {
-		pct = slotPct(*port.Slot)
-	} else {
-		pct = float64(onSideIdx+1) * 100 / float64(len(sameSide)+1)
-	}
-
-	w, h := kindWidthHeight(g.Kind)
-	// Local border point offset from center (y-up): pct measured from top for
-	// left/right, from left for top/bottom.
-	var bx, by float64
-	switch side {
-	case "left":
-		bx, by = -w/2, h*(0.5-pct/100)
-	case "right":
-		bx, by = w/2, h*(0.5-pct/100)
-	case "top":
-		by, bx = h/2, w*(pct/100-0.5)
-	default: // bottom
-		by, bx = -h/2, w*(pct/100-0.5)
-	}
-	dir := vec3{X: bx, Y: by}
-	if dir.length() == 0 {
-		// Exact center fallback: cardinal by side.
-		switch side {
-		case "left":
-			dir = vec3{X: -1}
-		case "right":
-			dir = vec3{X: 1}
-		case "top":
-			dir = vec3{Y: 1}
-		default:
-			dir = vec3{Y: -1}
-		}
-	}
-	return dir.normalize(), true
+	R := nodeRadius(g.Kind)
+	return ringAnchorDir(R, anchorIdx), true
 }
 
 // portWorldPos returns the sphere-surface point in the port direction, or the
