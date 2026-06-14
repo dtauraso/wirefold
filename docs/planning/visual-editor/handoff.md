@@ -12,7 +12,7 @@ needed) and proceed.
 
 Branch `task/sustained-bead-train`, **not merged**. `main` is at `0c25f1bf`. This branch
 builds a **sustained bead train** feature — a foundational change to the wire/send/recv
-model. **NOT ready to merge** (foundational change with known open issues below).
+model. **NOT ready to merge** (open optional cleanups below; all known blocking issues resolved).
 
 ### Commits (oldest → newest)
 
@@ -37,35 +37,34 @@ model. **NOT ready to merge** (foundational change with known open issues below)
   do NOT re-add to MODEL.md).
 - `bf0d74bd` `docs/planning/visual-editor/timing-spec.html` — tabbed timing-model reference
   (Model, Constants, Timers-current, Target-distance, Node-processing).
+- `144541c7` docs(timing): one-clock language; drop node-processing-distance direction (timing-spec.html).
+- `9551cc89` docs(timing): uniform pause-aware ✅ cells in timers table.
+- `9d75d8f9` fix(windowandgate): fixed 120wu (~3000ms) coincidence window — decoupled from wire latency; node 5 now fires reliably (was issue #2). VERIFIED via headless trace (node 5 fires on left+right coincidence, ToPassed=1).
+- `6014b68b` fix(nodes): poll loops (windowandgate/readgate/holdflip) park on the one clock via injected `WaitUntil` closure — pause-aware, not wall-clock `time.After` (was issue #3).
+- `891c6f8c` fix(wire): receiver dedups by per-train seq, not time window — removes the `recvGate==trainDuration` cross-node timing coupling (the core locality fix). `recvGateMs`/`RecvGateMs` deleted. `inflightBead` gains `seq`; `PacedWire` gains `trainSeq` + `lastAcceptedSeq`; `delivered` is now `[]deliveredBead{val,seq}`; Recv/PollRecv accept iff `b.seq > lastAcceptedSeq`. VERIFIED via headless trace: 90-bead train → 18 recv accepts (~5:1 collapse), node 5 fires once per complete coincidence, build + `-race` tests green across Wiring/windowandgate/readgate/holdflip/input.
 
 ### What works
 
-Nodes 1,2,3,4 emit uniform trains and process correctly; the recv-gate collapses each
-incoming train to one fire (nodes 2/3/4 verified by user); window/dwell are pause-aware.
+All three previously-open blocking issues are resolved:
 
-### Open issues (all must respect locality — fix LOCALLY per node, NOT via shared/global constants)
+- **Issue #2 (node 5 never fires) — RESOLVED.** `windowWu=120` (~3000ms fixed span, like a neuron membrane time constant) decoupled from wire latency. Window opens on first input and lasts a fixed distance; both inputs within window → AND output, else erase.
+- **Issue #3 (poll loops not pause-aware) — RESOLVED.** All poll loops (windowandgate/readgate/holdflip) now park on the one clock via injected `WaitUntil`; no wall-clock `time.After` remains in node poll paths.
+- **Locality invariant enforced (was root cause of issue #2).** The `recvGate==trainDuration` coupling was one node affecting another's timing — a locality violation. Train-seq identity dedup fixes it structurally: receiver accepts a bead iff its `seq` exceeds `lastAcceptedSeq` (first of each train accepted; rest dropped). No time window, no cross-node coupling.
 
-1. **Cadence slow (~10–40 s/cycle):** three ~2 s delays stack per hop (wire latency +
-   `recvGate` 2000 + train 2000). Speeding up must be PER-NODE, not by lowering the global
-   `trainDurationMs`/`recvGateMs` (those couple all nodes).
-2. **Node 5 (`WindowAndGate`) never fires:** its coincidence window mis-phases — opens on a
-   stale `FromLeft` and clears ~8 ms before the matching `FromRight` lands (inputs arrived
-   67 ms apart but the window had just cleared). `FromRight` also lags via the longer path
-   (2→3→4→5). Local to node 5.
-3. **`WindowAndGate` poll loop (`node.go:170`)** still uses wall-clock
-   `time.After(pollInterval=5ms)` — not pause-aware; the window/dwell CHECKS are pause-aware,
-   only the poll wake isn't. Minor; convert to read the one clock.
+Nodes 1–5 emit uniform trains and process correctly. Node 5 (`WindowAndGate`) fires reliably on coincident left+right inputs.
 
-### Active design direction (reference = `timing-spec.html`, NOT MODEL.md — user removed the MODEL.md version)
+### Clock and timing model (authoritative — `timing-spec.html`, NOT MODEL.md)
 
-- **Time = distance ÷ one `pulseSpeed` (0.04 wu/ms).** Each node AND wire is its own
-  independent goroutine with its OWN local timing distance. Human speed = every distance
-  advances at the same pulseSpeed. Play/pause = one button freezing all per-node timers (the
-  one shared clock — the ONLY shared timing).
-- **Free-floating ms timers** (dwell 800, poll 5, train 2000, recvGate 2000) should become
-  DISTANCES at pulseSpeed (e.g. dwell 32 wu, train 80 wu, spacing 16 wu, recvGate 80 wu) read
-  off the active-elapsed clock — human-speed AND pausing together. (`timing-spec.html`
-  "Target (distance)" tab.)
+- **ONE human-speed clock.** Everything reads it. There is no "sim clock" or "pacer clock" — do not introduce that language.
+- **Node processing is INSTANT** and stays so. The per-node `processingDistance` direction was **DROPPED this session** — do not re-add.
+- **`WindowAndGate` model (user-stated):** window opens on first input, lasts a FIXED span (`windowWu=120`, ~3000ms at pulseSpeed). This is a fixed per-node distance, like a neuron membrane time constant — NOT derived from wire latency. Both inputs within window → AND output; else erase. ~3000ms sits ~97% of the way to the ~3104ms input cadence (~100ms headroom); cross-tick pairing possible but currently yields 0 (benign). Dropping to 80wu would restore margin if wanted.
+- **Cadence (old issue #1) reframed:** not a code bug primarily. Measured per-hop = wire travel (arcLength/pulseSpeed, 0.5–1.7s/hop on the user's long experiment wires) dominates. The 2s `recvGate` floor is now gone (recvGate removed). To speed up: shorten wires (editor, user's lever) and/or make `trainDuration` a per-node distance (now safe since no receiver depends on it).
+
+### Open / optional (none blocking)
+
+1. **`trainDuration` could become a per-node distance** — now safe since no receiver depends on it. Only if per-node train speeds are wanted.
+2. **Free-floating-ms → distance refactor** (dwell 800=32wu, train 2000=80wu, spacing 400=16wu, poll 5ms) — behavior-preserving cleanup; user deprioritized it (no visual change). `windowWu` and `fireDwell` already converted where touched.
+
 ### Uncommitted (intentionally left)
 
 Topology layout autosaves — `topology/view/nodes/{2,3,4,5}.json` and
@@ -108,10 +107,14 @@ Topology layout autosaves — `topology/view/nodes/{2,3,4,5}.json` and
   The webview parser (`parse-nodes-edges.ts`) throws a `load-error` on slot 3+, which blanks
   the whole diagram (chrome renders, graph does not; Fit does nothing). Surfaces in
   `.probe/ts-errors.jsonl` as `spec.nodes[N].outputs[M].slot: expected 0|1|2, got 3`.
-- **Sustained-train model:** a fire emits a 2s/400ms train (multi-bead wire); the receiver
-  clock-gates Recv so a train collapses to ONE fire (`recvGateMs` window). Sends are
-  fire-and-forget (consume-gates stripped). All on the one active-elapsed clock (pauses
-  cleanly).
+- **Sustained-train model (updated):** a fire emits a 2s/400ms train (multi-bead wire); the
+  receiver deduplicates by per-train seq (`b.seq > lastAcceptedSeq`) so a train collapses to
+  ONE fire — no time window, no cross-node coupling. `recvGateMs`/`RecvGateMs` are **deleted**.
+  Sends are fire-and-forget (consume-gates stripped). All on the one active-elapsed clock
+  (pauses cleanly).
+- **Locality invariant:** one node must NOT affect another's timing. The old
+  `recvGate==trainDuration` coupling violated it. Train-seq identity dedup is the structural
+  fix — no shortcut. Do not reintroduce time-window recv gating.
 - **Timing-as-distance is the design target:** per-node local durations expressed as
   distances at pulseSpeed off the one clock — human-speed + locality + one-button pause.
   Reference: `timing-spec.html`. Do NOT put this in MODEL.md (user reverted that).
