@@ -53,25 +53,28 @@ type moveMsg struct {
 	X, Y, Z float64
 	Faded   bool
 	// Anchor payload (Kind == "anchor"): identify the port whose anchor changed.
-	// Port/IsInput name the port on NodeID; Anchor is the new direction offset.
-	Port    string
-	IsInput bool
-	Anchor  vec3
-	ack     chan struct{}
+	// Port/IsInput name the port on NodeID; AnchorId is the snapped ring-anchor index
+	// (Go snaps from the incoming world-space direction; TS never computes the index).
+	Port     string
+	IsInput  bool
+	AnchorId int
+	ack      chan struct{}
 }
 
-// setPortAnchor sets the Anchor on the named port within the given geom, returning
-// true if the port was found and mutated. The geom is mutated in place (its slice
-// elements are addressable). Used by both movers to apply an anchor update.
-func setPortAnchor(g *nodeGeom, port string, isInput bool, anchor vec3) bool {
+// setPortAnchorId sets the AnchorId on the named port within the given geom,
+// clearing any free-direction Anchor so AnchorId takes highest priority (matching
+// portDir's resolution order: AnchorId > Anchor > side/slot). Returns true if the
+// port was found and mutated. The geom is mutated in place (its slice elements are
+// addressable). Used by both movers to apply a snapped ring-anchor update.
+func setPortAnchorId(g *nodeGeom, port string, isInput bool, anchorId int) bool {
 	list := g.Outputs
 	if isInput {
 		list = g.Inputs
 	}
 	for i := range list {
 		if list[i].Name == port {
-			a := anchor
-			list[i].Anchor = &a
+			list[i].AnchorId = &anchorId
+			list[i].Anchor = nil // AnchorId takes priority; clear free direction
 			return true
 		}
 	}
@@ -97,9 +100,9 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindAnchor {
-		// Per-port anchor update: mutate this node's held port direction and re-emit
-		// node-geometry so the renderer redraws the port on its new ring position.
-		if !setPortAnchor(&m.geom, msg.Port, msg.IsInput, msg.Anchor) {
+		// Per-port anchor update: snap to ring-anchor index, mutate this node's held
+		// port AnchorId, and re-emit node-geometry so the renderer redraws the port.
+		if !setPortAnchorId(&m.geom, msg.Port, msg.IsInput, msg.AnchorId) {
 			return
 		}
 		if m.tr != nil {
@@ -178,11 +181,11 @@ func (m *edgeMover) handle(msg moveMsg) {
 		// Source endpoint is an OUTPUT (isInput==false); target endpoint is an INPUT.
 		switch {
 		case msg.NodeID == m.srcID && !msg.IsInput && msg.Port == m.srcH:
-			if !setPortAnchor(&m.srcGeom, msg.Port, false, msg.Anchor) {
+			if !setPortAnchorId(&m.srcGeom, msg.Port, false, msg.AnchorId) {
 				return
 			}
 		case msg.NodeID == m.dstID && msg.IsInput && msg.Port == m.dstH:
-			if !setPortAnchor(&m.dstGeom, msg.Port, true, msg.Anchor) {
+			if !setPortAnchorId(&m.dstGeom, msg.Port, true, msg.AnchorId) {
 				return
 			}
 		default:
@@ -347,5 +350,15 @@ func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
 // edge's per-edge in-flight time from the loaded geometry).
 func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
+}
+
+// NodeKind returns the kind string for the given node id, or "" if unknown.
+// Used by applyEdit to resolve the node's kind when snapping a port-anchor
+// world-space direction to the nearest ring-anchor index.
+func (md *MoveDispatch) NodeKind(nodeID string) string {
+	if nm, ok := md.nodeMovers[nodeID]; ok {
+		return nm.geom.Kind
+	}
+	return ""
 }
 

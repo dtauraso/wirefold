@@ -170,6 +170,33 @@ func ringAnchorDir(R float64, i int) vec3 {
 	return vec3{X: math.Cos(theta), Y: math.Sin(theta), Z: 0}
 }
 
+// snapToRingAnchorIndex returns the ring-anchor index (0..N-1) whose direction
+// best matches the given direction vector for a node of the given kind. The
+// winning index i maximises dot(normalize(dir), ringAnchorDir(R, i)). If dir is
+// the zero vector, 0 is returned as a safe default.
+func snapToRingAnchorIndex(kind string, dir vec3) int {
+	R := nodeRadius(kind)
+	N := ringAnchorCount(R)
+	nd := dir.normalize()
+	if nd.length() == 0 {
+		return 0
+	}
+	best := -1
+	bestDot := -2.0
+	for i := 0; i < N; i++ {
+		d := ringAnchorDir(R, i)
+		dot := nd.X*d.X + nd.Y*d.Y + nd.Z*d.Z
+		if dot > bestDot {
+			bestDot = dot
+			best = i
+		}
+	}
+	if best < 0 {
+		return 0
+	}
+	return best
+}
+
 // portDir mirrors portDir() in geometry-helpers.ts: the unit direction (in the
 // y-up frame, z=0) from node center toward the named port, derived from
 // side + slot/auto-spacing. Returns (zeroVec, false) if the port is not found.

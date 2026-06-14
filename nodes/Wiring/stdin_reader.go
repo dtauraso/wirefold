@@ -221,23 +221,27 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			}
 		}
 	case msg.Op == "port-anchor":
-		// Mail-sort an anchor update to the owning node + each incident edge inbox.
-		// Each owning goroutine mutates its OWN held port direction and re-emits/recomputes
-		// (node re-streams node-geometry; edges recompute segment/arc). No central recompute.
-		// Unknown keys are ignored (forward-compat).
+		// Mail-sort a snapped ring-anchor update to the owning node + each incident edge
+		// inbox. TS sends a world-space direction (anchor {x,y,z}) from node center to the
+		// pointer; Go snaps it to the nearest ring-anchor index and forwards AnchorId to
+		// each mover. Each owning goroutine sets AnchorId (clears free Anchor), re-emits/
+		// recomputes (node re-streams node-geometry; edges recompute segment/arc). No
+		// central recompute. Unknown keys are ignored (forward-compat).
 		if md == nil || msg.Node == "" || msg.Port == "" || msg.Anchor == nil || len(msg.Keys) == 0 {
 			return
 		}
 		tr.Breadcrumb("edit-port-anchor-recv", msg.Node, msg.Port, "")
-		a := vec3{X: msg.Anchor.X, Y: msg.Anchor.Y, Z: msg.Anchor.Z}
+		dir := vec3{X: msg.Anchor.X, Y: msg.Anchor.Y, Z: msg.Anchor.Z}
+		kind := md.NodeKind(msg.Node)
+		anchorId := snapToRingAnchorIndex(kind, dir)
 		for _, key := range msg.Keys {
 			if ch, ok := md.dispatch[key]; ok {
 				ch <- moveMsg{
-					Kind:    moveMsgKindAnchor,
-					NodeID:  msg.Node,
-					Port:    msg.Port,
-					IsInput: msg.IsInput,
-					Anchor:  a,
+					Kind:     moveMsgKindAnchor,
+					NodeID:   msg.Node,
+					Port:     msg.Port,
+					IsInput:  msg.IsInput,
+					AnchorId: anchorId,
 				}
 			}
 		}
@@ -252,8 +256,8 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 				_ = json.Unmarshal(raw, &p)
 			}
 			p.Name = msg.Port
-			anchor := specVec3{X: msg.Anchor.X, Y: msg.Anchor.Y, Z: msg.Anchor.Z}
-			p.Anchor = &anchor
+			p.Anchor = nil // clear free direction; AnchorId takes highest priority
+			p.AnchorId = &anchorId
 			_ = writePort(treeRoot, msg.Node, msg.Port, msg.IsInput, p)
 		}
 	case msg.Op == "fade":
