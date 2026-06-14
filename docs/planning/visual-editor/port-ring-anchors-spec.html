@@ -143,7 +143,7 @@
       <span class="eq-line">N = floor( C / (d + p) )</span>
     </div>
     <p>Where <code>R</code> = torus major radius (circle traced by the center of the tube around the node), <code>d</code> = port anchor diameter, <code>p</code> = small padding.</p>
-    <p>N IS the number of ports; positions are spaced evenly around the ring. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid.</p>
+    <p>N IS the capacity of the ring — a fixed list of visual anchor positions, each assigned an id (0..N-1). A per-node map <code>{ portName → anchorId }</code> places each named port (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …) onto one anchor id; unmapped ids are empty slots. Node logic addresses ports by name; the name resolves to an anchor id for rendering and edge attachment. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid.</p>
     <p class="note">Geometry is Go-owned — Go computes the N positions and streams them; TS renders, computes none.</p>
   </div>
 
@@ -185,20 +185,21 @@
   <div id="target" class="panel">
     <div class="card">
       <ul>
-        <li>Every node exposes N evenly-spaced port positions around its torus ring.</li>
-        <li>N is derived from geometry: <code>floor(C / (d + p))</code>.</li>
+        <li>Every node has a fixed list of N evenly-spaced visual anchor positions around its torus ring, each with an id (0..N-1). N is the capacity; it is derived from geometry: <code>floor(C / (d + p))</code>.</li>
+        <li>Ports are NAMED roles (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …). A per-node map <code>{ portName → anchorId }</code> assigns each named port to one anchor id. Unmapped ids are empty positions.</li>
+        <li>Node logic addresses ports by name; the name resolves to an anchor id for rendering and edge attachment.</li>
         <li>Positions are uniform across all instances of a node kind — no per-instance drift.</li>
-        <li>An edge attaches to one discrete position.</li>
+        <li>An edge attaches to the anchor id its port name maps to.</li>
       </ul>
     </div>
-    <p>Was: fixed 3-per-side grid + free anchors — New: one geometry-derived evenly-spaced ring.</p>
+    <p>Was: fixed 3-per-side grid + free anchors — New: one geometry-derived evenly-spaced ring of anchor ids with named ports mapped onto them.</p>
   </div>
 
   <div id="interaction" class="panel">
     <div class="card">
-      <p>Old model = free-drag a port to any continuous angle around the torus. New model = SWITCH which discrete evenly-spaced position an edge's port occupies — snap between the N positions, not slide.</p>
+      <p>Old model = free-drag a port to any continuous angle around the torus. New model = SWITCH which discrete anchor id a port name occupies — snap between the N anchor ids, not slide.</p>
     </div>
-    <p class="note">The drag gesture becomes a discrete reassign; the bridge edit op for port placement changes from a continuous anchor vector to a position index. Naming vs. index TBD pending Open Q 1 and Q 5.</p>
+    <p class="note">The drag gesture becomes a discrete reassign: switching an edge's port = changing that port name's <code>anchorId</code> in the <code>{ portName → anchorId }</code> map (no continuous angle). The bridge edit op carries the port name and its new <code>anchorId</code>. Message-shape design is still open (Q 5).</p>
   </div>
 
   <div id="openqs" class="panel">
@@ -210,7 +211,7 @@
         <tr>
           <td>1</td>
           <td>SEMANTIC IDENTITY: do the N ring positions keep named port roles, or become anonymous indexed positions?</td>
-          <td>(a) Ports keep names (FromLeft, ToNext0, FeedbackOut…); each role occupies one of the N positions; N is the capacity cap; node logic addresses ports by name; switching = move a role to a different ring slot. (b) Ports become pure positions 0..N-1; node logic addresses inputs/outputs by index/order; no names (e.g. WindowAndGate defines "left = lower index"). This affects Go node logic, not just rendering. UNANSWERED — blocks implementation.</td>
+          <td>RESOLVED — Model (a): named roles kept. Each node has a fixed list of N visual anchor ids (0..N-1); a per-node map <code>{ portName → anchorId }</code> places each named port. Node logic addresses ports by name; the name resolves to an anchor id. Switching = remap a port name to a different anchor id.</td>
         </tr>
         <tr>
           <td>2</td>
@@ -225,12 +226,12 @@
         <tr>
           <td>4</td>
           <td>If a node currently has fewer ports than N, are the extra positions empty/available, or is N exactly the port count (every position is a port)?</td>
-          <td>User stated "the number decides how many ports there are" — clarify whether N = capacity (some empty) or N = exact count. Open.</td>
+          <td>RESOLVED via Q1 — N is the CAPACITY (the list of anchor ids); a node's actual ports are the named ports mapped onto ids via <code>{ portName → anchorId }</code>; unmapped ids are empty positions. Not every id need be occupied.</td>
         </tr>
         <tr>
           <td>5</td>
-          <td>Editor bridge: the port-placement edit op changes from a continuous anchor to a discrete position switch — what does the TS→Go edit message carry (position index)?</td>
-          <td>Depends on Q1. Open.</td>
+          <td>Editor bridge: the port-placement edit op changes from a continuous anchor to a discrete position switch — what does the TS→Go edit message carry?</td>
+          <td>The TS→Go port-placement edit carries the port name and its new <code>anchorId</code> (the remap in <code>{ portName → anchorId }</code>). Final message-shape design still TBD. Open.</td>
         </tr>
       </tbody>
     </table>
