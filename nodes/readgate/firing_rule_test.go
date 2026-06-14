@@ -106,8 +106,8 @@ func send(t *testing.T, pw *Wiring.PacedWire, v int) {
 	clk := Wiring.NewFakeClock()
 	pw.SetClock(clk)
 	const inFlightMs = 10
-	if err := pw.SendDeliverOnly(ctx, v, inFlightMs); err != nil {
-		t.Fatalf("Send: %v", err)
+	if !pw.PlaceAndDriveDeliverOnly(ctx, v, inFlightMs) {
+		t.Fatal("PlaceAndDriveDeliverOnly returned false")
 	}
 	clk.Advance(inFlightMs * time.Millisecond)
 	// Wait for the clock-delivery goroutine to fill the slot.

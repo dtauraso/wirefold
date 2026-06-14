@@ -166,8 +166,8 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 	arc0 := inFlightMs * PulseSpeedWuPerMs
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "o"}
-	if !pw.TryPlace(11, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 11, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
 	// Advance to the half-way point: covered = arc0/2 ⇒ fraction t = 0.5.
@@ -211,8 +211,8 @@ func TestInFlightRederiveShrinkPreservesFraction(t *testing.T) {
 	arc0 := inFlightMs * PulseSpeedWuPerMs
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "o"}
-	if !pw.TryPlace(22, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 22, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
 	// Advance to half: fraction t = 0.5.
@@ -270,8 +270,8 @@ func TestDragDoesNotResetInFlightFraction(t *testing.T) {
 	arc0 := inFlightMs * PulseSpeedWuPerMs
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "s", Port: "o"}
-	if !pw.TryPlace(77, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 77, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
 	// Advance to ~half: fraction t ≈ 0.5.
@@ -380,8 +380,8 @@ func TestDeleteMidFlightCancels(t *testing.T) {
 	const inFlightMs = 50.0
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "src", Port: "out"}
-	if !pw.TryPlace(33, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 33, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
 	// Advance partway (bead in flight), then delete the edge mid-flight.
@@ -433,8 +433,8 @@ func TestDeleteAfterDeliveryNoCancel(t *testing.T) {
 	const inFlightMs = 50.0
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "src", Port: "out"}
-	if !pw.TryPlace(44, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 44, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 	clk.Advance(inFlightMs * time.Millisecond)
 	waitNotInFlight(t, pw)

@@ -234,9 +234,11 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 		t.Fatalf("expected first-hop in-flight time > 1ms, got %v", inFlightMs)
 	}
 
-	// Place a bead on the loaded wire with its own in-flight time.
-	if err := pw.SendDeliverOnly(ctx, 7, inFlightMs); err != nil {
-		t.Fatalf("Send: %v", err)
+	// Place a bead on the loaded wire with its own in-flight time and drive it
+	// to delivery on a background goroutine (the test-side stand-in for the
+	// per-node driven path).
+	if !pw.PlaceAndDriveDeliverOnly(ctx, 7, inFlightMs) {
+		t.Fatal("PlaceAndDriveDeliverOnly returned false")
 	}
 
 	// One whole millisecond short of the deadline: the bead must still be in flight.

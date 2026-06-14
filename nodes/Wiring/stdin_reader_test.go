@@ -30,8 +30,9 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 
 	// Place a bead with a 50ms in-flight time; delivery is timed by the clock.
 	const inFlightMs = 50
-	sendErr := make(chan error, 1)
-	go func() { sendErr <- pw.Send(ctx, 42, beadPlacement{InFlightMs: inFlightMs}) }()
+	if !placeAndDrive(pw, 42, beadPlacement{InFlightMs: inFlightMs}) {
+		t.Fatal("placeAndDrive returned false on fresh wire")
+	}
 	time.Sleep(10 * time.Millisecond)
 
 	// Feed a benign "edit" fade line. No bridge message delivers a bead — the
@@ -50,15 +51,6 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 		t.Fatalf("Recv: v=%v err=%v", v, err)
 	}
 	pw.Done()
-
-	select {
-	case err := <-sendErr:
-		if err != nil {
-			t.Fatalf("Send returned error: %v", err)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Send did not return after bead placement")
-	}
 	w.Close()
 }
 
@@ -96,8 +88,8 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 	const inFlightMs = 50.0
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{4, 0, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "src", Port: "out"}
-	if !pw.TryPlace(33, bp) {
-		t.Fatal("TryPlace rejected on fresh wire")
+	if !placeAndDrive(pw, 33, bp) {
+		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 	clk.Advance(20 * time.Millisecond)
 

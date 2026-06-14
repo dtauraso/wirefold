@@ -220,82 +220,6 @@ func (o *Out) Gated() bool {
 	return o.Rule != RuleFireAndForget
 }
 
-// TrySend in chan mode: non-blocking select. In paced mode: blocks until
-// the wire delivers the value or ctx is cancelled.
-func (o *Out) TrySend(v int) bool {
-	if o == nil {
-		return false
-	}
-	if o.pw != nil {
-		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		o.pw.placeBead(v, o.placement())
-		return true
-	}
-	if o.ch == nil {
-		return false
-	}
-	select {
-	case o.ch <- v:
-		o.trace.Send(o.node, o.port, v)
-		return true
-	default:
-		return false
-	}
-}
-
-// TryEmit is the fire-and-forget send: it places the bead non-blockingly and
-// drops it (returns false) if the wire is busy. On a successful placement it
-// emits the SendWire trace (so the pump animates it) and returns true. A dropped
-// bead produces NO trace — the placement happens first, the trace only on success.
-func (o *Out) TryEmit(v int) bool {
-	if o == nil {
-		return false
-	}
-	if o.pw != nil {
-		if !o.pw.placeBead(v, o.placement()) {
-			return false
-		}
-		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		return true
-	}
-	if o.ch == nil {
-		return false
-	}
-	select {
-	case o.ch <- v:
-		o.trace.Send(o.node, o.port, v)
-		return true
-	default:
-		return false
-	}
-}
-
-// EmitOne places one bead; the wire times delivery on Go's clock. It always
-// succeeds (no back-pressure check) and emits the same SendWire trace as
-// TryEmit. Use this when the caller controls its own pacing.
-func (o *Out) EmitOne(v int) bool {
-	if o == nil {
-		return false
-	}
-	if o.pw != nil {
-		if !o.pw.placeBead(v, o.placement()) {
-			return false
-		}
-		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-		return true
-	}
-	if o.ch == nil {
-		return false
-	}
-	select {
-	case o.ch <- v:
-		o.trace.Send(o.node, o.port, v)
-		return true
-	default:
-		return false
-	}
-}
-
 // EmitOneDriven places one bead WITHOUT spawning a walker goroutine, emits the
 // same SendWire trace as EmitOne, then drives the bead to delivery synchronously
 // on the caller's goroutine. Blocks until delivered or ctx is canceled.
@@ -386,7 +310,7 @@ type DriveItem struct {
 
 // PlaceDriven places one bead on this Out WITHOUT spawning a walker, emits the
 // SendWire trace, and returns a DriveItem the caller drives later via DriveAll.
-// In chan mode (tests) it sends immediately (EmitOne) and returns an inert item,
+// In chan mode (tests) it sends immediately on the raw channel and returns an inert item,
 // so unit tests keep their synchronous chan semantics. A nil Out, or a failed
 // placement (faded/deleted), returns an inert item.
 func (o *Out) PlaceDriven(v int) DriveItem {
@@ -402,7 +326,14 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
 	}
 	// chan mode (tests): no drive needed, send now and return inert.
-	o.EmitOne(v)
+	if o.ch != nil {
+		select {
+		case o.ch <- v:
+			o.trace.Send(o.node, o.port, v)
+		default:
+		}
+		return DriveItem{}
+	}
 	return DriveItem{}
 }
 
