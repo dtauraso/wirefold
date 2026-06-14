@@ -16,7 +16,7 @@
   ],
   "edges": [
     {
-      "id": "inToReadGate",
+      "id": "inToChainInhibitor",
       "source": "in0",
       "sourceHandle": "ToOut",
       "target": "readGate",
