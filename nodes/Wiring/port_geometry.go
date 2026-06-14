@@ -122,10 +122,7 @@ const (
 func ringAnchorCount(R float64) int {
 	pitch := ringAnchorDiameter + ringAnchorPadding
 	n := int(2 * math.Pi * R / pitch)
-	if n < 1 {
-		n = 1
-	}
-	return n
+	return max(n, 1)
 }
 
 // ringAnchorDir returns the unit direction (in the y-up, z-forward plane — the
