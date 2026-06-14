@@ -14,7 +14,7 @@
       "target": "readGate1",
       "targetHandle": "value",
       "kind": "chain",
-      "label": "inputToReadGate",
+      "label": "inputToChainInhibitor",
       "data": { "slots": 1 }
     },
     {
@@ -64,7 +64,7 @@
       "target": "readGate1",
       "targetHandle": "ack",
       "kind": "chain",
-      "label": "i1ToReadGate",
+      "label": "i1ToChainInhibitor",
       "data": { "slots": 1 }
     }
   ],

@@ -49,7 +49,7 @@ const activeNetTopo = `{
     {
       "id": "in08", "type": "Input",
       "data": {"init": [7], "repeat": false},
-      "outputs": [{"name": "ToReadGate", "side": "right", "slot": 1}]
+      "outputs": [{"name": "ToChainInhibitor", "side": "right", "slot": 1}]
     },
     {
       "id": "i0", "type": "ChainInhibitor",
@@ -71,7 +71,7 @@ const activeNetTopo = `{
     }
   ],
   "edges": [
-    {"label": "in08ToI0", "kind": "chain", "source": "in08", "sourceHandle": "ToReadGate", "target": "i0", "targetHandle": "FromPrevChainInhibitorNode"},
+    {"label": "in08ToI0", "kind": "chain", "source": "in08", "sourceHandle": "ToChainInhibitor", "target": "i0", "targetHandle": "FromPrevChainInhibitorNode"},
     {"label": "i0ToI1",   "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",    "target": "i1", "targetHandle": "FromPrevChainInhibitorNode"}
   ],
   "view": {"nodes": {
@@ -380,7 +380,7 @@ const feedbackRingTopo = `{
     {
       "id": "in08", "type": "Input",
       "data": {"init": [0, 1], "repeat": true},
-      "outputs": [{"name": "ToReadGate", "side": "right", "slot": 1}],
+      "outputs": [{"name": "ToChainInhibitor", "side": "right", "slot": 1}],
       "inputs":  [{"name": "FeedbackIn",  "side": "left",  "slot": 1}]
     },
     {
@@ -400,7 +400,7 @@ const feedbackRingTopo = `{
     }
   ],
   "edges": [
-    {"label": "in08ToI0",  "kind": "chain", "source": "in08", "sourceHandle": "ToReadGate",             "target": "i0",   "targetHandle": "FromPrevChainInhibitorNode"},
+    {"label": "in08ToI0",  "kind": "chain", "source": "in08", "sourceHandle": "ToChainInhibitor",             "target": "i0",   "targetHandle": "FromPrevChainInhibitorNode"},
     {"label": "i0ToI1",    "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",                "target": "i1",   "targetHandle": "FromPrevChainInhibitorNode"},
     {"label": "i0Feedback","kind": "chain", "source": "i0",   "sourceHandle": "FeedbackOut",            "target": "in08", "targetHandle": "FeedbackIn"}
   ],
@@ -461,9 +461,9 @@ func TestFeedbackRingAlternates(t *testing.T) {
 		// from i0 on FeedbackOut with value=1.
 		step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
 		const maxSteps = 400
-		// wantSend0 / wantSend1 appear as the in08 sends value 0 and value 1 on ToReadGate.
-		wantSend0 := `"kind":"send","node":"in08","port":"ToReadGate","value":0`
-		wantSend1 := `"kind":"send","node":"in08","port":"ToReadGate","value":1`
+		// wantSend0 / wantSend1 appear as the in08 sends value 0 and value 1 on ToChainInhibitor.
+		wantSend0 := `"kind":"send","node":"in08","port":"ToChainInhibitor","value":0`
+		wantSend1 := `"kind":"send","node":"in08","port":"ToChainInhibitor","value":1`
 		// wantFB1 appears each time i0 emits step=1 on FeedbackOut.
 		wantFB1 := `"kind":"send","node":"i0","port":"FeedbackOut","value":1`
 

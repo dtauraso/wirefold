@@ -23,7 +23,7 @@ type Node struct {
 	EmitRefillSlide func(beads []int)
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
-	ToReadGate  *Wiring.Out
+	ToChainInhibitor *Wiring.Out
 	FeedbackIn  *Wiring.In
 }
 
@@ -95,7 +95,7 @@ func (n *Node) Update(ctx context.Context) {
 			// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
 			v := working[len(working)-1]
 			n.Fire()
-			n.ToReadGate.EmitOneDriven(ctx, v)
+			n.ToChainInhibitor.EmitOneDriven(ctx, v)
 
 			// READ: block until ChainInhibitor sends the step on FeedbackIn.
 			step, ok := n.FeedbackIn.TryRecv()
@@ -136,7 +136,7 @@ func (n *Node) Update(ctx context.Context) {
 		v := popEnd(&working, &backup, init)
 		emitBeads() // array changed (pop, maybe refill) → restream interior
 		// fire-and-forget: advance unconditionally after EmitOne (no wait).
-		n.ToReadGate.EmitOneDriven(ctx, v)
+		n.ToChainInhibitor.EmitOneDriven(ctx, v)
 		emitted++
 	}
 }

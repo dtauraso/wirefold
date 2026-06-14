@@ -7,7 +7,7 @@
     {
       "id": "e",
       "source": "b",
-      "sourceHandle": "ToReadGate",
+      "sourceHandle": "ToChainInhibitor",
       "target": "a",
       "targetHandle": "in",
       "kind": "feedback-ack",

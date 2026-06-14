@@ -128,7 +128,7 @@ describe("parseSpec accepts the Go tree-loader emission shape", () => {
         id: "1", type: "Input",
         data: { init: [1, 0], repeat: true },
         inputs: [{ name: "FeedbackIn", side: "bottom", slot: 1 }],
-        outputs: [{ name: "ToReadGate", side: "right", slot: 1 }],
+        outputs: [{ name: "ToChainInhibitor", side: "right", slot: 1 }],
       },
       {
         id: "2", type: "ChainInhibitor",
@@ -148,7 +148,7 @@ describe("parseSpec accepts the Go tree-loader emission shape", () => {
       },
     ],
     edges: [
-      { id: "1To2", label: "1To2", kind: "chain", source: "1", sourceHandle: "ToReadGate", target: "2", targetHandle: "FromPrevChainInhibitorNode" },
+      { id: "1To2", label: "1To2", kind: "chain", source: "1", sourceHandle: "ToChainInhibitor", target: "2", targetHandle: "FromPrevChainInhibitorNode" },
       { id: "2FeedbackTo1", label: "2FeedbackTo1", kind: "chain", source: "2", sourceHandle: "FeedbackOut", target: "1", targetHandle: "FeedbackIn" },
       { id: "2To3", label: "2To3", kind: "chain", source: "2", sourceHandle: "ToNext0", target: "3", targetHandle: "FromPrevChainInhibitorNode" },
     ],

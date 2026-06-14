@@ -33,7 +33,7 @@ func TestNodeBeadSnapshotsTrackArray(t *testing.T) {
 		Fire:       func() { tr.Fire("in") },
 		Init:       []int{1, 0},
 		Repeat:     false, // one working drain: 2 pops then exit
-		ToReadGate: Wiring.NewOut(toRG, "in", "ToReadGate", tr),
+		ToChainInhibitor: Wiring.NewOut(toRG, "in", "ToChainInhibitor", tr),
 		EmitNodeBeads: func(working, backup []int) {
 			mu.Lock()
 			snaps = append(snaps, beadSnapshot{
