@@ -137,14 +137,14 @@
   </nav>
 
   <div id="model" class="panel active">
-    <p>The redesign replaces today's port placement — a <code>side</code> + <code>slot(0|1|2)</code> grid (4 sides × 3 slots) PLUS ad-hoc free <code>anchor</code> 3D vectors that override side/slot — with ONE uniform ring of evenly-spaced anchor positions on the node's torus.</p>
+    <p><strong>Core idea: the existing directional sizing system is replaced by one flat array.</strong> Today, a port is addressed by direction: <code>side</code> (top / bottom / left / right) plus <code>slot</code> within that side — four directional buckets, each with its own capacity and size, plus ad-hoc free <code>anchor</code> 3D vectors that override side+slot entirely. The redesign collapses all of that into <strong>one flat array of N evenly-spaced ring anchors</strong>, <code>anchors[0..N-1]</code>. A port is simply an index into that single array — four directional slot-arrays become one array, and <code>anchorId</code> is the index.</p>
     <div class="eq-block">
       <span class="eq-line">C = 2·π·R</span>
       <span class="eq-line">N = floor( C / (d + p) )</span>
     </div>
     <p>Where <code>R</code> = torus major radius (circle traced by the center of the tube around the node), <code>d</code> = port anchor diameter, <code>p</code> = small padding.</p>
     <p>Ring capacity N scales with node size: because R is derived from each kind's <code>node_dims</code>, a larger node gets a larger ring and therefore more anchor ids. N varies by kind.</p>
-    <p>N IS the capacity of the ring — a fixed list of visual anchor positions, each assigned an id (0..N-1). A per-node map <code>{ portName → anchorId }</code> places each named port (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …) onto one anchor id; unmapped ids are empty slots. Node logic addresses ports by name; the name resolves to an anchor id for rendering and edge attachment. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid.</p>
+    <p>N is the capacity of the ring — a fixed flat array of visual anchor positions, <code>anchors[0..N-1]</code>, each assigned an index id. A per-node map <code>{ portName → anchorId }</code> places each named port (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …) onto one index in that array; unmapped indices are empty slots. Node logic addresses ports by name; the name resolves to an array index for rendering and edge attachment. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid — the entire multi-array directional system is gone.</p>
     <p class="note">Geometry is Go-owned — Go computes the N positions and streams them; TS renders, computes none.</p>
   </div>
 
@@ -166,7 +166,7 @@
 
   <div id="was" class="panel">
     <div class="card">
-      <p>Current model: ports placed by <code>side</code> (top/bottom/left/right) + <code>slot</code> (0|1|2, at 25/50/75% along the side), with an optional free <code>anchor</code> 3D vector that OVERRIDES side+slot entirely (<code>port_geometry.go:157</code>).</p>
+      <p><strong>Directional multi-array system (being replaced).</strong> Current model: a port is addressed by <code>side</code> (top / bottom / left / right) + <code>slot</code> (0 | 1 | 2, at 25/50/75% along that side) — four separate directional buckets, each independently sized. On top of that, an optional free <code>anchor</code> 3D vector can OVERRIDE side+slot entirely (<code>port_geometry.go:157</code>), giving every instance its own ad-hoc position. The result: multiple arrays (one per side) with inconsistent per-instance overrides and no single uniform address space.</p>
     </div>
     <table>
       <thead>
@@ -185,15 +185,16 @@
 
   <div id="target" class="panel">
     <div class="card">
+      <p><strong>One flat array.</strong> Every node has a single flat array of N evenly-spaced visual anchor positions around its torus ring: <code>anchors[0..N-1]</code>. No directions, no per-side buckets — one array, one address space.</p>
       <ul>
-        <li>Every node has a fixed list of N evenly-spaced visual anchor positions around its torus ring, each with an id (0..N-1). N is the capacity; it is derived from geometry: <code>floor(C / (d + p))</code>.</li>
-        <li>Ports are NAMED roles (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …). A per-node map <code>{ portName → anchorId }</code> assigns each named port to one anchor id. Unmapped ids are empty positions.</li>
-        <li>Node logic addresses ports by name; the name resolves to an anchor id for rendering and edge attachment.</li>
-        <li>Positions are uniform across all instances of a node kind — no per-instance drift.</li>
-        <li>An edge attaches to the anchor id its port name maps to.</li>
+        <li>N is the capacity; it is derived from ring geometry: <code>floor(C / (d + p))</code>.</li>
+        <li>Ports are NAMED roles (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …). A per-node map <code>{ portName → anchorId }</code> assigns each named port to one <em>index</em> in that array. Unmapped indices are empty positions.</li>
+        <li>Node logic addresses ports by name; the name resolves to an array index for rendering and edge attachment.</li>
+        <li>Positions are uniform across all instances of a node kind — no per-instance drift, no free-anchor overrides.</li>
+        <li>An edge attaches to the anchor index its port name maps to.</li>
       </ul>
     </div>
-    <p>Was: fixed 3-per-side grid + free anchors — New: one geometry-derived evenly-spaced ring of anchor ids with named ports mapped onto them.</p>
+    <p>Was: four directional side-arrays (each independently sized) + free ad-hoc <code>anchor</code> overrides — New: one flat <code>anchors[0..N-1]</code> ring; a port is an index into that single array.</p>
   </div>
 
   <div id="interaction" class="panel">
