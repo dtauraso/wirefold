@@ -200,7 +200,7 @@
     <div class="card">
       <p>Old model = free-drag a port to any continuous angle around the torus. New model = SWITCH which discrete anchor id a port name occupies — snap between the N anchor ids, not slide.</p>
     </div>
-    <p class="note">The drag gesture becomes a discrete reassign: switching an edge's port = changing that port name's <code>anchorId</code> in the <code>{ portName → anchorId }</code> map (no continuous angle). The bridge edit op carries the port name and its new <code>anchorId</code>. Message-shape design is still open (Q 5).</p>
+    <p class="note">The drag gesture becomes a discrete reassign: switching an edge's port = changing that port name's <code>anchorId</code> in the <code>{ portName → anchorId }</code> map (no continuous angle). TS sends the drag; Go resolves it to the nearest ring anchor id. The bridge edit is an <code>update</code> op (no new message kind) carrying { nodeId, portName, anchorId }. Fire-and-forget.</p>
   </div>
 
   <div id="openqs" class="panel">
@@ -231,8 +231,8 @@
         </tr>
         <tr>
           <td>5</td>
-          <td>Editor bridge: the port-placement edit op changes from a continuous anchor to a discrete position switch — what does the TS→Go edit message carry?</td>
-          <td>The TS→Go port-placement edit carries the port name and its new <code>anchorId</code> (the remap in <code>{ portName → anchorId }</code>). Final message-shape design still TBD. Open.</td>
+          <td>RESOLVED — Editor bridge: the port-placement edit op changes from a continuous anchor to a discrete position switch — what does the TS→Go edit message carry?</td>
+          <td>Determined, not a choice. Reuse the existing single <code>edit</code> op with <code>op=update</code> (no new bridge message kind). Payload: { nodeId, portName, anchorId }. The retired side/slot/anchor fields are dropped from the port-update payload (consequence of the redesign). Per CLAUDE.md "TS computes no geometry, Go owns it": the editor sends the drag, GO resolves it to the nearest ring anchor id and applies the remap to its { portName -&gt; anchorId } map, then re-streams geometry. Fire-and-forget. Parity required in three places: messages.ts (parser), handle-message.ts (per-op forward), Go stdin_reader.go.</td>
         </tr>
       </tbody>
     </table>
