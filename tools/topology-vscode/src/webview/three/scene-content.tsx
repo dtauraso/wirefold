@@ -521,6 +521,10 @@ export function InteriorBeads({ nodeId }: { nodeId: string }) {
   );
 }
 
+// Arrowhead cone dims — visibly larger than the 1.5 tube radius. Tunable.
+const ARROW_HEIGHT = 6;
+const ARROW_RADIUS = 3;
+
 export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
   // streams the endpoints (geometry trace) on load and on every node-move;
@@ -534,8 +538,13 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
   const segKey = seg
     ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
     : "";
-  const { tubeGeo, haloGeo } = useMemo(() => {
-    if (!seg) return { tubeGeo: null as THREE.TubeGeometry | null, haloGeo: null as THREE.TubeGeometry | null };
+  const { tubeGeo, haloGeo, arrow } = useMemo(() => {
+    if (!seg)
+      return {
+        tubeGeo: null as THREE.TubeGeometry | null,
+        haloGeo: null as THREE.TubeGeometry | null,
+        arrow: null as { center: THREE.Vector3; q: THREE.Quaternion } | null,
+      };
     const start = new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z);
     const end = new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z);
     // Wire is a straight line: P(t) = Start + t*(End-Start).
@@ -543,7 +552,19 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
     const _tubeGeo = new THREE.TubeGeometry(tubeCurve, 1, 1.5, 6, false);
     // Halo: concentric tube on the same segment, larger radius — reads as a glow around the core.
     const _haloGeo = new THREE.TubeGeometry(tubeCurve, 1, 5, 6, false);
-    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo };
+    // Directional arrowhead: a cone whose apex sits at the target end (seg.end),
+    // base back along the edge. Degenerate (zero-length) segments get no arrow.
+    const dir = end.clone().sub(start);
+    let _arrow: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    if (dir.length() >= 1e-6) {
+      dir.normalize();
+      // ConeGeometry's apex points +Y; rotate +Y onto the edge direction.
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      // Place center so apex (= center + dir*height/2) lands on seg.end.
+      const center = end.clone().addScaledVector(dir, -ARROW_HEIGHT / 2);
+      _arrow = { center, q };
+    }
+    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo, arrow: _arrow };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segKey]);
 
@@ -577,6 +598,24 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
           depthWrite={false}
         />
       </mesh>
+      {/* Directional arrowhead: cone apex at the target end, fades with the tube. */}
+      {arrow && (
+        <mesh
+          position={[arrow.center.x, arrow.center.y, arrow.center.z]}
+          quaternion={[arrow.q.x, arrow.q.y, arrow.q.z, arrow.q.w]}
+          raycast={() => null}
+        >
+          <coneGeometry args={[ARROW_RADIUS, ARROW_HEIGHT, 16]} />
+          <meshStandardMaterial
+            key={faded ? "faded" : "solid"}
+            color={SHADING_PARAM_TUBE_COLOR}
+            emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
+            emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
+            transparent={faded}
+            opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1}
+          />
+        </mesh>
+      )}
       {/* Pulse bead: plotted at Go's streamed position (Phase 2). */}
       {!faded && <PulseBead edgeId={edgeId} />}
     </>
