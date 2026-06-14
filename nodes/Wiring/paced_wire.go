@@ -279,9 +279,7 @@ func (pw *PacedWire) launchWalkerLocked(gen uint64) {
 			}
 			b := pw.inflight[i]
 			arc := b.arc
-			seg := b.seg
 			placement = b.placement
-			stream := b.streams && tr != nil && arc > 0
 			pw.mu.Unlock()
 
 			deadline := placement
@@ -300,20 +298,15 @@ func (pw *PacedWire) launchWalkerLocked(gen uint64) {
 				return
 			}
 
-			if stream {
-				covered := pulseSpeed * float64(target-placement) / float64(time.Millisecond)
-				t := 0.0
-				if arc > 0 {
-					t = covered / arc
-				}
-				if t > 1 {
-					t = 1
-				}
-				pos := lerp(seg.Start, seg.End, t)
-				tr.Position(b.node, b.port, b.val, pos.X, pos.Y, pos.Z, t, b.gen)
+			// Advance this bead at the scheduled target time: emit position trace and
+			// determine whether the deadline was reached.
+			pw.mu.Lock()
+			emit, posArgs, isFinal := pw.advanceBeadLocked(gen, target)
+			// advanceBeadLocked released pw.mu.
+			if emit {
+				tr.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
 			}
-
-			if final {
+			if final || isFinal {
 				pw.mu.Lock()
 				// FIFO: a bead delivers only once it is at the head of inflight, so
 				// Recv sees values in SEND order even when a later bead's deadline
@@ -431,12 +424,87 @@ type arriveInfo struct {
 	gen        uint64 // the delivered/dropped bead's per-wire id (renderer bead key)
 }
 
+// posEmitArgs holds the arguments for a deferred tr.Position call, returned by
+// advanceBeadLocked so the caller can emit off the lock.
+type posEmitArgs struct {
+	node, port  string
+	val         int
+	x, y, z, t float64
+	gen         uint64
+}
+
 // emitArrive sends the traversal-complete trace for a delivered bead. Called by
 // the walker AFTER releasing pw.mu (trace channel send off the lock).
 func (pw *PacedWire) emitArrive(ai arriveInfo) {
 	if ai.emit {
 		pw.Trace.Arrive(ai.node, ai.port, ai.value, ai.gen)
 	}
+}
+
+// advanceBeadLocked performs one frame's work for the in-flight bead identified by
+// gen at clock reading now (the scheduled tick time). Caller must hold pw.mu on
+// entry; this method always releases it before returning.
+//
+// Returns:
+//   - emit=true if a Position trace should be sent (tr.Position) after this call;
+//     pos contains the arguments.
+//   - final=true if the bead has reached or passed its deadline at now, meaning the
+//     caller should proceed with the FIFO-head delivery loop.
+//
+// If the bead is missing or the wire torn down, all zero/false values are returned
+// and pw.mu is still released.
+//
+// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here; the
+// walker's FIFO-head wait loop does that after this returns when final=true. This
+// keeps the two locking phases (trace-emit window vs. delivery window) unchanged.
+func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool, pos posEmitArgs, final bool) {
+	tr := pw.Trace
+	pulseSpeed := pw.pulseSpeed
+
+	if gen < pw.teardownGen {
+		pw.mu.Unlock()
+		return
+	}
+	i := pw.findInflightLocked(gen)
+	if i < 0 {
+		pw.mu.Unlock()
+		return
+	}
+	b := pw.inflight[i]
+	arc := b.arc
+	seg := b.seg
+	placement := b.placement
+	stream := b.streams && tr != nil && arc > 0
+	pw.mu.Unlock()
+
+	deadline := placement
+	if pulseSpeed > 0 {
+		deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
+	}
+
+	target := now
+	if now >= deadline {
+		target = deadline
+		final = true
+	}
+
+	if stream {
+		covered := pulseSpeed * float64(target-placement) / float64(time.Millisecond)
+		t := 0.0
+		if arc > 0 {
+			t = covered / arc
+		}
+		if t > 1 {
+			t = 1
+		}
+		p := lerp(seg.Start, seg.End, t)
+		emit = true
+		pos = posEmitArgs{
+			node: b.node, port: b.port, val: b.val,
+			x: p.X, y: p.Y, z: p.Z, t: t, gen: b.gen,
+		}
+	}
+	return
 }
 
 // Done is a PHASE-1 SHIM: removed in phase 2 (gate strip). Recv/PollRecv now
