@@ -144,7 +144,7 @@
     </div>
     <p>Where <code>R</code> = torus major radius (circle traced by the center of the tube around the node), <code>d</code> = port anchor diameter, <code>p</code> = small padding.</p>
     <p>Ring capacity N scales with node size: because R is derived from each kind's <code>node_dims</code>, a larger node gets a larger ring and therefore more anchor ids. N varies by kind.</p>
-    <p>N is the capacity of the ring — a fixed flat array of visual anchor positions, <code>anchors[0..N-1]</code>, each assigned an index id. A per-node map <code>{ portName → anchorId }</code> places each named port (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …) onto one index in that array; unmapped indices are empty slots. Node logic addresses ports by name; the name resolves to an array index for rendering and edge attachment. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid — the entire multi-array directional system is gone.</p>
+    <p>N is the capacity of the ring — a fixed flat array of visual anchor positions, <code>anchors[0..N-1]</code>, each assigned an index id. Each named port (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …) carries an <code>anchorId</code> field — its index into that array — replacing the old <code>side</code>, <code>slot</code>, and <code>anchor</code> fields. Three directional fields per port become one index field per port. Unmapped indices are empty slots. Node logic addresses ports by name; the name resolves to an array index for rendering and edge attachment. This retires BOTH the free <code>anchor</code> vector and the <code>side</code>+<code>slot</code> grid — the entire multi-array directional system is gone.</p>
     <p class="note">Geometry is Go-owned — Go computes the N positions and streams them; TS renders, computes none.</p>
   </div>
 
@@ -166,7 +166,7 @@
 
   <div id="was" class="panel">
     <div class="card">
-      <p><strong>Directional multi-array system (being replaced).</strong> Current model: a port is addressed by <code>side</code> (top / bottom / left / right) + <code>slot</code> (0 | 1 | 2, at 25/50/75% along that side) — four separate directional buckets, each independently sized. On top of that, an optional free <code>anchor</code> 3D vector can OVERRIDE side+slot entirely (<code>port_geometry.go:157</code>), giving every instance its own ad-hoc position. The result: multiple arrays (one per side) with inconsistent per-instance overrides and no single uniform address space.</p>
+      <p><strong>Directional multi-array system (being replaced).</strong> Current model: each port record carries three placement fields — <code>side</code> (top / bottom / left / right), <code>slot</code> (0 | 1 | 2, at 25/50/75% along that side), and an optional <code>anchor</code> 3D vector that overrides side+slot entirely (<code>port_geometry.go:157</code>), giving every instance its own ad-hoc position. So a port record was <code>{ name, side, slot, anchor }</code> — placement intrinsic to the port, but using four separate directional buckets each independently sized, with inconsistent per-instance overrides and no single uniform address space. The redesign is a field swap: drop <code>side</code>, <code>slot</code>, and <code>anchor</code>; add a single <code>anchorId</code> field — the port's index into the ring array. A port becomes <code>{ "name": "ToNext0", "anchorId": 5 }</code>.</p>
     </div>
     <table>
       <thead>
@@ -188,20 +188,20 @@
       <p><strong>One flat array.</strong> Every node has a single flat array of N evenly-spaced visual anchor positions around its torus ring: <code>anchors[0..N-1]</code>. No directions, no per-side buckets — one array, one address space.</p>
       <ul>
         <li>N is the capacity; it is derived from ring geometry: <code>floor(C / (d + p))</code>.</li>
-        <li>Ports are NAMED roles (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …). A per-node map <code>{ portName → anchorId }</code> assigns each named port to one <em>index</em> in that array. Unmapped indices are empty positions.</li>
+        <li>Ports are NAMED roles (FromLeft, ToNext0, FeedbackOut, In, Out, FromPrev, FromRight, ToPassed, …). Each port record carries an <code>anchorId</code> field — its index into that array. Unmapped indices are empty positions.</li>
         <li>Node logic addresses ports by name; the name resolves to an array index for rendering and edge attachment.</li>
         <li>Positions are uniform across all instances of a node kind — no per-instance drift, no free-anchor overrides.</li>
         <li>An edge attaches to the anchor index its port name maps to.</li>
       </ul>
     </div>
-    <p>Was: four directional side-arrays (each independently sized) + free ad-hoc <code>anchor</code> overrides — New: one flat <code>anchors[0..N-1]</code> ring; a port is an index into that single array.</p>
+    <p>Was: each port record had fields <code>{ name, side, slot, anchor }</code> — placement via four directional side-arrays (each independently sized) + free ad-hoc <code>anchor</code> overrides. New: each port record has <code>{ name, anchorId }</code> — one flat <code>anchors[0..N-1]</code> ring; <code>anchorId</code> is the port's index into that single array.</p>
   </div>
 
   <div id="interaction" class="panel">
     <div class="card">
-      <p>Old model = free-drag a port to any continuous angle around the torus. New model = a port name occupies one of N discrete anchor ids — the result of a drag is that the port lands on a discrete id (not a continuous angle).</p>
+      <p>Old model = free-drag a port to any continuous angle around the torus. New model = a port's <code>anchorId</code> field is set to one of N discrete anchor ids — the result of a drag is that the port's <code>anchorId</code> changes to a discrete id (not a continuous angle).</p>
     </div>
-    <p class="note">Go STREAMS the N ring anchor positions, each tagged with its id (0..N-1) — Go owns and computes the ring geometry. TS renders those Go-streamed anchors. On a drag, TS UNPROJECTS the pointer via the camera (input handling, TS's domain) into a world-space drag target — a position near the node. TS sends <code>{ op: update, nodeId, portName, target }</code> where <code>target</code> is that world-space position — NOT an anchorId. TS does NOT pick or name an anchor id; it never hit-tests anchors to choose an id. Go receives the world-space target, SNAPS it to the nearest of its N anchor ids (geometry computation — Go-owned), updates its <code>{ portName → anchorId }</code> map, and re-streams geometry; TS renders whatever Go streams. Go produces the anchor id; TS never names one. Same shape as existing node-move: node positions are Go-authoritative; dragging a node sends a position to Go and Go applies it. Port-remap is identical — send the drag target, Go decides the anchor. Unprojecting the pointer via the camera is input handling (TS's domain); the snap is geometry (Go's domain). The bridge edit is an <code>update</code> op (no new message kind), fire-and-forget. (CLAUDE.md drift rule: TS computes no geometry; Go owns it.)</p>
+    <p class="note">Go STREAMS the N ring anchor positions, each tagged with its id (0..N-1) — Go owns and computes the ring geometry. TS renders those Go-streamed anchors. On a drag, TS UNPROJECTS the pointer via the camera (input handling, TS's domain) into a world-space drag target — a position near the node. TS sends <code>{ op: update, nodeId, portName, target }</code> where <code>target</code> is that world-space position — NOT an anchorId. TS does NOT pick or name an anchor id; it never hit-tests anchors to choose an id. Go receives the world-space target, SNAPS it to the nearest of its N anchor ids (geometry computation — Go-owned), writes the new id onto the port record's <code>anchorId</code> field, and re-streams geometry; TS renders whatever Go streams. Go produces the anchor id; TS never names one. Same shape as existing node-move: node positions are Go-authoritative; dragging a node sends a position to Go and Go applies it. Port placement is identical — send the drag target, Go decides the anchor id and updates the port record. Unprojecting the pointer via the camera is input handling (TS's domain); the snap is geometry (Go's domain). The bridge edit is an <code>update</code> op (no new message kind), fire-and-forget. (CLAUDE.md drift rule: TS computes no geometry; Go owns it.)</p>
   </div>
 
   <div id="openqs" class="panel">
@@ -213,7 +213,7 @@
         <tr>
           <td>1</td>
           <td>SEMANTIC IDENTITY: do the N ring positions keep named port roles, or become anonymous indexed positions?</td>
-          <td>RESOLVED — Model (a): named roles kept. Each node has a fixed list of N visual anchor ids (0..N-1); a per-node map <code>{ portName → anchorId }</code> places each named port. Node logic addresses ports by name; the name resolves to an anchor id. Switching = remap a port name to a different anchor id.</td>
+          <td>RESOLVED — named roles kept. Each port record carries an <code>anchorId</code> field — its index into the single ring array <code>anchors[0..N-1]</code> — replacing the old <code>side</code>/<code>slot</code>/<code>anchor</code> fields. Node logic addresses ports by name; the name resolves to an anchor id via the port record's own <code>anchorId</code> field. Switching = changing that port record's <code>anchorId</code>.</td>
         </tr>
         <tr>
           <td>2</td>
@@ -228,12 +228,12 @@
         <tr>
           <td>4</td>
           <td>If a node currently has fewer ports than N, are the extra positions empty/available, or is N exactly the port count (every position is a port)?</td>
-          <td>RESOLVED via Q1 — N is the CAPACITY (the list of anchor ids); a node's actual ports are the named ports mapped onto ids via <code>{ portName → anchorId }</code>; unmapped ids are empty positions. Not every id need be occupied.</td>
+          <td>RESOLVED via Q1 — N is the CAPACITY (the list of anchor ids); a node's actual ports are the named ports, each carrying its own <code>anchorId</code> field; unmapped ids are empty positions. Not every id need be occupied.</td>
         </tr>
         <tr>
           <td>5</td>
           <td>RESOLVED — Editor bridge: the port-placement edit op changes from a continuous anchor to a discrete position switch — what does the TS→Go edit message carry?</td>
-          <td>Determined, not a choice. Reuse the existing single <code>edit</code> op with <code>op=update</code> (no new bridge message kind). Payload: { nodeId, portName, target } where <code>target</code> is a WORLD-SPACE drag location (not an anchorId). TS unprojects the pointer via the camera (input handling) to get target; it does NOT pick or name an anchor id. Go OWNS the ring AND the <code>{ portName -&gt; anchorId }</code> map: it snaps target to the nearest anchor id, updates the map, and re-streams geometry. Go produces the id (the snap is geometry, Go-owned); TS never names one. Same shape as existing node-move (node positions Go-authoritative): send the drag target, Go decides the anchor. The retired side/slot/anchor fields are dropped from the port-update payload (consequence of the redesign). Fire-and-forget. Parity required in three places: messages.ts (parser), handle-message.ts (per-op forward), Go stdin_reader.go.</td>
+          <td>Determined, not a choice. Reuse the existing single <code>edit</code> op with <code>op=update</code> (no new bridge message kind). Payload: { nodeId, portName, target } where <code>target</code> is a WORLD-SPACE drag location (not an anchorId). TS unprojects the pointer via the camera (input handling) to get target; it does NOT pick or name an anchor id. Go OWNS the ring AND the port records: it snaps target to the nearest anchor id, writes the new id onto the port record's <code>anchorId</code> field (Go owns the ring and the port records), and re-streams geometry. Go produces the id (the snap is geometry, Go-owned); TS never names one. Same shape as existing node-move (node positions Go-authoritative): send the drag target, Go decides the anchor. The retired side/slot/anchor fields are dropped from the port-update payload (consequence of the redesign). Fire-and-forget. Parity required in three places: messages.ts (parser), handle-message.ts (per-op forward), Go stdin_reader.go.</td>
         </tr>
       </tbody>
     </table>
