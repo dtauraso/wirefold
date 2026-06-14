@@ -8,43 +8,28 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-13 — branch `task/node-runs-own-edges` IN FLIGHT, NOT merged)
+## State at handoff (2026-06-14 — branch `task/node-runs-own-edges` IN FLIGHT, NOT merged — full-fold COMPLETE)
 
-`main` is at `a6fc29ea` (just merged `task/persistent-edge-emit`: per-edge persistent flag — a wire re-sends its held value with a fresh seq; includes the `d3a79e2b` stall fix where persistent wires return `Occupied()==false`).
+Context: `main` at `a6fc29ea`. This branch took the network from the multi-bead sustained train to ONE BEAD PER FIRE where each node DRIVES its own outbound bead(s) to delivery on ITS OWN goroutine — no train, no seq, no persistent flag, and now NO per-bead walker goroutine. The production bead path spawns zero goroutines; nodes drive synchronously on the one clock.
 
-This branch `task/node-runs-own-edges` **REVERSES direction**: move the network from the multi-bead sustained train toward a **ONE-BEAD-PER-FIRE, node-owned-wire** model. A node emits ONE bead per fire; the bead rides a wire the source node owns; the node's own goroutine advances it; no train, no per-wire pacer goroutine, no seq, no bead-count/occupancy rule. (This unwinds the sustained-bead-train and persistent-train work.)
+### What's DONE & VERIFIED
+- Emit collapsed to one bead (StartTrain/runTrain/trainSeq/lastAcceptedSeq/persistent all deleted; Recv is plain FIFO, no dedup).
+- All node kinds drive their own outbound beads: Input, HoldFlip, WindowAndGate via `Out.EmitOneDriven(ctx,v)`; ChainInhibitor (nodes 2 & 3) via place-all-then-`DriveAll` (concurrent fan-out 2→{3,5} + feedback 2→1); ReadGate via EmitOneDriven.
+- Per-bead walker (`launchWalkerLocked`) + dead non-driven methods (`placeBead`, `Send`, `SendDeliverOnly`, `TryPlace`, `Out.TryEmit`/`TrySend`/`EmitOne`) DELETED. `placeBeadNoWalker` + the driven loop (`DriveBeadsToDelivery`/`DriveBeadToDelivery`/`DriveAll`, per-frame `advanceBeadLocked`) survive.
+- `ReviseInFlightGeometry` keeps its arc/seg rebase but no longer relaunches walkers (driven loop re-reads live arc/seg each frame).
+- User confirmed the live network (nodes 1–5: 1→2→{3,5}, 3→4→5, 2→1 feedback ring) animates correctly after each stage. go build + go test -race green throughout (8 packages).
 
-### Commits on this branch (oldest → newest)
+### Key commits (this branch, oldest→newest, abbrev)
+bcbc34f8 spec; 70571cf8 node1 EmitOne; 7be25ae3 node2 EmitOne+drop persistent 2→5; (node3 persistent drop); 7fecc889 node4; 033bdba5 handoff; 3a940de0 collapse to one-bead (delete train+seq); f3cac3eb remove persistent plumbing; 671f2ad2 extract advanceBeadLocked; a539cdeb node1 driven (no walker); 2d73ead4 node2 concurrent driven; 3e0051bd one-goroutine fan-out drive; 461e5caa fix node2 serial-blocking (DriveAll); 9eb4099e node4 driven; 2d387d18 node5 driven; 88fd0dc readgate driven; 4bf000be DELETE walker + dead emit paths.
 
-- `bcbc34f8` docs(spec): `docs/planning/visual-editor/node-edges-goroutine-spec.html` — tabbed spec (Model, Was (train), Target, Invariants, Migration, Open Qs) for the one-bead/node-owned model; node-1-first rollout in Migration.
-- `70571cf8` feat: node 1 emits ONE bead per fire via new `Out.EmitOne` (`nodes/Wiring/ports.go`) instead of `TryEmit`→`StartTrain`. `EmitOne` calls `placeBeadSeq(v, placement, true)` — one bead, fresh seq, NO pacer/train; the walker still animates+delivers it. Both node-1 emit sites in `nodes/input/node.go` switched. `paced_wire.go` NOT edited.
-- `7be25ae3` feat: node 2 (ChainInhibitor) all outgoing emits → `EmitOne`; dropped persistent flag on 2→5.
-- (node 3, also ChainInhibitor) dropped persistent on 3→4 — Go emits already `EmitOne` via the shared kind.
-- `7fecc889` feat: node 4 (HoldFlip) emit → `EmitOne` (line 90); dropped persistent on 4→5.
+### Warts / things to scrutinize (carry forward)
+- `PlaceAndDrive` / `PlaceAndDriveDeliverOnly` (paced_wire.go ~164): PUBLIC methods that spawn a goroutine, used ONLY by tests (replacing the old exported test-only SendDeliverOnly). Zero production callers. A test-only public goroutine-spawner — candidate to make package-private or restructure if it bothers you.
+- The walker-delete commit also added (production) `inflightBead.startedAt` + a deadline-cap on `minNext` in DriveBeadsToDelivery — added to keep geometry/anchor behavior equivalent when tests moved onto the shared driven loop. Reviewed and accepted; re-scrutinize if geometry-edit-during-flight looks off.
+- Tests run CHAN-MODE and do NOT exercise the synchronous paced drive loop — green tests do not prove runtime drive behavior. Editor eyeball is the real check for any drive change.
 
-### What's done & VERIFIED
-
-- Nodes 1–4 all emit ONE bead per fire via `Out.EmitOne` (one bead, fresh seq, no train pacer; walker still animates+delivers). Node 5 (WindowAndGate) is the sink — no outgoing edges, nothing to convert.
-- All three persistent flags removed (2→5, 3→4, 4→5).
-- User confirmed the full network works in the editor (one bead end-to-end across 1→2→5, 3→4→5, and the 2→1 feedback).
-- `go build` + `go test -race` green throughout. `paced_wire.go` NOT edited (read-only per constraint).
-
-### Hard constraints (carry forward)
-
-- **`paced_wire.go` still UNEDITED** — the train apparatus (`StartTrain`/`runTrain` pacer, `trainSeq`, walker, `Recv` seq gate) is all still present, just no longer invoked by the emit path. `EmitOne` uses `placeBeadSeq(..., true)`: one bead + fresh seq + walker, no pacer.
-- The wire is the source node's arc-geometry + position-over-time animation before handing the one bead to the next node — NOT a buffer/FIFO. Don't reintroduce queue framing.
-- `seq` is still present (the bead carries a fresh bumped seq to pass `PacedWire`'s `Recv` gate). Full seq removal is part of the `paced_wire` conversion, not yet done.
-
-### Next step (the remaining phase)
-
-- **`paced_wire.go` conversion** (previously deferred, now unblocked since nothing emits trains): remove the seq gate + the walker goroutine and fold the bead's position animation into the source node's own goroutine; then remove the now-dead train machinery (`StartTrain`/`runTrain`/`trainSeq`/persistent flag handling in `loader.go` + `wire-defs.ts`). This is where the true "one bead, no seq, node owns the animation" model lands. Resolve spec Open Qs (Q2 two-source wake, Q3 loop location) here.
-- Alternatively: this branch is in a coherent working state and could be merged as-is (emit path fully on one-bead) before tackling the deeper `paced_wire` conversion on a fresh branch.
-
-### Open questions (spec)
-
-- **Q2:** two-source wake (timer-as-channel vs wake-on-arm) — relevant when the walker folds into the node loop.
-- **Q3:** loop location — generic wrapper vs per-kind `Update()`.
-- Fate of persistent flag machinery (`loader.go`, `wire-defs.ts`) and `Occupied`/back-pressure once `paced_wire` is converted (both likely removed; persistent edge data already dropped).
+### Open / next
+- Branch is a coherent, working, verified milestone — READY TO MERGE pending sign-off (run tools/strip-branch-local-docs.sh task/node-runs-own-edges first; the spec html node-edges-goroutine-spec.html is branch-local).
+- The general INPUT-vs-TIMER two-source wake was never needed: every node turned out sequential at the input level (feedback ring + anyOccupied/HasValue guards keep a node from accepting new input while its outbound bead is mid-drive). If a future topology has a node that CAN receive while driving, that wake must be designed (spec Open Q2/Q3 in node-edges-goroutine-spec.html).
 
 ### Carry-forward facts
 
