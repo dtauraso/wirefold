@@ -30,7 +30,7 @@ func fanOutHeld(outs Wiring.OutMulti, held int) {
 		wg.Add(1)
 		go func(o *Wiring.Out) {
 			defer wg.Done()
-			o.TryEmit(held)
+			o.EmitOne(held)
 		}(out)
 	}
 	wg.Wait()
@@ -102,7 +102,7 @@ func (in *Node) Update(ctx context.Context) {
 				if heldChanged {
 					step = 1
 				}
-				in.FeedbackOut.TryEmit(step)
+				in.FeedbackOut.EmitOne(step)
 				// Forward the current held value on the downstream chain.
 				fanOutHeld(in.ToNext, in.Held)
 				in.Held = value
