@@ -8,51 +8,43 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — branch `task/port-ring-anchors` IN FLIGHT, NO commits yet — DESIGN phase)
+## State at handoff (2026-06-14 — branch `task/port-ring-anchors` IN FLIGHT, NOT merged — DESIGN COMPLETE, ready to implement)
 
-Context:
-- `main` is at `e699cc17` (last merge: task/cleanup-inactive-node-kinds — removed the ReadGate kind, the parked topology/inactive subtree, and renamed Input's port ToReadGate -> ToChainInhibitor).
-- Branch `task/port-ring-anchors` was just created off main; NO commits yet. This is a DESIGN task to redesign the physical layout of node ports. No spec written yet — write it first (HTML tabs, usual layout, like node-edges-goroutine-spec.html / timing-spec.html) once the one open question below is answered.
+Context: `main` at `e699cc17`. Branch `task/port-ring-anchors` (off main). This task redesigns node port PHYSICAL LAYOUT. The spec is DONE and all design questions are resolved — only IMPLEMENTATION remains. Docs only on this branch; no code yet.
 
-### The redesign (user-pinned model)
-Replace today's port placement (a `side` + `slot(0|1|2)` grid — 4 sides x 3 slots — PLUS ad-hoc free `anchor` 3D vectors that override side/slot) with a UNIFORM RING-OF-ANCHORS model:
-- Each node has a torus (the ring around it). **R = the torus MAJOR radius** = the radius of the circle traced by the CENTER OF THE TUBE around the node. Circumference **C = 2*pi*R**.
-- Each port anchor has diameter **d** plus small padding **p**. The number of evenly-spaced anchor positions that fit is **N = floor( C / (d + p) )**, and **N IS the number of ports** on the node. They are spaced EVENLY around the ring.
-- Interaction change: the old "free dragging a port to any continuous angle around the torus" is REPLACED by SWITCHING which discrete evenly-spaced position an edge's port occupies (snap between the N positions, not slide). This retires BOTH the free `anchor` vector AND the `side`+`slot` grid.
-- Proposed (tunable) defaults pending confirmation: **d = 8 wu** (the existing bead diameter), **p = 2 wu** padding.
+### The design (FINAL — see docs/planning/visual-editor/port-ring-anchors-spec.html, 6 tabs)
+CORE IDEA: replace the existing DIRECTIONAL layout system — `side` (top/bottom/left/right) x `slot`, i.e. four directional buckets each independently sized, plus ad-hoc free `anchor` 3D vectors that override them — with ONE FLAT ARRAY of evenly-spaced ring anchors.
+- Each node has a torus; **R = torus major radius (circle traced by the tube center), derived from the node's SIZE per kind (node_dims)** — bigger node => bigger ring => more anchors, so N varies by kind. Circumference C = 2*pi*R.
+- **N = floor( C / (d + p) )** evenly-spaced anchor positions = the array `anchors[0..N-1]`. d = port anchor diameter, p = padding; both are TUNABLE CONSTANTS (defaults d=8 wu, p=2 wu), adjusted by eye — NOT a design decision.
+- **Per-port field (data model):** each port record swaps its three directional fields (`side`/`slot`/`anchor`) for ONE `anchorId` field = its index into the ring array. e.g. topology/nodes/<id>/outputs/ToNext0.json becomes `{ "name": "ToNext0", "anchorId": 5 }`. There is NO separate name->id map structure — placement is a per-port field, exactly as side/slot were. Named roles are kept; node logic addresses ports BY NAME; anchorId is just placement.
+- **Interaction:** editing a port = changing its `anchorId`. TS captures the pointer and unprojects it via the camera (input handling, TS's domain) into a WORLD-SPACE drag target; sends the bridge edit `{ op:update, nodeId, portName, target }` (a position, NOT an anchorId). GO owns the ring geometry AND the port records: it SNAPS target to the nearest anchor index, writes `anchorId` onto the port record, and re-streams geometry. Go produces the id (the snap is geometry = Go-owned); TS never names an id. Same shape as existing node-move (node positions are Go-authoritative). Reuse the existing `update` edit op — no new message kind; parity needed in messages.ts / handle-message.ts / Go stdin_reader.go.
 
-### THE OPEN QUESTION (blocks the spec — affects Go node logic, not just rendering)
-The N ring positions are anonymous evenly-spaced slots, but some kinds need SEMANTIC ports (WindowAndGate must distinguish FromLeft vs FromRight; ChainInhibitor must distinguish FeedbackOut vs ToNext). Which model:
-- **(a)** Ports keep named roles (FromLeft, ToNext0, FeedbackOut…); each role OCCUPIES one of the N ring positions; N is the capacity cap; node logic still addresses ports by name. Switching = move a role to a different ring slot.
-- **(b)** Ports become pure positions 0..N-1; node logic addresses inputs/outputs by INDEX/order around the ring; no names (WindowAndGate defines e.g. "left = lower index").
-User has NOT yet answered. Get this answer first, then write the spec, then implement.
+### Resolved questions (all in the spec's Open Questions tab)
+- Q1 named roles kept; per-port `anchorId` field. Q2 d/p are tunable constants (not a decision). Q3 R scales with node size (N varies by kind). Q4 N = array length; ports occupy a subset of indices, unused indices empty. Q5 editing reuses `update` op carrying a world-space target; Go snaps + writes anchorId. NONE design-blocking remain.
 
-### Why the redesign (motivation)
-Current layout is inconsistent + ad-hoc: the SAME kind has different per-instance layouts (nodes 2 & 3 are both ChainInhibitor but their ports sit on different sides/slots), and most ports carry authored `anchor` vectors that bypass the side/slot grid entirely (port_geometry.go:157 — a non-nil anchor overrides side+slot).
+### Spec commits (this branch)
+b8fdabb2 handoff setup; d14fd2ae spec created; 06c1b3f9 Q1; 011f26fc Q3+Q2; e5b4f51f/810e7bab/ab711a00/edd024ce interaction iterations; f475ddbd lead-with-core-idea (one array); da440dfc per-port anchorId field (final data model).
 
-### Code map (where port layout lives today — from a fresh audit)
-- Port schema (side|slot|anchor): tools/topology-vscode/src/schema/types.ts:22-36. Slot 0|1|2 validation throws in parse-nodes-edges.ts:44-48.
-- Go port struct: nodes/Wiring/loader.go:40-45 (specPort: Name, Side, Slot *int, Anchor *specVec3 — "anchor overrides side+slot").
-- Go port-direction computation (AUTHORITATIVE): nodes/Wiring/port_geometry.go:136-216 (portDir): anchor override at :157; else side+slot; slot %s 25/50/75 from curve_params.go:52-56 (CurveParamSlotPct0/1/2).
-- Node dims (per-kind W/H, feeds node size/radius): nodes/Wiring/node_dims_gen.go:12-17 (GENERATED by tools/gen-node-defs from nodes/<Kind>/SPEC.md View section; regen: cd tools/topology-vscode && npm run gen:node-defs). TS fallback node-dims.ts NODE_DIM_FALLBACK.
-- TS render fallback (pre-emit only): tools/topology-vscode/src/webview/three/geometry-helpers.ts:101-142 (portDirLocal mirrors Go). Go streams authoritative geometry via node-geometry trace; node-geometry.ts / useNodeGeometryStore consume it; fallback disabled after first event.
-- Per-instance port data authored in topology/nodes/<id>/inputs/*.json and outputs/*.json (each: name, side, slot, anchor).
+### Code map (where to implement — from a fresh audit)
+- Go port-direction compute (AUTHORITATIVE): nodes/Wiring/port_geometry.go:136-216 (portDir) — REPLACE the side/slot/anchor logic with: compute N from R (node size), place anchor i at angle i*2pi/N around the ring; a port's position = anchors[port.anchorId].
+- Slot % constants to retire/replace: nodes/Wiring/curve_params.go:52-56 (CurveParamSlotPct0/1/2) — replaced by ring spacing from d/p.
+- Go port struct: nodes/Wiring/loader.go:40-45 specPort {Name, Side, Slot *int, Anchor *specVec3} — replace Side/Slot/Anchor with AnchorId int.
+- Node dims (R source): nodes/Wiring/node_dims_gen.go (GENERATED from nodes/<Kind>/SPEC.md View; regen: cd tools/topology-vscode && npm run gen:node-defs).
+- TS schema: tools/topology-vscode/src/schema/types.ts:22-36 (port side|slot|anchor -> anchorId); parse-nodes-edges.ts:44-48 (slot 0|1|2 validation -> anchorId range check 0..N-1). Per feedback_schema_parser_parity, update schema + parser together.
+- TS render fallback: tools/topology-vscode/src/webview/three/geometry-helpers.ts:101-142 (portDirLocal mirrors Go) — update to ring-array. Go streams authoritative geometry (node-geometry trace, node-geometry.ts / useNodeGeometryStore); fallback disabled after first event.
+- Bridge: messages.ts (parser) + handle-message.ts (per-op forward) + nodes/Wiring/stdin_reader.go for the `update` op carrying the drag target; Go snaps + writes anchorId.
+- Topology data migration: rewrite every topology/nodes/<id>/{inputs,outputs}/*.json — drop side/slot/anchor, add anchorId.
 
-### Current per-node port placement (snapshot, for reference)
-- node1 Input: in FeedbackIn (bottom,1, anchored); out ToChainInhibitor (right,1, anchored).
-- node2 ChainInhibitor: in FromPrevChainInhibitorNode (left,1); out ToNext0 (bottom,1), ToNext1 (left,2), FeedbackOut (top,1).
-- node3 ChainInhibitor: in FromPrevChainInhibitorNode (top,1); out ToNext0 (left,0), ToNext1 (bottom,2 — DANGLING, no active edge after inactive-subtree removal).
-- node4 HoldFlip: in In (right,0); out Out (left,0).
-- node5 WindowAndGate: in FromLeft (top,1), FromRight (top,2); out ToPassed (top,0).
-
-### Next step
-1. Get the user's answer to THE OPEN QUESTION (a vs b) and confirm d/p defaults.
-2. Write the spec HTML (tabs: Model, Geometry/formula, Was (side+slot+anchor), Target (ring), Interaction (snap-switch vs free-drag), Migration, Open Qs) — usual layout, branch-local (note branch in meta line).
-3. Then implement in Go (port_geometry.go owns the N evenly-spaced positions; retire side/slot/anchor), regenerate, update the editor interaction (snap-switch), and the topology port JSONs.
+### Suggested implementation order
+1. Go geometry: port_geometry.go computes the N-anchor ring from R and positions a port by its anchorId index; loader specPort gets AnchorId. 2. Migrate topology port JSONs (side/slot/anchor -> anchorId). 3. TS schema+parser (anchorId, drop side/slot/anchor). 4. Editor interaction: drag -> world target -> `update` edit -> Go snap -> re-stream. 5. Regenerate node-defs; verify go build + go test -race + tsc + vitest + editor eyeball.
 
 ### Carry-forward
-- This is GEOMETRY = Go-owned; pump/TS is a plotter (MODEL.md / CLAUDE.md). Go computes the N positions and streams them; TS renders, computes none.
-- Branch hygiene caution from THIS session: a background Agent dispatch fan-out into a ~20-agent swarm that duplicated commits and committed one unrequested change (empty data.json for nodes 4/5, since reverted). Keep subagents FOREGROUND for this branch; spot-check git log for stray commits.
+- GEOMETRY IS GO-OWNED (MODEL.md/CLAUDE.md). Go computes the ring + snaps; TS only unprojects the pointer (camera/input) and renders Go's stream. TS computes no layout.
+- SWARM CAUTION (this session): a background Agent dispatch fanned out into ~20 duplicate agents, duplicated commits, and committed one unrequested change (reverted). Keep subagents FOREGROUND on this branch; spot-check git log for stray commits before pushing.
+- port-ring-anchors-spec.html is branch-local (not frontmatter-tagged; HTML — strip-branch-local-docs won't catch it; decide at merge whether it rides to main).
+
+### Next step
+Begin implementation at step 1 (Go geometry). No open design questions block it.
 
 ## ALWAYS clause
 
