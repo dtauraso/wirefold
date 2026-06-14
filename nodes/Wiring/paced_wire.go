@@ -141,6 +141,10 @@ type PacedWire struct {
 	trainStart    time.Duration // clock active-elapsed reading the current window began
 	trainNext     time.Duration // clock active-elapsed reading of the next scheduled placement
 	trainRunning  bool          // a pacer goroutine is live (placing or parked on the clock)
+	// persistent: when true, runTrain never expires — at each trainDurationMs window
+	// rollover it mints a fresh train seq and re-sends the held trainValue.
+	// Sender-side only; does not affect receiver dedup logic.
+	persistent bool
 }
 
 // NewPacedWire creates an empty PacedWire. arcLength is the straight-line
@@ -340,6 +344,17 @@ func (pw *PacedWire) runTrain() {
 				// start. Re-check against the LIVE window end.
 				live := pw.trainStart + trainDurationMs*time.Millisecond
 				if next > live {
+					if pw.persistent && !pw.faded && !pw.deleted {
+						now := pw.clock.Now()
+						pw.trainSeq++
+						pw.trainStart = now
+						pw.trainNext = now
+						val := pw.trainValue
+						bp := pw.trainBP
+						pw.mu.Unlock()
+						pw.placeBeadSeq(val, bp, false)
+						continue
+					}
 					pw.trainActive = false
 					pw.trainRunning = false
 					pw.mu.Unlock()
@@ -369,6 +384,17 @@ func (pw *PacedWire) runTrain() {
 			// Re-check the window against the LIVE start (a refresh may have moved
 			// it); only place while inside [trainStart, trainStart+trainDurationMs].
 			if pw.clock.Now() > pw.trainStart+trainDurationMs*time.Millisecond {
+				if pw.persistent && !pw.faded && !pw.deleted {
+					now := pw.clock.Now()
+					pw.trainSeq++
+					pw.trainStart = now
+					pw.trainNext = now
+					val := pw.trainValue
+					bp := pw.trainBP
+					pw.mu.Unlock()
+					pw.placeBeadSeq(val, bp, false)
+					continue
+				}
 				pw.trainActive = false
 				pw.trainRunning = false
 				pw.mu.Unlock()
@@ -707,9 +733,15 @@ func (pw *PacedWire) InFlight() bool {
 
 // Occupied reports whether the wire is non-empty: a bead is in flight or a
 // delivered value is waiting to be read.
+// Persistent wires always carry beads by design; counting them as occupied
+// would stall senders indefinitely waiting for the wire to clear.
 func (pw *PacedWire) Occupied() bool {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
+	if pw.persistent {
+		return false // a persistent wire is intentionally always carrying beads;
+		// the sender must not block waiting for it to clear.
+	}
 	return len(pw.inflight) > 0 || len(pw.delivered) > 0
 }
 
