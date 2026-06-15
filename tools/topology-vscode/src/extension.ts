@@ -65,6 +65,21 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
 
   const post = (msg: HostToWebviewMsg) => panel.webview.postMessage(msg);
+  // Read the scene sidecar (topology/view/scene.json) fresh at load time so the
+  // navigated camera (camera3d) is delivered to the webview as `sceneText`.
+  // Without this the spec from Go carries only nodes/edges/view (diagram) and
+  // viewerState.camera3d stays undefined on reload — hasRestoredCamera is then
+  // false at first content render and CameraFitter's auto-fit clobbers the saved
+  // pose. Re-read on each load (not cached) so a save written between reloads
+  // restores correctly.
+  const readSceneText = (): string | undefined => {
+    if (!topologyPath) return undefined;
+    try {
+      return fs.readFileSync(path.join(topologyPath, "view", "scene.json"), "utf8");
+    } catch {
+      return undefined; // no sidecar yet → auto-fit frames the graph once (intended)
+    }
+  };
   let lastSpec: { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined;
   const runner = new BuildAndRunRunner(
     (status) => post({ type: "run-status", ...status }),
@@ -72,7 +87,7 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     (spec) => {
       // Go emitted the spec on startup — cache it and send it to the webview as a load message.
       lastSpec = spec;
-      post({ type: "load", text: JSON.stringify(spec) });
+      post({ type: "load", text: JSON.stringify(spec), sceneText: readSceneText() });
     },
   );
 
@@ -163,7 +178,7 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     // If the webview just mounted and we have a cached spec, replay it so the
     // diagram renders even when Go's one-shot startup emission beat the listener.
     if (typeof raw === "object" && raw !== null && (raw as { type?: string }).type === "ready" && lastSpec !== undefined) {
-      post({ type: "load", text: JSON.stringify(lastSpec) });
+      post({ type: "load", text: JSON.stringify(lastSpec), sceneText: readSceneText() });
     }
     const workspaceFolder = folderUri ? vscode.workspace.getWorkspaceFolder(folderUri) : undefined;
     const logUri = workspaceFolder?.uri ?? (folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("."));
