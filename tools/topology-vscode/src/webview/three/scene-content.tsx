@@ -267,7 +267,7 @@ export function GraphNode({
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
-      <mesh>
+      <mesh userData={{ nodeId: node.id, body: true }}>
         <sphereGeometry args={[r, 16, 16]} />
         <meshPhysicalMaterial
           key={faded ? "faded" : "solid"}
@@ -903,6 +903,11 @@ export function RaycasterHelper({
             if (opts.excludeId && nId === opts.excludeId) continue;
             return nId;
           }
+          if (hitObj.userData?.body === true && hitObj.userData?.nodeId) {
+            const nId = hitObj.userData.nodeId as string;
+            if (opts.excludeId && nId === opts.excludeId) continue;
+            return nId;
+          }
           const hitPoint = hitObj.parent;
           if (!hitPoint) continue;
           for (const n of nodes) {
@@ -936,16 +941,27 @@ export function RaycasterHelper({
           continue;
         }
         if (!nodeHit) {
-          const hitPoint = hitObj.parent;
-          if (!hitPoint) continue;
-          for (const n of nodes) {
-            const wp = nodeWorldPos(n);
-            if (
-              Math.abs(hitPoint.position.x - wp.x) < 1 &&
-              Math.abs(hitPoint.position.y - wp.y) < 1
-            ) {
-              nodeHit = { id: n.id, dist: hit.distance };
-              break;
+          // Resolve a node-body hit to its node id. Prefer the explicit
+          // userData.nodeId on the body sphere (exact, z-aware: the NEAREST body
+          // sphere the ray hits wins). Fall back to x,y proximity only for older
+          // meshes without the tag. The old x,y-only scan returned whichever node
+          // appeared first in `nodes` sharing the same x,y, so a node directly
+          // BEHIND another (same screen x,y, deeper z) could hijack the pick.
+          if (hitObj.userData?.body === true && hitObj.userData?.nodeId) {
+            nodeHit = { id: hitObj.userData.nodeId as string, dist: hit.distance };
+          } else {
+            const hitPoint = hitObj.parent;
+            if (hitPoint) {
+              for (const n of nodes) {
+                const wp = nodeWorldPos(n);
+                if (
+                  Math.abs(hitPoint.position.x - wp.x) < 1 &&
+                  Math.abs(hitPoint.position.y - wp.y) < 1
+                ) {
+                  nodeHit = { id: n.id, dist: hit.distance };
+                  break;
+                }
+              }
             }
           }
         }
@@ -968,6 +984,19 @@ export function RaycasterHelper({
       } else if (nodeHit) {
         picked = nodeHit.id;
       }
+
+      // TEMP breadcrumb: dump nearest hits + chosen id so we can read .probe/ts.jsonl
+      // and confirm true z-occlusion (frontmost body wins) vs. a mis-resolved pick.
+      postLog("pick", {
+        ndcX,
+        ndcY,
+        hits: hits.slice(0, 5).map((h) => {
+          const u = (h.object as THREE.Mesh).userData ?? {};
+          const kind = u.body ? "body" : u.ring ? "ring" : u.portId ? "port" : u.edgeId ? "edge" : "other";
+          return { kind, nodeId: u.nodeId ?? null, id: u.portId ?? u.edgeId ?? null, dist: h.distance };
+        }),
+        picked,
+      });
 
       return picked;
     };
