@@ -31,9 +31,23 @@ type portGeom struct {
 // center from Cell (latticeToWorld). A nil Cell defaults to cell {0,0,0} (origin).
 type nodeGeom struct {
 	Kind    string
-	Cell    *[3]int // integer lattice coord (i,j,k); nil → cell {0,0,0} (origin)
+	Cell    *[3]int  // integer lattice coord (i,j,k); nil → cell {0,0,0} (origin)
+	R       *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
 	Inputs  []portGeom
 	Outputs []portGeom
+}
+
+// defaultNodeR is the default starting sphere radius (world units) used for a
+// node that omits an explicit r. Tunable — chosen as a sensible starting size
+// for the sphere-chain layout (B3 will consume this via position computation).
+const defaultNodeR = 200.0
+
+// nodeR returns the node's sphere radius: *g.R when set, else defaultNodeR.
+func nodeR(g nodeGeom) float64 {
+	if g.R != nil {
+		return *g.R
+	}
+	return defaultNodeR
 }
 
 // Interior bead render dimensions — mirror scene-content.tsx INTERIOR_BEAD_R +

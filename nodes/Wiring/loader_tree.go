@@ -42,6 +42,7 @@ type jsonMeta struct {
 	ID   string   `json:"id"`
 	Type string   `json:"type"`
 	Cell *[3]int  `json:"cell,omitempty"` // optional integer lattice coord (i,j,k); highest priority for center
+	R    *float64 `json:"r,omitempty"`    // optional per-node sphere radius; nil → defaultNodeR (see nodeR)
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -75,6 +76,7 @@ func loadTree(root string) (topoSpec, error) {
 			ID:   meta.ID,
 			Type: meta.Type,
 			Cell: meta.Cell,
+			R:    meta.R,
 		}
 
 		// data.json — optional

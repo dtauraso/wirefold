@@ -49,13 +49,14 @@ type specNode struct {
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
 	Cell     *[3]int     `json:"cell,omitempty"` // integer lattice coord (i,j,k); the only node-position model (nil → cell {0,0,0})
+	R        *float64    `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, Cell: n.Cell}
+	g := nodeGeom{Kind: n.Type, Cell: n.Cell, R: n.R}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
