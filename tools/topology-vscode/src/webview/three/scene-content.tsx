@@ -397,13 +397,14 @@ export function SphereRing({
   if (!showSphere || !selNode) return null;
 
   const center = nodeWorldPos(selNode);
-  // R = Go-streamed sphere radius (nodeRadius reads geoms[id].radius; falls back to
-  // local min(w,h)/divisor compute until the first node-geometry event arrives).
-  const R = nodeRadius(selNode);
+  // R = Go-streamed sphere-chain radius (sphereR, used for bead orbit and port placement).
+  // Falls back to nodeRadius (body radius) if sphereR is not yet set.
+  const geom = getNodeGeometry(selNode.id);
+  const R = geom?.sphereR ?? nodeRadius(selNode);
   if (R < 1e-3) return null;
 
   // Thin tube so it reads as a ring, not a donut — scale to the node's own ring tube.
-  const tube = Math.max(0.5, nodeRadius(selNode) * 0.08);
+  const tube = Math.max(0.5, R * 0.08);
 
   // Highlighted when THIS sphere surface is the current sphere selection.
   const isSphereSelected = selectedSphere === selNode.id;

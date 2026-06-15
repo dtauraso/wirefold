@@ -139,6 +139,10 @@ type Event struct {
 	// (KindNodeGeometry) — Go-owned (min(w,h)/CurveParamNodeRadiusDivisor). The
 	// renderer reads it for the body/ring instead of recomputing from node dims.
 	Radius float64
+	// SphereR carries the node's sphere-chain radius on node-geometry events
+	// (KindNodeGeometry) — the radius used for bead-chain orbit and port placement
+	// (nodeR in port_geometry.go). Distinct from Radius (the node body/ring sphere).
+	SphereR float64 `json:"sphereR,omitempty"`
 	// Row/Col identify an interior bead's grid slot on node-bead events
 	// (KindNodeBead): Row 0 = top/backup, Row 1 = bottom/working; Col is the
 	// position in that row's slice. Keyed by Node + (Row,Col). X/Y/Z carry the
@@ -278,8 +282,8 @@ func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
 // carries each port's world position + direction. Each node's goroutine calls this
 // once on startup via its injected EmitGeometry closure (the node owns its geometry
 // emission; wires still own bead-position emission).
-func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz, radius float64, ports []PortGeom) {
-	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Radius: radius, Ports: ports})
+func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz, radius, sphereR float64, ports []PortGeom) {
+	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports})
 }
 
 // Arrive marks a bead completing its traversal — delivered into the destination

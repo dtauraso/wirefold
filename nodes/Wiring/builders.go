@@ -480,7 +480,7 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 	for _, p := range g.Outputs {
 		appendPort(p.Name, false)
 	}
-	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), ports)
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), nodeR(g), ports)
 }
 
 // emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one
