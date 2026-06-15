@@ -15,11 +15,11 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Fatalf("loadTree: %v", err)
 	}
 
-	if len(spec.Nodes) != 5 {
-		t.Fatalf("expected 5 nodes, got %d", len(spec.Nodes))
+	if len(spec.Nodes) != 6 {
+		t.Fatalf("expected 6 nodes, got %d", len(spec.Nodes))
 	}
-	if len(spec.Edges) != 6 {
-		t.Fatalf("expected 6 edges, got %d", len(spec.Edges))
+	if len(spec.Edges) != 7 {
+		t.Fatalf("expected 7 edges, got %d", len(spec.Edges))
 	}
 
 	nodeByID := map[string]specNode{}
@@ -49,6 +49,14 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	}
 	if n3.Type != "ChainInhibitor" {
 		t.Errorf("node \"3\" type: got %q, want \"ChainInhibitor\"", n3.Type)
+	}
+
+	n6, ok := nodeByID["6"]
+	if !ok {
+		t.Fatal("node \"6\" not found")
+	}
+	if n6.Type != "Latch" {
+		t.Errorf("node \"6\" type: got %q, want \"Latch\"", n6.Type)
 	}
 
 	// View positions should be populated for all nodes (view.nodes is kept as
@@ -81,6 +89,28 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	}
 	if _, ok := edgeByLabel["2FeedbackTo1"]; !ok {
 		t.Fatal("edge \"2FeedbackTo1\" not found")
+	}
+
+	e1to6, ok := edgeByLabel["1To6"]
+	if !ok {
+		t.Fatal("edge \"1To6\" not found")
+	}
+	if e1to6.SourceHandle != "ToLatch" {
+		t.Errorf("edge 1To6 sourceHandle: got %q, want \"ToLatch\"", e1to6.SourceHandle)
+	}
+	if e1to6.TargetHandle != "FromInput" {
+		t.Errorf("edge 1To6 targetHandle: got %q, want \"FromInput\"", e1to6.TargetHandle)
+	}
+
+	e6to5, ok := edgeByLabel["6To5"]
+	if !ok {
+		t.Fatal("edge \"6To5\" not found")
+	}
+	if e6to5.TargetHandle != "FromLeft" {
+		t.Errorf("edge 6To5 targetHandle: got %q, want \"FromLeft\"", e6to5.TargetHandle)
+	}
+	if _, ok := edgeByLabel["2To5"]; ok {
+		t.Error("edge \"2To5\" should have been removed")
 	}
 
 	// All nodes should have at least 1 input OR at least 1 output port

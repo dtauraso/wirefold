@@ -24,6 +24,10 @@ type Node struct {
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
 	ToChainInhibitor *Wiring.Out
+	// ToLatch fans the emitted value out to a Latch node (sample-and-hold). It is
+	// optional: when unwired (Wired()==false) the emit is skipped so existing
+	// topologies without a Latch are unaffected.
+	ToLatch     *Wiring.Out
 	FeedbackIn  *Wiring.In
 }
 
@@ -96,6 +100,9 @@ func (n *Node) Update(ctx context.Context) {
 			v := working[len(working)-1]
 			n.Fire()
 			n.ToChainInhibitor.EmitOneDriven(ctx, v)
+			if n.ToLatch.Wired() {
+				n.ToLatch.EmitOneDriven(ctx, v)
+			}
 
 			// READ: block until ChainInhibitor sends the step on FeedbackIn.
 			step, ok := n.FeedbackIn.TryRecv()
@@ -137,6 +144,9 @@ func (n *Node) Update(ctx context.Context) {
 		emitBeads() // array changed (pop, maybe refill) → restream interior
 		// fire-and-forget: advance unconditionally after EmitOne (no wait).
 		n.ToChainInhibitor.EmitOneDriven(ctx, v)
+		if n.ToLatch.Wired() {
+			n.ToLatch.EmitOneDriven(ctx, v)
+		}
 		emitted++
 	}
 }
