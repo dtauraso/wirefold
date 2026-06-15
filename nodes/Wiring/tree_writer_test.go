@@ -47,15 +47,15 @@ func TestWriteViewNodeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadTree after write: %v", err)
 	}
-	for _, n := range spec2.Nodes {
-		if n.ID == nodeID {
-			if n.Position.X != want.X || n.Position.Y != want.Y || n.Position.Z != want.Z {
-				t.Errorf("position mismatch: got %+v want %+v", n.Position, want)
-			}
-			return
-		}
+	// view.nodes is kept as auxiliary view data; assert the written position
+	// round-trips through view.nodes (node centers no longer derive from it).
+	got, ok := spec2.View.Nodes[nodeID]
+	if !ok {
+		t.Fatalf("node %s missing from view.nodes after write", nodeID)
 	}
-	t.Errorf("node %s not found after write", nodeID)
+	if got.X != want.X || got.Y != want.Y || got.Z != want.Z {
+		t.Errorf("position mismatch: got %+v want %+v", got, want)
+	}
 }
 
 func TestWritePortAnchorRoundTrip(t *testing.T) {

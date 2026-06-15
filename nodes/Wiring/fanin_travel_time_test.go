@@ -41,19 +41,14 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 	// srcNear is close (short edge); srcFar is far (long edge).
 	const topo = `{
 	  "nodes": [
-	    {"id":"srcNear","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"srcFar","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"sink","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"srcNear","type":"FanInSrc","cell":[1,0,0],"outputs":[{"name":"Out"}]},
+	    {"id":"srcFar","type":"FanInSrc","cell":[3,0,0],"outputs":[{"name":"Out"}]},
+	    {"id":"sink","type":"FanInSink","cell":[0,0,0],"inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"eNear","kind":"data","source":"srcNear","sourceHandle":"Out","target":"sink","targetHandle":"In"},
 	    {"label":"eFar","kind":"data","source":"srcFar","sourceHandle":"Out","target":"sink","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "srcNear": {"x": 100, "y": 0, "z": 0},
-	    "srcFar":  {"x": 800, "y": 0, "z": 0},
-	    "sink":    {"x": 0,   "y": 0, "z": 0}
-	  }}
+	  ]
 	}`
 
 	dir := t.TempDir()

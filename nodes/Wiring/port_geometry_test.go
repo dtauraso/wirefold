@@ -6,12 +6,14 @@ import (
 )
 
 // refPortWorldPos is an independent reimplementation of the portWorldPos algorithm,
-// used to lock the production code's output. Now uses the ring path exclusively.
-func refPortWorldPos(kind string, x, y, z float64, ports []portGeom, name string, isInput bool) vec3 {
-	w, h := kindWidthHeight(kind)
-	cx := x + w/2
-	cy := -(y + h/2)
-	cz := z
+// used to lock the production code's output. The node center resolves from the
+// lattice cell (the only node-position model); a nil cell defaults to {0,0,0}.
+func refPortWorldPos(kind string, cell *[3]int, ports []portGeom, name string, isInput bool) vec3 {
+	ci, cj, ck := 0, 0, 0
+	if cell != nil {
+		ci, cj, ck = cell[0], cell[1], cell[2]
+	}
+	cx, cy, cz := latticeToWorld(ci, cj, ck)
 	center := vec3{cx, cy, cz}
 	if name == "" {
 		return center
@@ -55,7 +57,7 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 	anchorId1 := 1
 	g := nodeGeom{
 		Kind: "HoldFlip",
-		Pos:  vec3{X: 100, Y: 200, Z: 30},
+		Cell: &[3]int{1, 2, -3},
 		Inputs: []portGeom{
 			{Name: "In", AnchorId: &anchorId1},
 			{Name: "In2"},
@@ -63,7 +65,7 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 		Outputs: []portGeom{{Name: "Out"}},
 	}
 	got := portWorldPos(g, "In", true)
-	want := refPortWorldPos(g.Kind, g.Pos.X, g.Pos.Y, g.Pos.Z, g.Inputs, "In", true)
+	want := refPortWorldPos(g.Kind, g.Cell, g.Inputs, "In", true)
 	if !almostEqual(got.X, want.X, 1e-9) || !almostEqual(got.Y, want.Y, 1e-9) || !almostEqual(got.Z, want.Z, 1e-9) {
 		t.Fatalf("portWorldPos = %+v, want %+v", got, want)
 	}
@@ -80,28 +82,28 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}{
 		{
 			name: "input-to-holdflip-2d",
-			src: nodeGeom{Kind: "Input", Pos: vec3{X: 25, Y: 318},
+			src: nodeGeom{Kind: "Input", Cell: &[3]int{0, 1, 0},
 				Outputs: []portGeom{{Name: "ToHoldFlip", AnchorId: &anchorId1}}},
 			srcH: "ToHoldFlip",
-			tgt: nodeGeom{Kind: "HoldFlip", Pos: vec3{X: 169, Y: 335},
+			tgt: nodeGeom{Kind: "HoldFlip", Cell: &[3]int{1, 1, 0},
 				Inputs: []portGeom{{Name: "In", AnchorId: &anchorId1}}},
 			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",
-			src: nodeGeom{Kind: "ChainInhibitor", Pos: vec3{X: 340, Y: 302, Z: 40},
+			src: nodeGeom{Kind: "ChainInhibitor", Cell: &[3]int{1, 1, 1},
 				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
-			tgt: nodeGeom{Kind: "ChainInhibitor", Pos: vec3{X: 327, Y: 356, Z: -25},
+			tgt: nodeGeom{Kind: "ChainInhibitor", Cell: &[3]int{1, 1, -1},
 				Inputs: []portGeom{{Name: "FromPrevChainInhibitorNode", AnchorId: &anchorId1}}},
 			tgtH: "FromPrevChainInhibitorNode",
 		},
 		{
 			name: "anchorid0-and-anchorid2-with-z",
-			src: nodeGeom{Kind: "WindowAndGate", Pos: vec3{X: 225, Y: 333, Z: 12},
+			src: nodeGeom{Kind: "WindowAndGate", Cell: &[3]int{1, 1, 0},
 				Outputs: []portGeom{{Name: "ToPassed", AnchorId: &anchorId0}}},
 			srcH: "ToPassed",
-			tgt: nodeGeom{Kind: "WindowAndGate", Pos: vec3{X: 500, Y: 100, Z: 90},
+			tgt: nodeGeom{Kind: "WindowAndGate", Cell: &[3]int{2, 0, 1},
 				Inputs: []portGeom{{Name: "FromRight", AnchorId: &anchorId2}}},
 			tgtH: "FromRight",
 		},
@@ -110,8 +112,8 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := arcLengthBetweenPorts(c.src, c.srcH, c.tgt, c.tgtH)
 			// Straight-segment model: arc length is the chord distance.
-			p0 := refPortWorldPos(c.src.Kind, c.src.Pos.X, c.src.Pos.Y, c.src.Pos.Z, c.src.Outputs, c.srcH, false)
-			p2 := refPortWorldPos(c.tgt.Kind, c.tgt.Pos.X, c.tgt.Pos.Y, c.tgt.Pos.Z, c.tgt.Inputs, c.tgtH, true)
+			p0 := refPortWorldPos(c.src.Kind, c.src.Cell, c.src.Outputs, c.srcH, false)
+			p2 := refPortWorldPos(c.tgt.Kind, c.tgt.Cell, c.tgt.Inputs, c.tgtH, true)
 			want := refChordLength(p0, p2)
 			if !almostEqual(got, want, 1e-9) {
 				t.Fatalf("arcLengthBetweenPorts = %v, want chord %v", got, want)
@@ -157,7 +159,7 @@ func TestPortAnchorIdRingPath(t *testing.T) {
 	anchorId1 := 1
 	g := nodeGeom{
 		Kind:    kind,
-		Pos:     vec3{X: 10, Y: 20, Z: 0},
+		Cell:    &[3]int{0, 0, 0},
 		Inputs:  []portGeom{{Name: "In", AnchorId: &anchorId1}},
 		Outputs: []portGeom{{Name: "Out"}}, // nil AnchorId → ring slot 0
 	}

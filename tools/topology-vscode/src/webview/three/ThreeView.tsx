@@ -26,7 +26,6 @@ import { scheduleViewSave } from "../save";
 export function ThreeView() {
   const nodes = useThreeStore((s) => s.nodes);
   const edges = useThreeStore((s) => s.edges);
-  const storeMoveNode = useThreeStore((s) => s.moveNode);
   const storeCreateEdge = useThreeStore((s) => s.createEdge);
   const storeDeleteEdge = useThreeStore((s) => s.deleteEdge);
   const toggleFade = useThreeStore((s) => s.toggleFade);
@@ -117,7 +116,6 @@ export function ThreeView() {
     pickRequest,
     setSelectedId,
     nodesRef,
-    storeMoveNode,
     storeCreateEdge,
     selectedIdRef,
     edgesRef,

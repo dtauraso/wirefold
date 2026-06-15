@@ -6,9 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
-import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
-import { NODE_DIM_FALLBACK } from "../state/node-dims";
-import { useThreeStore } from "./store";
+import { nodeWorldPos, pixelToNDC, pointerRingAnchor, LATTICE_SPACING } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
@@ -36,6 +34,36 @@ function commitCamera(cam: THREE.PerspectiveCamera) {
 const CLICK_MAX_MS = 150;
 /** Pixel movement threshold between CLICK and DRAG. */
 const MOVE_SLOP_PX = 6;
+
+/** Screen pixels of drag per one lattice-cell step (zoom-INDEPENDENT node drag). */
+const PX_PER_CELL = 80;
+
+/**
+ * Pick the world-axis unit vector (±X/±Y/±Z) most aligned with `dir`, signed so
+ * dot>0, excluding any axis index in `exclude`. The lattice is world-axis-aligned,
+ * so node-drag motion is along these axes. Returns the chosen vector and its axis
+ * index (0=X,1=Y,2=Z).
+ */
+function bestLatticeAxis(dir: THREE.Vector3, exclude: number): { vec: THREE.Vector3; axis: number } {
+  let bestAxis = 0;
+  let bestAbs = -1;
+  for (let i = 0; i < 3; i++) {
+    if (i === exclude) continue;
+    const c = i === 0 ? dir.x : i === 1 ? dir.y : dir.z;
+    if (Math.abs(c) > bestAbs) {
+      bestAbs = Math.abs(c);
+      bestAxis = i;
+    }
+  }
+  const c = bestAxis === 0 ? dir.x : bestAxis === 1 ? dir.y : dir.z;
+  const sign = c >= 0 ? 1 : -1;
+  const vec = new THREE.Vector3(
+    bestAxis === 0 ? sign : 0,
+    bestAxis === 1 ? sign : 0,
+    bestAxis === 2 ? sign : 0,
+  );
+  return { vec, axis: bestAxis };
+}
 
 // ---------------------------------------------------------------------------
 // ControlState
@@ -82,7 +110,6 @@ export function useInteractionControls(
   pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>,
   onSelect: (id: string | null) => void,
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
-  onMoveNode: (id: string, x: number, y: number) => void,
   storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
   selectedIdRef: React.MutableRefObject<string | null>,
   edgesRef: React.MutableRefObject<RFEdge<EdgeData>[]>,
@@ -102,9 +129,12 @@ export function useInteractionControls(
   // Node-drag state: set when pointer-down lands on a node.
   const nodeDragRef = useRef<{
     nodeId: string;
-    planePointAtStart: THREE.Vector3;
-    nodeCenterAtStart: THREE.Vector3;
-    rfPosAtStart: { x: number; y: number };
+    startCenter: THREE.Vector3; // node world center at drag start
+    downX: number;              // screen x at drag start
+    downY: number;              // screen y at drag start
+    axisR: THREE.Vector3;       // lattice axis mapped to screen-right (signed unit vec)
+    axisU: THREE.Vector3;       // lattice axis mapped to screen-up (signed unit vec)
+    lastWorldTarget: THREE.Vector3 | null; // most recent world target sent during the drag
   } | null>(null);
 
   // Wiring state: set when pointer-down lands on an UNCONNECTED port sphere
@@ -121,15 +151,16 @@ export function useInteractionControls(
   } | null>(null);
 
   // Throttle node-move IPC: one message per animation frame during drag.
-  const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number } | null>(null);
+  const pendingNodeMove = useRef<{ nodeId: string; x: number; y: number; z: number } | null>(null);
   const rafPending = useRef(false);
 
-  const flushNodeMove = useCallback((nodeId: string, x: number, y: number) => {
+  const flushNodeMove = useCallback((nodeId: string, x: number, y: number, z: number) => {
     // Decentralized node-move: mail-sort the move to the moved node + every incident
     // edge (source===moved || target===moved). TS owns the graph and computes the
     // incident edges; Go's per-node/per-edge goroutines own the recompute. Every
-    // entry carries the same moved node id + new position; keys are node id + edge ids.
-    const entry: MoveEntry = { nodeId, x, y, z: 0 };
+    // entry carries the same moved node id + WORLD-SPACE target (x,y,z) — Go snaps it
+    // to the nearest lattice cell (TS computes no cell). Keys are node id + edge ids.
+    const entry: MoveEntry = { nodeId, x, y, z };
     const entries: Record<string, MoveEntry> = { [nodeId]: entry };
     for (const e of edgesRef.current) {
       if (e.source === nodeId || e.target === nodeId) {
@@ -139,15 +170,15 @@ export function useInteractionControls(
     vscode.postMessage({ type: "edit", op: "update", entries });
   }, [edgesRef]);
 
-  const scheduleNodeMove = useCallback((nodeId: string, x: number, y: number) => {
-    pendingNodeMove.current = { nodeId, x, y };
+  const scheduleNodeMove = useCallback((nodeId: string, x: number, y: number, z: number) => {
+    pendingNodeMove.current = { nodeId, x, y, z };
     if (!rafPending.current) {
       rafPending.current = true;
       requestAnimationFrame(() => {
         rafPending.current = false;
         const p = pendingNodeMove.current;
         if (p) {
-          flushNodeMove(p.nodeId, p.x, p.y);
+          flushNodeMove(p.nodeId, p.x, p.y, p.z);
           pendingNodeMove.current = null;
         }
       });
@@ -351,15 +382,30 @@ export function useInteractionControls(
       s.emptyDown = (hitId === null);
 
       if (hitId !== null) {
-        // Node hit: record drag origin for node-drag phase.
-        const planePoint = unprojectToPlane(e.clientX, e.clientY, rect);
+        // Node hit: record drag origin for ZOOM-INDEPENDENT pixel→cell node drag.
+        // Capture the screen down-point, the node's start world center, and the two
+        // editable lattice axes (the world axes most aligned with screen right/up at
+        // start). Drag moves the node in whole lattice-cell STEPS based on screen-pixel
+        // distance (PX_PER_CELL), so one cell == 80px of drag at ANY zoom. Go still snaps
+        // the world target to the nearest cell. The camera-facing depth axis is held.
         const node = nodesRef.current.find((n) => n.id === hitId);
-        if (planePoint && node) {
+        const cam = cameraRef.current;
+        if (node && cam) {
+          cam.updateMatrixWorld(true);
+          const camRight = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+          const camUp = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+          const r = bestLatticeAxis(camRight, -1);
+          // axisU excludes the axis already taken by axisR (degenerate case: cam right
+          // and up map to the same lattice axis → pick the next-best for up).
+          const u = bestLatticeAxis(camUp, r.axis);
           nodeDragRef.current = {
             nodeId: hitId,
-            planePointAtStart: planePoint.clone(),
-            nodeCenterAtStart: nodeWorldPos(node),
-            rfPosAtStart: { x: node.position.x, y: node.position.y },
+            startCenter: nodeWorldPos(node),
+            downX: e.clientX,
+            downY: e.clientY,
+            axisR: r.vec,
+            axisU: u.vec,
+            lastWorldTarget: null,
           };
         }
       } else {
@@ -387,7 +433,7 @@ export function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, unprojectToPlane, incidentEdgeIds, ensureTarget, selectedIdRef, targetRef],
+    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, selectedIdRef, targetRef],
   );
 
   const onPointerMove = useCallback(
@@ -413,22 +459,23 @@ export function useInteractionControls(
       }
 
       if (s.phase === "dragging" && nodeDragRef.current) {
-        // Node drag: move node on the z=0 plane.
+        // Node drag: ZOOM-INDEPENDENT pixel→cell stepping. Convert screen-pixel drag from
+        // the down-point into whole lattice-cell steps along the two editable lattice axes
+        // (PX_PER_CELL pixels per cell). The world target = startCenter + axisR*stepR*spacing
+        // + axisU*stepU*spacing — already a clean cell multiple, so Go snaps it exactly onto
+        // startCell + the steps (clamped to the box by Go). The body repositions when Go
+        // re-emits node-geometry. No unproject / no zoom dependence.
         const nd = nodeDragRef.current;
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        const planePoint = unprojectToPlane(e.clientX, e.clientY, rect);
-        if (planePoint) {
-          const node = nodesRef.current.find((n) => n.id === nd.nodeId);
-          if (node) {
-            const w = node.data?.width ?? NODE_DIM_FALLBACK.width;
-            const h = node.data?.height ?? NODE_DIM_FALLBACK.height;
-            const newCenterX = planePoint.x + (nd.nodeCenterAtStart.x - nd.planePointAtStart.x);
-            const newCenterY = planePoint.y + (nd.nodeCenterAtStart.y - nd.planePointAtStart.y);
-            const newPosX = newCenterX - w / 2;
-            const newPosY = -newCenterY - h / 2;
-            onMoveNode(nd.nodeId, newPosX, newPosY);
-            scheduleNodeMove(nd.nodeId, newPosX, newPosY);
-          }
+        const dxPx = e.clientX - nd.downX;
+        const dyPx = e.clientY - nd.downY;
+        const stepR = Math.round(dxPx / PX_PER_CELL);
+        const stepU = Math.round(-dyPx / PX_PER_CELL); // screen-y is down
+        const target = nd.startCenter.clone()
+          .add(nd.axisR.clone().multiplyScalar(stepR * LATTICE_SPACING))
+          .add(nd.axisU.clone().multiplyScalar(stepU * LATTICE_SPACING));
+        if (Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z)) {
+          nd.lastWorldTarget = target;
+          scheduleNodeMove(nd.nodeId, target.x, target.y, target.z);
         }
         s.prevX = e.clientX;
         s.prevY = e.clientY;
@@ -481,7 +528,7 @@ export function useInteractionControls(
         }
       }
     },
-    [cameraRef, nodesRef, onMoveNode, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
+    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -532,21 +579,17 @@ export function useInteractionControls(
         return;
       }
 
-      // Node drag completed: persist position.
+      // Node drag completed: flush the final WORLD target. Go snaps it to the nearest
+      // lattice cell, sets the node's Cell, persists (meta.json), and re-streams the
+      // snapped center — Go owns the snapped position, so TS does not write view-node x/y
+      // here. Reset throttle so the last frame isn't dropped.
       if (s.phase === "dragging" && nodeDragRef.current) {
         const nd = nodeDragRef.current;
-        // Normal move: persist position.
-        const node = useThreeStore.getState().nodes.find((n) => n.id === nd.nodeId);
-        if (node) {
-          patchViewerState((v) => {
-            if (!v.nodes) v.nodes = {};
-            const existing = v.nodes[node.id];
-            v.nodes[node.id] = { ...(existing ?? {}), x: node.position.x, y: node.position.y };
-          });
-          scheduleViewSave();
+        const t = nd.lastWorldTarget;
+        if (t && Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z)) {
           pendingNodeMove.current = null;
           rafPending.current = false;
-          flushNodeMove(node.id, node.position.x, node.position.y);
+          flushNodeMove(nd.nodeId, t.x, t.y, t.z);
         }
         nodeDragRef.current = null;
         s.phase = "idle";
@@ -578,7 +621,7 @@ export function useInteractionControls(
 
       s.phase = "idle";
     },
-    [flushNodeMove, flushPortAnchor, onMoveNode, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
+    [flushNodeMove, flushPortAnchor, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
   );
 
   // Exposed so ThreeView can attach a non-passive native listener.
@@ -594,6 +637,33 @@ export function useInteractionControls(
         // target multiplicatively. Defined purely from (camera pose, target) — both
         // finite — so it's a total operation with no z=0 raycast. >1 deltaY zooms
         // out. MIN_DIST floors |offset| so the camera never reaches/crosses target.
+        //
+        // RE-AIM: before zooming, snap the persistent target onto the NODE NEAREST
+        // THE SCREEN CENTER — the node most in view — rather than the node under the
+        // cursor. Project each node's world center to NDC and pick the one with the
+        // smallest distance from NDC center (0,0). This always selects a real node
+        // (never an edge, never null, never an occluding neighbor), so a centered
+        // focus makes the multiplicative zoom converge straight in with no sideways
+        // drift. If no node is finite/in-front, we leave targetRef as-is and zoom
+        // toward the existing persistent focus — no z=0 plane dependency either way.
+        let centerNode: string | null = null;
+        let centerNdcDist = Infinity;
+        let centerPos: THREE.Vector3 | null = null;
+        for (const n of nodesRef.current) {
+          const c = nodeWorldPos(n);
+          if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) continue;
+          const ndc = c.clone().project(cam);
+          if (ndc.z > 1) continue; // behind the camera / beyond far plane
+          const d = Math.sqrt(ndc.x * ndc.x + ndc.y * ndc.y);
+          if (d < centerNdcDist) {
+            centerNdcDist = d;
+            centerNode = n.id;
+            centerPos = c;
+          }
+        }
+        if (centerPos) {
+          targetRef.current.copy(centerPos);
+        }
         const target = ensureTarget(cam);
         const ZOOM_BASE = 1.01;
         const MIN_DIST = 5;
@@ -641,7 +711,7 @@ export function useInteractionControls(
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, ensureTarget],
+    [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };

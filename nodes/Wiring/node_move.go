@@ -42,7 +42,7 @@ const (
 )
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
-//   - "" or "move": node-move — NodeID + X/Y/Z applied by nodeMover and edgeMover.
+//   - "" or "move": node-move — NodeID + Cell applied by nodeMover and edgeMover.
 //   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
 //
 // ack (if non-nil) is closed by the mover after it has fully handled the message —
@@ -50,8 +50,11 @@ const (
 type moveMsg struct {
 	Kind    string
 	NodeID  string
-	X, Y, Z float64
-	Faded   bool
+	// Cell (node-move only): the lattice cell (i,j,k) the incoming world target snapped
+	// to (Go snaps in applyEdit via worldToLattice). It is the sole node-position model;
+	// nodeWorldPos resolves the center from Cell (latticeToWorld). nil → cell {0,0,0}.
+	Cell  *[3]int
+	Faded bool
 	// Anchor payload (Kind == "anchor"): identify the port whose anchor changed.
 	// Port/IsInput name the port on NodeID; AnchorId is the snapped ring-anchor index
 	// (Go snaps from the incoming world-space direction; TS never computes the index).
@@ -109,7 +112,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		return
 	}
-	m.geom.Pos = vec3{X: msg.X, Y: msg.Y, Z: msg.Z}
+	m.geom.Cell = msg.Cell // lattice snap is the only node-position model
 	if m.tr != nil {
 		emitNodeGeometry(m.tr, m.id, m.geom)
 	}
@@ -195,9 +198,9 @@ func (m *edgeMover) handle(msg moveMsg) {
 	}
 	switch msg.NodeID {
 	case m.srcID:
-		m.srcGeom.Pos = vec3{X: msg.X, Y: msg.Y, Z: msg.Z}
+		m.srcGeom.Cell = msg.Cell // lattice snap is the only endpoint-position model
 	case m.dstID:
-		m.dstGeom.Pos = vec3{X: msg.X, Y: msg.Y, Z: msg.Z}
+		m.dstGeom.Cell = msg.Cell
 	default:
 		return
 	}

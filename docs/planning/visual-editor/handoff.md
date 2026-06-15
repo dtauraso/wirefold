@@ -8,9 +8,28 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — NO TASK IN FLIGHT — on `main`)
+## State at handoff (2026-06-14 — branch `task/node-lattice` IN FLIGHT — design complete, implementing)
 
-Context: `main` is at `376757c0`. No task branch is active. Recent work is all merged and verified. New work is friction-driven (post-v0 posture) — pick from real editor use, no phase plan.
+Context: `main` is at `f1633bf7`. Branch `task/node-lattice` (off main) makes node placement a discrete 3D LATTICE — the node-scale twin of the port ring-anchor work. Spec DONE (all questions resolved); IMPLEMENTATION starting.
+
+### The design (FINAL — see docs/planning/visual-editor/node-lattice-spec.html)
+- A node's position is an INTEGER lattice cell (i,j,k) in a FINITE BOX, replacing free continuous x/y. worldPos = origin + (i,j,k)*spacing, clamped to the box.
+- Go OWNS the lattice->world mapping and STREAMS node positions (geometry Go-owned, like it already streams node centers).
+- DRAG snaps to a cell: TS unprojects the 2D drag onto the VIEW-PERPENDICULAR plane through the node (camera math = TS) -> world target; GO snaps to the nearest lattice cell (round per axis, clamped to box), writes (i,j,k), re-streams. The two editable dimensions are whichever face the camera; ORBIT changes them; depth is held with no special gesture. Reuse the existing node-move edit op (payload = world target, not a coord; Go snaps). Total op, no z=0 singularity.
+- spacing = tunable Go constant (~2-3x node size, by eye); box dimensions = Go-owned param (sized to hold the graph + margin).
+- Migration: existing free positions -> nearest cell (round, clamped). Snap-MODEL only (lattice invisible; visible reference deferred). Storage: node json stores (i,j,k) replacing free x/y, schema+parser parity (mirrors the port anchorId migration).
+- Parallel: ports replaced free `anchor` with `anchorId` index into a ring; nodes replace free x/y with (i,j,k) into a lattice. Same philosophy (discrete, Go-owned mapping, snap is total).
+
+### Implementation plan (follows the port-rollout shape)
+1. Go lattice geometry: node world pos resolves from (i,j,k) via origin+coord*spacing clamped to box; node spec gains (i,j,k). Additive/non-breaking first (keep free x/y path).
+2. Migrate topology node positions free x/y -> nearest (i,j,k).
+3. TS schema/parser: node position accepts (i,j,k) (parity).
+4. Drag-snap interaction: node drag -> view-plane target -> Go snaps to nearest cell -> writes (i,j,k) -> re-stream.
+5. Cleanup: remove the free x/y path.
+Then verify (go build + go test -race + tsc + vitest + editor eyeball).
+
+### Next step
+Step 1 (Go lattice geometry), additive: node world pos resolves from (i,j,k) via origin+coord*spacing clamped to box; node spec gains (i,j,k). Keep the free x/y path in place (non-breaking).
 
 ### Recently shipped to main (newest first)
 - **Edge direction arrowheads** (merge 376757c0): each edge renders a cone arrowhead at its TARGET end (apex on the target IN-port, oriented along (end-start)), showing source->target flow direction. Matches the tube's SHADING_PARAM_TUBE_COLOR/emissive and fade (faded edges' arrows fade too); raycast disabled (decorative). Derived from the Go-streamed edge segment (useEdgeGeometryStore), so it follows on node-move. Consts ARROW_HEIGHT=6, ARROW_RADIUS=3 (tube radius is 1.5) — tunable. File: tools/topology-vscode/src/webview/three/scene-content.tsx (inside SingleEdgeTube).
@@ -30,8 +49,9 @@ Input(1) -> ChainInhibitor(2,3) -> HoldFlip(4) -> WindowAndGate(5); 2->1 feedbac
 - IDE DIAGNOSTICS WERE REPEATEDLY STALE this session (phantom broken imports / unused funcs that were actually wired). Verify against `go build` / grep, not the diagnostic panel.
 - When a node has multiple outbound edges, PLACE all beads then DRIVE all together in one loop (never per-edge in series) — see memory feedback_place_all_then_drive_concurrently.
 
-### Next step
-None pending. Friction-driven: pick the next change from real editor use / observed friction. (Open idea, not committed: node 3's dangling ToNext1 port could be removed if a single-output ChainInhibitor is wanted.) (Non-blocking follow-up: camera target is runtime-only — could be persisted to scene.json (extend Camera3D with a target, update serialize/parse + CameraRefBridge restore) so orbit pivot/zoom survive reload exactly; deferred — re-seeding from scene center is fine for now.)
+### Carry-forward ideas (not blocking node-lattice)
+- Node 3's dangling ToNext1 port could be removed if a single-output ChainInhibitor is wanted.
+- Camera target is runtime-only — could be persisted to scene.json (extend Camera3D with a target, update serialize/parse + CameraRefBridge restore) so orbit pivot/zoom survive reload exactly; deferred — re-seeding from scene center is fine for now.
 
 ## ALWAYS clause
 

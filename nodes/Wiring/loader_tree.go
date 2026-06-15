@@ -39,8 +39,9 @@ type jsonPos struct {
 
 // jsonMeta is the shape of nodes/<id>/meta.json.
 type jsonMeta struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
+	ID   string   `json:"id"`
+	Type string   `json:"type"`
+	Cell *[3]int  `json:"cell,omitempty"` // optional integer lattice coord (i,j,k); highest priority for center
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -73,6 +74,7 @@ func loadTree(root string) (topoSpec, error) {
 		sn := specNode{
 			ID:   meta.ID,
 			Type: meta.Type,
+			Cell: meta.Cell,
 		}
 
 		// data.json — optional
@@ -146,13 +148,6 @@ func loadTree(root string) (topoSpec, error) {
 		}
 		id := strings.TrimSuffix(fname, ".json")
 		spec.View.Nodes[id] = specPosition{X: jp.X, Y: jp.Y, Z: jp.Z}
-	}
-
-	// ── populate Position on each specNode from view.nodes ───────────────────
-	for i := range spec.Nodes {
-		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
-			spec.Nodes[i].Position = pos
-		}
 	}
 
 	return spec, nil

@@ -34,6 +34,12 @@ export type Node = {
   outputs?: Port[];
   // Struct field values injected before the first tick (wire:"data.state").
   state?: Record<string, number>;
+  // Optional integer lattice cell (i,j,k). When present, the node center is
+  // resolved from the lattice (latticeToWorld) rather than a free-form x/y.
+  // Mirrors Go's Spec.Node `cell` field (loader.go). Authoritative positions
+  // still come from Go's node-geometry stream; this only seeds the pre-emit
+  // fallback in geometry-helpers.nodeWorldPosLocal.
+  cell?: [number, number, number];
 
 };
 

@@ -51,14 +51,9 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Errorf("node \"3\" type: got %q, want \"ChainInhibitor\"", n3.Type)
 	}
 
-	// All nodes should have non-zero position (view positions exist in topology/view/)
-	for _, n := range spec.Nodes {
-		if n.Position.X == 0 && n.Position.Y == 0 {
-			t.Errorf("node %q has zero position", n.ID)
-		}
-	}
-
-	// View positions should be populated for all nodes
+	// View positions should be populated for all nodes (view.nodes is kept as
+	// auxiliary view data; node centers no longer derive from it — the lattice
+	// cell is the only node-position model).
 	for _, n := range spec.Nodes {
 		if _, ok := spec.View.Nodes[n.ID]; !ok {
 			t.Errorf("node %q missing from view.nodes", n.ID)
