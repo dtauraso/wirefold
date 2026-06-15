@@ -139,50 +139,58 @@
   <!-- TAB 1: MODEL -->
   <div id="model" class="panel active">
     <p>
-      Replace the discrete cubic lattice (nodes parked at integer cells) with a
-      <strong>recursive sphere-chain</strong>. Each node is the <strong>center of a sphere</strong>;
-      the nodes it sends to — its <strong>output targets</strong> — sit on that sphere's
-      <strong>boundary (surface)</strong>. Each of those targets is itself the center of its own
-      sphere, with <em>its</em> targets on <em>its</em> surface. The structure unfolds recursively
-      from node <code>1</code> (the Input / root).
+      The sphere-chain is the <strong>placement frame</strong> — it replaces the lattice frame, the
+      same way the lattice was the placement frame for discrete cells. Where the lattice provided a
+      grid of cells to park nodes in, the sphere-chain provides a set of radius-<code>R</code> spheres
+      whose surfaces nodes sit on. It is not a separate decoration; it <em>is</em> where positions come from.
+    </p>
+
+    <p>
+      Each node is the <strong>center of a sphere of radius <code>R</code></strong>, and its
+      neighbors ride that sphere's <strong>surface</strong>. Crucially this is
+      <strong>symmetric and applies to every edge — in or out, back edges included</strong>:
     </p>
 
     <div class="eq-block">
-      <span class="eq-line">child_pos = parent_center + R · dir</span>
+      <span class="eq-line">neighbor_pos = node_center + R · dir</span>
+      <span class="eq-line">A on B's sphere  ⇔  B on A's sphere</span>
     </div>
 
     <ul>
-      <li><strong>Node = sphere center.</strong> Every node is the center of a sphere of radius <code>R</code>.</li>
-      <li><strong>Output-targets on the boundary.</strong> The nodes a node sends to are placed on its sphere's surface, at distance <code>R</code> in some unit direction <code>dir</code>.</li>
-      <li><strong>Recursive from node 1.</strong> Node <code>1</code> centers a sphere; nodes <code>2</code> and <code>6</code> (its targets) sit on node 1's boundary and are themselves centers of spheres; repeat down every output edge.</li>
+      <li><strong>Node = sphere center.</strong> Every node centers a sphere of radius <code>R</code>.</li>
+      <li><strong>Symmetric neighbors-on-sphere.</strong> Every node connected to a given node by <em>any</em> edge — incoming, outgoing, or a feedback back-edge — sits on that node's surface, and it is reciprocal: if A is on B's sphere then B is on A's sphere.</li>
+      <li><strong>Equivalent statement.</strong> Every edge has length <code>R</code>; equivalently, each node's neighbors all lie on its radius-<code>R</code> sphere.</li>
+      <li><strong>Example.</strong> Node <code>2</code> sits on node <code>1</code>'s surface (the <code>1 → 2</code> edge), and nodes <code>1</code>, <code>3</code>, and <code>7</code> all sit on node <code>2</code>'s surface — node <code>1</code> via the <code>2 → 1</code> feedback back-edge, nodes <code>3</code> and <code>7</code> via <code>2 → 3</code> and <code>2 → 7</code>. The <code>1</code>↔<code>2</code> relationship is reciprocal.</li>
       <li><strong>Go computes + streams positions.</strong> Layout is geometry, so it is Go-owned: Go derives node world positions from the graph structure and streams them (as it streams centers today); TS only renders.</li>
-      <li><strong>Replaces the lattice.</strong> No more lattice cell storage and no <code>latticeToWorld</code>; positions come from the spheres, not from stored <code>(i,j,k)</code> cells.</li>
+      <li><strong>Replaces the lattice frame.</strong> No more lattice cell storage and no <code>latticeToWorld</code>; positions come from the spheres, not from stored <code>(i,j,k)</code> cells.</li>
     </ul>
 
     <p class="note">
-      The current topology is not a clean tree: node <code>5</code> has two parents
-      (<code>6</code> and <code>4</code>), and there is a feedback cycle (<code>2 → 1</code>).
-      How those cases place is open — see Open Questions.
+      The topology has a multi-parent node (<code>5</code>, from <code>6</code> and <code>4</code>)
+      and a feedback edge (<code>2 → 1</code>). Both are handled by the symmetric frame: back edges
+      are in, and because the graph is sparse (under-constrained) an exact uniform-<code>R</code>
+      placement exists — see Open Questions Q3.
     </p>
   </div>
 
   <!-- TAB 2: GEOMETRY -->
   <div id="geometry" class="panel">
     <p>
-      A child's world position is its parent's center pushed out by the sphere radius along a
-      chosen unit direction:
+      A neighbor's world position is a node's center pushed out by the sphere radius along a
+      unit direction. Symmetrically: every edge has length <code>R</code>, so both endpoints lie on
+      each other's radius-<code>R</code> sphere.
     </p>
 
     <div class="eq-block">
-      <span class="eq-line">child_pos = parent_center + R · dir</span>
-      <span class="eq-line">|dir| = 1</span>
+      <span class="eq-line">neighbor_pos = node_center + R · dir</span>
+      <span class="eq-line">|dir| = 1   ·   ‖edge‖ = R for every edge</span>
     </div>
 
     <ul>
-      <li><strong>R — sphere radius.</strong> A layout parameter. Whether it is a uniform tunable constant or derived per-node (e.g. scaled by the number of children, or by node size) is <strong>open</strong> (Q1). Leaning uniform constant to start.</li>
-      <li><strong>dir — per-child direction.</strong> When a node has multiple output-targets, each target needs its own <code>dir</code> on the boundary. <em>How</em> those directions are chosen (even spread, general downstream direction, golden spiral, full 3D sphere vs a 2D circle) is the crux and is <strong>open</strong> (Q2).</li>
-      <li><strong>Traversal.</strong> Layout is computed by walking the graph from the root (<code>1</code>) along <strong>output edges</strong>. Each node, once placed, places its own output-targets on its surface — the recursion in the Model tab.</li>
-      <li><strong>Forward edges only (leaning).</strong> Back/feedback edges (e.g. <code>2 → 1</code>) would make placement circular; excluding them from the traversal is leaning-open (Q4).</li>
+      <li><strong>R — sphere radius.</strong> A layout parameter. Whether it is a uniform tunable constant or derived per-node (e.g. scaled by the number of children, or by node size) is <strong>open</strong> (Q1). Leaning uniform constant.</li>
+      <li><strong>dir — per-neighbor direction.</strong> When a node has multiple neighbors, each one needs its own <code>dir</code> on the surface. <em>How</em> those directions are chosen (even spread, deterministic recursive BFS placement from node <code>1</code>, golden spiral, full 3D sphere vs a 2D circle) is the crux and is <strong>open</strong> (Q2).</li>
+      <li><strong>All edges define the frame.</strong> Back/feedback edges (e.g. <code>2 → 1</code>) are <strong>not</strong> excluded — they constrain placement like any other edge (node <code>1</code> on node <code>2</code>'s sphere and vice versa). The frame is the whole edge set, not a spanning tree.</li>
+      <li><strong>Exact placement, no relaxation needed.</strong> Achieving every-edge-= <code>R</code> exactly is only impossible for <em>dense / over-constrained</em> graphs — e.g. a 5-clique <code>K5</code> with uniform edge length can't exist in 3D (at most 4 equidistant points = a tetrahedron), or a shared neighbor whose two neighbors are pinned more than <code>2R</code> apart. This topology is <strong>sparse / under-constrained</strong>: 7 nodes give <code>3·7 − 6 = 15</code> degrees of freedom against only ~7 edges, so an <strong>exact</strong> uniform-<code>R</code> placement exists with slack to spare. A <strong>deterministic exact placement</strong> works — <strong>no force-directed relaxation</strong> required.</li>
     </ul>
   </div>
 
@@ -206,12 +214,14 @@
   <!-- TAB 4: TARGET (SPHERE CHAIN) -->
   <div id="target" class="panel">
     <p>
-      What replaces it: a recursive <strong>spherical hierarchy</strong> rooted at node <code>1</code>.
+      What replaces it: the sphere-chain as the new <strong>placement frame</strong> — a set of
+      radius-<code>R</code> spheres, one per node, whose surfaces hold that node's neighbors. It
+      takes over the lattice's job (giving nodes somewhere to sit) rather than adding a layer.
     </p>
     <ul>
-      <li>Each node is a sphere center; its output-targets ride its surface at radius <code>R</code>.</li>
-      <li>Positions are <strong>derived from the graph</strong> (parent → children on spheres), not stored as cells.</li>
-      <li>The "chain" follows <strong>output edges</strong>: node 1 → {2,6}, node 2 → {3,7}, node 6 → {5}, node 7 → {4}, node 4 → {5}, terminating at sinks (<code>5</code>) and dangling outputs (<code>3</code>).</li>
+      <li>Each node is a sphere center; <strong>every</strong> node it shares an edge with — in, out, or back — rides its surface at radius <code>R</code>, reciprocally.</li>
+      <li>Positions are <strong>derived from the graph</strong> (neighbors-on-sphere), not stored as cells.</li>
+      <li>The edge set defines the frame: node 1 ↔ {2,6}, node 2 ↔ {1,3,7}, node 6 ↔ {1,5}, node 7 ↔ {2,4}, node 4 ↔ {7,5}, node 5 ↔ {6,4}, including the <code>2 → 1</code> back-edge.</li>
       <li>No grid, no snapping, no quantized cells — the wiring is the layout.</li>
     </ul>
 
@@ -246,7 +256,8 @@
     <div class="card">
       <h2>A — Auto-computed (no dragging)</h2>
       <p>
-        The layout is fully a function of the graph. Go computes every position from the wiring;
+        The layout is fully a function of the graph. Because the topology is sparse, Go can compute
+        an <strong>exact uniform-<code>R</code> placement deterministically</strong> (no relaxation);
         the user never moves nodes by hand. Changing the layout means changing the wiring (or the
         layout parameters), not dragging.
       </p>
@@ -290,13 +301,13 @@
         </tr>
         <tr>
           <td>Q3</td>
-          <td><strong>Multi-parent nodes</strong>: node <code>5</code> is a target of both <code>6</code> and <code>4</code> — it can't sit on two spheres at once. Which parent places it (first / primary), a blend / midpoint, or does it get its own rule?</td>
-          <td>Open.</td>
+          <td><strong>Multi-parent nodes</strong>: node <code>5</code> is a neighbor of both <code>6</code> and <code>4</code>, so it must sit on both their spheres at once.</td>
+          <td><strong>RESOLVED</strong> — this is fine. Sitting on two spheres just means node <code>5</code> is at distance <code>R</code> from both <code>6</code> and <code>4</code>, which is satisfiable whenever <code>6</code> and <code>4</code> are within <code>2R</code> of each other. Because the graph is under-constrained, the layout is free to keep <code>6</code> and <code>4</code> within <code>2R</code>, so exact placement works. No primary-parent / midpoint rule needed.</td>
         </tr>
         <tr>
           <td>Q4</td>
-          <td><strong>Cycles / feedback</strong>: the <code>2 → 1</code> feedback edge would make placement circular. Are feedback / back edges excluded from the layout traversal (only forward output edges define the tree)?</td>
-          <td>Open. Lean exclude back-edges.</td>
+          <td><strong>Cycles / feedback</strong>: how does the <code>2 → 1</code> feedback edge affect the frame?</td>
+          <td><strong>RESOLVED</strong> — back edges are <strong>not</strong> excluded; all edges define the frame. The <code>2 → 1</code> edge constrains placement exactly like any other (length <code>R</code>, node <code>1</code> on node <code>2</code>'s sphere and reciprocally). There is no forward-only traversal / spanning tree; the whole edge set is the frame.</td>
         </tr>
         <tr>
           <td>Q5</td>
