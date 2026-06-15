@@ -375,11 +375,13 @@ export function GraphNode({
 
 export function SphereRing({
   nodes,
+  edges,
   selectedId,
   selectedSphere,
   showSphere,
 }: {
   nodes: RFNode<NodeData>[];
+  edges: RFEdge<EdgeData>[];
   selectedId: string | null;
   selectedSphere: string | null;
   showSphere: boolean;
@@ -389,12 +391,17 @@ export function SphereRing({
 
   const selNode = selectedId ? nodes.find((n) => n.id === selectedId) ?? null : null;
 
+  // Only output-bearing nodes center a sphere; output-less nodes (no outgoing
+  // edge, e.g. surface-only members like 3 and 5) live on others' surfaces and
+  // have no sphere of their own.
+  const centersSphere = selNode != null && edges.some((e) => e.source === selNode.id);
+
   const ringColor = useMemo(
     () => new THREE.Color(selNode?.data?.stroke ?? "#888888"),
     [selNode?.data?.stroke],
   );
 
-  if (!showSphere || !selNode) return null;
+  if (!showSphere || !selNode || !centersSphere) return null;
 
   const center = nodeWorldPos(selNode);
   // R = Go-streamed sphere-chain radius (sphereR, used for bead orbit and port placement).
@@ -1187,6 +1194,7 @@ export function Scene({
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
       <SphereRing
         nodes={nodes}
+        edges={edges}
         selectedId={selectedId}
         selectedSphere={selectedSphere}
         showSphere={showSphere}
