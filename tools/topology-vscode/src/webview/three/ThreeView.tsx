@@ -32,6 +32,9 @@ export function ThreeView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showSphere, setShowSphere] = useState<boolean>(false);
+  // selectedSphere: the node id whose sphere SURFACE (torus rim) is selected.
+  // Distinct from selectedId (a node/edge/port). Set when a pick returns "sphere:<id>".
+  const [selectedSphere, setSelectedSphere] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
   const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
@@ -111,11 +114,23 @@ export function ThreeView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, edges, toggleFade, storeDeleteEdge]);
 
+  // Route a pick result to the right selection state. A "sphere:<id>" result selects
+  // the SPHERE surface (setSelectedSphere); anything else selects a node/edge/port and
+  // clears the sphere selection. Empty space (null) clears both.
+  const handleSelect = useCallback((id: string | null) => {
+    if (id && id.startsWith("sphere:")) {
+      setSelectedSphere(id.slice("sphere:".length));
+      return;
+    }
+    setSelectedId(id);
+    setSelectedSphere(null);
+  }, []);
+
   const { onPointerDown, onPointerMove, onPointerUp, onWheelNative } = useInteractionControls(
     cameraRef,
     canvasSize,
     pickRequest,
-    setSelectedId,
+    handleSelect,
     nodesRef,
     storeCreateEdge,
     selectedIdRef,
@@ -148,7 +163,8 @@ export function ThreeView() {
         if (!pickRequest.current) return;
         const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
         const hitId = pickRequest.current(ndcX, ndcY);
-        setHoveredId(hitId);
+        // Sphere-surface picks ("sphere:<id>") are not node hovers — ignore for hover.
+        setHoveredId(hitId && hitId.startsWith("sphere:") ? null : hitId);
       });
     },
     [onPointerMove, pickRequest],
@@ -213,6 +229,7 @@ export function ThreeView() {
             nodes={nodes}
             edges={edges}
             selectedId={selectedId}
+            selectedSphere={selectedSphere}
             hoveredId={hoveredId}
             cameraRef={cameraRef}
             initialCamera3d={viewerState.camera3d}
