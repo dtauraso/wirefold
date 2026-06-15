@@ -22,12 +22,10 @@ import (
 // deliver mail-sorts a node-move to the node's inbox + every incident edge's inbox,
 // each with an ack the mover closes when done, then waits — mirroring the live
 // stdin-reader dispatch but blocking so the test can assert deterministically.
-// deliver snaps a world target to its lattice cell (mirroring stdin_reader's
-// worldToLattice) and mail-sorts a node-move (Cell only — the sole position model)
-// to the node's inbox + every incident edge's inbox, blocking on acks.
+// deliver sends "center" messages (the sphere-chain position model) to the node's
+// inbox + every incident edge's inbox, blocking on acks.
 func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
-	i, j, k := worldToLattice(x, y, z)
-	cell := &[3]int{i, j, k}
+	center := &vec3{X: x, Y: y, Z: z}
 	var keys []string
 	keys = append(keys, nodeID)
 	for edgeID, em := range md.edgeMovers {
@@ -38,7 +36,7 @@ func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
 	acks := make([]chan struct{}, 0, len(keys))
 	for _, kk := range keys {
 		ack := make(chan struct{})
-		md.dispatch[kk] <- moveMsg{NodeID: nodeID, Cell: cell, ack: ack}
+		md.dispatch[kk] <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, ack: ack}
 		acks = append(acks, ack)
 	}
 	for _, ack := range acks {
@@ -94,10 +92,10 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	const nx, ny, nz = 400, 250, 30
 	deliver(md, "src", nx, ny, nz)
 
-	// Expected recompute from the moved geometry: src's cell is worldToLattice(nx,ny,nz).
-	si, sj, sk := worldToLattice(nx, ny, nz)
-	srcGeom := nodeGeom{Kind: "FanInSrc", Cell: &[3]int{si, sj, sk}, Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", Cell: &[3]int{0, 0, 0}, Inputs: []portGeom{{Name: "In"}}}
+	// Expected recompute from the moved geometry: src center is the world target.
+	srcCenter := vec3{X: nx, Y: ny, Z: nz}
+	srcGeom := nodeGeom{Kind: "FanInSrc", Center: &srcCenter, Outputs: []portGeom{{Name: "Out"}}}
+	dstGeom := nodeGeom{Kind: "FanInSink", Inputs: []portGeom{{Name: "In"}}}
 	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
 	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")
 

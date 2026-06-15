@@ -43,7 +43,7 @@ const (
 )
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
-//   - "" or "move": node-move — NodeID + Cell applied by nodeMover and edgeMover.
+//   - "" or "move": node-move — currently a no-op (sphere-chain layout owns positioning via "center" messages).
 //   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
 //
 // ack (if non-nil) is closed by the mover after it has fully handled the message —
@@ -51,10 +51,6 @@ const (
 type moveMsg struct {
 	Kind    string
 	NodeID  string
-	// Cell (node-move only): the lattice cell (i,j,k) the incoming world target snapped
-	// to (Go snaps in applyEdit via worldToLattice). It is the sole node-position model;
-	// nodeWorldPos resolves the center from Cell (latticeToWorld). nil → cell {0,0,0}.
-	Cell  *[3]int
 	Faded bool
 	// Anchor payload (Kind == "anchor"): identify the port whose anchor changed.
 	// Port/IsInput name the port on NodeID; AnchorId is the snapped ring-anchor index
@@ -133,7 +129,6 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		return
 	}
-	m.geom.Cell = msg.Cell // lattice snap is the only node-position model
 	if m.tr != nil {
 		emitNodeGeometry(m.tr, m.id, m.geom)
 	}
@@ -237,16 +232,9 @@ func (m *edgeMover) handle(msg moveMsg) {
 		m.recomputeGeometry()
 		return
 	}
-	switch msg.NodeID {
-	case m.srcID:
-		m.srcGeom.Cell = msg.Cell // lattice snap is the only endpoint-position model
-	case m.dstID:
-		m.dstGeom.Cell = msg.Cell
-	default:
-		return
-	}
-
-	m.recomputeGeometry()
+	// Plain "move" messages have no effect under sphere-chain layout;
+	// position updates arrive as "center" messages instead.
+	_ = msg
 }
 
 // recomputeGeometry re-derives this edge's segment/arc/latency from its held endpoint
@@ -472,7 +460,7 @@ func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, boo
 	// to that node's mover AND every incident edge's mover). Each owning goroutine
 	// writes the center/Dir onto its own held geom and re-emits — preserving the
 	// per-goroutine ownership model. The whole-graph SOLVE is central; the per-mover
-	// APPLY stays decentralized, exactly like a Cell move's fan-out.
+	// APPLY stays decentralized.
 	for id, c := range newCenters {
 		cc := c
 		dir := geoms[id].Dir

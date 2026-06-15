@@ -78,12 +78,6 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return nodeWorldPosLocal(node);
 }
 
-// World-units per one node-drag step. Retained as the drag-step scale for
-// interaction-controls (zoom-independent pixel→step node drag); it is NOT a
-// lattice constant any more (the lattice was retired for the sphere-chain
-// layout). The numeric value is the historical step size.
-export const LATTICE_SPACING = 46.5425;
-
 /**
  * FALLBACK: local node-center compute. Used pre-emit ONLY (before Go's first
  * node-geometry emit). Authoritative WORLD centers are Go-computed by sphere-chain

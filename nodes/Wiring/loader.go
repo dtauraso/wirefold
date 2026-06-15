@@ -48,7 +48,6 @@ type specNode struct {
 	Data     *NodeData  `json:"data,omitempty"`
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
-	Cell     *[3]int     `json:"cell,omitempty"` // integer lattice coord (i,j,k); the lattice node-position model (nil → cell {0,0,0})
 	R        *float64    `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
 	Dir      *[3]float64 `json:"dir,omitempty"`  // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
 }
@@ -57,7 +56,7 @@ type specNode struct {
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, Cell: n.Cell, R: n.R, Dir: n.Dir}
+	g := nodeGeom{Kind: n.Type, R: n.R, Dir: n.Dir}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -167,7 +166,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
-// and validated topoSpec. Node centers resolve from each node's lattice Cell.
+// and validated topoSpec. Node centers resolve via sphere-chain propagation (computeSphereChainPositions).
 func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
 	// Build id→geometry map for arc-length computation at wire construction.
 	// nodeGeom carries kind/dims/port side+slot so the Go arc length mirrors
@@ -177,12 +176,9 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		nodeGeoms[n.ID] = n.toNodeGeom()
 	}
 
-	// Sphere-chain layout (B3): if any node carries an explicit R, resolve world
-	// centers by propagation from an anchor (computeSphereChainPositions) and inject
-	// each into its nodeGeom.Center. nodeWorldPos then returns that center directly,
-	// bypassing the lattice path. GATED + ADDITIVE: with no R, the map is nil and
-	// every node keeps its lattice cell; nodes not reached from the anchor keep
-	// their lattice pos (no Center injected). Computed once here so all downstream
+	// Sphere-chain layout: resolve world centers by propagation from an anchor
+	// (computeSphereChainPositions) and inject each into its nodeGeom.Center.
+	// nodeWorldPos returns that center directly. Computed once here so all downstream
 	// arc/segment/build geometry sees the propagated centers.
 	{
 		edges := make([]sphereEdge, 0, len(spec.Edges))
