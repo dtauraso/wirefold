@@ -146,9 +146,17 @@
     </p>
 
     <p>
-      Each node is the <strong>center of a sphere of radius <code>R</code></strong>, and its
-      neighbors ride that sphere's <strong>surface</strong>. Crucially this is
+      Each node <em>with outputs</em> is the <strong>center of a sphere of radius <code>R</code></strong>,
+      and its directly connected neighbors ride that sphere's <strong>surface</strong>. Crucially this is
       <strong>symmetric and applies to every edge — in or out, back edges included</strong>:
+    </p>
+
+    <p>
+      A sphere is <strong>local</strong>: it concerns only that one node and the nodes it
+      <strong>directly connects to</strong> (its neighbors) — never the whole graph. A sphere =
+      a node + its direct neighbors on its surface. <strong>Only connected nodes share a surface</strong>:
+      if two nodes have no edge between them, neither is on the other's sphere (e.g. nodes
+      <code>6</code> and <code>7</code> are not connected, so neither sits on the other's surface).
     </p>
 
     <div class="eq-block">
@@ -157,7 +165,8 @@
     </div>
 
     <ul>
-      <li><strong>Node = sphere center.</strong> Every node centers a sphere of radius <code>R</code>.</li>
+      <li><strong>Only output-bearing nodes center a sphere.</strong> A node <em>with outputs</em> centers a sphere of radius <code>R</code>. <strong>Output-less nodes are surface-only</strong>: they own no sphere; they sit on the surfaces of the node(s) that connect to them, and may belong to <strong>more than one</strong> surface (e.g. sink node <code>5</code> sits on both node <code>6</code>'s and node <code>4</code>'s surface; node <code>3</code>'s dangling output gives it no sphere). Multi-surface membership is fine.</li>
+      <li><strong>Local sphere.</strong> Each sphere is about one node and its <em>direct</em> neighbors only, never the whole graph. Only connected nodes share a surface; unconnected pairs (e.g. <code>6</code> and <code>7</code>) are on neither's sphere.</li>
       <li><strong>Symmetric neighbors-on-sphere.</strong> Every node connected to a given node by <em>any</em> edge — incoming, outgoing, or a feedback back-edge — sits on that node's surface, and it is reciprocal: if A is on B's sphere then B is on A's sphere.</li>
       <li><strong>Equivalent statement.</strong> Every edge has length <code>R</code>; equivalently, each node's neighbors all lie on its radius-<code>R</code> sphere.</li>
       <li><strong>Example.</strong> Node <code>2</code> sits on node <code>1</code>'s surface (the <code>1 → 2</code> edge), and nodes <code>1</code>, <code>3</code>, and <code>7</code> all sit on node <code>2</code>'s surface — node <code>1</code> via the <code>2 → 1</code> feedback back-edge, nodes <code>3</code> and <code>7</code> via <code>2 → 3</code> and <code>2 → 7</code>. The <code>1</code>↔<code>2</code> relationship is reciprocal.</li>
@@ -166,10 +175,10 @@
     </ul>
 
     <p class="note">
-      The topology has a multi-parent node (<code>5</code>, from <code>6</code> and <code>4</code>)
-      and a feedback edge (<code>2 → 1</code>). Both are handled by the symmetric frame: back edges
-      are in, and because the graph is sparse (under-constrained) an exact uniform-<code>R</code>
-      placement exists — see Open Questions Q3.
+      The topology has a multi-surface node (<code>5</code>, on both <code>6</code>'s and
+      <code>4</code>'s surfaces) and a feedback edge (<code>2 → 1</code>). Both are handled by the
+      symmetric, local frame: back edges are in, multi-surface membership is fine, and the graph is
+      sparse enough that a per-node placement exists — see Open Questions Q3.
     </p>
   </div>
 
@@ -187,8 +196,10 @@
     </div>
 
     <ul>
-      <li><strong>R — sphere radius.</strong> A layout parameter. Whether it is a uniform tunable constant or derived per-node (e.g. scaled by the number of children, or by node size) is <strong>open</strong> (Q1). Leaning uniform constant.</li>
+      <li><strong>R — per-node starting radius.</strong> <code>R</code> is a <strong>per-node starting value</strong>, independent and adjustable per node — <em>not</em> the length of any designated/reference edge (there is no designated edge). The user supplies the starting values. Resizing a node's sphere (dragging its surface toward the center) changes <em>that node's</em> <code>R</code>. Where the starting values come from is <strong>open</strong> (Q1).</li>
+      <li><strong>Local frame.</strong> A sphere constrains only the node and its <em>direct</em> neighbors; only connected nodes lie on each other's surfaces. Output-less nodes have no sphere of their own and appear only as surface members of the node(s) they connect to (possibly several).</li>
       <li><strong>dir — per-neighbor direction.</strong> When a node has multiple neighbors, each one needs its own <code>dir</code> on the surface. <em>How</em> those directions are chosen (even spread, deterministic recursive BFS placement from node <code>1</code>, golden spiral, full 3D sphere vs a 2D circle) is the crux and is <strong>open</strong> (Q2).</li>
+      <li><strong>First-cut render (committed 837087f7).</strong> A see-through <strong>torus ring at radius <code>R</code></strong> (styled like the node's border torus), toggled by a "sphere" button for the selected node, with discrete diameter-sized draggable surface slots. <code>R</code> there currently stands in as the live primary-output-edge distance until per-node starting values exist (Q1).</li>
       <li><strong>All edges define the frame.</strong> Back/feedback edges (e.g. <code>2 → 1</code>) are <strong>not</strong> excluded — they constrain placement like any other edge (node <code>1</code> on node <code>2</code>'s sphere and vice versa). The frame is the whole edge set, not a spanning tree.</li>
       <li><strong>Exact placement, no relaxation needed.</strong> Achieving every-edge-= <code>R</code> exactly is only impossible for <em>dense / over-constrained</em> graphs — e.g. a 5-clique <code>K5</code> with uniform edge length can't exist in 3D (at most 4 equidistant points = a tetrahedron), or a shared neighbor whose two neighbors are pinned more than <code>2R</code> apart. This topology is <strong>sparse / under-constrained</strong>: 7 nodes give <code>3·7 − 6 = 15</code> degrees of freedom against only ~7 edges, so an <strong>exact</strong> uniform-<code>R</code> placement exists with slack to spare. A <strong>deterministic exact placement</strong> works — <strong>no force-directed relaxation</strong> required.</li>
     </ul>
@@ -219,7 +230,7 @@
       takes over the lattice's job (giving nodes somewhere to sit) rather than adding a layer.
     </p>
     <ul>
-      <li>Each node is a sphere center; <strong>every</strong> node it shares an edge with — in, out, or back — rides its surface at radius <code>R</code>, reciprocally.</li>
+      <li>Each <em>output-bearing</em> node is a sphere center; every node it shares an edge with — in, out, or back — rides its surface at radius <code>R</code>, reciprocally. Output-less nodes (<code>3</code>, <code>5</code>) own no sphere and are surface-only, possibly on several surfaces.</li>
       <li>Positions are <strong>derived from the graph</strong> (neighbors-on-sphere), not stored as cells.</li>
       <li>The edge set defines the frame: node 1 ↔ {2,6}, node 2 ↔ {1,3,7}, node 6 ↔ {1,5}, node 7 ↔ {2,4}, node 4 ↔ {7,5}, node 5 ↔ {6,4}, including the <code>2 → 1</code> back-edge.</li>
       <li>No grid, no snapping, no quantized cells — the wiring is the layout.</li>
@@ -276,6 +287,19 @@
       Which framing wins is <strong>open</strong> (Q5). Either way, the lattice's
       drag-snap-to-cell behavior is gone — there are no cells to snap to.
     </p>
+
+    <div class="card">
+      <h2>First-cut visualization (committed 837087f7)</h2>
+      <p>
+        A <strong>"sphere" button</strong> toggles a see-through <strong>torus ring at radius
+        <code>R</code></strong> for the <strong>selected node</strong> (styled like that node's border
+        torus). It shows the node's own sphere. <code>R</code> there currently uses the live
+        <strong>primary-output-edge distance as a stand-in</strong> for the node's starting <code>R</code>
+        value (the real per-node starting value is still Q1). Neighbors land on the surface as
+        <strong>discrete, diameter-sized draggable slots</strong>; dragging a slot inward shrinks that
+        node's <code>R</code>.
+      </p>
+    </div>
   </div>
 
   <!-- TAB 6: OPEN QUESTIONS -->
@@ -291,8 +315,8 @@
       <tbody>
         <tr>
           <td>Q1</td>
-          <td>Sphere <strong>radius R</strong>: uniform constant (tunable), or per-node / derived (e.g. scaled by number of children or node size)?</td>
-          <td>Open. Lean uniform constant to start.</td>
+          <td>Sphere <strong>radius R</strong>: a <strong>per-node starting value</strong> — independent, adjustable, user-supplied; <em>not</em> the length of any designated/reference edge (there is no designated edge). Resizing a node's sphere changes that node's <code>R</code>.</td>
+          <td><strong>RESOLVED</strong> (framing) — <code>R</code> is a per-node starting value. Still <strong>OPEN</strong>: the explicit starting <code>R</code> values and where they come from (first-cut render stands in with the live primary-output-edge distance).</td>
         </tr>
         <tr>
           <td>Q2</td>
@@ -301,8 +325,8 @@
         </tr>
         <tr>
           <td>Q3</td>
-          <td><strong>Multi-parent nodes</strong>: node <code>5</code> is a neighbor of both <code>6</code> and <code>4</code>, so it must sit on both their spheres at once.</td>
-          <td><strong>RESOLVED</strong> — this is fine. Sitting on two spheres just means node <code>5</code> is at distance <code>R</code> from both <code>6</code> and <code>4</code>, which is satisfiable whenever <code>6</code> and <code>4</code> are within <code>2R</code> of each other. Because the graph is under-constrained, the layout is free to keep <code>6</code> and <code>4</code> within <code>2R</code>, so exact placement works. No primary-parent / midpoint rule needed.</td>
+          <td><strong>Multi-parent / multi-surface nodes</strong>: node <code>5</code> is a neighbor of both <code>6</code> and <code>4</code>, so it sits on both their surfaces at once.</td>
+          <td><strong>RESOLVED</strong> — <strong>multi-surface membership is fine</strong>. Node <code>5</code> is output-less, so it owns no sphere; it is placed purely as a surface member of its connecting nodes' spheres — here both <code>6</code> and <code>4</code>. Sitting on two surfaces just means it is at distance <code>R</code> from both, satisfiable whenever <code>6</code> and <code>4</code> are within <code>2R</code>. Because the graph is under-constrained, the layout keeps them within <code>2R</code>, so exact placement works. No primary-parent / midpoint rule needed.</td>
         </tr>
         <tr>
           <td>Q4</td>
@@ -316,8 +340,8 @@
         </tr>
         <tr>
           <td>Q6</td>
-          <td><strong>Root + disconnected / dangling</strong>: node <code>1</code> is the root. What about nodes with no incoming forward edge, or node <code>3</code>'s dangling output? How is the traversal seeded, and what places the root itself?</td>
-          <td>Open.</td>
+          <td><strong>Output-less / dangling nodes</strong>: node <code>3</code>'s dangling output and the sink node <code>5</code>.</td>
+          <td><strong>RESOLVED</strong> — output-less nodes have <strong>no sphere of their own</strong>; they are <strong>surface-only</strong>, placed solely as surface members of the node(s) that connect to them (possibly several — node <code>5</code> on both <code>6</code> and <code>4</code>). This is a local, per-node frame, not a rooted traversal of the whole graph.</td>
         </tr>
         <tr>
           <td>Q7</td>
