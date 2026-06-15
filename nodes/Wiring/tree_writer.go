@@ -57,6 +57,18 @@ func writeMetaDir(root, nodeID string, dir *[3]float64) error {
 	return writeJSONAtomic(path, meta)
 }
 
+// writeMetaR sets the sphere radius on a node's meta.json, preserving its id/type/cell/dir.
+func writeMetaR(root, nodeID string, r float64) error {
+	path := filepath.Join(root, "nodes", nodeID, "meta.json")
+	var meta jsonMeta
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &meta)
+	}
+	meta.ID = nodeID
+	meta.R = &r
+	return writeJSONAtomic(path, meta)
+}
+
 func writePort(root, nodeID, port string, isInput bool, p specPort) error {
 	side := "inputs"
 	if !isInput {

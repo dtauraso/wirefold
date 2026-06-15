@@ -80,6 +80,8 @@ type stdinMsg struct {
 	Anchor  *anchorVec      `json:"anchor"`
 	Keys    []string        `json:"keys"`
 	Scene   json.RawMessage `json:"scene"`
+	NodeId  string          `json:"nodeId"`
+	R       float64         `json:"r"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -309,6 +311,17 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		}
 		if treeRoot != "" {
 			_ = mergeFades(treeRoot, msg.Edges)
+		}
+	case msg.Op == "sphere-resize":
+		// Set the node's sphere R and re-propagate (children move to the new radius).
+		// Anchor-1 only; upstream nodes unaffected (full re-root is follow-up).
+		if md == nil || msg.NodeId == "" || math.IsNaN(msg.R) {
+			return
+		}
+		tr.Breadcrumb("edit-sphere-resize-recv", msg.NodeId, "", "")
+		newR, ok := md.SphereResize(msg.NodeId, msg.R)
+		if ok && treeRoot != "" {
+			_ = writeMetaR(treeRoot, msg.NodeId, newR)
 		}
 	case msg.Op == "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {

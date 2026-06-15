@@ -490,6 +490,56 @@ func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, boo
 	return newQuantDir, true
 }
 
+// SphereResize sets the given node's sphere radius R and re-propagates every node's
+// world center from the anchor (computeSphereChainPositions), fanning the fresh centers
+// out to every node/edge mover (same decentralized APPLY as SphereMove). Changing a
+// node's R changes the distance to ITS children, so the node's subtree contracts/expands
+// toward it. r is clamped to a small minimum. Anchor-1 only: upstream nodes do not move
+// (a full re-root would need per-edge re-anchoring — follow-up). Returns the clamped R
+// and true on a real change; 0,false for an unknown node.
+func (md *MoveDispatch) SphereResize(nodeID string, r float64) (float64, bool) {
+	nm, ok := md.nodeMovers[nodeID]
+	if !ok {
+		return 0, false
+	}
+	const minR = 1.0
+	if r < minR {
+		r = minR
+	}
+	// Set R on the resized node's held geom (single owner mutates its own geom here,
+	// matching how SphereMove sets Dir on the local geoms copy before re-propagating).
+	rr := r
+	nm.geom.R = &rr
+
+	geoms := make(map[string]nodeGeom, len(md.nodeMovers))
+	for id, m := range md.nodeMovers {
+		geoms[id] = m.geom
+	}
+	edges := make([]sphereEdge, 0, len(md.edgeMovers))
+	for _, em := range md.edgeMovers {
+		edges = append(edges, sphereEdge{Source: em.srcID, Target: em.dstID})
+	}
+	newCenters := computeSphereChainPositions(geoms, edges)
+	if len(newCenters) == 0 {
+		return 0, false
+	}
+	for id, c := range newCenters {
+		cc := c
+		dir := geoms[id].Dir
+		if ch, ok := md.dispatch[id]; ok {
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir}
+		}
+		for edgeID, em := range md.edgeMovers {
+			if em.srcID == id || em.dstID == id {
+				if ch, ok := md.dispatch[edgeID]; ok {
+					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir}
+				}
+			}
+		}
+	}
+	return r, true
+}
+
 // NodeKind returns the kind string for the given node id, or "" if unknown.
 // Used by applyEdit to resolve the node's kind when snapping a port-anchor
 // world-space direction to the nearest ring-anchor index.
