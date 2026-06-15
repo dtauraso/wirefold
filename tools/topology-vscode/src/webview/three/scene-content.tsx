@@ -985,19 +985,6 @@ export function RaycasterHelper({
         picked = nodeHit.id;
       }
 
-      // TEMP breadcrumb: dump nearest hits + chosen id so we can read .probe/ts.jsonl
-      // and confirm true z-occlusion (frontmost body wins) vs. a mis-resolved pick.
-      postLog("pick", {
-        ndcX,
-        ndcY,
-        hits: hits.slice(0, 5).map((h) => {
-          const u = (h.object as THREE.Mesh).userData ?? {};
-          const kind = u.body ? "body" : u.ring ? "ring" : u.portId ? "port" : u.edgeId ? "edge" : "other";
-          return { kind, nodeId: u.nodeId ?? null, id: u.portId ?? u.edgeId ?? null, dist: h.distance };
-        }),
-        picked,
-      });
-
       return picked;
     };
   }, [camera, scene, nodes]);
