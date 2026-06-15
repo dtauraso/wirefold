@@ -141,6 +141,8 @@ Visual editor reached v0. New work is friction-driven, not phase-driven (per-pha
 
 If the main session catches itself doing executor-style work, that's a miss — note it and route the next similar task to a subagent.
 
+**Verification runs (sim / anything that can block):** do NOT delegate a single run-and-grep verification, and never run the sim in the foreground. The sim (`./wirefold …`) and anything parked on a halted clock / paced wire can fail to exit, so a foreground call blocks until the harness limit (this hung a subagent for 13 min). Run it **backgrounded** (the runtime streams the trace live and re-invokes you on exit), or wrap any potentially-blocking command in `tools/run-bounded.sh <seconds> <cmd…>` (macOS has no `timeout`). Keep run-and-grep checks in the main session where you control backgrounding/kill; delegate only the editing. Capture geometry/startup events from the streamed trace file rather than waiting on process exit.
+
 **Model routing:**
 
 | Work type | Model |
