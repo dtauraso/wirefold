@@ -18,6 +18,10 @@ import (
 type Node struct {
 	Fire         func()
 	EmitGeometry func()
+	// EmitHeldBead, injected by Wiring.reflectBuild, streams the held value as a
+	// SINGLE centered interior node-bead (present when held != -1). Re-emitted at
+	// startup (held = -1, empty interior) and whenever the held value changes.
+	EmitHeldBead func(held int)
 	FromInput    *Wiring.In
 	Out          *Wiring.Out
 }
@@ -28,6 +32,9 @@ func (g *Node) Update(ctx context.Context) {
 	}
 
 	held := -1
+	if g.EmitHeldBead != nil {
+		g.EmitHeldBead(held) // startup: empty interior (held == -1)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -37,6 +44,9 @@ func (g *Node) Update(ctx context.Context) {
 
 		if v, ok := g.FromInput.PollRecv(); ok {
 			g.FromInput.Done()
+			if v != held && g.EmitHeldBead != nil {
+				g.EmitHeldBead(v)
+			}
 			held = v
 		}
 
