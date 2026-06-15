@@ -8,9 +8,14 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — NO TASK IN FLIGHT — on main)
+## State at handoff (2026-06-14 — branch task/sphere-chain-layout IN FLIGHT — implementing sphere-chain layout)
 
 Context: `main` is at `545c71ab`.
+
+### In flight: sphere-chain node layout (replaces the lattice)
+Design DONE (docs/planning/visual-editor/sphere-chain-layout-spec.html). Model: each OUTPUT-bearing node centers a sphere of radius R (per-node, adjustable starting value = current neighbor distance); its directly-connected neighbors sit on the surface at discrete Fibonacci-distributed slots (slot size = placed node's diameter). Spheres are LOCAL (node + its direct neighbors). Symmetric for connected nodes; back edges included; NOT rooted (resize any node's R and the rest flexes); only connected nodes share a surface. Output-less nodes (3,5) are surface-only, multi-surface. Positions Go-computed by propagation from an anchor, streamed.
+Already built on the branch: the sphere VISUALIZATION — a see-through TORUS ring at radius R toggled by a corner 'sphere' button for the selected node (837087f7), and the torus is SELECTABLE as a distinct sphere selection with highlight (08e4f623).
+A 10-task list (A1..G1) tracks the remaining implementation (per-node R, slots, position computation, topology migration, TS schema, drag-to-slot, resize-R, remove lattice, verify). User reviews when the whole list is done.
 
 ### Next step
 None pending — friction-driven.
