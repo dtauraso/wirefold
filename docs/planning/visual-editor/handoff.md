@@ -8,30 +8,15 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — branch `task/node-lattice` IN FLIGHT — design complete, implementing)
+## State at handoff (2026-06-14 — NO TASK IN FLIGHT — on main)
 
-Context: `main` is at `f1633bf7`. Branch `task/node-lattice` (off main) makes node placement a discrete 3D LATTICE — the node-scale twin of the port ring-anchor work. Spec DONE (all questions resolved); IMPLEMENTATION starting.
-
-### The design (FINAL — see docs/planning/visual-editor/node-lattice-spec.html)
-- A node's position is an INTEGER lattice cell (i,j,k) in a FINITE BOX, replacing free continuous x/y. worldPos = origin + (i,j,k)*spacing, clamped to the box.
-- Go OWNS the lattice->world mapping and STREAMS node positions (geometry Go-owned, like it already streams node centers).
-- DRAG snaps to a cell: TS unprojects the 2D drag onto the VIEW-PERPENDICULAR plane through the node (camera math = TS) -> world target; GO snaps to the nearest lattice cell (round per axis, clamped to box), writes (i,j,k), re-streams. The two editable dimensions are whichever face the camera; ORBIT changes them; depth is held with no special gesture. Reuse the existing node-move edit op (payload = world target, not a coord; Go snaps). Total op, no z=0 singularity.
-- spacing = tunable Go constant (~2-3x node size, by eye); box dimensions = Go-owned param (sized to hold the graph + margin).
-- Migration: existing free positions -> nearest cell (round, clamped). Snap-MODEL only (lattice invisible; visible reference deferred). Storage: node json stores (i,j,k) replacing free x/y, schema+parser parity (mirrors the port anchorId migration).
-- Parallel: ports replaced free `anchor` with `anchorId` index into a ring; nodes replace free x/y with (i,j,k) into a lattice. Same philosophy (discrete, Go-owned mapping, snap is total).
-
-### Implementation plan (follows the port-rollout shape)
-1. Go lattice geometry: node world pos resolves from (i,j,k) via origin+coord*spacing clamped to box; node spec gains (i,j,k). Additive/non-breaking first (keep free x/y path).
-2. Migrate topology node positions free x/y -> nearest (i,j,k).
-3. TS schema/parser: node position accepts (i,j,k) (parity).
-4. Drag-snap interaction: node drag -> view-plane target -> Go snaps to nearest cell -> writes (i,j,k) -> re-stream.
-5. Cleanup: remove the free x/y path.
-Then verify (go build + go test -race + tsc + vitest + editor eyeball).
+Context: `main` is at `da2564ec`.
 
 ### Next step
-Step 1 (Go lattice geometry), additive: node world pos resolves from (i,j,k) via origin+coord*spacing clamped to box; node spec gains (i,j,k). Keep the free x/y path in place (non-breaking).
+None pending — friction-driven.
 
 ### Recently shipped to main (newest first)
+- **Node lattice placement** (merge da2564ec): node positions are discrete integer lattice cells (i,j,k) instead of free x/y — the node-scale twin of the port ring-anchor work. Go owns the cell->world mapping (worldPos = origin + cell*spacing) and streams positions; SPACING and BOX are DERIVED from the initial layout (min pairwise node distance / extent), NOT a hand-picked constant, so the graph keeps its shape (a magic 330 spacing had collapsed the graph into one cell and stacked nodes in depth -> occlusion; deriving it fixed that). Dragging snaps a node to a cell via zoom-INDEPENDENT pixel->cell steps (PX_PER_CELL=80); the two editable axes are chosen by camera orientation (orbit to expose depth). Migration snapped existing positions to nearest cell; node cell stored in topology/nodes/<id>/meta.json, schema+parser parity. Files: nodes/Wiring/lattice.go (latticeToWorld/worldToLattice), loader/loader_tree/node_move/stdin_reader/port_geometry, TS geometry-helpers.ts + parse-nodes-edges.ts + types. Also resolved a camera regression chain the lattice exposed: zoom focus now follows the node nearest SCREEN CENTER (was a fixed-depth target that, once nodes had depth, made zoom drift/stall on the wrong node).
 - **Edge direction arrowheads** (merge 376757c0): each edge renders a cone arrowhead at its TARGET end (apex on the target IN-port, oriented along (end-start)), showing source->target flow direction. Matches the tube's SHADING_PARAM_TUBE_COLOR/emissive and fade (faded edges' arrows fade too); raycast disabled (decorative). Derived from the Go-streamed edge segment (useEdgeGeometryStore), so it follows on node-move. Consts ARROW_HEIGHT=6, ARROW_RADIUS=3 (tube radius is 1.5) — tunable. File: tools/topology-vscode/src/webview/three/scene-content.tsx (inside SingleEdgeTube).
 - **Persistent-target camera navigation** (merge 6b3094ed): replaced per-gesture z=0-plane raycast anchoring with a camera-owned PERSISTENT TARGET point, so orbit/pan/dolly are TOTAL operations of (camera pose, target) — the edge-on/grazing singularity is structurally unreachable (it was the ray-vs-z=0 partial function diverging when the view went parallel to the ground). Orbit pivots around the target (the selection if one is selected, else a seeded scene-depth point); pan slides camera+target together on the view plane (scale = distance to target, fixes the earlier zoom-leak/swing/reversed-direction); dolly zooms toward the target; Fit sets target = scene center. Free 6-DOF arcball rotation unchanged (no clamp, no turntable). The target is RUNTIME-ONLY (re-seeded on load by projecting scene center onto the camera forward ray) — NOT persisted to scene.json yet. unprojectToPlane is retained ONLY for node-drag / port-drag / click-pick (placing things on the z=0 layout), not for camera gestures. Files: tools/topology-vscode/src/webview/three/interaction-controls.ts, ThreeView.tsx, camera-ui.tsx. Doc updated: docs/planning/visual-editor/camera-navigation.html. PRINCIPLE (carry-forward): camera gestures must be TOTAL functions of camera state; a singularity means the REPRESENTATION is wrong — fix it by anchoring on always-finite camera-owned state, NOT by clamping inputs (6-DOF is substance) or adding fallback band-aids (which only mask the partial function). Industry carries a target too (OrbitControls/Blender/Maya/CAD); adopt the target, reject their rotation constraints.
 - **3D camera navigation reference page** (merge 7a4ea597): added docs/planning/visual-editor/camera-navigation.html — a 5-tab visual reference (Controls / Camera model / Motions / Fit & persistence / Design) with 6 inline SVG diagrams documenting the editor's custom (non-OrbitControls) arcball camera: orbit = drag empty space (h->world Y, v->world X, pivot fixed at gesture start), pan = two-finger scroll, dolly = ctrl/pinch scroll (1.01^deltaY), Fit = Home button (bbox -> fov dist -> 1.2x pad -> square-on), roll reachable in math but NOT wired to input. Camera = PerspectiveCamera(fov50/near0.1/far20000), Camera3D{position,quaternion}; persistence via commitCamera -> scheduleViewSave(400ms) -> scene.json, restore via CameraRefBridge/CameraFitter. Source: tools/topology-vscode/src/webview/three/ (interaction-controls.ts, camera-ui.tsx, scene-content.tsx, ThreeView.tsx).
@@ -48,6 +33,7 @@ Input(1) -> ChainInhibitor(2,3) -> HoldFlip(4) -> WindowAndGate(5); 2->1 feedbac
 - SWARM CAUTION: a background Agent dispatch fanned out into ~20 duplicate agents, duplicated commits, and committed one unrequested change (reverted). Keep subagents FOREGROUND; spot-check git log before pushing.
 - IDE DIAGNOSTICS WERE REPEATEDLY STALE this session (phantom broken imports / unused funcs that were actually wired). Verify against `go build` / grep, not the diagnostic panel.
 - When a node has multiple outbound edges, PLACE all beads then DRIVE all together in one loop (never per-edge in series) — see memory feedback_place_all_then_drive_concurrently.
+- Magic constants in spatial code (spacing/box) should be DERIVED from the content, not hand-picked — a fixed 330 lattice spacing collapsed the graph; deriving from layout fixed it. (Mirrors: a singularity/occlusion means the representation/scale is wrong, not the inputs.)
 
 ### Carry-forward ideas (not blocking node-lattice)
 - Node 3's dangling ToNext1 port could be removed if a single-output ChainInhibitor is wanted.
