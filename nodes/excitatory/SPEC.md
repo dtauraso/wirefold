@@ -5,18 +5,18 @@
 | Field | Value |
 |-------|-------|
 | kind | excitatory |
-| bg | #e8f5e9 |
-| border | #1b5e20 |
-| text | #1b5e20 |
-| accent | #1b5e20 |
-| minWidth | 36 |
+| bg | #e1f5fe |
+| border | #01579b |
+| text | #01579b |
+| accent | #01579b |
+| minWidth | 90 |
 | defaultLabel | excitatory |
 | role | excitatory |
 | shape | rect |
-| fill | #e8f5e9 |
-| stroke | #1b5e20 |
-| width | 36 |
-| height | 36 |
+| fill | #e1f5fe |
+| stroke | #01579b |
+| width | 90 |
+| height | 60 |
 
 ## Ports
 
