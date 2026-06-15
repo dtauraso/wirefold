@@ -48,15 +48,16 @@ type specNode struct {
 	Data     *NodeData  `json:"data,omitempty"`
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
-	Cell     *[3]int     `json:"cell,omitempty"` // integer lattice coord (i,j,k); the only node-position model (nil → cell {0,0,0})
+	Cell     *[3]int     `json:"cell,omitempty"` // integer lattice coord (i,j,k); the lattice node-position model (nil → cell {0,0,0})
 	R        *float64    `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
+	Dir      *[3]float64 `json:"dir,omitempty"`  // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, Cell: n.Cell, R: n.R}
+	g := nodeGeom{Kind: n.Type, Cell: n.Cell, R: n.R, Dir: n.Dir}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -174,6 +175,28 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	nodeGeoms := map[string]nodeGeom{}
 	for _, n := range spec.Nodes {
 		nodeGeoms[n.ID] = n.toNodeGeom()
+	}
+
+	// Sphere-chain layout (B3): if any node carries an explicit R, resolve world
+	// centers by propagation from an anchor (computeSphereChainPositions) and inject
+	// each into its nodeGeom.Center. nodeWorldPos then returns that center directly,
+	// bypassing the lattice path. GATED + ADDITIVE: with no R, the map is nil and
+	// every node keeps its lattice cell; nodes not reached from the anchor keep
+	// their lattice pos (no Center injected). Computed once here so all downstream
+	// arc/segment/build geometry sees the propagated centers.
+	{
+		edges := make([]sphereEdge, 0, len(spec.Edges))
+		for _, e := range spec.Edges {
+			edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
+		}
+		if centers := computeSphereChainPositions(nodeGeoms, edges); len(centers) > 0 {
+			for id, c := range centers {
+				g := nodeGeoms[id]
+				cc := c
+				g.Center = &cc
+				nodeGeoms[id] = g
+			}
+		}
 	}
 
 	// Allocate one *PacedWire per destination port (fan-in safe).

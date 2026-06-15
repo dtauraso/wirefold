@@ -31,8 +31,10 @@ type portGeom struct {
 // center from Cell (latticeToWorld). A nil Cell defaults to cell {0,0,0} (origin).
 type nodeGeom struct {
 	Kind    string
-	Cell    *[3]int  // integer lattice coord (i,j,k); nil → cell {0,0,0} (origin)
-	R       *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
+	Cell    *[3]int     // integer lattice coord (i,j,k); nil → cell {0,0,0} (origin)
+	R       *float64    // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
+	Dir     *[3]float64 // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
+	Center  *vec3       // optional precomputed world center (sphere-chain propagation); when set, nodeWorldPos returns it directly, bypassing the lattice path
 	Inputs  []portGeom
 	Outputs []portGeom
 }
@@ -120,6 +122,12 @@ func nodeRadius(kind string) float64 {
 // default to cell {0,0,0} (the world origin); every live node carries a Cell, so
 // the nil branch only guards hand-written/partial specs.
 func nodeWorldPos(g nodeGeom) vec3 {
+	// Sphere-chain override: when the graph-level propagation has resolved a world
+	// center for this node (computeSphereChainPositions, sphere_layout.go), use it
+	// directly and bypass the lattice path entirely.
+	if g.Center != nil {
+		return *g.Center
+	}
 	i, j, k := 0, 0, 0 // fallback default: cell {0,0,0} = origin
 	if g.Cell != nil {
 		i, j, k = g.Cell[0], g.Cell[1], g.Cell[2]
