@@ -72,8 +72,8 @@ export const NEAREST_N = 8;
 // they cannot visually diverge. (The former static data.init bead components were
 // removed when node 1's interior switched to the live node-bead stream.)
 const VALUE_BEAD_STYLE: Record<number, { fill: string; ring: string }> = {
-  0: { fill: "#ffffff", ring: "#000000" },
-  1: { fill: "#000000", ring: "#000000" },
+  0: { fill: "#000000", ring: "#000000" },
+  1: { fill: "#ffffff", ring: "#000000" },
 };
 // Only 0 and 1 are valid bead values. A value outside the map (including a
 // missing/undefined value) returns undefined — the caller hides the bead rather
