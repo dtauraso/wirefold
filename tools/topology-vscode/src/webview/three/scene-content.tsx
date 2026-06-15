@@ -404,7 +404,7 @@ export function SphereRing({
   if (R < 1e-3) return null;
 
   // Thin tube so it reads as a ring, not a donut — scale to the node's own ring tube.
-  const tube = Math.max(0.5, R * 0.08);
+  const tube = Math.max(0.5, nodeRadius(selNode) * 0.08);
 
   // Highlighted when THIS sphere surface is the current sphere selection.
   const isSphereSelected = selectedSphere === selNode.id;
