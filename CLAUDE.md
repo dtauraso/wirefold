@@ -121,6 +121,11 @@ is in
 Do not rely on chat history for handoff context; the next session may
 be a fresh model with no transcript.
 
+Handoff updates RIDE THE TASK BRANCH — they merge to main with the work. Avoid
+standalone handoff/doc commits directly to main; main advances only through merges.
+This follows the Workflow rule "if on the default branch, branch first" — branch first,
+fold the handoff update into that task branch.
+
 ## Posture (post-v0)
 
 Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.

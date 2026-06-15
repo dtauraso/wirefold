@@ -45,8 +45,13 @@ Kinds: Input, ChainInhibitor, HoldFlip, WindowAndGate, Excitatory (holds/pulses 
 ## ALWAYS clause
 
 At end of session, overwrite this file with a freshly-rendered prompt tailored to the
-state you're leaving the branch in, and commit on the active branch (main if no task is
-in flight). Do not rely on chat history; the next AI may be a fresh model with no
+state you're leaving the branch in, and commit the re-rendered handoff ON THE ACTIVE TASK
+BRANCH so it merges to main with the work — do NOT make standalone handoff commits directly
+to main. When there is no task branch in flight, fold the handoff update into the next task
+branch when it starts (the handoff is shared, not branch-local-stripped, so it merges
+cleanly); if you genuinely must commit it on main, PUSH immediately so main is never left
+with a loose unpushed commit. The principle: main advances only through merges.
+Do not rely on chat history; the next AI may be a fresh model with no
 transcript. The rendered handoff must itself contain this same ALWAYS clause so the loop
 is self-perpetuating across sessions. Use
 [continuation-prompt-template.md](continuation-prompt-template.md) as the structural
