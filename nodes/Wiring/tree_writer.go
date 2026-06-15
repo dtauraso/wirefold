@@ -29,6 +29,20 @@ func writeViewNode(root, nodeID string, pos specPosition) error {
 	return writeJSONAtomic(path, pos)
 }
 
+// writeMetaCell sets the lattice cell on a node's meta.json, preserving its id/type.
+// Cell takes priority over the view-node free position at load (see loader_tree.go),
+// so persisting it here makes a lattice-snapped node-move durable across reload.
+func writeMetaCell(root, nodeID string, cell *[3]int) error {
+	path := filepath.Join(root, "nodes", nodeID, "meta.json")
+	var meta jsonMeta
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &meta)
+	}
+	meta.ID = nodeID
+	meta.Cell = cell
+	return writeJSONAtomic(path, meta)
+}
+
 func writePort(root, nodeID, port string, isInput bool, p specPort) error {
 	side := "inputs"
 	if !isInput {

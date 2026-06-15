@@ -83,7 +83,7 @@ func TestPortDirAnchorIdPath(t *testing.T) {
 
 	g := nodeGeom{
 		Kind: kind,
-		Pos:  vec3{},
+		Cell: &[3]int{0, 0, 0},
 		Inputs: []portGeom{
 			{Name: "ring_port", AnchorId: &anchorIdx},
 		},

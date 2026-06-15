@@ -47,6 +47,7 @@ export function specToFlow(
         // n.data is the raw data blob (includes init, state per kind).
         // flow-to-spec rebuilds it from nodeData + initState.
         nodeData: n.data,
+        cell: n.cell,
         initState: n.state,
         index: n.index,
       },

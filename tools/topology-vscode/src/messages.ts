@@ -117,7 +117,12 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       const ok = vals.every((v) => {
         if (!v || typeof v !== "object") return false;
         const e = v as Record<string, unknown>;
-        return typeof e.nodeId === "string" && typeof e.x === "number" && typeof e.y === "number";
+        return (
+          typeof e.nodeId === "string" &&
+          typeof e.x === "number" && Number.isFinite(e.x) &&
+          typeof e.y === "number" && Number.isFinite(e.y) &&
+          typeof e.z === "number" && Number.isFinite(e.z)
+        );
       });
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }

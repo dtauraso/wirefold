@@ -108,10 +108,12 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	const nx, ny, nz = 400, 250, 30
 	deliver(nmr, "src", nx, ny, nz)
 
-	// Build the expected segment + arc independently from the moved geometry.
-	srcGeom := nodeGeom{Kind: "FanInSrc", Pos: vec3{X: nx, Y: ny, Z: nz},
+	// Build the expected segment + arc independently from the moved geometry:
+	// src's cell is the lattice snap of the world target (the only position model).
+	si, sj, sk := worldToLattice(nx, ny, nz)
+	srcGeom := nodeGeom{Kind: "FanInSrc", Cell: &[3]int{si, sj, sk},
 		Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", Pos: vec3{X: 0, Y: 0, Z: 0},
+	dstGeom := nodeGeom{Kind: "FanInSink", Cell: &[3]int{0, 0, 0},
 		Inputs: []portGeom{{Name: "In"}}}
 	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
 	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")

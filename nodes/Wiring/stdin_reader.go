@@ -30,6 +30,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -204,19 +205,33 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil || len(msg.Entries) == 0 {
 			return
 		}
-		// Mail-sort: push each entry to its key's inbox. Unknown keys are ignored.
-		// No recompute, no topology logic here — the owning goroutine does the work.
+		// Each entry carries a WORLD-SPACE target (the cursor unprojected onto the
+		// view-plane through the node's current center; TS owns that camera math). Go
+		// snaps the target to the nearest lattice cell here (worldToLattice → round+clamp
+		// to the box) and attaches Cell to the move; the owning node/edge goroutine sets
+		// its geom.Cell so nodeWorldPos resolves via the lattice (Cell > Pos). Guard NaN.
 		for key, e := range msg.Entries {
+			if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) {
+				continue
+			}
+			i, j, k := worldToLattice(e.X, e.Y, e.Z)
+			cell := &[3]int{i, j, k}
 			if ch, ok := md.dispatch[key]; ok {
-				ch <- moveMsg{NodeID: e.NodeId, X: e.X, Y: e.Y, Z: e.Z}
+				ch <- moveMsg{NodeID: e.NodeId, Cell: cell}
 			}
 		}
 		if treeRoot != "" {
 			seen := map[string]bool{}
 			for _, e := range msg.Entries {
+				if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) {
+					continue
+				}
 				if !seen[e.NodeId] {
 					seen[e.NodeId] = true
-					_ = writeViewNode(treeRoot, e.NodeId, specPosition{X: e.X, Y: e.Y, Z: e.Z})
+					i, j, k := worldToLattice(e.X, e.Y, e.Z)
+					// Persist the snapped lattice cell (durable across reload); Cell has
+					// priority over the view-node free position at load.
+					_ = writeMetaCell(treeRoot, e.NodeId, &[3]int{i, j, k})
 				}
 			}
 		}

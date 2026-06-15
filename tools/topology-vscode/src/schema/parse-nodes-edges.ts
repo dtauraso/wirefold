@@ -26,6 +26,21 @@ import { RUNTIME_IMPLEMENTED_KINDS } from "./node-types";
 
 const KNOWN_NODE_KINDS: ReadonlySet<string> = new Set([...RUNTIME_IMPLEMENTED_KINDS, "Generic"]);
 
+function parseCell(v: unknown, path: string): [number, number, number] {
+  const a = arr(v, path);
+  if (a.length !== 3) {
+    throw new Error(`${path}: expected 3-element lattice cell [i,j,k], got length ${a.length}`);
+  }
+  const c = a.map((x, i) => {
+    const n = num(x, `${path}[${i}]`);
+    if (!Number.isInteger(n)) {
+      throw new Error(`${path}[${i}]: expected integer lattice coord, got ${JSON.stringify(x)}`);
+    }
+    return n;
+  });
+  return [c[0], c[1], c[2]];
+}
+
 function parsePort(v: unknown, path: string): Port {
   const o = obj(v, path);
   // Port `kind` is vestigial: not stored in the canonical topology tree
@@ -88,6 +103,7 @@ export function parseNode(v: unknown, path: string): Node {
     spec: opt(o.spec, (x) => parseNodeSpec(x, `${path}.spec`)),
     notes: opt(o.notes, (x) => str(x, `${path}.notes`)),
     data: parseNodeData(nodeType, o.data, path),
+    cell: opt(o.cell, (x) => parseCell(x, `${path}.cell`)),
     inputs: opt(o.inputs, (x) => parsePorts(x, `${path}.inputs`)),
     outputs: opt(o.outputs, (x) => parsePorts(x, `${path}.outputs`)),
     state: (() => {

@@ -48,14 +48,14 @@ type specNode struct {
 	Data     *NodeData  `json:"data,omitempty"`
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
-	Position specPosition `json:"-"` // populated from view.nodes after JSON parse; internal-only, never emitted
+	Cell     *[3]int     `json:"cell,omitempty"` // integer lattice coord (i,j,k); the only node-position model (nil → cell {0,0,0})
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, Pos: vec3{X: n.Position.X, Y: n.Position.Y, Z: n.Position.Z}}
+	g := nodeGeom{Kind: n.Type, Cell: n.Cell}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -161,26 +161,17 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 		return nil, nil, nil, nil, err
 	}
 
-	// Populate Position on each specNode from view.nodes.
-	for i := range spec.Nodes {
-		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
-			spec.Nodes[i].Position = pos
-		}
-	}
-
 	return buildFromSpec(ctx, spec, tr, clk)
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
-// and validated topoSpec (with Position pre-populated on each specNode).
+// and validated topoSpec. Node centers resolve from each node's lattice Cell.
 func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
-	// Build id→position and id→geometry maps for arc-length computation at wire
-	// construction. nodeGeom carries kind/dims/port side+slot so the Go arc
-	// length mirrors buildPortCurve (3-D port-to-port) exactly.
-	nodePos := map[string]specPosition{}
+	// Build id→geometry map for arc-length computation at wire construction.
+	// nodeGeom carries kind/dims/port side+slot so the Go arc length mirrors
+	// buildPortCurve (3-D port-to-port) exactly.
 	nodeGeoms := map[string]nodeGeom{}
 	for _, n := range spec.Nodes {
-		nodePos[n.ID] = n.Position
 		nodeGeoms[n.ID] = n.toNodeGeom()
 	}
 
@@ -402,11 +393,6 @@ func readTopologySpec(jsonPath string) (topoSpec, error) {
 	var spec topoSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return topoSpec{}, fmt.Errorf("readTopologySpec: parse %s: %w", jsonPath, err)
-	}
-	for i := range spec.Nodes {
-		if pos, ok := spec.View.Nodes[spec.Nodes[i].ID]; ok {
-			spec.Nodes[i].Position = pos
-		}
 	}
 	return spec, nil
 }

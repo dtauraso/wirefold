@@ -47,6 +47,13 @@ export interface NodeData {
   nodeData?: unknown;
   inputs: Port[];
   outputs: Port[];
+  /**
+   * Optional integer lattice cell (i,j,k) carried from Spec.Node.cell. When
+   * present, the pre-emit fallback (geometry-helpers.nodeWorldPosLocal) resolves
+   * the node center via the lattice instead of free-form position. Authoritative
+   * positions still come from Go's node-geometry stream.
+   */
+  cell?: [number, number, number];
   /** Spec-side Go field seeds (data.state in JSON). Distinct from viewer state below. */
   initState?: Record<string, number>;
   /**

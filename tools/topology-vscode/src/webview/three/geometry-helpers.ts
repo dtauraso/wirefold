@@ -78,11 +78,34 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return nodeWorldPosLocal(node);
 }
 
-/** FALLBACK: local node-center compute (RF y-down → Three y-up). Used pre-emit only. */
+// Lattice constants — must match Go's lattice.go (latticeSpacing / latticeHalf)
+// exactly so the pre-emit fallback agrees with Go's latticeToWorld.
+// Derived from the initial node layout (min pairwise distance / layout extent),
+// not hand-picked. Mirror of lattice.go latticeSpacing / latticeHalf.
+export const LATTICE_SPACING = 46.5425;
+const LATTICE_HALF = 10;
+
+/** Clamp a lattice coord to [-LATTICE_HALF, LATTICE_HALF]. Mirrors Go clampLattice. */
+function clampLattice(c: number): number {
+  if (c < -LATTICE_HALF) return -LATTICE_HALF;
+  if (c > LATTICE_HALF) return LATTICE_HALF;
+  return c;
+}
+
+/**
+ * FALLBACK: local node-center compute. Used pre-emit only.
+ * The lattice `cell` [i,j,k] is the only node-position model: mirror Go's
+ * latticeToWorld (lattice.go) exactly — clamp each coord to [-8,8], scale by 330,
+ * origin (0,0,0). A node lacking a cell defaults to cell {0,0,0} (the origin),
+ * matching Go's nil-Cell fallback in nodeWorldPos.
+ */
 function nodeWorldPosLocal(node: RFNode<NodeData>): THREE.Vector3 {
-  const x = node.position.x + (node.data?.width ?? NODE_DIM_FALLBACK.width) / 2;
-  const y = -(node.position.y + (node.data?.height ?? NODE_DIM_FALLBACK.height) / 2);
-  return new THREE.Vector3(x, y, 0);
+  const cell = node.data?.cell ?? [0, 0, 0];
+  return new THREE.Vector3(
+    clampLattice(cell[0]) * LATTICE_SPACING,
+    clampLattice(cell[1]) * LATTICE_SPACING,
+    clampLattice(cell[2]) * LATTICE_SPACING,
+  );
 }
 
 // ---------------------------------------------------------------------------

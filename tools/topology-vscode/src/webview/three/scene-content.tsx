@@ -850,11 +850,43 @@ export function RaycasterHelper({
       }
 
       if (opts?.portOnly) {
+        // A port only wins the pointer when the click lands on its EXPOSED region,
+        // not merely anywhere the ray grazes a port sphere. Port spheres sit on the
+        // node's ring (radius ~= node radius), so the ray into a node body almost
+        // always also clips a connected port; returning that port unconditionally
+        // (the old behavior) hijacked every node-body grab into a port-slide and is
+        // the real reason nodes were "not draggable". Resolve with the SAME body-
+        // proximity precedence the default pick uses: a port wins only if its hit is
+        // at/closer than the nearest node-body hit, within PORT_HIT_TOL. Otherwise
+        // the body is the intended target → return null so the caller falls through
+        // to the node-drag path. (Reducing lattice spacing only enlarged the relative
+        // body target enough to sometimes clear ports — a symptom mask, not the fix.)
+        const PORT_HIT_TOL = 8;
+        let portHit: { id: string; dist: number } | null = null;
+        let nodeHitDist: number | null = null;
         for (const hit of hits) {
           const hitObj = hit.object as THREE.Mesh;
-          if (hitObj.userData?.portId) {
-            return hitObj.userData.portId as string;
+          if (!portHit && hitObj.userData?.portId) {
+            portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
+            continue;
           }
+          if (nodeHitDist === null) {
+            const hitPoint = hitObj.parent;
+            if (!hitPoint) continue;
+            for (const n of nodes) {
+              const wp = nodeWorldPos(n);
+              if (
+                Math.abs(hitPoint.position.x - wp.x) < 1 &&
+                Math.abs(hitPoint.position.y - wp.y) < 1
+              ) {
+                nodeHitDist = hit.distance;
+                break;
+              }
+            }
+          }
+        }
+        if (portHit && (nodeHitDist === null || portHit.dist <= nodeHitDist + PORT_HIT_TOL)) {
+          return portHit.id;
         }
         return null;
       }

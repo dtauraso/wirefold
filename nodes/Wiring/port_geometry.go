@@ -9,7 +9,8 @@
 //
 // Inputs the geometry needs, per node:
 //   - kind        → width/height via kindDims (generated from SPEC.md View)
-//   - position    → x, y, z (z defaults to 0)
+//   - cell        → integer lattice coord (i,j,k); the only node-position model
+//                   (nodeWorldPos → latticeToWorld; nil Cell → cell {0,0,0})
 //   - port lists  → inputs/outputs with optional side + slot (from the spec node;
 //                   falls back to registry ports with default sides when absent)
 //
@@ -26,9 +27,11 @@ type portGeom struct {
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
+// The lattice Cell is the only node-position model: nodeWorldPos resolves the
+// center from Cell (latticeToWorld). A nil Cell defaults to cell {0,0,0} (origin).
 type nodeGeom struct {
 	Kind    string
-	Pos     vec3
+	Cell    *[3]int // integer lattice coord (i,j,k); nil → cell {0,0,0} (origin)
 	Inputs  []portGeom
 	Outputs []portGeom
 }
@@ -98,16 +101,17 @@ func nodeRadius(kind string) float64 {
 	return min(w, h) / float64(CurveParamNodeRadiusDivisor)
 }
 
-// nodeWorldPos mirrors nodeWorldPos() in geometry-helpers.ts: the RF y-down →
-// Three y-up flip, offsetting by half-dimensions to reach the node center.
-// z passes through unchanged.
+// nodeWorldPos resolves a node's world center from its lattice Cell — the only
+// node-position model. Cell{i,j,k} → latticeToWorld. A nil Cell is a fallback
+// default to cell {0,0,0} (the world origin); every live node carries a Cell, so
+// the nil branch only guards hand-written/partial specs.
 func nodeWorldPos(g nodeGeom) vec3 {
-	w, h := kindWidthHeight(g.Kind)
-	return vec3{
-		X: g.Pos.X + w/2,
-		Y: -(g.Pos.Y + h/2),
-		Z: g.Pos.Z,
+	i, j, k := 0, 0, 0 // fallback default: cell {0,0,0} = origin
+	if g.Cell != nil {
+		i, j, k = g.Cell[0], g.Cell[1], g.Cell[2]
 	}
+	x, y, z := latticeToWorld(i, j, k)
+	return vec3{X: x, Y: y, Z: z}
 }
 
 // Ring-anchor geometry constants. These are Go-local until the TS side adopts them.
