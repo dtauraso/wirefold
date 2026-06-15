@@ -316,12 +316,12 @@
         <tr>
           <td>Q1</td>
           <td>Sphere <strong>radius R</strong>: a <strong>per-node starting value</strong> — independent, adjustable, user-supplied; <em>not</em> the length of any designated/reference edge (there is no designated edge). Resizing a node's sphere changes that node's <code>R</code>.</td>
-          <td><strong>RESOLVED</strong> (framing) — <code>R</code> is a per-node starting value. Still <strong>OPEN</strong>: the explicit starting <code>R</code> values and where they come from (first-cut render stands in with the live primary-output-edge distance).</td>
+          <td><strong>RESOLVED</strong> — <code>R</code> is a per-node starting value, and each node's <strong>starting <code>R</code> = the current distance to a connected neighbor</strong> (computed from the present layout). Stored per node as <code>data.r</code>, adjustable thereafter (drag the sphere to resize).</td>
         </tr>
         <tr>
           <td>Q2</td>
-          <td><strong>Child placement on the boundary</strong>: when a node has multiple output-targets (e.g. <code>1 → {2,6}</code>, <code>2 → {3,7}</code>), how are they positioned on the sphere — evenly spaced (like the port ring), spread in a general downstream direction, golden-spiral, or…? And in 3D (full sphere) vs a 2D circle?</td>
-          <td>Open. The crux.</td>
+          <td><strong>Slot tiling on the surface</strong>: when a node has multiple neighbors, how are they positioned on the sphere?</td>
+          <td><strong>RESOLVED</strong> — discrete slots <strong>evenly distributed</strong> on the sphere via a <strong>Fibonacci-sphere distribution</strong>; slot spacing = the <em>placed</em> node's diameter (so no overlap). Slot capacity <code>N = floor(4·pi·R² / nodeFootprint)</code> where footprint ≈ the placed node's projected area. A neighbor occupies a <strong>slot index</strong>; <code>slotDir(R, diameter, i)</code> gives the unit direction of slot <code>i</code>.</td>
         </tr>
         <tr>
           <td>Q3</td>
@@ -335,8 +335,8 @@
         </tr>
         <tr>
           <td>Q5</td>
-          <td><strong>Interaction</strong>: auto-computed layout (no dragging) vs draggable (slide a node on its parent's sphere / re-root). Does this remove node dragging entirely?</td>
-          <td>Open. The other crux.</td>
+          <td><strong>Position computation &amp; interaction</strong>: how are world positions computed, and what does dragging/resizing do?</td>
+          <td><strong>RESOLVED</strong> — positions are computed by <strong>propagation from an anchor node</strong> (default node <code>1</code>; or the last-resized node) over the connection graph: each neighbor is placed at <code>placing_node_center + R_placing · slotDir(neighbor's slot)</code>. Back edges to already-placed nodes <strong>don't re-place</strong> them. Output-less nodes (<code>3</code>, <code>5</code>) are placed as surface members on their first connecting node (multi-surface ok). <strong>Resizing a node's <code>R</code> re-anchors propagation at that node</strong>, so the rest of the connected structure flexes/moves (the "not rooted" behavior). Dragging a neighbor changes its slot index; resizing drags the surface to change <code>R</code>.</td>
         </tr>
         <tr>
           <td>Q6</td>
@@ -346,10 +346,26 @@
         <tr>
           <td>Q7</td>
           <td><strong>Storage</strong>: the lattice stored <code>(i,j,k)</code> per node. Sphere-chain positions are derived from the graph — is anything stored per node (e.g. the chosen <code>dir</code> / angle on the parent sphere, so it's stable across loads), or fully recomputed each load?</td>
-          <td>Open.</td>
+          <td><strong>RESOLVED</strong> — per node, <code>data.r</code> (the node's <code>R</code>) and each neighbor's <strong>slot index</strong> are stored; world positions are recomputed each load by propagation from the anchor. Geometry is <strong>Go-owned</strong>: Go computes + streams positions, TS renders.</td>
         </tr>
       </tbody>
     </table>
+
+    <h2>Implementation plan</h2>
+    <p>
+      A <strong>10-task list</strong> tracks the remaining implementation:
+      <strong>A1</strong> spec lock ·
+      <strong>B1</strong> per-node <code>R</code> ·
+      <strong>B2</strong> slots ·
+      <strong>B3</strong> positions ·
+      <strong>C1</strong> migration ·
+      <strong>D1</strong> TS schema ·
+      <strong>E1</strong> drag-to-slot ·
+      <strong>E2</strong> resize-<code>R</code> ·
+      <strong>F1</strong> remove lattice ·
+      <strong>G1</strong> verify + handoff.
+      See the handoff (<code>docs/planning/visual-editor/handoff.md</code>) for live task state.
+    </p>
   </div>
 </div>
 
