@@ -55,8 +55,8 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("node \"6\" not found")
 	}
-	if n6.Type != "Latch" {
-		t.Errorf("node \"6\" type: got %q, want \"Latch\"", n6.Type)
+	if n6.Type != "Excitatory" {
+		t.Errorf("node \"6\" type: got %q, want \"Excitatory\"", n6.Type)
 	}
 
 	// View positions should be populated for all nodes (view.nodes is kept as
@@ -95,8 +95,8 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("edge \"1To6\" not found")
 	}
-	if e1to6.SourceHandle != "ToLatch" {
-		t.Errorf("edge 1To6 sourceHandle: got %q, want \"ToLatch\"", e1to6.SourceHandle)
+	if e1to6.SourceHandle != "ToExcitatory" {
+		t.Errorf("edge 1To6 sourceHandle: got %q, want \"ToExcitatory\"", e1to6.SourceHandle)
 	}
 	if e1to6.TargetHandle != "FromInput" {
 		t.Errorf("edge 1To6 targetHandle: got %q, want \"FromInput\"", e1to6.TargetHandle)

@@ -4,8 +4,8 @@ package main
 
 import (
 	_ "github.com/dtauraso/wirefold/nodes/chaininhibitor"
+	_ "github.com/dtauraso/wirefold/nodes/excitatory"
 	_ "github.com/dtauraso/wirefold/nodes/holdflip"
 	_ "github.com/dtauraso/wirefold/nodes/input"
-	_ "github.com/dtauraso/wirefold/nodes/latch"
 	_ "github.com/dtauraso/wirefold/nodes/windowandgate"
 )

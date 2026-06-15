@@ -23,7 +23,7 @@ This document defines what goes in a SPEC and what each section means.
 
 | Field | Type | Source | Notes |
 |-------|------|--------|-------|
-| HeldValue | int | `data.initialSlots.held` | initial latch value |
+| HeldValue | int | `data.initialSlots.held` | initial excitatory value |
 
 ## Firing rule
 
