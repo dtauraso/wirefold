@@ -9,8 +9,8 @@
 //
 // Inputs the geometry needs, per node:
 //   - kind        → width/height via kindDims (generated from SPEC.md View)
-//   - cell        → integer lattice coord (i,j,k); the only node-position model
-//                   (nodeWorldPos → latticeToWorld; nil Cell → cell {0,0,0})
+//   - center      → world center resolved by sphere-chain propagation (computeSphereChainPositions,
+//                   sphere_layout.go); nil Center falls back to the origin
 //   - port lists  → inputs/outputs with optional side + slot (from the spec node;
 //                   falls back to registry ports with default sides when absent)
 //
@@ -27,13 +27,28 @@ type portGeom struct {
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
-// The lattice Cell is the only node-position model: nodeWorldPos resolves the
-// center from Cell (latticeToWorld). A nil Cell defaults to cell {0,0,0} (origin).
+// Center is the sphere-chain propagated world center; nodeWorldPos returns it directly.
+// A nil Center falls back to the world origin (used only for hand-written/partial specs).
 type nodeGeom struct {
 	Kind    string
-	Cell    *[3]int // integer lattice coord (i,j,k); nil → cell {0,0,0} (origin)
+	R       *float64    // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
+	Dir     *[3]float64 // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
+	Center  *vec3       // optional precomputed world center (sphere-chain propagation); when set, nodeWorldPos returns it directly
 	Inputs  []portGeom
 	Outputs []portGeom
+}
+
+// defaultNodeR is the default starting sphere radius (world units) used for a
+// node that omits an explicit r. Tunable — chosen as a sensible starting size
+// for the sphere-chain layout (B3 will consume this via position computation).
+const defaultNodeR = 200.0
+
+// nodeR returns the node's sphere radius: *g.R when set, else defaultNodeR.
+func nodeR(g nodeGeom) float64 {
+	if g.R != nil {
+		return *g.R
+	}
+	return defaultNodeR
 }
 
 // Interior bead render dimensions — mirror scene-content.tsx INTERIOR_BEAD_R +
@@ -101,17 +116,16 @@ func nodeRadius(kind string) float64 {
 	return min(w, h) / float64(CurveParamNodeRadiusDivisor)
 }
 
-// nodeWorldPos resolves a node's world center from its lattice Cell — the only
-// node-position model. Cell{i,j,k} → latticeToWorld. A nil Cell is a fallback
-// default to cell {0,0,0} (the world origin); every live node carries a Cell, so
-// the nil branch only guards hand-written/partial specs.
+// nodeWorldPos resolves a node's world center from its sphere-chain propagated Center.
+// A nil Center is a fallback for hand-written/partial specs → origin.
 func nodeWorldPos(g nodeGeom) vec3 {
-	i, j, k := 0, 0, 0 // fallback default: cell {0,0,0} = origin
-	if g.Cell != nil {
-		i, j, k = g.Cell[0], g.Cell[1], g.Cell[2]
+	// Sphere-chain: the graph-level propagation (computeSphereChainPositions,
+	// sphere_layout.go) resolves a world center for every node and injects it as
+	// g.Center. A nil Center is a fallback for hand-written/partial specs → origin.
+	if g.Center != nil {
+		return *g.Center
 	}
-	x, y, z := latticeToWorld(i, j, k)
-	return vec3{X: x, Y: y, Z: z}
+	return vec3{}
 }
 
 // Ring-anchor geometry constants. These are Go-local until the TS side adopts them.

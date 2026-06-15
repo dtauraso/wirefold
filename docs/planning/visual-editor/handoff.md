@@ -8,12 +8,30 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — NO TASK IN FLIGHT — on main)
+## State at handoff (2026-06-14 — branch task/sphere-chain-layout — sphere-chain layout IMPLEMENTED, awaiting user review, NOT merged)
 
 Context: `main` is at `545c71ab`.
 
+### Sphere-chain node layout — implemented (replaces the lattice)
+Model: each node has a per-node radius R (adjustable; starting value = current neighbor distance) and a Dir (unit direction on its parent's sphere). Node WORLD positions are Go-computed by PROPAGATION from anchor node "1" at origin: child_center = parent_center + R_parent * Dir_child (computeSphereChainPositions, nodes/Wiring/sphere_layout.go). The lattice (cells/latticeToWorld) is REMOVED. Stored per node as meta.json {r, dir} (cell gone). Output-bearing nodes center a sphere; output-less (3,5) are surface members.
+Interaction: node DRAG re-aims the node's Dir on its parent's sphere in steps of the node's own diameter (SphereMove in node_move.go; TS sends a view-plane world target, Go projects onto the parent sphere + quantizes). Sphere VISUALIZATION: a see-through torus ring at R, toggled by the corner "sphere" button for the selected node, and SELECTABLE (pick returns "sphere:<id>", selectedSphere state + highlight). RESIZE: dragging the selected sphere surface sets R (new "sphere-resize" edit op {nodeId, r}); Go sets R, re-propagates, persists, fans out.
+
+### Commits (this branch, newest first)
+ecc80b3b remove dead lattice path; 2ab06bb1 resize R via sphere drag; 89dd9142 node drag on parent sphere; 4d588835 TS schema r/dir; 35d29d16 migrate to R+Dir; d84a754b propagation positions; 554b02b4 projection+diameter-step helpers; c5af92a7 per-node R field; 08e4f623 sphere torus selectable; 837087f7 sphere torus visualization. Plus spec/handoff doc commits. Design spec: docs/planning/visual-editor/sphere-chain-layout-spec.html.
+
+### Verified vs NOT verified
+- VERIFIED: go build ./... + go test -race ./... green; tsc --noEmit clean; vitest at baseline; parity/await guards clean; migration confirmed propagation reproduces the prior layout within ~3%.
+- NOT VERIFIED: the LIVE EDITOR behavior (rendering, drag-on-sphere, resize, sphere show/select). Only build/test pass. NEEDS USER EYEBALL — this is why it's unmerged.
+
+### Known limitations / follow-ups
+- NOT ROOTED is INCOMPLETE: node move + resize re-propagate from the FIXED anchor "1", so they only move the dragged node's CHILDREN/subtree. The user's "shrink node 2's R and drag node 1 (upstream) closer" / "grab any node, the rest flexes around it" is NOT implemented — it needs per-EDGE directions and re-rooting the BFS at the dragged node (the current Dir is stored per-node relative to one BFS parent, which goes stale on re-root). This is the main follow-up.
+- Node 5 has two parents (6 and 4); BFS assigns it ONE parent — so its position follows one sphere, not both.
+- Sphere move/resize use a CENTRAL solve (computeSphereChainPositions) then fan out "center" messages to the per-node/edge movers (a deviation from pure per-goroutine ownership, but serialized by the single stdin reader).
+- Anchor node "1" drag is a no-op (no parent).
+- The R derivation per node uses distance to the FIRST BFS child (single scalar), so multi-child nodes can't reproduce every child distance exactly (the ~3% migration error).
+
 ### Next step
-None pending — friction-driven.
+User reviews in the editor. Likely next: the re-root/per-edge-direction work for true "not rooted" flexing; verify drag/resize feel.
 
 ### Recently shipped to main (newest first)
 - **Node pick respects occlusion** (task/pick-occlusion): selecting/hovering a node now returns the FRONTMOST node body the cursor ray actually hits (true nearest-hit occlusion). Root cause: the node body sphere mesh had no nodeId tag, so a body hit was mapped to a node by scanning node positions for matching x,y ONLY (ignoring z) — so a node directly BEHIND another (same screen x,y, deeper z, e.g. node 7 behind node 3 after a depth drag) resolved to the front node. Fix: tag each body sphere with userData.nodeId and resolve the hit directly (z-aware); same path serves hover-highlight and click. File: tools/topology-vscode/src/webview/three/scene-content.tsx.
@@ -39,6 +57,7 @@ Kinds: Input, ChainInhibitor, HoldFlip, WindowAndGate, Excitatory (holds/pulses 
 - Magic constants in spatial code (spacing/box) should be DERIVED from the content, not hand-picked — a fixed 330 lattice spacing collapsed the graph; deriving from layout fixed it. (Mirrors: a singularity/occlusion means the representation/scale is wrong, not the inputs.)
 - Fan-OUT needs separate Out ports (one Out binds only labels[0]); fan-IN needs separate In ports. To send the same value to N targets concurrently, the node spawns a goroutine per wire (node 1 does this for 2 and 6) or uses place-all + DriveAll.
 - Dragging at a tilted camera can move a node along the DEPTH axis (the editable axes are the two facing the camera), landing it directly behind another node (same i,j, different k) — an occlusion hazard; the pick now handles it (nearest body wins), but be aware nodes can stack in depth.
+- Sphere move/resize re-propagate from a fixed anchor — true "grab any node, rest flexes" needs per-edge directions + re-rooting (stored Dir is per-node relative to one BFS parent).
 
 ### Carry-forward ideas (not blocking node-lattice)
 - Node 3's dangling ToNext1 port could be removed if a single-output ChainInhibitor is wanted.

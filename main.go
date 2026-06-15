@@ -68,7 +68,25 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 			node.Update(ctx)
 		}()
 	}
-	wg.Wait()
+
+	// Wait for all nodes to exit, but never block forever: in a timed/cancelled
+	// run (e.g. -duration, or SIGINT) some nodes may be parked on paced-wire
+	// delivery gated by a halted clock and so never observe ctx cancellation.
+	// On cancellation, Resume the clock so any ctx-aware paced waits proceed and
+	// nodes can return, then wait a brief grace and exit regardless. The startup
+	// geometry is already emitted (in LoadTopology) before any pacing, so
+	// flushing the trace here still captures it.
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		clk.Resume()
+		select {
+		case <-done:
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 
 	tr.Close()
 	if tracePath != "" {

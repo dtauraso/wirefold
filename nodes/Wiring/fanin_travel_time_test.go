@@ -39,11 +39,12 @@ func init() {
 func TestFanInPerEdgeTravelTime(t *testing.T) {
 	// Two sources at different distances from the sink, both feeding sink.In.
 	// srcNear is close (short edge); srcFar is far (long edge).
+	// Positions are set via "center" messages after load (sphere-chain deliver).
 	const topo = `{
 	  "nodes": [
-	    {"id":"srcNear","type":"FanInSrc","cell":[1,0,0],"outputs":[{"name":"Out"}]},
-	    {"id":"srcFar","type":"FanInSrc","cell":[3,0,0],"outputs":[{"name":"Out"}]},
-	    {"id":"sink","type":"FanInSink","cell":[0,0,0],"inputs":[{"name":"In"}]}
+	    {"id":"srcNear","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"srcFar","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"sink","type":"FanInSink","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"eNear","kind":"data","source":"srcNear","sourceHandle":"Out","target":"sink","targetHandle":"In"},
@@ -64,6 +65,11 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 	nmr.Start(ctx)
+
+	// Set positions via center messages: srcNear at (100,0,0), srcFar at (400,0,0),
+	// sink at origin (no deliver needed — default center is origin).
+	deliver(nmr, "srcNear", 100, 0, 0)
+	deliver(nmr, "srcFar", 400, 0, 0)
 
 	nearOut := nmr.edgeOut["eNear"]
 	farOut := nmr.edgeOut["eFar"]

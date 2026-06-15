@@ -6,15 +6,8 @@ import (
 )
 
 // refPortWorldPos is an independent reimplementation of the portWorldPos algorithm,
-// used to lock the production code's output. The node center resolves from the
-// lattice cell (the only node-position model); a nil cell defaults to {0,0,0}.
-func refPortWorldPos(kind string, cell *[3]int, ports []portGeom, name string, isInput bool) vec3 {
-	ci, cj, ck := 0, 0, 0
-	if cell != nil {
-		ci, cj, ck = cell[0], cell[1], cell[2]
-	}
-	cx, cy, cz := latticeToWorld(ci, cj, ck)
-	center := vec3{cx, cy, cz}
+// used to lock the production code's output. The node center is provided directly.
+func refPortWorldPos(kind string, center vec3, ports []portGeom, name string, isInput bool) vec3 {
 	if name == "" {
 		return center
 	}
@@ -55,9 +48,10 @@ func almostEqual(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 
 func TestPortWorldPosMirrorsReference(t *testing.T) {
 	anchorId1 := 1
+	center := vec3{X: 46.5425, Y: 93.085, Z: -139.6275}
 	g := nodeGeom{
-		Kind: "HoldFlip",
-		Cell: &[3]int{1, 2, -3},
+		Kind:   "HoldFlip",
+		Center: &center,
 		Inputs: []portGeom{
 			{Name: "In", AnchorId: &anchorId1},
 			{Name: "In2"},
@@ -65,7 +59,7 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 		Outputs: []portGeom{{Name: "Out"}},
 	}
 	got := portWorldPos(g, "In", true)
-	want := refPortWorldPos(g.Kind, g.Cell, g.Inputs, "In", true)
+	want := refPortWorldPos(g.Kind, center, g.Inputs, "In", true)
 	if !almostEqual(got.X, want.X, 1e-9) || !almostEqual(got.Y, want.Y, 1e-9) || !almostEqual(got.Z, want.Z, 1e-9) {
 		t.Fatalf("portWorldPos = %+v, want %+v", got, want)
 	}
@@ -73,6 +67,11 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 
 func TestArcLengthBetweenPortsCases(t *testing.T) {
 	anchorId0, anchorId1, anchorId2 := 0, 1, 2
+	c01 := vec3{X: 0, Y: 46.5425, Z: 0}
+	c11 := vec3{X: 46.5425, Y: 46.5425, Z: 0}
+	c111 := vec3{X: 46.5425, Y: 46.5425, Z: 46.5425}
+	c11n1 := vec3{X: 46.5425, Y: 46.5425, Z: -46.5425}
+	c201 := vec3{X: 93.085, Y: 0, Z: 46.5425}
 	cases := []struct {
 		name string
 		src  nodeGeom
@@ -82,28 +81,28 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}{
 		{
 			name: "input-to-holdflip-2d",
-			src: nodeGeom{Kind: "Input", Cell: &[3]int{0, 1, 0},
+			src: nodeGeom{Kind: "Input", Center: &c01,
 				Outputs: []portGeom{{Name: "ToHoldFlip", AnchorId: &anchorId1}}},
 			srcH: "ToHoldFlip",
-			tgt: nodeGeom{Kind: "HoldFlip", Cell: &[3]int{1, 1, 0},
+			tgt: nodeGeom{Kind: "HoldFlip", Center: &c11,
 				Inputs: []portGeom{{Name: "In", AnchorId: &anchorId1}}},
 			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",
-			src: nodeGeom{Kind: "ChainInhibitor", Cell: &[3]int{1, 1, 1},
+			src: nodeGeom{Kind: "ChainInhibitor", Center: &c111,
 				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
-			tgt: nodeGeom{Kind: "ChainInhibitor", Cell: &[3]int{1, 1, -1},
+			tgt: nodeGeom{Kind: "ChainInhibitor", Center: &c11n1,
 				Inputs: []portGeom{{Name: "FromPrevChainInhibitorNode", AnchorId: &anchorId1}}},
 			tgtH: "FromPrevChainInhibitorNode",
 		},
 		{
 			name: "anchorid0-and-anchorid2-with-z",
-			src: nodeGeom{Kind: "WindowAndGate", Cell: &[3]int{1, 1, 0},
+			src: nodeGeom{Kind: "WindowAndGate", Center: &c11,
 				Outputs: []portGeom{{Name: "ToPassed", AnchorId: &anchorId0}}},
 			srcH: "ToPassed",
-			tgt: nodeGeom{Kind: "WindowAndGate", Cell: &[3]int{2, 0, 1},
+			tgt: nodeGeom{Kind: "WindowAndGate", Center: &c201,
 				Inputs: []portGeom{{Name: "FromRight", AnchorId: &anchorId2}}},
 			tgtH: "FromRight",
 		},
@@ -112,8 +111,12 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := arcLengthBetweenPorts(c.src, c.srcH, c.tgt, c.tgtH)
 			// Straight-segment model: arc length is the chord distance.
-			p0 := refPortWorldPos(c.src.Kind, c.src.Cell, c.src.Outputs, c.srcH, false)
-			p2 := refPortWorldPos(c.tgt.Kind, c.tgt.Cell, c.tgt.Inputs, c.tgtH, true)
+			srcCenter := vec3{}
+			if c.src.Center != nil { srcCenter = *c.src.Center }
+			tgtCenter := vec3{}
+			if c.tgt.Center != nil { tgtCenter = *c.tgt.Center }
+			p0 := refPortWorldPos(c.src.Kind, srcCenter, c.src.Outputs, c.srcH, false)
+			p2 := refPortWorldPos(c.tgt.Kind, tgtCenter, c.tgt.Inputs, c.tgtH, true)
 			want := refChordLength(p0, p2)
 			if !almostEqual(got, want, 1e-9) {
 				t.Fatalf("arcLengthBetweenPorts = %v, want chord %v", got, want)
@@ -159,7 +162,6 @@ func TestPortAnchorIdRingPath(t *testing.T) {
 	anchorId1 := 1
 	g := nodeGeom{
 		Kind:    kind,
-		Cell:    &[3]int{0, 0, 0},
 		Inputs:  []portGeom{{Name: "In", AnchorId: &anchorId1}},
 		Outputs: []portGeom{{Name: "Out"}}, // nil AnchorId → ring slot 0
 	}

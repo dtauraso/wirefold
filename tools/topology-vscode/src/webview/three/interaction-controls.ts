@@ -6,7 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
-import { nodeWorldPos, pixelToNDC, pointerRingAnchor, LATTICE_SPACING } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
@@ -35,43 +35,13 @@ const CLICK_MAX_MS = 150;
 /** Pixel movement threshold between CLICK and DRAG. */
 const MOVE_SLOP_PX = 6;
 
-/** Screen pixels of drag per one lattice-cell step (zoom-INDEPENDENT node drag). */
-const PX_PER_CELL = 80;
-
-/**
- * Pick the world-axis unit vector (±X/±Y/±Z) most aligned with `dir`, signed so
- * dot>0, excluding any axis index in `exclude`. The lattice is world-axis-aligned,
- * so node-drag motion is along these axes. Returns the chosen vector and its axis
- * index (0=X,1=Y,2=Z).
- */
-function bestLatticeAxis(dir: THREE.Vector3, exclude: number): { vec: THREE.Vector3; axis: number } {
-  let bestAxis = 0;
-  let bestAbs = -1;
-  for (let i = 0; i < 3; i++) {
-    if (i === exclude) continue;
-    const c = i === 0 ? dir.x : i === 1 ? dir.y : dir.z;
-    if (Math.abs(c) > bestAbs) {
-      bestAbs = Math.abs(c);
-      bestAxis = i;
-    }
-  }
-  const c = bestAxis === 0 ? dir.x : bestAxis === 1 ? dir.y : dir.z;
-  const sign = c >= 0 ? 1 : -1;
-  const vec = new THREE.Vector3(
-    bestAxis === 0 ? sign : 0,
-    bestAxis === 1 ? sign : 0,
-    bestAxis === 2 ? sign : 0,
-  );
-  return { vec, axis: bestAxis };
-}
-
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring" | "port-move";
+  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring" | "port-move" | "sphere-resize";
   // Pointer-down snapshot
   downX: number;
   downY: number;
@@ -129,13 +99,12 @@ export function useInteractionControls(
   // Node-drag state: set when pointer-down lands on a node.
   const nodeDragRef = useRef<{
     nodeId: string;
-    startCenter: THREE.Vector3; // node world center at drag start
-    downX: number;              // screen x at drag start
-    downY: number;              // screen y at drag start
-    axisR: THREE.Vector3;       // lattice axis mapped to screen-right (signed unit vec)
-    axisU: THREE.Vector3;       // lattice axis mapped to screen-up (signed unit vec)
+    startCenter: THREE.Vector3; // node world center at drag start (defines the drag plane)
     lastWorldTarget: THREE.Vector3 | null; // most recent world target sent during the drag
   } | null>(null);
+
+  // Sphere-resize state: set when pointer-down lands on the selected sphere torus rim.
+  const sphereResizeRef = useRef<{ nodeId: string; nodeCenter: THREE.Vector3 } | null>(null);
 
   // Wiring state: set when pointer-down lands on an UNCONNECTED port sphere
   // (drag port→port creates an edge).
@@ -184,6 +153,23 @@ export function useInteractionControls(
       });
     }
   }, [flushNodeMove]);
+
+  const pendingResize = useRef<{ nodeId: string; r: number } | null>(null);
+  const resizeRafPending = useRef(false);
+  const flushSphereResize = useCallback((nodeId: string, r: number) => {
+    vscode.postMessage({ type: "edit", op: "sphere-resize", nodeId, r });
+  }, []);
+  const scheduleSphereResize = useCallback((nodeId: string, r: number) => {
+    pendingResize.current = { nodeId, r };
+    if (!resizeRafPending.current) {
+      resizeRafPending.current = true;
+      requestAnimationFrame(() => {
+        resizeRafPending.current = false;
+        const p = pendingResize.current;
+        if (p) { flushSphereResize(p.nodeId, p.r); pendingResize.current = null; }
+      });
+    }
+  }, [flushSphereResize]);
 
   // Edge ids incident on a specific port (output → source/sourceHandle, input →
   // target/targetHandle). Used both to decide connected-vs-unconnected and to build
@@ -348,6 +334,7 @@ export function useInteractionControls(
       nodeDragRef.current = null;
       wiringRef.current = null;
       portMoveRef.current = null;
+      sphereResizeRef.current = null;
 
       // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -378,33 +365,33 @@ export function useInteractionControls(
         return;
       }
 
+      sphereResizeRef.current = null;
+      const sphereHit = pickRequest.current?.(ndcX, ndcY) ?? null;
+      if (sphereHit !== null && sphereHit.startsWith("sphere:")) {
+        const sphereNodeId = sphereHit.slice("sphere:".length);
+        const node = nodesRef.current.find((n) => n.id === sphereNodeId);
+        if (node) {
+          sphereResizeRef.current = { nodeId: sphereNodeId, nodeCenter: nodeWorldPos(node) };
+          s.phase = "pending";
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
       s.emptyDown = (hitId === null);
 
       if (hitId !== null) {
-        // Node hit: record drag origin for ZOOM-INDEPENDENT pixel→cell node drag.
-        // Capture the screen down-point, the node's start world center, and the two
-        // editable lattice axes (the world axes most aligned with screen right/up at
-        // start). Drag moves the node in whole lattice-cell STEPS based on screen-pixel
-        // distance (PX_PER_CELL), so one cell == 80px of drag at ANY zoom. Go still snaps
-        // the world target to the nearest cell. The camera-facing depth axis is held.
+        // Node hit: record the drag origin. The node's start world center defines a
+        // camera-facing drag plane; pointer moves unproject onto that plane to a WORLD
+        // TARGET. Go projects that target onto the node's PARENT sphere and re-aims the
+        // node's Dir in diameter steps (sphere-chain layout) — no lattice stepping here.
         const node = nodesRef.current.find((n) => n.id === hitId);
         const cam = cameraRef.current;
         if (node && cam) {
-          cam.updateMatrixWorld(true);
-          const camRight = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
-          const camUp = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
-          const r = bestLatticeAxis(camRight, -1);
-          // axisU excludes the axis already taken by axisR (degenerate case: cam right
-          // and up map to the same lattice axis → pick the next-best for up).
-          const u = bestLatticeAxis(camUp, r.axis);
           nodeDragRef.current = {
             nodeId: hitId,
             startCenter: nodeWorldPos(node),
-            downX: e.clientX,
-            downY: e.clientY,
-            axisR: r.vec,
-            axisU: u.vec,
             lastWorldTarget: null,
           };
         }
@@ -446,7 +433,9 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        if (portMoveRef.current) {
+        if (sphereResizeRef.current) {
+          s.phase = "sphere-resize";
+        } else if (portMoveRef.current) {
           s.phase = "port-move";
         } else if (wiringRef.current) {
           s.phase = "wiring";
@@ -459,23 +448,51 @@ export function useInteractionControls(
       }
 
       if (s.phase === "dragging" && nodeDragRef.current) {
-        // Node drag: ZOOM-INDEPENDENT pixel→cell stepping. Convert screen-pixel drag from
-        // the down-point into whole lattice-cell steps along the two editable lattice axes
-        // (PX_PER_CELL pixels per cell). The world target = startCenter + axisR*stepR*spacing
-        // + axisU*stepU*spacing — already a clean cell multiple, so Go snaps it exactly onto
-        // startCell + the steps (clamped to the box by Go). The body repositions when Go
-        // re-emits node-geometry. No unproject / no zoom dependence.
+        // Node drag (sphere-chain): unproject the pointer onto a CAMERA-FACING plane
+        // through the node's start center, giving a free WORLD TARGET. Go projects it
+        // onto the node's PARENT sphere and snaps the re-aimed Dir to the node's own
+        // diameter steps — the quantization lives in Go now, not in a TS lattice. The
+        // body repositions when Go re-emits node-geometry. No lattice / no zoom math.
         const nd = nodeDragRef.current;
-        const dxPx = e.clientX - nd.downX;
-        const dyPx = e.clientY - nd.downY;
-        const stepR = Math.round(dxPx / PX_PER_CELL);
-        const stepU = Math.round(-dyPx / PX_PER_CELL); // screen-y is down
-        const target = nd.startCenter.clone()
-          .add(nd.axisR.clone().multiplyScalar(stepR * LATTICE_SPACING))
-          .add(nd.axisU.clone().multiplyScalar(stepU * LATTICE_SPACING));
-        if (Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z)) {
-          nd.lastWorldTarget = target;
-          scheduleNodeMove(nd.nodeId, target.x, target.y, target.z);
+        const cam = cameraRef.current;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        if (cam) {
+          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+          const normal = new THREE.Vector3();
+          cam.getWorldDirection(normal); // plane faces the camera
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, nd.startCenter);
+          const target = new THREE.Vector3();
+          const hit = raycaster.ray.intersectPlane(plane, target);
+          if (hit && Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z)) {
+            nd.lastWorldTarget = target.clone();
+            scheduleNodeMove(nd.nodeId, target.x, target.y, target.z);
+          }
+        }
+        s.prevX = e.clientX;
+        s.prevY = e.clientY;
+      }
+
+      if (s.phase === "sphere-resize" && sphereResizeRef.current) {
+        // New R = distance from node center to the pointer projected onto the
+        // camera-facing plane through the center. Dragging the rim inward shrinks R,
+        // outward grows it. Go clamps the minimum and re-propagates (children move).
+        const sr = sphereResizeRef.current;
+        const cam = cameraRef.current;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        if (cam) {
+          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+          const normal = new THREE.Vector3();
+          cam.getWorldDirection(normal);
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, sr.nodeCenter);
+          const hitPt = new THREE.Vector3();
+          if (raycaster.ray.intersectPlane(plane, hitPt)) {
+            const r = sr.nodeCenter.distanceTo(hitPt);
+            if (Number.isFinite(r)) scheduleSphereResize(sr.nodeId, r);
+          }
         }
         s.prevX = e.clientX;
         s.prevY = e.clientY;
@@ -528,7 +545,7 @@ export function useInteractionControls(
         }
       }
     },
-    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
+    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, scheduleSphereResize, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -579,10 +596,34 @@ export function useInteractionControls(
         return;
       }
 
-      // Node drag completed: flush the final WORLD target. Go snaps it to the nearest
-      // lattice cell, sets the node's Cell, persists (meta.json), and re-streams the
-      // snapped center — Go owns the snapped position, so TS does not write view-node x/y
-      // here. Reset throttle so the last frame isn't dropped.
+      if (s.phase === "sphere-resize" && sphereResizeRef.current) {
+        const sr = sphereResizeRef.current;
+        const cam = cameraRef.current;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        if (cam) {
+          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
+          const raycaster = new THREE.Raycaster();
+          raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+          const normal = new THREE.Vector3();
+          cam.getWorldDirection(normal);
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, sr.nodeCenter);
+          const hitPt = new THREE.Vector3();
+          if (raycaster.ray.intersectPlane(plane, hitPt)) {
+            const r = sr.nodeCenter.distanceTo(hitPt);
+            if (Number.isFinite(r)) { pendingResize.current = null; resizeRafPending.current = false; flushSphereResize(sr.nodeId, r); }
+          }
+        }
+        sphereResizeRef.current = null;
+        s.phase = "idle";
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+        return;
+      }
+
+      // Node drag completed: flush the final WORLD target. Go projects it onto the
+      // node's parent sphere, re-aims the node's Dir in diameter steps, persists Dir
+      // (meta.json), re-propagates, and re-streams the centers — Go owns the snapped
+      // position, so TS does not write view-node x/y here. Reset throttle so the last
+      // frame isn't dropped.
       if (s.phase === "dragging" && nodeDragRef.current) {
         const nd = nodeDragRef.current;
         const t = nd.lastWorldTarget;
@@ -621,7 +662,7 @@ export function useInteractionControls(
 
       s.phase = "idle";
     },
-    [flushNodeMove, flushPortAnchor, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
+    [flushNodeMove, flushPortAnchor, flushSphereResize, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
   );
 
   // Exposed so ThreeView can attach a non-passive native listener.

@@ -364,6 +364,91 @@ export function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
+// SphereRing — "show the sphere" visualization.
+// When showSphere is on AND a node is selected, draws two thin see-through torus
+// rings (XY + XZ planes) centered on that node with major radius R = the node's
+// Go-streamed sphere radius (nodeRadius reads geoms[id].radius; falls back to local
+// compute pre-emit). Styled like the node's border ring (NODE_DEFS stroke), but
+// transparent + depthWrite false + raycast disabled so it's purely decorative and
+// you can see the nodes inside. Re-derives R + center every frame from live geometry.
+// ---------------------------------------------------------------------------
+
+export function SphereRing({
+  nodes,
+  edges,
+  selectedId,
+  selectedSphere,
+  showSphere,
+}: {
+  nodes: RFNode<NodeData>[];
+  edges: RFEdge<EdgeData>[];
+  selectedId: string | null;
+  selectedSphere: string | null;
+  showSphere: boolean;
+}) {
+  // Re-render when Go streams node geometry (centers/radius), so R + center track moves.
+  useNodeGeometryStore((s) => s.geoms);
+
+  const selNode = selectedId ? nodes.find((n) => n.id === selectedId) ?? null : null;
+
+  // Only output-bearing nodes center a sphere; output-less nodes (no outgoing
+  // edge, e.g. surface-only members like 3 and 5) live on others' surfaces and
+  // have no sphere of their own.
+  const centersSphere = selNode != null && edges.some((e) => e.source === selNode.id);
+
+  const ringColor = useMemo(
+    () => new THREE.Color(selNode?.data?.stroke ?? "#888888"),
+    [selNode?.data?.stroke],
+  );
+
+  if (!showSphere || !selNode || !centersSphere) return null;
+
+  const center = nodeWorldPos(selNode);
+  // R = Go-streamed sphere-chain radius (sphereR, used for bead orbit and port placement).
+  // Falls back to nodeRadius (body radius) if sphereR is not yet set.
+  const geom = getNodeGeometry(selNode.id);
+  const R = geom?.sphereR ?? nodeRadius(selNode);
+  if (R < 1e-3) return null;
+
+  // Thin tube so it reads as a ring, not a donut — scale to the node's own ring tube.
+  const tube = Math.max(0.5, nodeRadius(selNode) * 0.08);
+
+  // Highlighted when THIS sphere surface is the current sphere selection.
+  const isSphereSelected = selectedSphere === selNode.id;
+
+  // Two perpendicular great-circle rings so the sphere reads as a sphere:
+  // the first lies in XY (torusGeometry's default plane), the second is
+  // rotated 90° about X into the XZ plane. Both share radius/tube/material,
+  // and both carry the sphere userData so clicking either ring selects the sphere.
+  const ringMat = (
+    <meshStandardMaterial
+      color={ringColor}
+      emissive={ringColor}
+      emissiveIntensity={isSphereSelected ? 1.2 : 0.25}
+      transparent
+      opacity={isSphereSelected ? 0.95 : 0.55}
+      depthWrite={false}
+    />
+  );
+
+  return (
+    <group position={[center.x, center.y, center.z]}>
+      <mesh userData={{ sphereSurface: true, sphereNodeId: selNode.id }}>
+        <torusGeometry args={[R, tube, 12, 96]} />
+        {ringMat}
+      </mesh>
+      <mesh
+        rotation={[Math.PI / 2, 0, 0]}
+        userData={{ sphereSurface: true, sphereNodeId: selNode.id }}
+      >
+        <torusGeometry args={[R, tube, 12, 96]} />
+        {ringMat}
+      </mesh>
+    </group>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Edges — 3D tube path using LineCurve3 (straight segment).
 // Exit/entry points: point on each node's sphere surface facing the other node.
 // ---------------------------------------------------------------------------
@@ -929,9 +1014,20 @@ export function RaycasterHelper({
       let portHit: { id: string; dist: number } | null = null;
       let edgeHit: { id: string; dist: number } | null = null;
       let nodeHit: { id: string; dist: number } | null = null;
+      // Sphere-surface torus rim hit → encoded "sphere:<nodeId>". Thin rim, so this
+      // only fires when the ray actually grazes the ring; clicking through the open
+      // middle still passes to the node body inside.
+      let sphereHit: { id: string; dist: number } | null = null;
 
       for (const hit of hits) {
         const hitObj = hit.object as THREE.Mesh;
+        if (!sphereHit && hitObj.userData?.sphereSurface) {
+          sphereHit = {
+            id: "sphere:" + (hitObj.userData.sphereNodeId as string),
+            dist: hit.distance,
+          };
+          continue;
+        }
         if (!portHit && hitObj.userData?.portId) {
           portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
           continue;
@@ -975,7 +1071,17 @@ export function RaycasterHelper({
 
       // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
       let picked: string | null = null;
-      if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
+      // Sphere-surface rim wins when its hit is nearer than the node body (the ray
+      // actually struck the thin ring rim before reaching the node inside). It does
+      // not override a port (ports sit on the node ring and are the finer target).
+      if (
+        sphereHit &&
+        !portHit &&
+        (!nodeHit || sphereHit.dist <= nodeHit.dist) &&
+        (!edgeHit || sphereHit.dist <= edgeHit.dist)
+      ) {
+        picked = sphereHit.id;
+      } else if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
         picked = portHit.id;
       } else if (edgeHit && nodeHit) {
         picked = edgeHit.dist < nodeHit.dist - EDGE_BIAS ? edgeHit.id : nodeHit.id;
@@ -1035,6 +1141,7 @@ export function Scene({
   nodes,
   edges,
   selectedId,
+  selectedSphere,
   hoveredId,
   cameraRef,
   initialCamera3d,
@@ -1042,11 +1149,14 @@ export function Scene({
   onPositions,
   onNearestN,
   onCameraSettle,
+  showSphere,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
+  selectedSphere: string | null;
   hoveredId: string | null;
+  showSphere: boolean;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   initialCamera3d?: Camera3D;
   onPickRequest: React.MutableRefObject<
@@ -1082,6 +1192,13 @@ export function Scene({
       {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
           node-local offsets) so they ride the node on move — no top-level mount. */}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
+      <SphereRing
+        nodes={nodes}
+        edges={edges}
+        selectedId={selectedId}
+        selectedSphere={selectedSphere}
+        showSphere={showSphere}
+      />
     </ProceduralEnvProvider>
   );
 }

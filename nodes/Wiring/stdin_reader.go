@@ -80,6 +80,8 @@ type stdinMsg struct {
 	Anchor  *anchorVec      `json:"anchor"`
 	Keys    []string        `json:"keys"`
 	Scene   json.RawMessage `json:"scene"`
+	NodeId  string          `json:"nodeId"`
+	R       float64         `json:"r"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -205,35 +207,26 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil || len(msg.Entries) == 0 {
 			return
 		}
-		// Each entry carries a WORLD-SPACE target (the cursor unprojected onto the
-		// view-plane through the node's current center; TS owns that camera math). Go
-		// snaps the target to the nearest lattice cell here (worldToLattice → round+clamp
-		// to the box) and attaches Cell to the move; the owning node/edge goroutine sets
-		// its geom.Cell so nodeWorldPos resolves via the lattice (Cell > Pos). Guard NaN.
-		for key, e := range msg.Entries {
-			if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) {
-				continue
-			}
-			i, j, k := worldToLattice(e.X, e.Y, e.Z)
-			cell := &[3]int{i, j, k}
-			if ch, ok := md.dispatch[key]; ok {
-				ch <- moveMsg{NodeID: e.NodeId, Cell: cell}
-			}
-		}
-		if treeRoot != "" {
+		// SPHERE-CHAIN layout: a node-drag re-aims the node's Dir on its PARENT's
+		// sphere toward the world target, quantized to the node's own diameter steps;
+		// positions then RE-PROPAGATE from the anchor (whole-graph). The incoming
+		// entries all carry the same moved node id + world target (one per incident
+		// edge + the node itself), so SphereMove runs once per unique node id. The
+		// anchor (no parent) is a no-op.
+		if md.sphereChainActive() {
 			seen := map[string]bool{}
 			for _, e := range msg.Entries {
-				if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) {
+				if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) || seen[e.NodeId] {
 					continue
 				}
-				if !seen[e.NodeId] {
-					seen[e.NodeId] = true
-					i, j, k := worldToLattice(e.X, e.Y, e.Z)
-					// Persist the snapped lattice cell (durable across reload); Cell has
-					// priority over the view-node free position at load.
-					_ = writeMetaCell(treeRoot, e.NodeId, &[3]int{i, j, k})
+				seen[e.NodeId] = true
+				dir, moved := md.SphereMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
+				// Persist the re-aimed Dir (durable across reload) when the move landed.
+				if moved && treeRoot != "" {
+					_ = writeMetaDir(treeRoot, e.NodeId, dir)
 				}
 			}
+			return
 		}
 	case msg.Op == "port-anchor":
 		// Mail-sort a snapped ring-anchor update to the owning node + each incident edge
@@ -288,6 +281,17 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		}
 		if treeRoot != "" {
 			_ = mergeFades(treeRoot, msg.Edges)
+		}
+	case msg.Op == "sphere-resize":
+		// Set the node's sphere R and re-propagate (children move to the new radius).
+		// Anchor-1 only; upstream nodes unaffected (full re-root is follow-up).
+		if md == nil || msg.NodeId == "" || math.IsNaN(msg.R) {
+			return
+		}
+		tr.Breadcrumb("edit-sphere-resize-recv", msg.NodeId, "", "")
+		newR, ok := md.SphereResize(msg.NodeId, msg.R)
+		if ok && treeRoot != "" {
+			_ = writeMetaR(treeRoot, msg.NodeId, newR)
 		}
 	case msg.Op == "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sphere-Chain Node Layout</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card-bg: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --border: #d2d2d7;
+    --accent: #0071e3;
+    --tab-active: #0071e3;
+    --code-bg: #e8e8ed;
+    --table-head: #f0f0f5;
+    --table-zebra: #f9f9fb;
+    --eq-bg: #e8f0fb;
+    --eq-border: #b3c9f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --card-bg: #2c2c2e;
+      --text: #f5f5f7;
+      --text-muted: #8e8e93;
+      --border: #3a3a3c;
+      --accent: #4da3ff;
+      --tab-active: #4da3ff;
+      --code-bg: #3a3a3c;
+      --table-head: #3a3a3c;
+      --table-zebra: #252527;
+      --eq-bg: #1e2d45;
+      --eq-border: #2d4a7a;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem 1rem 4rem;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 1.25rem 0 0.6rem; }
+  .meta { font-size: 0.78rem; color: var(--text-muted); }
+  nav { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 1.75rem; flex-wrap: wrap; }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--tab-active); border-bottom-color: var(--tab-active); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  p { margin-bottom: 0.85rem; }
+  ul { padding-left: 1.4rem; margin-bottom: 0.85rem; }
+  li { margin-bottom: 0.4rem; }
+  code, .mono {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 0.84em;
+    background: var(--code-bg);
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+  }
+  .eq-block {
+    background: var(--eq-bg);
+    border: 1px solid var(--eq-border);
+    border-radius: 6px;
+    padding: 1rem 1.5rem;
+    margin: 1rem 0 1.2rem;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 1rem;
+    line-height: 2;
+  }
+  .eq-block .eq-line { display: block; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.875rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+  th {
+    background: var(--table-head);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: var(--table-zebra); }
+  td code { font-size: 0.82em; }
+  .note {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-top: -0.5rem;
+    margin-bottom: 1rem;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Sphere-Chain Node Layout</h1>
+    <div class="meta">branch: task/sphere-chain-layout &nbsp;·&nbsp; docs/planning/visual-editor/sphere-chain-layout-spec.html</div>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" data-tab="model">Model</button>
+    <button class="tab-btn" data-tab="geometry">Geometry</button>
+    <button class="tab-btn" data-tab="was">Was (lattice)</button>
+    <button class="tab-btn" data-tab="target">Target (sphere chain)</button>
+    <button class="tab-btn" data-tab="interaction">Interaction</button>
+    <button class="tab-btn" data-tab="open">Open Questions</button>
+  </nav>
+
+  <!-- TAB 1: MODEL -->
+  <div id="model" class="panel active">
+    <p>
+      The sphere-chain is the <strong>placement frame</strong> — it replaces the lattice frame, the
+      same way the lattice was the placement frame for discrete cells. Where the lattice provided a
+      grid of cells to park nodes in, the sphere-chain provides a set of radius-<code>R</code> spheres
+      whose surfaces nodes sit on. It is not a separate decoration; it <em>is</em> where positions come from.
+    </p>
+
+    <p>
+      Each node <em>with outputs</em> is the <strong>center of a sphere of radius <code>R</code></strong>,
+      and its directly connected neighbors ride that sphere's <strong>surface</strong>. Crucially this is
+      <strong>symmetric and applies to every edge — in or out, back edges included</strong>:
+    </p>
+
+    <p>
+      A sphere is <strong>local</strong>: it concerns only that one node and the nodes it
+      <strong>directly connects to</strong> (its neighbors) — never the whole graph. A sphere =
+      a node + its direct neighbors on its surface. <strong>Only connected nodes share a surface</strong>:
+      if two nodes have no edge between them, neither is on the other's sphere (e.g. nodes
+      <code>6</code> and <code>7</code> are not connected, so neither sits on the other's surface).
+    </p>
+
+    <div class="eq-block">
+      <span class="eq-line">neighbor_pos = node_center + R · dir</span>
+      <span class="eq-line">A on B's sphere  ⇔  B on A's sphere</span>
+    </div>
+
+    <ul>
+      <li><strong>Only output-bearing nodes center a sphere.</strong> A node <em>with outputs</em> centers a sphere of radius <code>R</code>. <strong>Output-less nodes are surface-only</strong>: they own no sphere; they sit on the surfaces of the node(s) that connect to them, and may belong to <strong>more than one</strong> surface (e.g. sink node <code>5</code> sits on both node <code>6</code>'s and node <code>4</code>'s surface; node <code>3</code>'s dangling output gives it no sphere). Multi-surface membership is fine.</li>
+      <li><strong>Local sphere.</strong> Each sphere is about one node and its <em>direct</em> neighbors only, never the whole graph. Only connected nodes share a surface; unconnected pairs (e.g. <code>6</code> and <code>7</code>) are on neither's sphere.</li>
+      <li><strong>Symmetric neighbors-on-sphere.</strong> Every node connected to a given node by <em>any</em> edge — incoming, outgoing, or a feedback back-edge — sits on that node's surface, and it is reciprocal: if A is on B's sphere then B is on A's sphere.</li>
+      <li><strong>Equivalent statement.</strong> Every edge has length <code>R</code>; equivalently, each node's neighbors all lie on its radius-<code>R</code> sphere.</li>
+      <li><strong>Example.</strong> Node <code>2</code> sits on node <code>1</code>'s surface (the <code>1 → 2</code> edge), and nodes <code>1</code>, <code>3</code>, and <code>7</code> all sit on node <code>2</code>'s surface — node <code>1</code> via the <code>2 → 1</code> feedback back-edge, nodes <code>3</code> and <code>7</code> via <code>2 → 3</code> and <code>2 → 7</code>. The <code>1</code>↔<code>2</code> relationship is reciprocal.</li>
+      <li><strong>Go computes + streams positions.</strong> Layout is geometry, so it is Go-owned: Go derives node world positions from the graph structure and streams them (as it streams centers today); TS only renders.</li>
+      <li><strong>Replaces the lattice frame.</strong> No more lattice cell storage and no <code>latticeToWorld</code>; positions come from the spheres, not from stored <code>(i,j,k)</code> cells.</li>
+    </ul>
+
+    <p class="note">
+      The topology has a multi-surface node (<code>5</code>, on both <code>6</code>'s and
+      <code>4</code>'s surfaces) and a feedback edge (<code>2 → 1</code>). Both are handled by the
+      symmetric, local frame: back edges are in, multi-surface membership is fine, and the graph is
+      sparse enough that a per-node placement exists — see Open Questions Q3.
+    </p>
+  </div>
+
+  <!-- TAB 2: GEOMETRY -->
+  <div id="geometry" class="panel">
+    <p>
+      A neighbor's world position is a node's center pushed out by the sphere radius along a
+      unit direction. Symmetrically: every edge has length <code>R</code>, so both endpoints lie on
+      each other's radius-<code>R</code> sphere.
+    </p>
+
+    <div class="eq-block">
+      <span class="eq-line">neighbor_pos = node_center + R · dir</span>
+      <span class="eq-line">|dir| = 1   ·   ‖edge‖ = R for every edge</span>
+    </div>
+
+    <ul>
+      <li><strong>R — per-node starting radius.</strong> <code>R</code> is a <strong>per-node starting value</strong>, independent and adjustable per node — <em>not</em> the length of any designated/reference edge (there is no designated edge). The user supplies the starting values. Resizing a node's sphere (dragging its surface toward the center) changes <em>that node's</em> <code>R</code>. Where the starting values come from is <strong>open</strong> (Q1).</li>
+      <li><strong>Local frame.</strong> A sphere constrains only the node and its <em>direct</em> neighbors; only connected nodes lie on each other's surfaces. Output-less nodes have no sphere of their own and appear only as surface members of the node(s) they connect to (possibly several).</li>
+      <li><strong>dir — per-neighbor direction.</strong> When a node has multiple neighbors, each one needs its own <code>dir</code> on the surface. <strong>Initial</strong> directions are seeded by <strong>projecting each neighbor's current edge direction onto the sphere</strong> (<code>projectToSphere</code>); thereafter dragging moves a node across the surface in steps of <strong>its own diameter</strong> (step angle <code>diameter / R</code>, <code>diameterStepAngle</code>). There is <strong>no global slot grid and no Fibonacci distribution</strong> (Q2).</li>
+      <li><strong>First-cut render (committed 837087f7).</strong> A see-through <strong>torus ring at radius <code>R</code></strong> (styled like the node's border torus), toggled by a "sphere" button for the selected node, with draggable surface positions that step by the dragged node's own diameter. <code>R</code> there currently stands in as the live primary-output-edge distance until per-node starting values exist (Q1).</li>
+      <li><strong>All edges define the frame.</strong> Back/feedback edges (e.g. <code>2 → 1</code>) are <strong>not</strong> excluded — they constrain placement like any other edge (node <code>1</code> on node <code>2</code>'s sphere and vice versa). The frame is the whole edge set, not a spanning tree.</li>
+      <li><strong>Exact placement, no relaxation needed.</strong> Achieving every-edge-= <code>R</code> exactly is only impossible for <em>dense / over-constrained</em> graphs — e.g. a 5-clique <code>K5</code> with uniform edge length can't exist in 3D (at most 4 equidistant points = a tetrahedron), or a shared neighbor whose two neighbors are pinned more than <code>2R</code> apart. This topology is <strong>sparse / under-constrained</strong>: 7 nodes give <code>3·7 − 6 = 15</code> degrees of freedom against only ~7 edges, so an <strong>exact</strong> uniform-<code>R</code> placement exists with slack to spare. A <strong>deterministic exact placement</strong> works — <strong>no force-directed relaxation</strong> required.</li>
+    </ul>
+  </div>
+
+  <!-- TAB 3: WAS (LATTICE) -->
+  <div id="was" class="panel">
+    <p>
+      What is being removed: the discrete cubic <strong>lattice</strong>.
+    </p>
+    <ul>
+      <li>Each node is parked at an integer cell <code>(i, j, k)</code>, stored per node.</li>
+      <li>World position is the cell scaled into space: <code>worldPos = origin + cell · spacing</code> (<code>latticeToWorld</code>).</li>
+      <li>Dragging a node <strong>snaps to the nearest cell</strong> — positions are quantized to the grid.</li>
+      <li>Positions are <strong>stored</strong> (the cell is authoritative); they do not depend on the wiring.</li>
+    </ul>
+    <p class="note">
+      The lattice cell storage and <code>latticeToWorld</code> go away entirely; the sphere-chain
+      derives positions from the graph instead.
+    </p>
+  </div>
+
+  <!-- TAB 4: TARGET (SPHERE CHAIN) -->
+  <div id="target" class="panel">
+    <p>
+      What replaces it: the sphere-chain as the new <strong>placement frame</strong> — a set of
+      radius-<code>R</code> spheres, one per node, whose surfaces hold that node's neighbors. It
+      takes over the lattice's job (giving nodes somewhere to sit) rather than adding a layer.
+    </p>
+    <ul>
+      <li>Each <em>output-bearing</em> node is a sphere center; every node it shares an edge with — in, out, or back — rides its surface at radius <code>R</code>, reciprocally. Output-less nodes (<code>3</code>, <code>5</code>) own no sphere and are surface-only, possibly on several surfaces.</li>
+      <li>Positions are <strong>derived from the graph</strong> (neighbors-on-sphere), not stored as cells.</li>
+      <li>The edge set defines the frame: node 1 ↔ {2,6}, node 2 ↔ {1,3,7}, node 6 ↔ {1,5}, node 7 ↔ {2,4}, node 4 ↔ {7,5}, node 5 ↔ {6,4}, including the <code>2 → 1</code> back-edge.</li>
+      <li>No grid, no snapping, no quantized cells — the wiring is the layout.</li>
+    </ul>
+
+    <h2>Current topology (chain by output edge)</h2>
+    <table>
+      <thead>
+        <tr><th>Node</th><th>Kind</th><th>Output targets</th><th>Note</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>1</code></td><td>Input</td><td><code>{2, 6}</code></td><td>root</td></tr>
+        <tr><td><code>2</code></td><td>ChainInhibitor</td><td><code>{3, 7}</code></td><td>+ feedback <code>2 → 1</code></td></tr>
+        <tr><td><code>6</code></td><td>Excitatory</td><td><code>{5}</code></td><td>—</td></tr>
+        <tr><td><code>3</code></td><td>ChainInhibitor</td><td><code>{}</code></td><td>output dangles</td></tr>
+        <tr><td><code>7</code></td><td>Excitatory</td><td><code>{4}</code></td><td>—</td></tr>
+        <tr><td><code>4</code></td><td>HoldFlip</td><td><code>{5}</code></td><td>—</td></tr>
+        <tr><td><code>5</code></td><td>WindowAndGate</td><td><code>{}</code></td><td>sink; two parents (6, 4)</td></tr>
+      </tbody>
+    </table>
+    <p class="note">
+      Not a clean tree: node <code>5</code> has two parents and there is a <code>2 → 1</code> cycle.
+      See Open Questions Q3 / Q4.
+    </p>
+  </div>
+
+  <!-- TAB 5: INTERACTION -->
+  <div id="interaction" class="panel">
+    <p>
+      The big open question: with positions derived from the topology, what happens to
+      <strong>node dragging</strong>? Two framings:
+    </p>
+
+    <div class="card">
+      <h2>A — Auto-computed (no dragging)</h2>
+      <p>
+        The layout is fully a function of the graph. Because the topology is sparse, Go can compute
+        an <strong>exact uniform-<code>R</code> placement deterministically</strong> (no relaxation);
+        the user never moves nodes by hand. Changing the layout means changing the wiring (or the
+        layout parameters), not dragging.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>B — Draggable on the sphere</h2>
+      <p>
+        Nodes remain movable, but constrained to the model: e.g. a child slides around on its
+        parent's sphere surface (changing its <code>dir</code> at fixed <code>R</code>) in
+        <strong>steps of its own diameter</strong> (step angle <code>diameter / R</code>), so a
+        smaller node has finer steps; the tree can be re-rooted. Dragging adjusts <code>dir</code>/angle rather than free-placing.
+      </p>
+    </div>
+
+    <p class="note">
+      Which framing wins is <strong>open</strong> (Q5). Either way, the lattice's
+      drag-snap-to-cell behavior is gone — there are no cells to snap to.
+    </p>
+
+    <div class="card">
+      <h2>First-cut visualization (committed 837087f7)</h2>
+      <p>
+        A <strong>"sphere" button</strong> toggles a see-through <strong>torus ring at radius
+        <code>R</code></strong> for the <strong>selected node</strong> (styled like that node's border
+        torus). It shows the node's own sphere. <code>R</code> there currently uses the live
+        <strong>primary-output-edge distance as a stand-in</strong> for the node's starting <code>R</code>
+        value (the real per-node starting value is still Q1). Neighbors are seeded on the surface by
+        <strong>projecting their current edge direction</strong> onto it and thereafter drag across the
+        surface in <strong>steps of the dragged node's own diameter</strong>; dragging the surface inward
+        shrinks that node's <code>R</code>.
+      </p>
+    </div>
+  </div>
+
+  <!-- TAB 6: OPEN QUESTIONS -->
+  <div id="open" class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Question</th>
+          <th>Notes / leaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Q1</td>
+          <td>Sphere <strong>radius R</strong>: a <strong>per-node starting value</strong> — independent, adjustable, user-supplied; <em>not</em> the length of any designated/reference edge (there is no designated edge). Resizing a node's sphere changes that node's <code>R</code>.</td>
+          <td><strong>RESOLVED</strong> — <code>R</code> is a per-node starting value, and each node's <strong>starting <code>R</code> = the current distance to a connected neighbor</strong> (computed from the present layout). Stored per node as <code>data.r</code>, adjustable thereafter (drag the sphere to resize).</td>
+        </tr>
+        <tr>
+          <td>Q2</td>
+          <td><strong>Surface placement</strong>: when a node has multiple neighbors, how are they positioned on the sphere?</td>
+          <td><strong>RESOLVED</strong> — <strong>no global slot grid and no Fibonacci distribution</strong>. <strong>Initial</strong> positions seed from the present layout: each neighbor's spot = the <strong>projection of its current edge direction onto the sphere</strong>, <code>pos = node_center + R · normalize(neighbor_current − node_center)</code> (<code>projectToSphere</code>). <strong>Ongoing</strong>, dragging a node across the surface moves in steps of <strong>that node's own diameter</strong> (per-node, individual): step angle = <code>diameter / R</code> (<code>diameterStepAngle</code>), so a <strong>smaller node has finer steps / more reachable places</strong> on the same sphere, and the diameter prevents overlap. No global/Fibonacci slot scheme.</td>
+        </tr>
+        <tr>
+          <td>Q3</td>
+          <td><strong>Multi-parent / multi-surface nodes</strong>: node <code>5</code> is a neighbor of both <code>6</code> and <code>4</code>, so it sits on both their surfaces at once.</td>
+          <td><strong>RESOLVED</strong> — <strong>multi-surface membership is fine</strong>. Node <code>5</code> is output-less, so it owns no sphere; it is placed purely as a surface member of its connecting nodes' spheres — here both <code>6</code> and <code>4</code>. Sitting on two surfaces just means it is at distance <code>R</code> from both, satisfiable whenever <code>6</code> and <code>4</code> are within <code>2R</code>. Because the graph is under-constrained, the layout keeps them within <code>2R</code>, so exact placement works. No primary-parent / midpoint rule needed.</td>
+        </tr>
+        <tr>
+          <td>Q4</td>
+          <td><strong>Cycles / feedback</strong>: how does the <code>2 → 1</code> feedback edge affect the frame?</td>
+          <td><strong>RESOLVED</strong> — back edges are <strong>not</strong> excluded; all edges define the frame. The <code>2 → 1</code> edge constrains placement exactly like any other (length <code>R</code>, node <code>1</code> on node <code>2</code>'s sphere and reciprocally). There is no forward-only traversal / spanning tree; the whole edge set is the frame.</td>
+        </tr>
+        <tr>
+          <td>Q5</td>
+          <td><strong>Position computation &amp; interaction</strong>: how are world positions computed, and what does dragging/resizing do?</td>
+          <td><strong>RESOLVED</strong> — positions are computed by <strong>propagation from an anchor node</strong> (default node <code>1</code>; or the last-resized node) over the connection graph: each neighbor is placed by <strong>projecting its current edge direction onto the placing node's sphere</strong> (<code>placing_node_center + R_placing · normalize(neighbor_current − placing_node_center)</code>). Back edges to already-placed nodes <strong>don't re-place</strong> them. Output-less nodes (<code>3</code>, <code>5</code>) are placed as surface members on their first connecting node (multi-surface ok). <strong>Resizing a node's <code>R</code> re-anchors propagation at that node</strong>, so the rest of the connected structure flexes/moves (the "not rooted" behavior). Dragging a neighbor moves it across the surface in steps of its own diameter; resizing drags the surface to change <code>R</code>.</td>
+        </tr>
+        <tr>
+          <td>Q6</td>
+          <td><strong>Output-less / dangling nodes</strong>: node <code>3</code>'s dangling output and the sink node <code>5</code>.</td>
+          <td><strong>RESOLVED</strong> — output-less nodes have <strong>no sphere of their own</strong>; they are <strong>surface-only</strong>, placed solely as surface members of the node(s) that connect to them (possibly several — node <code>5</code> on both <code>6</code> and <code>4</code>). This is a local, per-node frame, not a rooted traversal of the whole graph.</td>
+        </tr>
+        <tr>
+          <td>Q7</td>
+          <td><strong>Storage</strong>: the lattice stored <code>(i,j,k)</code> per node. Sphere-chain positions are derived from the graph — is anything stored per node (e.g. the chosen <code>dir</code> / angle on the parent sphere, so it's stable across loads), or fully recomputed each load?</td>
+          <td><strong>RESOLVED</strong> — per node, <code>data.r</code> (the node's <code>R</code>) and each neighbor's <strong>surface direction</strong> (its <code>dir</code> on the sphere, as last dragged) are stored; world positions are recomputed each load by propagation from the anchor, with initial directions seeded by edge projection. Geometry is <strong>Go-owned</strong>: Go computes + streams positions, TS renders.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Implementation plan</h2>
+    <p>
+      A <strong>10-task list</strong> tracks the remaining implementation:
+      <strong>A1</strong> spec lock ·
+      <strong>B1</strong> per-node <code>R</code> ·
+      <strong>B2</strong> surface placement ·
+      <strong>B3</strong> positions ·
+      <strong>C1</strong> migration ·
+      <strong>D1</strong> TS schema ·
+      <strong>E1</strong> drag-on-surface (diameter steps) ·
+      <strong>E2</strong> resize-<code>R</code> ·
+      <strong>F1</strong> remove lattice ·
+      <strong>G1</strong> verify + handoff.
+      See the handoff (<code>docs/planning/visual-editor/handoff.md</code>) for live task state.
+    </p>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var buttons = document.querySelectorAll('.tab-btn');
+    var panels  = document.querySelectorAll('.panel');
+
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = btn.getAttribute('data-tab');
+
+        buttons.forEach(function (b) { b.classList.remove('active'); });
+        panels.forEach(function (p)  { p.classList.remove('active'); });
+
+        btn.classList.add('active');
+        var panel = document.getElementById(target);
+        if (panel) { panel.classList.add('active'); }
+      });
+    });
+  })();
+</script>
+</body>
+</html>

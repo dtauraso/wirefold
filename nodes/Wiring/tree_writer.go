@@ -29,17 +29,29 @@ func writeViewNode(root, nodeID string, pos specPosition) error {
 	return writeJSONAtomic(path, pos)
 }
 
-// writeMetaCell sets the lattice cell on a node's meta.json, preserving its id/type.
-// Cell takes priority over the view-node free position at load (see loader_tree.go),
-// so persisting it here makes a lattice-snapped node-move durable across reload.
-func writeMetaCell(root, nodeID string, cell *[3]int) error {
+// writeMetaDir sets the sphere-chain direction on a node's meta.json, preserving its
+// id/type/cell/r. Dir is the node's unit direction on its PARENT's sphere; persisting
+// it makes a sphere-surface node-drag (re-aimed Dir) durable across reload.
+func writeMetaDir(root, nodeID string, dir *[3]float64) error {
 	path := filepath.Join(root, "nodes", nodeID, "meta.json")
 	var meta jsonMeta
 	if raw, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(raw, &meta)
 	}
 	meta.ID = nodeID
-	meta.Cell = cell
+	meta.Dir = dir
+	return writeJSONAtomic(path, meta)
+}
+
+// writeMetaR sets the sphere radius on a node's meta.json, preserving its id/type/cell/dir.
+func writeMetaR(root, nodeID string, r float64) error {
+	path := filepath.Join(root, "nodes", nodeID, "meta.json")
+	var meta jsonMeta
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &meta)
+	}
+	meta.ID = nodeID
+	meta.R = &r
 	return writeJSONAtomic(path, meta)
 }
 

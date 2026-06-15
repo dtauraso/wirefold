@@ -53,3 +53,4 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_per_goroutine_bridge.md](feedback_per_goroutine_bridge.md) — Go↔TS bridge is per-goroutine (each goroutine sends/picks up); geometry's central emitter is the deviation
 - [project_wire_is_straight_line_not_chain.md](project_wire_is_straight_line_not_chain.md) — Wires are straight PacedWire lines; bead-item chain model was built then rejected (O(N²) follow latency); don't re-propose it
 - [feedback_place_all_then_drive_concurrently.md](feedback_place_all_then_drive_concurrently.md) — Place all outbound beads before driving concurrently (DriveAll); serial per-edge drive causes fan-out timing regression (node-2 lesson, 2026-06-14)
+- [feedback_no_foreground_sim_runs.md](feedback_no_foreground_sim_runs.md) — Never run the sim in the foreground; it can fail to exit and hang the call. Background it or wrap in tools/run-bounded.sh, keep run-and-grep in the main session

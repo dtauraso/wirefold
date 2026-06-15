@@ -26,15 +26,15 @@ import { RUNTIME_IMPLEMENTED_KINDS } from "./node-types";
 
 const KNOWN_NODE_KINDS: ReadonlySet<string> = new Set([...RUNTIME_IMPLEMENTED_KINDS, "Generic"]);
 
-function parseCell(v: unknown, path: string): [number, number, number] {
+function parseDir(v: unknown, path: string): [number, number, number] {
   const a = arr(v, path);
   if (a.length !== 3) {
-    throw new Error(`${path}: expected 3-element lattice cell [i,j,k], got length ${a.length}`);
+    throw new Error(`${path}: expected 3-element unit direction [x,y,z], got length ${a.length}`);
   }
   const c = a.map((x, i) => {
     const n = num(x, `${path}[${i}]`);
-    if (!Number.isInteger(n)) {
-      throw new Error(`${path}[${i}]: expected integer lattice coord, got ${JSON.stringify(x)}`);
+    if (!Number.isFinite(n)) {
+      throw new Error(`${path}[${i}]: expected finite number, got ${JSON.stringify(x)}`);
     }
     return n;
   });
@@ -103,7 +103,12 @@ export function parseNode(v: unknown, path: string): Node {
     spec: opt(o.spec, (x) => parseNodeSpec(x, `${path}.spec`)),
     notes: opt(o.notes, (x) => str(x, `${path}.notes`)),
     data: parseNodeData(nodeType, o.data, path),
-    cell: opt(o.cell, (x) => parseCell(x, `${path}.cell`)),
+    r: opt(o.r, (x) => {
+      const n = num(x, `${path}.r`);
+      if (!Number.isFinite(n)) throw new Error(`${path}.r: expected finite number, got ${JSON.stringify(x)}`);
+      return n;
+    }),
+    dir: opt(o.dir, (x) => parseDir(x, `${path}.dir`)),
     inputs: opt(o.inputs, (x) => parsePorts(x, `${path}.inputs`)),
     outputs: opt(o.outputs, (x) => parsePorts(x, `${path}.outputs`)),
     state: (() => {

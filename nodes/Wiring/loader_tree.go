@@ -41,7 +41,8 @@ type jsonPos struct {
 type jsonMeta struct {
 	ID   string   `json:"id"`
 	Type string   `json:"type"`
-	Cell *[3]int  `json:"cell,omitempty"` // optional integer lattice coord (i,j,k); highest priority for center
+	R    *float64    `json:"r,omitempty"`    // optional per-node sphere radius; nil → defaultNodeR (see nodeR)
+	Dir  *[3]float64 `json:"dir,omitempty"`  // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -74,7 +75,8 @@ func loadTree(root string) (topoSpec, error) {
 		sn := specNode{
 			ID:   meta.ID,
 			Type: meta.Type,
-			Cell: meta.Cell,
+			R:    meta.R,
+			Dir:  meta.Dir,
 		}
 
 		// data.json — optional
