@@ -521,14 +521,15 @@ func marshalEvent(e Event) ([]byte, error) {
 		DZ      float64 `json:"dz"`
 	}
 	type nodeGeometry struct {
-		Step   int            `json:"step"`
-		Kind   string         `json:"kind"`
-		Node   string         `json:"node"`
-		NX     float64        `json:"nx"`
-		NY     float64        `json:"ny"`
-		NZ     float64        `json:"nz"`
-		Radius float64        `json:"radius"`
-		Ports  []portGeomJSON `json:"ports"`
+		Step    int            `json:"step"`
+		Kind    string         `json:"kind"`
+		Node    string         `json:"node"`
+		NX      float64        `json:"nx"`
+		NY      float64        `json:"ny"`
+		NZ      float64        `json:"nz"`
+		Radius  float64        `json:"radius"`
+		SphereR float64        `json:"sphereR,omitempty"`
+		Ports   []portGeomJSON `json:"ports"`
 	}
 	type nodeBead struct {
 		Step    int     `json:"step"`
@@ -570,7 +571,7 @@ func marshalEvent(e Event) ([]byte, error) {
 		for i, p := range e.Ports {
 			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
 		}
-		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, Ports: ports})
+		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR, Ports: ports})
 	case KindNodeBead:
 		// row/col/present/value/position always emitted (0/false is valid for each).
 		return json.Marshal(nodeBead{Step: e.Step, Kind: e.Kind, Node: e.Node, Row: e.Row, Col: e.Col, Present: e.Present, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
