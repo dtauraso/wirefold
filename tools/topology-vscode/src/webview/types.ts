@@ -48,12 +48,13 @@ export interface NodeData {
   inputs: Port[];
   outputs: Port[];
   /**
-   * Optional integer lattice cell (i,j,k) carried from Spec.Node.cell. When
-   * present, the pre-emit fallback (geometry-helpers.nodeWorldPosLocal) resolves
-   * the node center via the lattice instead of free-form position. Authoritative
-   * positions still come from Go's node-geometry stream.
+   * Sphere-chain layout fields carried from Spec.Node.r / Spec.Node.dir.
+   * `r` is the node's sphere radius; `dir` the unit direction on its parent's
+   * sphere. Used only as a pre-emit hint; authoritative WORLD centers come from
+   * Go's node-geometry stream (sphere_layout.go propagation from anchor "1").
    */
-  cell?: [number, number, number];
+  r?: number;
+  dir?: [number, number, number];
   /** Spec-side Go field seeds (data.state in JSON). Distinct from viewer state below. */
   initState?: Record<string, number>;
   /**

@@ -78,34 +78,22 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
   return nodeWorldPosLocal(node);
 }
 
-// Lattice constants — must match Go's lattice.go (latticeSpacing / latticeHalf)
-// exactly so the pre-emit fallback agrees with Go's latticeToWorld.
-// Derived from the initial node layout (min pairwise distance / layout extent),
-// not hand-picked. Mirror of lattice.go latticeSpacing / latticeHalf.
+// World-units per one node-drag step. Retained as the drag-step scale for
+// interaction-controls (zoom-independent pixel→step node drag); it is NOT a
+// lattice constant any more (the lattice was retired for the sphere-chain
+// layout). The numeric value is the historical step size.
 export const LATTICE_SPACING = 46.5425;
-const LATTICE_HALF = 10;
-
-/** Clamp a lattice coord to [-LATTICE_HALF, LATTICE_HALF]. Mirrors Go clampLattice. */
-function clampLattice(c: number): number {
-  if (c < -LATTICE_HALF) return -LATTICE_HALF;
-  if (c > LATTICE_HALF) return LATTICE_HALF;
-  return c;
-}
 
 /**
- * FALLBACK: local node-center compute. Used pre-emit only.
- * The lattice `cell` [i,j,k] is the only node-position model: mirror Go's
- * latticeToWorld (lattice.go) exactly — clamp each coord to [-8,8], scale by 330,
- * origin (0,0,0). A node lacking a cell defaults to cell {0,0,0} (the origin),
- * matching Go's nil-Cell fallback in nodeWorldPos.
+ * FALLBACK: local node-center compute. Used pre-emit ONLY (before Go's first
+ * node-geometry emit). Authoritative WORLD centers are Go-computed by sphere-chain
+ * propagation from anchor node "1" at origin (child = parent + r_parent * dir_child;
+ * see nodes/Wiring/sphere_layout.go) and streamed via node-geometry — the editor
+ * does not replicate that propagation here, so this fallback just returns the origin
+ * as a stable placeholder until the stream arrives.
  */
-function nodeWorldPosLocal(node: RFNode<NodeData>): THREE.Vector3 {
-  const cell = node.data?.cell ?? [0, 0, 0];
-  return new THREE.Vector3(
-    clampLattice(cell[0]) * LATTICE_SPACING,
-    clampLattice(cell[1]) * LATTICE_SPACING,
-    clampLattice(cell[2]) * LATTICE_SPACING,
-  );
+function nodeWorldPosLocal(_node: RFNode<NodeData>): THREE.Vector3 {
+  return new THREE.Vector3(0, 0, 0);
 }
 
 // ---------------------------------------------------------------------------

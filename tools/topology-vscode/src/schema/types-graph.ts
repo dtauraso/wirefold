@@ -34,12 +34,14 @@ export type Node = {
   outputs?: Port[];
   // Struct field values injected before the first tick (wire:"data.state").
   state?: Record<string, number>;
-  // Optional integer lattice cell (i,j,k). When present, the node center is
-  // resolved from the lattice (latticeToWorld) rather than a free-form x/y.
-  // Mirrors Go's Spec.Node `cell` field (loader.go). Authoritative positions
-  // still come from Go's node-geometry stream; this only seeds the pre-emit
-  // fallback in geometry-helpers.nodeWorldPosLocal.
-  cell?: [number, number, number];
+  // Sphere-chain layout (Go's sphere_layout.go). `r` is the node's sphere
+  // radius; `dir` is the unit direction on its parent's sphere. Go computes
+  // authoritative WORLD centers by propagation from anchor node "1" at origin
+  // (child_center = parent_center + r_parent * dir_child) and streams them via
+  // node-geometry. These fields only seed the pre-emit fallback; positions are
+  // Go-authoritative once the first node-geometry emit arrives.
+  r?: number;
+  dir?: [number, number, number];
 
 };
 
