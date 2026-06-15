@@ -198,8 +198,8 @@
     <ul>
       <li><strong>R — per-node starting radius.</strong> <code>R</code> is a <strong>per-node starting value</strong>, independent and adjustable per node — <em>not</em> the length of any designated/reference edge (there is no designated edge). The user supplies the starting values. Resizing a node's sphere (dragging its surface toward the center) changes <em>that node's</em> <code>R</code>. Where the starting values come from is <strong>open</strong> (Q1).</li>
       <li><strong>Local frame.</strong> A sphere constrains only the node and its <em>direct</em> neighbors; only connected nodes lie on each other's surfaces. Output-less nodes have no sphere of their own and appear only as surface members of the node(s) they connect to (possibly several).</li>
-      <li><strong>dir — per-neighbor direction.</strong> When a node has multiple neighbors, each one needs its own <code>dir</code> on the surface. <em>How</em> those directions are chosen (even spread, deterministic recursive BFS placement from node <code>1</code>, golden spiral, full 3D sphere vs a 2D circle) is the crux and is <strong>open</strong> (Q2).</li>
-      <li><strong>First-cut render (committed 837087f7).</strong> A see-through <strong>torus ring at radius <code>R</code></strong> (styled like the node's border torus), toggled by a "sphere" button for the selected node, with discrete diameter-sized draggable surface slots. <code>R</code> there currently stands in as the live primary-output-edge distance until per-node starting values exist (Q1).</li>
+      <li><strong>dir — per-neighbor direction.</strong> When a node has multiple neighbors, each one needs its own <code>dir</code> on the surface. <strong>Initial</strong> directions are seeded by <strong>projecting each neighbor's current edge direction onto the sphere</strong> (<code>projectToSphere</code>); thereafter dragging moves a node across the surface in steps of <strong>its own diameter</strong> (step angle <code>diameter / R</code>, <code>diameterStepAngle</code>). There is <strong>no global slot grid and no Fibonacci distribution</strong> (Q2).</li>
+      <li><strong>First-cut render (committed 837087f7).</strong> A see-through <strong>torus ring at radius <code>R</code></strong> (styled like the node's border torus), toggled by a "sphere" button for the selected node, with draggable surface positions that step by the dragged node's own diameter. <code>R</code> there currently stands in as the live primary-output-edge distance until per-node starting values exist (Q1).</li>
       <li><strong>All edges define the frame.</strong> Back/feedback edges (e.g. <code>2 → 1</code>) are <strong>not</strong> excluded — they constrain placement like any other edge (node <code>1</code> on node <code>2</code>'s sphere and vice versa). The frame is the whole edge set, not a spanning tree.</li>
       <li><strong>Exact placement, no relaxation needed.</strong> Achieving every-edge-= <code>R</code> exactly is only impossible for <em>dense / over-constrained</em> graphs — e.g. a 5-clique <code>K5</code> with uniform edge length can't exist in 3D (at most 4 equidistant points = a tetrahedron), or a shared neighbor whose two neighbors are pinned more than <code>2R</code> apart. This topology is <strong>sparse / under-constrained</strong>: 7 nodes give <code>3·7 − 6 = 15</code> degrees of freedom against only ~7 edges, so an <strong>exact</strong> uniform-<code>R</code> placement exists with slack to spare. A <strong>deterministic exact placement</strong> works — <strong>no force-directed relaxation</strong> required.</li>
     </ul>
@@ -278,8 +278,9 @@
       <h2>B — Draggable on the sphere</h2>
       <p>
         Nodes remain movable, but constrained to the model: e.g. a child slides around on its
-        parent's sphere surface (changing its <code>dir</code> at fixed <code>R</code>), or the
-        tree can be re-rooted. Dragging adjusts <code>dir</code>/angle rather than free-placing.
+        parent's sphere surface (changing its <code>dir</code> at fixed <code>R</code>) in
+        <strong>steps of its own diameter</strong> (step angle <code>diameter / R</code>), so a
+        smaller node has finer steps; the tree can be re-rooted. Dragging adjusts <code>dir</code>/angle rather than free-placing.
       </p>
     </div>
 
@@ -295,9 +296,10 @@
         <code>R</code></strong> for the <strong>selected node</strong> (styled like that node's border
         torus). It shows the node's own sphere. <code>R</code> there currently uses the live
         <strong>primary-output-edge distance as a stand-in</strong> for the node's starting <code>R</code>
-        value (the real per-node starting value is still Q1). Neighbors land on the surface as
-        <strong>discrete, diameter-sized draggable slots</strong>; dragging a slot inward shrinks that
-        node's <code>R</code>.
+        value (the real per-node starting value is still Q1). Neighbors are seeded on the surface by
+        <strong>projecting their current edge direction</strong> onto it and thereafter drag across the
+        surface in <strong>steps of the dragged node's own diameter</strong>; dragging the surface inward
+        shrinks that node's <code>R</code>.
       </p>
     </div>
   </div>
@@ -320,8 +322,8 @@
         </tr>
         <tr>
           <td>Q2</td>
-          <td><strong>Slot tiling on the surface</strong>: when a node has multiple neighbors, how are they positioned on the sphere?</td>
-          <td><strong>RESOLVED</strong> — discrete slots <strong>evenly distributed</strong> on the sphere via a <strong>Fibonacci-sphere distribution</strong>; slot spacing = the <em>placed</em> node's diameter (so no overlap). Slot capacity <code>N = floor(4·pi·R² / nodeFootprint)</code> where footprint ≈ the placed node's projected area. A neighbor occupies a <strong>slot index</strong>; <code>slotDir(R, diameter, i)</code> gives the unit direction of slot <code>i</code>.</td>
+          <td><strong>Surface placement</strong>: when a node has multiple neighbors, how are they positioned on the sphere?</td>
+          <td><strong>RESOLVED</strong> — <strong>no global slot grid and no Fibonacci distribution</strong>. <strong>Initial</strong> positions seed from the present layout: each neighbor's spot = the <strong>projection of its current edge direction onto the sphere</strong>, <code>pos = node_center + R · normalize(neighbor_current − node_center)</code> (<code>projectToSphere</code>). <strong>Ongoing</strong>, dragging a node across the surface moves in steps of <strong>that node's own diameter</strong> (per-node, individual): step angle = <code>diameter / R</code> (<code>diameterStepAngle</code>), so a <strong>smaller node has finer steps / more reachable places</strong> on the same sphere, and the diameter prevents overlap. No global/Fibonacci slot scheme.</td>
         </tr>
         <tr>
           <td>Q3</td>
@@ -336,7 +338,7 @@
         <tr>
           <td>Q5</td>
           <td><strong>Position computation &amp; interaction</strong>: how are world positions computed, and what does dragging/resizing do?</td>
-          <td><strong>RESOLVED</strong> — positions are computed by <strong>propagation from an anchor node</strong> (default node <code>1</code>; or the last-resized node) over the connection graph: each neighbor is placed at <code>placing_node_center + R_placing · slotDir(neighbor's slot)</code>. Back edges to already-placed nodes <strong>don't re-place</strong> them. Output-less nodes (<code>3</code>, <code>5</code>) are placed as surface members on their first connecting node (multi-surface ok). <strong>Resizing a node's <code>R</code> re-anchors propagation at that node</strong>, so the rest of the connected structure flexes/moves (the "not rooted" behavior). Dragging a neighbor changes its slot index; resizing drags the surface to change <code>R</code>.</td>
+          <td><strong>RESOLVED</strong> — positions are computed by <strong>propagation from an anchor node</strong> (default node <code>1</code>; or the last-resized node) over the connection graph: each neighbor is placed by <strong>projecting its current edge direction onto the placing node's sphere</strong> (<code>placing_node_center + R_placing · normalize(neighbor_current − placing_node_center)</code>). Back edges to already-placed nodes <strong>don't re-place</strong> them. Output-less nodes (<code>3</code>, <code>5</code>) are placed as surface members on their first connecting node (multi-surface ok). <strong>Resizing a node's <code>R</code> re-anchors propagation at that node</strong>, so the rest of the connected structure flexes/moves (the "not rooted" behavior). Dragging a neighbor moves it across the surface in steps of its own diameter; resizing drags the surface to change <code>R</code>.</td>
         </tr>
         <tr>
           <td>Q6</td>
@@ -346,7 +348,7 @@
         <tr>
           <td>Q7</td>
           <td><strong>Storage</strong>: the lattice stored <code>(i,j,k)</code> per node. Sphere-chain positions are derived from the graph — is anything stored per node (e.g. the chosen <code>dir</code> / angle on the parent sphere, so it's stable across loads), or fully recomputed each load?</td>
-          <td><strong>RESOLVED</strong> — per node, <code>data.r</code> (the node's <code>R</code>) and each neighbor's <strong>slot index</strong> are stored; world positions are recomputed each load by propagation from the anchor. Geometry is <strong>Go-owned</strong>: Go computes + streams positions, TS renders.</td>
+          <td><strong>RESOLVED</strong> — per node, <code>data.r</code> (the node's <code>R</code>) and each neighbor's <strong>surface direction</strong> (its <code>dir</code> on the sphere, as last dragged) are stored; world positions are recomputed each load by propagation from the anchor, with initial directions seeded by edge projection. Geometry is <strong>Go-owned</strong>: Go computes + streams positions, TS renders.</td>
         </tr>
       </tbody>
     </table>
@@ -356,11 +358,11 @@
       A <strong>10-task list</strong> tracks the remaining implementation:
       <strong>A1</strong> spec lock ·
       <strong>B1</strong> per-node <code>R</code> ·
-      <strong>B2</strong> slots ·
+      <strong>B2</strong> surface placement ·
       <strong>B3</strong> positions ·
       <strong>C1</strong> migration ·
       <strong>D1</strong> TS schema ·
-      <strong>E1</strong> drag-to-slot ·
+      <strong>E1</strong> drag-on-surface (diameter steps) ·
       <strong>E2</strong> resize-<code>R</code> ·
       <strong>F1</strong> remove lattice ·
       <strong>G1</strong> verify + handoff.
