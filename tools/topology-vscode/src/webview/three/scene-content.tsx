@@ -364,37 +364,22 @@ export function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
-// SphereRing — first-cut "show the sphere" visualization.
-// When showSphere is on AND a node is selected, draws a thin see-through torus
-// ring centered on that node, in the XY plane, with major radius R = distance to
-// the node's reference neighbor (its primary OUTPUT-edge target; fallback: first
-// connected neighbor). Styled like the node's border ring (NODE_DEFS stroke), but
+// SphereRing — "show the sphere" visualization.
+// When showSphere is on AND a node is selected, draws two thin see-through torus
+// rings (XY + XZ planes) centered on that node with major radius R = the node's
+// Go-streamed sphere radius (nodeRadius reads geoms[id].radius; falls back to local
+// compute pre-emit). Styled like the node's border ring (NODE_DEFS stroke), but
 // transparent + depthWrite false + raycast disabled so it's purely decorative and
 // you can see the nodes inside. Re-derives R + center every frame from live geometry.
 // ---------------------------------------------------------------------------
 
-function referenceNeighborId(
-  nodeId: string,
-  edges: RFEdge<EdgeData>[],
-): string | null {
-  // Primary output edge: first edge whose source is this node.
-  const out = edges.find((e) => e.source === nodeId);
-  if (out) return out.target;
-  // Fallback: first edge touching this node (any direction).
-  const any = edges.find((e) => e.source === nodeId || e.target === nodeId);
-  if (any) return any.source === nodeId ? any.target : any.source;
-  return null;
-}
-
 export function SphereRing({
   nodes,
-  edges,
   selectedId,
   selectedSphere,
   showSphere,
 }: {
   nodes: RFNode<NodeData>[];
-  edges: RFEdge<EdgeData>[];
   selectedId: string | null;
   selectedSphere: string | null;
   showSphere: boolean;
@@ -403,18 +388,18 @@ export function SphereRing({
   useNodeGeometryStore((s) => s.geoms);
 
   const selNode = selectedId ? nodes.find((n) => n.id === selectedId) ?? null : null;
-  const refId = selNode ? referenceNeighborId(selNode.id, edges) : null;
-  const refNode = refId ? nodes.find((n) => n.id === refId) ?? null : null;
 
   const ringColor = useMemo(
     () => new THREE.Color(selNode?.data?.stroke ?? "#888888"),
     [selNode?.data?.stroke],
   );
 
-  if (!showSphere || !selNode || !refNode) return null;
+  if (!showSphere || !selNode) return null;
 
   const center = nodeWorldPos(selNode);
-  const R = center.distanceTo(nodeWorldPos(refNode));
+  // R = Go-streamed sphere radius (nodeRadius reads geoms[id].radius; falls back to
+  // local min(w,h)/divisor compute until the first node-geometry event arrives).
+  const R = nodeRadius(selNode);
   if (R < 1e-3) return null;
 
   // Thin tube so it reads as a ring, not a donut — scale to the node's own ring tube.
@@ -1201,7 +1186,6 @@ export function Scene({
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
       <SphereRing
         nodes={nodes}
-        edges={edges}
         selectedId={selectedId}
         selectedSphere={selectedSphere}
         showSphere={showSphere}
