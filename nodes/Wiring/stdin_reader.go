@@ -205,6 +205,27 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil || len(msg.Entries) == 0 {
 			return
 		}
+		// SPHERE-CHAIN layout: a node-drag re-aims the node's Dir on its PARENT's
+		// sphere toward the world target, quantized to the node's own diameter steps;
+		// positions then RE-PROPAGATE from the anchor (whole-graph). The incoming
+		// entries all carry the same moved node id + world target (one per incident
+		// edge + the node itself), so SphereMove runs once per unique node id. The
+		// anchor (no parent) is a no-op. Lattice Cell snapping is bypassed in this mode.
+		if md.sphereChainActive() {
+			seen := map[string]bool{}
+			for _, e := range msg.Entries {
+				if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) || seen[e.NodeId] {
+					continue
+				}
+				seen[e.NodeId] = true
+				dir, moved := md.SphereMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
+				// Persist the re-aimed Dir (durable across reload) when the move landed.
+				if moved && treeRoot != "" {
+					_ = writeMetaDir(treeRoot, e.NodeId, dir)
+				}
+			}
+			return
+		}
 		// Each entry carries a WORLD-SPACE target (the cursor unprojected onto the
 		// view-plane through the node's current center; TS owns that camera math). Go
 		// snaps the target to the nearest lattice cell here (worldToLattice → round+clamp

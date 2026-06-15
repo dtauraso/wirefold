@@ -18,6 +18,8 @@
 
 package Wiring
 
+import "math"
+
 // sphereEdge is the minimal undirected connection used for placement propagation:
 // the two endpoint node IDs. Direction is irrelevant for WHERE a node sits.
 type sphereEdge struct {
@@ -60,18 +62,9 @@ func computeSphereChainPositions(nodes map[string]nodeGeom, edges []sphereEdge) 
 		return nil
 	}
 
-	// Pick a stable anchor: "1" if present, else any node (first by deterministic
-	// scan is impossible over a map; "1" is the documented seed and topologies use
-	// it, so the else-branch is only a degenerate fallback).
-	anchor := ""
-	if _, ok := nodes["1"]; ok {
-		anchor = "1"
-	} else {
-		for id := range nodes {
-			anchor = id
-			break
-		}
-	}
+	// Pick a stable anchor: "1" if present, else any node ("1" is the documented seed
+	// and topologies use it; the else-branch is only a degenerate fallback).
+	anchor := sphereChainAnchor(nodes)
 	if anchor == "" {
 		return map[string]vec3{}
 	}
@@ -111,4 +104,126 @@ func dirOf(g nodeGeom) vec3 {
 		return vec3{X: g.Dir[0], Y: g.Dir[1], Z: g.Dir[2]}
 	}
 	return defaultDir
+}
+
+// sphereChainAnchor picks the stable anchor id used as the root of sphere-chain
+// propagation: "1" if present, else any node (degenerate fallback). Empty string
+// when there are no nodes.
+func sphereChainAnchor(nodes map[string]nodeGeom) string {
+	if _, ok := nodes["1"]; ok {
+		return "1"
+	}
+	for id := range nodes {
+		return id
+	}
+	return ""
+}
+
+// sphereChainParents returns the BFS parent of every reached node (the same
+// already-placed node that PLACES it in computeSphereChainPositions), keyed by node
+// id. The anchor has no parent (absent from the map). Undirected adjacency from the
+// edge list; first reacher wins (cycle-safe), matching the position propagation.
+//
+// This is the inverse lookup E1 needs: a drag re-aims a node's Dir on its PARENT's
+// sphere, so the move handler must know which node is the parent. Recomputed from the
+// same inputs as the position pass so the two stay in lock-step.
+func sphereChainParents(nodes map[string]nodeGeom, edges []sphereEdge) map[string]string {
+	anchor := sphereChainAnchor(nodes)
+	if anchor == "" {
+		return map[string]string{}
+	}
+	adj := map[string][]string{}
+	for _, e := range edges {
+		if e.Source == "" || e.Target == "" {
+			continue
+		}
+		adj[e.Source] = append(adj[e.Source], e.Target)
+		adj[e.Target] = append(adj[e.Target], e.Source)
+	}
+	parent := map[string]string{}
+	visited := map[string]bool{anchor: true}
+	queue := []string{anchor}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		for _, m := range adj[p] {
+			if visited[m] {
+				continue
+			}
+			visited[m] = true
+			parent[m] = p
+			queue = append(queue, m)
+		}
+	}
+	return parent
+}
+
+// quantizeDirToStep snaps newDir onto the sphere by rounding its angular displacement
+// from oldDir to the nearest whole multiple of step radians, then rotating oldDir by
+// that quantized angle toward newDir. step is the node's diameter step angle on the
+// parent's sphere (diameterStepAngle); a smaller node gets finer steps. Both inputs
+// are treated as unit directions; the result is unit length.
+//
+//   - step <= 0 (degenerate R or diameter): return newDir normalized (no quantization).
+//   - oldDir and newDir (anti-)parallel: the rotation axis is undefined; return the
+//     quantized rotation about an arbitrary perpendicular axis, or oldDir when the
+//     rounded step count is 0 (the move stayed within half a step).
+func quantizeDirToStep(oldDir, newDir vec3, step float64) vec3 {
+	od := oldDir.normalize()
+	nd := newDir.normalize()
+	if step <= 0 {
+		return nd
+	}
+	dot := od.X*nd.X + od.Y*nd.Y + od.Z*nd.Z
+	if dot > 1 {
+		dot = 1
+	} else if dot < -1 {
+		dot = -1
+	}
+	angle := math.Acos(dot) // 0..pi between old and new
+	steps := math.Round(angle / step)
+	if steps == 0 {
+		return od // stayed within half a diameter step → no move
+	}
+	q := steps * step
+	if q > math.Pi {
+		q = math.Pi
+	}
+	// Rotation axis = od × nd (perpendicular to both). Degenerate when (anti-)parallel.
+	axis := vec3{
+		X: od.Y*nd.Z - od.Z*nd.Y,
+		Y: od.Z*nd.X - od.X*nd.Z,
+		Z: od.X*nd.Y - od.Y*nd.X,
+	}
+	al := axis.length()
+	if al == 0 {
+		// (Anti-)parallel: pick an arbitrary axis perpendicular to od.
+		axis = vec3{X: 1, Y: 0, Z: 0}
+		if math.Abs(od.X) > 0.9 {
+			axis = vec3{X: 0, Y: 1, Z: 0}
+		}
+		// Re-orthogonalize against od.
+		d := axis.X*od.X + axis.Y*od.Y + axis.Z*od.Z
+		axis = vec3{X: axis.X - d*od.X, Y: axis.Y - d*od.Y, Z: axis.Z - d*od.Z}
+		al = axis.length()
+		if al == 0 {
+			return od
+		}
+	}
+	axis = vec3{X: axis.X / al, Y: axis.Y / al, Z: axis.Z / al}
+	// Rodrigues' rotation of od about axis by angle q.
+	cosA := math.Cos(q)
+	sinA := math.Sin(q)
+	cross := vec3{
+		X: axis.Y*od.Z - axis.Z*od.Y,
+		Y: axis.Z*od.X - axis.X*od.Z,
+		Z: axis.X*od.Y - axis.Y*od.X,
+	}
+	axDotOd := axis.X*od.X + axis.Y*od.Y + axis.Z*od.Z
+	res := vec3{
+		X: od.X*cosA + cross.X*sinA + axis.X*axDotOd*(1-cosA),
+		Y: od.Y*cosA + cross.Y*sinA + axis.Y*axDotOd*(1-cosA),
+		Z: od.Z*cosA + cross.Z*sinA + axis.Z*axDotOd*(1-cosA),
+	}
+	return res.normalize()
 }
