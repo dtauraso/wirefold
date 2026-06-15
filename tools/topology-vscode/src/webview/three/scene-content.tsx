@@ -423,21 +423,35 @@ export function SphereRing({
   // Highlighted when THIS sphere surface is the current sphere selection.
   const isSphereSelected = selectedSphere === selNode.id;
 
+  // Two perpendicular great-circle rings so the sphere reads as a sphere:
+  // the first lies in XY (torusGeometry's default plane), the second is
+  // rotated 90° about X into the XZ plane. Both share radius/tube/material,
+  // and both carry the sphere userData so clicking either ring selects the sphere.
+  const ringMat = (
+    <meshStandardMaterial
+      color={ringColor}
+      emissive={ringColor}
+      emissiveIntensity={isSphereSelected ? 1.2 : 0.25}
+      transparent
+      opacity={isSphereSelected ? 0.95 : 0.55}
+      depthWrite={false}
+    />
+  );
+
   return (
-    <mesh
-      position={[center.x, center.y, center.z]}
-      userData={{ sphereSurface: true, sphereNodeId: selNode.id }}
-    >
-      <torusGeometry args={[R, tube, 12, 96]} />
-      <meshStandardMaterial
-        color={ringColor}
-        emissive={ringColor}
-        emissiveIntensity={isSphereSelected ? 1.2 : 0.25}
-        transparent
-        opacity={isSphereSelected ? 0.95 : 0.55}
-        depthWrite={false}
-      />
-    </mesh>
+    <group position={[center.x, center.y, center.z]}>
+      <mesh userData={{ sphereSurface: true, sphereNodeId: selNode.id }}>
+        <torusGeometry args={[R, tube, 12, 96]} />
+        {ringMat}
+      </mesh>
+      <mesh
+        rotation={[Math.PI / 2, 0, 0]}
+        userData={{ sphereSurface: true, sphereNodeId: selNode.id }}
+      >
+        <torusGeometry args={[R, tube, 12, 96]} />
+        {ringMat}
+      </mesh>
+    </group>
   );
 }
 
