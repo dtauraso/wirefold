@@ -24,8 +24,12 @@ export interface NodeGeom {
   center: { x: number; y: number; z: number };
   /** Go-owned node body/ring sphere radius (min(w,h)/divisor). */
   radius: number;
-  /** Go-owned sphere-chain radius used for bead orbit and port placement (nodeR in Go). */
+  /** Go-owned sphere radius used for bead orbit and port placement (nodeR in Go). */
   sphereR: number;
+  /** Go-owned vertical great-circle ring normal (default: {x:0,y:0,z:1}). */
+  vrx: number; vry: number; vrz: number;
+  /** Go-owned flat (equatorial) great-circle ring normal (default: {x:0,y:1,z:0}). */
+  frx: number; fry: number; frz: number;
   ports: NodePortGeom[];
 }
 
@@ -38,6 +42,8 @@ interface NodeGeometryState {
     center: NodeGeom["center"],
     radius: number,
     sphereR: number,
+    vrx: number, vry: number, vrz: number,
+    frx: number, fry: number, frz: number,
     ports: NodePortGeom[],
   ) => void;
   /** Drop one node's geometry (on node delete) so stale geometry can't be read. */
@@ -46,8 +52,8 @@ interface NodeGeometryState {
 
 export const useNodeGeometryStore = create<NodeGeometryState>((set) => ({
   geoms: {},
-  setNodeGeometry: (nodeId, center, radius, sphereR, ports) =>
-    set((s) => ({ geoms: { ...s.geoms, [nodeId]: { center, radius, sphereR, ports } } })),
+  setNodeGeometry: (nodeId, center, radius, sphereR, vrx, vry, vrz, frx, fry, frz, ports) =>
+    set((s) => ({ geoms: { ...s.geoms, [nodeId]: { center, radius, sphereR, vrx, vry, vrz, frx, fry, frz, ports } } })),
   removeNodeGeometry: (nodeId) =>
     set((s) => {
       if (!(nodeId in s.geoms)) return s;

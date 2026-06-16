@@ -1,5 +1,5 @@
-// sphere_layout.go — graph-level node-position helpers for the non-rooted
-// layout. Node centers are stored absolutely (meta.json x/y/z).
+// sphere_layout.go — graph-level node-position helpers for the polar layout.
+// Node centers are stored absolutely (meta.json x/y/z).
 
 package Wiring
 

@@ -207,22 +207,25 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil || len(msg.Entries) == 0 {
 			return
 		}
-		// NON-ROOTED layout: a node-drag pins the node at the world target and relaxes
-		// every other node's center (whole-graph). The incoming entries all carry the
-		// same moved node id + world target (one per incident edge + the node itself),
-		// so SphereDrag runs once per unique node id. After the relax, persist every
-		// node's held center so reload is consistent.
-		if md.sphereChainActive() {
+		// POLAR layout (docs/planning/visual-editor/polar-coordinate-model.md): a
+		// node-drag updates only the dragged node's OUTER POLAR ROOT (soft membership —
+		// no other node moves). The incoming entries all carry the same moved node id +
+		// world target (one per incident edge + the node itself), so RootMove runs once
+		// per unique node id. Persistence writes each node's world position recovered
+		// from its root (the on-disk prism-Cartesian frame, §8a).
+		{
 			seen := map[string]bool{}
 			for _, e := range msg.Entries {
 				if math.IsNaN(e.X) || math.IsNaN(e.Y) || math.IsNaN(e.Z) || seen[e.NodeId] {
 					continue
 				}
 				seen[e.NodeId] = true
-				md.SphereDrag(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
+				md.RootMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
 				if treeRoot != "" {
-					for id, c := range md.heldCenters() {
-						_ = writeMetaPos(treeRoot, id, c.X, c.Y, c.Z)
+					for id := range md.roots.roots {
+						if w, ok := md.roots.world(id); ok {
+							_ = writeMetaPos(treeRoot, id, w.X, w.Y, w.Z)
+						}
 					}
 				}
 			}

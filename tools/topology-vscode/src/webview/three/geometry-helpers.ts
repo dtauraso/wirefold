@@ -80,11 +80,10 @@ export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
 
 /**
  * FALLBACK: local node-center compute. Used pre-emit ONLY (before Go's first
- * node-geometry emit). Authoritative WORLD centers are Go-computed by sphere-chain
- * propagation from anchor node "1" at origin (child = parent + r_parent * dir_child;
- * see nodes/Wiring/sphere_layout.go) and streamed via node-geometry — the editor
- * does not replicate that propagation here, so this fallback just returns the origin
- * as a stable placeholder until the stream arrives.
+ * node-geometry emit). Authoritative WORLD centers are Go-computed under the polar
+ * layout (polar roots → derived Cartesian centers; see nodes/Wiring/derived.go) and
+ * streamed via node-geometry — the editor does not replicate that derivation here,
+ * so this fallback returns the origin as a stable placeholder until the stream arrives.
  */
 function nodeWorldPosLocal(_node: RFNode<NodeData>): THREE.Vector3 {
   return new THREE.Vector3(0, 0, 0);

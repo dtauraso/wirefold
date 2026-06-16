@@ -49,7 +49,7 @@ type specNode struct {
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
 	R        *float64   `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
-	X        float64    `json:"x"`              // stored absolute world center (non-rooted layout)
+	X        float64    `json:"x"`              // stored absolute world center (polar layout)
 	Y        float64    `json:"y"`
 	Z        float64    `json:"z"`
 }
@@ -259,6 +259,34 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// mover stream its own node/edge geometry on a move. Outs + dest wires are bound
 	// below once node construction has populated them.
 	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
+
+	// Polar layout (docs/planning/visual-editor/polar-coordinate-model.md): build
+	// the container prism + per-node outer polar root from the loaded world centers.
+	// Held on the dispatch as the authoritative coordinate for polar move/lock logic;
+	// world positions recover via md.roots.world(id). Cartesian centers above remain
+	// for the existing port/edge geometry until the polar path replaces them.
+	{
+		centers := map[string]vec3{}
+		for id, g := range nodeGeoms {
+			if g.Center != nil {
+				centers[id] = *g.Center
+			}
+		}
+		md.setRoots(buildRoots(centers))
+
+		// Couple nodes 2 and 6 on node 1's sphere via a bidirectional chord lock
+		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
+		// mirrors the other across node 1's vertical (φ=0) disk, keeping them
+		// equidistant on the surface. Stopgap registration by id (no spec-level lock
+		// declaration yet); only wired when all three nodes exist.
+		_, has1 := centers["1"]
+		_, has2 := centers["2"]
+		_, has6 := centers["6"]
+		if has1 && has2 && has6 {
+			md.addChordLock("1", "2", "6")
+			md.addChordLock("1", "6", "2")
+		}
+	}
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}

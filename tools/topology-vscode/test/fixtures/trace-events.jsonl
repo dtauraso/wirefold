@@ -5,6 +5,6 @@
 {"step":4,"kind":"edge-bead","node":"A","port":"out","value":1,"x":1.5,"y":2.5,"z":0,"f":0.5}
 {"step":5,"kind":"geometry","edge":"AtoB","sx":0,"sy":0,"sz":0,"ex":2,"ey":0,"ez":0}
 {"step":6,"kind":"pulse-cancelled","node":"A","port":"out","value":1}
-{"step":7,"kind":"node-geometry","node":"A","nx":1.5,"ny":-2.5,"nz":0,"radius":15,"ports":[{"name":"in","isInput":true,"px":1,"py":-2.5,"pz":0,"dx":-1,"dy":0,"dz":0},{"name":"out","isInput":false,"px":2,"py":-2.5,"pz":0,"dx":1,"dy":0,"dz":0}]}
+{"step":7,"kind":"node-geometry","node":"A","nx":1.5,"ny":-2.5,"nz":0,"radius":15,"vrx":0,"vry":0,"vrz":1,"frx":0,"fry":1,"frz":0,"ports":[{"name":"in","isInput":true,"px":1,"py":-2.5,"pz":0,"dx":-1,"dy":0,"dz":0},{"name":"out","isInput":false,"px":2,"py":-2.5,"pz":0,"dx":1,"dy":0,"dz":0}]}
 {"step":8,"kind":"arrive","node":"A","port":"out","value":1}
 {"step":9,"kind":"node-bead","node":"A","row":1,"col":0,"present":true,"value":1,"x":4.5,"y":-6.5,"z":0}

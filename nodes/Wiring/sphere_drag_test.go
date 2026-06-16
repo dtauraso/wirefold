@@ -1,18 +1,17 @@
-// sphere_drag_test.go — SphereDrag radial-scale behaviour.
+// sphere_drag_test.go — RootMove polar-layout behaviour.
 //
-// Topology used by most tests:
+// Topology:
 //
-//	eCA: C → A   (C is sphere center, A is surface node)
+//	eCA: C → A   (C is sphere center, A is a surface node)
 //	eCB: C → B   (B is another surface node on the same sphere)
 //	N: isolated node with no edges to C
 //
 // Initial positions: C=(0,0,0), A=(5,0,0), B=(0,5,0), N=(20,0,0).
-// C carries R=5 so sphere-chain layout is active.
-// Dragging A to (10,0,0) should:
-//   - A lands at target (10,0,0)
-//   - C.R updated to 10.0
-//   - B rescaled radially: dir=(0,1,0) → new pos (0,10,0)
-//   - C and N stay put
+// Under the polar model a drag updates ONLY the dragged node's outer root
+// (soft membership). Dragging A to (10,0,0) should:
+//   - A's root + world land at (10,0,0)
+//   - B, C, N stay exactly put (no radial scale, no cascade)
+//   - C's sphere R grows to reach A (derived, not stored)
 
 package Wiring
 
@@ -23,17 +22,12 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// flushNode sends a no-op "move" message with an ack to the node's inbox (and
-// every incident edge inbox) and blocks until each mover closes the ack. Since
-// "move" messages do not update geom.Center, this is a pure flush: it drains
-// all earlier messages (including fanCenters "center" messages) before returning,
-// without overwriting any state.
+// flushNode drains a node's (and incident edges') inboxes via an acked no-op.
 func flushNode(md *MoveDispatch, nodeID string) {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return
 	}
-	var keys []string
-	keys = append(keys, nodeID)
+	keys := []string{nodeID}
 	for edgeID, em := range md.edgeMovers {
 		if em.srcID == nodeID || em.dstID == nodeID {
 			keys = append(keys, edgeID)
@@ -50,123 +44,89 @@ func flushNode(md *MoveDispatch, nodeID string) {
 	}
 }
 
-// buildSphereDragFixture constructs a MoveDispatch with 4 nodes and 2 edges:
-//
-//	C=(0,0,0) R=5  (center of sphere)
-//	A=(5,0,0)      (surface node — target of eCA)
-//	B=(0,5,0)      (surface node — target of eCB)
-//	N=(20,0,0)     (isolated, no edge to C)
-//
-// edges: eCA C→A, eCB C→B
-func buildSphereDragFixture() (*MoveDispatch, context.CancelFunc) {
-	r5 := 5.0
-	cCenter := vec3{X: 0, Y: 0, Z: 0}
-	aCenter := vec3{X: 5, Y: 0, Z: 0}
-	bCenter := vec3{X: 0, Y: 5, Z: 0}
-	nCenter := vec3{X: 20, Y: 0, Z: 0}
-
-	geoms := map[string]nodeGeom{
-		"C": {Kind: "FanInSrc", Center: &cCenter, R: &r5},
-		"A": {Kind: "FanInSrc", Center: &aCenter},
-		"B": {Kind: "FanInSrc", Center: &bCenter},
-		"N": {Kind: "FanInSrc", Center: &nCenter},
+// buildRootMoveFixture: C center with surface nodes A,B; N isolated. Roots built
+// from the centers so RootMove has the polar authority installed.
+func buildRootMoveFixture() (*MoveDispatch, context.CancelFunc) {
+	centers := map[string]vec3{
+		"C": {0, 0, 0},
+		"A": {5, 0, 0},
+		"B": {0, 5, 0},
+		"N": {20, 0, 0},
+	}
+	geoms := map[string]nodeGeom{}
+	for id, c := range centers {
+		cc := c
+		geoms[id] = nodeGeom{Kind: "FanInSrc", Center: &cc}
 	}
 	edgeEndpoints := map[string]EdgeEndpoints{
 		"eCA": {Source: "C", Target: "A", SourceHandle: "Out", TargetHandle: "In"},
 		"eCB": {Source: "C", Target: "B", SourceHandle: "Out", TargetHandle: "In"},
 	}
-
 	tr := T.New(256)
 	md := newMoveDispatch(geoms, edgeEndpoints, tr)
-
+	md.setRoots(buildRoots(centers))
 	ctx, cancel := context.WithCancel(context.Background())
 	md.Start(ctx)
 	return md, cancel
 }
 
-func TestSphereDragDraggedNodeLandsAtTarget(t *testing.T) {
-	md, cancel := buildSphereDragFixture()
+func TestRootMoveDraggedNodeLandsAtTarget(t *testing.T) {
+	md, cancel := buildRootMoveFixture()
 	defer cancel()
-
-	ok := md.SphereDrag("A", vec3{X: 10, Y: 0, Z: 0})
+	if !md.RootMove("A", vec3{X: 10, Y: 0, Z: 0}) {
+		t.Fatal("RootMove returned false for known node A")
+	}
+	w, ok := md.roots.world("A")
 	if !ok {
-		t.Fatal("SphereDrag returned false for known node A")
+		t.Fatal("no world for A")
 	}
-
-	// Flush: wait until A's mover has processed all queued messages.
-	flushNode(md, "A")
-
-	got := md.nodeMovers["A"].geom.Center
-	if got == nil {
-		t.Fatal("A.Center is nil after drag")
-	}
-	if !approxEq(got.X, 10) || !approxEq(got.Y, 0) || !approxEq(got.Z, 0) {
-		t.Errorf("A.Center = %+v, want (10,0,0)", *got)
+	if w.sub(vec3{10, 0, 0}).length() > 1e-6 {
+		t.Errorf("A world = %v want (10,0,0)", w)
 	}
 }
 
-func TestSphereDragSiblingRescaledToNewRadius(t *testing.T) {
-	md, cancel := buildSphereDragFixture()
+// Co-sphere radius coupling: dragging surface node A out to radius 10 scales the
+// other surface node B of center C radially to the same radius (keeping B's
+// direction); the center C and the isolated node N stay put.
+func TestRootMoveCouplesSurfaceSiblings(t *testing.T) {
+	md, cancel := buildRootMoveFixture()
 	defer cancel()
-
-	md.SphereDrag("A", vec3{X: 10, Y: 0, Z: 0})
-
-	// Wait for both B and A to drain their queues.
-	flushNode(md, "A")
-	flushNode(md, "B")
-
-	// C.R should be updated to 10.
-	if md.nodeMovers["C"].geom.R == nil {
-		t.Fatal("C.R is nil after drag")
+	const eps = 1e-6
+	md.RootMove("A", vec3{X: 10, Y: 0, Z: 0}) // newR = 10
+	// B was at (0,5,0), dir (0,1,0) → scaled to radius 10 → (0,10,0).
+	wB, _ := md.roots.world("B")
+	if wB.sub(vec3{0, 10, 0}).length() > eps {
+		t.Errorf("B = %v want (0,10,0) (radially scaled to new radius)", wB)
 	}
-	if !approxEq(*md.nodeMovers["C"].geom.R, 10) {
-		t.Errorf("C.R = %v, want 10", *md.nodeMovers["C"].geom.R)
+	// Center C and isolated N unchanged.
+	wC, _ := md.roots.world("C")
+	if wC.sub(vec3{0, 0, 0}).length() > eps {
+		t.Errorf("center C moved to %v; should stay at origin", wC)
 	}
-
-	// B should be radially scaled: dir (0,1,0) * 10 = (0,10,0).
-	gotB := md.nodeMovers["B"].geom.Center
-	if gotB == nil {
-		t.Fatal("B.Center is nil after drag")
-	}
-	if !approxEq(gotB.X, 0) || !approxEq(gotB.Y, 10) || !approxEq(gotB.Z, 0) {
-		t.Errorf("B.Center = %+v, want (0,10,0)", *gotB)
+	wN, _ := md.roots.world("N")
+	if wN.sub(vec3{20, 0, 0}).length() > eps {
+		t.Errorf("isolated N moved to %v; should stay put", wN)
 	}
 }
 
-func TestSphereDragNonSurfaceNodeUnchanged(t *testing.T) {
-	md, cancel := buildSphereDragFixture()
+func TestRootMoveGrowsSphereR(t *testing.T) {
+	md, cancel := buildRootMoveFixture()
 	defer cancel()
-
-	md.SphereDrag("A", vec3{X: 10, Y: 0, Z: 0})
-
-	// Flush via a node that IS touched (A), ensuring fanCenters has returned.
-	flushNode(md, "A")
-
-	// N has no edge to C so its center must not change.
-	gotN := md.nodeMovers["N"].geom.Center
-	if gotN == nil {
-		t.Fatal("N.Center is nil")
+	edges := md.heldEdges()
+	if r := md.roots.sphereR("C", edges); r > 5+1e-9 {
+		t.Fatalf("initial R(C) = %v want 5", r)
 	}
-	if !approxEq(gotN.X, 20) || !approxEq(gotN.Y, 0) || !approxEq(gotN.Z, 0) {
-		t.Errorf("N.Center = %+v, want (20,0,0)", *gotN)
-	}
-
-	// C (sphere center) should also stay at origin.
-	gotC := md.nodeMovers["C"].geom.Center
-	if gotC == nil {
-		t.Fatal("C.Center is nil")
-	}
-	if !approxEq(gotC.X, 0) || !approxEq(gotC.Y, 0) || !approxEq(gotC.Z, 0) {
-		t.Errorf("C.Center = %+v, want (0,0,0)", *gotC)
+	md.RootMove("A", vec3{X: 10, Y: 0, Z: 0})
+	// A now at distance 10; B still at 5 → reach grows to 10.
+	if r := md.roots.sphereR("C", edges); r < 10-1e-6 {
+		t.Errorf("R(C) = %v want ~10 after moving A out", r)
 	}
 }
 
-func TestSphereDragUnknownIDReturnsFalse(t *testing.T) {
-	md, cancel := buildSphereDragFixture()
+func TestRootMoveUnknownReturnsFalse(t *testing.T) {
+	md, cancel := buildRootMoveFixture()
 	defer cancel()
-
-	ok := md.SphereDrag("does-not-exist", vec3{X: 1, Y: 2, Z: 3})
-	if ok {
-		t.Error("SphereDrag returned true for unknown node id")
+	if md.RootMove("does-not-exist", vec3{X: 1, Y: 2, Z: 3}) {
+		t.Error("RootMove returned true for unknown node id")
 	}
 }
