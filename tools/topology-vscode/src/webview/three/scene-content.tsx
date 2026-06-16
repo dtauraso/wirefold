@@ -306,7 +306,7 @@ export function GraphNode({
         <meshBasicMaterial
           color="#ff5a00"
           transparent
-          opacity={selected ? 0.5 : 0}
+          opacity={(selected || onSphereSurface) ? 0.5 : 0}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
