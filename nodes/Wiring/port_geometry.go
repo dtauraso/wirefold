@@ -9,8 +9,7 @@
 //
 // Inputs the geometry needs, per node:
 //   - kind        → width/height via kindDims (generated from SPEC.md View)
-//   - center      → world center resolved by sphere-chain propagation (computeSphereChainPositions,
-//                   sphere_layout.go); nil Center falls back to the origin
+//   - center      → world center (from meta.json x/y/z or origin fallback)
 //   - port lists  → inputs/outputs with optional side + slot (from the spec node;
 //                   falls back to registry ports with default sides when absent)
 //
@@ -32,7 +31,6 @@ type portGeom struct {
 type nodeGeom struct {
 	Kind    string
 	R       *float64    // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
-	Dir     *[3]float64 // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
 	Center  *vec3       // optional precomputed world center (sphere-chain propagation); when set, nodeWorldPos returns it directly
 	// ReachR is the sphere REACH radius: the max distance from this node's center to
 	// any node it outputs to (its surface children), under the resolved centers. It is
@@ -125,9 +123,7 @@ func nodeRadius(kind string) float64 {
 // nodeWorldPos resolves a node's world center from its sphere-chain propagated Center.
 // A nil Center is a fallback for hand-written/partial specs → origin.
 func nodeWorldPos(g nodeGeom) vec3 {
-	// Sphere-chain: the graph-level propagation (computeSphereChainPositions,
-	// sphere_layout.go) resolves a world center for every node and injects it as
-	// g.Center. A nil Center is a fallback for hand-written/partial specs → origin.
+	// g.Center is resolved from meta.json x/y/z. A nil Center falls back to origin.
 	if g.Center != nil {
 		return *g.Center
 	}

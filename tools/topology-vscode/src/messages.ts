@@ -40,7 +40,6 @@ export type EditMsg =
       anchor: { x: number; y: number; z: number };
       keys: string[];
     }
-  | { type: "edit"; op: "sphere-resize"; nodeId: string; r: number }
   | { type: "edit"; op: "scene"; scene: unknown };
 
 export type WebviewToHostMsg =
@@ -156,10 +155,6 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       );
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }
-    case "sphere-resize":
-      return typeof m.nodeId === "string" && typeof m.r === "number" && Number.isFinite(m.r)
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
     case "scene":
       return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
     default:

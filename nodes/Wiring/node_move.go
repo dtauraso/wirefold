@@ -58,14 +58,11 @@ type moveMsg struct {
 	Port     string
 	IsInput  bool
 	AnchorId int
-	// Center (Kind == "center"): the re-propagated world center for NodeID under
-	// sphere-chain layout. Dir is the node's (possibly re-aimed) unit direction on its
-	// parent's sphere. Each owning node/edge goroutine writes these onto its held geom
-	// (Center overrides the lattice path; Dir keeps a later re-propagation consistent)
-	// and re-emits its own geometry. SphereMove computes both centrally and fans them
-	// out — the one centralized step (whole-graph placement, sphere_layout.go).
+	// Center (Kind == "center"): the re-relaxed world center for NodeID under the
+	// non-rooted layout. Each owning node/edge goroutine writes it onto its held geom
+	// and re-emits its own geometry. SphereDrag relaxes the whole graph centrally and
+	// fans the fresh centers out — the one centralized step (sphere_layout.go).
 	Center *vec3
-	Dir    *[3]float64
 	// ReachR (Kind == "center"): the re-propagated sphere REACH radius for NodeID (max
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
 	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
@@ -122,12 +119,9 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// Sphere-chain re-propagation: adopt the centrally-computed world center (and
-		// the re-aimed Dir for a later re-propagation), then re-emit node-geometry.
+		// Non-rooted re-relaxation: adopt the centrally-computed world center, then
+		// re-emit node-geometry.
 		m.geom.Center = msg.Center
-		if msg.Dir != nil {
-			m.geom.Dir = msg.Dir
-		}
 		m.geom.ReachR = msg.ReachR
 		if m.tr != nil {
 			emitNodeGeometry(m.tr, m.id, m.geom)
@@ -218,19 +212,13 @@ func (m *edgeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// Sphere-chain re-propagation: adopt the centrally-computed center (+ re-aimed
-		// Dir) on whichever endpoint this message names, then recompute the edge.
+		// Non-rooted re-relaxation: adopt the centrally-computed center on whichever
+		// endpoint this message names, then recompute the edge.
 		switch msg.NodeID {
 		case m.srcID:
 			m.srcGeom.Center = msg.Center
-			if msg.Dir != nil {
-				m.srcGeom.Dir = msg.Dir
-			}
 		case m.dstID:
 			m.dstGeom.Center = msg.Center
-			if msg.Dir != nil {
-				m.dstGeom.Dir = msg.Dir
-			}
 		default:
 			return
 		}
@@ -389,7 +377,7 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 }
 
 // sphereChainActive reports whether sphere-chain layout is in effect: at least one
-// held node carries an explicit R (mirrors the GATE in computeSphereChainPositions).
+// held node carries an explicit R.
 // When false, applyEdit keeps the lattice (Cell) move path.
 func (md *MoveDispatch) sphereChainActive() bool {
 	for _, nm := range md.nodeMovers {
@@ -400,151 +388,103 @@ func (md *MoveDispatch) sphereChainActive() bool {
 	return false
 }
 
-// SphereMove handles a node-drag under sphere-chain layout: it re-aims the moved
-// node's Dir on its PARENT's sphere toward the world-space target, quantized to the
-// node's own diameter steps, then RE-PROPAGATES every node's world center from the
-// anchor and pushes the fresh centers to every node/edge mover (which re-emit their
-// own geometry). Sphere-chain placement is inherently a WHOLE-GRAPH computation
-// (sphere_layout.go), so this re-aim + re-propagate cannot be decentralized the way a
-// lattice Cell move is — the one place node-position logic is centralized.
-//
-//   - The anchor (node "1", or a node with no parent) has no parent sphere to sit on;
-//     dragging it is a no-op (documented). Future work could translate the whole graph.
-//   - target is the world point TS unprojected through the node; newDir =
-//     normalize(target - parentCenter), then quantizeDirToStep snaps it.
-//
-// Returns the re-aimed Dir (for persistence) and true on a real move; nil,false when
-// the move was a no-op (unknown node, anchor, or sub-step displacement).
-func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, bool) {
-	if _, ok := md.nodeMovers[nodeID]; !ok {
-		return nil, false
-	}
-	// Rebuild the full geom map + undirected edge list from held mover state.
-	geoms := make(map[string]nodeGeom, len(md.nodeMovers))
+// heldCenters / heldEdges snapshot the movers' current geometry.
+func (md *MoveDispatch) heldCenters() map[string]vec3 {
+	centers := make(map[string]vec3, len(md.nodeMovers))
 	for id, m := range md.nodeMovers {
-		geoms[id] = m.geom
-	}
-	edges := make([]sphereEdge, 0, len(md.edgeMovers))
-	for _, em := range md.edgeMovers {
-		edges = append(edges, sphereEdge{Source: em.srcID, Target: em.dstID})
-	}
-
-	parents := sphereChainParents(geoms, edges)
-	parentID, hasParent := parents[nodeID]
-	if !hasParent {
-		return nil, false // anchor / unparented node: no parent sphere to re-aim on.
-	}
-
-	// Current centers (pre-move) give the parent's world center to aim from.
-	centers := computeSphereChainPositions(geoms, edges)
-	parentCenter, okP := centers[parentID]
-	if !okP {
-		return nil, false
-	}
-
-	newDir := target.sub(parentCenter)
-	if newDir.length() == 0 {
-		return nil, false
-	}
-	// Drag on the parent's sphere in DIAMETER-STEPS of the dragged node: a smaller
-	// node has more places to land than a larger one (finer angular step). The
-	// parent here is unambiguous — it is the node that OUTPUTS to the dragged node
-	// (directed edge), so this is stable and does not flicker.
-	step := diameterStepAngle(nodeR(geoms[parentID]), 2*nodeRadius(geoms[nodeID].Kind))
-	quant := quantizeDirToStep(dirOf(geoms[nodeID]), newDir, step)
-
-	// New Dir for the moved node; re-propagate the whole graph from this geom set.
-	// The mover adopts this Dir via its own "center" message (below) — no direct
-	// cross-goroutine geom write here.
-	newQuantDir := &[3]float64{quant.X, quant.Y, quant.Z}
-	g := geoms[nodeID]
-	g.Dir = newQuantDir
-	geoms[nodeID] = g
-
-	newCenters := computeSphereChainPositions(geoms, edges)
-	if len(newCenters) == 0 {
-		return nil, false
-	}
-	reachR := reachRFromCenters(newCenters, edges)
-	// Fan the fresh centers out through inboxes (one "center" message per node, routed
-	// to that node's mover AND every incident edge's mover). Each owning goroutine
-	// writes the center/Dir onto its own held geom and re-emits — preserving the
-	// per-goroutine ownership model. The whole-graph SOLVE is central; the per-mover
-	// APPLY stays decentralized.
-	for id, c := range newCenters {
-		cc := c
-		dir := geoms[id].Dir
-		rr := reachR[id]
-		if ch, ok := md.dispatch[id]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
-		}
-		for edgeID, em := range md.edgeMovers {
-			if em.srcID == id || em.dstID == id {
-				if ch, ok := md.dispatch[edgeID]; ok {
-					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
-				}
-			}
+		if m.geom.Center != nil {
+			centers[id] = *m.geom.Center
 		}
 	}
-	return newQuantDir, true
+	return centers
 }
 
-// SphereResize sets the given node's sphere radius R and re-propagates every node's
-// world center from the anchor (computeSphereChainPositions), fanning the fresh centers
-// out to every node/edge mover (same decentralized APPLY as SphereMove). Changing a
-// node's R changes the distance to ITS children, so the node's subtree contracts/expands
-// toward it. r is clamped to a small minimum. Anchor-1 only: upstream nodes do not move
-// (a full re-root would need per-edge re-anchoring — follow-up). Returns the clamped R
-// and true on a real change; 0,false for an unknown node.
-func (md *MoveDispatch) SphereResize(nodeID string, r float64) (float64, bool) {
-	nm, ok := md.nodeMovers[nodeID]
-	if !ok {
-		return 0, false
-	}
-	const minR = 1.0
-	if r < minR {
-		r = minR
-	}
-	// Set R on the resized node's held geom (single owner mutates its own geom here,
-	// matching how SphereMove sets Dir on the local geoms copy before re-propagating).
-	rr := r
-	nm.geom.R = &rr
-
-	geoms := make(map[string]nodeGeom, len(md.nodeMovers))
-	for id, m := range md.nodeMovers {
-		geoms[id] = m.geom
-	}
+func (md *MoveDispatch) heldEdges() []sphereEdge {
 	edges := make([]sphereEdge, 0, len(md.edgeMovers))
 	for _, em := range md.edgeMovers {
 		edges = append(edges, sphereEdge{Source: em.srcID, Target: em.dstID})
 	}
-	newCenters := computeSphereChainPositions(geoms, edges)
-	if len(newCenters) == 0 {
-		return 0, false
-	}
-	reachR := reachRFromCenters(newCenters, edges)
+	return edges
+}
+
+// fanCenters pushes one "center" message per node (carrying its new world center and
+// reach radius) to that node's mover AND every incident edge's mover. Each owning
+// goroutine writes the center onto its own held geom and re-emits — the whole-graph
+// SOLVE is central; the per-mover APPLY stays decentralized.
+func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]float64) {
 	for id, c := range newCenters {
 		cc := c
-		dir := geoms[id].Dir
-		rr := reachR[id]
+		rr := reach[id]
 		if ch, ok := md.dispatch[id]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: rr}
 		}
 		for edgeID, em := range md.edgeMovers {
 			if em.srcID == id || em.dstID == id {
 				if ch, ok := md.dispatch[edgeID]; ok {
-					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
+					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: rr}
 				}
 			}
 		}
 	}
-	return r, true
+}
+
+// SphereDrag handles a node-drag under the non-rooted layout: it pins the dragged node
+// at the world-space target and radially scales every co-sphere sibling to keep each
+// edge's rest length. The fresh centers are fanned out to every node/edge mover (which
+// re-emit their own geometry). Returns true (unknown node ⇒ false).
+func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
+	if _, ok := md.nodeMovers[nodeID]; !ok {
+		return false
+	}
+	centers := md.heldCenters()
+	edges := md.heldEdges()
+	// ONLY the surface nodes of the dragged node's sphere(s) move. The dragged node goes
+	// to the cursor, which sets each owner sphere's radius to the new distance; every
+	// OTHER surface node of that sphere moves RADIALLY to the new radius (keeping its
+	// direction from the center). The sphere CENTER (owner) and every node not on the
+	// sphere keep their positions. No relaxation / flex of the rest of the graph.
+	centers[nodeID] = target
+	setR := func(id string, r float64) {
+		if om := md.nodeMovers[id]; om != nil {
+			rr := r
+			om.geom.R = &rr // persist the resized radius
+		}
+	}
+	for _, e := range edges {
+		if e.Target != nodeID || e.Source == "" {
+			continue // only edges INTO the dragged node identify the spheres it sits on
+		}
+		o := e.Source // sphere center
+		oc, ok := centers[o]
+		if !ok {
+			continue
+		}
+		R := target.sub(oc).length() // new sphere radius = center → dragged-node distance
+		setR(o, R)
+		for _, se := range edges {
+			if se.Source != o || se.Target == "" || se.Target == nodeID {
+				continue // o's other surface nodes (its outgoing-edge targets)
+			}
+			cc, ok := centers[se.Target]
+			if !ok {
+				continue
+			}
+			dir := cc.sub(oc)
+			if dir.length() < 1e-9 {
+				continue
+			}
+			centers[se.Target] = oc.add(dir.normalize().scale(R)) // radial scale to new R
+		}
+	}
+	reach := reachRFromCenters(centers, edges)
+	md.fanCenters(centers, reach)
+	return true
 }
 
 // reachRFromCenters computes each node's sphere REACH radius (max distance from a
 // node's center to any node it outputs to) under the given centers and edge set.
-// Mirrors loader.go buildFromSpec; used by SphereMove/SphereResize so the fanned
-// "center" message carries the new reach radius and the ring stays sized during a drag.
+// Mirrors loader.go buildFromSpec; used by SphereDrag so the fanned "center" message
+// carries the new reach radius and the ring stays sized during a drag.
 func reachRFromCenters(centers map[string]vec3, edges []sphereEdge) map[string]float64 {
 	reachR := map[string]float64{}
 	for _, e := range edges {

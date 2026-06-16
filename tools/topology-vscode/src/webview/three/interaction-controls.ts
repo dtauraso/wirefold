@@ -41,7 +41,7 @@ const MOVE_SLOP_PX = 6;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring" | "port-move" | "sphere-resize";
+  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring" | "port-move";
   // Pointer-down snapshot
   downX: number;
   downY: number;
@@ -103,9 +103,6 @@ export function useInteractionControls(
     lastWorldTarget: THREE.Vector3 | null; // most recent world target sent during the drag
   } | null>(null);
 
-  // Sphere-resize state: set when pointer-down lands on the selected sphere torus rim.
-  const sphereResizeRef = useRef<{ nodeId: string; nodeCenter: THREE.Vector3 } | null>(null);
-
   // Wiring state: set when pointer-down lands on an UNCONNECTED port sphere
   // (drag port→port creates an edge).
   const wiringRef = useRef<{ nodeId: string; portName: string; isInput: boolean } | null>(null);
@@ -153,23 +150,6 @@ export function useInteractionControls(
       });
     }
   }, [flushNodeMove]);
-
-  const pendingResize = useRef<{ nodeId: string; r: number } | null>(null);
-  const resizeRafPending = useRef(false);
-  const flushSphereResize = useCallback((nodeId: string, r: number) => {
-    vscode.postMessage({ type: "edit", op: "sphere-resize", nodeId, r });
-  }, []);
-  const scheduleSphereResize = useCallback((nodeId: string, r: number) => {
-    pendingResize.current = { nodeId, r };
-    if (!resizeRafPending.current) {
-      resizeRafPending.current = true;
-      requestAnimationFrame(() => {
-        resizeRafPending.current = false;
-        const p = pendingResize.current;
-        if (p) { flushSphereResize(p.nodeId, p.r); pendingResize.current = null; }
-      });
-    }
-  }, [flushSphereResize]);
 
   // Edge ids incident on a specific port (output → source/sourceHandle, input →
   // target/targetHandle). Used both to decide connected-vs-unconnected and to build
@@ -370,7 +350,6 @@ export function useInteractionControls(
       nodeDragRef.current = null;
       wiringRef.current = null;
       portMoveRef.current = null;
-      sphereResizeRef.current = null;
 
       // Pick node under cursor.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -399,19 +378,6 @@ export function useInteractionControls(
         s.phase = "pending";
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         return;
-      }
-
-      sphereResizeRef.current = null;
-      const sphereHit = pickRequest.current?.(ndcX, ndcY) ?? null;
-      if (sphereHit !== null && sphereHit.startsWith("sphere:")) {
-        const sphereNodeId = sphereHit.slice("sphere:".length);
-        const node = nodesRef.current.find((n) => n.id === sphereNodeId);
-        if (node) {
-          sphereResizeRef.current = { nodeId: sphereNodeId, nodeCenter: nodeWorldPos(node) };
-          s.phase = "pending";
-          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-          return;
-        }
       }
 
       const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
@@ -472,9 +438,7 @@ export function useInteractionControls(
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
-        if (sphereResizeRef.current) {
-          s.phase = "sphere-resize";
-        } else if (portMoveRef.current) {
+        if (portMoveRef.current) {
           s.phase = "port-move";
         } else if (wiringRef.current) {
           s.phase = "wiring";
@@ -507,30 +471,6 @@ export function useInteractionControls(
           if (hit && Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z)) {
             nd.lastWorldTarget = target.clone();
             scheduleNodeMove(nd.nodeId, target.x, target.y, target.z);
-          }
-        }
-        s.prevX = e.clientX;
-        s.prevY = e.clientY;
-      }
-
-      if (s.phase === "sphere-resize" && sphereResizeRef.current) {
-        // New R = distance from node center to the pointer projected onto the
-        // camera-facing plane through the center. Dragging the rim inward shrinks R,
-        // outward grows it. Go clamps the minimum and re-propagates (children move).
-        const sr = sphereResizeRef.current;
-        const cam = cameraRef.current;
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        if (cam) {
-          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-          const raycaster = new THREE.Raycaster();
-          raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
-          const normal = new THREE.Vector3();
-          cam.getWorldDirection(normal);
-          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, sr.nodeCenter);
-          const hitPt = new THREE.Vector3();
-          if (raycaster.ray.intersectPlane(plane, hitPt)) {
-            const r = sr.nodeCenter.distanceTo(hitPt);
-            if (Number.isFinite(r)) scheduleSphereResize(sr.nodeId, r);
           }
         }
         s.prevX = e.clientX;
@@ -591,7 +531,7 @@ export function useInteractionControls(
         }
       }
     },
-    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, scheduleSphereResize, unprojectToPlane],
+    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -637,29 +577,6 @@ export function useInteractionControls(
           }
         }
         portMoveRef.current = null;
-        s.phase = "idle";
-        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
-        return;
-      }
-
-      if (s.phase === "sphere-resize" && sphereResizeRef.current) {
-        const sr = sphereResizeRef.current;
-        const cam = cameraRef.current;
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        if (cam) {
-          const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-          const raycaster = new THREE.Raycaster();
-          raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
-          const normal = new THREE.Vector3();
-          cam.getWorldDirection(normal);
-          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, sr.nodeCenter);
-          const hitPt = new THREE.Vector3();
-          if (raycaster.ray.intersectPlane(plane, hitPt)) {
-            const r = sr.nodeCenter.distanceTo(hitPt);
-            if (Number.isFinite(r)) { pendingResize.current = null; resizeRafPending.current = false; flushSphereResize(sr.nodeId, r); }
-          }
-        }
-        sphereResizeRef.current = null;
         s.phase = "idle";
         (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
         return;
@@ -711,7 +628,7 @@ export function useInteractionControls(
 
       s.phase = "idle";
     },
-    [flushNodeMove, flushPortAnchor, flushSphereResize, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
+    [flushNodeMove, flushPortAnchor, onSelect, pickRequest, storeCreateEdge, unprojectToPlane],
   );
 
   // Exposed so ThreeView can attach a non-passive native listener.

@@ -122,8 +122,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         // the routing keys (node id + each incident edge id) Go mail-sorts to. Forward
         // verbatim, fire-and-forget — same fan-out shape as op="update".
         runner.writeStdin(JSON.stringify({ type: "edit", op: "port-anchor", node: msg.node, port: msg.port, isInput: msg.isInput, anchor: msg.anchor, keys: msg.keys }));
-      } else if (msg.op === "sphere-resize") {
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "sphere-resize", nodeId: msg.nodeId, r: msg.r }));
       } else if (msg.op === "scene") {
         runner.writeStdin(JSON.stringify({ type: "edit", op: "scene", scene: msg.scene }));
       }

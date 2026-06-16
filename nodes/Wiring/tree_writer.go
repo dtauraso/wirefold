@@ -29,31 +29,21 @@ func writeViewNode(root, nodeID string, pos specPosition) error {
 	return writeJSONAtomic(path, pos)
 }
 
-// writeMetaDir sets the sphere-chain direction on a node's meta.json, preserving its
-// id/type/cell/r. Dir is the node's unit direction on its PARENT's sphere; persisting
-// it makes a sphere-surface node-drag (re-aimed Dir) durable across reload.
-func writeMetaDir(root, nodeID string, dir *[3]float64) error {
+// writeMetaPos sets the absolute world center on a node's meta.json, preserving its
+// id/type/r. Persisting x/y/z makes a node-drag (non-rooted layout) durable across reload.
+func writeMetaPos(root, nodeID string, x, y, z float64) error {
 	path := filepath.Join(root, "nodes", nodeID, "meta.json")
 	var meta jsonMeta
 	if raw, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(raw, &meta)
 	}
 	meta.ID = nodeID
-	meta.Dir = dir
+	meta.X = x
+	meta.Y = y
+	meta.Z = z
 	return writeJSONAtomic(path, meta)
 }
 
-// writeMetaR sets the sphere radius on a node's meta.json, preserving its id/type/cell/dir.
-func writeMetaR(root, nodeID string, r float64) error {
-	path := filepath.Join(root, "nodes", nodeID, "meta.json")
-	var meta jsonMeta
-	if raw, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(raw, &meta)
-	}
-	meta.ID = nodeID
-	meta.R = &r
-	return writeJSONAtomic(path, meta)
-}
 
 func writePort(root, nodeID, port string, isInput bool, p specPort) error {
 	side := "inputs"
