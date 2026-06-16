@@ -8,30 +8,50 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-14 — branch task/sphere-chain-layout — sphere-chain layout IMPLEMENTED, awaiting user review, NOT merged)
+## State at handoff (2026-06-16 — branch task/spherical-layout — POLAR coordinate model IMPLEMENTED, awaiting live-editor verify, NOT merged)
 
-Context: `main` is at `545c71ab`.
+Context: `main` is at `c123b83e`. Full design: docs/planning/visual-editor/polar-coordinate-model.md.
 
-### Sphere-chain node layout — implemented (replaces the lattice)
-Model: each node has a per-node radius R (adjustable; starting value = current neighbor distance) and a Dir (unit direction on its parent's sphere). Node WORLD positions are Go-computed by PROPAGATION from anchor node "1" at origin: child_center = parent_center + R_parent * Dir_child (computeSphereChainPositions, nodes/Wiring/sphere_layout.go). The lattice (cells/latticeToWorld) is REMOVED. Stored per node as meta.json {r, dir} (cell gone). Output-bearing nodes center a sphere; output-less (3,5) are surface members.
-Interaction: node DRAG re-aims the node's Dir on its parent's sphere in steps of the node's own diameter (SphereMove in node_move.go; TS sends a view-plane world target, Go projects onto the parent sphere + quantizes). Sphere VISUALIZATION: a see-through torus ring at R, toggled by the corner "sphere" button for the selected node, and SELECTABLE (pick returns "sphere:<id>", selectedSphere state + highlight). RESIZE: dragging the selected sphere surface sets R (new "sphere-resize" edit op {nodeId, r}); Go sets R, re-propagates, persists, fans out.
+### Polar coordinate model — replaces the Cartesian non-rooted layout
+The diagram sits in a large container sphere (center = polar origin = center of the
+axis-aligned PRISM built from the node points). Every node's authoritative position is
+ONE outer polar coordinate (r,θ,φ) from the origin; ALL nodes are roots (flat, no
+parent chain — kills the 8↔1 feedback cycle). Each node is also a sphere center; its
+sphere R and surface coords are DERIVE-ON-READ measurements over the roots (soft
+membership — R grows around its nodes, never pins them; a move touches exactly one
+root, no cascade, no solver). Pole = +y. Cartesian appears only at three boundaries:
+camera, render, and saved files (world Cartesian in the prism frame); never on a node
+at runtime.
 
-### Commits (this branch, newest first)
-ecc80b3b remove dead lattice path; 2ab06bb1 resize R via sphere drag; 89dd9142 node drag on parent sphere; 4d588835 TS schema r/dir; 35d29d16 migrate to R+Dir; d84a754b propagation positions; 554b02b4 projection+diameter-step helpers; c5af92a7 per-node R field; 08e4f623 sphere torus selectable; 837087f7 sphere torus visualization. Plus spec/handoff doc commits. Design spec: docs/planning/visual-editor/sphere-chain-layout-spec.html.
+Go (nodes/Wiring): polar.go (conversions), prism.go (prism/rootSet/buildRoots),
+derived.go (sphereR / surfaceCoord / ring normals), node_move.go RootMove (root =
+authority, soft membership; replaced SphereDrag), lock.go chordLock (follower =
+mirror_φ(leader); the perpendicular-chord lock as a one-line polar invariant).
+Bridge: Go emits render-ready Cartesian + sphereR + two ring normals (vrx..frz) on
+node-geometry; pump = pure plotter. Render: SphereRing orients tori from the emitted
+normals. Camera: pan=2D-Cartesian, zoom=Cartesian, rotate=polar-orbit, camera
+constrained inside the large sphere (interaction-controls.ts).
 
 ### Verified vs NOT verified
-- VERIFIED: go build ./... + go test -race ./... green; tsc --noEmit clean; vitest at baseline; parity/await guards clean; migration confirmed propagation reproduces the prior layout within ~3%.
-- NOT VERIFIED: the LIVE EDITOR behavior (rendering, drag-on-sphere, resize, sphere show/select). Only build/test pass. NEEDS USER EYEBALL — this is why it's unmerged.
+- VERIFIED: go build ./... + go test ./... green (10 pkgs); tsc --noEmit clean;
+  vitest 71/71; npm build clean; all 8 guard scripts pass (incl. ts-computes-no-geometry,
+  no-await-on-bridge). Unit tests cover conversions, prism/roots round-trip, sphereR,
+  surface coords, ring normals, RootMove (one-root/soft-membership), chord lock.
+- NOT VERIFIED (needs user eyeball, why it's unmerged): live editor — spheres/tori/nodes
+  render from the Go stream (P6.4), camera feel (P7.7), chord-lock drag live (P8.4),
+  8-node load preserves positions in the editor (P2.6).
 
-### Known limitations / follow-ups
-- NOT ROOTED is INCOMPLETE: node move + resize re-propagate from the FIXED anchor "1", so they only move the dragged node's CHILDREN/subtree. The user's "shrink node 2's R and drag node 1 (upstream) closer" / "grab any node, the rest flexes around it" is NOT implemented — it needs per-EDGE directions and re-rooting the BFS at the dragged node (the current Dir is stored per-node relative to one BFS parent, which goes stale on re-root). This is the main follow-up.
-- Node 5 has two parents (6 and 4); BFS assigns it ONE parent — so its position follows one sphere, not both.
-- Sphere move/resize use a CENTRAL solve (computeSphereChainPositions) then fan out "center" messages to the per-node/edge movers (a deviation from pure per-goroutine ownership, but serialized by the single stdin reader).
-- Anchor node "1" drag is a no-op (no parent).
-- The R derivation per node uses distance to the FIRST BFS child (single scalar), so multi-child nodes can't reproduce every child distance exactly (the ~3% migration error).
+### Follow-ups / known limitations
+- nodeGeom.Center is KEPT as the derived render/geometry coordinate (port/edge arc math
+  still reads it); it is updated from roots on move. Full removal would mean rederiving
+  all port/edge geometry from roots — a larger follow-up, intentionally out of scope.
+- Prism is recomputed deterministically from points at load (not separately persisted);
+  on-disk format stays world Cartesian, so the 8-node topology needs no file migration.
+- Chord lock is registered in code (lock.go addChordLock); no editor UI to create locks yet.
 
 ### Next step
-User reviews in the editor. Likely next: the re-root/per-edge-direction work for true "not rooted" flexing; verify drag/resize feel.
+User verifies in the editor (P6.4, P7.7, P8.4, P2.6). Then merge task/spherical-layout
+(run tools/strip-branch-local-docs.sh first — the spec + this section ride the branch).
 
 ### Recently shipped to main (newest first)
 - **Node pick respects occlusion** (task/pick-occlusion): selecting/hovering a node now returns the FRONTMOST node body the cursor ray actually hits (true nearest-hit occlusion). Root cause: the node body sphere mesh had no nodeId tag, so a body hit was mapped to a node by scanning node positions for matching x,y ONLY (ignoring z) — so a node directly BEHIND another (same screen x,y, deeper z, e.g. node 7 behind node 3 after a depth drag) resolved to the front node. Fix: tag each body sphere with userData.nodeId and resolve the hit directly (z-aware); same path serves hover-highlight and click. File: tools/topology-vscode/src/webview/three/scene-content.tsx.
