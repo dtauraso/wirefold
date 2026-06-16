@@ -9,8 +9,7 @@
 //
 // Inputs the geometry needs, per node:
 //   - kind        → width/height via kindDims (generated from SPEC.md View)
-//   - center      → world center resolved by sphere-chain propagation (computeSphereChainPositions,
-//                   sphere_layout.go); nil Center falls back to the origin
+//   - center      → world center (from meta.json x/y/z or origin fallback)
 //   - port lists  → inputs/outputs with optional side + slot (from the spec node;
 //                   falls back to registry ports with default sides when absent)
 //
@@ -124,9 +123,7 @@ func nodeRadius(kind string) float64 {
 // nodeWorldPos resolves a node's world center from its sphere-chain propagated Center.
 // A nil Center is a fallback for hand-written/partial specs → origin.
 func nodeWorldPos(g nodeGeom) vec3 {
-	// Sphere-chain: the graph-level propagation (computeSphereChainPositions,
-	// sphere_layout.go) resolves a world center for every node and injects it as
-	// g.Center. A nil Center is a fallback for hand-written/partial specs → origin.
+	// g.Center is resolved from meta.json x/y/z. A nil Center falls back to origin.
 	if g.Center != nil {
 		return *g.Center
 	}

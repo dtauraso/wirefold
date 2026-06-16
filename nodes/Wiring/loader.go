@@ -168,7 +168,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
-// and validated topoSpec. Node centers resolve via sphere-chain propagation (computeSphereChainPositions).
+// and validated topoSpec.
 func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
 	// Build id→geometry map for arc-length computation at wire construction.
 	// nodeGeom carries kind/dims/port side+slot so the Go arc length mirrors
