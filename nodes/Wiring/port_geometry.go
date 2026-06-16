@@ -26,12 +26,12 @@ type portGeom struct {
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
-// Center is the sphere-chain propagated world center; nodeWorldPos returns it directly.
+// Center is the polar-layout propagated world center; nodeWorldPos returns it directly.
 // A nil Center falls back to the world origin (used only for hand-written/partial specs).
 type nodeGeom struct {
 	Kind    string
 	R       *float64    // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
-	Center  *vec3       // optional precomputed world center (sphere-chain propagation); when set, nodeWorldPos returns it directly
+	Center  *vec3       // optional precomputed world center (polar-layout propagation); when set, nodeWorldPos returns it directly
 	// ReachR is the sphere REACH radius: the max distance from this node's center to
 	// any node it outputs to (its surface children), under the resolved centers. It is
 	// streamed in the NodeGeometry sphereR field and consumed by the TS SphereRing so the
@@ -44,7 +44,7 @@ type nodeGeom struct {
 
 // defaultNodeR is the default starting sphere radius (world units) used for a
 // node that omits an explicit r. Tunable — chosen as a sensible starting size
-// for the sphere-chain layout (B3 will consume this via position computation).
+// for the polar layout.
 const defaultNodeR = 200.0
 
 // nodeR returns the node's sphere radius: *g.R when set, else defaultNodeR.
@@ -120,7 +120,7 @@ func nodeRadius(kind string) float64 {
 	return min(w, h) / float64(CurveParamNodeRadiusDivisor)
 }
 
-// nodeWorldPos resolves a node's world center from its sphere-chain propagated Center.
+// nodeWorldPos resolves a node's world center from its polar-layout propagated Center.
 // A nil Center is a fallback for hand-written/partial specs → origin.
 func nodeWorldPos(g nodeGeom) vec3 {
 	// g.Center is resolved from meta.json x/y/z. A nil Center falls back to origin.

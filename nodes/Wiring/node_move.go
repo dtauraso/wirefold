@@ -39,11 +39,11 @@ const (
 	moveMsgKindMove   = "move" // default (zero-value "" is also treated as move)
 	moveMsgKindFade   = "fade"
 	moveMsgKindAnchor = "anchor" // per-port anchor update (drag along the ring)
-	moveMsgKindCenter = "center" // sphere-chain re-propagated world center for a node
+	moveMsgKindCenter = "center" // polar-layout re-propagated world center for a node
 )
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
-//   - "" or "move": node-move — currently a no-op (sphere-chain layout owns positioning via "center" messages).
+//   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
 //   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
 //
 // ack (if non-nil) is closed by the mover after it has fully handled the message —
@@ -58,9 +58,9 @@ type moveMsg struct {
 	Port     string
 	IsInput  bool
 	AnchorId int
-	// Center (Kind == "center"): the re-relaxed world center for NodeID under the
-	// non-rooted layout. Each owning node/edge goroutine writes it onto its held geom
-	// and re-emits its own geometry. SphereDrag relaxes the whole graph centrally and
+	// Center (Kind == "center"): the re-propagated world center for NodeID under the
+	// polar layout. Each owning node/edge goroutine writes it onto its held geom
+	// and re-emits its own geometry. RootMove updates one node centrally and
 	// fans the fresh centers out — the one centralized step (sphere_layout.go).
 	Center *vec3
 	// ReachR (Kind == "center"): the re-propagated sphere REACH radius for NodeID (max
@@ -119,7 +119,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// Non-rooted re-relaxation: adopt the centrally-computed world center, then
+		// Polar re-propagation: adopt the centrally-computed world center, then
 		// re-emit node-geometry.
 		m.geom.Center = msg.Center
 		m.geom.ReachR = msg.ReachR
@@ -212,7 +212,7 @@ func (m *edgeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// Non-rooted re-relaxation: adopt the centrally-computed center on whichever
+		// Polar re-propagation: adopt the centrally-computed center on whichever
 		// endpoint this message names, then recompute the edge.
 		switch msg.NodeID {
 		case m.srcID:
@@ -225,7 +225,7 @@ func (m *edgeMover) handle(msg moveMsg) {
 		m.recomputeGeometry()
 		return
 	}
-	// Plain "move" messages have no effect under sphere-chain layout;
+	// Plain "move" messages have no effect under the polar layout;
 	// position updates arrive as "center" messages instead.
 	_ = msg
 }
@@ -385,18 +385,6 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
 }
 
-// sphereChainActive reports whether sphere-chain layout is in effect: at least one
-// held node carries an explicit R.
-// When false, applyEdit keeps the lattice (Cell) move path.
-func (md *MoveDispatch) sphereChainActive() bool {
-	for _, nm := range md.nodeMovers {
-		if nm.geom.R != nil {
-			return true
-		}
-	}
-	return false
-}
-
 // heldCenters / heldEdges snapshot the movers' current geometry.
 func (md *MoveDispatch) heldCenters() map[string]vec3 {
 	centers := make(map[string]vec3, len(md.nodeMovers))
@@ -475,7 +463,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 
 // reachRFromCenters computes each node's sphere REACH radius (max distance from a
 // node's center to any node it outputs to) under the given centers and edge set.
-// Mirrors loader.go buildFromSpec; used by SphereDrag so the fanned "center" message
+// Mirrors loader.go buildFromSpec; used by RootMove so the fanned "center" message
 // carries the new reach radius and the ring stays sized during a drag.
 func reachRFromCenters(centers map[string]vec3, edges []sphereEdge) map[string]float64 {
 	reachR := map[string]float64{}

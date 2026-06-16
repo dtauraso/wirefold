@@ -49,7 +49,7 @@ type specNode struct {
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
 	R        *float64   `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
-	X        float64    `json:"x"`              // stored absolute world center (non-rooted layout)
+	X        float64    `json:"x"`              // stored absolute world center (polar layout)
 	Y        float64    `json:"y"`
 	Z        float64    `json:"z"`
 }
