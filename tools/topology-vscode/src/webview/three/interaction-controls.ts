@@ -3,7 +3,6 @@
 // Single-pointer empty-space drag (arcball rotation) and dwell→PanPad are removed.
 
 import { useRef, useCallback } from "react";
-import type React from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
@@ -11,7 +10,6 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
-import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -65,13 +63,6 @@ function constrainInsideLargeSphere(cam: THREE.PerspectiveCamera, R: number): vo
 }
 
 // ---------------------------------------------------------------------------
-// Exported HUD constants
-// ---------------------------------------------------------------------------
-
-/** Turntable deadzone half-window in pixels — also used by RotateHud to draw strips/rings. */
-export const ROT_HUD_WIN_PX = 24;
-
-// ---------------------------------------------------------------------------
 // Gesture discrimination constants
 // ---------------------------------------------------------------------------
 
@@ -96,29 +87,11 @@ export interface ControlState {
   prevY: number;
   // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
   emptyDown: boolean;
-  // Arcball pivot: captured once at gesture start (world space)
-  arcballPivot: THREE.Vector3;
-  // Two-cylinder gesture-start snapshot (anchored, world-fixed axes). Re-snapshotted
-  // on every turntable<->roll switch and window re-anchor so each segment is anchored.
-  arcStartOffset: THREE.Vector3; // cam.position - pivot at segment start
-  arcStartUp: THREE.Vector3;     // cam.up at segment start
-  arcStartQuat: THREE.Quaternion; // camera orientation at segment start
-  // Rotation sub-mode (within phase "rotating"): straight drag = turntable (yaw/pitch),
-  // curling drag = roll about the view axis (driven by the path's accumulated turning).
-  rotMode: "turntable" | "roll";
-  anchorX: number; // deadzone-window center (re-armed at current pointer on re-anchor)
-  anchorY: number;
-  rollAccum: number;             // signed roll angle this segment (radians)
-  rollPrevAngle: number;         // last pointer angle around the anchor (for angular sweep)
-  rotPhase: "neutral" | "turntable" | "roll"; // 3-state classifier vs the square deadzone
-  turnStartX: number;            // adx/ady captured on entering turntable (no edge jump)
-  turnStartY: number;
-  lastStepX: number;             // last min-step-gated pointer sample
-  lastStepY: number;
-  lastVecX: number;              // last gated motion vector (for turning angle)
-  lastVecY: number;
-  hasVec: boolean;
-  straightCount: number;         // consecutive ~straight gated steps (roll->turntable)
+  // Arcball gesture-start snapshot
+  arcP0: THREE.Vector3;           // unit sphere point at gesture start
+  arcStartOffset: THREE.Vector3; // cam.position - C at gesture start
+  arcStartUp: THREE.Vector3;     // cam.up at gesture start
+  arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
 }
 
 // ---------------------------------------------------------------------------
@@ -147,27 +120,15 @@ export function useInteractionControls(
   edgesRef: React.MutableRefObject<RFEdge<EdgeData>[]>,
   targetRef: React.MutableRefObject<THREE.Vector3>,
 ) {
-  // HUD state ref — written by pointer handlers, polled by RotateHud each frame.
-  const rotHudRef = useRef<{ active: boolean; x: number; y: number; mx: number; my: number; mode: "turntable" | "roll" }>({
-    active: false, x: 0, y: 0, mx: 0, my: 0, mode: "turntable",
-  });
-
   const state = useRef<ControlState>({
     phase: "idle",
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
     emptyDown: false,
-    arcballPivot: new THREE.Vector3(0, 0, 0),
+    arcP0: new THREE.Vector3(),
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
     arcStartQuat: new THREE.Quaternion(),
-    rotMode: "turntable",
-    anchorX: 0, anchorY: 0,
-    rollAccum: 0, rollPrevAngle: 0,
-    rotPhase: "neutral", turnStartX: 0, turnStartY: 0,
-    lastStepX: 0, lastStepY: 0,
-    lastVecX: 0, lastVecY: 0, hasVec: false,
-    straightCount: 0,
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -394,6 +355,26 @@ export function useInteractionControls(
     [nodesRef, ensureTarget],
   );
 
+  const arcballPoint = useCallback(
+    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera): THREE.Vector3 => {
+      const C = new THREE.Vector3(0, 0, 0);
+      const R = computeLargeSphereRadius(nodesRef.current);
+      const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+      const hit = new THREE.Vector3();
+      const sphere = new THREE.Sphere(C, R);
+      if (raycaster.ray.intersectSphere(sphere, hit)) {
+        return hit.clone().sub(C).normalize();
+      }
+      // Off-sphere: nearest point on ray to C → rim direction (enables roll)
+      const foot = new THREE.Vector3();
+      raycaster.ray.closestPointToPoint(C, foot);
+      return foot.sub(C).normalize();
+    },
+    [nodesRef],
+  );
+
   // ------ helpers ------
 
   /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
@@ -472,34 +453,23 @@ export function useInteractionControls(
           };
         }
       } else {
-        // Empty-space pointerdown: capture the arcball pivot. Orbit is a TOTAL
-        // operation over (camera pose, target) — both finite — so no z=0 raycast and
-        // no grazing singularity. If a node is selected, orbit around it (preserves
-        // the selection-pivot UX). Otherwise orbit around the REGION CENTER (model B):
-        // the mid-depth point straight ahead of the camera, recomputed now so it
-        // reflects the diagram's current depth slab.
+        // Empty-space pointerdown: snapshot camera state for true arcball rotation.
+        // Center C = origin (0,0,0); R = large sphere radius from node layout.
+        const C = new THREE.Vector3(0, 0, 0);
         const cam0 = cameraRef.current;
-        const selId = selectedIdRef.current;
-        const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
-        if (selNode) {
-          s.arcballPivot = nodeWorldPos(selNode);
-          if (cam0) targetRef.current.copy(s.arcballPivot);
-        } else if (cam0) {
-          s.arcballPivot = regionFocus(cam0).clone();
-          targetRef.current.copy(s.arcballPivot);
-        }
-        // Snapshot camera state for the anchored two-cylinder rotation.
         if (cam0) {
           cam0.updateMatrixWorld(true);
-          s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
+          s.arcStartOffset = cam0.position.clone().sub(C);
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0);
         }
       }
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, regionFocus, selectedIdRef, targetRef],
+    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, arcballPoint],
   );
 
   const onPointerMove = useCallback(
@@ -519,24 +489,8 @@ export function useInteractionControls(
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
         } else if (s.emptyDown) {
-          // Empty-space drag: start rotation. Arm the turntable deadzone windows at
-          // the current pointer and snapshot the camera as this segment's anchor.
+          // Empty-space drag: start arcball rotation.
           s.phase = "rotating";
-          const cam0 = cameraRef.current;
-          if (cam0) {
-            cam0.updateMatrixWorld(true);
-            s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
-            s.arcStartUp = cam0.up.clone();
-            s.arcStartQuat = cam0.quaternion.clone();
-          }
-          s.rotMode = "turntable";
-          s.anchorX = e.clientX; s.anchorY = e.clientY;
-          s.rollAccum = 0;
-          s.rotPhase = "neutral";
-          s.lastStepX = e.clientX; s.lastStepY = e.clientY;
-          s.hasVec = false; s.straightCount = 0;
-          rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "turntable" };
-          postLog("rot-start", { x: e.clientX, y: e.clientY, win: ROT_HUD_WIN_PX });
         }
       }
 
@@ -594,97 +548,15 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          const pivot = s.arcballPivot;
-          const ROT_SPEED = 0.005;
-          const WIN_PX = ROT_HUD_WIN_PX; // deadzone half-window; in a strip = turntable
-          const ROLL_SPEED = 1.0;        // angular sweep -> roll (1:1; flip sign to reverse)
-
-          // Re-snapshot the camera as the current segment's anchor so each segment is
-          // anchored (closed loops return to start).
-          const reanchor = () => {
-            cam.updateMatrixWorld(true);
-            s.arcStartOffset = cam.position.clone().sub(pivot);
-            s.arcStartUp = cam.up.clone();
-            s.arcStartQuat = cam.quaternion.clone();
-          };
-
-          // POSITION-BASED classifier. The anchor centers BOTH the deadzone strips and
-          // the roll rings. Mouse within a strip (|dx|<=WIN or |dy|<=WIN) = turntable;
-          // outside both strips (the ring region) = roll. The anchor (ring center) is
-          // FIXED during roll; it re-arms only when the mouse returns to a strip — so the
-          // circles don't move until the mouse leaves the striped areas again.
-          // The pointer is treated as a SQUARE deadzone (half-side WIN_PX) around the
-          // anchor. Inside the square = NEUTRAL (jitter ignored, no rotation). Leave it
-          // through ONE side = single-axis turntable (left/right = yaw, up/down = pitch —
-          // only one direction at a time). Leave it through a CORNER (both axes) = roll.
-          const adx = e.clientX - s.anchorX;
-          const ady = e.clientY - s.anchorY;
-          const xOut = Math.abs(adx) > WIN_PX;
-          const yOut = Math.abs(ady) > WIN_PX;
-          const bothIn = !xOut && !yOut; // inside the central square
-
-          // Asymmetric hysteresis. Engagement is square-based: from NEUTRAL, leaving
-          // through a side = turntable, through a corner = roll. ROLL is STICKY — it
-          // releases ONLY when the pointer returns to the central square, NOT when it
-          // merely crosses a strip axis. (Circling the anchor passes the axes; those
-          // strip "zones" must not recapture the gesture into turntable.)
-          let phase: "neutral" | "turntable" | "roll" = s.rotPhase;
-          if (s.rotPhase === "neutral") {
-            if (xOut && yOut) phase = "roll";
-            else if (xOut || yOut) phase = "turntable";
-          } else if (s.rotPhase === "turntable") {
-            if (xOut && yOut) phase = "roll";
-            else if (bothIn) phase = "neutral";
-          } else {
-            // roll: release only back into the square
-            if (bothIn) phase = "neutral";
-          }
-
-          // On a phase change, re-snapshot the camera (jump-free) and capture the entry
-          // reference so each phase starts from zero rotation at the edge it crossed.
-          if (phase !== s.rotPhase) {
-            reanchor();
-            if (phase === "roll") {
-              s.rollAccum = 0;
-              s.rollPrevAngle = Math.atan2(ady, adx);
-            } else if (phase === "turntable") {
-              s.turnStartX = adx;
-              s.turnStartY = ady;
-            }
-            postLog("rot-phase", { from: s.rotPhase, to: phase, adx: Math.round(adx), ady: Math.round(ady), xOut, yOut });
-            s.rotPhase = phase;
-          }
-
-          // HUD mode: roll shows rings, neutral+turntable show the strips.
-          s.rotMode = phase === "roll" ? "roll" : "turntable";
-          rotHudRef.current = { active: true, x: s.anchorX, y: s.anchorY, mx: e.clientX, my: e.clientY, mode: s.rotMode };
-
-          let rotInv: THREE.Quaternion;
-          if (phase === "roll") {
-            // Roll = angular sweep of the pointer AROUND THE ANCHOR, about the view axis.
-            // Smaller circle = less travel per angle = faster roll.
-            const ang = Math.atan2(ady, adx);
-            let d = ang - s.rollPrevAngle;
-            if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
-            s.rollAccum += d * ROLL_SPEED;
-            s.rollPrevAngle = ang;
-            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(s.arcStartQuat);
-            rotInv = new THREE.Quaternion().setFromAxisAngle(fwd, s.rollAccum);
-          } else if (phase === "turntable") {
-            // Single axis only: horizontal -> yaw (world up), vertical -> pitch (camera
-            // right). Measured from the entry edge so there is no jump.
-            let angY = 0, angX = 0;
-            if (xOut) angY = (adx - s.turnStartX) * ROT_SPEED;
-            else angX = (ady - s.turnStartY) * ROT_SPEED;
-            const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
-            const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
-            const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
-            rotInv = qy.clone().multiply(qx).invert();
-          } else {
-            // Neutral (inside the square): no rotation.
-            rotInv = new THREE.Quaternion();
-          }
-          cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
+          const C = new THREE.Vector3(0, 0, 0);
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam);
+          // q rotates arcP0 → p1 on the sphere surface; applying the inverse to the
+          // camera orbits it so the scene point under the pointer stays fixed.
+          // swap q<->rotInv here to flip rotation direction if needed
+          const q = new THREE.Quaternion().setFromUnitVectors(s.arcP0, p1);
+          const rotInv = q.clone().invert();
+          cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
           cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
           cam.updateMatrixWorld(true);
@@ -694,7 +566,7 @@ export function useInteractionControls(
         }
       }
     },
-    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
+    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane, arcballPoint],
   );
 
   const onPointerUp = useCallback(
@@ -765,7 +637,6 @@ export function useInteractionControls(
 
       // Arcball rotation completed: reset state without triggering select.
       if (s.phase === "rotating") {
-        rotHudRef.current = { ...rotHudRef.current, active: false };
         nodeDragRef.current = null;
         s.phase = "idle";
         return;
@@ -894,5 +765,5 @@ export function useInteractionControls(
     [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef],
   );
 
-  return { onPointerDown, onPointerMove, onPointerUp, onWheelNative, rotHudRef };
+  return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
 }

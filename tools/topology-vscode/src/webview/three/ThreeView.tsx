@@ -15,7 +15,6 @@ import { pixelToNDC } from "./geometry-helpers";
 import { GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
-import { RotateHud } from "./RotateHud";
 import { Scene, computeOcclusionCounts } from "./scene-content";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
@@ -120,7 +119,7 @@ export function ThreeView() {
     setSphereMode(ownSphere ? "own" : "surface");
   }, []);
 
-  const { onPointerDown, onPointerMove, onPointerUp, onWheelNative, rotHudRef } = useInteractionControls(
+  const { onPointerDown, onPointerMove, onPointerUp, onWheelNative } = useInteractionControls(
     cameraRef,
     canvasSize,
     pickRequest,
@@ -311,9 +310,6 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
-
-      {/* Rotate gesture HUD — absolutely positioned over canvas, pointer-events:none */}
-      <RotateHud rotHudRef={rotHudRef} containerRef={containerRef} />
 
     </div>
   );
