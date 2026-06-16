@@ -1,4 +1,4 @@
-package inhibitor
+package holdnewsendold
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func TestFireOnReceive(t *testing.T) {
 	node := &Node{
 		Fire:                       func() { tr.Fire("ci") },
 		Held:                       99,
-		FromPrevInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevInhibitorNode", tr),
+		FromPrevHoldNewSendOldNode: Wiring.NewIn(fromPrev, "ci", "FromPrevHoldNewSendOldNode", tr),
 		ToNext: Wiring.OutMulti{
 			Wiring.NewOut(out0, "ci", "ToNext", tr),
 			Wiring.NewOut(out1, "ci", "ToNext", tr),

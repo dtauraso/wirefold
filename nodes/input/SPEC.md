@@ -29,18 +29,18 @@
 
 | Name | Direction | EdgeKind | Optional | Notes |
 |------|-----------|----------|----------|-------|
-| ToInhibitor | out | chain |  | forwards Init values to the chain inhibitor |
+| ToHoldNewSendOld | out | chain |  | forwards Init values to the chain holdnewsendold |
 | ToPacer | out | chain | yes | fans the emitted value out to a Pacer node (change-step feedback); active when wired |
-| FeedbackIn | in | chain | yes | receives step (1=advance, 0=hold index) from Inhibitor; enables feedback-ring mode when wired |
+| FeedbackIn | in | chain | yes | receives step (1=advance, 0=hold index) from HoldNewSendOld; enables feedback-ring mode when wired |
 
 ## Firing rule
 
-Plain emit path (FeedbackIn not wired): iterate through Init (wrapping if Repeat), Fire and send each value on ToInhibitor in order. Exit when all values sent (or never if Repeat).
+Plain emit path (FeedbackIn not wired): iterate through Init (wrapping if Repeat), Fire and send each value on ToHoldNewSendOld in order. Exit when all values sent (or never if Repeat).
 
 Feedback-ring path (FeedbackIn wired): iterate indefinitely (index `i` starting at 0).
 1. Fire.
-2. Send Init[i % len(Init)] on ToInhibitor.
-3. Block on FeedbackIn for a step value `s` from Inhibitor.
+2. Send Init[i % len(Init)] on ToHoldNewSendOld.
+3. Block on FeedbackIn for a step value `s` from HoldNewSendOld.
 4. Advance: `i = (i + s) % len(Init)`.
 5. Loop (exit on ctx cancel or wire close).
 

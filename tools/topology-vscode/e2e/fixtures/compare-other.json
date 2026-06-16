@@ -1,8 +1,8 @@
 {
   "nodes": [
     { "id": "a", "type": "Input", "x": 100, "y": 100 },
-    { "id": "b", "type": "Inhibitor", "x": 360, "y": 100 },
-    { "id": "c", "type": "Inhibitor", "x": 520, "y": 100 }
+    { "id": "b", "type": "HoldNewSendOld", "x": 360, "y": 100 },
+    { "id": "c", "type": "HoldNewSendOld", "x": 520, "y": 100 }
   ],
   "edges": []
 }

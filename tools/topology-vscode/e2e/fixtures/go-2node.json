@@ -12,19 +12,19 @@
       }
     },
     {
-      "id": "chainInhibitor1",
-      "type": "Inhibitor"
+      "id": "chainHoldNewSendOld1",
+      "type": "HoldNewSendOld"
     }
   ],
   "edges": [
     {
-      "id": "in0.out->chainInhibitor1.value",
+      "id": "in0.out->chainHoldNewSendOld1.value",
       "source": "in08",
       "sourceHandle": "out",
-      "target": "chainInhibitor1",
-      "targetHandle": "FromPrevInhibitorNode",
+      "target": "chainHoldNewSendOld1",
+      "targetHandle": "FromPrevHoldNewSendOldNode",
       "kind": "chain",
-      "label": "inputToInhibitor",
+      "label": "inputToHoldNewSendOld",
       "data": {
         "slots": 1
       }

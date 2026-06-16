@@ -62,7 +62,7 @@ For channels the loader allocates but does not wire to any edge — e.g., Input 
 
 ### Non-channel fields
 
-Struct fields populated from `topology.json` at load time (not wires). Examples: `HeldValue` on `Inhibitor`, `Name` / `Id` on most kinds. Trivial fields like `Id`/`Name` are implicit and need not be listed; only list fields with substantive load-time semantics.
+Struct fields populated from `topology.json` at load time (not wires). Examples: `HeldValue` on `HoldNewSendOld`, `Name` / `Id` on most kinds. Trivial fields like `Id`/`Name` are implicit and need not be listed; only list fields with substantive load-time semantics.
 
 ### Firing rule
 

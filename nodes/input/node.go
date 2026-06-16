@@ -24,7 +24,7 @@ type Node struct {
 	EmitRefillSlide func(beads []int)
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
-	ToInhibitor *Wiring.Out
+	ToHoldNewSendOld *Wiring.Out
 	// ToExcitatory fans the emitted value out to an Excitatory node (sample-and-hold). It is
 	// optional: when unwired (Wired()==false) the emit is skipped so existing
 	// topologies without an Excitatory are unaffected.
@@ -105,12 +105,12 @@ func (n *Node) Update(ctx context.Context) {
 			v := working[len(working)-1]
 			n.Fire()
 			// Node 1 initiates a goroutine per wired output so node 2
-			// (ToInhibitor) and node 6 (ToExcitatory) get the same bead
+			// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
 			// concurrently. wg.Wait keeps node 1 paced and preserves the
 			// feedback-ring ordering (the TryRecv below still runs after).
 			var wg sync.WaitGroup
 			wg.Add(1)
-			go func() { defer wg.Done(); n.ToInhibitor.EmitOneDriven(ctx, v) }()
+			go func() { defer wg.Done(); n.ToHoldNewSendOld.EmitOneDriven(ctx, v) }()
 			if n.ToExcitatory.Wired() {
 				wg.Add(1)
 				go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
@@ -121,7 +121,7 @@ func (n *Node) Update(ctx context.Context) {
 			}
 			wg.Wait()
 
-			// READ: block until Inhibitor sends the step on FeedbackIn.
+			// READ: block until HoldNewSendOld sends the step on FeedbackIn.
 			step, ok := n.FeedbackIn.TryRecv()
 			if !ok {
 				return
@@ -160,11 +160,11 @@ func (n *Node) Update(ctx context.Context) {
 		v := popEnd(&working, &backup, init)
 		emitBeads() // array changed (pop, maybe refill) → restream interior
 		// Node 1 initiates a goroutine per wired output so node 2
-		// (ToInhibitor) and node 6 (ToExcitatory) get the same bead
+		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
 		// concurrently; wg.Wait keeps node 1 paced before the next pop.
 		var wg sync.WaitGroup
 		wg.Add(1)
-		go func() { defer wg.Done(); n.ToInhibitor.EmitOneDriven(ctx, v) }()
+		go func() { defer wg.Done(); n.ToHoldNewSendOld.EmitOneDriven(ctx, v) }()
 		if n.ToExcitatory.Wired() {
 			wg.Add(1)
 			go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()

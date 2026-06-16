@@ -39,16 +39,16 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("node \"2\" not found")
 	}
-	if n2.Type != "Inhibitor" {
-		t.Errorf("node \"2\" type: got %q, want \"Inhibitor\"", n2.Type)
+	if n2.Type != "HoldNewSendOld" {
+		t.Errorf("node \"2\" type: got %q, want \"HoldNewSendOld\"", n2.Type)
 	}
 
 	n3, ok := nodeByID["3"]
 	if !ok {
 		t.Fatal("node \"3\" not found")
 	}
-	if n3.Type != "Inhibitor" {
-		t.Errorf("node \"3\" type: got %q, want \"Inhibitor\"", n3.Type)
+	if n3.Type != "HoldNewSendOld" {
+		t.Errorf("node \"3\" type: got %q, want \"HoldNewSendOld\"", n3.Type)
 	}
 
 	n6, ok := nodeByID["6"]
@@ -85,11 +85,11 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("edge \"1To2\" not found")
 	}
-	if e1to2.SourceHandle != "ToInhibitor" {
-		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToInhibitor\"", e1to2.SourceHandle)
+	if e1to2.SourceHandle != "ToHoldNewSendOld" {
+		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToHoldNewSendOld\"", e1to2.SourceHandle)
 	}
-	if e1to2.TargetHandle != "FromPrevInhibitorNode" {
-		t.Errorf("edge 1To2 targetHandle: got %q, want \"FromPrevInhibitorNode\"", e1to2.TargetHandle)
+	if e1to2.TargetHandle != "FromPrevHoldNewSendOldNode" {
+		t.Errorf("edge 1To2 targetHandle: got %q, want \"FromPrevHoldNewSendOldNode\"", e1to2.TargetHandle)
 	}
 
 	if _, ok := edgeByLabel["2To3"]; !ok {

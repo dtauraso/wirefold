@@ -1,7 +1,7 @@
 // Scenario: dragging a node does not disconnect its edges.
 // Observable: the React Flow edge DOM element for each incident wire
 // is still present in the DOM after the drag completes.
-// Fixture: go-2node (Input → Inhibitor, one edge).
+// Fixture: go-2node (Input → HoldNewSendOld, one edge).
 
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -20,7 +20,7 @@ declare global {
 // React Flow renders edges as <g class="react-flow__edge"> elements. The
 // edge SVG path has class react-flow__edge-path. Use aria-label to find
 // the specific edge — RF sets aria-label="Edge from <source> to <target>".
-const EDGE_ARIA = "Edge from in08 to chainInhibitor1";
+const EDGE_ARIA = "Edge from in08 to chainHoldNewSendOld1";
 
 test("wire-survives-drag: dragging a node keeps its edge in the DOM", async ({ page }) => {
   const fixture = readFileSync(resolve(HERE, "fixtures/go-2node.json"), "utf-8");

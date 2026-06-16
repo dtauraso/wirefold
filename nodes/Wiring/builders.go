@@ -261,7 +261,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	}
 
 	// Inject EmitHeldBead closure if the struct has an `EmitHeldBead func(held int)`
-	// field (Inhibitor's interior held-value bead). The closure captures this
+	// field (HoldNewSendOld's interior held-value bead). The closure captures this
 	// node's id and emits a SINGLE centered node-bead (slot 0,0 at offset 0,0,0)
 	// colored by the held value; held == -1 → present=false (empty interior).
 	if f := v.FieldByName("EmitHeldBead"); f.IsValid() && f.CanSet() && f.Type() == tEmitHeldFunc {
@@ -512,7 +512,7 @@ func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []i
 	emitRow(1, working) // bottom row = working
 }
 
-// emitHeldBead streams the Inhibitor node's interior as a SINGLE centered
+// emitHeldBead streams the HoldNewSendOld node's interior as a SINGLE centered
 // bead (row 0, col 0) at the node center (offset 0,0,0). The bead is PRESENT when
 // held != -1 and colored by the held value (0 = white, 1 = black per the existing
 // node-bead convention); held == -1 (no value seen yet) → present=false so the

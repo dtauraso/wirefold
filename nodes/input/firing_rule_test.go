@@ -31,7 +31,7 @@ func TestEmitsInitValues(t *testing.T) {
 	node := &Node{
 		Fire:       func() { tr.Fire("in") },
 		Init:       []int{10, 20, 30},
-		ToInhibitor: Wiring.NewOut(toRG, "in", "ToInhibitor", tr),
+		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -103,7 +103,7 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	node := &Node{
 		Fire:       func() { tr.Fire("in") },
 		Init:       []int{1, 0},
-		ToInhibitor: Wiring.NewOut(toRG, "in", "ToInhibitor", tr),
+		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
 	}
 
@@ -164,7 +164,7 @@ func TestFeedbackSendDoesNotDeplete(t *testing.T) {
 	node := &Node{
 		Fire:       func() { tr.Fire("in") },
 		Init:       []int{1, 0},
-		ToInhibitor: Wiring.NewOut(toRG, "in", "ToInhibitor", tr),
+		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
 		EmitNodeBeads: func(working, backup []int) {
 			mu.Lock()
@@ -210,7 +210,7 @@ func TestEmptyInit(t *testing.T) {
 	node := &Node{
 		Fire:       func() { tr.Fire("in") },
 		Init:       nil,
-		ToInhibitor: Wiring.NewOut(toRG, "in", "ToInhibitor", tr),
+		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
