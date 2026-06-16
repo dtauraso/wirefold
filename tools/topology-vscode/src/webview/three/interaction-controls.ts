@@ -458,8 +458,9 @@ export function useInteractionControls(
         }
       } else {
         // Empty-space pointerdown: snapshot camera state for true arcball rotation.
-        // Center C = origin (0,0,0); R = large sphere radius from node layout.
-        const C = new THREE.Vector3(0, 0, 0);
+        // Pivot C = the camera's look-at TARGET (panning moves it), so the rotation
+        // center follows where you've panned — not a fixed world origin.
+        const C = targetRef.current.clone();
         const cam0 = cameraRef.current;
         if (cam0) {
           cam0.updateMatrixWorld(true);
@@ -552,7 +553,7 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          const C = new THREE.Vector3(0, 0, 0);
+          const C = targetRef.current.clone();
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const p1 = arcballPoint(e.clientX, e.clientY, rect);
           // arcP0/p1 are EYE-space unit vectors. qEye rotates arcP0 → p1 in eye space;
