@@ -290,7 +290,14 @@ type MoveDispatch struct {
 	// started is set by Start; the synchronous façade uses the goroutine path when
 	// true and direct handler calls otherwise (unit tests that never Start).
 	started bool
+	// roots is the polar layout (container prism/origin + per-node outer polar
+	// coordinate), built at load from the loaded world centers. Authoritative for
+	// the polar move/lock logic; world positions recover via roots.world(id).
+	roots rootSet
 }
+
+// setRoots installs the polar layout built at load (buildRoots).
+func (md *MoveDispatch) setRoots(rs rootSet) { md.roots = rs }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
 // It creates one nodeMover per node and one edgeMover per edge, registering each in

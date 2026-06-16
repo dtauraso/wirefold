@@ -75,3 +75,46 @@ func rootFromCartesian(pos, origin vec3) nodeRoot {
 func worldFromRoot(r nodeRoot, origin vec3) vec3 {
 	return polar2cart(r.polar).add(origin)
 }
+
+// rootSet is the runtime polar layout: the container frame plus every node's
+// authoritative outer polar coordinate. Built at load from world Cartesian
+// centers (spec §8b: prism → origin → roots). World positions are recovered via
+// worldFromRoot(roots[id], origin); the prism/origin are recomputed
+// deterministically from the same centers, so save/load is stable.
+type rootSet struct {
+	prism  prism
+	origin vec3
+	radius float64             // large sphere radius (circumscribes the nodes)
+	roots  map[string]nodeRoot // node id → outer polar coord
+}
+
+// buildRoots constructs the rootSet from id→world-center positions: bounding-box
+// prism, its center as the polar origin, the circumscribing radius, and each
+// node's root measured from the origin.
+func buildRoots(centers map[string]vec3) rootSet {
+	pts := make([]vec3, 0, len(centers))
+	for _, c := range centers {
+		pts = append(pts, c)
+	}
+	p := prismFromPoints(pts)
+	origin := p.center()
+	rs := rootSet{
+		prism:  p,
+		origin: origin,
+		radius: largeSphereRadius(origin, pts),
+		roots:  make(map[string]nodeRoot, len(centers)),
+	}
+	for id, c := range centers {
+		rs.roots[id] = rootFromCartesian(c, origin)
+	}
+	return rs
+}
+
+// world recovers a node's world Cartesian position from its root.
+func (rs rootSet) world(id string) (vec3, bool) {
+	r, ok := rs.roots[id]
+	if !ok {
+		return vec3{}, false
+	}
+	return worldFromRoot(r, rs.origin), true
+}

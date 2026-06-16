@@ -260,6 +260,21 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// below once node construction has populated them.
 	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
 
+	// Polar layout (docs/planning/visual-editor/polar-coordinate-model.md): build
+	// the container prism + per-node outer polar root from the loaded world centers.
+	// Held on the dispatch as the authoritative coordinate for polar move/lock logic;
+	// world positions recover via md.roots.world(id). Cartesian centers above remain
+	// for the existing port/edge geometry until the polar path replaces them.
+	{
+		centers := map[string]vec3{}
+		for id, g := range nodeGeoms {
+			if g.Center != nil {
+				centers[id] = *g.Center
+			}
+		}
+		md.setRoots(buildRoots(centers))
+	}
+
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
 	nodeType := map[string]string{}
 	for _, n := range spec.Nodes {

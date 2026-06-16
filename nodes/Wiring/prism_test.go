@@ -38,6 +38,36 @@ func TestLargeSphereRadius(t *testing.T) {
 	}
 }
 
+// buildRoots: every node's world position is recovered from its root within epsilon.
+func TestBuildRootsRecoversWorld(t *testing.T) {
+	const eps = 1e-9
+	centers := map[string]vec3{
+		"1": {0, 0, 0},
+		"2": {100, -6, 6},
+		"6": {90, -1, -47},
+		"8": {-30, 20, 10},
+	}
+	rs := buildRoots(centers)
+	for id, want := range centers {
+		got, ok := rs.world(id)
+		if !ok {
+			t.Fatalf("no world for %s", id)
+		}
+		if got.sub(want).length() > eps {
+			t.Errorf("node %s world = %v want %v", id, got, want)
+		}
+	}
+	// Origin is the bounding-box center; radius circumscribes all nodes.
+	if rs.origin != rs.prism.center() {
+		t.Errorf("origin %v != prism center %v", rs.origin, rs.prism.center())
+	}
+	for id, want := range centers {
+		if d := want.sub(rs.origin).length(); d > rs.radius+eps {
+			t.Errorf("node %s at %v is outside large sphere radius %v", id, want, rs.radius)
+		}
+	}
+}
+
 // A node's world position survives cartesian→root→cartesian about a prism center.
 func TestRootRoundTrip(t *testing.T) {
 	const eps = 1e-9
