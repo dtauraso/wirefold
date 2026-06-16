@@ -456,17 +456,38 @@ func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
 	// ALL the owner's outgoing edges, every node on the owner's surface (not just the
 	// dragged one) relaxes to the new radius — the sphere resizes and its whole surface
 	// follows. The rest of the graph still flexes around the pinned nodes.
+	setR := func(id string, r float64) {
+		radius[id] = r
+		if om := md.nodeMovers[id]; om != nil {
+			rr := r
+			om.geom.R = &rr // persist
+		}
+	}
 	pinned := map[string]bool{nodeID: true}
+	ownerR := map[string]float64{}
 	for _, e := range edges {
 		if e.Target == nodeID && e.Source != "" {
 			pinned[e.Source] = true
 			if c, ok := centers[e.Source]; ok {
-				newR := target.sub(c).length()
-				radius[e.Source] = newR
-				if om := md.nodeMovers[e.Source]; om != nil {
-					rr := newR
-					om.geom.R = &rr // persist the resized radius
-				}
+				ownerR[e.Source] = target.sub(c).length()
+			}
+		}
+	}
+	for o, r := range ownerR {
+		setR(o, r)
+	}
+	// A mutual pair (O<->M: both O->M and M->O exist, e.g. the 1<->8 feedback ring) must
+	// keep BOTH edge rest lengths equal or they fight. When O's sphere resizes, set M's
+	// own R to O's new R so M follows O's surface instead of being frozen by its back
+	// edge — both ends of the pair shrink/grow together.
+	have := map[string]bool{}
+	for _, e := range edges {
+		have[e.Source+"\x00"+e.Target] = true
+	}
+	for o, r := range ownerR {
+		for _, e := range edges {
+			if e.Source == o && e.Target != "" && e.Target != nodeID && have[e.Target+"\x00"+o] {
+				setR(e.Target, r)
 			}
 		}
 	}
