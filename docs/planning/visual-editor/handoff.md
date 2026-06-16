@@ -8,9 +8,11 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-16 — branch task/spherical-layout — POLAR coordinate model IMPLEMENTED, awaiting live-editor verify, NOT merged)
+## State at handoff (2026-06-16 — POLAR coordinate model MERGED to main)
 
-Context: `main` is at `c123b83e`. Full design: docs/planning/visual-editor/polar-coordinate-model.md.
+Context: `main` includes task/spherical-layout (merge a27ff1ec). The full design doc
+(polar-coordinate-model.md) was branch-local and stripped at merge — recover it from
+the task/spherical-layout branch history if needed.
 
 ### Polar coordinate model — replaces the Cartesian non-rooted layout
 The diagram sits in a large container sphere (center = polar origin = center of the
@@ -49,9 +51,23 @@ constrained inside the large sphere (interaction-controls.ts).
   on-disk format stays world Cartesian, so the 8-node topology needs no file migration.
 - Chord lock is registered in code (lock.go addChordLock); no editor UI to create locks yet.
 
-### Next step
-User verifies in the editor (P6.4, P7.7, P8.4, P2.6). Then merge task/spherical-layout
-(run tools/strip-branch-local-docs.sh first — the spec + this section ride the branch).
+### Open follow-ups (deferred, separate branches)
+- **Roll-axis camera control** — rotation about the axis perpendicular to the view
+  (roll) has little control; long-standing, PRE-EXISTING (not introduced by the polar
+  work). Substance question about the arcball/roll axis (see
+  memory project_interaction_control_is_substance). Deserves its own branch.
+- **Spec-level lock declaration** — the chord lock coupling nodes 2 & 6 is wired by a
+  stopgap id-based registration in loader.go buildFromSpec (only when nodes 1/2/6
+  exist). Replace with a lock declaration in the topology spec so locks are data, not
+  hardcoded ids.
+- **nodeGeom.Center removal** — Center is still the derived render/geometry coordinate
+  (port/edge arc math reads it). Fully polar would rederive all port/edge geometry from
+  roots; larger follow-up, intentionally out of scope here.
+
+### Status
+MERGED to main (2026-06-16). Polar coordinate model live; all 52 plan tasks done;
+editor-verified (render, chord lock, camera nav, load positions). go build/test, tsc,
+vitest, npm build, all 8 guards green.
 
 ### Recently shipped to main (newest first)
 - **Node pick respects occlusion** (task/pick-occlusion): selecting/hovering a node now returns the FRONTMOST node body the cursor ray actually hits (true nearest-hit occlusion). Root cause: the node body sphere mesh had no nodeId tag, so a body hit was mapped to a node by scanning node positions for matching x,y ONLY (ignoring z) — so a node directly BEHIND another (same screen x,y, deeper z, e.g. node 7 behind node 3 after a depth drag) resolved to the front node. Fix: tag each body sphere with userData.nodeId and resolve the hit directly (z-aware); same path serves hover-highlight and click. File: tools/topology-vscode/src/webview/three/scene-content.tsx.
