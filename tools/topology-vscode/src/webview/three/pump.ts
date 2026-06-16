@@ -112,6 +112,8 @@ export function handleTraceEvent(event: TraceEvent): void {
         { x: e.nx, y: e.ny, z: e.nz },
         e.radius,
         e.sphereR ?? e.radius,
+        e.vrx, e.vry, e.vrz,
+        e.frx, e.fry, e.frz,
         e.ports.map((p) => ({
           name: p.name,
           isInput: p.isInput,
