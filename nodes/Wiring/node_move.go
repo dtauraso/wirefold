@@ -435,56 +435,38 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	}
 }
 
-// SphereDrag handles a node-drag under the non-rooted layout: it pins the dragged node
-// at the world-space target and radially scales every co-sphere sibling to keep each
-// edge's rest length. The fresh centers are fanned out to every node/edge mover (which
-// re-emit their own geometry). Returns true (unknown node ⇒ false).
-func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
+// RootMove handles a node-drag under the polar layout
+// (docs/planning/visual-editor/polar-coordinate-model.md): the dragged node's
+// OUTER POLAR ROOT is the single authority. The world-space target converts to a
+// root (about the container origin); only THAT node's root + center change (soft
+// membership — no other node moves). Every center the node sits on recomputes its
+// reach radius on the fresh positions so its ring grows around the node, and those
+// centers are re-emitted (center unchanged, ReachR updated). Returns false for an
+// unknown node.
+func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
+	// Authority: update the dragged node's root. Center is the derived world value.
+	md.roots.roots[nodeID] = rootFromCartesian(target, md.roots.origin)
+
 	centers := md.heldCenters()
 	edges := md.heldEdges()
-	// ONLY the surface nodes of the dragged node's sphere(s) move. The dragged node goes
-	// to the cursor, which sets each owner sphere's radius to the new distance; every
-	// OTHER surface node of that sphere moves RADIALLY to the new radius (keeping its
-	// direction from the center). The sphere CENTER (owner) and every node not on the
-	// sphere keep their positions. No relaxation / flex of the rest of the graph.
-	centers[nodeID] = target
-	setR := func(id string, r float64) {
-		if om := md.nodeMovers[id]; om != nil {
-			rr := r
-			om.geom.R = &rr // persist the resized radius
-		}
-	}
-	for _, e := range edges {
-		if e.Target != nodeID || e.Source == "" {
-			continue // only edges INTO the dragged node identify the spheres it sits on
-		}
-		o := e.Source // sphere center
-		oc, ok := centers[o]
-		if !ok {
-			continue
-		}
-		R := target.sub(oc).length() // new sphere radius = center → dragged-node distance
-		setR(o, R)
-		for _, se := range edges {
-			if se.Source != o || se.Target == "" || se.Target == nodeID {
-				continue // o's other surface nodes (its outgoing-edge targets)
-			}
-			cc, ok := centers[se.Target]
-			if !ok {
-				continue
-			}
-			dir := cc.sub(oc)
-			if dir.length() < 1e-9 {
-				continue
-			}
-			centers[se.Target] = oc.add(dir.normalize().scale(R)) // radial scale to new R
-		}
-	}
+	centers[nodeID] = target // soft membership: only the dragged node moves
 	reach := reachRFromCenters(centers, edges)
-	md.fanCenters(centers, reach)
+
+	// Fan: the moved node (new center) plus each center it is a surface node of
+	// (center unchanged, reach grew). reachRFromCenters already used the new
+	// position, so the re-emitted ReachR reflects the grown sphere.
+	emit := map[string]vec3{nodeID: target}
+	for _, e := range edges {
+		if e.Target == nodeID && e.Source != "" {
+			if c, ok := centers[e.Source]; ok {
+				emit[e.Source] = c
+			}
+		}
+	}
+	md.fanCenters(emit, reach)
 	return true
 }
 
