@@ -3,6 +3,7 @@
 // Single-pointer empty-space drag (arcball rotation) and dwell→PanPad are removed.
 
 import { useRef, useCallback } from "react";
+import type React from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
@@ -61,6 +62,13 @@ function constrainInsideLargeSphere(cam: THREE.PerspectiveCamera, R: number): vo
     cam.updateMatrixWorld(true);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Exported HUD constants
+// ---------------------------------------------------------------------------
+
+/** Turntable deadzone half-window in pixels — also used by RotateHud to draw strips/rings. */
+export const ROT_HUD_WIN_PX = 24;
 
 // ---------------------------------------------------------------------------
 // Gesture discrimination constants
@@ -134,6 +142,11 @@ export function useInteractionControls(
   edgesRef: React.MutableRefObject<RFEdge<EdgeData>[]>,
   targetRef: React.MutableRefObject<THREE.Vector3>,
 ) {
+  // HUD state ref — written by pointer handlers, polled by RotateHud each frame.
+  const rotHudRef = useRef<{ active: boolean; x: number; y: number; mode: "turntable" | "roll" }>({
+    active: false, x: 0, y: 0, mode: "turntable",
+  });
+
   const state = useRef<ControlState>({
     phase: "idle",
     downX: 0, downY: 0, downTime: 0,
@@ -515,6 +528,7 @@ export function useInteractionControls(
           s.rollAccum = 0;
           s.lastStepX = e.clientX; s.lastStepY = e.clientY;
           s.hasVec = false; s.straightCount = 0;
+          rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: "turntable" };
         }
       }
 
@@ -575,7 +589,7 @@ export function useInteractionControls(
           const pivot = s.arcballPivot;
           const ROT_SPEED = 0.005;
           // Roll gesture tuning (re-classifying state machine with hysteresis):
-          const WIN_PX = 24;          // turntable deadzone half-window; leave BOTH -> roll
+          const WIN_PX = ROT_HUD_WIN_PX; // turntable deadzone half-window; leave BOTH -> roll
           const MIN_STEP_PX = 3;      // min segment to compute a stable tangent (jitter gate)
           const STRAIGHT_TURN = 0.18; // |path turn| below this (rad) = a "straight" step
           const STRAIGHT_RUN = 4;     // consecutive straight steps cancel roll -> turntable
@@ -611,14 +625,18 @@ export function useInteractionControls(
               if (Math.abs(e.clientX - s.anchorX) > WIN_PX && Math.abs(e.clientY - s.anchorY) > WIN_PX) {
                 reanchor();
                 s.rotMode = "roll"; s.rollAccum = 0; s.straightCount = 0;
+                rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: "roll" };
               }
             } else if (s.straightCount >= STRAIGHT_RUN) {
               // Sustained straight run -> back to turntable; re-arm windows here.
               reanchor();
               s.rotMode = "turntable";
               s.anchorX = e.clientX; s.anchorY = e.clientY; s.straightCount = 0;
+              rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: "turntable" };
             }
           }
+          // Update HUD position each frame while rotating.
+          rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: s.rotMode };
 
           // Apply the current mode's rotation, anchored to the segment-start snapshot.
           let rotInv: THREE.Quaternion;
@@ -718,6 +736,7 @@ export function useInteractionControls(
 
       // Arcball rotation completed: reset state without triggering select.
       if (s.phase === "rotating") {
+        rotHudRef.current = { ...rotHudRef.current, active: false };
         nodeDragRef.current = null;
         s.phase = "idle";
         return;
@@ -846,5 +865,5 @@ export function useInteractionControls(
     [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef],
   );
 
-  return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
+  return { onPointerDown, onPointerMove, onPointerUp, onWheelNative, rotHudRef };
 }
