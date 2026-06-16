@@ -131,31 +131,6 @@ fold the handoff update into that task branch.
 
 Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.
 
-## Delegation
-
-**When to delegate (apply each prompt):** delegation is the default, not the exception.
-
-- More than ~2 read-only lookups on a topic → spawn an `Explore` subagent with `model: "haiku"`.
-- A clear, scoped edit spec (rename, flag removal, mechanical refactor) → spawn a general-purpose subagent with `model: "sonnet"`.
-- A single targeted Read/grep with a known path → just do it inline; delegation overhead isn't worth it.
-- **Main session never writes.** Every `Edit`, `Write`, or scripting `Bash` call goes to a subagent. Main session outputs prose, decisions, and dispatch prompts only.
-
-If the main session catches itself doing executor-style work, that's a miss — note it and route the next similar task to a subagent.
-
-**Verification runs (sim / anything that can block):** do NOT delegate a single run-and-grep verification, and never run the sim in the foreground. The sim (`./wirefold …`) and anything parked on a halted clock / paced wire can fail to exit, so a foreground call blocks until the harness limit (this hung a subagent for 13 min). Run it **backgrounded** (the runtime streams the trace live and re-invokes you on exit), or wrap any potentially-blocking command in `tools/run-bounded.sh <seconds> <cmd…>` (macOS has no `timeout`). Keep run-and-grep checks in the main session where you control backgrounding/kill; delegate only the editing. Capture geometry/startup events from the streamed trace file rather than waiting on process exit.
-
-**Model routing:**
-
-| Work type | Model |
-|---|---|
-| File scans, log/grep, reading session-log or memory to surface a fact, simple multi-file finds, running deterministic audit scripts | `haiku` |
-| Mechanical edits with a clear spec, refactors inside a single file, writing tests against an existing pattern, doc updates, running CI-backed audits (1–3) when red and triaging output, follow-up fixes from audit findings | `sonnet` |
-| Planning a new task branch, judgment-heavy audits (6 security, 9 complexity, 10 architecture, 19 reading-trip economy), debugging non-obvious behavior, designing spec/view split when adding fields | Opus (default) |
-
-Apply via `Agent({ model: "sonnet", ... })` or by spawning a subagent of the matching kind. If unsure, downshift first and escalate only if the cheaper model produces poor output — the cost asymmetry favors trying cheap first.
-
-**Prompt style (~15 lines):** one-line goal; files to read (paths only); bulleted concrete edits with `file:line` when known; one-line verify command; one-line constraints (branch, no merge, no amend, push or not). Skip rationale paragraphs, alternative-considerations, and "if ambiguous…" hedging — the agent will ask if blocked.
-
 ## Language / runtime
 
 Go 1.23.0 — `github.com/dtauraso/wirefold`

@@ -11,7 +11,7 @@ import os
 import re
 import sys
 
-THRESHOLD = 1  # block on the (THRESHOLD+1)th call
+THRESHOLD = 8  # block on the (THRESHOLD+1)th call
 SEARCH_VERBS = re.compile(r"^\s*(grep|rg|find|ls|cat|head|tail|awk|sed)\b")
 
 def counter_path(session_id: str) -> str:
