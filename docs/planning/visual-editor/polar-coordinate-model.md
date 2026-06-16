@@ -189,21 +189,27 @@ R** are *derived on read*, computed from roots when something needs them
 push/sync logic exists. Every edit — outside drag or surface move — ultimately
 writes the moved node's **root**; surface coords and R are recomputed lazily.
 
-**Soft membership.** A center's sphere R is a **reach radius that grows around**
-its surface nodes — it never pins them. Surface nodes keep their own
-independent roots; resizing a sphere does **not** move other nodes.
+**Co-sphere radius coupling (surface nodes are equidistant).** "On the surface"
+means every surface node of a center is at the same distance R from it — they all
+lie ON the sphere. Dragging a surface node *resizes the sphere*: the new R is the
+dragged node's distance to the center, and every OTHER surface node of that center
+moves RADIALLY to the new R, keeping its own direction from the center. (Earlier
+this was "soft membership" — R = max distance, siblings independent — but then
+dragging an inner node couldn't shrink a sphere pinned by its farthest node; the
+correct meaning of "on the surface" is equidistant.)
 
-Consequence — moving a node is bounded, no cascade:
+Bounded, no runaway cascade:
 
-- Move node 5 → write 5's root.
-- The centers 5 sits on (4 and 6) recompute their R on next read, each over
-  *its own* surface set — O(surface nodes of 4) + O(surface nodes of 6).
-- Nothing else moves. No other root changes; the 8↔1 feedback ring cannot
-  cascade or loop, because a size change never propagates into positions.
+- Move a surface node X of center C → set R = dist(C, X) → scale C's other surface
+  nodes to R along their own directions. Applied ONCE for X's centers; siblings are
+  moved directly, NOT re-recursed through RootMove.
+- Each moved sibling's OWN sphere R is still derive-on-read (recomputed when drawn),
+  so it grows around its nodes without moving them. The 8↔1 feedback ring therefore
+  cannot loop: coupling acts one level (C's surface), never recursing into the
+  siblings' spheres.
 
-This is the property the model exists to preserve: a move touches exactly one
-root; everything else is bounded derive-on-read. Hard membership (R pinning its
-nodes) was rejected here — it reintroduces the relaxation-solver cascade.
+Chord lock composes on top: after radial coupling, a chord-locked follower (node 6)
+is set to mirror_φ(leader) (node 2) — same R, mirrored angle.
 
 ## 8. What this replaces
 

@@ -440,22 +440,49 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// Authority: update the dragged node's root. Center is the derived world value.
 	md.roots.roots[nodeID] = rootFromCartesian(target, md.roots.origin)
 
-	centers := md.heldCenters()
 	edges := md.heldEdges()
-	centers[nodeID] = target // soft membership: only the dragged node moves
-	reach := reachRFromCenters(centers, edges)
-
-	// Fan: the moved node (new center) plus each center it is a surface node of
-	// (center unchanged, reach grew). reachRFromCenters already used the new
-	// position, so the re-emitted ReachR reflects the grown sphere.
 	emit := map[string]vec3{nodeID: target}
+
+	// CO-SPHERE RADIUS COUPLING: every surface node of a sphere is equidistant from
+	// the center (on the sphere). Dragging a surface node resizes the sphere — its
+	// new radius is the dragged node's distance to the center — and every OTHER
+	// surface node of that sphere moves RADIALLY to the new radius, keeping its own
+	// direction from the center. Applied once for the dragged node's centers (siblings
+	// are moved directly, not re-recursed), so the 8↔1 ring cannot cascade.
 	for _, e := range edges {
-		if e.Target == nodeID && e.Source != "" {
-			if c, ok := centers[e.Source]; ok {
-				emit[e.Source] = c
-			}
+		if e.Target != nodeID || e.Source == "" {
+			continue // only edges INTO the dragged node identify the spheres it sits on
 		}
+		cw, ok := md.roots.world(e.Source)
+		if !ok {
+			continue
+		}
+		newR := target.sub(cw).length()
+		for _, se := range edges {
+			if se.Source != e.Source || se.Target == "" || se.Target == nodeID {
+				continue // other surface nodes of this center
+			}
+			yw, ok := md.roots.world(se.Target)
+			if !ok {
+				continue
+			}
+			dir := yw.sub(cw)
+			if dir.length() < 1e-9 {
+				continue
+			}
+			ny := cw.add(dir.normalize().scale(newR))
+			md.roots.roots[se.Target] = rootFromCartesian(ny, md.roots.origin)
+			emit[se.Target] = ny
+		}
+		emit[e.Source] = cw // re-emit the center so its ring re-sizes
 	}
+
+	// Recompute every center's reach over the updated positions and fan all movers.
+	centers := md.heldCenters()
+	for id, w := range emit {
+		centers[id] = w
+	}
+	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
 	md.applyLocks(nodeID)
 	return true

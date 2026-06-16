@@ -85,20 +85,27 @@ func TestRootMoveDraggedNodeLandsAtTarget(t *testing.T) {
 	}
 }
 
-func TestRootMoveTouchesOneRootOnly(t *testing.T) {
+// Co-sphere radius coupling: dragging surface node A out to radius 10 scales the
+// other surface node B of center C radially to the same radius (keeping B's
+// direction); the center C and the isolated node N stay put.
+func TestRootMoveCouplesSurfaceSiblings(t *testing.T) {
 	md, cancel := buildRootMoveFixture()
 	defer cancel()
-	before := map[string]vec3{}
-	for id := range md.roots.roots {
-		w, _ := md.roots.world(id)
-		before[id] = w
+	const eps = 1e-6
+	md.RootMove("A", vec3{X: 10, Y: 0, Z: 0}) // newR = 10
+	// B was at (0,5,0), dir (0,1,0) → scaled to radius 10 → (0,10,0).
+	wB, _ := md.roots.world("B")
+	if wB.sub(vec3{0, 10, 0}).length() > eps {
+		t.Errorf("B = %v want (0,10,0) (radially scaled to new radius)", wB)
 	}
-	md.RootMove("A", vec3{X: 10, Y: 0, Z: 0})
-	for _, id := range []string{"B", "C", "N"} {
-		w, _ := md.roots.world(id)
-		if w.sub(before[id]).length() > 1e-9 {
-			t.Errorf("node %s moved (%v -> %v); soft membership should keep it put", id, before[id], w)
-		}
+	// Center C and isolated N unchanged.
+	wC, _ := md.roots.world("C")
+	if wC.sub(vec3{0, 0, 0}).length() > eps {
+		t.Errorf("center C moved to %v; should stay at origin", wC)
+	}
+	wN, _ := md.roots.world("N")
+	if wN.sub(vec3{20, 0, 0}).length() > eps {
+		t.Errorf("isolated N moved to %v; should stay put", wN)
 	}
 }
 
