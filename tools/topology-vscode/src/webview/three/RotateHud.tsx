@@ -21,8 +21,10 @@ const COLOR_BRIGHT = "rgba(120,200,255,0.55)";
 interface RotateHudProps {
   rotHudRef: React.MutableRefObject<{
     active: boolean;
-    x: number;
+    x: number;  // anchor (deadzone-window center, client coords) — strips
     y: number;
+    mx: number; // live pointer (client coords) — roll rings follow it
+    my: number;
     mode: "turntable" | "roll";
   }>;
   containerRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -99,11 +101,14 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
       svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
 
       const isTurntable = hud.mode === "turntable";
-      const stripColor = isTurntable ? COLOR_BRIGHT : COLOR_DIM;
-      const ringColor = isTurntable ? COLOR_DIM : COLOR_BRIGHT;
+      const HIDDEN = "rgba(0,0,0,0)";
       const halfW = ROT_HUD_WIN_PX;
+      // Live pointer (container-relative): the roll rings follow it.
+      const mx = hud.mx - rect.left;
+      const my = hud.my - rect.top;
 
-      // Horizontal strip: full-width rect centered at cy.
+      // Strips: shown ONLY in turntable, centered on the anchor. They VANISH in roll.
+      const stripColor = isTurntable ? COLOR_BRIGHT : HIDDEN;
       const hStrip = hStripRef.current!;
       hStrip.setAttribute("x", "0");
       hStrip.setAttribute("y", String(cy - halfW));
@@ -111,7 +116,6 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
       hStrip.setAttribute("height", String(halfW * 2));
       hStrip.setAttribute("fill", stripColor);
 
-      // Vertical strip: full-height rect centered at cx.
       const vStrip = vStripRef.current!;
       vStrip.setAttribute("x", String(cx - halfW));
       vStrip.setAttribute("y", "0");
@@ -119,10 +123,13 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
       vStrip.setAttribute("height", String(H));
       vStrip.setAttribute("fill", stripColor);
 
-      // Concentric rings.
+      // Concentric rings: shown ONLY in roll, centered on the LIVE pointer so they
+      // re-center as the mouse drifts (a new circle is "made" wherever it goes —
+      // smaller circle = tighter curl = faster roll, from the turning-integration math).
+      const ringColor = isTurntable ? HIDDEN : COLOR_BRIGHT;
       const setRing = (el: SVGCircleElement, r: number) => {
-        el.setAttribute("cx", String(cx));
-        el.setAttribute("cy", String(cy));
+        el.setAttribute("cx", String(mx));
+        el.setAttribute("cy", String(my));
         el.setAttribute("r", String(r));
         el.setAttribute("stroke", ringColor);
       };

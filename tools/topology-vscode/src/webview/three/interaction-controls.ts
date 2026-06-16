@@ -143,8 +143,8 @@ export function useInteractionControls(
   targetRef: React.MutableRefObject<THREE.Vector3>,
 ) {
   // HUD state ref — written by pointer handlers, polled by RotateHud each frame.
-  const rotHudRef = useRef<{ active: boolean; x: number; y: number; mode: "turntable" | "roll" }>({
-    active: false, x: 0, y: 0, mode: "turntable",
+  const rotHudRef = useRef<{ active: boolean; x: number; y: number; mx: number; my: number; mode: "turntable" | "roll" }>({
+    active: false, x: 0, y: 0, mx: 0, my: 0, mode: "turntable",
   });
 
   const state = useRef<ControlState>({
@@ -528,7 +528,7 @@ export function useInteractionControls(
           s.rollAccum = 0;
           s.lastStepX = e.clientX; s.lastStepY = e.clientY;
           s.hasVec = false; s.straightCount = 0;
-          rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: "turntable" };
+          rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "turntable" };
         }
       }
 
@@ -625,18 +625,19 @@ export function useInteractionControls(
               if (Math.abs(e.clientX - s.anchorX) > WIN_PX && Math.abs(e.clientY - s.anchorY) > WIN_PX) {
                 reanchor();
                 s.rotMode = "roll"; s.rollAccum = 0; s.straightCount = 0;
-                rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: "roll" };
+                rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "roll" };
               }
             } else if (s.straightCount >= STRAIGHT_RUN) {
               // Sustained straight run -> back to turntable; re-arm windows here.
               reanchor();
               s.rotMode = "turntable";
               s.anchorX = e.clientX; s.anchorY = e.clientY; s.straightCount = 0;
-              rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: "turntable" };
+              rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "turntable" };
             }
           }
-          // Update HUD position each frame while rotating.
-          rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mode: s.rotMode };
+          // Update HUD each frame: strips at the anchor (window center), rings follow
+          // the live pointer.
+          rotHudRef.current = { active: true, x: s.anchorX, y: s.anchorY, mx: e.clientX, my: e.clientY, mode: s.rotMode };
 
           // Apply the current mode's rotation, anchored to the segment-start snapshot.
           let rotInv: THREE.Quaternion;
