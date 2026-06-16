@@ -14,6 +14,12 @@ export interface InputData {
   repeat: boolean;
 }
 
+export interface PacerData {
+  state: {
+    held: number;
+  };
+}
+
 // parseNodeData validates node.data for known kinds. Unknown kinds pass through.
 // Throws ParseError if the data shape does not match the Go struct.
 export function parseNodeData(kind: string, data: unknown, path: string): unknown {
@@ -30,6 +36,12 @@ export function parseNodeData(kind: string, data: unknown, path: string): unknow
       const d = data as Record<string, unknown>;
     if (!Array.isArray(d["init"]) || !(d["init"] as unknown[]).every((x) => typeof x === "number")) throw new ParseError(path+".data.init: expected number[]");
     if (typeof d["repeat"] !== "boolean") throw new ParseError(path+".data.repeat: expected boolean");
+      return data;
+    }
+    case "Pacer": {
+      if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
+      const d = data as Record<string, unknown>;
+    { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.state.held: expected number"); }
       return data;
     }
     default:

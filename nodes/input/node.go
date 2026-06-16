@@ -29,6 +29,10 @@ type Node struct {
 	// optional: when unwired (Wired()==false) the emit is skipped so existing
 	// topologies without an Excitatory are unaffected.
 	ToExcitatory *Wiring.Out
+	// ToPacer fans the emitted value out to a Pacer node (sample-and-hold,
+	// change-step feedback). Optional: when unwired (Wired()==false) the emit
+	// is skipped so existing topologies without a Pacer are unaffected.
+	ToPacer    *Wiring.Out
 	FeedbackIn  *Wiring.In
 }
 
@@ -111,6 +115,10 @@ func (n *Node) Update(ctx context.Context) {
 				wg.Add(1)
 				go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
 			}
+			if n.ToPacer.Wired() {
+				wg.Add(1)
+				go func() { defer wg.Done(); n.ToPacer.EmitOneDriven(ctx, v) }()
+			}
 			wg.Wait()
 
 			// READ: block until Inhibitor sends the step on FeedbackIn.
@@ -160,6 +168,10 @@ func (n *Node) Update(ctx context.Context) {
 		if n.ToExcitatory.Wired() {
 			wg.Add(1)
 			go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
+		}
+		if n.ToPacer.Wired() {
+			wg.Add(1)
+			go func() { defer wg.Done(); n.ToPacer.EmitOneDriven(ctx, v) }()
 		}
 		wg.Wait()
 		emitted++

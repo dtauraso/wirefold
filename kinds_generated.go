@@ -7,5 +7,6 @@ import (
 	_ "github.com/dtauraso/wirefold/nodes/holdflip"
 	_ "github.com/dtauraso/wirefold/nodes/inhibitor"
 	_ "github.com/dtauraso/wirefold/nodes/input"
+	_ "github.com/dtauraso/wirefold/nodes/pacer"
 	_ "github.com/dtauraso/wirefold/nodes/windowandgate"
 )
