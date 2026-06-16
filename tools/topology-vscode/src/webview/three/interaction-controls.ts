@@ -109,6 +109,9 @@ export interface ControlState {
   anchorY: number;
   rollAccum: number;             // signed roll angle this segment (radians)
   rollPrevAngle: number;         // last pointer angle around the anchor (for angular sweep)
+  rotPhase: "neutral" | "turntable" | "roll"; // 3-state classifier vs the square deadzone
+  turnStartX: number;            // adx/ady captured on entering turntable (no edge jump)
+  turnStartY: number;
   lastStepX: number;             // last min-step-gated pointer sample
   lastStepY: number;
   lastVecX: number;              // last gated motion vector (for turning angle)
@@ -160,6 +163,7 @@ export function useInteractionControls(
     rotMode: "turntable",
     anchorX: 0, anchorY: 0,
     rollAccum: 0, rollPrevAngle: 0,
+    rotPhase: "neutral", turnStartX: 0, turnStartY: 0,
     lastStepX: 0, lastStepY: 0,
     lastVecX: 0, lastVecY: 0, hasVec: false,
     straightCount: 0,
@@ -606,45 +610,59 @@ export function useInteractionControls(
           // outside both strips (the ring region) = roll. The anchor (ring center) is
           // FIXED during roll; it re-arms only when the mouse returns to a strip — so the
           // circles don't move until the mouse leaves the striped areas again.
+          // The pointer is treated as a SQUARE deadzone (half-side WIN_PX) around the
+          // anchor. Inside the square = NEUTRAL (jitter ignored, no rotation). Leave it
+          // through ONE side = single-axis turntable (left/right = yaw, up/down = pitch —
+          // only one direction at a time). Leave it through a CORNER (both axes) = roll.
           const adx = e.clientX - s.anchorX;
           const ady = e.clientY - s.anchorY;
-          const inStrip = Math.abs(adx) <= WIN_PX || Math.abs(ady) <= WIN_PX;
-          if (s.rotMode === "turntable" && !inStrip) {
+          const xOut = Math.abs(adx) > WIN_PX;
+          const yOut = Math.abs(ady) > WIN_PX;
+          const phase: "neutral" | "turntable" | "roll" =
+            xOut && yOut ? "roll" : (xOut || yOut ? "turntable" : "neutral");
+
+          // On a phase change, re-snapshot the camera (jump-free) and capture the entry
+          // reference so each phase starts from zero rotation at the edge it crossed.
+          if (phase !== s.rotPhase) {
             reanchor();
-            s.rotMode = "roll";
-            s.rollAccum = 0;
-            s.rollPrevAngle = Math.atan2(ady, adx);
-          } else if (s.rotMode === "roll" && inStrip) {
-            reanchor();
-            s.rotMode = "turntable";
-            s.anchorX = e.clientX; s.anchorY = e.clientY;
+            if (phase === "roll") {
+              s.rollAccum = 0;
+              s.rollPrevAngle = Math.atan2(ady, adx);
+            } else if (phase === "turntable") {
+              s.turnStartX = adx;
+              s.turnStartY = ady;
+            }
+            s.rotPhase = phase;
           }
 
+          // HUD mode: roll shows rings, neutral+turntable show the strips.
+          s.rotMode = phase === "roll" ? "roll" : "turntable";
           rotHudRef.current = { active: true, x: s.anchorX, y: s.anchorY, mx: e.clientX, my: e.clientY, mode: s.rotMode };
 
           let rotInv: THREE.Quaternion;
-          if (s.rotMode === "roll") {
-            // Roll = angular sweep of the pointer AROUND THE ANCHOR, applied about the
-            // view (forward) axis. Smaller circle = less travel per angle = faster roll.
-            const r = Math.hypot(adx, ady);
-            if (r >= WIN_PX) {
-              const ang = Math.atan2(ady, adx);
-              let d = ang - s.rollPrevAngle;
-              if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
-              s.rollAccum += d * ROLL_SPEED;
-              s.rollPrevAngle = ang;
-            }
+          if (phase === "roll") {
+            // Roll = angular sweep of the pointer AROUND THE ANCHOR, about the view axis.
+            // Smaller circle = less travel per angle = faster roll.
+            const ang = Math.atan2(ady, adx);
+            let d = ang - s.rollPrevAngle;
+            if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+            s.rollAccum += d * ROLL_SPEED;
+            s.rollPrevAngle = ang;
             const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(s.arcStartQuat);
             rotInv = new THREE.Quaternion().setFromAxisAngle(fwd, s.rollAccum);
-          } else {
-            // Turntable: yaw about world up, pitch about the camera's right axis,
-            // anchored to the (re-armable) strip center.
-            const angY = adx * ROT_SPEED;
-            const angX = ady * ROT_SPEED;
+          } else if (phase === "turntable") {
+            // Single axis only: horizontal -> yaw (world up), vertical -> pitch (camera
+            // right). Measured from the entry edge so there is no jump.
+            let angY = 0, angX = 0;
+            if (xOut) angY = (adx - s.turnStartX) * ROT_SPEED;
+            else angX = (ady - s.turnStartY) * ROT_SPEED;
             const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
             const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
             const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
             rotInv = qy.clone().multiply(qx).invert();
+          } else {
+            // Neutral (inside the square): no rotation.
+            rotInv = new THREE.Quaternion();
           }
           cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
