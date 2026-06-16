@@ -719,30 +719,35 @@ export function useInteractionControls(
         // out. MIN_DIST floors |offset| so the camera never reaches/crosses target.
         //
         // RE-AIM: before zooming, snap the persistent target onto the NODE NEAREST
-        // THE SCREEN CENTER — the node most in view — rather than the node under the
-        // cursor. Project each node's world center to NDC and pick the one with the
-        // smallest distance from NDC center (0,0). This always selects a real node
-        // (never an edge, never null, never an occluding neighbor), so a centered
-        // focus makes the multiplicative zoom converge straight in with no sideways
-        // drift. If no node is finite/in-front, we leave targetRef as-is and zoom
-        // toward the existing persistent focus — no z=0 plane dependency either way.
-        let centerNode: string | null = null;
-        let centerNdcDist = Infinity;
-        let centerPos: THREE.Vector3 | null = null;
+        // THE CURSOR — zoom in toward the node the mouse is on. Convert the pointer to
+        // NDC, project each node's world center to NDC, and pick the one with the
+        // smallest distance from the cursor's NDC. This always selects a real node
+        // (never an edge, never null, never an occluding neighbor), and zooming toward
+        // it keeps that node under the cursor. If no node is finite/in-front, we leave
+        // targetRef as-is and zoom toward the existing persistent focus — no z=0 plane
+        // dependency either way.
+        const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
+        const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
+        let cursorNode: string | null = null;
+        let cursorNdcDist = Infinity;
+        let cursorPos: THREE.Vector3 | null = null;
         for (const n of nodesRef.current) {
           const c = nodeWorldPos(n);
           if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) continue;
           const ndc = c.clone().project(cam);
           if (ndc.z > 1) continue; // behind the camera / beyond far plane
-          const d = Math.sqrt(ndc.x * ndc.x + ndc.y * ndc.y);
-          if (d < centerNdcDist) {
-            centerNdcDist = d;
-            centerNode = n.id;
-            centerPos = c;
+          const dx = ndc.x - mouseNdcX;
+          const dy = ndc.y - mouseNdcY;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < cursorNdcDist) {
+            cursorNdcDist = d;
+            cursorNode = n.id;
+            cursorPos = c;
           }
         }
-        if (centerPos) {
-          targetRef.current.copy(centerPos);
+        if (cursorPos) {
+          targetRef.current.copy(cursorPos);
         }
         const target = ensureTarget(cam);
         const ZOOM_BASE = 1.01;
