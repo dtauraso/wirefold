@@ -235,6 +235,7 @@ export function GraphNode({
   faded,
   selectedId,
   hoveredId,
+  onSphereSurface,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
@@ -242,6 +243,7 @@ export function GraphNode({
   faded: boolean;
   selectedId?: string | null;
   hoveredId?: string | null;
+  onSphereSurface?: boolean;
 }) {
   const envTex = useContext(EnvTexContext);
   // Subscribe reactively so GraphNode re-renders when Go streams node-geometry for
@@ -254,15 +256,19 @@ export function GraphNode({
   const fillHex = node.data?.fill ?? "#ffffff";
   const strokeHex = selected ? "#ffcc00"
     : hovered ? "#aaddff"
+    : onSphereSurface ? "#ffcc00"
     : (node.data?.stroke ?? "#888888");
 
   // Memoize THREE.Color objects to avoid allocating on every render.
   const fillColor = useMemo(() => new THREE.Color(fillHex), [fillHex]);
   const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
   const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
-  const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
+  const emissiveStroke = useMemo(
+    () => new THREE.Color((!selected && onSphereSurface) ? "#ffcc00" : 0x000000),
+    [selected, onSphereSurface],
+  );
 
-  const torusThick = (selected || hovered) ? r * 0.14 : r * 0.08;
+  const torusThick = (selected || hovered || (!selected && onSphereSurface)) ? r * 0.14 : r * 0.08;
   const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
   return (
@@ -292,7 +298,7 @@ export function GraphNode({
           key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}
-          emissiveIntensity={0}
+          emissiveIntensity={(!selected && onSphereSurface) ? 0.6 : 0}
           transparent={faded}
           opacity={faded ? fadeOpacity : 1}
         />
@@ -1167,6 +1173,12 @@ export function Scene({
   onCameraSettle: () => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  // Nodes on the visible sphere's surface = the selected node's outgoing-edge
+  // targets (its children sit on its sphere at radius R). Highlighted while the
+  // sphere is shown. Empty set otherwise (no highlight).
+  const surfaceIds = (showSphere && selectedId)
+    ? new Set(edges.filter((e) => e.source === selectedId).map((e) => e.target))
+    : new Set<string>();
   const hasRestoredCamera = initialCamera3d !== undefined;
   return (
     <ProceduralEnvProvider>
@@ -1187,6 +1199,7 @@ export function Scene({
           faded={!!n.data?.faded}
           selectedId={selectedId}
           hoveredId={hoveredId}
+          onSphereSurface={surfaceIds.has(n.id)}
         />
       ))}
       {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
