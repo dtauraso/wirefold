@@ -418,8 +418,8 @@ export function SphereRing({
 
   // Two perpendicular great-circle rings so the sphere reads as a sphere:
   // the first lies in XY (torusGeometry's default plane), the second is
-  // rotated 90° about X into the XZ plane. Both share radius/tube/material,
-  // and both carry the sphere userData so clicking either ring selects the sphere.
+  // rotated 90° about X into the XZ plane. Both share radius/tube/material.
+  // The rings are visual-only (not selectable) — see the raycast disable below.
   const ringMat = (
     <meshStandardMaterial
       color={ringColor}
@@ -431,16 +431,16 @@ export function SphereRing({
     />
   );
 
+  // The tori are visual-only: raycast disabled so they never intercept a pick
+  // (clicks pass through to the nodes behind them). The sphere is not selectable.
+  const noRaycast = () => null;
   return (
     <group position={[center.x, center.y, center.z]}>
-      <mesh userData={{ sphereSurface: true, sphereNodeId: selNode.id }}>
+      <mesh raycast={noRaycast}>
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
-      <mesh
-        rotation={[Math.PI / 2, 0, 0]}
-        userData={{ sphereSurface: true, sphereNodeId: selNode.id }}
-      >
+      <mesh rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
