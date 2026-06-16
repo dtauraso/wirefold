@@ -1119,6 +1119,7 @@ export function Scene({
   nodes,
   edges,
   selectedId,
+  sphereMode,
   hoveredId,
   cameraRef,
   initialCamera3d,
@@ -1130,6 +1131,7 @@ export function Scene({
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
+  sphereMode: "surface" | "own";
   hoveredId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   initialCamera3d?: Camera3D;
@@ -1141,25 +1143,25 @@ export function Scene({
   onCameraSettle: () => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  // Nodes on the visible sphere's surface = the selected node's outgoing-edge
-  // targets (its children sit on its sphere at radius R). Highlighted while the
-  // sphere is shown. Empty set otherwise (no highlight).
-  // On selection, show every sphere the node touches: its OWN sphere (where it is the
-  // center) PLUS every sphere whose center outputs to it (the spheres it sits on the
-  // surface of — its incoming-edge sources; one node can be on several, e.g. node 5 on
-  // both 4 and 6). For each owner we draw its sphere and highlight the owner (center)
-  // plus all nodes on its surface (the owner's children). Owners that center no sphere
-  // (no outgoing edge) draw nothing but still contribute their own highlight.
-  const sphereOwners = selectedId
-    ? Array.from(
-        new Set<string>([
-          selectedId,
-          ...edges
-            .filter((e) => e.target === selectedId && e.source)
-            .map((e) => e.source as string),
-        ]),
-      )
-    : [];
+  // Sphere owners depend on the click kind (sphereMode):
+  //   "surface" (single click): the spheres the node sits ON the surface of — every
+  //     sphere whose center outputs to it (its incoming-edge sources; one node can be
+  //     on several, e.g. node 5 on both 4 and 6).
+  //   "own" (two-finger click): just the node's OWN sphere (where it is the center).
+  // For each owner we draw its sphere and highlight the owner (center) plus all nodes
+  // on its surface (the owner's children). Owners that center no sphere (no outgoing
+  // edge) draw nothing but still contribute their own highlight.
+  const sphereOwners = !selectedId
+    ? []
+    : sphereMode === "own"
+      ? [selectedId]
+      : Array.from(
+          new Set<string>(
+            edges
+              .filter((e) => e.target === selectedId && e.source)
+              .map((e) => e.source as string),
+          ),
+        );
   const surfaceIds = new Set<string>();
   for (const ownerId of sphereOwners) {
     surfaceIds.add(ownerId);

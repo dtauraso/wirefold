@@ -78,7 +78,7 @@ export function useInteractionControls(
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>,
   canvasSize: { w: number; h: number },
   pickRequest: React.MutableRefObject<((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null>,
-  onSelect: (id: string | null) => void,
+  onSelect: (id: string | null, ownSphere?: boolean) => void,
   nodesRef: React.MutableRefObject<RFNode<NodeData>[]>,
   storeCreateEdge: (sourceId: string, sourceHandle: string | null, targetId: string, targetHandle: string | null) => void,
   selectedIdRef: React.MutableRefObject<string | null>,
@@ -702,7 +702,10 @@ export function useInteractionControls(
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
           const hitId = pickRequest.current?.(ndcX, ndcY) ?? null;
-          onSelect(hitId);
+          // Two-finger tap on a trackpad arrives as a secondary click (button 2) ->
+          // select with the node's OWN sphere. A single (primary) click selects with
+          // the spheres the node sits on the surface of.
+          onSelect(hitId, e.button === 2);
         }
       }
 
