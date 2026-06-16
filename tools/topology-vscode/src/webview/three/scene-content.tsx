@@ -403,9 +403,24 @@ export function SphereRing({
   if (!ownerNode || !centersSphere) return null;
 
   const center = nodeWorldPos(ownerNode);
-  // R = Go-streamed sphere-chain radius (sphereR). Falls back to nodeRadius pre-emit.
+  // Radius: the ring must REACH the nodes on this owner's surface (the nodes it
+  // outputs to). A surface node may have been placed by a DIFFERENT parent (a
+  // multi-parent node like 5, placed on 6's sphere; or the anchor reached via a
+  // feedback edge), so the owner's own sphereR doesn't reach it. Size to the
+  // farthest surface node's actual distance; for a node that placed its own
+  // children this equals sphereR. Fall back to sphereR when no surface-node
+  // geometry is available yet.
   const geom = getNodeGeometry(ownerNode.id);
-  const R = geom?.sphereR ?? nodeRadius(ownerNode);
+  let R = geom?.sphereR ?? nodeRadius(ownerNode);
+  let maxSurfaceDist = 0;
+  for (const e of edges) {
+    if (e.source !== ownerNode.id) continue;
+    const sn = nodes.find((n) => n.id === e.target);
+    if (!sn) continue;
+    const d = center.distanceTo(nodeWorldPos(sn));
+    if (Number.isFinite(d) && d > maxSurfaceDist) maxSurfaceDist = d;
+  }
+  if (maxSurfaceDist > 1e-3) R = maxSurfaceDist;
   if (R < 1e-3) return null;
 
   // Thin tube so it reads as a ring, not a donut.
