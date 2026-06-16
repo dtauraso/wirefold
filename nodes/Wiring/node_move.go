@@ -517,3 +517,17 @@ func (md *MoveDispatch) NodeKind(nodeID string) string {
 	return ""
 }
 
+// SetOrigin re-bases the polar frame to newOrigin (camera pan focus), preserving
+// every node's world position. After re-basing, re-emits node-geometry for all
+// nodes so the stream stays consistent with the updated roots. Call from the
+// stdin reader on op=="set-origin".
+func (md *MoveDispatch) SetOrigin(o vec3, tr *T.Trace) {
+	md.roots.reOrigin(o)
+	if tr == nil {
+		return
+	}
+	for _, nm := range md.nodeMovers {
+		emitNodeGeometry(tr, nm.id, nm.geom)
+	}
+}
+

@@ -82,6 +82,10 @@ type stdinMsg struct {
 	Scene   json.RawMessage `json:"scene"`
 	NodeId  string          `json:"nodeId"`
 	R       float64         `json:"r"`
+	// set-origin payload: new polar frame origin (camera pan focus).
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -289,5 +293,14 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if treeRoot != "" && len(msg.Scene) > 0 {
 			_ = writeScene(treeRoot, msg.Scene)
 		}
+	case msg.Op == "set-origin":
+		// Re-base the polar frame to the camera's new pan focus. World positions are
+		// preserved by construction (reOrigin recovers each node's world from the old
+		// root and re-encodes it relative to newOrigin). Fire-and-forget from TS;
+		// throttled to one per animation frame on the sender side.
+		if md == nil || math.IsNaN(msg.X) || math.IsNaN(msg.Y) || math.IsNaN(msg.Z) {
+			return
+		}
+		md.SetOrigin(vec3{X: msg.X, Y: msg.Y, Z: msg.Z}, tr)
 	}
 }
