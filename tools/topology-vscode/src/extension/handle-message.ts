@@ -124,6 +124,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         runner.writeStdin(JSON.stringify({ type: "edit", op: "port-anchor", node: msg.node, port: msg.port, isInput: msg.isInput, anchor: msg.anchor, keys: msg.keys }));
       } else if (msg.op === "scene") {
         runner.writeStdin(JSON.stringify({ type: "edit", op: "scene", scene: msg.scene }));
+      } else if (msg.op === "set-origin") {
+        // Re-base the polar frame to the camera's new pan focus. Fire-and-forget.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "set-origin", x: msg.x, y: msg.y, z: msg.z }));
       }
       return;
   }
