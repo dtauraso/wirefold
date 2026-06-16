@@ -447,53 +447,47 @@ func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
 		return false
 	}
 	centers := md.heldCenters()
-	radius := md.heldRadii()
 	edges := md.heldEdges()
+	// ONLY the surface nodes of the dragged node's sphere(s) move. The dragged node goes
+	// to the cursor, which sets each owner sphere's radius to the new distance; every
+	// OTHER surface node of that sphere moves RADIALLY to the new radius (keeping its
+	// direction from the center). The sphere CENTER (owner) and every node not on the
+	// sphere keep their positions. No relaxation / flex of the rest of the graph.
 	centers[nodeID] = target
-	// Pin the dragged node AND its direct owners (the sources of edges into it — the
-	// nodes whose spheres it sits on). Each owner stays put, and its sphere RADIUS is
-	// set to the dragged node's new distance. Because that radius is the rest length of
-	// ALL the owner's outgoing edges, every node on the owner's surface (not just the
-	// dragged one) relaxes to the new radius — the sphere resizes and its whole surface
-	// follows. The rest of the graph still flexes around the pinned nodes.
 	setR := func(id string, r float64) {
-		radius[id] = r
 		if om := md.nodeMovers[id]; om != nil {
 			rr := r
-			om.geom.R = &rr // persist
+			om.geom.R = &rr // persist the resized radius
 		}
 	}
-	pinned := map[string]bool{nodeID: true}
-	ownerR := map[string]float64{}
 	for _, e := range edges {
-		if e.Target == nodeID && e.Source != "" {
-			pinned[e.Source] = true
-			if c, ok := centers[e.Source]; ok {
-				ownerR[e.Source] = target.sub(c).length()
+		if e.Target != nodeID || e.Source == "" {
+			continue // only edges INTO the dragged node identify the spheres it sits on
+		}
+		o := e.Source // sphere center
+		oc, ok := centers[o]
+		if !ok {
+			continue
+		}
+		R := target.sub(oc).length() // new sphere radius = center → dragged-node distance
+		setR(o, R)
+		for _, se := range edges {
+			if se.Source != o || se.Target == "" || se.Target == nodeID {
+				continue // o's other surface nodes (its outgoing-edge targets)
 			}
+			cc, ok := centers[se.Target]
+			if !ok {
+				continue
+			}
+			dir := cc.sub(oc)
+			if dir.length() < 1e-9 {
+				continue
+			}
+			centers[se.Target] = oc.add(dir.normalize().scale(R)) // radial scale to new R
 		}
 	}
-	for o, r := range ownerR {
-		setR(o, r)
-	}
-	// A mutual pair (O<->M: both O->M and M->O exist, e.g. the 1<->8 feedback ring) must
-	// keep BOTH edge rest lengths equal or they fight. When O's sphere resizes, set M's
-	// own R to O's new R so M follows O's surface instead of being frozen by its back
-	// edge — both ends of the pair shrink/grow together.
-	have := map[string]bool{}
-	for _, e := range edges {
-		have[e.Source+"\x00"+e.Target] = true
-	}
-	for o, r := range ownerR {
-		for _, e := range edges {
-			if e.Source == o && e.Target != "" && e.Target != nodeID && have[e.Target+"\x00"+o] {
-				setR(e.Target, r)
-			}
-		}
-	}
-	newCenters := relaxPositions(centers, edges, radius, pinned, relaxIterations)
-	reach := reachRFromCenters(newCenters, edges)
-	md.fanCenters(newCenters, reach)
+	reach := reachRFromCenters(centers, edges)
+	md.fanCenters(centers, reach)
 	return true
 }
 
