@@ -621,8 +621,24 @@ export function useInteractionControls(
           const ady = e.clientY - s.anchorY;
           const xOut = Math.abs(adx) > WIN_PX;
           const yOut = Math.abs(ady) > WIN_PX;
-          const phase: "neutral" | "turntable" | "roll" =
-            xOut && yOut ? "roll" : (xOut || yOut ? "turntable" : "neutral");
+          const bothIn = !xOut && !yOut; // inside the central square
+
+          // Asymmetric hysteresis. Engagement is square-based: from NEUTRAL, leaving
+          // through a side = turntable, through a corner = roll. ROLL is STICKY — it
+          // releases ONLY when the pointer returns to the central square, NOT when it
+          // merely crosses a strip axis. (Circling the anchor passes the axes; those
+          // strip "zones" must not recapture the gesture into turntable.)
+          let phase: "neutral" | "turntable" | "roll" = s.rotPhase;
+          if (s.rotPhase === "neutral") {
+            if (xOut && yOut) phase = "roll";
+            else if (xOut || yOut) phase = "turntable";
+          } else if (s.rotPhase === "turntable") {
+            if (xOut && yOut) phase = "roll";
+            else if (bothIn) phase = "neutral";
+          } else {
+            // roll: release only back into the square
+            if (bothIn) phase = "neutral";
+          }
 
           // On a phase change, re-snapshot the camera (jump-free) and capture the entry
           // reference so each phase starts from zero rotation at the edge it crossed.
