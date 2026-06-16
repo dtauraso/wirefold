@@ -15,9 +15,7 @@ goroutine. They are connected by Go channels. The network is
 self-scheduling: there is no central runner, no walker, no underlying
 layer that "runs" the nodes. The network IS the running program.
 
-Behavior emerges from wiring — the topology is the logic. Lateral
-inhibition, contrast detection, and competitive binding are implemented
-as circuit primitives.
+Behavior emerges from wiring — the topology is the logic.
 
 The visual editor is the medium for authoring and observing the network;
 the network itself is the nodes-and-wires Go runtime.

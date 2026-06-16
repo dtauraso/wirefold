@@ -16,9 +16,10 @@ arrived.
 
 ## Core concepts
 
-The model's core concepts — the inhibitor chain, AND-gate tree, and lateral
-inhibition — are wiring patterns of the active node kinds (see [MODEL.md](MODEL.md)).
-The "Model" pointer at the top of this file is the only entry point you need.
+The model's real entities live in [MODEL.md](MODEL.md): bead, wire (`PacedWire`
+goroutine), node goroutine, channel, clock. The active node kinds are the structs
+under `nodes/<Kind>/` (see the Node kinds section). The "Model" pointer at the top
+of this file is the only entry point you need.
 
 ## Primitive landing rule (narrowed)
 

@@ -6,7 +6,7 @@ A concurrent dataflow system written in Go, paired with a visual editor where th
 
 Two things in one repo:
 
-1. **A dataflow runtime in Go.** Behavior emerges from how nodes are wired together, not from procedural code. Goroutines and channels replace conventional control flow. Primitives include lateral inhibition, contrast detection (XOR edges), partition timing windows, AND-gate reduction trees, and wire-owned clear/busy send gating for safe pipelining.
+1. **A dataflow runtime in Go.** Behavior emerges from how nodes are wired together, not from procedural code. Goroutines and channels replace conventional control flow.
 
 2. **A visual topology editor** (vscode webview, React Flow) where the diagram is the spec; a runtime loader reads `topology.json` directly at startup — no codegen step required.
 

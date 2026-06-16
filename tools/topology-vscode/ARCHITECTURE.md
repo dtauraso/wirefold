@@ -68,7 +68,7 @@ sidecar.
 
 The webview renders with React Three Fiber (R3F) — a 3D canvas. The runtime loader stays authoritative — the renderer change was about *how nodes/edges are rendered and interacted with*, not about who owns the spec.
 
-The topology has genuine depth (inhibitor chain, rings, lateral-inhibition lattices). 2D React Flow was retired because it flattened real 3D structure into misleading edge crossings. R3F is the sole view; RF types are kept for their node/edge shapes but no RF component is instantiated.
+The topology has genuine 3D depth. 2D React Flow was retired because it flattened real 3D structure into misleading edge crossings. R3F is the sole view; RF types are kept for their node/edge shapes but no RF component is instantiated.
 
 ## Build
 
