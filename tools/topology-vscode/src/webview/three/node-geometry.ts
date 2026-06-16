@@ -24,7 +24,7 @@ export interface NodeGeom {
   center: { x: number; y: number; z: number };
   /** Go-owned node body/ring sphere radius (min(w,h)/divisor). */
   radius: number;
-  /** Go-owned sphere-chain radius used for bead orbit and port placement (nodeR in Go). */
+  /** Go-owned sphere radius used for bead orbit and port placement (nodeR in Go). */
   sphereR: number;
   /** Go-owned vertical great-circle ring normal (default: {x:0,y:0,z:1}). */
   vrx: number; vry: number; vrz: number;
