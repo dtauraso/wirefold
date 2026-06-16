@@ -204,6 +204,29 @@ export function useInteractionControls(
     [edgesRef],
   );
 
+  // Throttle set-origin IPC: one message per animation frame during pan.
+  const pendingOrigin = useRef<{ x: number; y: number; z: number } | null>(null);
+  const originRafPending = useRef(false);
+
+  const flushOrigin = useCallback((x: number, y: number, z: number) => {
+    vscode.postMessage({ type: "edit", op: "set-origin", x, y, z });
+  }, []);
+
+  const scheduleOrigin = useCallback((x: number, y: number, z: number) => {
+    pendingOrigin.current = { x, y, z };
+    if (!originRafPending.current) {
+      originRafPending.current = true;
+      requestAnimationFrame(() => {
+        originRafPending.current = false;
+        const p = pendingOrigin.current;
+        if (p) {
+          flushOrigin(p.x, p.y, p.z);
+          pendingOrigin.current = null;
+        }
+      });
+    }
+  }, [flushOrigin]);
+
   // Throttle port-anchor IPC: one message per animation frame during a port drag.
   const pendingAnchor = useRef<{
     nodeId: string;
@@ -761,11 +784,18 @@ export function useInteractionControls(
         // exactly the prior square-on behavior (a flat 2D slide in the z=0 plane).
         // P7.5: keep camera inside the large sphere after pan.
         constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
+        // Re-form the polar origin at the new screen-center: compute the world point
+        // straight ahead of the camera (regionFocus) and send set-origin to Go.
+        // Throttled to one per animation frame so a scroll burst sends at most one.
+        const newFocus = regionFocus(cam);
+        if (Number.isFinite(newFocus.x) && Number.isFinite(newFocus.y) && Number.isFinite(newFocus.z)) {
+          scheduleOrigin(newFocus.x, newFocus.y, newFocus.z);
+        }
       }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef],
+    [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef, regionFocus, scheduleOrigin],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
