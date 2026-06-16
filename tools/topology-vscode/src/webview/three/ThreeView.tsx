@@ -30,6 +30,9 @@ export function ThreeView() {
   const storeDeleteEdge = useThreeStore((s) => s.deleteEdge);
   const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Which spheres to show on selection: "surface" (single click) = the spheres the
+  // node sits on the surface of; "own" (two-finger click) = the node's own sphere.
+  const [sphereMode, setSphereMode] = useState<"surface" | "own">("surface");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
@@ -111,8 +114,9 @@ export function ThreeView() {
   }, [selectedId, edges, toggleFade, storeDeleteEdge]);
 
   // Route a pick result to selection state: a node/edge/port id, or null for empty space.
-  const handleSelect = useCallback((id: string | null) => {
+  const handleSelect = useCallback((id: string | null, ownSphere?: boolean) => {
     setSelectedId(id);
+    setSphereMode(ownSphere ? "own" : "surface");
   }, []);
 
   const { onPointerDown, onPointerMove, onPointerUp, onWheelNative } = useInteractionControls(
@@ -206,6 +210,7 @@ export function ThreeView() {
         onPointerMove={onPointerMoveWithHover}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerLeave}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <Canvas
           camera={{ fov: 50, near: 0.1, far: 20000, position: [0, 0, 500] }}
@@ -217,6 +222,7 @@ export function ThreeView() {
             nodes={nodes}
             edges={edges}
             selectedId={selectedId}
+            sphereMode={sphereMode}
             hoveredId={hoveredId}
             cameraRef={cameraRef}
             initialCamera3d={viewerState.camera3d}
