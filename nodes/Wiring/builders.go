@@ -457,6 +457,15 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	return node, nil
 }
 
+// verticalRingNormal and flatRingNormal are the two great-circle ring normals
+// streamed on every node-geometry event so TS never hardcodes ring orientation.
+// vertical: ring stands upright (normal points along +Z world axis).
+// flat: ring lies flat (normal points along +Y world axis, Three y-up convention).
+const (
+	verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ = 0.0, 0.0, 1.0
+	flatRingNormalX, flatRingNormalY, flatRingNormalZ             = 0.0, 1.0, 0.0
+)
+
 // emitNodeGeometry streams a node's authoritative center + per-port world
 // positions/dirs as a node-geometry event, computed with the port_geometry.go
 // helpers (no duplicated math). Called from each node's EmitGeometry closure on
@@ -487,7 +496,9 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 	if g.ReachR > 0 {
 		sphereR = g.ReachR
 	}
-	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports)
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
+		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
+		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
 }
 
 // emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one

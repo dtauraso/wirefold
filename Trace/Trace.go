@@ -143,6 +143,12 @@ type Event struct {
 	// (KindNodeGeometry) — the radius used for bead-chain orbit and port placement
 	// (nodeR in port_geometry.go). Distinct from Radius (the node body/ring sphere).
 	SphereR float64 `json:"sphereR,omitempty"`
+	// VRX/VRY/VRZ carry the vertical great-circle ring normal on node-geometry events
+	// (KindNodeGeometry). Go owns these constants so TS never hardcodes ring orientation.
+	VRX, VRY, VRZ float64
+	// FRX/FRY/FRZ carry the flat (equatorial) great-circle ring normal on node-geometry
+	// events (KindNodeGeometry). Companion to VRX/VRY/VRZ above.
+	FRX, FRY, FRZ float64
 	// Row/Col identify an interior bead's grid slot on node-bead events
 	// (KindNodeBead): Row 0 = top/backup, Row 1 = bottom/working; Col is the
 	// position in that row's slice. Keyed by Node + (Row,Col). X/Y/Z carry the
@@ -277,13 +283,15 @@ func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
 	})
 }
 
-// NodeGeometry emits one node's authoritative center + per-port world geometry
+// NodeGeometry emits one node's authoritative center + per-port world geometry,
+// plus the two great-circle ring normals (vertical + flat) owned by Go.
 // (item 1), keyed by node id. cx/cy/cz is the node center world position; ports
 // carries each port's world position + direction. Each node's goroutine calls this
 // once on startup via its injected EmitGeometry closure (the node owns its geometry
 // emission; wires still own bead-position emission).
-func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz, radius, sphereR float64, ports []PortGeom) {
-	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports})
+func (t *Trace) NodeGeometry(nodeID string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
+	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
+		VRX: vrx, VRY: vry, VRZ: vrz, FRX: frx, FRY: fry, FRZ: frz})
 }
 
 // Arrive marks a bead completing its traversal — delivered into the destination
@@ -529,6 +537,12 @@ func marshalEvent(e Event) ([]byte, error) {
 		NZ      float64        `json:"nz"`
 		Radius  float64        `json:"radius"`
 		SphereR float64        `json:"sphereR,omitempty"`
+		VRX     float64        `json:"vrx"`
+		VRY     float64        `json:"vry"`
+		VRZ     float64        `json:"vrz"`
+		FRX     float64        `json:"frx"`
+		FRY     float64        `json:"fry"`
+		FRZ     float64        `json:"frz"`
 		Ports   []portGeomJSON `json:"ports"`
 	}
 	type nodeBead struct {
@@ -571,7 +585,8 @@ func marshalEvent(e Event) ([]byte, error) {
 		for i, p := range e.Ports {
 			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
 		}
-		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR, Ports: ports})
+		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR,
+			VRX: e.VRX, VRY: e.VRY, VRZ: e.VRZ, FRX: e.FRX, FRY: e.FRY, FRZ: e.FRZ, Ports: ports})
 	case KindNodeBead:
 		// row/col/present/value/position always emitted (0/false is valid for each).
 		return json.Marshal(nodeBead{Step: e.Step, Kind: e.Kind, Node: e.Node, Row: e.Row, Col: e.Col, Present: e.Present, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})

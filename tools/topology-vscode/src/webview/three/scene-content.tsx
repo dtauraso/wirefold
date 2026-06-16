@@ -415,10 +415,21 @@ export function SphereRing({
   // Thin tube so it reads as a ring, not a donut.
   const tube = Math.max(0.5, nodeRadius(ownerNode) * 0.08);
 
-  // Two perpendicular great-circle rings so the sphere reads as a sphere:
-  // the first lies in XY (torusGeometry's default plane), the second is
-  // rotated 90° about X into the XZ plane. Both share radius/tube/material.
-  // The rings are visual-only (not selectable) — see the raycast disable below.
+  // Go streams the two great-circle ring normals (vrx/vry/vrz = vertical,
+  // frx/fry/frz = flat). Orient each torus so its default +Z axis aligns
+  // with the emitted normal via quaternion; fall back to hardcoded XY / XZ
+  // orientation if the geometry hasn't arrived yet.
+  // torusGeometry lies in the XY plane by default, so its plane normal = +Z (0,0,1).
+  const torusDefaultNormal = new THREE.Vector3(0, 0, 1);
+  const vrNormal = geom
+    ? new THREE.Vector3(geom.vrx, geom.vry, geom.vrz).normalize()
+    : new THREE.Vector3(0, 0, 1); // fallback: XY plane (vertical ring)
+  const frNormal = geom
+    ? new THREE.Vector3(geom.frx, geom.fry, geom.frz).normalize()
+    : new THREE.Vector3(1, 0, 0); // fallback: rotate 90° about X into XZ plane
+  const vrQ = new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, vrNormal);
+  const frQ = new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, frNormal);
+
   const ringMat = (
     <meshStandardMaterial
       color={ringColor}
@@ -435,11 +446,11 @@ export function SphereRing({
   const noRaycast = () => null;
   return (
     <group position={[center.x, center.y, center.z]}>
-      <mesh raycast={noRaycast}>
+      <mesh quaternion={vrQ} raycast={noRaycast}>
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
-      <mesh rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
+      <mesh quaternion={frQ} raycast={noRaycast}>
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
