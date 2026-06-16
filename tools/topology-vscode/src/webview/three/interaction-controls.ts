@@ -304,6 +304,42 @@ export function useInteractionControls(
     [targetRef, sceneCenter],
   );
 
+  /**
+   * Region-center rotation focus (model B). The diagram occupies a depth SLAB in
+   * front of the camera: zNear = the nearest node's depth along the camera's forward
+   * axis, zFar = the farthest node's. The rotation pivot is the CENTER of that slab —
+   * a point straight ahead of the camera (on the forward ray, i.e. screen center) at
+   * depth (zNear+zFar)/2. It is camera-relative: it does NOT track the diagram
+   * sideways. You pan the diagram to bring whatever part you want into the region,
+   * then orbit around it. Recomputed at each rotation start so the depth range is
+   * current. Falls back to ensureTarget() when there are no finite node depths.
+   */
+  const regionFocus = useCallback(
+    (cam: THREE.PerspectiveCamera): THREE.Vector3 => {
+      cam.updateMatrixWorld(true);
+      const forward = new THREE.Vector3();
+      cam.getWorldDirection(forward); // unit
+      const nodes = nodesRef.current;
+      let zNear = Infinity;
+      let zFar = -Infinity;
+      if (nodes) {
+        for (const n of nodes) {
+          const p = nodeWorldPos(n);
+          if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+          const depth = forward.dot(p.clone().sub(cam.position));
+          if (!Number.isFinite(depth)) continue;
+          if (depth < zNear) zNear = depth;
+          if (depth > zFar) zFar = depth;
+        }
+      }
+      if (zNear === Infinity || zFar === -Infinity) return ensureTarget(cam);
+      const FOCUS_MIN = 10; // keep the pivot off the camera even if the slab is behind it
+      const midDepth = Math.max((zNear + zFar) / 2, FOCUS_MIN);
+      return cam.position.clone().add(forward.multiplyScalar(midDepth));
+    },
+    [nodesRef, ensureTarget],
+  );
+
   // ------ helpers ------
 
   /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
@@ -396,10 +432,12 @@ export function useInteractionControls(
           };
         }
       } else {
-        // Empty-space pointerdown: capture arcball pivot once from the persistent
-        // target. Orbit is a TOTAL operation over (camera pose, target) — both
-        // finite — so no z=0 raycast and no grazing singularity. If a node is
-        // selected, orbit around it (preserves the selection-pivot UX).
+        // Empty-space pointerdown: capture the arcball pivot. Orbit is a TOTAL
+        // operation over (camera pose, target) — both finite — so no z=0 raycast and
+        // no grazing singularity. If a node is selected, orbit around it (preserves
+        // the selection-pivot UX). Otherwise orbit around the REGION CENTER (model B):
+        // the mid-depth point straight ahead of the camera, recomputed now so it
+        // reflects the diagram's current depth slab.
         const cam0 = cameraRef.current;
         const selId = selectedIdRef.current;
         const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
@@ -407,7 +445,8 @@ export function useInteractionControls(
           s.arcballPivot = nodeWorldPos(selNode);
           if (cam0) targetRef.current.copy(s.arcballPivot);
         } else if (cam0) {
-          s.arcballPivot = ensureTarget(cam0).clone();
+          s.arcballPivot = regionFocus(cam0).clone();
+          targetRef.current.copy(s.arcballPivot);
         }
         // Snapshot camera state for the anchored two-cylinder rotation.
         if (cam0) {
@@ -420,7 +459,7 @@ export function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, selectedIdRef, targetRef],
+    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, regionFocus, selectedIdRef, targetRef],
   );
 
   const onPointerMove = useCallback(
@@ -531,9 +570,16 @@ export function useInteractionControls(
           // the pivot. Horizontal drag rotates about world Y, vertical drag about
           // world X. Decoupled, world-fixed axes; anchored to total drag from the
           // down-point so a closed loop returns to start (no accumulation).
-          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> world Y
-          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> world X
-          const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angX);
+          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> azimuth
+          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> elevation
+          // Turntable axes: yaw about WORLD up (keeps the horizon level), but pitch
+          // about the CAMERA's right axis (its local X at gesture start) — NOT world X.
+          // Using world X made "rotate down" pitch about a stale axis after any yaw,
+          // because the pitch axis never tracked the camera's orientation. The camera
+          // right is captured per gesture from arcStartQuat, so pitch always tilts the
+          // view up/down relative to the screen regardless of the current azimuth.
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
+          const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
           const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
           const rot = qy.clone().multiply(qx);
           const rotInv = rot.clone().invert();
@@ -680,30 +726,35 @@ export function useInteractionControls(
         // out. MIN_DIST floors |offset| so the camera never reaches/crosses target.
         //
         // RE-AIM: before zooming, snap the persistent target onto the NODE NEAREST
-        // THE SCREEN CENTER — the node most in view — rather than the node under the
-        // cursor. Project each node's world center to NDC and pick the one with the
-        // smallest distance from NDC center (0,0). This always selects a real node
-        // (never an edge, never null, never an occluding neighbor), so a centered
-        // focus makes the multiplicative zoom converge straight in with no sideways
-        // drift. If no node is finite/in-front, we leave targetRef as-is and zoom
-        // toward the existing persistent focus — no z=0 plane dependency either way.
-        let centerNode: string | null = null;
-        let centerNdcDist = Infinity;
-        let centerPos: THREE.Vector3 | null = null;
+        // THE CURSOR — zoom in toward the node the mouse is on. Convert the pointer to
+        // NDC, project each node's world center to NDC, and pick the one with the
+        // smallest distance from the cursor's NDC. This always selects a real node
+        // (never an edge, never null, never an occluding neighbor), and zooming toward
+        // it keeps that node under the cursor. If no node is finite/in-front, we leave
+        // targetRef as-is and zoom toward the existing persistent focus — no z=0 plane
+        // dependency either way.
+        const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
+        const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
+        let cursorNode: string | null = null;
+        let cursorNdcDist = Infinity;
+        let cursorPos: THREE.Vector3 | null = null;
         for (const n of nodesRef.current) {
           const c = nodeWorldPos(n);
           if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) continue;
           const ndc = c.clone().project(cam);
           if (ndc.z > 1) continue; // behind the camera / beyond far plane
-          const d = Math.sqrt(ndc.x * ndc.x + ndc.y * ndc.y);
-          if (d < centerNdcDist) {
-            centerNdcDist = d;
-            centerNode = n.id;
-            centerPos = c;
+          const dx = ndc.x - mouseNdcX;
+          const dy = ndc.y - mouseNdcY;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < cursorNdcDist) {
+            cursorNdcDist = d;
+            cursorNode = n.id;
+            cursorPos = c;
           }
         }
-        if (centerPos) {
-          targetRef.current.copy(centerPos);
+        if (cursorPos) {
+          targetRef.current.copy(cursorPos);
         }
         const target = ensureTarget(cam);
         const ZOOM_BASE = 1.01;
