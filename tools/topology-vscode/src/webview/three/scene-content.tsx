@@ -368,9 +368,9 @@ export function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
-// SphereRing — "show the sphere" visualization.
-// When showSphere is on AND a node is selected, draws two thin see-through torus
-// rings (XY + XZ planes) centered on that node with major radius R = the node's
+// SphereRing — "show the sphere" visualization for one owner node.
+// Draws two thin see-through torus rings (XY + XZ planes) centered on the owner node
+// with major radius R = the node's
 // Go-streamed sphere radius (nodeRadius reads geoms[id].radius; falls back to local
 // compute pre-emit). Styled like the node's border ring (NODE_DEFS stroke), but
 // transparent + depthWrite false + raycast disabled so it's purely decorative and
@@ -1144,14 +1144,12 @@ export function Scene({
   onPositions,
   onNearestN,
   onCameraSettle,
-  showSphere,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
   selectedSphere: string | null;
   hoveredId: string | null;
-  showSphere: boolean;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   initialCamera3d?: Camera3D;
   onPickRequest: React.MutableRefObject<
@@ -1165,17 +1163,20 @@ export function Scene({
   // Nodes on the visible sphere's surface = the selected node's outgoing-edge
   // targets (its children sit on its sphere at radius R). Highlighted while the
   // sphere is shown. Empty set otherwise (no highlight).
-  // A node sits on the surface of EVERY sphere whose center outputs to it. So the
-  // spheres the selected node is on = its incoming-edge sources (one node can be on
-  // several, e.g. node 5 on both 4 and 6). For each such owner we draw its sphere and
-  // highlight the owner (center) plus all nodes on its surface (the owner's children).
-  const sphereOwners = (showSphere && selectedId)
+  // On selection, show every sphere the node touches: its OWN sphere (where it is the
+  // center) PLUS every sphere whose center outputs to it (the spheres it sits on the
+  // surface of — its incoming-edge sources; one node can be on several, e.g. node 5 on
+  // both 4 and 6). For each owner we draw its sphere and highlight the owner (center)
+  // plus all nodes on its surface (the owner's children). Owners that center no sphere
+  // (no outgoing edge) draw nothing but still contribute their own highlight.
+  const sphereOwners = selectedId
     ? Array.from(
-        new Set(
-          edges
+        new Set<string>([
+          selectedId,
+          ...edges
             .filter((e) => e.target === selectedId && e.source)
             .map((e) => e.source as string),
-        ),
+        ]),
       )
     : [];
   const surfaceIds = new Set<string>();

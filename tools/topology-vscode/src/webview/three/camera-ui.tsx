@@ -99,42 +99,6 @@ export function HomeButton({
   );
 }
 
-/** SPHERE TOGGLE: top-right button to show/hide the selected node's sphere ring. */
-export function SphereToggle({
-  on,
-  onClick,
-}: {
-  on: boolean;
-  onClick: (e: React.MouseEvent) => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      title={on ? "Hide selected node's sphere" : "Show selected node's sphere"}
-      style={{
-        position: "absolute",
-        top: 76,
-        right: 12,
-        background: "rgba(0,0,0,0.55)",
-        borderRadius: 6,
-        padding: "3px 7px",
-        cursor: "pointer",
-        pointerEvents: "auto",
-        zIndex: 20,
-        color: on ? "#ddd" : "#888",
-        fontSize: 11,
-        fontFamily: "monospace",
-        userSelect: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-      }}
-    >
-      ◯ sphere
-    </div>
-  );
-}
-
 /** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels. */
 export function GlobalLabelsToggle({
   hidden,
