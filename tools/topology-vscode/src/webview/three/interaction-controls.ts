@@ -570,9 +570,16 @@ export function useInteractionControls(
           // the pivot. Horizontal drag rotates about world Y, vertical drag about
           // world X. Decoupled, world-fixed axes; anchored to total drag from the
           // down-point so a closed loop returns to start (no accumulation).
-          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> world Y
-          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> world X
-          const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angX);
+          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> azimuth
+          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> elevation
+          // Turntable axes: yaw about WORLD up (keeps the horizon level), but pitch
+          // about the CAMERA's right axis (its local X at gesture start) — NOT world X.
+          // Using world X made "rotate down" pitch about a stale axis after any yaw,
+          // because the pitch axis never tracked the camera's orientation. The camera
+          // right is captured per gesture from arcStartQuat, so pitch always tilts the
+          // view up/down relative to the screen regardless of the current azimuth.
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
+          const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
           const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
           const rot = qy.clone().multiply(qx);
           const rotInv = rot.clone().invert();
