@@ -304,6 +304,42 @@ export function useInteractionControls(
     [targetRef, sceneCenter],
   );
 
+  /**
+   * Region-center rotation focus (model B). The diagram occupies a depth SLAB in
+   * front of the camera: zNear = the nearest node's depth along the camera's forward
+   * axis, zFar = the farthest node's. The rotation pivot is the CENTER of that slab —
+   * a point straight ahead of the camera (on the forward ray, i.e. screen center) at
+   * depth (zNear+zFar)/2. It is camera-relative: it does NOT track the diagram
+   * sideways. You pan the diagram to bring whatever part you want into the region,
+   * then orbit around it. Recomputed at each rotation start so the depth range is
+   * current. Falls back to ensureTarget() when there are no finite node depths.
+   */
+  const regionFocus = useCallback(
+    (cam: THREE.PerspectiveCamera): THREE.Vector3 => {
+      cam.updateMatrixWorld(true);
+      const forward = new THREE.Vector3();
+      cam.getWorldDirection(forward); // unit
+      const nodes = nodesRef.current;
+      let zNear = Infinity;
+      let zFar = -Infinity;
+      if (nodes) {
+        for (const n of nodes) {
+          const p = nodeWorldPos(n);
+          if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+          const depth = forward.dot(p.clone().sub(cam.position));
+          if (!Number.isFinite(depth)) continue;
+          if (depth < zNear) zNear = depth;
+          if (depth > zFar) zFar = depth;
+        }
+      }
+      if (zNear === Infinity || zFar === -Infinity) return ensureTarget(cam);
+      const FOCUS_MIN = 10; // keep the pivot off the camera even if the slab is behind it
+      const midDepth = Math.max((zNear + zFar) / 2, FOCUS_MIN);
+      return cam.position.clone().add(forward.multiplyScalar(midDepth));
+    },
+    [nodesRef, ensureTarget],
+  );
+
   // ------ helpers ------
 
   /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
@@ -396,10 +432,12 @@ export function useInteractionControls(
           };
         }
       } else {
-        // Empty-space pointerdown: capture arcball pivot once from the persistent
-        // target. Orbit is a TOTAL operation over (camera pose, target) — both
-        // finite — so no z=0 raycast and no grazing singularity. If a node is
-        // selected, orbit around it (preserves the selection-pivot UX).
+        // Empty-space pointerdown: capture the arcball pivot. Orbit is a TOTAL
+        // operation over (camera pose, target) — both finite — so no z=0 raycast and
+        // no grazing singularity. If a node is selected, orbit around it (preserves
+        // the selection-pivot UX). Otherwise orbit around the REGION CENTER (model B):
+        // the mid-depth point straight ahead of the camera, recomputed now so it
+        // reflects the diagram's current depth slab.
         const cam0 = cameraRef.current;
         const selId = selectedIdRef.current;
         const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
@@ -407,7 +445,8 @@ export function useInteractionControls(
           s.arcballPivot = nodeWorldPos(selNode);
           if (cam0) targetRef.current.copy(s.arcballPivot);
         } else if (cam0) {
-          s.arcballPivot = ensureTarget(cam0).clone();
+          s.arcballPivot = regionFocus(cam0).clone();
+          targetRef.current.copy(s.arcballPivot);
         }
         // Snapshot camera state for the anchored two-cylinder rotation.
         if (cam0) {
@@ -420,7 +459,7 @@ export function useInteractionControls(
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, selectedIdRef, targetRef],
+    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, regionFocus, selectedIdRef, targetRef],
   );
 
   const onPointerMove = useCallback(
