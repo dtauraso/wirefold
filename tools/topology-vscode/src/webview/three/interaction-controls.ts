@@ -579,7 +579,7 @@ export function useInteractionControls(
           const MIN_STEP_PX = 3;      // min segment to compute a stable tangent (jitter gate)
           const STRAIGHT_TURN = 0.18; // |path turn| below this (rad) = a "straight" step
           const STRAIGHT_RUN = 4;     // consecutive straight steps cancel roll -> turntable
-          const ROLL_SPEED = 1.0;     // path-turn -> roll (1:1; a full mouse loop = full roll)
+          const ROLL_SPEED = -1.0;    // path-turn -> roll (1:1; negative = match mouse circle direction)
 
           // Re-snapshot the camera as the current segment's anchor (used on mode switch
           // + window re-arm so each segment is anchored, closed loops return to start).
