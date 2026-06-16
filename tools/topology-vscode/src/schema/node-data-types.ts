@@ -3,6 +3,12 @@
 
 import { ParseError } from "./parse-primitives";
 
+export interface HoldData {
+  state: {
+    held: number;
+  };
+}
+
 export interface HoldNewSendOldData {
   state: {
     held: number;
@@ -25,6 +31,12 @@ export interface PacerData {
 export function parseNodeData(kind: string, data: unknown, path: string): unknown {
   if (data === undefined || data === null) return data;
   switch (kind) {
+    case "Hold": {
+      if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
+      const d = data as Record<string, unknown>;
+    { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.state.held: expected number"); }
+      return data;
+    }
     case "HoldNewSendOld": {
       if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
       const d = data as Record<string, unknown>;

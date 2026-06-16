@@ -20,6 +20,7 @@ export interface NodeDef {
 // Single source of truth — derived from Wiring.Register calls.
 export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
   "Excitatory",
+  "Hold",
   "HoldFlip",
   "HoldNewSendOld",
   "Input",
@@ -29,6 +30,7 @@ export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
 
 export const NODE_DEFS: Record<string, NodeDef> = {
   Excitatory: { bg: "#e1f5fe", border: "#01579b", text: "#01579b", minWidth: 90, role: "excitatory", shape: "rect", fill: "#e1f5fe", stroke: "#01579b", width: 90, height: 60, inputs: [{ name: "FromInput", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }] },
+  Hold: { bg: "#f3e5f5", border: "#6a1b9a", text: "#4a148c", minWidth: 60, role: "hold", shape: "rect", fill: "#f3e5f5", stroke: "#6a1b9a", width: 60, height: 60, inputs: [{ name: "In", kind: "chain" }] },
   HoldFlip: { bg: "#eceff1", border: "#263238", text: "#263238", minWidth: 36, role: "hold-flip", shape: "rect", fill: "#eceff1", stroke: "#263238", width: 36, height: 36, inputs: [{ name: "In", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }] },
   HoldNewSendOld: { bg: "#fff3e0", border: "#e65100", text: "#bf360c", minWidth: 90, role: "holdnewsendold", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevHoldNewSendOldNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }] },
   Input: { bg: "#e0e0e0", border: "#666", text: "#1a1a1a", minWidth: 90, role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, inputs: [{ name: "FeedbackIn", kind: "chain" }], outputs: [{ name: "ToHoldNewSendOld", kind: "chain" }, { name: "ToExcitatory", kind: "chain" }, { name: "ToPacer", kind: "chain" }] },
