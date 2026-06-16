@@ -60,8 +60,8 @@ type moveMsg struct {
 	AnchorId int
 	// Center (Kind == "center"): the re-relaxed world center for NodeID under the
 	// non-rooted layout. Each owning node/edge goroutine writes it onto its held geom
-	// and re-emits its own geometry. SphereDrag/SphereResize relax the whole graph
-	// centrally and fan the fresh centers out — the one centralized step (sphere_layout.go).
+	// and re-emits its own geometry. SphereDrag relaxes the whole graph centrally and
+	// fans the fresh centers out — the one centralized step (sphere_layout.go).
 	Center *vec3
 	// ReachR (Kind == "center"): the re-propagated sphere REACH radius for NodeID (max
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
@@ -388,8 +388,7 @@ func (md *MoveDispatch) sphereChainActive() bool {
 	return false
 }
 
-// heldCenters / heldRadii / heldEdges snapshot the movers' current geometry into
-// the maps relaxPositions consumes.
+// heldCenters / heldEdges snapshot the movers' current geometry.
 func (md *MoveDispatch) heldCenters() map[string]vec3 {
 	centers := make(map[string]vec3, len(md.nodeMovers))
 	for id, m := range md.nodeMovers {
@@ -398,14 +397,6 @@ func (md *MoveDispatch) heldCenters() map[string]vec3 {
 		}
 	}
 	return centers
-}
-
-func (md *MoveDispatch) heldRadii() map[string]float64 {
-	radius := make(map[string]float64, len(md.nodeMovers))
-	for id, m := range md.nodeMovers {
-		radius[id] = nodeR(m.geom)
-	}
-	return radius
 }
 
 func (md *MoveDispatch) heldEdges() []sphereEdge {
@@ -419,7 +410,7 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 // fanCenters pushes one "center" message per node (carrying its new world center and
 // reach radius) to that node's mover AND every incident edge's mover. Each owning
 // goroutine writes the center onto its own held geom and re-emits — the whole-graph
-// SOLVE (relaxPositions) is central; the per-mover APPLY stays decentralized.
+// SOLVE is central; the per-mover APPLY stays decentralized.
 func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]float64) {
 	for id, c := range newCenters {
 		cc := c
@@ -438,10 +429,9 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 }
 
 // SphereDrag handles a node-drag under the non-rooted layout: it pins the dragged node
-// at the world-space target and relaxes every other node's center so each edge's
-// endpoints settle to the source node's R apart (relaxPositions). The fresh centers are
-// fanned out to every node/edge mover (which re-emit their own geometry). The whole-graph
-// relax is the one centralized step. Returns true (unknown node ⇒ false).
+// at the world-space target and radially scales every co-sphere sibling to keep each
+// edge's rest length. The fresh centers are fanned out to every node/edge mover (which
+// re-emit their own geometry). Returns true (unknown node ⇒ false).
 func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
@@ -491,37 +481,10 @@ func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
 	return true
 }
 
-// SphereResize sets the given node's sphere radius R and relaxes every node's world
-// center (relaxPositions with no pinned node), fanning the fresh centers out to every
-// node/edge mover. Changing a node's R changes the rest length of its outgoing edges,
-// so its surface children move toward/away from it. r is clamped to a small minimum.
-// Returns the clamped R and true on a real change; 0,false for an unknown node.
-func (md *MoveDispatch) SphereResize(nodeID string, r float64) (float64, bool) {
-	nm, ok := md.nodeMovers[nodeID]
-	if !ok {
-		return 0, false
-	}
-	const minR = 1.0
-	if r < minR {
-		r = minR
-	}
-	rr := r
-	nm.geom.R = &rr
-
-	centers := md.heldCenters()
-	radius := md.heldRadii()
-	radius[nodeID] = r
-	edges := md.heldEdges()
-	newCenters := relaxPositions(centers, edges, radius, map[string]bool{}, relaxIterations)
-	reach := reachRFromCenters(newCenters, edges)
-	md.fanCenters(newCenters, reach)
-	return r, true
-}
-
 // reachRFromCenters computes each node's sphere REACH radius (max distance from a
 // node's center to any node it outputs to) under the given centers and edge set.
-// Mirrors loader.go buildFromSpec; used by SphereDrag/SphereResize so the fanned
-// "center" message carries the new reach radius and the ring stays sized during a drag.
+// Mirrors loader.go buildFromSpec; used by SphereDrag so the fanned "center" message
+// carries the new reach radius and the ring stays sized during a drag.
 func reachRFromCenters(centers map[string]vec3, edges []sphereEdge) map[string]float64 {
 	reachR := map[string]float64{}
 	for _, e := range edges {
