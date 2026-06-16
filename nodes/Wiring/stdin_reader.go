@@ -207,12 +207,11 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil || len(msg.Entries) == 0 {
 			return
 		}
-		// SPHERE-CHAIN layout: a node-drag re-aims the node's Dir on its PARENT's
-		// sphere toward the world target, quantized to the node's own diameter steps;
-		// positions then RE-PROPAGATE from the anchor (whole-graph). The incoming
-		// entries all carry the same moved node id + world target (one per incident
-		// edge + the node itself), so SphereMove runs once per unique node id. The
-		// anchor (no parent) is a no-op.
+		// NON-ROOTED layout: a node-drag pins the node at the world target and relaxes
+		// every other node's center (whole-graph). The incoming entries all carry the
+		// same moved node id + world target (one per incident edge + the node itself),
+		// so SphereDrag runs once per unique node id. After the relax, persist every
+		// node's held center so reload is consistent.
 		if md.sphereChainActive() {
 			seen := map[string]bool{}
 			for _, e := range msg.Entries {
@@ -220,10 +219,11 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 					continue
 				}
 				seen[e.NodeId] = true
-				dir, moved := md.SphereMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
-				// Persist the re-aimed Dir (durable across reload) when the move landed.
-				if moved && treeRoot != "" {
-					_ = writeMetaDir(treeRoot, e.NodeId, dir)
+				md.SphereDrag(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
+				if treeRoot != "" {
+					for id, c := range md.heldCenters() {
+						_ = writeMetaPos(treeRoot, id, c.X, c.Y, c.Z)
+					}
 				}
 			}
 			return
@@ -292,6 +292,9 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		newR, ok := md.SphereResize(msg.NodeId, msg.R)
 		if ok && treeRoot != "" {
 			_ = writeMetaR(treeRoot, msg.NodeId, newR)
+			for id, c := range md.heldCenters() {
+				_ = writeMetaPos(treeRoot, id, c.X, c.Y, c.Z)
+			}
 		}
 	case msg.Op == "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {

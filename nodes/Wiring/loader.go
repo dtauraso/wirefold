@@ -48,15 +48,17 @@ type specNode struct {
 	Data     *NodeData  `json:"data,omitempty"`
 	Inputs   []specPort `json:"inputs,omitempty"`
 	Outputs  []specPort `json:"outputs,omitempty"`
-	R        *float64    `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
-	Dir      *[3]float64 `json:"dir,omitempty"`  // unit direction of this node on its PARENT's sphere (sphere-chain layout; nil until C1 populates)
+	R        *float64   `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
+	X        float64    `json:"x"`              // stored absolute world center (non-rooted layout)
+	Y        float64    `json:"y"`
+	Z        float64    `json:"z"`
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, R: n.R, Dir: n.Dir}
+	g := nodeGeom{Kind: n.Type, R: n.R, Center: &vec3{X: n.X, Y: n.Y, Z: n.Z}}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -176,43 +178,28 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		nodeGeoms[n.ID] = n.toNodeGeom()
 	}
 
-	// Sphere-chain layout: resolve world centers by propagation from an anchor
-	// (computeSphereChainPositions) and inject each into its nodeGeom.Center.
-	// nodeWorldPos returns that center directly. Computed once here so all downstream
-	// arc/segment/build geometry sees the propagated centers.
+	// Non-rooted layout: each node's world center is loaded directly from its spec
+	// (meta.json x/y/z, injected as nodeGeom.Center in toNodeGeom). Compute each
+	// node's REACH radius (max distance from its center to any node it outputs to)
+	// under the loaded centers; streamed in NodeGeometry's sphereR field so the TS
+	// SphereRing reaches every surface node. Computed before newMoveDispatch so each
+	// node/edge mover captures it in its held geom.
 	{
-		edges := make([]sphereEdge, 0, len(spec.Edges))
+		reachR := map[string]float64{}
 		for _, e := range spec.Edges {
-			edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
+			sg, okS := nodeGeoms[e.Source]
+			tg, okT := nodeGeoms[e.Target]
+			if !okS || !okT || sg.Center == nil || tg.Center == nil {
+				continue
+			}
+			if d := chordLength(*sg.Center, *tg.Center); d > reachR[e.Source] {
+				reachR[e.Source] = d
+			}
 		}
-		if centers := computeSphereChainPositions(nodeGeoms, edges); len(centers) > 0 {
-			for id, c := range centers {
-				g := nodeGeoms[id]
-				cc := c
-				g.Center = &cc
-				nodeGeoms[id] = g
-			}
-			// Per-node REACH radius: max distance from a node's center to any node it
-			// outputs to, using the resolved centers. Streamed in NodeGeometry's sphereR
-			// field (builders.emitNodeGeometry) so the TS SphereRing reaches every surface
-			// node — geometry that used to be recomputed in TS (drift). Computed before
-			// newMoveDispatch so each node/edge mover captures it in its held geom.
-			reachR := map[string]float64{}
-			for _, e := range spec.Edges {
-				sc, okS := centers[e.Source]
-				tc, okT := centers[e.Target]
-				if !okS || !okT {
-					continue
-				}
-				if d := chordLength(sc, tc); d > reachR[e.Source] {
-					reachR[e.Source] = d
-				}
-			}
-			for id, r := range reachR {
-				g := nodeGeoms[id]
-				g.ReachR = r
-				nodeGeoms[id] = g
-			}
+		for id, r := range reachR {
+			g := nodeGeoms[id]
+			g.ReachR = r
+			nodeGeoms[id] = g
 		}
 	}
 
