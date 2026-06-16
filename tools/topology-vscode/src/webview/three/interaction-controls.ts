@@ -88,6 +88,7 @@ export interface ControlState {
   // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
   emptyDown: boolean;
   // Arcball gesture-start snapshot
+  arcPivot: THREE.Vector3;        // orbit pivot (screen-center scene point), fixed for the gesture
   arcP0: THREE.Vector3;           // unit sphere point at gesture start
   arcStartOffset: THREE.Vector3; // cam.position - C at gesture start
   arcStartUp: THREE.Vector3;     // cam.up at gesture start
@@ -125,6 +126,7 @@ export function useInteractionControls(
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
     emptyDown: false,
+    arcPivot: new THREE.Vector3(),
     arcP0: new THREE.Vector3(),
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
@@ -458,12 +460,15 @@ export function useInteractionControls(
         }
       } else {
         // Empty-space pointerdown: snapshot camera state for true arcball rotation.
-        // Pivot C = the camera's look-at TARGET (panning moves it), so the rotation
-        // center follows where you've panned — not a fixed world origin.
-        const C = targetRef.current.clone();
         const cam0 = cameraRef.current;
         if (cam0) {
           cam0.updateMatrixWorld(true);
+          // Pivot = the scene point straight ahead (screen center), snapshotted now and
+          // held for the whole gesture. It shares the arcball's viewport center, so
+          // rotation orbits what you're looking at instead of a point that drifts to the
+          // side as you pan. Panning changes what's at center → next gesture pivots there.
+          const C = regionFocus(cam0);
+          s.arcPivot = C.clone();
           s.arcStartOffset = cam0.position.clone().sub(C);
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
@@ -553,7 +558,7 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          const C = targetRef.current.clone();
+          const C = s.arcPivot; // fixed screen-center pivot snapshotted at gesture start
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const p1 = arcballPoint(e.clientX, e.clientY, rect);
           // arcP0/p1 are EYE-space unit vectors. qEye rotates arcP0 → p1 in eye space;
