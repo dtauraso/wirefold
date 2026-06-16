@@ -441,6 +441,10 @@ func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, boo
 	if newDir.length() == 0 {
 		return nil, false
 	}
+	// Drag on the parent's sphere in DIAMETER-STEPS of the dragged node: a smaller
+	// node has more places to land than a larger one (finer angular step). The
+	// parent here is unambiguous — it is the node that OUTPUTS to the dragged node
+	// (directed edge), so this is stable and does not flicker.
 	step := diameterStepAngle(nodeR(geoms[parentID]), 2*nodeRadius(geoms[nodeID].Kind))
 	quant := quantizeDirToStep(dirOf(geoms[nodeID]), newDir, step)
 
