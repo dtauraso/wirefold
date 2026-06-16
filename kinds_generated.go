@@ -4,6 +4,7 @@ package main
 
 import (
 	_ "github.com/dtauraso/wirefold/nodes/excitatory"
+	_ "github.com/dtauraso/wirefold/nodes/hold"
 	_ "github.com/dtauraso/wirefold/nodes/holdflip"
 	_ "github.com/dtauraso/wirefold/nodes/holdnewsendold"
 	_ "github.com/dtauraso/wirefold/nodes/input"

@@ -47,8 +47,8 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("node \"3\" not found")
 	}
-	if n3.Type != "HoldNewSendOld" {
-		t.Errorf("node \"3\" type: got %q, want \"HoldNewSendOld\"", n3.Type)
+	if n3.Type != "Hold" {
+		t.Errorf("node \"3\" type: got %q, want \"Hold\"", n3.Type)
 	}
 
 	n6, ok := nodeByID["6"]
