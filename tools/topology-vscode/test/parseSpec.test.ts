@@ -128,12 +128,12 @@ describe("parseSpec accepts the Go tree-loader emission shape", () => {
         id: "1", type: "Input",
         data: { init: [1, 0], repeat: true },
         inputs: [{ name: "FeedbackIn", side: "bottom", slot: 1 }],
-        outputs: [{ name: "ToChainInhibitor", side: "right", slot: 1 }],
+        outputs: [{ name: "ToInhibitor", side: "right", slot: 1 }],
       },
       {
-        id: "2", type: "ChainInhibitor",
+        id: "2", type: "Inhibitor",
         data: { state: { held: -1 }, sendRules: { ToNext1: "fireAndForget" } },
-        inputs: [{ name: "FromPrevChainInhibitorNode", side: "left", slot: 1 }],
+        inputs: [{ name: "FromPrevInhibitorNode", side: "left", slot: 1 }],
         outputs: [
           { name: "FeedbackOut", side: "top", slot: 1 },
           { name: "ToNext0", side: "bottom", slot: 1 },
@@ -141,16 +141,16 @@ describe("parseSpec accepts the Go tree-loader emission shape", () => {
         ],
       },
       {
-        id: "3", type: "ChainInhibitor",
+        id: "3", type: "Inhibitor",
         data: { state: { held: 0 } },
-        inputs: [{ name: "FromPrevChainInhibitorNode", side: "left", slot: 1 }],
+        inputs: [{ name: "FromPrevInhibitorNode", side: "left", slot: 1 }],
         outputs: [{ name: "FeedbackOut", side: "top", slot: 1 }],
       },
     ],
     edges: [
-      { id: "1To2", label: "1To2", kind: "chain", source: "1", sourceHandle: "ToChainInhibitor", target: "2", targetHandle: "FromPrevChainInhibitorNode" },
+      { id: "1To2", label: "1To2", kind: "chain", source: "1", sourceHandle: "ToInhibitor", target: "2", targetHandle: "FromPrevInhibitorNode" },
       { id: "2FeedbackTo1", label: "2FeedbackTo1", kind: "chain", source: "2", sourceHandle: "FeedbackOut", target: "1", targetHandle: "FeedbackIn" },
-      { id: "2To3", label: "2To3", kind: "chain", source: "2", sourceHandle: "ToNext0", target: "3", targetHandle: "FromPrevChainInhibitorNode" },
+      { id: "2To3", label: "2To3", kind: "chain", source: "2", sourceHandle: "ToNext0", target: "3", targetHandle: "FromPrevInhibitorNode" },
     ],
     view: {
       nodes: {

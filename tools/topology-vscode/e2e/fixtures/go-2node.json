@@ -13,7 +13,7 @@
     },
     {
       "id": "chainInhibitor1",
-      "type": "ChainInhibitor"
+      "type": "Inhibitor"
     }
   ],
   "edges": [
@@ -22,9 +22,9 @@
       "source": "in08",
       "sourceHandle": "out",
       "target": "chainInhibitor1",
-      "targetHandle": "FromPrevChainInhibitorNode",
+      "targetHandle": "FromPrevInhibitorNode",
       "kind": "chain",
-      "label": "inputToChainInhibitor",
+      "label": "inputToInhibitor",
       "data": {
         "slots": 1
       }

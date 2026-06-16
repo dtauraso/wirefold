@@ -1,7 +1,7 @@
 {
   "nodes": [
     { "id": "a", "type": "Input", "x": 100, "y": 100 },
-    { "id": "b", "type": "ChainInhibitor", "x": 300, "y": 100 }
+    { "id": "b", "type": "Inhibitor", "x": 300, "y": 100 }
   ],
   "edges": []
 }

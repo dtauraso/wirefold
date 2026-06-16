@@ -29,17 +29,17 @@
 
 | Name | Direction | EdgeKind | Optional | Notes |
 |------|-----------|----------|----------|-------|
-| ToChainInhibitor | out | chain |  | forwards Init values to the chain inhibitor |
-| FeedbackIn | in | chain | yes | receives step (1=advance, 0=hold index) from ChainInhibitor; enables feedback-ring mode when wired |
+| ToInhibitor | out | chain |  | forwards Init values to the chain inhibitor |
+| FeedbackIn | in | chain | yes | receives step (1=advance, 0=hold index) from Inhibitor; enables feedback-ring mode when wired |
 
 ## Firing rule
 
-Plain emit path (FeedbackIn not wired): iterate through Init (wrapping if Repeat), Fire and send each value on ToChainInhibitor in order. Exit when all values sent (or never if Repeat).
+Plain emit path (FeedbackIn not wired): iterate through Init (wrapping if Repeat), Fire and send each value on ToInhibitor in order. Exit when all values sent (or never if Repeat).
 
 Feedback-ring path (FeedbackIn wired): iterate indefinitely (index `i` starting at 0).
 1. Fire.
-2. Send Init[i % len(Init)] on ToChainInhibitor.
-3. Block on FeedbackIn for a step value `s` from ChainInhibitor.
+2. Send Init[i % len(Init)] on ToInhibitor.
+3. Block on FeedbackIn for a step value `s` from Inhibitor.
 4. Advance: `i = (i + s) % len(Init)`.
 5. Loop (exit on ctx cancel or wire close).
 

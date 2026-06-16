@@ -19,17 +19,17 @@ export interface NodeDef {
 // PascalCase Go kind names that have a Go runtime.
 // Single source of truth — derived from Wiring.Register calls.
 export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
-  "ChainInhibitor",
   "Excitatory",
   "HoldFlip",
+  "Inhibitor",
   "Input",
   "WindowAndGate",
 ]);
 
 export const NODE_DEFS: Record<string, NodeDef> = {
-  ChainInhibitor: { bg: "#fff3e0", border: "#e65100", text: "#bf360c", minWidth: 90, role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevChainInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }, { name: "FeedbackOut", kind: "chain" }] },
   Excitatory: { bg: "#e1f5fe", border: "#01579b", text: "#01579b", minWidth: 90, role: "excitatory", shape: "rect", fill: "#e1f5fe", stroke: "#01579b", width: 90, height: 60, inputs: [{ name: "FromInput", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }] },
   HoldFlip: { bg: "#eceff1", border: "#263238", text: "#263238", minWidth: 36, role: "hold-flip", shape: "rect", fill: "#eceff1", stroke: "#263238", width: 36, height: 36, inputs: [{ name: "In", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }] },
-  Input: { bg: "#e0e0e0", border: "#666", text: "#1a1a1a", minWidth: 90, role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, inputs: [{ name: "FeedbackIn", kind: "chain" }], outputs: [{ name: "ToChainInhibitor", kind: "chain" }, { name: "ToExcitatory", kind: "chain" }] },
+  Inhibitor: { bg: "#fff3e0", border: "#e65100", text: "#bf360c", minWidth: 90, role: "inhibitor", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevInhibitorNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }, { name: "FeedbackOut", kind: "chain" }] },
+  Input: { bg: "#e0e0e0", border: "#666", text: "#1a1a1a", minWidth: 90, role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, inputs: [{ name: "FeedbackIn", kind: "chain" }], outputs: [{ name: "ToInhibitor", kind: "chain" }, { name: "ToExcitatory", kind: "chain" }] },
   WindowAndGate: { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "window-and-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
 };

@@ -1,4 +1,4 @@
-package chaininhibitor
+package inhibitor
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 // this package's unit tests. In chan mode Out.Wired() is false (no backing
 // PacedWire), so the wired branch in Update is not entered; and the paced
 // constructor (NewOutPaced) needs the unexported wireSegment type plus a
-// FakeClock that live in package Wiring, which cannot import chaininhibitor
+// FakeClock that live in package Wiring, which cannot import inhibitor
 // (import cycle). The wired path is therefore covered by reasoning (the next
 // paced TryRecv blocks until node 1 sends the next value, so the node still
 // paces on its input — no busy-loop, no deadlock — and TryEmit drops rather
@@ -42,7 +42,7 @@ func TestToNextNotBlockedByFeedback(t *testing.T) {
 	node := &Node{
 		Fire:                       func() { tr.Fire("ci") },
 		Held:                       99,
-		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),
+		FromPrevInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevInhibitorNode", tr),
 		ToNext: Wiring.OutMulti{
 			Wiring.NewOut(out0, "ci", "ToNext", tr),
 			Wiring.NewOut(out1, "ci", "ToNext", tr),

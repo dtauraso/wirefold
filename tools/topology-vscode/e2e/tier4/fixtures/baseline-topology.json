@@ -26,7 +26,7 @@
     },
     {
       "id": "i0Test3",
-      "type": "ChainInhibitor",
+      "type": "Inhibitor",
       "role": "inhibitor",
       "x": 373,
       "y": 273,
@@ -38,7 +38,7 @@
     },
     {
       "id": "i1",
-      "type": "ChainInhibitor",
+      "type": "Inhibitor",
       "role": "inhibitor",
       "x": 816,
       "y": 280,
@@ -83,7 +83,7 @@
       "target": "readGate14",
       "targetHandle": "ack",
       "kind": "feedback-ack",
-      "label": "i1AckToChainInhibitor",
+      "label": "i1AckToInhibitor",
       "route": "below",
       "data": {
         "init": [
@@ -98,7 +98,7 @@
       "target": "readGate14",
       "targetHandle": "value",
       "kind": "chain",
-      "label": "inputToChainInhibitor"
+      "label": "inputToInhibitor"
     },
     {
       "id": "i0.inhibitOut->inhibitRight0.left",
@@ -124,7 +124,7 @@
     "steps": [
       {
         "t": 0,
-        "event": "i1 fires → i1AckToChainInhibitor + i1ToInhibitRight depart",
+        "event": "i1 fires → i1AckToInhibitor + i1ToInhibitRight depart",
         "fires": [
           "i1"
         ],
@@ -142,14 +142,14 @@
       },
       {
         "t": 0.331,
-        "event": "i1AckToChainInhibitor arrives at readGate",
+        "event": "i1AckToInhibitor arrives at readGate",
         "arrives": [
           "i1.out->readGate.ack"
         ]
       },
       {
         "t": 0.739,
-        "event": "in0 fires → inputToChainInhibitor departs",
+        "event": "in0 fires → inputToInhibitor departs",
         "fires": [
           "in0test"
         ],
@@ -159,7 +159,7 @@
       },
       {
         "t": 0.826,
-        "event": "inputToChainInhibitor arrives; readGate fires → readGateToI0",
+        "event": "inputToInhibitor arrives; readGate fires → readGateToI0",
         "fires": [
           "readGate14"
         ],

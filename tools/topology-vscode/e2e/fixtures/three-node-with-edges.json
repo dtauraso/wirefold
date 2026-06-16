@@ -1,8 +1,8 @@
 {
   "nodes": [
     { "id": "in0", "type": "Input", "x": 80, "y": 200 },
-    { "id": "i0", "type": "ChainInhibitor", "x": 360, "y": 200 },
-    { "id": "i1", "type": "ChainInhibitor", "x": 640, "y": 200 }
+    { "id": "i0", "type": "Inhibitor", "x": 360, "y": 200 },
+    { "id": "i1", "type": "Inhibitor", "x": 640, "y": 200 }
   ],
   "edges": [
     {
