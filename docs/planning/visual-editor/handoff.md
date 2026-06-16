@@ -8,6 +8,29 @@ needed) and proceed.
 
 ---
 
+## Active branch: task/roll-axis-camera — prism/sphere navigation model (NOT merged, awaiting editor verify)
+
+The camera model is the prism/sphere split (mirrors the Go polar model):
+- **Pan/zoom = Cartesian on the prism.** Pan = view-plane translation; zoom = dolly.
+- **Rotation = true screen-space arcball on the sphere** (Shoemake/Holroyd): cursor →
+  virtual unit ball at the viewport (eye space), conjugated to world; camera-position-
+  independent (the earlier world-space-vs-container-sphere arcball degenerated because
+  the camera sits INSIDE the sphere → axis pinned). Roll falls out at the rim.
+- **Pivot = the scene point straight ahead (regionFocus), snapshotted per gesture** —
+  so panning away no longer strands the axis at a side point.
+- **Polar origin follows the focus:** on pan, the editor sends `set-origin` (throttled,
+  fire-and-forget) → Go `reOrigin` re-bases every node root to the new origin while
+  PRESERVING world positions (nothing jumps visually), so node polar ops/locks are
+  relative to the current focus. Files: interaction-controls.ts, messages.ts,
+  handle-message.ts, nodes/Wiring/{prism,node_move,stdin_reader}.go.
+- Verified: go build/test (7 pkgs), tsc, vitest 71, npm build, 8 guards green.
+- NOT verified (user editor gates, why unmerged): pan-decouple + rotate-at-focus,
+  zoom, roll direction/feel, re-origin stability. ROLL/rotInv sign is a one-line flip
+  if direction is mirrored.
+- Design context: this is hyperphantasia-driven — controls must be conversion-free
+  direct manipulation (grab the sphere), not turntable prostheses; see the long design
+  rationale in session history.
+
 ## State at handoff (2026-06-16 — POLAR coordinate model MERGED to main)
 
 Context: `main` includes task/spherical-layout (merge a27ff1ec). The full design doc
