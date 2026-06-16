@@ -380,45 +380,36 @@ export function GraphNode({
 export function SphereRing({
   nodes,
   edges,
-  selectedId,
-  selectedSphere,
-  showSphere,
+  ownerId,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
-  selectedId: string | null;
-  selectedSphere: string | null;
-  showSphere: boolean;
+  ownerId: string | null; // the node whose sphere to draw (a sphere the selection sits on)
 }) {
   // Re-render when Go streams node geometry (centers/radius), so R + center track moves.
   useNodeGeometryStore((s) => s.geoms);
 
-  const selNode = selectedId ? nodes.find((n) => n.id === selectedId) ?? null : null;
+  const ownerNode = ownerId ? nodes.find((n) => n.id === ownerId) ?? null : null;
 
-  // Only output-bearing nodes center a sphere; output-less nodes (no outgoing
-  // edge, e.g. surface-only members like 3 and 5) live on others' surfaces and
-  // have no sphere of their own.
-  const centersSphere = selNode != null && edges.some((e) => e.source === selNode.id);
+  // Only output-bearing nodes center a sphere; output-less nodes (no outgoing edge)
+  // live on others' surfaces and have no sphere of their own.
+  const centersSphere = ownerNode != null && edges.some((e) => e.source === ownerNode.id);
 
   const ringColor = useMemo(
-    () => new THREE.Color(selNode?.data?.stroke ?? "#888888"),
-    [selNode?.data?.stroke],
+    () => new THREE.Color(ownerNode?.data?.stroke ?? "#888888"),
+    [ownerNode?.data?.stroke],
   );
 
-  if (!showSphere || !selNode || !centersSphere) return null;
+  if (!ownerNode || !centersSphere) return null;
 
-  const center = nodeWorldPos(selNode);
-  // R = Go-streamed sphere-chain radius (sphereR, used for bead orbit and port placement).
-  // Falls back to nodeRadius (body radius) if sphereR is not yet set.
-  const geom = getNodeGeometry(selNode.id);
-  const R = geom?.sphereR ?? nodeRadius(selNode);
+  const center = nodeWorldPos(ownerNode);
+  // R = Go-streamed sphere-chain radius (sphereR). Falls back to nodeRadius pre-emit.
+  const geom = getNodeGeometry(ownerNode.id);
+  const R = geom?.sphereR ?? nodeRadius(ownerNode);
   if (R < 1e-3) return null;
 
-  // Thin tube so it reads as a ring, not a donut — scale to the node's own ring tube.
-  const tube = Math.max(0.5, nodeRadius(selNode) * 0.08);
-
-  // Highlighted when THIS sphere surface is the current sphere selection.
-  const isSphereSelected = selectedSphere === selNode.id;
+  // Thin tube so it reads as a ring, not a donut.
+  const tube = Math.max(0.5, nodeRadius(ownerNode) * 0.08);
 
   // Two perpendicular great-circle rings so the sphere reads as a sphere:
   // the first lies in XY (torusGeometry's default plane), the second is
@@ -428,9 +419,9 @@ export function SphereRing({
     <meshStandardMaterial
       color={ringColor}
       emissive={ringColor}
-      emissiveIntensity={isSphereSelected ? 1.2 : 0.25}
+      emissiveIntensity={0.25}
       transparent
-      opacity={isSphereSelected ? 0.95 : 0.55}
+      opacity={0.55}
       depthWrite={false}
     />
   );
@@ -1174,9 +1165,26 @@ export function Scene({
   // Nodes on the visible sphere's surface = the selected node's outgoing-edge
   // targets (its children sit on its sphere at radius R). Highlighted while the
   // sphere is shown. Empty set otherwise (no highlight).
-  const surfaceIds = (showSphere && selectedId)
-    ? new Set(edges.filter((e) => e.source === selectedId).map((e) => e.target))
-    : new Set<string>();
+  // A node sits on the surface of EVERY sphere whose center outputs to it. So the
+  // spheres the selected node is on = its incoming-edge sources (one node can be on
+  // several, e.g. node 5 on both 4 and 6). For each such owner we draw its sphere and
+  // highlight the owner (center) plus all nodes on its surface (the owner's children).
+  const sphereOwners = (showSphere && selectedId)
+    ? Array.from(
+        new Set(
+          edges
+            .filter((e) => e.target === selectedId && e.source)
+            .map((e) => e.source as string),
+        ),
+      )
+    : [];
+  const surfaceIds = new Set<string>();
+  for (const ownerId of sphereOwners) {
+    surfaceIds.add(ownerId);
+    for (const e of edges) {
+      if (e.source === ownerId && e.target) surfaceIds.add(e.target);
+    }
+  }
   const hasRestoredCamera = initialCamera3d !== undefined;
   return (
     <ProceduralEnvProvider>
@@ -1203,13 +1211,9 @@ export function Scene({
       {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
           node-local offsets) so they ride the node on move — no top-level mount. */}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
-      <SphereRing
-        nodes={nodes}
-        edges={edges}
-        selectedId={selectedId}
-        selectedSphere={selectedSphere}
-        showSphere={showSphere}
-      />
+      {sphereOwners.map((oid) => (
+        <SphereRing key={oid} nodes={nodes} edges={edges} ownerId={oid} />
+      ))}
     </ProceduralEnvProvider>
   );
 }

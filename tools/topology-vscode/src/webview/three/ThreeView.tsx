@@ -31,7 +31,8 @@ export function ThreeView() {
   const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [showSphere, setShowSphere] = useState<boolean>(false);
+  // Default ON: selecting a node shows the sphere(s) it sits on. The toggle can hide them.
+  const [showSphere, setShowSphere] = useState<boolean>(true);
   // selectedSphere: the node id whose sphere SURFACE (torus rim) is selected.
   // Distinct from selectedId (a node/edge/port). Set when a pick returns "sphere:<id>".
   const [selectedSphere, setSelectedSphere] = useState<string | null>(null);
