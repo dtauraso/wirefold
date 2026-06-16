@@ -451,14 +451,23 @@ func (md *MoveDispatch) SphereDrag(nodeID string, target vec3) bool {
 	edges := md.heldEdges()
 	centers[nodeID] = target
 	// Pin the dragged node AND its direct owners (the sources of edges into it — the
-	// nodes whose spheres it sits on). Pinned owners stay put, so the owner->node edge
-	// stretches and the owner's sphere (reachR = distance to its surface nodes) GROWS to
-	// keep the dragged node on its surface — i.e. dragging a surface node RESIZES the
-	// sphere it's on. The rest of the graph still flexes around the pinned nodes.
+	// nodes whose spheres it sits on). Each owner stays put, and its sphere RADIUS is
+	// set to the dragged node's new distance. Because that radius is the rest length of
+	// ALL the owner's outgoing edges, every node on the owner's surface (not just the
+	// dragged one) relaxes to the new radius — the sphere resizes and its whole surface
+	// follows. The rest of the graph still flexes around the pinned nodes.
 	pinned := map[string]bool{nodeID: true}
 	for _, e := range edges {
 		if e.Target == nodeID && e.Source != "" {
 			pinned[e.Source] = true
+			if c, ok := centers[e.Source]; ok {
+				newR := target.sub(c).length()
+				radius[e.Source] = newR
+				if om := md.nodeMovers[e.Source]; om != nil {
+					rr := newR
+					om.geom.R = &rr // persist the resized radius
+				}
+			}
 		}
 	}
 	newCenters := relaxPositions(centers, edges, radius, pinned, relaxIterations)
