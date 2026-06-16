@@ -273,6 +273,19 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			}
 		}
 		md.setRoots(buildRoots(centers))
+
+		// Couple nodes 2 and 6 on node 1's sphere via a bidirectional chord lock
+		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
+		// mirrors the other across node 1's vertical (φ=0) disk, keeping them
+		// equidistant on the surface. Stopgap registration by id (no spec-level lock
+		// declaration yet); only wired when all three nodes exist.
+		_, has1 := centers["1"]
+		_, has2 := centers["2"]
+		_, has6 := centers["6"]
+		if has1 && has2 && has6 {
+			md.addChordLock("1", "2", "6")
+			md.addChordLock("1", "6", "2")
+		}
 	}
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
