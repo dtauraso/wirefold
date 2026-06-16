@@ -16,9 +16,10 @@ arrived.
 
 ## Core concepts
 
-These live in [MODEL.md](MODEL.md): the inhibitor chain, edge nodes,
-partition nodes, AND-gate tree, and lateral inhibition. The
-"Model" pointer at the top of this file is the only entry point you need.
+The model's real entities live in [MODEL.md](MODEL.md): bead, wire (`PacedWire`
+goroutine), node goroutine, channel, clock. The active node kinds are the structs
+under `nodes/<Kind>/` (see the Node kinds section). The "Model" pointer at the top
+of this file is the only entry point you need.
 
 ## Primitive landing rule (narrowed)
 
