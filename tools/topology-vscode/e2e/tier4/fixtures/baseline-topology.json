@@ -26,24 +26,24 @@
     },
     {
       "id": "i0Test3",
-      "type": "Inhibitor",
-      "role": "inhibitor",
+      "type": "HoldNewSendOld",
+      "role": "holdnewsendold",
       "x": 373,
       "y": 273,
       "index": 0,
-      "sublabel": "Chain Inhibitor",
+      "sublabel": "Chain HoldNewSendOld",
       "state": {
         "held": 0
       }
     },
     {
       "id": "i1",
-      "type": "Inhibitor",
-      "role": "inhibitor",
+      "type": "HoldNewSendOld",
+      "role": "holdnewsendold",
       "x": 816,
       "y": 280,
       "index": 1,
-      "sublabel": "Chain Inhibitor",
+      "sublabel": "Chain HoldNewSendOld",
       "state": {
         "held": 0
       }
@@ -83,7 +83,7 @@
       "target": "readGate14",
       "targetHandle": "ack",
       "kind": "feedback-ack",
-      "label": "i1AckToInhibitor",
+      "label": "i1AckToHoldNewSendOld",
       "route": "below",
       "data": {
         "init": [
@@ -98,7 +98,7 @@
       "target": "readGate14",
       "targetHandle": "value",
       "kind": "chain",
-      "label": "inputToInhibitor"
+      "label": "inputToHoldNewSendOld"
     },
     {
       "id": "i0.inhibitOut->inhibitRight0.left",
@@ -124,7 +124,7 @@
     "steps": [
       {
         "t": 0,
-        "event": "i1 fires → i1AckToInhibitor + i1ToInhibitRight depart",
+        "event": "i1 fires → i1AckToHoldNewSendOld + i1ToInhibitRight depart",
         "fires": [
           "i1"
         ],
@@ -142,14 +142,14 @@
       },
       {
         "t": 0.331,
-        "event": "i1AckToInhibitor arrives at readGate",
+        "event": "i1AckToHoldNewSendOld arrives at readGate",
         "arrives": [
           "i1.out->readGate.ack"
         ]
       },
       {
         "t": 0.739,
-        "event": "in0 fires → inputToInhibitor departs",
+        "event": "in0 fires → inputToHoldNewSendOld departs",
         "fires": [
           "in0test"
         ],
@@ -159,7 +159,7 @@
       },
       {
         "t": 0.826,
-        "event": "inputToInhibitor arrives; readGate fires → readGateToI0",
+        "event": "inputToHoldNewSendOld arrives; readGate fires → readGateToI0",
         "fires": [
           "readGate14"
         ],

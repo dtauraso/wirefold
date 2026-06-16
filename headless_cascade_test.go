@@ -40,7 +40,7 @@ import (
 	W "github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// activeNetTopo is the active cascade: an Input seeds chain-inhibitor i0, which
+// activeNetTopo is the active cascade: an Input seeds chain-holdnewsendold i0, which
 // forwards its held value to i1. This mirrors topology.json's in08/i0/i1 nodes,
 // wired so the headless run is a genuine multi-hop cascade (the editor's faded
 // edges are omitted; what remains is the live chain).
@@ -49,21 +49,21 @@ const activeNetTopo = `{
     {
       "id": "in08", "type": "Input",
       "data": {"init": [7], "repeat": false},
-      "outputs": [{"name": "ToInhibitor", "side": "right", "slot": 1}]
+      "outputs": [{"name": "ToHoldNewSendOld", "side": "right", "slot": 1}]
     },
     {
-      "id": "i0", "type": "Inhibitor",
+      "id": "i0", "type": "HoldNewSendOld",
       "data": {"state": {"held": 5}, "sendRules": {"ToNext1": "fireAndForget"}},
-      "inputs":  [{"name": "FromPrevInhibitorNode", "side": "left", "slot": 1}],
+      "inputs":  [{"name": "FromPrevHoldNewSendOldNode", "side": "left", "slot": 1}],
       "outputs": [
         {"name": "ToNext0", "side": "bottom", "slot": 1},
         {"name": "ToNext1", "side": "left", "slot": 2}
       ]
     },
     {
-      "id": "i1", "type": "Inhibitor",
+      "id": "i1", "type": "HoldNewSendOld",
       "data": {"state": {"held": 0}, "sendRules": {"ToNext0": "fireAndForget", "ToNext1": "fireAndForget"}},
-      "inputs":  [{"name": "FromPrevInhibitorNode", "side": "top", "slot": 1}],
+      "inputs":  [{"name": "FromPrevHoldNewSendOldNode", "side": "top", "slot": 1}],
       "outputs": [
         {"name": "ToNext0", "side": "left", "slot": 0},
         {"name": "ToNext1", "side": "bottom", "slot": 2}
@@ -71,8 +71,8 @@ const activeNetTopo = `{
     }
   ],
   "edges": [
-    {"label": "in08ToI0", "kind": "chain", "source": "in08", "sourceHandle": "ToInhibitor", "target": "i0", "targetHandle": "FromPrevInhibitorNode"},
-    {"label": "i0ToI1",   "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",    "target": "i1", "targetHandle": "FromPrevInhibitorNode"}
+    {"label": "in08ToI0", "kind": "chain", "source": "in08", "sourceHandle": "ToHoldNewSendOld", "target": "i0", "targetHandle": "FromPrevHoldNewSendOldNode"},
+    {"label": "i0ToI1",   "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",    "target": "i1", "targetHandle": "FromPrevHoldNewSendOldNode"}
   ],
   "view": {"nodes": {
     "in08": {"x": 19,  "y": 314},
@@ -197,7 +197,7 @@ func TestHeadlessCascadeCompletes(t *testing.T) {
 	}
 
 	// i1 must have received i0's held value (5), proving the value crossed both hops.
-	if !sink.contains(`"kind":"recv","node":"i1","port":"FromPrevInhibitorNode","value":5`) {
+	if !sink.contains(`"kind":"recv","node":"i1","port":"FromPrevHoldNewSendOldNode","value":5`) {
 		t.Fatalf("i1 received, but not i0's forwarded held value 5.\nTrace:\n%s", sink.String())
 	}
 }
@@ -225,7 +225,7 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 	// First hop: in08 → i0. The per-edge in-flight time lives on the source Out;
 	// the dest wire (1:1 edge) carries the same value as its window aggregate.
 	out := nmr.EdgeOut("in08ToI0")
-	pw := slotReg["i0.FromPrevInhibitorNode"]
+	pw := slotReg["i0.FromPrevHoldNewSendOldNode"]
 	if out == nil || pw == nil {
 		t.Fatalf("missing first-hop out/wire: out=%v wire=%v", out, pw)
 	}
@@ -372,8 +372,8 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 // TestFeedbackRingAlternates verifies the plain-Input path:
 //   - A plain-Input case (FeedbackIn unwired) emits unchanged 0,1 in order.
 //
-// (The Inhibitor-sourced feedback-ring subtest was removed when the FeedbackOut
-// port moved off the Inhibitor kind onto the Pacer kind; the Inhibitor is now a
+// (The HoldNewSendOld-sourced feedback-ring subtest was removed when the FeedbackOut
+// port moved off the HoldNewSendOld kind onto the Pacer kind; the HoldNewSendOld is now a
 // pure forwarder.)
 func TestFeedbackRingAlternates(t *testing.T) {
 	t.Run("PlainInputUnwired", func(t *testing.T) {

@@ -1,4 +1,4 @@
-package inhibitor
+package holdnewsendold
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func TestEmitHeldBead(t *testing.T) {
 	node := &Node{
 		Fire:                       func() { tr.Fire("ci") },
 		Held:                       -1,
-		FromPrevInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevInhibitorNode", tr),
+		FromPrevHoldNewSendOldNode: Wiring.NewIn(fromPrev, "ci", "FromPrevHoldNewSendOldNode", tr),
 		ToNext: Wiring.OutMulti{
 			Wiring.NewOut(out0, "ci", "ToNext", tr),
 		},
@@ -96,7 +96,7 @@ func TestNoSentinelOnToNext(t *testing.T) {
 	node := &Node{
 		Fire:                       func() { tr.Fire("ci") },
 		Held:                       -1,
-		FromPrevInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevInhibitorNode", tr),
+		FromPrevHoldNewSendOldNode: Wiring.NewIn(fromPrev, "ci", "FromPrevHoldNewSendOldNode", tr),
 		ToNext: Wiring.OutMulti{
 			Wiring.NewOut(out0, "ci", "ToNext", tr),
 		},

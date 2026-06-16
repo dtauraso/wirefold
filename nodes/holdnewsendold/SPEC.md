@@ -1,18 +1,18 @@
-# InhibitorNode
+# HoldNewSendOldNode
 
 ## View
 
 | Field | Value |
 |-------|-------|
-| kind | chainInhibitor |
+| kind | chainHoldNewSendOld |
 | bg | #fff3e0 |
 | border | #e65100 |
 | text | #bf360c |
 | accent | #e65100 |
 | minWidth | 90 |
 | displays | held |
-| defaultLabel | chainInhibitor |
-| role | inhibitor |
+| defaultLabel | chainHoldNewSendOld |
+| role | holdnewsendold |
 | shape | rect |
 | fill | #fff3e0 |
 | stroke | #e65100 |
@@ -29,17 +29,17 @@
 
 | Name | Direction | EdgeKind | Notes |
 |------|-----------|----------|-------|
-| FromPrevInhibitorNode | in | chain | receives value from upstream chain inhibitor |
+| FromPrevHoldNewSendOldNode | in | chain | receives value from upstream chain holdnewsendold |
 | ToNext | out | chain | fan-out to downstream nodes (multi-output) |
 
 ## Firing rule
 
-On each value received from FromPrevInhibitorNode:
+On each value received from FromPrevHoldNewSendOldNode:
 1. Fire.
 2. Fan-out the current Held value concurrently on all ToNext outputs.
 3. Update Held to value.
 
-The Inhibitor is a pure forwarder: it holds the last value and re-emits it on the next fire (feedback now lives on the Pacer kind, not here).
+The HoldNewSendOld is a pure forwarder: it holds the last value and re-emits it on the next fire (feedback now lives on the Pacer kind, not here).
 
 The node parks if any ToNext output wire is still occupied (bead in flight or unconsumed), to prevent drops when output transit time exceeds the input rate.
 

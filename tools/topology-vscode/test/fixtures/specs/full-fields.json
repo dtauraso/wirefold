@@ -3,7 +3,7 @@
     { "id": "in0", "type": "Input" },
     {
       "id": "i0",
-      "type": "Inhibitor",
+      "type": "HoldNewSendOld",
       "spec": {
         "lang": "en",
         "segments": [
@@ -21,7 +21,7 @@
       "source": "in0",
       "sourceHandle": "ToOut",
       "target": "i0",
-      "targetHandle": "FromPrevInhibitorNode",
+      "targetHandle": "FromPrevHoldNewSendOldNode",
       "kind": "chain",
       "label": "inToI0",
       "valueLabel": "v",

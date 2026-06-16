@@ -1,9 +1,9 @@
-// Scenario: Inhibitor renders its held value as an in-box label.
+// Scenario: HoldNewSendOld renders its held value as an in-box label.
 // Observable: a DOM text node containing "held=0" is visible inside
-// the Inhibitor node immediately after mount (seed=0 means the
-// initial held value is 0). This pins the feat(chain-inhibitor) label
+// the HoldNewSendOld node immediately after mount (seed=0 means the
+// initial held value is 0). This pins the feat(chain-holdnewsendold) label
 // landed in f8af21a.
-// Fixture: three-node-with-edges (Input → i0 → i1, both Inhibitor).
+// Fixture: three-node-with-edges (Input → i0 → i1, both HoldNewSendOld).
 
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -19,7 +19,7 @@ declare global {
   }
 }
 
-test("chainInhibitor: held= label renders at mount", async ({ page }) => {
+test("chainHoldNewSendOld: held= label renders at mount", async ({ page }) => {
   const fixture = readFileSync(
     resolve(HERE, "fixtures/three-node-with-edges.json"), "utf-8",
   );
@@ -29,7 +29,7 @@ test("chainInhibitor: held= label renders at mount", async ({ page }) => {
   // Wait for nodes to mount.
   await page.waitForSelector('.react-flow__node[data-id="i0"]');
 
-  // The InhibitorBody renders a <span> with "held=<value>".
+  // The HoldNewSendOldBody renders a <span> with "held=<value>".
   // With no explicit seed on this fixture the initial held value is null,
   // so the label reads "held=null". Wait for it to appear.
   const label = page.locator('.react-flow__node[data-id="i0"] span').filter({
