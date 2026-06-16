@@ -254,21 +254,19 @@ export function GraphNode({
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
   const fillHex = node.data?.fill ?? "#ffffff";
-  const strokeHex = selected ? "#ffcc00"
+  // Sphere-surface nodes get the SAME highlight as the center (selected) node:
+  // stroke #ffcc00 + a thicker ring, no extra glow.
+  const strokeHex = (selected || onSphereSurface) ? "#ffcc00"
     : hovered ? "#aaddff"
-    : onSphereSurface ? "#ffcc00"
     : (node.data?.stroke ?? "#888888");
 
   // Memoize THREE.Color objects to avoid allocating on every render.
   const fillColor = useMemo(() => new THREE.Color(fillHex), [fillHex]);
   const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
   const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
-  const emissiveStroke = useMemo(
-    () => new THREE.Color((!selected && onSphereSurface) ? "#ffcc00" : 0x000000),
-    [selected, onSphereSurface],
-  );
+  const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
-  const torusThick = (selected || hovered || (!selected && onSphereSurface)) ? r * 0.14 : r * 0.08;
+  const torusThick = (selected || hovered || onSphereSurface) ? r * 0.14 : r * 0.08;
   const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
   return (
@@ -298,7 +296,7 @@ export function GraphNode({
           key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}
-          emissiveIntensity={(!selected && onSphereSurface) ? 0.6 : 0}
+          emissiveIntensity={0}
           transparent={faded}
           opacity={faded ? fadeOpacity : 1}
         />
