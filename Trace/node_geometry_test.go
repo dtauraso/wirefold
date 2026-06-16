@@ -13,7 +13,7 @@ func TestNodeGeometryEmitsEvent(t *testing.T) {
 	tr.NodeGeometry("N1", 1, 2, 3, 15, 20.0, []PortGeom{
 		{Name: "in", IsInput: true, PX: 0.5, PY: 2, PZ: 3, DX: -1, DY: 0, DZ: 0},
 		{Name: "out", IsInput: false, PX: 1.5, PY: 2, PZ: 3, DX: 1, DY: 0, DZ: 0},
-	})
+	}, 0, 0, 1, 0, 1, 0)
 	tr.Close()
 
 	events := tr.Events()
