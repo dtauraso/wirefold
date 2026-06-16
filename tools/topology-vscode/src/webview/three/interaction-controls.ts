@@ -11,6 +11,7 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
+import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -531,9 +532,11 @@ export function useInteractionControls(
           s.rotMode = "turntable";
           s.anchorX = e.clientX; s.anchorY = e.clientY;
           s.rollAccum = 0;
+          s.rotPhase = "neutral";
           s.lastStepX = e.clientX; s.lastStepY = e.clientY;
           s.hasVec = false; s.straightCount = 0;
           rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "turntable" };
+          postLog("rot-start", { x: e.clientX, y: e.clientY, win: ROT_HUD_WIN_PX });
         }
       }
 
@@ -632,6 +635,7 @@ export function useInteractionControls(
               s.turnStartX = adx;
               s.turnStartY = ady;
             }
+            postLog("rot-phase", { from: s.rotPhase, to: phase, adx: Math.round(adx), ady: Math.round(ady), xOut, yOut });
             s.rotPhase = phase;
           }
 
