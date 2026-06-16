@@ -1,7 +1,7 @@
 // Scenario: dragging a node does not disconnect its edges.
 // Observable: the React Flow edge DOM element for each incident wire
 // is still present in the DOM after the drag completes.
-// Fixture: go-2node (Input → ChainInhibitor, one edge).
+// Fixture: go-2node (Input → Inhibitor, one edge).
 
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";

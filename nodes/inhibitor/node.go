@@ -1,4 +1,4 @@
-package chaininhibitor
+package inhibitor
 
 import (
 	"context"
@@ -11,7 +11,7 @@ type Node struct {
 	EmitGeometry               func()
 	EmitHeldBead               func(held int)
 	Held                       int `wire:"data.state"`
-	FromPrevChainInhibitorNode *Wiring.In
+	FromPrevInhibitorNode *Wiring.In
 	ToNext                     Wiring.OutMulti
 	FeedbackOut                *Wiring.Out
 }
@@ -66,9 +66,9 @@ func (in *Node) Update(ctx context.Context) {
 			continue
 		}
 
-		if value, ok := in.FromPrevChainInhibitorNode.TryRecv(); ok {
+		if value, ok := in.FromPrevInhibitorNode.TryRecv(); ok {
 			in.Fire()
-			in.FromPrevChainInhibitorNode.Done()
+			in.FromPrevInhibitorNode.Done()
 
 			// Interior held-value bead: emit only when the held value changes
 			// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the
@@ -111,5 +111,5 @@ func (in *Node) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("ChainInhibitor", func() any { return &Node{} })
+	Wiring.Register("Inhibitor", func() any { return &Node{} })
 }

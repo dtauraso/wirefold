@@ -16,7 +16,7 @@ import (
 // bead) updates the INSTANT input arrives, with no one-output-drive lag:
 //   - The MAIN loop BLOCKS on input receive (TryRecv, which parks in paced mode
 //     until a value is placed). The moment input arrives it emits the new
-//     held-bead and stores the new held — exactly like ChainInhibitor, so the
+//     held-bead and stores the new held — exactly like Inhibitor, so the
 //     bead shows immediately.
 //   - A DRIVE goroutine continuously pulses the CURRENT held value to the
 //     output. EmitOneDriven is synchronous (blocks for the wire traversal), so

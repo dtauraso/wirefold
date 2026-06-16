@@ -49,21 +49,21 @@ const activeNetTopo = `{
     {
       "id": "in08", "type": "Input",
       "data": {"init": [7], "repeat": false},
-      "outputs": [{"name": "ToChainInhibitor", "side": "right", "slot": 1}]
+      "outputs": [{"name": "ToInhibitor", "side": "right", "slot": 1}]
     },
     {
-      "id": "i0", "type": "ChainInhibitor",
+      "id": "i0", "type": "Inhibitor",
       "data": {"state": {"held": 5}, "sendRules": {"ToNext1": "fireAndForget"}},
-      "inputs":  [{"name": "FromPrevChainInhibitorNode", "side": "left", "slot": 1}],
+      "inputs":  [{"name": "FromPrevInhibitorNode", "side": "left", "slot": 1}],
       "outputs": [
         {"name": "ToNext0", "side": "bottom", "slot": 1},
         {"name": "ToNext1", "side": "left", "slot": 2}
       ]
     },
     {
-      "id": "i1", "type": "ChainInhibitor",
+      "id": "i1", "type": "Inhibitor",
       "data": {"state": {"held": 0}, "sendRules": {"ToNext0": "fireAndForget", "ToNext1": "fireAndForget"}},
-      "inputs":  [{"name": "FromPrevChainInhibitorNode", "side": "top", "slot": 1}],
+      "inputs":  [{"name": "FromPrevInhibitorNode", "side": "top", "slot": 1}],
       "outputs": [
         {"name": "ToNext0", "side": "left", "slot": 0},
         {"name": "ToNext1", "side": "bottom", "slot": 2}
@@ -71,8 +71,8 @@ const activeNetTopo = `{
     }
   ],
   "edges": [
-    {"label": "in08ToI0", "kind": "chain", "source": "in08", "sourceHandle": "ToChainInhibitor", "target": "i0", "targetHandle": "FromPrevChainInhibitorNode"},
-    {"label": "i0ToI1",   "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",    "target": "i1", "targetHandle": "FromPrevChainInhibitorNode"}
+    {"label": "in08ToI0", "kind": "chain", "source": "in08", "sourceHandle": "ToInhibitor", "target": "i0", "targetHandle": "FromPrevInhibitorNode"},
+    {"label": "i0ToI1",   "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",    "target": "i1", "targetHandle": "FromPrevInhibitorNode"}
   ],
   "view": {"nodes": {
     "in08": {"x": 19,  "y": 314},
@@ -197,7 +197,7 @@ func TestHeadlessCascadeCompletes(t *testing.T) {
 	}
 
 	// i1 must have received i0's held value (5), proving the value crossed both hops.
-	if !sink.contains(`"kind":"recv","node":"i1","port":"FromPrevChainInhibitorNode","value":5`) {
+	if !sink.contains(`"kind":"recv","node":"i1","port":"FromPrevInhibitorNode","value":5`) {
 		t.Fatalf("i1 received, but not i0's forwarded held value 5.\nTrace:\n%s", sink.String())
 	}
 }
@@ -225,7 +225,7 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 	// First hop: in08 → i0. The per-edge in-flight time lives on the source Out;
 	// the dest wire (1:1 edge) carries the same value as its window aggregate.
 	out := nmr.EdgeOut("in08ToI0")
-	pw := slotReg["i0.FromPrevChainInhibitorNode"]
+	pw := slotReg["i0.FromPrevInhibitorNode"]
 	if out == nil || pw == nil {
 		t.Fatalf("missing first-hop out/wire: out=%v wire=%v", out, pw)
 	}
@@ -371,7 +371,7 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 
 // feedbackRingTopo is a 3-node topology with a feedback ring:
 //
-//	in08 (Input Init=[0,1] repeat=true) → i0 (ChainInhibitor) → i1 (ChainInhibitor)
+//	in08 (Input Init=[0,1] repeat=true) → i0 (Inhibitor) → i1 (Inhibitor)
 //	i0.FeedbackOut → in08.FeedbackIn
 //
 // The ring drives in08's index via i0's step signal so values alternate 0,1,0,1.
@@ -380,28 +380,28 @@ const feedbackRingTopo = `{
     {
       "id": "in08", "type": "Input",
       "data": {"init": [0, 1], "repeat": true},
-      "outputs": [{"name": "ToChainInhibitor", "side": "right", "slot": 1}],
+      "outputs": [{"name": "ToInhibitor", "side": "right", "slot": 1}],
       "inputs":  [{"name": "FeedbackIn",  "side": "left",  "slot": 1}]
     },
     {
-      "id": "i0", "type": "ChainInhibitor",
+      "id": "i0", "type": "Inhibitor",
       "data": {"state": {"held": 0}, "sendRules": {"ToNext0": "fireAndForget"}},
-      "inputs":  [{"name": "FromPrevChainInhibitorNode", "side": "left",   "slot": 1}],
+      "inputs":  [{"name": "FromPrevInhibitorNode", "side": "left",   "slot": 1}],
       "outputs": [
         {"name": "ToNext0",     "side": "right",  "slot": 1},
         {"name": "FeedbackOut", "side": "bottom",  "slot": 1}
       ]
     },
     {
-      "id": "i1", "type": "ChainInhibitor",
+      "id": "i1", "type": "Inhibitor",
       "data": {"state": {"held": 0}, "sendRules": {"ToNext0": "fireAndForget"}},
-      "inputs":  [{"name": "FromPrevChainInhibitorNode", "side": "left", "slot": 1}],
+      "inputs":  [{"name": "FromPrevInhibitorNode", "side": "left", "slot": 1}],
       "outputs": [{"name": "ToNext0", "side": "right", "slot": 1}]
     }
   ],
   "edges": [
-    {"label": "in08ToI0",  "kind": "chain", "source": "in08", "sourceHandle": "ToChainInhibitor",             "target": "i0",   "targetHandle": "FromPrevChainInhibitorNode"},
-    {"label": "i0ToI1",    "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",                "target": "i1",   "targetHandle": "FromPrevChainInhibitorNode"},
+    {"label": "in08ToI0",  "kind": "chain", "source": "in08", "sourceHandle": "ToInhibitor",             "target": "i0",   "targetHandle": "FromPrevInhibitorNode"},
+    {"label": "i0ToI1",    "kind": "chain", "source": "i0",   "sourceHandle": "ToNext0",                "target": "i1",   "targetHandle": "FromPrevInhibitorNode"},
     {"label": "i0Feedback","kind": "chain", "source": "i0",   "sourceHandle": "FeedbackOut",            "target": "in08", "targetHandle": "FeedbackIn"}
   ],
   "view": {"nodes": {
@@ -461,9 +461,9 @@ func TestFeedbackRingAlternates(t *testing.T) {
 		// from i0 on FeedbackOut with value=1.
 		step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
 		const maxSteps = 400
-		// wantSend0 / wantSend1 appear as the in08 sends value 0 and value 1 on ToChainInhibitor.
-		wantSend0 := `"kind":"send","node":"in08","port":"ToChainInhibitor","value":0`
-		wantSend1 := `"kind":"send","node":"in08","port":"ToChainInhibitor","value":1`
+		// wantSend0 / wantSend1 appear as the in08 sends value 0 and value 1 on ToInhibitor.
+		wantSend0 := `"kind":"send","node":"in08","port":"ToInhibitor","value":0`
+		wantSend1 := `"kind":"send","node":"in08","port":"ToInhibitor","value":1`
 		// wantFB1 appears each time i0 emits step=1 on FeedbackOut.
 		wantFB1 := `"kind":"send","node":"i0","port":"FeedbackOut","value":1`
 

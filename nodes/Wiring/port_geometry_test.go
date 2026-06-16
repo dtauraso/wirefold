@@ -90,12 +90,12 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 		},
 		{
 			name: "nonzero-z-both",
-			src: nodeGeom{Kind: "ChainInhibitor", Center: &c111,
+			src: nodeGeom{Kind: "Inhibitor", Center: &c111,
 				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
-			tgt: nodeGeom{Kind: "ChainInhibitor", Center: &c11n1,
-				Inputs: []portGeom{{Name: "FromPrevChainInhibitorNode", AnchorId: &anchorId1}}},
-			tgtH: "FromPrevChainInhibitorNode",
+			tgt: nodeGeom{Kind: "Inhibitor", Center: &c11n1,
+				Inputs: []portGeom{{Name: "FromPrevInhibitorNode", AnchorId: &anchorId1}}},
+			tgtH: "FromPrevInhibitorNode",
 		},
 		{
 			name: "anchorid0-and-anchorid2-with-z",

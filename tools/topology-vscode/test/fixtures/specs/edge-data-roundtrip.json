@@ -11,12 +11,12 @@
     },
     {
       "id": "i0",
-      "type": "ChainInhibitor"
+      "type": "Inhibitor"
     }
   ],
   "edges": [
     {
-      "id": "inToChainInhibitor",
+      "id": "inToInhibitor",
       "source": "in0",
       "sourceHandle": "ToOut",
       "target": "readGate",
@@ -27,9 +27,9 @@
     {
       "id": "readGateToI0",
       "source": "readGate",
-      "sourceHandle": "ToChainInhibitor",
+      "sourceHandle": "ToInhibitor",
       "target": "i0",
-      "targetHandle": "FromPrevChainInhibitorNode",
+      "targetHandle": "FromPrevInhibitorNode",
       "kind": "chain",
       "data": { "delay": 2, "init": [1] }
     }

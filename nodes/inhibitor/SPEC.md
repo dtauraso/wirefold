@@ -1,4 +1,4 @@
-# ChainInhibitorNode
+# InhibitorNode
 
 ## View
 
@@ -29,13 +29,13 @@
 
 | Name | Direction | EdgeKind | Notes |
 |------|-----------|----------|-------|
-| FromPrevChainInhibitorNode | in | chain | receives value from upstream chain inhibitor |
+| FromPrevInhibitorNode | in | chain | receives value from upstream chain inhibitor |
 | ToNext | out | chain | fan-out to downstream nodes (multi-output) |
 | FeedbackOut | out | chain | sends step (1=advance, 0=hold) back to Input node; active when wired; fire-and-forget (no consume acknowledgment) |
 
 ## Firing rule
 
-On each value received from FromPrevChainInhibitorNode:
+On each value received from FromPrevInhibitorNode:
 1. Fire.
 2. If FeedbackOut is wired:
    a. Compute step: 1 if value ≠ last seen value (or first recv), else 0.

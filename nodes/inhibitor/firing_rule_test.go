@@ -1,4 +1,4 @@
-package chaininhibitor
+package inhibitor
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func TestFireOnReceive(t *testing.T) {
 	node := &Node{
 		Fire:                       func() { tr.Fire("ci") },
 		Held:                       99,
-		FromPrevChainInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevChainInhibitorNode", tr),
+		FromPrevInhibitorNode: Wiring.NewIn(fromPrev, "ci", "FromPrevInhibitorNode", tr),
 		ToNext: Wiring.OutMulti{
 			Wiring.NewOut(out0, "ci", "ToNext", tr),
 			Wiring.NewOut(out1, "ci", "ToNext", tr),
