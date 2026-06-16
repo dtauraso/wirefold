@@ -6,8 +6,9 @@
 // at `parent_center + R_parent * Dir_M`, where Dir_M is M's stored unit direction
 // on its parent's sphere (specNode.Dir) and R_parent = the placing parent node's R
 // (nodeR(parent)). Positions PROPAGATE outward from the anchor by BFS over the
-// CONNECTION graph (edges, undirected for placement): the first already-placed node
-// to reach M becomes M's parent. Back/cross edges to already-placed nodes do not
+// DIRECTED connection graph (an edge S->T means S outputs to T, so T sits on S's
+// sphere — T is a CHILD of S). M's parent is the node that OUTPUTS to it; it is
+// never an undirected neighbor. Back/cross edges to already-placed nodes do not
 // re-place them, so cycles terminate.
 //
 // This is a WHOLE-GRAPH computation: a single node cannot know its own world
@@ -18,13 +19,41 @@
 
 package Wiring
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
-// sphereEdge is the minimal undirected connection used for placement propagation:
-// the two endpoint node IDs. Direction is irrelevant for WHERE a node sits.
+// sphereEdge is a DIRECTED connection used for placement propagation: Source
+// outputs to Target, so Target sits on Source's sphere surface. Direction matters:
+// the center node (Source) carries the sphere; the surface node (Target) is placed
+// on it. This is why a node's "parent" is the node that OUTPUTS to it, never an
+// undirected neighbor — node 4 (7->4) is on node 7's sphere; the 4->5 edge puts
+// node 5 on node 4's sphere and has nothing to do with where node 4 sits.
 type sphereEdge struct {
 	Source string
 	Target string
+}
+
+// buildDirectedChildren builds the placement adjacency: for each directed edge
+// Source->Target, Target is a CHILD of Source (Target sits on Source's sphere). The
+// child lists are sorted by id so propagation is deterministic regardless of the
+// caller's edge order (callers build the edge slice by ranging a Go map, whose
+// order is randomized — undirected + unsorted is what made node 4's parent flip
+// between 7 and 5 and flicker). A node reached by two incoming edges (e.g. node 5:
+// 4->5 and 6->5) is placed by its first parent in sorted order.
+func buildDirectedChildren(edges []sphereEdge) map[string][]string {
+	children := map[string][]string{}
+	for _, e := range edges {
+		if e.Source == "" || e.Target == "" {
+			continue
+		}
+		children[e.Source] = append(children[e.Source], e.Target)
+	}
+	for k := range children {
+		sort.Strings(children[k])
+	}
+	return children
 }
 
 // defaultDir is the fallback unit direction used to place a reached node whose
@@ -40,8 +69,8 @@ var defaultDir = vec3{X: 0, Y: 1, Z: 0}
 //   - ANCHOR: node "1" if present, else the first node in nodes (map iteration is
 //     non-deterministic, so a stable anchor matters; "1" is the conventional seed).
 //     The anchor sits at the origin (0,0,0).
-//   - BFS over the undirected connection graph (adjacency built from edges' source
-//     and target, both directions). For each node M reached from already-placed
+//   - BFS over the DIRECTED connection graph (children built from edges' source ->
+//     target only; T sits on S's sphere). For each child M reached from already-placed
 //     parent P: pos[M] = pos[P] + nodeR(P) * Dir_M (M's stored unit dir; nil → +Y).
 //   - CYCLES: a node is placed at most once (visited set); back/cross edges to an
 //     already-placed node are ignored, so the BFS terminates on any cycle.
@@ -69,15 +98,9 @@ func computeSphereChainPositions(nodes map[string]nodeGeom, edges []sphereEdge) 
 		return map[string]vec3{}
 	}
 
-	// Build undirected adjacency from the edge list.
-	adj := map[string][]string{}
-	for _, e := range edges {
-		if e.Source == "" || e.Target == "" {
-			continue
-		}
-		adj[e.Source] = append(adj[e.Source], e.Target)
-		adj[e.Target] = append(adj[e.Target], e.Source)
-	}
+	// Directed placement adjacency: a node sits on the sphere of the node that
+	// OUTPUTS to it. Propagate outward from the anchor following output edges.
+	children := buildDirectedChildren(edges)
 
 	pos := map[string]vec3{anchor: {X: 0, Y: 0, Z: 0}}
 	queue := []string{anchor}
@@ -86,7 +109,7 @@ func computeSphereChainPositions(nodes map[string]nodeGeom, edges []sphereEdge) 
 		queue = queue[1:]
 		pCenter := pos[p]
 		pR := nodeR(nodes[p])
-		for _, m := range adj[p] {
+		for _, m := range children[p] {
 			if _, placed := pos[m]; placed {
 				continue // back/cross edge — already placed, do not re-place (cycle-safe)
 			}
@@ -121,8 +144,9 @@ func sphereChainAnchor(nodes map[string]nodeGeom) string {
 
 // sphereChainParents returns the BFS parent of every reached node (the same
 // already-placed node that PLACES it in computeSphereChainPositions), keyed by node
-// id. The anchor has no parent (absent from the map). Undirected adjacency from the
-// edge list; first reacher wins (cycle-safe), matching the position propagation.
+// id. The anchor has no parent (absent from the map). DIRECTED adjacency (parent =
+// the node that outputs to the child); first reacher wins (cycle-safe), matching
+// the position propagation.
 //
 // This is the inverse lookup E1 needs: a drag re-aims a node's Dir on its PARENT's
 // sphere, so the move handler must know which node is the parent. Recomputed from the
@@ -132,26 +156,19 @@ func sphereChainParents(nodes map[string]nodeGeom, edges []sphereEdge) map[strin
 	if anchor == "" {
 		return map[string]string{}
 	}
-	adj := map[string][]string{}
-	for _, e := range edges {
-		if e.Source == "" || e.Target == "" {
-			continue
-		}
-		adj[e.Source] = append(adj[e.Source], e.Target)
-		adj[e.Target] = append(adj[e.Target], e.Source)
-	}
+	children := buildDirectedChildren(edges)
 	parent := map[string]string{}
 	visited := map[string]bool{anchor: true}
 	queue := []string{anchor}
 	for len(queue) > 0 {
 		p := queue[0]
 		queue = queue[1:]
-		for _, m := range adj[p] {
+		for _, m := range children[p] {
 			if visited[m] {
 				continue
 			}
 			visited[m] = true
-			parent[m] = p
+			parent[m] = p // m sits on p's sphere because p outputs to m
 			queue = append(queue, m)
 		}
 	}

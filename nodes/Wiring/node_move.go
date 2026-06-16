@@ -441,19 +441,17 @@ func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, boo
 	if newDir.length() == 0 {
 		return nil, false
 	}
-	// Smooth follow: the node's new direction on its parent's sphere is just the
-	// (normalized) direction from the parent center toward the drag target. We do
-	// NOT quantize to a diameter-step slot per frame — per-frame snapping is
-	// bistable near a slot boundary and flickers the node between two adjacent
-	// slots (and the snapped point sits off the cursor). Tracking the cursor
-	// direction continuously removes the flicker. (Diameter-step quantization is
-	// retained as a helper for a future snap-on-release; see diameterStepAngle.)
-	nd := newDir.normalize()
+	// Drag on the parent's sphere in DIAMETER-STEPS of the dragged node: a smaller
+	// node has more places to land than a larger one (finer angular step). The
+	// parent here is unambiguous — it is the node that OUTPUTS to the dragged node
+	// (directed edge), so this is stable and does not flicker.
+	step := diameterStepAngle(nodeR(geoms[parentID]), 2*nodeRadius(geoms[nodeID].Kind))
+	quant := quantizeDirToStep(dirOf(geoms[nodeID]), newDir, step)
 
 	// New Dir for the moved node; re-propagate the whole graph from this geom set.
 	// The mover adopts this Dir via its own "center" message (below) — no direct
 	// cross-goroutine geom write here.
-	newQuantDir := &[3]float64{nd.X, nd.Y, nd.Z}
+	newQuantDir := &[3]float64{quant.X, quant.Y, quant.Z}
 	g := geoms[nodeID]
 	g.Dir = newQuantDir
 	geoms[nodeID] = g

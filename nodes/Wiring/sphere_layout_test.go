@@ -58,13 +58,14 @@ func TestSphereChainCycleTerminates(t *testing.T) {
 	if !approxVec(pos["1"], vec3{0, 0, 0}, 1e-9) {
 		t.Errorf("anchor moved by back edge: %+v", pos["1"])
 	}
-	// BFS reaches both 2 and 3 directly from anchor 1 (1-2 and the 3-1 edge):
-	// 2 placed from 1 → {R,0,0}; 3 placed from 1 → {0,R,0}. The 2-3 edge is a
-	// cross edge to an already-placed node and is ignored (terminates the cycle).
+	// DIRECTED propagation from anchor 1: 1->2 places 2 from 1 → {R,0,0};
+	// 2->3 places 3 from 2 → {R,0,0} + R*(0,1,0) = {R,R,0}. The 3->1 edge makes 1
+	// a child of 3, but 1 is already placed (anchor) so it is ignored — this
+	// terminates the cycle and leaves the anchor at the origin.
 	if !approxVec(pos["2"], vec3{R, 0, 0}, 1e-9) {
 		t.Errorf("node 2: %+v", pos["2"])
 	}
-	if !approxVec(pos["3"], vec3{0, R, 0}, 1e-9) {
+	if !approxVec(pos["3"], vec3{R, R, 0}, 1e-9) {
 		t.Errorf("node 3: %+v", pos["3"])
 	}
 }
