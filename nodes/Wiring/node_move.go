@@ -294,6 +294,8 @@ type MoveDispatch struct {
 	// coordinate), built at load from the loaded world centers. Authoritative for
 	// the polar move/lock logic; world positions recover via roots.world(id).
 	roots rootSet
+	// locks are polar relationships re-derived after a RootMove (lock.go).
+	locks []chordLock
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -467,6 +469,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		}
 	}
 	md.fanCenters(emit, reach)
+	md.applyLocks(nodeID)
 	return true
 }
 
