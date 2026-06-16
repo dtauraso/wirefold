@@ -30,7 +30,7 @@ func writeViewNode(root, nodeID string, pos specPosition) error {
 }
 
 // writeMetaPos sets the absolute world center on a node's meta.json, preserving its
-// id/type/r. Persisting x/y/z makes a node-drag (non-rooted layout) durable across reload.
+// id/type/r. Persisting x/y/z makes a node-drag (polar layout) durable across reload.
 func writeMetaPos(root, nodeID string, x, y, z float64) error {
 	path := filepath.Join(root, "nodes", nodeID, "meta.json")
 	var meta jsonMeta

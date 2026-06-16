@@ -42,7 +42,7 @@ type jsonMeta struct {
 	ID   string   `json:"id"`
 	Type string   `json:"type"`
 	R    *float64 `json:"r,omitempty"` // optional per-node sphere radius; nil → defaultNodeR (see nodeR)
-	X    float64  `json:"x"`           // stored absolute world center (non-rooted layout)
+	X    float64  `json:"x"`           // stored absolute world center (polar layout)
 	Y    float64  `json:"y"`
 	Z    float64  `json:"z"`
 }
