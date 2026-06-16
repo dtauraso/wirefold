@@ -480,7 +480,14 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 	for _, p := range g.Outputs {
 		appendPort(p.Name, false)
 	}
-	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), nodeR(g), ports)
+	// sphereR streams the REACH radius (max distance to a surface child) so the TS
+	// SphereRing sizes correctly without recomputing geometry. Childless nodes
+	// (ReachR == 0) fall back to nodeR so the value stays sane.
+	sphereR := nodeR(g)
+	if g.ReachR > 0 {
+		sphereR = g.ReachR
+	}
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports)
 }
 
 // emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one

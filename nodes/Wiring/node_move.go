@@ -66,6 +66,10 @@ type moveMsg struct {
 	// out — the one centralized step (whole-graph placement, sphere_layout.go).
 	Center *vec3
 	Dir    *[3]float64
+	// ReachR (Kind == "center"): the re-propagated sphere REACH radius for NodeID (max
+	// distance to a surface child under the new centers). The nodeMover writes it onto its
+	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
+	ReachR float64
 	ack    chan struct{}
 }
 
@@ -124,6 +128,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		if msg.Dir != nil {
 			m.geom.Dir = msg.Dir
 		}
+		m.geom.ReachR = msg.ReachR
 		if m.tr != nil {
 			emitNodeGeometry(m.tr, m.id, m.geom)
 		}
@@ -460,6 +465,7 @@ func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, boo
 	if len(newCenters) == 0 {
 		return nil, false
 	}
+	reachR := reachRFromCenters(newCenters, edges)
 	// Fan the fresh centers out through inboxes (one "center" message per node, routed
 	// to that node's mover AND every incident edge's mover). Each owning goroutine
 	// writes the center/Dir onto its own held geom and re-emits — preserving the
@@ -468,13 +474,14 @@ func (md *MoveDispatch) SphereMove(nodeID string, target vec3) (*[3]float64, boo
 	for id, c := range newCenters {
 		cc := c
 		dir := geoms[id].Dir
+		rr := reachR[id]
 		if ch, ok := md.dispatch[id]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir}
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
 		}
 		for edgeID, em := range md.edgeMovers {
 			if em.srcID == id || em.dstID == id {
 				if ch, ok := md.dispatch[edgeID]; ok {
-					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir}
+					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
 				}
 			}
 		}
@@ -515,21 +522,42 @@ func (md *MoveDispatch) SphereResize(nodeID string, r float64) (float64, bool) {
 	if len(newCenters) == 0 {
 		return 0, false
 	}
+	reachR := reachRFromCenters(newCenters, edges)
 	for id, c := range newCenters {
 		cc := c
 		dir := geoms[id].Dir
+		rr := reachR[id]
 		if ch, ok := md.dispatch[id]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir}
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
 		}
 		for edgeID, em := range md.edgeMovers {
 			if em.srcID == id || em.dstID == id {
 				if ch, ok := md.dispatch[edgeID]; ok {
-					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir}
+					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, Dir: dir, ReachR: rr}
 				}
 			}
 		}
 	}
 	return r, true
+}
+
+// reachRFromCenters computes each node's sphere REACH radius (max distance from a
+// node's center to any node it outputs to) under the given centers and edge set.
+// Mirrors loader.go buildFromSpec; used by SphereMove/SphereResize so the fanned
+// "center" message carries the new reach radius and the ring stays sized during a drag.
+func reachRFromCenters(centers map[string]vec3, edges []sphereEdge) map[string]float64 {
+	reachR := map[string]float64{}
+	for _, e := range edges {
+		sc, okS := centers[e.Source]
+		tc, okT := centers[e.Target]
+		if !okS || !okT {
+			continue
+		}
+		if d := chordLength(sc, tc); d > reachR[e.Source] {
+			reachR[e.Source] = d
+		}
+	}
+	return reachR
 }
 
 // NodeKind returns the kind string for the given node id, or "" if unknown.
