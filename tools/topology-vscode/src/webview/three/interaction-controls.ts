@@ -108,6 +108,7 @@ export interface ControlState {
   anchorX: number; // deadzone-window center (re-armed at current pointer on re-anchor)
   anchorY: number;
   rollAccum: number;             // signed roll angle this segment (radians)
+  rollPrevAngle: number;         // last pointer angle around the anchor (for angular sweep)
   lastStepX: number;             // last min-step-gated pointer sample
   lastStepY: number;
   lastVecX: number;              // last gated motion vector (for turning angle)
@@ -158,7 +159,7 @@ export function useInteractionControls(
     arcStartQuat: new THREE.Quaternion(),
     rotMode: "turntable",
     anchorX: 0, anchorY: 0,
-    rollAccum: 0,
+    rollAccum: 0, rollPrevAngle: 0,
     lastStepX: 0, lastStepY: 0,
     lastVecX: 0, lastVecY: 0, hasVec: false,
     straightCount: 0,
@@ -588,15 +589,11 @@ export function useInteractionControls(
         if (cam) {
           const pivot = s.arcballPivot;
           const ROT_SPEED = 0.005;
-          // Roll gesture tuning (re-classifying state machine with hysteresis):
-          const WIN_PX = ROT_HUD_WIN_PX; // turntable deadzone half-window; leave BOTH -> roll
-          const MIN_STEP_PX = 3;      // min segment to compute a stable tangent (jitter gate)
-          const STRAIGHT_TURN = 0.18; // |path turn| below this (rad) = a "straight" step
-          const STRAIGHT_RUN = 4;     // consecutive straight steps cancel roll -> turntable
-          const ROLL_SPEED = -1.0;    // path-turn -> roll (1:1; negative = match mouse circle direction)
+          const WIN_PX = ROT_HUD_WIN_PX; // deadzone half-window; in a strip = turntable
+          const ROLL_SPEED = 1.0;        // angular sweep -> roll (1:1; flip sign to reverse)
 
-          // Re-snapshot the camera as the current segment's anchor (used on mode switch
-          // + window re-arm so each segment is anchored, closed loops return to start).
+          // Re-snapshot the camera as the current segment's anchor so each segment is
+          // anchored (closed loops return to start).
           const reanchor = () => {
             cam.updateMatrixWorld(true);
             s.arcStartOffset = cam.position.clone().sub(pivot);
@@ -604,53 +601,46 @@ export function useInteractionControls(
             s.arcStartQuat = cam.quaternion.clone();
           };
 
-          // Detection runs on min-step-gated samples so pixel jitter can't fake turning.
-          const sdx = e.clientX - s.lastStepX;
-          const sdy = e.clientY - s.lastStepY;
-          const stepLen = Math.hypot(sdx, sdy);
-          if (stepLen >= MIN_STEP_PX) {
-            const vx = sdx / stepLen, vy = sdy / stepLen;
-            if (s.hasVec) {
-              // Signed turn between successive motion tangents (the "intersecting
-              // tangents" curvature, taken as the turn between them — robust to jitter).
-              const turn = Math.atan2(s.lastVecX * vy - s.lastVecY * vx, s.lastVecX * vx + s.lastVecY * vy);
-              if (Math.abs(turn) < STRAIGHT_TURN) s.straightCount++; else s.straightCount = 0;
-              if (s.rotMode === "roll") s.rollAccum += turn * ROLL_SPEED;
-            }
-            s.lastVecX = vx; s.lastVecY = vy; s.hasVec = true;
-            s.lastStepX = e.clientX; s.lastStepY = e.clientY;
-
-            if (s.rotMode === "turntable") {
-              // Curled out of BOTH windows -> roll (re-anchor camera as roll start).
-              if (Math.abs(e.clientX - s.anchorX) > WIN_PX && Math.abs(e.clientY - s.anchorY) > WIN_PX) {
-                reanchor();
-                s.rotMode = "roll"; s.rollAccum = 0; s.straightCount = 0;
-                rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "roll" };
-              }
-            } else if (s.straightCount >= STRAIGHT_RUN) {
-              // Sustained straight run -> back to turntable; re-arm windows here.
-              reanchor();
-              s.rotMode = "turntable";
-              s.anchorX = e.clientX; s.anchorY = e.clientY; s.straightCount = 0;
-              rotHudRef.current = { active: true, x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, mode: "turntable" };
-            }
+          // POSITION-BASED classifier. The anchor centers BOTH the deadzone strips and
+          // the roll rings. Mouse within a strip (|dx|<=WIN or |dy|<=WIN) = turntable;
+          // outside both strips (the ring region) = roll. The anchor (ring center) is
+          // FIXED during roll; it re-arms only when the mouse returns to a strip — so the
+          // circles don't move until the mouse leaves the striped areas again.
+          const adx = e.clientX - s.anchorX;
+          const ady = e.clientY - s.anchorY;
+          const inStrip = Math.abs(adx) <= WIN_PX || Math.abs(ady) <= WIN_PX;
+          if (s.rotMode === "turntable" && !inStrip) {
+            reanchor();
+            s.rotMode = "roll";
+            s.rollAccum = 0;
+            s.rollPrevAngle = Math.atan2(ady, adx);
+          } else if (s.rotMode === "roll" && inStrip) {
+            reanchor();
+            s.rotMode = "turntable";
+            s.anchorX = e.clientX; s.anchorY = e.clientY;
           }
-          // Update HUD each frame: strips at the anchor (window center), rings follow
-          // the live pointer.
+
           rotHudRef.current = { active: true, x: s.anchorX, y: s.anchorY, mx: e.clientX, my: e.clientY, mode: s.rotMode };
 
-          // Apply the current mode's rotation, anchored to the segment-start snapshot.
           let rotInv: THREE.Quaternion;
           if (s.rotMode === "roll") {
-            // Roll about the view (forward) axis through the pivot — spins the scene
-            // around the user's view; driven by the mouse path's accumulated turning.
+            // Roll = angular sweep of the pointer AROUND THE ANCHOR, applied about the
+            // view (forward) axis. Smaller circle = less travel per angle = faster roll.
+            const r = Math.hypot(adx, ady);
+            if (r >= WIN_PX) {
+              const ang = Math.atan2(ady, adx);
+              let d = ang - s.rollPrevAngle;
+              if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+              s.rollAccum += d * ROLL_SPEED;
+              s.rollPrevAngle = ang;
+            }
             const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(s.arcStartQuat);
             rotInv = new THREE.Quaternion().setFromAxisAngle(fwd, s.rollAccum);
           } else {
             // Turntable: yaw about world up, pitch about the camera's right axis,
-            // anchored to the re-armable window center (not the raw down-point).
-            const angY = (e.clientX - s.anchorX) * ROT_SPEED;
-            const angX = (e.clientY - s.anchorY) * ROT_SPEED;
+            // anchored to the (re-armable) strip center.
+            const angY = adx * ROT_SPEED;
+            const angX = ady * ROT_SPEED;
             const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
             const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
             const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);

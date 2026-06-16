@@ -37,9 +37,7 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
   // Stable element refs for the SVG children we mutate each frame.
   const hStripRef = useRef<SVGRectElement | null>(null);
   const vStripRef = useRef<SVGRectElement | null>(null);
-  const ring1Ref = useRef<SVGCircleElement | null>(null);
-  const ring2Ref = useRef<SVGCircleElement | null>(null);
-  const ring3Ref = useRef<SVGCircleElement | null>(null);
+  const ringsRef = useRef<SVGCircleElement[]>([]);
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -59,16 +57,17 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
     svg.appendChild(vStrip);
     vStripRef.current = vStrip;
 
-    const makeCircle = (r: number) => {
+    // Pool of concentric-ring elements; how many are shown grows with the pointer's
+    // distance from the anchor (a ring is "added outside" as the mouse moves out).
+    const MAX_RINGS = 16;
+    ringsRef.current = [];
+    for (let i = 0; i < MAX_RINGS; i++) {
       const c = document.createElementNS(ns, "circle");
       c.setAttribute("fill", "none");
       c.setAttribute("stroke-width", "1.5");
       svg.appendChild(c);
-      return c;
-    };
-    ring1Ref.current = makeCircle(ROT_HUD_WIN_PX);
-    ring2Ref.current = makeCircle(ROT_HUD_WIN_PX * 2);
-    ring3Ref.current = makeCircle(ROT_HUD_WIN_PX * 3);
+      ringsRef.current.push(c);
+    }
 
     let rafId: number;
 
@@ -103,7 +102,7 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
       const isTurntable = hud.mode === "turntable";
       const HIDDEN = "rgba(0,0,0,0)";
       const halfW = ROT_HUD_WIN_PX;
-      // Live pointer (container-relative): the roll rings follow it.
+      // Live pointer (container-relative) — only used to size how many rings to show.
       const mx = hud.mx - rect.left;
       const my = hud.my - rect.top;
 
@@ -123,19 +122,24 @@ export function RotateHud({ rotHudRef, containerRef }: RotateHudProps) {
       vStrip.setAttribute("height", String(H));
       vStrip.setAttribute("fill", stripColor);
 
-      // Concentric rings: shown ONLY in roll, centered on the LIVE pointer so they
-      // re-center as the mouse drifts (a new circle is "made" wherever it goes —
-      // smaller circle = tighter curl = faster roll, from the turning-integration math).
-      const ringColor = isTurntable ? HIDDEN : COLOR_BRIGHT;
-      const setRing = (el: SVGCircleElement, r: number) => {
-        el.setAttribute("cx", String(mx));
-        el.setAttribute("cy", String(my));
-        el.setAttribute("r", String(r));
-        el.setAttribute("stroke", ringColor);
-      };
-      setRing(ring1Ref.current!, ROT_HUD_WIN_PX);
-      setRing(ring2Ref.current!, ROT_HUD_WIN_PX * 2);
-      setRing(ring3Ref.current!, ROT_HUD_WIN_PX * 3);
+      // Concentric rings: shown ONLY in roll, centered on the ANCHOR (fixed — they do
+      // not move while rolling). One more ring than the pointer's radius is shown, so a
+      // ring is "added outside" as the mouse moves out. The mouse rides around them;
+      // smaller ring = less travel per angle = faster roll.
+      const rings = ringsRef.current;
+      const pointerR = Math.hypot(mx - cx, my - cy);
+      const shown = isTurntable ? 0 : Math.min(rings.length, Math.max(3, Math.ceil(pointerR / halfW) + 1));
+      for (let i = 0; i < rings.length; i++) {
+        const el = rings[i];
+        if (i < shown) {
+          el.setAttribute("cx", String(cx));
+          el.setAttribute("cy", String(cy));
+          el.setAttribute("r", String((i + 1) * halfW));
+          el.setAttribute("stroke", COLOR_BRIGHT);
+        } else {
+          el.setAttribute("stroke", HIDDEN);
+        }
+      }
     };
 
     tick();
