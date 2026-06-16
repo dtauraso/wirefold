@@ -12,7 +12,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { GlobalLabelsToggle, HomeButton, SphereToggle } from "./camera-ui";
+import { GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts } from "./scene-content";
@@ -31,7 +31,6 @@ export function ThreeView() {
   const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [showSphere, setShowSphere] = useState<boolean>(false);
   // selectedSphere: the node id whose sphere SURFACE (torus rim) is selected.
   // Distinct from selectedId (a node/edge/port). Set when a pick returns "sphere:<id>".
   const [selectedSphere, setSelectedSphere] = useState<string | null>(null);
@@ -237,7 +236,6 @@ export function ThreeView() {
             onPositions={onPositions}
             onNearestN={onNearestN}
             onCameraSettle={onCameraSettle}
-            showSphere={showSphere}
           />
         </Canvas>
       </div>
@@ -318,13 +316,6 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
-      <SphereToggle
-        on={showSphere}
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowSphere((v) => !v);
-        }}
-      />
 
     </div>
   );

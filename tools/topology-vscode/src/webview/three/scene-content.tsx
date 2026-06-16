@@ -235,6 +235,7 @@ export function GraphNode({
   faded,
   selectedId,
   hoveredId,
+  onSphereSurface,
 }: {
   node: RFNode<NodeData>;
   selected: boolean;
@@ -242,6 +243,7 @@ export function GraphNode({
   faded: boolean;
   selectedId?: string | null;
   hoveredId?: string | null;
+  onSphereSurface?: boolean;
 }) {
   const envTex = useContext(EnvTexContext);
   // Subscribe reactively so GraphNode re-renders when Go streams node-geometry for
@@ -252,7 +254,9 @@ export function GraphNode({
   const pos = nodeWorldPos(node);
   const r = nodeRadius(node);
   const fillHex = node.data?.fill ?? "#ffffff";
-  const strokeHex = selected ? "#ffcc00"
+  // Sphere-surface nodes get the SAME highlight as the center (selected) node:
+  // stroke #ffcc00 + a thicker ring, no extra glow.
+  const strokeHex = (selected || onSphereSurface) ? "#ffcc00"
     : hovered ? "#aaddff"
     : (node.data?.stroke ?? "#888888");
 
@@ -262,7 +266,7 @@ export function GraphNode({
   const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
   const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
-  const torusThick = (selected || hovered) ? r * 0.14 : r * 0.08;
+  const torusThick = (selected || hovered || onSphereSurface) ? r * 0.14 : r * 0.08;
   const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
   return (
@@ -302,7 +306,7 @@ export function GraphNode({
         <meshBasicMaterial
           color="#ff5a00"
           transparent
-          opacity={selected ? 0.5 : 0}
+          opacity={(selected || onSphereSurface) ? 0.5 : 0}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
@@ -364,9 +368,9 @@ export function GraphNode({
 }
 
 // ---------------------------------------------------------------------------
-// SphereRing — "show the sphere" visualization.
-// When showSphere is on AND a node is selected, draws two thin see-through torus
-// rings (XY + XZ planes) centered on that node with major radius R = the node's
+// SphereRing — "show the sphere" visualization for one owner node.
+// Draws two thin see-through torus rings (XY + XZ planes) centered on the owner node
+// with major radius R = the node's
 // Go-streamed sphere radius (nodeRadius reads geoms[id].radius; falls back to local
 // compute pre-emit). Styled like the node's border ring (NODE_DEFS stroke), but
 // transparent + depthWrite false + raycast disabled so it's purely decorative and
@@ -376,71 +380,77 @@ export function GraphNode({
 export function SphereRing({
   nodes,
   edges,
-  selectedId,
-  selectedSphere,
-  showSphere,
+  ownerId,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
-  selectedId: string | null;
-  selectedSphere: string | null;
-  showSphere: boolean;
+  ownerId: string | null; // the node whose sphere to draw (a sphere the selection sits on)
 }) {
   // Re-render when Go streams node geometry (centers/radius), so R + center track moves.
   useNodeGeometryStore((s) => s.geoms);
 
-  const selNode = selectedId ? nodes.find((n) => n.id === selectedId) ?? null : null;
+  const ownerNode = ownerId ? nodes.find((n) => n.id === ownerId) ?? null : null;
 
-  // Only output-bearing nodes center a sphere; output-less nodes (no outgoing
-  // edge, e.g. surface-only members like 3 and 5) live on others' surfaces and
-  // have no sphere of their own.
-  const centersSphere = selNode != null && edges.some((e) => e.source === selNode.id);
+  // Only output-bearing nodes center a sphere; output-less nodes (no outgoing edge)
+  // live on others' surfaces and have no sphere of their own.
+  const centersSphere = ownerNode != null && edges.some((e) => e.source === ownerNode.id);
 
   const ringColor = useMemo(
-    () => new THREE.Color(selNode?.data?.stroke ?? "#888888"),
-    [selNode?.data?.stroke],
+    () => new THREE.Color(ownerNode?.data?.stroke ?? "#888888"),
+    [ownerNode?.data?.stroke],
   );
 
-  if (!showSphere || !selNode || !centersSphere) return null;
+  if (!ownerNode || !centersSphere) return null;
 
-  const center = nodeWorldPos(selNode);
-  // R = Go-streamed sphere-chain radius (sphereR, used for bead orbit and port placement).
-  // Falls back to nodeRadius (body radius) if sphereR is not yet set.
-  const geom = getNodeGeometry(selNode.id);
-  const R = geom?.sphereR ?? nodeRadius(selNode);
+  const center = nodeWorldPos(ownerNode);
+  // Radius: the ring must REACH the nodes on this owner's surface (the nodes it
+  // outputs to). A surface node may have been placed by a DIFFERENT parent (a
+  // multi-parent node like 5, placed on 6's sphere; or the anchor reached via a
+  // feedback edge), so the owner's own sphereR doesn't reach it. Size to the
+  // farthest surface node's actual distance; for a node that placed its own
+  // children this equals sphereR. Fall back to sphereR when no surface-node
+  // geometry is available yet.
+  const geom = getNodeGeometry(ownerNode.id);
+  let R = geom?.sphereR ?? nodeRadius(ownerNode);
+  let maxSurfaceDist = 0;
+  for (const e of edges) {
+    if (e.source !== ownerNode.id) continue;
+    const sn = nodes.find((n) => n.id === e.target);
+    if (!sn) continue;
+    const d = center.distanceTo(nodeWorldPos(sn));
+    if (Number.isFinite(d) && d > maxSurfaceDist) maxSurfaceDist = d;
+  }
+  if (maxSurfaceDist > 1e-3) R = maxSurfaceDist;
   if (R < 1e-3) return null;
 
-  // Thin tube so it reads as a ring, not a donut — scale to the node's own ring tube.
-  const tube = Math.max(0.5, nodeRadius(selNode) * 0.08);
-
-  // Highlighted when THIS sphere surface is the current sphere selection.
-  const isSphereSelected = selectedSphere === selNode.id;
+  // Thin tube so it reads as a ring, not a donut.
+  const tube = Math.max(0.5, nodeRadius(ownerNode) * 0.08);
 
   // Two perpendicular great-circle rings so the sphere reads as a sphere:
   // the first lies in XY (torusGeometry's default plane), the second is
-  // rotated 90° about X into the XZ plane. Both share radius/tube/material,
-  // and both carry the sphere userData so clicking either ring selects the sphere.
+  // rotated 90° about X into the XZ plane. Both share radius/tube/material.
+  // The rings are visual-only (not selectable) — see the raycast disable below.
   const ringMat = (
     <meshStandardMaterial
       color={ringColor}
       emissive={ringColor}
-      emissiveIntensity={isSphereSelected ? 1.2 : 0.25}
+      emissiveIntensity={0.25}
       transparent
-      opacity={isSphereSelected ? 0.95 : 0.55}
+      opacity={0.55}
       depthWrite={false}
     />
   );
 
+  // The tori are visual-only: raycast disabled so they never intercept a pick
+  // (clicks pass through to the nodes behind them). The sphere is not selectable.
+  const noRaycast = () => null;
   return (
     <group position={[center.x, center.y, center.z]}>
-      <mesh userData={{ sphereSurface: true, sphereNodeId: selNode.id }}>
+      <mesh raycast={noRaycast}>
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
-      <mesh
-        rotation={[Math.PI / 2, 0, 0]}
-        userData={{ sphereSurface: true, sphereNodeId: selNode.id }}
-      >
+      <mesh rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
@@ -1149,14 +1159,12 @@ export function Scene({
   onPositions,
   onNearestN,
   onCameraSettle,
-  showSphere,
 }: {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
   selectedSphere: string | null;
   hoveredId: string | null;
-  showSphere: boolean;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   initialCamera3d?: Camera3D;
   onPickRequest: React.MutableRefObject<
@@ -1167,6 +1175,32 @@ export function Scene({
   onCameraSettle: () => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  // Nodes on the visible sphere's surface = the selected node's outgoing-edge
+  // targets (its children sit on its sphere at radius R). Highlighted while the
+  // sphere is shown. Empty set otherwise (no highlight).
+  // On selection, show every sphere the node touches: its OWN sphere (where it is the
+  // center) PLUS every sphere whose center outputs to it (the spheres it sits on the
+  // surface of — its incoming-edge sources; one node can be on several, e.g. node 5 on
+  // both 4 and 6). For each owner we draw its sphere and highlight the owner (center)
+  // plus all nodes on its surface (the owner's children). Owners that center no sphere
+  // (no outgoing edge) draw nothing but still contribute their own highlight.
+  const sphereOwners = selectedId
+    ? Array.from(
+        new Set<string>([
+          selectedId,
+          ...edges
+            .filter((e) => e.target === selectedId && e.source)
+            .map((e) => e.source as string),
+        ]),
+      )
+    : [];
+  const surfaceIds = new Set<string>();
+  for (const ownerId of sphereOwners) {
+    surfaceIds.add(ownerId);
+    for (const e of edges) {
+      if (e.source === ownerId && e.target) surfaceIds.add(e.target);
+    }
+  }
   const hasRestoredCamera = initialCamera3d !== undefined;
   return (
     <ProceduralEnvProvider>
@@ -1187,18 +1221,15 @@ export function Scene({
           faded={!!n.data?.faded}
           selectedId={selectedId}
           hoveredId={hoveredId}
+          onSphereSurface={surfaceIds.has(n.id)}
         />
       ))}
       {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
           node-local offsets) so they ride the node on move — no top-level mount. */}
       <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
-      <SphereRing
-        nodes={nodes}
-        edges={edges}
-        selectedId={selectedId}
-        selectedSphere={selectedSphere}
-        showSphere={showSphere}
-      />
+      {sphereOwners.map((oid) => (
+        <SphereRing key={oid} nodes={nodes} edges={edges} ownerId={oid} />
+      ))}
     </ProceduralEnvProvider>
   );
 }
