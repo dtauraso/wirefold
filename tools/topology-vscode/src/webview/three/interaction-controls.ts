@@ -89,10 +89,23 @@ export interface ControlState {
   emptyDown: boolean;
   // Arcball pivot: captured once at gesture start (world space)
   arcballPivot: THREE.Vector3;
-  // Two-cylinder gesture-start snapshot (anchored, world-fixed axes)
-  arcStartOffset: THREE.Vector3; // cam.position - pivot at gesture start
-  arcStartUp: THREE.Vector3;     // cam.up at gesture start
-  arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
+  // Two-cylinder gesture-start snapshot (anchored, world-fixed axes). Re-snapshotted
+  // on every turntable<->roll switch and window re-anchor so each segment is anchored.
+  arcStartOffset: THREE.Vector3; // cam.position - pivot at segment start
+  arcStartUp: THREE.Vector3;     // cam.up at segment start
+  arcStartQuat: THREE.Quaternion; // camera orientation at segment start
+  // Rotation sub-mode (within phase "rotating"): straight drag = turntable (yaw/pitch),
+  // curling drag = roll about the view axis (driven by the path's accumulated turning).
+  rotMode: "turntable" | "roll";
+  anchorX: number; // deadzone-window center (re-armed at current pointer on re-anchor)
+  anchorY: number;
+  rollAccum: number;             // signed roll angle this segment (radians)
+  lastStepX: number;             // last min-step-gated pointer sample
+  lastStepY: number;
+  lastVecX: number;              // last gated motion vector (for turning angle)
+  lastVecY: number;
+  hasVec: boolean;
+  straightCount: number;         // consecutive ~straight gated steps (roll->turntable)
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +143,12 @@ export function useInteractionControls(
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
     arcStartQuat: new THREE.Quaternion(),
+    rotMode: "turntable",
+    anchorX: 0, anchorY: 0,
+    rollAccum: 0,
+    lastStepX: 0, lastStepY: 0,
+    lastVecX: 0, lastVecY: 0, hasVec: false,
+    straightCount: 0,
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -481,8 +500,21 @@ export function useInteractionControls(
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
         } else if (s.emptyDown) {
-          // Empty-space drag: start arcball rotation.
+          // Empty-space drag: start rotation. Arm the turntable deadzone windows at
+          // the current pointer and snapshot the camera as this segment's anchor.
           s.phase = "rotating";
+          const cam0 = cameraRef.current;
+          if (cam0) {
+            cam0.updateMatrixWorld(true);
+            s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
+            s.arcStartUp = cam0.up.clone();
+            s.arcStartQuat = cam0.quaternion.clone();
+          }
+          s.rotMode = "turntable";
+          s.anchorX = e.clientX; s.anchorY = e.clientY;
+          s.rollAccum = 0;
+          s.lastStepX = e.clientX; s.lastStepY = e.clientY;
+          s.hasVec = false; s.straightCount = 0;
         }
       }
 
@@ -542,23 +574,69 @@ export function useInteractionControls(
         if (cam) {
           const pivot = s.arcballPivot;
           const ROT_SPEED = 0.005;
-          // Two cylinders: both rotation axes lie in the node's plane (z=0) through
-          // the pivot. Horizontal drag rotates about world Y, vertical drag about
-          // world X. Decoupled, world-fixed axes; anchored to total drag from the
-          // down-point so a closed loop returns to start (no accumulation).
-          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> azimuth
-          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> elevation
-          // Turntable axes: yaw about WORLD up (keeps the horizon level), but pitch
-          // about the CAMERA's right axis (its local X at gesture start) — NOT world X.
-          // Using world X made "rotate down" pitch about a stale axis after any yaw,
-          // because the pitch axis never tracked the camera's orientation. The camera
-          // right is captured per gesture from arcStartQuat, so pitch always tilts the
-          // view up/down relative to the screen regardless of the current azimuth.
-          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
-          const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
-          const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
-          const rot = qy.clone().multiply(qx);
-          const rotInv = rot.clone().invert();
+          // Roll gesture tuning (re-classifying state machine with hysteresis):
+          const WIN_PX = 24;          // turntable deadzone half-window; leave BOTH -> roll
+          const MIN_STEP_PX = 3;      // min segment to compute a stable tangent (jitter gate)
+          const STRAIGHT_TURN = 0.18; // |path turn| below this (rad) = a "straight" step
+          const STRAIGHT_RUN = 4;     // consecutive straight steps cancel roll -> turntable
+          const ROLL_SPEED = 1.0;     // path-turn -> roll (1:1; a full mouse loop = full roll)
+
+          // Re-snapshot the camera as the current segment's anchor (used on mode switch
+          // + window re-arm so each segment is anchored, closed loops return to start).
+          const reanchor = () => {
+            cam.updateMatrixWorld(true);
+            s.arcStartOffset = cam.position.clone().sub(pivot);
+            s.arcStartUp = cam.up.clone();
+            s.arcStartQuat = cam.quaternion.clone();
+          };
+
+          // Detection runs on min-step-gated samples so pixel jitter can't fake turning.
+          const sdx = e.clientX - s.lastStepX;
+          const sdy = e.clientY - s.lastStepY;
+          const stepLen = Math.hypot(sdx, sdy);
+          if (stepLen >= MIN_STEP_PX) {
+            const vx = sdx / stepLen, vy = sdy / stepLen;
+            if (s.hasVec) {
+              // Signed turn between successive motion tangents (the "intersecting
+              // tangents" curvature, taken as the turn between them — robust to jitter).
+              const turn = Math.atan2(s.lastVecX * vy - s.lastVecY * vx, s.lastVecX * vx + s.lastVecY * vy);
+              if (Math.abs(turn) < STRAIGHT_TURN) s.straightCount++; else s.straightCount = 0;
+              if (s.rotMode === "roll") s.rollAccum += turn * ROLL_SPEED;
+            }
+            s.lastVecX = vx; s.lastVecY = vy; s.hasVec = true;
+            s.lastStepX = e.clientX; s.lastStepY = e.clientY;
+
+            if (s.rotMode === "turntable") {
+              // Curled out of BOTH windows -> roll (re-anchor camera as roll start).
+              if (Math.abs(e.clientX - s.anchorX) > WIN_PX && Math.abs(e.clientY - s.anchorY) > WIN_PX) {
+                reanchor();
+                s.rotMode = "roll"; s.rollAccum = 0; s.straightCount = 0;
+              }
+            } else if (s.straightCount >= STRAIGHT_RUN) {
+              // Sustained straight run -> back to turntable; re-arm windows here.
+              reanchor();
+              s.rotMode = "turntable";
+              s.anchorX = e.clientX; s.anchorY = e.clientY; s.straightCount = 0;
+            }
+          }
+
+          // Apply the current mode's rotation, anchored to the segment-start snapshot.
+          let rotInv: THREE.Quaternion;
+          if (s.rotMode === "roll") {
+            // Roll about the view (forward) axis through the pivot — spins the scene
+            // around the user's view; driven by the mouse path's accumulated turning.
+            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(s.arcStartQuat);
+            rotInv = new THREE.Quaternion().setFromAxisAngle(fwd, s.rollAccum);
+          } else {
+            // Turntable: yaw about world up, pitch about the camera's right axis,
+            // anchored to the re-armable window center (not the raw down-point).
+            const angY = (e.clientX - s.anchorX) * ROT_SPEED;
+            const angX = (e.clientY - s.anchorY) * ROT_SPEED;
+            const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
+            const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
+            const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
+            rotInv = qy.clone().multiply(qx).invert();
+          }
           cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
           cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
