@@ -6,7 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
-import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
+import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
@@ -24,6 +24,42 @@ function commitCamera(cam: THREE.PerspectiveCamera) {
     };
   });
   scheduleViewSave();
+}
+
+// ---------------------------------------------------------------------------
+// P7.5 — Large sphere constraint helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the radius of the large container sphere from the node set.
+ * Mirrors the Go formula: max distance from origin to any node center + that
+ * node's own radius, plus a 20% padding. Falls back to a minimum of 500 so
+ * the camera is never clamped out of a scene with no nodes.
+ */
+function computeLargeSphereRadius(nodes: RFNode<NodeData>[]): number {
+  const MIN_R = 500;
+  if (!nodes || nodes.length === 0) return MIN_R;
+  let maxR = 0;
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    const dist = p.length() + nodeRadius(n);
+    if (dist > maxR) maxR = dist;
+  }
+  return Math.max(maxR * 1.2, MIN_R);
+}
+
+/**
+ * P7.5: Clamp the camera position so it stays on or inside the large
+ * container sphere of radius R. If the camera is outside, project it back
+ * to the surface (same direction, length = R). No-op when inside.
+ */
+function constrainInsideLargeSphere(cam: THREE.PerspectiveCamera, R: number): void {
+  const len = cam.position.length();
+  if (Number.isFinite(len) && len > R) {
+    cam.position.multiplyScalar(R / len);
+    cam.updateMatrixWorld(true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -527,6 +563,8 @@ export function useInteractionControls(
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
           cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
           cam.updateMatrixWorld(true);
+          // P7.5: keep camera inside the large sphere after orbit.
+          constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
           commitCamera(cam);
         }
       }
@@ -689,6 +727,8 @@ export function useInteractionControls(
             cam.position.copy(target).add(offset.multiplyScalar(f));
           }
         }
+        // P7.5: keep camera inside the large sphere after dolly.
+        constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
       } else {
         // PAN = pure 2D screen-space translation along the camera's own right/up
         // basis, translating BOTH the camera AND the persistent target by the same
@@ -719,6 +759,8 @@ export function useInteractionControls(
         // Square-on check: cam looks down -z, so right=(1,0,0), up=(0,1,0). Then this
         // is a world-XY translation scaled by worldPerPixel at the look-distance —
         // exactly the prior square-on behavior (a flat 2D slide in the z=0 plane).
+        // P7.5: keep camera inside the large sphere after pan.
+        constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
       }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
