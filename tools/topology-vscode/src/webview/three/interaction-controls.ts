@@ -389,17 +389,16 @@ export function useInteractionControls(
   const arcballPoint = useCallback(
     (clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 => {
       const ballR = Math.min(rect.width, rect.height) * 0.5;
-      let x = (clientX - rect.left - rect.width / 2) / ballR;
-      let y = (rect.height / 2 - (clientY - rect.top)) / ballR; // screen y-down → up
-      const d2 = x * x + y * y;
-      let z: number;
-      if (d2 <= 1) {
-        z = Math.sqrt(1 - d2);
-      } else {
-        const d = Math.sqrt(d2);
-        x /= d; y /= d; z = 0;
-      }
-      return new THREE.Vector3(x, y, z);
+      const x = (clientX - rect.left - rect.width / 2) / ballR;
+      const y = (rect.height / 2 - (clientY - rect.top)) / ballR; // screen y-down → up
+      const r2 = x * x + y * y;
+      // Bell/Holroyd hyperbolic-sheet arcball: inside the ball use the sphere; OUTSIDE
+      // use a hyperbola (z = 0.5/√r2, C1-continuous with the sphere at r2 = 0.5). This
+      // keeps tumbling as you drag past the rim instead of saturating at z = 0 — the
+      // rim-clamp version made rotation "stick" near the screen edges. Normalize so the
+      // result is a unit direction either way.
+      const z = r2 < 0.5 ? Math.sqrt(1 - r2) : 0.5 / Math.sqrt(r2);
+      return new THREE.Vector3(x, y, z).normalize();
     },
     [],
   );
