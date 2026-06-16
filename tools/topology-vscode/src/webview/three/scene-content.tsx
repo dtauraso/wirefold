@@ -403,24 +403,13 @@ export function SphereRing({
   if (!ownerNode || !centersSphere) return null;
 
   const center = nodeWorldPos(ownerNode);
-  // Radius: the ring must REACH the nodes on this owner's surface (the nodes it
-  // outputs to). A surface node may have been placed by a DIFFERENT parent (a
-  // multi-parent node like 5, placed on 6's sphere; or the anchor reached via a
-  // feedback edge), so the owner's own sphereR doesn't reach it. Size to the
-  // farthest surface node's actual distance; for a node that placed its own
-  // children this equals sphereR. Fall back to sphereR when no surface-node
-  // geometry is available yet.
+  // Radius: Go streams the REACH radius in sphereR — the max distance from this owner's
+  // center to any node it outputs to (its surface children), computed from the resolved
+  // centers. This reaches every surface node even when a child was placed by a different
+  // parent (e.g. node 5 on 6's sphere; the anchor reached via a feedback edge). No
+  // geometry math here — Go owns it. Fall back to the node radius before geometry arrives.
   const geom = getNodeGeometry(ownerNode.id);
-  let R = geom?.sphereR ?? nodeRadius(ownerNode);
-  let maxSurfaceDist = 0;
-  for (const e of edges) {
-    if (e.source !== ownerNode.id) continue;
-    const sn = nodes.find((n) => n.id === e.target);
-    if (!sn) continue;
-    const d = center.distanceTo(nodeWorldPos(sn));
-    if (Number.isFinite(d) && d > maxSurfaceDist) maxSurfaceDist = d;
-  }
-  if (maxSurfaceDist > 1e-3) R = maxSurfaceDist;
+  const R = geom?.sphereR ?? nodeRadius(ownerNode);
   if (R < 1e-3) return null;
 
   // Thin tube so it reads as a ring, not a donut.
@@ -1024,20 +1013,9 @@ export function RaycasterHelper({
       let portHit: { id: string; dist: number } | null = null;
       let edgeHit: { id: string; dist: number } | null = null;
       let nodeHit: { id: string; dist: number } | null = null;
-      // Sphere-surface torus rim hit → encoded "sphere:<nodeId>". Thin rim, so this
-      // only fires when the ray actually grazes the ring; clicking through the open
-      // middle still passes to the node body inside.
-      let sphereHit: { id: string; dist: number } | null = null;
 
       for (const hit of hits) {
         const hitObj = hit.object as THREE.Mesh;
-        if (!sphereHit && hitObj.userData?.sphereSurface) {
-          sphereHit = {
-            id: "sphere:" + (hitObj.userData.sphereNodeId as string),
-            dist: hit.distance,
-          };
-          continue;
-        }
         if (!portHit && hitObj.userData?.portId) {
           portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
           continue;
@@ -1081,17 +1059,7 @@ export function RaycasterHelper({
 
       // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
       let picked: string | null = null;
-      // Sphere-surface rim wins when its hit is nearer than the node body (the ray
-      // actually struck the thin ring rim before reaching the node inside). It does
-      // not override a port (ports sit on the node ring and are the finer target).
-      if (
-        sphereHit &&
-        !portHit &&
-        (!nodeHit || sphereHit.dist <= nodeHit.dist) &&
-        (!edgeHit || sphereHit.dist <= edgeHit.dist)
-      ) {
-        picked = sphereHit.id;
-      } else if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
+      if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
         picked = portHit.id;
       } else if (edgeHit && nodeHit) {
         picked = edgeHit.dist < nodeHit.dist - EDGE_BIAS ? edgeHit.id : nodeHit.id;
@@ -1151,7 +1119,6 @@ export function Scene({
   nodes,
   edges,
   selectedId,
-  selectedSphere,
   hoveredId,
   cameraRef,
   initialCamera3d,
@@ -1163,7 +1130,6 @@ export function Scene({
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
   selectedId: string | null;
-  selectedSphere: string | null;
   hoveredId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   initialCamera3d?: Camera3D;

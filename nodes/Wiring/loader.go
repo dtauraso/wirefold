@@ -192,6 +192,27 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				g.Center = &cc
 				nodeGeoms[id] = g
 			}
+			// Per-node REACH radius: max distance from a node's center to any node it
+			// outputs to, using the resolved centers. Streamed in NodeGeometry's sphereR
+			// field (builders.emitNodeGeometry) so the TS SphereRing reaches every surface
+			// node — geometry that used to be recomputed in TS (drift). Computed before
+			// newMoveDispatch so each node/edge mover captures it in its held geom.
+			reachR := map[string]float64{}
+			for _, e := range spec.Edges {
+				sc, okS := centers[e.Source]
+				tc, okT := centers[e.Target]
+				if !okS || !okT {
+					continue
+				}
+				if d := chordLength(sc, tc); d > reachR[e.Source] {
+					reachR[e.Source] = d
+				}
+			}
+			for id, r := range reachR {
+				g := nodeGeoms[id]
+				g.ReachR = r
+				nodeGeoms[id] = g
+			}
 		}
 	}
 
