@@ -355,24 +355,28 @@ export function useInteractionControls(
     [nodesRef, ensureTarget],
   );
 
+  // Screen-space arcball (Shoemake/Holroyd). Maps the cursor onto a virtual unit
+  // ball centered at the viewport, returning a unit vector in EYE space. This is
+  // camera-POSITION-independent (works whether the camera is inside or outside the
+  // scene), unlike a world-space ray-vs-container-sphere — which degenerates when
+  // the camera sits inside the large sphere and pins the rotation axis. Inside the
+  // ball (d<=1): z = sqrt(1-d^2) (tumble). Outside: clamp to the rim, z=0 (roll).
   const arcballPoint = useCallback(
-    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera): THREE.Vector3 => {
-      const C = new THREE.Vector3(0, 0, 0);
-      const R = computeLargeSphereRadius(nodesRef.current);
-      const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
-      const hit = new THREE.Vector3();
-      const sphere = new THREE.Sphere(C, R);
-      if (raycaster.ray.intersectSphere(sphere, hit)) {
-        return hit.clone().sub(C).normalize();
+    (clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 => {
+      const ballR = Math.min(rect.width, rect.height) * 0.5;
+      let x = (clientX - rect.left - rect.width / 2) / ballR;
+      let y = (rect.height / 2 - (clientY - rect.top)) / ballR; // screen y-down → up
+      const d2 = x * x + y * y;
+      let z: number;
+      if (d2 <= 1) {
+        z = Math.sqrt(1 - d2);
+      } else {
+        const d = Math.sqrt(d2);
+        x /= d; y /= d; z = 0;
       }
-      // Off-sphere: nearest point on ray to C → rim direction (enables roll)
-      const foot = new THREE.Vector3();
-      raycaster.ray.closestPointToPoint(C, foot);
-      return foot.sub(C).normalize();
+      return new THREE.Vector3(x, y, z);
     },
-    [nodesRef],
+    [],
   );
 
   // ------ helpers ------
@@ -463,7 +467,7 @@ export function useInteractionControls(
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0);
+          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect);
         }
       }
 
@@ -550,12 +554,16 @@ export function useInteractionControls(
         if (cam) {
           const C = new THREE.Vector3(0, 0, 0);
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam);
-          // q rotates arcP0 → p1 on the sphere surface; applying the inverse to the
-          // camera orbits it so the scene point under the pointer stays fixed.
-          // swap q<->rotInv here to flip rotation direction if needed
-          const q = new THREE.Quaternion().setFromUnitVectors(s.arcP0, p1);
-          const rotInv = q.clone().invert();
+          const p1 = arcballPoint(e.clientX, e.clientY, rect);
+          // arcP0/p1 are EYE-space unit vectors. qEye rotates arcP0 → p1 in eye space;
+          // conjugate by the start camera orientation to get the world rotation, then
+          // orbit the camera by its inverse so the grabbed sphere point follows the
+          // cursor (the whole rigid scene turns as one — incl. roll near the rim).
+          // Swap Rworld<->rotInv to flip rotation direction if needed.
+          const qEye = new THREE.Quaternion().setFromUnitVectors(s.arcP0, p1);
+          const Q = s.arcStartQuat.clone();
+          const Rworld = Q.clone().multiply(qEye).multiply(Q.clone().invert());
+          const rotInv = Rworld.clone().invert();
           cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
           cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
