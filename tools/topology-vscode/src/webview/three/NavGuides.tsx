@@ -115,6 +115,10 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
     [radiusKey, tubeKey],
   );
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
+  // Two more tori rotated 45° from the existing pair (about the same X axis): 45° and 135°,
+  // so the four great circles sit at 0/45/90/135.
+  const rotC = useMemo(() => new THREE.Euler(Math.PI / 4, 0, 0), []);
+  const rotD = useMemo(() => new THREE.Euler((3 * Math.PI) / 4, 0, 0), []);
   const camera = useThree((s) => s.camera);
   const groupRef = useRef<THREE.Group>(null);
   // The tori are VIEW-ALIGNED: the group tracks the camera's orientation each frame, so the
@@ -132,6 +136,12 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
       <mesh geometry={geoB} rotation={rotB} raycast={() => null}>
+        <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <mesh geometry={geoA} rotation={rotC} raycast={() => null}>
+        <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <mesh geometry={geoA} rotation={rotD} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
     </group>
