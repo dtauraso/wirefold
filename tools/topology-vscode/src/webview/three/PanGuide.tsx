@@ -26,8 +26,8 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Re-derive when Go streams geometry (sphere center/radius move with the diagram).
   useNodeGeometryStore((s) => s.geoms);
   const { camera, gl, size } = useThree();
-  const prevP = useRef<THREE.Vector3 | null>(null);  // last cursor point on the sphere
-  const tanDir = useRef(new THREE.Vector3(1, 0, 0)); // smoothed drag direction (tangent), stable
+  // The disk plane + triangle are FROZEN once (they "stay put"); only the red radius spins.
+  const frozen = useRef<{ e1: THREE.Vector3; e2: THREE.Vector3; Pf: THREE.Vector3 } | null>(null);
 
   // Fat-line objects (Line2) for the disk, triangle, and disk spokes.
   const { disk, tri, spoke0, interLine } = useMemo(() => {
@@ -69,28 +69,20 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const radius = P.clone().sub(C); // hypotenuse, length R
     const rHat = radius.clone().normalize();
 
-    // The disk TRACKS THE DRAG DIRECTION but stays stable: keep a SMOOTHED tangent direction
-    // (tanDir) instead of the raw per-frame cross product. Smoothing averages out the noise
-    // that made the raw normal flip 180° on a near-straight drag; a genuine reversal still
-    // turns it around. When motion is near-radial (no tangential part) tanDir is just held.
-    if (prevP.current) {
-      const m = P.clone().sub(prevP.current);
-      const t = m.clone().sub(rHat.clone().multiplyScalar(m.dot(rHat))); // tangential part of motion
-      if (t.lengthSq() > 1e-7) {
-        t.normalize();
-        tanDir.current.lerp(t, 0.25);
-        if (tanDir.current.lengthSq() < 1e-6) tanDir.current.copy(t);
-        tanDir.current.normalize();
-      }
+    // FREEZE the disk plane + triangle once, so they "stay put". Default plane = the meridian
+    // through the first cursor (radius + pole); the triangle is the right triangle at that
+    // first cursor point. Held thereafter — they no longer chase the cursor.
+    if (!frozen.current) {
+      const e1 = rHat.clone();
+      let e2 = pole.clone().sub(e1.clone().multiplyScalar(pole.dot(e1)));
+      if (e2.lengthSq() < 1e-6) e2 = new THREE.Vector3(1, 0, 0).sub(e1.clone().multiplyScalar(e1.x));
+      e2.normalize();
+      frozen.current = { e1, e2, Pf: P.clone() };
     }
-    prevP.current = P.clone();
+    const { e1, e2, Pf } = frozen.current;
+    const n = new THREE.Vector3().crossVectors(e1, e2); // frozen disk normal
 
-    // Disk = great circle in the plane the radius sweeps = span(rHat, tanDir): e1 = rHat,
-    // e2 = tanDir orthogonalized against rHat.
-    const e1 = rHat.clone();
-    let e2 = tanDir.current.clone().sub(e1.clone().multiplyScalar(tanDir.current.dot(e1)));
-    if (e2.lengthSq() < 1e-8) e2 = Math.abs(e1.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-    e2.sub(e1.clone().multiplyScalar(e2.dot(e1))).normalize();
+    // Disk = great circle in the FROZEN plane.
     const dPts: number[] = [];
     const N = 96;
     for (let i = 0; i <= N; i++) {
@@ -102,19 +94,23 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Right triangle ON the disk: hypotenuse = radius (C→P, in the disk plane); base along the
-    // disk's HORIZONTAL axis (disk plane ∩ world-horizontal = n × pole), forced toward the
-    // cursor so it never flips; height = the remaining in-plane leg. Right angle at Q.
-    const n = new THREE.Vector3().crossVectors(e1, e2); // disk normal (stable, from smoothed plane)
+    // Triangle STAYS PUT: built from the frozen cursor point Pf. hypotenuse = C→Pf; base along
+    // the disk's horizontal axis (n × pole) toward Pf; height the remaining in-plane leg.
+    const radiusF = Pf.clone().sub(C);
     let hAxis = new THREE.Vector3().crossVectors(n, pole);
-    if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone(); // disk near-horizontal → degenerate
+    if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone();
     hAxis.normalize();
-    if (radius.dot(hAxis) < 0) hAxis.negate();        // base points toward the cursor
-    const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
-    tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
+    if (radiusF.dot(hAxis) < 0) hAxis.negate();
+    const Q = C.clone().add(hAxis.multiplyScalar(radiusF.dot(hAxis)));
+    tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, Pf.x, Pf.y, Pf.z, C.x, C.y, C.z]);
 
-    // The radius r to the cursor (C → P).
-    spoke0.geometry.setPositions([C.x, C.y, C.z, P.x, P.y, P.z]);
+    // The red radius SPINS OPPOSITE to the cursor's angular motion (instead of pointing at the
+    // cursor): the cursor's angle in the frozen plane is a = atan2(radius·e2, radius·e1); the
+    // marker sits at −a, so as the cursor turns one way the marker turns the other.
+    const a = Math.atan2(radius.dot(e2), radius.dot(e1));
+    const sd = e1.clone().multiplyScalar(Math.cos(-a)).add(e2.clone().multiplyScalar(Math.sin(-a)));
+    const sp = C.clone().add(sd.multiplyScalar(R));
+    spoke0.geometry.setPositions([C.x, C.y, C.z, sp.x, sp.y, sp.z]);
     (spoke0.material as LineMaterial).resolution.set(size.width, size.height);
 
     // Intersection of the HORIZONTAL torus (equator, plane normal = pole) with the disk
