@@ -43,7 +43,22 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     };
     // spoke0 = the radius to the cursor (the FIRST direction), highlighted red; spokes = the
     // other three radii at 90° steps on the disk, white.
-    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4), spokes: mk(0xffffff, 2) };
+    // Number sprites 1–4 mark the ends of the four radii (1 = toward the cursor).
+    const numberSprite = (n: number, color: string) => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 64;
+      const ctx = c.getContext("2d")!;
+      ctx.fillStyle = color;
+      ctx.font = "bold 48px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(n), 32, 34);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+      sp.renderOrder = 1000;
+      return sp;
+    };
+    const labels = [numberSprite(1, "#ff5555"), numberSprite(2, "#ffffff"), numberSprite(3, "#ffffff"), numberSprite(4, "#ffffff")];
+    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4), spokes: mk(0xffffff, 2), labels };
   }, []);
 
   useFrame(() => {
@@ -123,6 +138,16 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     (spoke0.material as LineMaterial).resolution.set(size.width, size.height);
     (spokes.material as LineMaterial).resolution.set(size.width, size.height);
 
+    // Number labels just past each radius end (1 = toward cursor, then 2,3,4 at 90° steps).
+    const ends = [p0, p1, p2, p3];
+    const dirs = [e1, e2, e1.clone().negate(), e2.clone().negate()];
+    const lblScale = R * 0.18;
+    for (let i = 0; i < 4; i++) {
+      const lp = ends[i].clone().add(dirs[i].clone().multiplyScalar(R * 0.12));
+      labels[i].position.copy(lp);
+      labels[i].scale.set(lblScale, lblScale, 1);
+    }
+
     // Fat lines need the viewport resolution to size their pixel width.
     (disk.material as LineMaterial).resolution.set(size.width, size.height);
     (tri.material as LineMaterial).resolution.set(size.width, size.height);
@@ -135,6 +160,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       <primitive object={tri} />
       <primitive object={spoke0} />
       <primitive object={spokes} />
+      {labels.map((l, i) => <primitive key={i} object={l} />)}
     </>
   );
 }
