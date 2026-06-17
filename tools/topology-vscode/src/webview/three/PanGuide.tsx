@@ -27,8 +27,9 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Re-derive when Go streams geometry (sphere center/radius move with the diagram).
   useNodeGeometryStore((s) => s.geoms);
   const { camera, gl, size } = useThree();
-  const prevP = useRef<THREE.Vector3 | null>(null);   // last cursor point on the sphere
-  const lastNormal = useRef(new THREE.Vector3(0, 0, 1)); // last disk normal (held when not moving)
+  const prevP = useRef<THREE.Vector3 | null>(null);   // sphere point at the last normal update (anchor)
+  const anchorCursor = useRef<{ x: number; y: number } | null>(null); // cursor px at that anchor
+  const lastNormal = useRef(new THREE.Vector3(0, 0, 1)); // last disk normal (held between updates)
 
   // Fat-line objects (Line2) for the disk and triangle.
   const { disk, tri } = useMemo(() => {
@@ -69,29 +70,39 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
 
     // Disk plane FOLLOWS THE MOUSE MOTION: spanned by the radius and the motion direction;
     // normal = radius × motion (the rotation axis). Held when the cursor isn't moving.
+    // STABILIZED normal: only update once the cursor has moved a real distance (MOVE_THRESH
+    // px), and measure direction over that whole baseline. Frame-to-frame motion is tiny and
+    // noisy → the normal jittered every frame (constant flicker) and accumulated into a spin
+    // on a straight drag. Between updates the normal is HELD, so the disk sits still.
+    const MOVE_THRESH = 6; // px
     let n = lastNormal.current.clone();
-    if (prevP.current) {
-      const motion = P.clone().sub(prevP.current);
-      if (motion.lengthSq() > 1e-10) {
+    if (!anchorCursor.current || !prevP.current) {
+      anchorCursor.current = { x, y };
+      prevP.current = P.clone();
+    } else {
+      const sdx = x - anchorCursor.current.x;
+      const sdy = y - anchorCursor.current.y;
+      if (Math.hypot(sdx, sdy) >= MOVE_THRESH) {
+        const motion = P.clone().sub(prevP.current); // over the whole baseline, not one frame
         const cand = new THREE.Vector3().crossVectors(radius, motion);
-        const crossLen = cand.length();              // = R·|motion|·sin(angle between radius & motion)
-        if (crossLen > 1e-10) {
+        const crossLen = cand.length();
+        if (crossLen > 1e-9) {
           cand.normalize();
           const dotBefore = cand.dot(lastNormal.current);
-          if (dotBefore < 0) cand.negate();          // keep continuous with the last normal
+          if (dotBefore < 0) cand.negate(); // keep continuous with the last normal
           n = cand;
           lastNormal.current.copy(n);
           postLog("panguide", {
-            mo: [+motion.x.toFixed(2), +motion.y.toFixed(2), +motion.z.toFixed(2)],
-            moLen: +motion.length().toFixed(3),
-            crossLen: +crossLen.toFixed(4),          // tiny ⇒ motion ∥ radius ⇒ normal ill-defined
+            sdxy: [Math.round(sdx), Math.round(sdy)],
+            crossLen: +crossLen.toFixed(4),
             n: [+n.x.toFixed(2), +n.y.toFixed(2), +n.z.toFixed(2)],
             negated: dotBefore < 0,
           });
         }
+        anchorCursor.current = { x, y };
+        prevP.current = P.clone();
       }
     }
-    prevP.current = P.clone();
 
     // Disk = great circle (center C, radius R) in that plane: e1 along radius, e2 = n × e1.
     const e1 = radius.clone().normalize();
