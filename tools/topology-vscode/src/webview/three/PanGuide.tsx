@@ -54,10 +54,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const cs = computeContentSphere(nodes);
     const C = cs.center;
     const R = cs.radius;
-    // Use the VIEW-UP (the view-aligned horizontal torus's normal = camera up), not world Y,
-    // so the triangle's base/right-angle and the equator-intersection line land on the actual
-    // (view-aligned) horizontal torus where it crosses the disk.
-    const pole = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+    const pole = new THREE.Vector3(0, 1, 0); // diagram top axis
 
     // Cursor → point P on the diagram sphere (raycast; clamp to the silhouette on miss).
     const { x, y, inside } = useCursorStore.getState();
@@ -113,14 +110,21 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Triangle on the disk: hypotenuse = radius (C→P); base along the disk's horizontal axis
-    // (n × pole). Unlike the disk, the base KEEPS n's sign — so when the mouse changes
-    // direction (n → −n) the TRIANGLE flips to the other side, while the disk does not.
-    let hAxis = new THREE.Vector3().crossVectors(n, pole);
-    if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone();
-    hAxis.normalize();
-    const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
-    tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
+    // Right triangle with the right angle GUARANTEED at the tori intersection (Thales): the
+    // hypotenuse is the cursor's DIAMETER (P → antipode); the disk-circle point I where the
+    // disk crosses the horizontal torus sees that diameter at exactly 90°, always. interDir =
+    // pole × n is the equator∩disk direction; I = the crossing point nearer the cursor. The
+    // intersection (and thus which side the right angle is on) keeps n's sign → flips with the
+    // mouse direction, while the disk does not.
+    let iDir = new THREE.Vector3().crossVectors(pole, n);
+    if (iDir.lengthSq() < 1e-8) iDir = e1.clone();
+    iDir.normalize();
+    const Iplus = C.clone().add(iDir.clone().multiplyScalar(R));
+    const Iminus = C.clone().add(iDir.clone().multiplyScalar(-R));
+    const I = P.distanceToSquared(Iplus) <= P.distanceToSquared(Iminus) ? Iplus : Iminus;
+    const Pant = C.clone().multiplyScalar(2).sub(P); // antipode of the cursor on the disk
+    // lineLoop closes Pant→P (the hypotenuse = the cursor's diameter).
+    tri.geometry.setPositions([P.x, P.y, P.z, I.x, I.y, I.z, Pant.x, Pant.y, Pant.z]);
 
     // The radius r to the cursor (C → P), no spin.
     spoke0.geometry.setPositions([C.x, C.y, C.z, P.x, P.y, P.z]);
