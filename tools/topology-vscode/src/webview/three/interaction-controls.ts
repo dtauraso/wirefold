@@ -646,30 +646,45 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // INCREMENTAL SCREEN-AXIS TRACKBALL. Each frame's rotation axis is PERPENDICULAR
-          // to the cursor's motion in the screen plane — so the axis depends only on the
-          // DIRECTION you drag, never on where you grabbed. Drag left → vertical axis →
-          // pure yaw; drag up → horizontal axis → pure pitch; CIRCLE the cursor → the swept
-          // axes compose to a twist about the view axis → ROLL emerges on its own (geometric
-          // phase), no rim special-case. Angle ∝ pixels moved ⇒ constant speed at any zoom
-          // or sphere size. No sphere-point pick (so no center-fast/rim-fast, no feedback,
-          // no antipode flip). Applied about the pivot C from gesture start.
+          // POLAR TRACKBALL. The cursor is a polar coordinate (r, θ) about the screen CENTER
+          // (= the pivot's projection, since the pivot is straight ahead). Decompose the
+          // per-frame motion into its RADIAL and TANGENTIAL parts about that center:
+          //   • RADIAL (toward/away from center) → TUMBLE about the in-screen axis ⊥ radial
+          //     (drag out along +x → yaw, along +y → pitch). Angle ∝ radial pixels.
+          //   • TANGENTIAL (around the center) → ROLL about the VIEW axis (eye z). Swinging
+          //     the "radius" around the center by dθ rolls the diagram by dθ — exactly
+          //     "grab the radius, move it around the center → roll", r-independent (a quarter
+          //     turn around = 90° roll at any radius). No geometric phase, no rim case.
+          // Camera rotates opposite about pivot C so the content follows the cursor.
           const dx = e.clientX - s.prevX;
           const dy = e.clientY - s.prevY;
           s.prevX = e.clientX;
           s.prevY = e.clientY;
-          const len = Math.hypot(dx, dy);
-          if (len > 0) {
+          if (dx !== 0 || dy !== 0) {
             const C = s.arcPivot;
-            // Axis ⊥ drag, in eye space (+x right, +y up, -z forward). dy is screen-DOWN
-            // positive: drag right (dx>0) → +y (yaw); drag down (dy>0) → -x (pitch down).
-            const axisEye = new THREE.Vector3(-dy, dx, 0).normalize();
-            const axisWorld = axisEye.applyQuaternion(cam.quaternion).normalize();
-            const angle = len * ROT_GAIN; // rad per pixel — constant speed
-            // Scene rotation; camera rotates the OPPOSITE way about C so the scene appears
-            // to follow the cursor.
-            const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
-            const qCam = qScene.clone().invert();
+            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            const Ox = rect.left + rect.width / 2;   // polar center = canvas center
+            const Oy = rect.top + rect.height / 2;
+            const rvx = e.clientX - Ox;
+            const rvy = e.clientY - Oy;
+            const r = Math.hypot(rvx, rvy) || 1;
+            const R_FLOOR = 60;                       // clamp so center isn't hypersensitive (no 1/r blow-up)
+            const rEff = Math.max(r, R_FLOOR);
+            const rhx = rvx / r, rhy = rvy / r;       // radial unit (screen coords, y-down)
+            const thx = -rhy, thy = rhx;              // tangential unit (90° CCW in screen)
+            const dRad = dx * rhx + dy * rhy;         // radial pixel motion
+            const dTan = dx * thx + dy * thy;         // tangential pixel motion
+            // TUMBLE: axis ⊥ radial, in eye space. Screen radial (rhx, rhy_down) →
+            // eye-perp axis (-rhy, rhx, 0) (matches the yaw/pitch sign already tuned).
+            const tumbleAxisWorld = new THREE.Vector3(-rhy, rhx, 0).normalize().applyQuaternion(cam.quaternion).normalize();
+            const tumbleAngle = dRad * ROT_GAIN;
+            // ROLL: about the view axis (eye +z), by the swept angle dθ = dTan / r.
+            const rollAxisWorld = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion).normalize();
+            const rollAngle = dTan / rEff;
+            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxisWorld, tumbleAngle);
+            const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxisWorld, rollAngle);
+            const qScene = qRoll.multiply(qTumble);
+            const qCam = qScene.clone().invert(); // camera orbits opposite so content follows the cursor
             cam.position.sub(C).applyQuaternion(qCam).add(C);
             cam.quaternion.premultiply(qCam);
             cam.up.applyQuaternion(qCam);
@@ -677,10 +692,12 @@ export function useInteractionControls(
             const R = computeLargeSphereRadius(nodesRef.current);
             constrainInsideLargeSphere(cam, R);
             postLog("rot", {
-              build: "trackball-screenaxis-v8",
-              d: [dx, dy],
-              axisWorld: [+axisWorld.x.toFixed(2), +axisWorld.y.toFixed(2), +axisWorld.z.toFixed(2)],
-              angleDeg: +((angle * 180) / Math.PI).toFixed(1),
+              build: "polar-trackball-v11",
+              d: [+dx.toFixed(1), +dy.toFixed(1)],
+              rTheta: [Math.round(r), +(Math.atan2(rvy, rvx) * 180 / Math.PI).toFixed(0)],
+              dRadTan: [+dRad.toFixed(1), +dTan.toFixed(1)],
+              tumbleDeg: +((tumbleAngle * 180) / Math.PI).toFixed(1),
+              rollDeg: +((rollAngle * 180) / Math.PI).toFixed(1),
             });
             commitCamera(cam);
           }
