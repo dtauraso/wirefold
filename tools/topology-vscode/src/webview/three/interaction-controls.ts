@@ -643,7 +643,10 @@ export function useInteractionControls(
             .multiply(new THREE.Quaternion().setFromAxisAngle(camRight, -dy * S));
           const C = s.arcPivot;
           const before = cam.position.clone();
-          cam.position.copy(C).add(cam.position.clone().sub(C).applyQuaternion(q));
+          // Orbit: rotate the PRE-copy offset (before − C). Must read `before`, not
+          // cam.position — copy(C) overwrites cam.position first, so reading it here gave
+          // C−C=0 (camera teleported to the pivot and only spun in place).
+          cam.position.copy(C).add(before.clone().sub(C).applyQuaternion(q));
           cam.quaternion.premultiply(q);
           cam.up.applyQuaternion(q);
           cam.updateMatrixWorld(true);
