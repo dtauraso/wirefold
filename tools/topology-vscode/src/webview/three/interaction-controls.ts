@@ -102,6 +102,10 @@ const MOVE_SLOP_PX = 6;
  *  zone). Exported so the visible arcball sphere matches the grab sphere. */
 export const ARCBALL_FILL = 0.4;
 
+/** Rotation speed multiplier — amplifies the arcball's swept angle so rotation feels
+ *  fast even when the grab sphere fills the view. 1 = raw arcball; >1 = faster. */
+const ROT_GAIN = 3;
+
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
@@ -619,7 +623,12 @@ export function useInteractionControls(
           // cursor: rotate the camera by setFromUnitVectors(p1, p0) around C — the whole
           // rigid scene turns as one, roll included at the silhouette. Swap (p1,p0)↔(p0,p1)
           // to flip rotation direction if needed.
-          const rotInv = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
+          // Amplify the swept angle by ROT_GAIN so rotation feels fast even though the
+          // grab sphere fills the view (a view-filling ball only sweeps a small arc per
+          // drag). slerp from identity by GAIN extrapolates the rotation; a closed loop
+          // (p1→p0) still returns to identity. Tune ROT_GAIN for feel.
+          const swept = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
+          const rotInv = new THREE.Quaternion().slerpQuaternions(new THREE.Quaternion(), swept, ROT_GAIN);
           cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
           cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
