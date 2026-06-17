@@ -16,6 +16,7 @@ import { GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts } from "./scene-content";
+import { NavGuides } from "./NavGuides";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -231,6 +232,7 @@ export function ThreeView() {
             onNearestN={onNearestN}
             onCameraSettle={onCameraSettle}
           />
+          <NavGuides nodes={nodes} />
         </Canvas>
       </div>
 
