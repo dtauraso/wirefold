@@ -627,20 +627,41 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // UNIFORM-RATE TRACKBALL (incremental). Each frame, rotate by an angle ∝ the
-          // mouse delta about the axis perpendicular to the drag, in the CAMERA's screen
-          // plane. No sphere projection → uniform rate at every r (no slow center / fast
-          // edge); circling composes the tumbles into net roll (geometric phase), so roll
-          // is preserved. Incremental small angles ⇒ stable, never wraps. Pivot = the
-          // content-sphere center (s.arcPivot). Flip the dx/dy signs to reverse direction.
-          const dx = e.clientX - s.prevX;
-          const dy = e.clientY - s.prevY;
-          const S = 0.006; // radians per pixel — uniform sensitivity, tune for feel
+          // POLAR decomposition of mouse motion about the SCREEN CENTER (no rim special
+          // case — it's a sphere). The mouse is a polar coord; its ANGULAR motion (the
+          // radius swept around the center) is ROLL about the view axis (screen-
+          // perpendicular = camera forward here); its RADIAL motion (in/out) is TUMBLE
+          // about the axis ⊥ to the radius. Roll is uniform per revolution at any radius;
+          // tumble is uniform per pixel. Flip ROLL_SIGN / S signs to reverse direction.
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const px = e.clientX - cx, py = e.clientY - cy;       // mouse rel. to center
+          const dpx = e.clientX - s.prevX, dpy = e.clientY - s.prevY; // delta this frame
+          const r = Math.hypot(px, py);
+          const S = 0.006; // tumble radians per pixel (uniform)
+          const ROLL_SIGN = -1;
           const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
           const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-          const q = new THREE.Quaternion()
-            .setFromAxisAngle(camUp, -dx * S)
-            .multiply(new THREE.Quaternion().setFromAxisAngle(camRight, -dy * S));
+          const fwd = cam.getWorldDirection(new THREE.Vector3());
+          let q: THREE.Quaternion;
+          const CENTER_DEADZONE = 12; // polar is singular at r→0; tumble-only near center
+          if (r < CENTER_DEADZONE) {
+            q = new THREE.Quaternion()
+              .setFromAxisAngle(camUp, -dpx * S)
+              .multiply(new THREE.Quaternion().setFromAxisAngle(camRight, -dpy * S));
+          } else {
+            const ux = px / r, uy = py / r;                  // radial unit (screen, y down)
+            const dRad = dpx * ux + dpy * uy;                // radial pixels → tumble
+            const dPhi = (px * dpy - py * dpx) / (r * r);    // angular sweep → roll (rad)
+            // tumble axis = screen-perpendicular to the radius, mapped to world
+            // (screen +x→camRight, screen +y(down)→ −camUp):
+            const tumbleAxis = camRight.clone().multiplyScalar(-uy)
+              .add(camUp.clone().multiplyScalar(-ux)).normalize();
+            const qRoll = new THREE.Quaternion().setFromAxisAngle(fwd, ROLL_SIGN * dPhi);
+            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxis, dRad * S);
+            q = qRoll.multiply(qTumble);
+          }
           const C = s.arcPivot;
           const before = cam.position.clone();
           // Orbit: rotate the PRE-copy offset (before − C). Must read `before`, not
