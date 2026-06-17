@@ -73,7 +73,14 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       const motion = P.clone().sub(prevP.current);
       if (motion.lengthSq() > 1e-10) {
         const cand = new THREE.Vector3().crossVectors(radius, motion);
-        if (cand.lengthSq() > 1e-10) { n = cand.normalize(); lastNormal.current.copy(n); }
+        if (cand.lengthSq() > 1e-10) {
+          cand.normalize();
+          // Keep the normal CONTINUOUS with the last one — the raw cross product flips sign
+          // when motion wobbles across the radius, which flipped the triangle's right angle.
+          if (cand.dot(lastNormal.current) < 0) cand.negate();
+          n = cand;
+          lastNormal.current.copy(n);
+        }
       }
     }
     prevP.current = P.clone();
