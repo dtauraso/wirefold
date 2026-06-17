@@ -650,36 +650,30 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // WORLD-FIXED SPHERE, POLAR MAPPING. The sphere is fixed to the DIAGRAM (center C) with
+          // WORLD-FIXED SPHERE. The sphere is fixed to the DIAGRAM (center C, radius arcR) with
           // its OWN pole — not glued to the camera. The cursor maps to a point on that world
-          // sphere; the radius (C→point) sweeps a disk, and the rotation axis is the disk's NORMAL
-          // **in world space** (radius_prev × radius_cur) — so it leans between the view and the
-          // sphere's top by however off-center the grab is ("the view is not the camera view").
-          // The mapping is POLAR/azimuthal-equidistant, NOT orthographic raycast: colatitude from
-          // the front point is LINEAR in screen ρ (φ = ρ/Rpix·π/2) ⇒ uniform rate, and a straight
-          // screen drag no longer slides in latitude (the orthographic slide was the residual
-          // tilt). The tangent frame is anchored to the diagram's UP (frozen pose), so the world
-          // normal carries the diagram's top, not the camera's.
+          // sphere; the radius (C→point) sweeps a disk as the cursor moves, and the rotation
+          // axis is the disk's NORMAL **in world space** (radius_prev × radius_cur). Because the
+          // sphere's pole is the diagram's up, the normal leans between the view and the sphere's
+          // top by however far off-center the grab is — exactly "the view is not the camera view."
+          // The cursor→sphere ray is built from the FROZEN start pose so the mapping is stable as
+          // the camera orbits (no feedback); the rotation is applied incrementally to the live cam.
           const C = s.arcPivot;
+          const R = s.arcR;
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const cx = rect.left + rect.width / 2;
-          const cy = rect.top + rect.height / 2;
-          const Rpix = 0.5 * Math.min(rect.width, rect.height);
-          // Front point (toward the frozen camera) + a tangent frame anchored to the diagram up.
-          const rFront = s.arcStartPos.clone().sub(C).normalize();
-          let upT = new THREE.Vector3(0, 1, 0).sub(rFront.clone().multiplyScalar(new THREE.Vector3(0, 1, 0).dot(rFront)));
-          if (upT.lengthSq() < 1e-6) upT = new THREE.Vector3(1, 0, 0).sub(rFront.clone().multiplyScalar(rFront.x)); // camera on the up-axis
-          upT.normalize();
-          const rightT = new THREE.Vector3().crossVectors(upT, rFront).normalize();
-          // Cursor → world radius vector via polar (equidistant) map onto the world sphere.
+          // Cursor → world radius vector on the sphere, via a ray from the frozen start pose.
           const toRadius = (clientX: number, clientY: number) => {
-            const sx = clientX - cx;
-            const sy = -(clientY - cy); // screen y up
-            const rho = Math.hypot(sx, sy);
-            if (rho < 1e-6) return rFront.clone();
-            const phi = Math.min((rho / Rpix) * (Math.PI / 2), Math.PI); // linear in ρ ⇒ uniform rate
-            const tangent = rightT.clone().multiplyScalar(sx / rho).add(upT.clone().multiplyScalar(sy / rho));
-            return rFront.clone().multiplyScalar(Math.cos(phi)).add(tangent.multiplyScalar(Math.sin(phi)));
+            const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
+            const t = Math.tan((cam.fov * Math.PI) / 180 / 2);
+            const dir = new THREE.Vector3(ndcX * t * cam.aspect, ndcY * t, -1)
+              .applyQuaternion(s.arcStartQuat).normalize();
+            const ray = new THREE.Ray(s.arcStartPos.clone(), dir);
+            const hit = new THREE.Vector3();
+            if (ray.intersectSphere(new THREE.Sphere(C, R), hit)) return hit.sub(C).normalize();
+            // Miss: clamp to the silhouette (point on sphere nearest the ray).
+            const near = new THREE.Vector3();
+            ray.closestPointToPoint(C, near);
+            return near.sub(C).normalize();
           };
           const rPrev = toRadius(s.prevX, s.prevY);
           const rCur = toRadius(e.clientX, e.clientY);
@@ -699,7 +693,7 @@ export function useInteractionControls(
             const Rcage = computeLargeSphereRadius(nodesRef.current);
             constrainInsideLargeSphere(cam, Rcage);
             postLog("rot", {
-              build: "world-sphere-polar-v16",
+              build: "world-sphere-v15",
               rPrev: [+rPrev.x.toFixed(2), +rPrev.y.toFixed(2), +rPrev.z.toFixed(2)],
               rCur: [+rCur.x.toFixed(2), +rCur.y.toFixed(2), +rCur.z.toFixed(2)],
               axisWorld: [+axisWorld.x.toFixed(2), +axisWorld.y.toFixed(2), +axisWorld.z.toFixed(2)],
