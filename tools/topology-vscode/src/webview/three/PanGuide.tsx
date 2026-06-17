@@ -100,11 +100,15 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Right triangle: hypotenuse = radius (C→P); base = horizontal projection of the radius,
-    // pointing TOWARD the cursor (position-based ⇒ never flips); height drops to the pole axis.
-    const v = pole.clone().multiplyScalar(radius.dot(pole));
-    const h = radius.clone().sub(v);
-    const Q = C.clone().add(h);
+    // Right triangle ON the disk: hypotenuse = radius (C→P, in the disk plane); base along the
+    // disk's HORIZONTAL axis (disk plane ∩ world-horizontal = n × pole), forced toward the
+    // cursor so it never flips; height = the remaining in-plane leg. Right angle at Q.
+    const n = new THREE.Vector3().crossVectors(e1, e2); // disk normal (stable, from smoothed plane)
+    let hAxis = new THREE.Vector3().crossVectors(n, pole);
+    if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone(); // disk near-horizontal → degenerate
+    hAxis.normalize();
+    if (radius.dot(hAxis) < 0) hAxis.negate();        // base points toward the cursor
+    const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
     tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
     // Fat lines need the viewport resolution to size their pixel width.
