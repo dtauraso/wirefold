@@ -418,9 +418,14 @@ export function useInteractionControls(
   // the limb (nearest sphere point to the ray) → roll. No 2-D screen projection, no
   // hemisphere/dome, no z=0 rim — you grab the actual sphere, so there is no dead zone
   // anywhere the sphere covers the view.
+  // Real sphere at pivot C, CAMERA-RELATIVE radius R = ARCBALL_FILL·dist(cam,C). Because
+  // R/dist is constant, the sphere subtends a constant angular size on screen at any zoom
+  // → rotation speed is constant regardless of size, and the camera is always OUTSIDE it
+  // (k<1). Ray-pick the surface: hit = grabbed world direction from C; off the silhouette,
+  // the limb → roll. Roll (rim) + tumble (pole) both from one sphere, no special case.
   const arcballPoint = useCallback(
-    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera): THREE.Vector3 => {
-      const { center: C, radius: R } = computeContentSphere(nodesRef.current);
+    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera, C: THREE.Vector3): THREE.Vector3 => {
+      const R = cam.position.distanceTo(C) * ARCBALL_FILL;
       const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
       const ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
@@ -432,7 +437,7 @@ export function useInteractionControls(
       ray.ray.closestPointToPoint(C, foot);
       return foot.sub(C).normalize();
     },
-    [nodesRef],
+    [],
   );
 
   // ------ helpers ------
@@ -539,7 +544,7 @@ export function useInteractionControls(
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0);
+          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0, C);
         }
       }
 
@@ -627,65 +632,30 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // POLAR decomposition of mouse motion about the SCREEN CENTER (no rim special
-          // case — it's a sphere). The mouse is a polar coord; its ANGULAR motion (the
-          // radius swept around the center) is ROLL about the view axis (screen-
-          // perpendicular = camera forward here); its RADIAL motion (in/out) is TUMBLE
-          // about the axis ⊥ to the radius. Roll is uniform per revolution at any radius;
-          // tumble is uniform per pixel. Flip ROLL_SIGN / S signs to reverse direction.
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const cx = rect.left + rect.width / 2;
-          const cy = rect.top + rect.height / 2;
-          const px = e.clientX - cx, py = e.clientY - cy;       // mouse rel. to center
-          const dpx = e.clientX - s.prevX, dpy = e.clientY - s.prevY; // delta this frame
-          const r = Math.hypot(px, py);
-          const S = 0.006; // tumble radians per pixel (uniform)
-          const ROLL_SIGN = -1;
-          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-          const fwd = cam.getWorldDirection(new THREE.Vector3());
-          let q: THREE.Quaternion;
-          const CENTER_DEADZONE = 12; // polar is singular at r→0; tumble-only near center
-          if (r < CENTER_DEADZONE) {
-            q = new THREE.Quaternion()
-              .setFromAxisAngle(camUp, -dpx * S)
-              .multiply(new THREE.Quaternion().setFromAxisAngle(camRight, -dpy * S));
-          } else {
-            const ux = px / r, uy = py / r;                  // radial unit (screen, y down)
-            const dRad = dpx * ux + dpy * uy;                // radial pixels → tumble
-            const dPhi = (px * dpy - py * dpx) / (r * r);    // angular sweep → roll (rad)
-            // tumble axis = screen-perpendicular to the radius, mapped to world
-            // (screen +x→camRight, screen +y(down)→ −camUp):
-            const tumbleAxis = camRight.clone().multiplyScalar(-uy)
-              .add(camUp.clone().multiplyScalar(-ux)).normalize();
-            const qRoll = new THREE.Quaternion().setFromAxisAngle(fwd, ROLL_SIGN * dPhi);
-            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxis, dRad * S);
-            q = qRoll.multiply(qTumble);
-          }
+          // CAMERA-RELATIVE REAL ARCBALL. Total rotation from gesture start: the rotation
+          // taking the grabbed surface point arcP0 → the current p1 on the camera-relative
+          // sphere (constant apparent size ⇒ constant speed at any zoom). Applied about C
+          // from the start snapshot (no accumulation/drift; closed loop returns). Roll
+          // emerges at the rim, tumble at the pole — both from the one sphere, no special
+          // case. Swap (p1,arcP0)↔(arcP0,p1) to flip direction.
           const C = s.arcPivot;
-          const before = cam.position.clone();
-          // Orbit: rotate the PRE-copy offset (before − C). Must read `before`, not
-          // cam.position — copy(C) overwrites cam.position first, so reading it here gave
-          // C−C=0 (camera teleported to the pivot and only spun in place).
-          cam.position.copy(C).add(before.clone().sub(C).applyQuaternion(q));
-          cam.quaternion.premultiply(q);
-          cam.up.applyQuaternion(q);
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam, C);
+          const rotInv = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
+          cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
+          cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
+          cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
           cam.updateMatrixWorld(true);
           const R = computeLargeSphereRadius(nodesRef.current);
           const distBefore = cam.position.length();
           constrainInsideLargeSphere(cam, R);
           postLog("rot", {
-            build: "pivot-ahead-v4",
-            dx: Math.round(dx), dy: Math.round(dy),
-            pivot: [Math.round(C.x), Math.round(C.y), Math.round(C.z)],
-            offsetLen: Math.round(before.distanceTo(C)),
-            moved: Math.round(before.distanceTo(cam.position)),
+            build: "arcball-camrel-v5",
+            offsetLen: Math.round(s.arcStartOffset.length()),
+            grabR: Math.round(cam.position.distanceTo(C) * ARCBALL_FILL),
             clampedFrom: distBefore > R ? Math.round(distBefore) : 0,
-            R: Math.round(R),
           });
           commitCamera(cam);
-          s.prevX = e.clientX;
-          s.prevY = e.clientY;
         }
       }
     },
