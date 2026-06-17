@@ -103,6 +103,10 @@ const MOVE_SLOP_PX = 6;
  *  zone). Exported so the visible arcball sphere matches the grab sphere. */
 export const ARCBALL_FILL = 0.4;
 
+/** Rotation speed for the incremental screen-axis trackball: radians per pixel of cursor
+ *  motion. Constant ⇒ rotation feels the same at any zoom level or sphere size. */
+const ROT_GAIN = 0.005;
+
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
@@ -642,34 +646,44 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // CAMERA-RELATIVE REAL ARCBALL. Total rotation from gesture start: the rotation
-          // taking the grabbed surface point arcP0 → the current p1 on the camera-relative
-          // sphere (constant apparent size ⇒ constant speed at any zoom). Applied about C
-          // from the start snapshot (no accumulation/drift; closed loop returns). Roll
-          // emerges at the rim, tumble at the pole — both from the one sphere, no special
-          // case. Swap (p1,arcP0)↔(arcP0,p1) to flip direction.
-          const C = s.arcPivot;
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          // Sample p1 from the FROZEN start pose (start camera position = C + arcStartOffset,
-          // orientation = arcStartQuat), so the screen→sphere mapping doesn't move as the
-          // camera orbits → no feedback, no jitter/inside-out.
-          const eyePos = C.clone().add(s.arcStartOffset);
-          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam.fov, cam.aspect, eyePos, s.arcStartQuat, C);
-          const rotInv = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
-          cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
-          cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
-          cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
-          cam.updateMatrixWorld(true);
-          const R = computeLargeSphereRadius(nodesRef.current);
-          const distBefore = cam.position.length();
-          constrainInsideLargeSphere(cam, R);
-          postLog("rot", {
-            build: "arcball-frozen-v6",
-            offsetLen: Math.round(s.arcStartOffset.length()),
-            grabR: Math.round(cam.position.distanceTo(C) * ARCBALL_FILL),
-            clampedFrom: distBefore > R ? Math.round(distBefore) : 0,
-          });
-          commitCamera(cam);
+          // INCREMENTAL SCREEN-AXIS TRACKBALL. Each frame's rotation axis is PERPENDICULAR
+          // to the cursor's motion in the screen plane — so the axis depends only on the
+          // DIRECTION you drag, never on where you grabbed. Drag left → vertical axis →
+          // pure yaw; drag up → horizontal axis → pure pitch; CIRCLE the cursor → the swept
+          // axes compose to a twist about the view axis → ROLL emerges on its own (geometric
+          // phase), no rim special-case. Angle ∝ pixels moved ⇒ constant speed at any zoom
+          // or sphere size. No sphere-point pick (so no center-fast/rim-fast, no feedback,
+          // no antipode flip). Applied about the pivot C from gesture start.
+          const dx = e.clientX - s.prevX;
+          const dy = e.clientY - s.prevY;
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
+          const len = Math.hypot(dx, dy);
+          if (len > 0) {
+            const C = s.arcPivot;
+            // Axis ⊥ drag, in eye space (+x right, +y up, -z forward). dy is screen-DOWN
+            // positive: drag right (dx>0) → +y (yaw); drag down (dy>0) → -x (pitch down).
+            const axisEye = new THREE.Vector3(-dy, dx, 0).normalize();
+            const axisWorld = axisEye.applyQuaternion(cam.quaternion).normalize();
+            const angle = len * ROT_GAIN; // rad per pixel — constant speed
+            // Scene rotation; camera rotates the OPPOSITE way about C so the scene appears
+            // to follow the cursor.
+            const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
+            const qCam = qScene.clone().invert();
+            cam.position.sub(C).applyQuaternion(qCam).add(C);
+            cam.quaternion.premultiply(qCam);
+            cam.up.applyQuaternion(qCam);
+            cam.updateMatrixWorld(true);
+            const R = computeLargeSphereRadius(nodesRef.current);
+            constrainInsideLargeSphere(cam, R);
+            postLog("rot", {
+              build: "trackball-screenaxis-v8",
+              d: [dx, dy],
+              axisWorld: [+axisWorld.x.toFixed(2), +axisWorld.y.toFixed(2), +axisWorld.z.toFixed(2)],
+              angleDeg: +((angle * 180) / Math.PI).toFixed(1),
+            });
+            commitCamera(cam);
+          }
         }
       }
     },
