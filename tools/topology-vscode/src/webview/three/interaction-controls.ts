@@ -646,26 +646,28 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // SPHERE GREAT-CIRCLE TRACKBALL. The cursor maps to a point on a TRUE sphere
-          // (front hemisphere: z = √(1−r²) inside the disk, clamped to the rim outside — no
-          // dome/hyperbola). As the cursor moves, that surface point follows a path; the
-          // radius r (center→point) sweeps a disk, and the rotation axis is PERPENDICULAR to
-          // that disk = p_prev × p_cur. Done INCREMENTALLY (per-frame p_prev→p_cur) so it
-          // tracks the real path and never flips inside-out near the silhouette. Roll emerges
-          // naturally near the rim (two near-rim points cross to the view axis), tumble near
-          // the center — one sphere, no special case. Eye-space mapping ⇒ the sphere always
-          // faces the camera (camera outside) and the rate is constant at any zoom/size.
+          // POLAR SPHERE TRACKBALL. The cursor is a POLAR coordinate (ρ, θ) about the screen
+          // center. It maps to a sphere point by the AZIMUTHAL-EQUIDISTANT rule: the polar
+          // angle from the viewer-facing pole is LINEAR in ρ (φ = ρ/Rpix · π/2), azimuth = θ.
+          // Linear-in-ρ ⇒ a fixed pixel move = a fixed angular move at ANY r (uniform rate —
+          // NOT the Cartesian z=√(1−r²) orthographic map, which compresses near the rim and
+          // put the point in the wrong place). Past the rim (ρ>Rpix) φ keeps growing onto the
+          // BACK hemisphere — a true full sphere, no rim case. As the cursor moves the surface
+          // point follows a path; the radius sweeps a disk; the rotation axis is PERPENDICULAR
+          // to that disk = p_prev × p_cur (incremental, so no inside-out flip).
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
-          const Rpix = 0.5 * Math.min(rect.width, rect.height); // sphere fills the view
+          const Rpix = 0.5 * Math.min(rect.width, rect.height); // ρ=Rpix → equator (rim)
           const toSphere = (clientX: number, clientY: number) => {
-            const x = (clientX - cx) / Rpix;
-            const y = -(clientY - cy) / Rpix; // eye-space: +y up
-            const d2 = x * x + y * y;
-            if (d2 <= 1) return new THREE.Vector3(x, y, Math.sqrt(1 - d2)); // true sphere front
-            const inv = 1 / Math.sqrt(d2);
-            return new THREE.Vector3(x * inv, y * inv, 0); // clamp to the rim (no hyperbola)
+            const dx = clientX - cx;
+            const dy = -(clientY - cy); // eye-space: +y up
+            const rho = Math.hypot(dx, dy);
+            if (rho < 1e-6) return new THREE.Vector3(0, 0, 1); // pole facing the viewer
+            const theta = Math.atan2(dy, dx);
+            const phi = Math.min((rho / Rpix) * (Math.PI / 2), Math.PI); // linear in ρ, cap at antipode
+            const s = Math.sin(phi);
+            return new THREE.Vector3(s * Math.cos(theta), s * Math.sin(theta), Math.cos(phi));
           };
           const pPrev = toSphere(s.prevX, s.prevY);
           const pCur = toSphere(e.clientX, e.clientY);
@@ -675,7 +677,7 @@ export function useInteractionControls(
           const sinA = axisEye.length();
           if (sinA > 1e-9) {
             const C = s.arcPivot;
-            const angle = Math.asin(Math.min(1, sinA));
+            const angle = Math.atan2(sinA, pPrev.dot(pCur)); // robust past 90°
             axisEye.normalize();
             const axisWorld = axisEye.applyQuaternion(cam.quaternion).normalize();
             const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
@@ -687,7 +689,7 @@ export function useInteractionControls(
             const R = computeLargeSphereRadius(nodesRef.current);
             constrainInsideLargeSphere(cam, R);
             postLog("rot", {
-              build: "sphere-greatcircle-v12",
+              build: "polar-sphere-v13",
               pPrev: [+pPrev.x.toFixed(2), +pPrev.y.toFixed(2), +pPrev.z.toFixed(2)],
               pCur: [+pCur.x.toFixed(2), +pCur.y.toFixed(2), +pCur.z.toFixed(2)],
               axisEye: [+axisEye.x.toFixed(2), +axisEye.y.toFixed(2), +axisEye.z.toFixed(2)],
