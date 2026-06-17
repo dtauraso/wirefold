@@ -71,6 +71,11 @@ const CLICK_MAX_MS = 150;
 /** Pixel movement threshold between CLICK and DRAG. */
 const MOVE_SLOP_PX = 6;
 
+/** Arcball sphere radius as a fraction of camera→pivot distance (<1 ⇒ camera outside
+ *  the ball; large enough that the ball fills the view so there is no on-screen dead
+ *  zone). Exported so the visible arcball sphere matches the grab sphere. */
+export const ARCBALL_FILL = 0.75;
+
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
@@ -380,25 +385,25 @@ export function useInteractionControls(
     [nodesRef, ensureTarget],
   );
 
-  // Screen-space arcball (Shoemake/Holroyd). Maps the cursor onto a virtual unit
-  // ball centered at the viewport, returning a unit vector in EYE space. This is
-  // camera-POSITION-independent (works whether the camera is inside or outside the
-  // scene), unlike a world-space ray-vs-container-sphere — which degenerates when
-  // the camera sits inside the large sphere and pins the rotation axis. Inside the
-  // ball (d<=1): z = sqrt(1-d^2) (tumble). Outside: clamp to the rim, z=0 (roll).
+  // TRUE 3-D arcball: a real sphere at the pivot C, sized so the camera is OUTSIDE it
+  // and it fills the view (R = ARCBALL_FILL·dist, < dist). Raycast the cursor onto it;
+  // the hit is the grabbed world-space unit direction from C. Off the silhouette, use
+  // the limb (nearest sphere point to the ray) → roll. No 2-D screen projection, no
+  // hemisphere/dome, no z=0 rim — you grab the actual sphere, so there is no dead zone
+  // anywhere the sphere covers the view.
   const arcballPoint = useCallback(
-    (clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 => {
-      const ballR = Math.min(rect.width, rect.height) * 0.5;
-      const x = (clientX - rect.left - rect.width / 2) / ballR;
-      const y = (rect.height / 2 - (clientY - rect.top)) / ballR; // screen y-down → up
-      const r2 = x * x + y * y;
-      // Bell/Holroyd hyperbolic-sheet arcball: inside the ball use the sphere; OUTSIDE
-      // use a hyperbola (z = 0.5/√r2, C1-continuous with the sphere at r2 = 0.5). This
-      // keeps tumbling as you drag past the rim instead of saturating at z = 0 — the
-      // rim-clamp version made rotation "stick" near the screen edges. Normalize so the
-      // result is a unit direction either way.
-      const z = r2 < 0.5 ? Math.sqrt(1 - r2) : 0.5 / Math.sqrt(r2);
-      return new THREE.Vector3(x, y, z).normalize();
+    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera, C: THREE.Vector3): THREE.Vector3 => {
+      const R = cam.position.distanceTo(C) * ARCBALL_FILL;
+      const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+      const hit = new THREE.Vector3();
+      if (ray.ray.intersectSphere(new THREE.Sphere(C, R), hit)) {
+        return hit.sub(C).normalize();
+      }
+      const foot = new THREE.Vector3();
+      ray.ray.closestPointToPoint(C, foot);
+      return foot.sub(C).normalize();
     },
     [],
   );
@@ -495,7 +500,7 @@ export function useInteractionControls(
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect);
+          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0, C);
         }
       }
 
@@ -580,18 +585,15 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          const C = s.arcPivot; // fixed screen-center pivot snapshotted at gesture start
+          const C = s.arcPivot; // fixed pivot (screen-center scene point) for the gesture
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const p1 = arcballPoint(e.clientX, e.clientY, rect);
-          // arcP0/p1 are EYE-space unit vectors. qEye rotates arcP0 → p1 in eye space;
-          // conjugate by the start camera orientation to get the world rotation, then
-          // orbit the camera by its inverse so the grabbed sphere point follows the
-          // cursor (the whole rigid scene turns as one — incl. roll near the rim).
-          // Swap Rworld<->rotInv to flip rotation direction if needed.
-          const qEye = new THREE.Quaternion().setFromUnitVectors(s.arcP0, p1);
-          const Q = s.arcStartQuat.clone();
-          const Rworld = Q.clone().multiply(qEye).multiply(Q.clone().invert());
-          const rotInv = Rworld.clone().invert();
+          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam, C);
+          // arcP0/p1 are WORLD-space unit directions on the real sphere about C. The
+          // camera orbits by the rotation that makes the grabbed point follow the
+          // cursor: rotate the camera by setFromUnitVectors(p1, p0) around C — the whole
+          // rigid scene turns as one, roll included at the silhouette. Swap (p1,p0)↔(p0,p1)
+          // to flip rotation direction if needed.
+          const rotInv = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
           cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
           cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
