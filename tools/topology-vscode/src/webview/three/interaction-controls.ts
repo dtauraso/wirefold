@@ -646,44 +646,39 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // POLAR TRACKBALL. The cursor is a polar coordinate (r, θ) about the screen CENTER
-          // (= the pivot's projection, since the pivot is straight ahead). Decompose the
-          // per-frame motion into its RADIAL and TANGENTIAL parts about that center:
-          //   • RADIAL (toward/away from center) → TUMBLE about the in-screen axis ⊥ radial
-          //     (drag out along +x → yaw, along +y → pitch). Angle ∝ radial pixels.
-          //   • TANGENTIAL (around the center) → ROLL about the VIEW axis (eye z). Swinging
-          //     the "radius" around the center by dθ rolls the diagram by dθ — exactly
-          //     "grab the radius, move it around the center → roll", r-independent (a quarter
-          //     turn around = 90° roll at any radius). No geometric phase, no rim case.
-          // Camera rotates opposite about pivot C so the content follows the cursor.
-          const dx = e.clientX - s.prevX;
-          const dy = e.clientY - s.prevY;
+          // SPHERE GREAT-CIRCLE TRACKBALL. The cursor maps to a point on a TRUE sphere
+          // (front hemisphere: z = √(1−r²) inside the disk, clamped to the rim outside — no
+          // dome/hyperbola). As the cursor moves, that surface point follows a path; the
+          // radius r (center→point) sweeps a disk, and the rotation axis is PERPENDICULAR to
+          // that disk = p_prev × p_cur. Done INCREMENTALLY (per-frame p_prev→p_cur) so it
+          // tracks the real path and never flips inside-out near the silhouette. Roll emerges
+          // naturally near the rim (two near-rim points cross to the view axis), tumble near
+          // the center — one sphere, no special case. Eye-space mapping ⇒ the sphere always
+          // faces the camera (camera outside) and the rate is constant at any zoom/size.
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const Rpix = 0.5 * Math.min(rect.width, rect.height); // sphere fills the view
+          const toSphere = (clientX: number, clientY: number) => {
+            const x = (clientX - cx) / Rpix;
+            const y = -(clientY - cy) / Rpix; // eye-space: +y up
+            const d2 = x * x + y * y;
+            if (d2 <= 1) return new THREE.Vector3(x, y, Math.sqrt(1 - d2)); // true sphere front
+            const inv = 1 / Math.sqrt(d2);
+            return new THREE.Vector3(x * inv, y * inv, 0); // clamp to the rim (no hyperbola)
+          };
+          const pPrev = toSphere(s.prevX, s.prevY);
+          const pCur = toSphere(e.clientX, e.clientY);
           s.prevX = e.clientX;
           s.prevY = e.clientY;
-          if (dx !== 0 || dy !== 0) {
+          const axisEye = new THREE.Vector3().crossVectors(pPrev, pCur); // ⊥ disk r sweeps
+          const sinA = axisEye.length();
+          if (sinA > 1e-9) {
             const C = s.arcPivot;
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const Ox = rect.left + rect.width / 2;   // polar center = canvas center
-            const Oy = rect.top + rect.height / 2;
-            const rvx = e.clientX - Ox;
-            const rvy = e.clientY - Oy;
-            const r = Math.hypot(rvx, rvy) || 1;
-            const R_FLOOR = 60;                       // clamp so center isn't hypersensitive (no 1/r blow-up)
-            const rEff = Math.max(r, R_FLOOR);
-            const rhx = rvx / r, rhy = rvy / r;       // radial unit (screen coords, y-down)
-            const thx = -rhy, thy = rhx;              // tangential unit (90° CCW in screen)
-            const dRad = dx * rhx + dy * rhy;         // radial pixel motion
-            const dTan = dx * thx + dy * thy;         // tangential pixel motion
-            // TUMBLE: axis ⊥ radial, in eye space. Screen radial (rhx, rhy_down) →
-            // eye-perp axis (-rhy, rhx, 0) (matches the yaw/pitch sign already tuned).
-            const tumbleAxisWorld = new THREE.Vector3(-rhy, rhx, 0).normalize().applyQuaternion(cam.quaternion).normalize();
-            const tumbleAngle = dRad * ROT_GAIN;
-            // ROLL: about the view axis (eye +z), by the swept angle dθ = dTan / r.
-            const rollAxisWorld = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion).normalize();
-            const rollAngle = dTan / rEff;
-            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxisWorld, tumbleAngle);
-            const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxisWorld, rollAngle);
-            const qScene = qRoll.multiply(qTumble);
+            const angle = Math.asin(Math.min(1, sinA));
+            axisEye.normalize();
+            const axisWorld = axisEye.applyQuaternion(cam.quaternion).normalize();
+            const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
             const qCam = qScene.clone().invert(); // camera orbits opposite so content follows the cursor
             cam.position.sub(C).applyQuaternion(qCam).add(C);
             cam.quaternion.premultiply(qCam);
@@ -692,12 +687,11 @@ export function useInteractionControls(
             const R = computeLargeSphereRadius(nodesRef.current);
             constrainInsideLargeSphere(cam, R);
             postLog("rot", {
-              build: "polar-trackball-v11",
-              d: [+dx.toFixed(1), +dy.toFixed(1)],
-              rTheta: [Math.round(r), +(Math.atan2(rvy, rvx) * 180 / Math.PI).toFixed(0)],
-              dRadTan: [+dRad.toFixed(1), +dTan.toFixed(1)],
-              tumbleDeg: +((tumbleAngle * 180) / Math.PI).toFixed(1),
-              rollDeg: +((rollAngle * 180) / Math.PI).toFixed(1),
+              build: "sphere-greatcircle-v12",
+              pPrev: [+pPrev.x.toFixed(2), +pPrev.y.toFixed(2), +pPrev.z.toFixed(2)],
+              pCur: [+pCur.x.toFixed(2), +pCur.y.toFixed(2), +pCur.z.toFixed(2)],
+              axisEye: [+axisEye.x.toFixed(2), +axisEye.y.toFixed(2), +axisEye.z.toFixed(2)],
+              angleDeg: +((angle * 180) / Math.PI).toFixed(1),
             });
             commitCamera(cam);
           }
