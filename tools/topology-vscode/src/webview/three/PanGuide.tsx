@@ -54,7 +54,10 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const cs = computeContentSphere(nodes);
     const C = cs.center;
     const R = cs.radius;
-    const pole = new THREE.Vector3(0, 1, 0); // diagram top axis
+    // Use the VIEW-UP (the view-aligned horizontal torus's normal = camera up), not world Y,
+    // so the triangle's base/right-angle and the equator-intersection line land on the actual
+    // (view-aligned) horizontal torus where it crosses the disk.
+    const pole = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
 
     // Cursor → point P on the diagram sphere (raycast; clamp to the silhouette on miss).
     const { x, y, inside } = useCursorStore.getState();
