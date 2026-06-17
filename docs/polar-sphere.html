@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Polar System for a Sphere</title>
+<style>
+  :root {
+    --bg: #0f1320; --panel: #171c2e; --ink: #e7ecf5; --dim: #9aa6c0;
+    --line: #2b3350; --accent: #ffcc44; --green: #66ff99; --red: #ff5566;
+    --blue: #57b6ff; --pole: #c79cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 28px 32px 8px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  header p { margin: 0; color: var(--dim); }
+  .tabs { display: flex; gap: 4px; padding: 16px 32px 0; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line); }
+  .tab { background: none; border: 1px solid transparent; border-bottom: none;
+    color: var(--dim); padding: 9px 16px; border-radius: 8px 8px 0 0; cursor: pointer;
+    font-size: 14px; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { background: var(--panel); color: var(--ink);
+    border-color: var(--line); position: relative; top: 1px; }
+  .panel { display: none; padding: 24px 32px 64px; max-width: 1000px; }
+  .panel.active { display: block; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .fig { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px; }
+  .fig figcaption { color: var(--dim); font-size: 13px; margin-top: 6px; text-align: center; }
+  .prose { flex: 1; min-width: 280px; }
+  h2 { font-size: 19px; margin: 4px 0 10px; }
+  h3 { font-size: 15px; margin: 18px 0 6px; color: var(--accent); }
+  code { background: #0c1020; padding: 1px 6px; border-radius: 5px; color: #cfe0ff;
+    font-size: 13px; }
+  .k { color: var(--accent); } .kg { color: var(--green); } .kr { color: var(--red); }
+  .kb { color: var(--blue); } .kp { color: var(--pole); }
+  ul { padding-left: 20px; } li { margin: 4px 0; }
+  .note { border-left: 3px solid var(--accent); padding: 6px 12px; background: #1b2138;
+    border-radius: 0 8px 8px 0; color: var(--dim); margin: 14px 0; }
+  table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  td, th { border: 1px solid var(--line); padding: 7px 10px; text-align: left; font-size: 14px; }
+  th { color: var(--accent); }
+  text { font-family: ui-monospace, Menlo, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>The Polar System for a Sphere</h1>
+  <p>How <span class="kb">2D polar</span> <code>(r, θ)</code> grows into <span class="kp">3D spherical</span> <code>(r, θ, φ)</code> — and the parts that only exist in 3D.</p>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="t2d">2D polar</button>
+  <button class="tab" data-tab="t3d">3D spherical</button>
+  <button class="tab" data-tab="tdiff">What 3D adds</button>
+  <button class="tab" data-tab="tframe">The frame</button>
+  <button class="tab" data-tab="ttri">The pan triangle</button>
+</nav>
+
+<!-- 2D ----------------------------------------------------------------------->
+<section class="panel active" id="t2d">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svg2d" width="360" height="320"></svg>
+      <figcaption>2D polar: a point is one length and one angle.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>Flat polar — two numbers</h2>
+      <p>On a flat plane, a point is named by <code>(<span class="k">r</span>, <span class="kb">θ</span>)</code>:</p>
+      <ul>
+        <li><span class="k">r</span> — distance from the center.</li>
+        <li><span class="kb">θ</span> — the angle around the center, from a reference direction.</li>
+      </ul>
+      <p>The point sits where the <strong>radius</strong> (length <span class="k">r</span>, pointing at angle <span class="kb">θ</span>) lands on the circle. Converting to Cartesian is the schoolbook right triangle:</p>
+      <p><code>x = r·cos θ</code> &nbsp; <code>y = r·sin θ</code></p>
+      <p>The radius is the <strong>hypotenuse</strong>; its horizontal and vertical shadows are the legs. Everything in 2D lives in this one plane — there is only <em>one</em> circle and <em>one</em> angle to turn through.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3D ----------------------------------------------------------------------->
+<section class="panel" id="t3d">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svg3d" width="460" height="420"></svg>
+      <figcaption>3D spherical: a second angle <span class="kp">φ</span> lifts the point off the equator.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>Spherical — three numbers, two angles</h2>
+      <p>On a sphere a point is <code>(<span class="k">r</span>, <span class="kb">θ</span>, <span class="kp">φ</span>)</code>:</p>
+      <ul>
+        <li><span class="k">r</span> — distance from the center (on the surface, <code>r = R</code>). This is <strong>zoom</strong>.</li>
+        <li><span class="kp">φ</span> — the <strong>polar angle</strong>: how far the radius tips <em>down from the pole</em>. <code>0</code> at the top pole, <code>90°</code> at the equator, <code>180°</code> at the bottom.</li>
+        <li><span class="kb">θ</span> — the <strong>azimuth</strong>: how far <em>around</em> the pole, measured in the equatorial plane.</li>
+      </ul>
+      <p>Direction to the point, then scale by <code>R</code>:</p>
+      <p><code>dir = cos <span class="kp">φ</span>·<span class="kp">pole</span> + sin <span class="kp">φ</span>·(cos <span class="kb">θ</span>·refX + sin <span class="kb">θ</span>·refY)</code></p>
+      <p>Two angles fully name a direction; the radius says how far out. That is the whole system.</p>
+      <div class="note"><strong>Globe analogy:</strong> <span class="kp">φ</span> is latitude (from the pole), <span class="kb">θ</span> is longitude. Lines of constant <span class="kb">θ</span> are <strong>meridians</strong>; lines of constant <span class="kp">φ</span> are <strong>parallels</strong>; the <span class="kg">equator</span> is the parallel at <span class="kp">φ</span> = 90°.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- DIFF --------------------------------------------------------------------->
+<section class="panel" id="tdiff">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgDiff" width="460" height="420"></svg>
+      <figcaption>The same radius now sweeps a <em>tilted disk</em> in space, not a flat circle.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>The parts that only exist in 3D</h2>
+      <table>
+        <tr><th>2D polar</th><th>3D spherical</th></tr>
+        <tr><td>one angle <span class="kb">θ</span></td><td>two angles <span class="kb">θ</span>, <span class="kp">φ</span></td></tr>
+        <tr><td>one circle</td><td>many great circles (meridians + equator)</td></tr>
+        <tr><td>the radius stays in the plane</td><td>the radius tips <em>out of</em> the screen plane</td></tr>
+        <tr><td>circles don't "intersect"</td><td>any two great circles cross at 2 points</td></tr>
+        <tr><td>no singular point</td><td>the two <span class="kp">poles</span> are singular</td></tr>
+      </table>
+      <h3>1 · A second angle, out of the plane</h3>
+      <p>2D only turns <span class="kb">θ</span>. 3D adds <span class="kp">φ</span>, which lifts the radius <em>off</em> the equator toward the pole — the motion the flat plane can't represent.</p>
+      <h3>2 · The radius sweeps a disk, not a line</h3>
+      <p>Spin a point around the pole and its radius traces a <strong>disk</strong> (a whole circle in 3D). Which disk depends on the latitude <span class="kp">φ</span>. In 2D there is only ever the one circle.</p>
+      <h3>3 · Great circles, and where they cross</h3>
+      <p>Meridians and the <span class="kg">equator</span> are great circles. <strong>Two distinct great circles always meet at two opposite points</strong> — the basis for the pan guide's intersection line. Nothing in 2D has this.</p>
+      <h3>4 · The pole singularity</h3>
+      <p>At a pole (<span class="kp">φ</span> = 0 or 180°) every longitude collapses to one point, so <span class="kb">θ</span> is undefined. It's the one place the coordinates break — a real point you can avoid, unlike the noisy blow-ups Cartesian cross products have.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FRAME -------------------------------------------------------------------->
+<section class="panel" id="tframe">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgFrame" width="460" height="420"></svg>
+      <figcaption>The frame: center, pole, two equatorial axes, equator.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>The frame you fix first</h2>
+      <p>Before any point has coordinates you pin a frame:</p>
+      <ul>
+        <li><strong>Center C</strong> — the origin.</li>
+        <li><span class="kp">pole</span> — the chosen "up" axis (here the diagram's own top). It pierces the sphere at the two poles.</li>
+        <li><strong>refX / refY</strong> — two perpendicular directions in the equatorial plane; <span class="kb">θ</span> is measured from refX.</li>
+        <li><span class="kg">equator</span> — the great circle perpendicular to the pole.</li>
+      </ul>
+      <p>That's the <em>only</em> place a Cartesian basis is built. After that everything is angle arithmetic about the pole: "spin" is <code><span class="kb">θ</span> + Δ</code>, "tip" is <code><span class="kp">φ</span> + Δ</code>, "perpendicular" is <code>+90°</code> — none of which can degenerate.</p>
+    </div>
+  </div>
+</section>
+
+<!-- TRIANGLE ----------------------------------------------------------------->
+<section class="panel" id="ttri">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgTri" width="460" height="420"></svg>
+      <figcaption>The pan triangle: hypotenuse = radius, right angle on the <span class="kg">green</span> equator line.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>The pan triangle, in 3D</h2>
+      <p>This is the 2D right triangle (<code>x = r cos θ</code>) lifted onto the sphere — the construction the editor's pan guide draws:</p>
+      <ul>
+        <li><span class="kr">hypotenuse</span> — the radius <code>C → P</code> to the cursor point (length <code>R</code>).</li>
+        <li><span class="kg">green line</span> — the equator (horizontal torus) diameter at the cursor's azimuth <span class="kb">θ</span>.</li>
+        <li><strong>foot G</strong> — the cursor's horizontal shadow, <code>R·sin <span class="kp">φ</span></code> along <span class="kb">θ</span>, sitting <em>on</em> the green line.</li>
+        <li>the <strong>right angle is at G</strong>: <code>C→G</code> (the pan offset) is horizontal, <code>G→P</code> (= <code>R·cos <span class="kp">φ</span></code>) runs straight up the pole — perpendicular by construction, every frame.</li>
+      </ul>
+      <p>The 3D difference: in 2D the right angle is just a corner in the plane. Here the green line is the crossing of two great circles (disk ∩ equator), and the height rises <em>out of</em> the equatorial plane toward the pole. The same trig, but the legs now live on different circles of the sphere.</p>
+      <div class="note">Because <code>G</code> is placed by the angle <span class="kb">θ</span> (always defined) and offset <code>R·sin <span class="kp">φ</span></code>, the right angle can never "flip" — there is no cross product to collapse.</div>
+    </div>
+  </div>
+</section>
+
+<script>
+// ---- shared 3D projector ---------------------------------------------------
+// World: pole = +Y. dir(θ,φ) = (sinφ cosθ, cosφ, sinφ sinθ). View tilted about X so the
+// equator reads as an ellipse and we can see "above" the equator.
+const TILT = -22 * Math.PI / 180;
+function dirOf(th, ph){ return { x: Math.sin(ph)*Math.cos(th), y: Math.cos(ph), z: Math.sin(ph)*Math.sin(th) }; }
+function proj(th, ph, cx, cy, R){
+  const d = dirOf(th, ph);
+  const y2 = d.y*Math.cos(TILT) - d.z*Math.sin(TILT);
+  const z2 = d.y*Math.sin(TILT) + d.z*Math.cos(TILT);
+  return { x: cx + R*d.x, y: cy - R*y2, front: z2 >= -0.02 };
+}
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs){ const e=document.createElementNS(NS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function poly(samples, attrs){
+  const p = el("polyline", attrs); p.setAttribute("points", samples.map(s=>s.x.toFixed(1)+","+s.y.toFixed(1)).join(" ")); return p;
+}
+// draw a curve on the sphere, splitting front (solid) / back (dashed)
+function sphereCurve(svg, fn, n, cx, cy, R, color, w){
+  let run=[], front=null;
+  const flush=()=>{ if(run.length>1){ svg.appendChild(poly(run,{fill:"none",stroke:color,"stroke-width":w,
+    "stroke-opacity":front?1:0.35,"stroke-dasharray":front?"":"4 5"})); } run=[]; };
+  for(let i=0;i<=n;i++){ const p=fn(i/n); if(front===null)front=p.front; if(p.front!==front){flush();front=p.front;} run.push(p); }
+  flush();
+}
+function dot(svg,x,y,c,r){ svg.appendChild(el("circle",{cx:x,cy:y,r:r||4,fill:c})); }
+function line(svg,x1,y1,x2,y2,c,w,dash){ svg.appendChild(el("line",{x1,y1,x2,y2,stroke:c,"stroke-width":w||2,"stroke-dasharray":dash||""})); }
+function label(svg,x,y,t,c,size){ const e=el("text",{x,y,fill:c||"#e7ecf5","font-size":size||13}); e.textContent=t; svg.appendChild(e); }
+
+// ---- 2D polar --------------------------------------------------------------
+(function(){
+  const svg=document.getElementById("svg2d"), cx=180, cy=170, R=120, th=-50*Math.PI/180;
+  for(let i=1;i<=3;i++) svg.appendChild(el("circle",{cx,cy,r:R*i/3,fill:"none",stroke:"#2b3350","stroke-width":1}));
+  for(let a=0;a<360;a+=30){ const r=a*Math.PI/180; line(svg,cx,cy,cx+R*Math.cos(r),cy+R*Math.sin(r),"#222a44",1); }
+  const px=cx+R*Math.cos(th), py=cy+R*Math.sin(th);
+  // angle arc
+  const arc=el("path",{d:`M ${cx+40} ${cy} A 40 40 0 0 1 ${cx+40*Math.cos(th)} ${cy+40*Math.sin(th)}`,fill:"none",stroke:"#57b6ff","stroke-width":2});
+  svg.appendChild(arc);
+  line(svg,cx,cy,cx+R,cy,"#445","1"); // reference axis (θ = 0)
+  line(svg,cx,cy,px,py,"#ff5566",3);            // radius = hypotenuse
+  line(svg,px,py,px,cy,"#66ff99",2,"4 4");      // vertical leg
+  line(svg,cx,cy,px,cy,"#ffcc44",2,"4 4");      // horizontal leg
+  dot(svg,cx,cy,"#e7ecf5",4); dot(svg,px,py,"#ff5566",5);
+  label(svg,cx-10,cy+18,"C","#9aa6c0"); label(svg,px+8,py-6,"P","#ff5566");
+  label(svg,(cx+px)/2-6,(cy+py)/2-8,"r","#ff5566"); label(svg,cx+48,cy-8,"θ","#57b6ff",15);
+  label(svg,(cx+px)/2-6,cy+16,"r·cosθ","#ffcc44"); label(svg,px+6,(cy+py)/2,"r·sinθ","#66ff99");
+})();
+
+// ---- generic sphere scaffold ----------------------------------------------
+function sphere(svg, cx, cy, R){
+  svg.appendChild(el("circle",{cx,cy,r:R,fill:"#10182e",stroke:"#2b3350","stroke-width":1.5}));
+  // parallels
+  for(const ph of [30,60,90,120,150].map(d=>d*Math.PI/180))
+    sphereCurve(svg,t=>proj(t*2*Math.PI,ph,cx,cy,R),80,cx,cy,R,"#2f3a5c",1);
+  // meridians
+  for(const th of [0,45,90,135].map(d=>d*Math.PI/180))
+    sphereCurve(svg,t=>proj(th,t*2*Math.PI,cx,cy,R),80,cx,cy,R,"#2f3a5c",1);
+}
+function poleAxis(svg,cx,cy,R){
+  const top=proj(0,0,cx,cy,R), bot=proj(0,Math.PI,cx,cy,R);
+  line(svg,cx,bot.y+18,cx,top.y-18,"#c79cff",2);
+  label(svg,cx+8,top.y-10,"pole","#c79cff");
+  dot(svg,top.x,top.y,"#c79cff",3.5); dot(svg,bot.x,bot.y,"#c79cff",3.5);
+}
+
+// ---- 3D spherical ----------------------------------------------------------
+(function(){
+  const svg=document.getElementById("svg3d"), cx=230, cy=210, R=150;
+  sphere(svg,cx,cy,R); poleAxis(svg,cx,cy,R);
+  // equator highlighted
+  sphereCurve(svg,t=>proj(t*2*Math.PI,Math.PI/2,cx,cy,R),120,cx,cy,R,"#66ff99",2.2);
+  const TH=45*Math.PI/180, PH=52*Math.PI/180;
+  // meridian through P
+  sphereCurve(svg,t=>proj(TH,t*2*Math.PI,cx,cy,R),120,cx,cy,R,"#ffcc44",2);
+  const P=proj(TH,PH,cx,cy,R), C={x:cx,y:cy};
+  const top=proj(0,0,cx,cy,R);
+  line(svg,C.x,C.y,P.x,P.y,"#ff5566",3);           // radius
+  line(svg,C.x,C.y,top.x,top.y,"#c79cff",2,"5 4"); // pole radius
+  // φ arc (pole→P) and θ arc (refX→P azimuth) at center-ish
+  const eqRef=proj(0,Math.PI/2,cx,cy,R);
+  line(svg,C.x,C.y,eqRef.x,eqRef.y,"#2b3350",1.5);
+  dot(svg,C.x,C.y,"#e7ecf5",4); dot(svg,P.x,P.y,"#ff5566",5.5);
+  label(svg,C.x-14,C.y+16,"C","#9aa6c0");
+  label(svg,P.x+8,P.y,"P (r,θ,φ)","#ff5566",13);
+  label(svg,(C.x+P.x)/2+4,(C.y+P.y)/2-4,"r","#ff5566");
+  label(svg,C.x+10,C.y-40,"φ","#c79cff",15);
+  label(svg,eqRef.x-2,eqRef.y+16,"refX (θ=0)","#9aa6c0",11);
+  label(svg,proj(Math.PI/2,Math.PI/2,cx,cy,R).x-30,proj(Math.PI/2,Math.PI/2,cx,cy,R).y+4,"equator","#66ff99",11);
+})();
+
+// ---- diff: radius sweeping a tilted disk -----------------------------------
+(function(){
+  const svg=document.getElementById("svgDiff"), cx=230, cy=210, R=150;
+  sphere(svg,cx,cy,R); poleAxis(svg,cx,cy,R);
+  const PH=55*Math.PI/180;
+  // the parallel (disk the radius sweeps at this latitude) — bold
+  sphereCurve(svg,t=>proj(t*2*Math.PI,PH,cx,cy,R),120,cx,cy,R,"#ffcc44",2.4);
+  // several radii sweeping the disk
+  for(const th of [0,60,120,200,300].map(d=>d*Math.PI/180)){
+    const p=proj(th,PH,cx,cy,R); line(svg,cx,cy,p.x,p.y,"#ff5566", p.front?2:1);
+    if(!p.front){}
+  }
+  dot(svg,cx,cy,"#e7ecf5",4);
+  label(svg,cx-120,cy-120,"the radius sweeps a DISK","#ffcc44",13);
+  label(svg,cx-120,cy-102,"(a full circle in 3D, not a line)","#9aa6c0",12);
+})();
+
+// ---- frame -----------------------------------------------------------------
+(function(){
+  const svg=document.getElementById("svgFrame"), cx=230, cy=210, R=150;
+  sphere(svg,cx,cy,R); poleAxis(svg,cx,cy,R);
+  sphereCurve(svg,t=>proj(t*2*Math.PI,Math.PI/2,cx,cy,R),120,cx,cy,R,"#66ff99",2.2);
+  const rx=proj(0,Math.PI/2,cx,cy,R), ry=proj(Math.PI/2,Math.PI/2,cx,cy,R);
+  line(svg,cx,cy,rx.x,rx.y,"#ffcc44",2.5); line(svg,cx,cy,ry.x,ry.y,"#57b6ff",2.5);
+  dot(svg,cx,cy,"#e7ecf5",4.5);
+  label(svg,cx-14,cy+18,"C","#9aa6c0");
+  label(svg,rx.x+6,rx.y+4,"refX","#ffcc44"); label(svg,ry.x-8,ry.y+16,"refY","#57b6ff");
+  label(svg,proj(2.4,Math.PI/2,cx,cy,R).x-40,proj(2.4,Math.PI/2,cx,cy,R).y+14,"equator","#66ff99",11);
+})();
+
+// ---- triangle --------------------------------------------------------------
+(function(){
+  const svg=document.getElementById("svgTri"), cx=230, cy=215, R=155;
+  sphere(svg,cx,cy,R); poleAxis(svg,cx,cy,R);
+  sphereCurve(svg,t=>proj(t*2*Math.PI,Math.PI/2,cx,cy,R),120,cx,cy,R,"#2f3a5c",1);
+  const TH=42*Math.PI/180, PH=50*Math.PI/180;
+  // green line = equator diameter at azimuth θ
+  const gA=proj(TH,Math.PI/2,cx,cy,R), gB=proj(TH+Math.PI,Math.PI/2,cx,cy,R);
+  line(svg,gA.x,gA.y,gB.x,gB.y,"#66ff99",3);
+  // P and foot G (R sinφ along θ on the equator dir), height up the pole
+  const P=proj(TH,PH,cx,cy,R);
+  // G in 3D: center + sinφ*R along equator dir(θ); project by treating it as a point inside —
+  // approximate by scaling the equator point gA toward center by sinφ.
+  const s=Math.sin(PH);
+  const G={x:cx+(gA.x-cx)*s, y:cy+(gA.y-cy)*s};
+  line(svg,cx,cy,P.x,P.y,"#ff5566",3);     // hypotenuse (radius)
+  line(svg,cx,cy,G.x,G.y,"#ffcc44",2.5);   // base along green line (pan offset)
+  line(svg,G.x,G.y,P.x,P.y,"#57b6ff",2.5); // height up the pole
+  // little right-angle square at G
+  const ux={x:(G.x-cx),y:(G.y-cy)}, m=Math.hypot(ux.x,ux.y)||1; ux.x/=m; ux.y/=m;
+  const vy={x:(P.x-G.x),y:(P.y-G.y)}, m2=Math.hypot(vy.x,vy.y)||1; vy.x/=m2; vy.y/=m2;
+  const sq=11; svg.appendChild(poly([
+    {x:G.x+ux.x*sq,y:G.y+ux.y*sq},{x:G.x+ux.x*sq+vy.x*sq,y:G.y+ux.y*sq+vy.y*sq},
+    {x:G.x+vy.x*sq,y:G.y+vy.y*sq}],{fill:"none",stroke:"#e7ecf5","stroke-width":1.4}));
+  dot(svg,cx,cy,"#e7ecf5",4.5); dot(svg,P.x,P.y,"#ff5566",5.5); dot(svg,G.x,G.y,"#ffcc44",4.5);
+  label(svg,cx-14,cy+18,"C","#9aa6c0");
+  label(svg,P.x+8,P.y,"P (cursor)","#ff5566",12);
+  label(svg,G.x+6,G.y+14,"G (right angle)","#ffcc44",11);
+  label(svg,(cx+P.x)/2+4,(cy+P.y)/2-4,"r","#ff5566");
+  label(svg,gB.x-4,gB.y+14,"green line","#66ff99",11);
+  label(svg,(G.x+P.x)/2+6,(G.y+P.y)/2,"R·cosφ","#57b6ff",11);
+})();
+</script>
+</body>
+</html>
