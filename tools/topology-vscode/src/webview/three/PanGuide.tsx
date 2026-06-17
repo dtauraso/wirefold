@@ -113,15 +113,17 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Compact right triangle: hypotenuse = radius (C→P); base along the disk's HORIZONTAL axis
-    // (n × pole — the disk∩horizontal-torus direction) so the right angle at Q (foot of the
-    // perpendicular from P) sits on the tori-intersection LINE; height = Q→P. base keeps n's
-    // sign so the triangle flips with the mouse direction (the disk does not).
-    let hAxis = new THREE.Vector3().crossVectors(n, pole);
-    if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone();
-    hAxis.normalize();
-    const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
-    tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
+    // Classic trig (cartesian↔polar) right triangle. The VERTICAL radius is the pole projected
+    // into the disk plane (center → top of the disk). Drop a HORIZONTAL line from the cursor
+    // point P to that vertical radius; its foot F is the right-angle corner:
+    //   C→F  = vertical leg (along the vertical radius),
+    //   F→P  = horizontal leg (the pan offset),
+    //   C→P  = hypotenuse (the radius r).
+    let vUp = pole.clone().sub(n.clone().multiplyScalar(pole.dot(n))); // pole projected into the disk plane
+    if (vUp.lengthSq() < 1e-8) vUp = e1.clone(); // disk ⟂ pole → degenerate
+    vUp.normalize();
+    const F = C.clone().add(vUp.multiplyScalar(radius.dot(vUp))); // foot on the vertical radius
+    tri.geometry.setPositions([C.x, C.y, C.z, F.x, F.y, F.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
     // The radius r to the cursor (C → P), no spin.
     spoke0.geometry.setPositions([C.x, C.y, C.z, P.x, P.y, P.z]);
