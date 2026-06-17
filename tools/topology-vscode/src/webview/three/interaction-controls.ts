@@ -520,7 +520,10 @@ export function useInteractionControls(
           // held for the whole gesture. It shares the arcball's viewport center, so
           // rotation orbits what you're looking at instead of a point that drifts to the
           // side as you pan. Panning changes what's at center → next gesture pivots there.
-          const C = computeContentSphere(nodesRef.current).center;
+          // Pivot = the scene point at the CENTER of the view (regionFocus), so rotation
+          // happens IN PLACE — the diagram doesn't swing away toward the edge (which it
+          // did when pivoting about the off-screen diagram bbox center).
+          const C = regionFocus(cam0);
           s.arcPivot = C.clone();
           s.arcStartOffset = cam0.position.clone().sub(C);
           s.arcStartUp = cam0.up.clone();
