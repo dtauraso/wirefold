@@ -753,25 +753,28 @@ export function CameraRefBridge({
   initialCamera3d?: Camera3D;
 }) {
   const { camera } = useThree();
+  const restoredRef = useRef(false);
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera;
-    cameraRef.current = cam;
-    // Restore saved camera state. If a quaternion is saved, apply it (preserves
-    // any arcball rotation). If no quaternion is saved (fresh/default), fall back
-    // to the square-on lock (looking straight down -z toward the z=0 plane).
-    // NOTE: initialCamera3d is a dependency so that if load() populates
-    // viewerState.camera3d after the first mount (which happens asynchronously
-    // on reload), the effect re-runs and the saved position is applied.
+    cameraRef.current = cam; // always keep the ref current
+    // Restore the saved camera ONCE. Without this guard, every commitCamera during a
+    // drag mutates viewerState.camera3d → this effect re-runs → it re-applies the saved
+    // pose on top of the live rotation each frame, FIGHTING the gesture (jitter) and
+    // partly undoing it (slow). We still re-run (restoredRef stays false) until a real
+    // saved pose is available, so the async load() case is covered; once applied we stop.
+    if (restoredRef.current) return;
     if (initialCamera3d) {
       cam.position.set(...initialCamera3d.position);
       if (initialCamera3d.quaternion) {
         const [qx, qy, qz, qw] = initialCamera3d.quaternion;
         cam.quaternion.set(qx, qy, qz, qw);
         cam.updateMatrixWorld(true);
+        restoredRef.current = true; // restored a real pose → ignore later commits
         return;
       }
     }
-    // No saved quaternion: default square-on orientation.
+    // No saved quaternion yet: default square-on orientation (don't mark restored, so a
+    // later load can still apply the saved pose).
     cam.up.set(0, 1, 0);
     cam.lookAt(cam.position.x, cam.position.y, 0);
     cam.updateMatrixWorld(true);
