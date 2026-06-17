@@ -552,8 +552,11 @@ export function useInteractionControls(
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
         } else if (s.emptyDown) {
-          // Empty-space drag: start arcball rotation.
+          // Empty-space drag: start trackball rotation. Seed prevX/Y so the first frame's
+          // delta is measured from here (no jump from the down-point + slop).
           s.phase = "rotating";
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
         }
       }
 
@@ -611,22 +614,29 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          const C = s.arcPivot; // fixed pivot (screen-center scene point) for the gesture
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam);
-          // arcP0/p1 are WORLD-space unit directions on the real sphere about C. The
-          // camera orbits by the rotation that makes the grabbed point follow the
-          // cursor: rotate the camera by setFromUnitVectors(p1, p0) around C — the whole
-          // rigid scene turns as one, roll included at the silhouette. Swap (p1,p0)↔(p0,p1)
-          // to flip rotation direction if needed.
-          const rotInv = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
-          cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
-          cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
-          cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
+          // UNIFORM-RATE TRACKBALL (incremental). Each frame, rotate by an angle ∝ the
+          // mouse delta about the axis perpendicular to the drag, in the CAMERA's screen
+          // plane. No sphere projection → uniform rate at every r (no slow center / fast
+          // edge); circling composes the tumbles into net roll (geometric phase), so roll
+          // is preserved. Incremental small angles ⇒ stable, never wraps. Pivot = the
+          // content-sphere center (s.arcPivot). Flip the dx/dy signs to reverse direction.
+          const dx = e.clientX - s.prevX;
+          const dy = e.clientY - s.prevY;
+          const S = 0.006; // radians per pixel — uniform sensitivity, tune for feel
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+          const q = new THREE.Quaternion()
+            .setFromAxisAngle(camUp, -dx * S)
+            .multiply(new THREE.Quaternion().setFromAxisAngle(camRight, -dy * S));
+          const C = s.arcPivot;
+          cam.position.copy(C).add(cam.position.clone().sub(C).applyQuaternion(q));
+          cam.quaternion.premultiply(q);
+          cam.up.applyQuaternion(q);
           cam.updateMatrixWorld(true);
-          // P7.5: keep camera inside the large sphere after orbit.
           constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
           commitCamera(cam);
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
         }
       }
     },
