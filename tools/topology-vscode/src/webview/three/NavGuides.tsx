@@ -11,6 +11,7 @@ import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
 import { PanGuide } from "./PanGuide";
+import { ZoomGuide } from "./ZoomGuide";
 
 // ---------------------------------------------------------------------------
 // Prism — axis-aligned bounding box of all node world positions.
@@ -132,12 +133,13 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
 // NavGuides — combined export
 // ---------------------------------------------------------------------------
 
-export function NavGuides({ nodes }: { nodes: RFNode<NodeData>[] }) {
+export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
   return (
     <>
       <Prism nodes={nodes} />
       <ArcballSphere nodes={nodes} />
       <PanGuide nodes={nodes} />
+      <ZoomGuide nodes={nodes} selectedId={selectedId ?? null} />
     </>
   );
 }
