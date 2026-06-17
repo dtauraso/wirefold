@@ -54,7 +54,10 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const cs = computeContentSphere(nodes);
     const C = cs.center;
     const R = cs.radius;
-    const pole = new THREE.Vector3(0, 1, 0); // diagram top axis
+    // Pole = the VIEW-aligned horizontal torus's normal = the camera's up (the tori track the
+    // camera). Using world Y here made the green line the disk ∩ WORLD-equator, not the disk ∩
+    // the visible horizontal torus.
+    const pole = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
 
     // Cursor → point P on the diagram sphere (raycast; clamp to the silhouette on miss).
     const { x, y, inside } = useCursorStore.getState();
@@ -110,21 +113,15 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Right triangle with the right angle GUARANTEED at the tori intersection (Thales): the
-    // hypotenuse is the cursor's DIAMETER (P → antipode); the disk-circle point I where the
-    // disk crosses the horizontal torus sees that diameter at exactly 90°, always. interDir =
-    // pole × n is the equator∩disk direction; I = the crossing point nearer the cursor. The
-    // intersection (and thus which side the right angle is on) keeps n's sign → flips with the
-    // mouse direction, while the disk does not.
-    let iDir = new THREE.Vector3().crossVectors(pole, n);
-    if (iDir.lengthSq() < 1e-8) iDir = e1.clone();
-    iDir.normalize();
-    const Iplus = C.clone().add(iDir.clone().multiplyScalar(R));
-    const Iminus = C.clone().add(iDir.clone().multiplyScalar(-R));
-    const I = P.distanceToSquared(Iplus) <= P.distanceToSquared(Iminus) ? Iplus : Iminus;
-    const Pant = C.clone().multiplyScalar(2).sub(P); // antipode of the cursor on the disk
-    // lineLoop closes Pant→P (the hypotenuse = the cursor's diameter).
-    tri.geometry.setPositions([P.x, P.y, P.z, I.x, I.y, I.z, Pant.x, Pant.y, Pant.z]);
+    // Compact right triangle: hypotenuse = radius (C→P); base along the disk's HORIZONTAL axis
+    // (n × pole — the disk∩horizontal-torus direction) so the right angle at Q (foot of the
+    // perpendicular from P) sits on the tori-intersection LINE; height = Q→P. base keeps n's
+    // sign so the triangle flips with the mouse direction (the disk does not).
+    let hAxis = new THREE.Vector3().crossVectors(n, pole);
+    if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone();
+    hAxis.normalize();
+    const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
+    tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
     // The radius r to the cursor (C → P), no spin.
     spoke0.geometry.setPositions([C.x, C.y, C.z, P.x, P.y, P.z]);

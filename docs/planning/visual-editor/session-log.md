@@ -255,3 +255,15 @@ to observe canAccept-triggered sequential delivery.
 125 tests passing, all green.
 
 ---
+
+## 2026-06-17 — pan-guide triangle: right angle on the view-aligned torus
+
+The pan-guide right angle wasn't landing on the visible tori intersection: after the tori
+were made view-aligned (horizontal-torus normal = camera up), the disk∩torus intersection and
+the triangle base still used world Y, so they sat on the world equator instead of the visible
+torus. Briefly tried a Thales triangle (right angle guaranteed on the circle) but the
+diameter-hypotenuse made it span the whole sphere and drift off-view
+([drift 1](screenshots/2026-06-17-panguide-triangle-drift-1.png),
+[drift 2](screenshots/2026-06-17-panguide-triangle-drift-2.png)). Fix: use the camera-up as
+the pole so the green intersection line and the compact C–Q–P right triangle (right angle at
+the foot Q) land on the visible horizontal torus.
