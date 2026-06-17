@@ -50,6 +50,32 @@ function computeLargeSphereRadius(nodes: RFNode<NodeData>[]): number {
 }
 
 /**
+ * The diagram's WORLD-FIXED content sphere: center = bounding-box center of the node
+ * world positions, radius = farthest node from that center (+10% margin). This is the
+ * arcball — fixed in world space, so it zooms WITH the diagram (both grow as you dolly
+ * in) instead of staying screen-size. Exported shape used by the visible sphere too.
+ */
+export function computeContentSphere(nodes: RFNode<NodeData>[]): { center: THREE.Vector3; radius: number } {
+  const center = new THREE.Vector3();
+  if (!nodes || nodes.length === 0) return { center, radius: 100 };
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    min.min(p); max.max(p);
+  }
+  center.addVectors(min, max).multiplyScalar(0.5);
+  let r = 0;
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    r = Math.max(r, p.distanceTo(center));
+  }
+  return { center, radius: Math.max(r * 1.1, 1) };
+}
+
+/**
  * P7.5: Clamp the camera position so it stays on or inside the large
  * container sphere of radius R. If the camera is outside, project it back
  * to the surface (same direction, length = R). No-op when inside.
@@ -74,7 +100,7 @@ const MOVE_SLOP_PX = 6;
 /** Arcball sphere radius as a fraction of camera→pivot distance (<1 ⇒ camera outside
  *  the ball; large enough that the ball fills the view so there is no on-screen dead
  *  zone). Exported so the visible arcball sphere matches the grab sphere. */
-export const ARCBALL_FILL = 0.75;
+export const ARCBALL_FILL = 0.4;
 
 // ---------------------------------------------------------------------------
 // ControlState
@@ -392,8 +418,8 @@ export function useInteractionControls(
   // hemisphere/dome, no z=0 rim — you grab the actual sphere, so there is no dead zone
   // anywhere the sphere covers the view.
   const arcballPoint = useCallback(
-    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera, C: THREE.Vector3): THREE.Vector3 => {
-      const R = cam.position.distanceTo(C) * ARCBALL_FILL;
+    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera): THREE.Vector3 => {
+      const { center: C, radius: R } = computeContentSphere(nodesRef.current);
       const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
       const ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
@@ -405,7 +431,7 @@ export function useInteractionControls(
       ray.ray.closestPointToPoint(C, foot);
       return foot.sub(C).normalize();
     },
-    [],
+    [nodesRef],
   );
 
   // ------ helpers ------
@@ -494,13 +520,13 @@ export function useInteractionControls(
           // held for the whole gesture. It shares the arcball's viewport center, so
           // rotation orbits what you're looking at instead of a point that drifts to the
           // side as you pan. Panning changes what's at center → next gesture pivots there.
-          const C = regionFocus(cam0);
+          const C = computeContentSphere(nodesRef.current).center;
           s.arcPivot = C.clone();
           s.arcStartOffset = cam0.position.clone().sub(C);
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0, C);
+          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0);
         }
       }
 
@@ -587,7 +613,7 @@ export function useInteractionControls(
         if (cam) {
           const C = s.arcPivot; // fixed pivot (screen-center scene point) for the gesture
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam, C);
+          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam);
           // arcP0/p1 are WORLD-space unit directions on the real sphere about C. The
           // camera orbits by the rotation that makes the grabbed point follow the
           // cursor: rotate the camera by setFromUnitVectors(p1, p0) around C — the whole
