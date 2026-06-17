@@ -9,7 +9,7 @@
 // Drawn with fat lines (Line2, pixel width) so the outlines are easy to see. Plot-only:
 // reads the cursor (cursor-store) + camera, derives geometry each frame.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
@@ -26,6 +26,8 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Re-derive when Go streams geometry (sphere center/radius move with the diagram).
   useNodeGeometryStore((s) => s.geoms);
   const { camera, gl, size } = useThree();
+  const prevP = useRef<THREE.Vector3 | null>(null);  // last cursor point on the sphere
+  const tanDir = useRef(new THREE.Vector3(1, 0, 0)); // smoothed drag direction (tangent), stable
 
   // Fat-line objects (Line2) for the disk and triangle.
   const { disk, tri } = useMemo(() => {
@@ -63,18 +65,30 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
 
     const radius = P.clone().sub(C); // hypotenuse, length R
+    const rHat = radius.clone().normalize();
 
-    // POSITION-BASED disk (no motion, no flipping). The disk is the MERIDIAN great circle
-    // through the cursor: the plane of {horizontal-toward-cursor, pole}. It reorients toward
-    // wherever the cursor is (its azimuth follows the cursor). Because it's derived from the
-    // cursor POSITION, never from a motion direction, there's no normal whose sign can flip
-    // 180° — the cause of the jitter.
-    const v = pole.clone().multiplyScalar(radius.dot(pole)); // vertical leg (along the pole)
-    const h = radius.clone().sub(v);                          // horizontal leg, toward the cursor
-    let e1 = h.clone();
-    if (e1.lengthSq() < 1e-9) e1 = new THREE.Vector3(1, 0, 0); // cursor over a pole
-    e1.normalize();
-    const e2 = pole.clone();
+    // The disk TRACKS THE DRAG DIRECTION but stays stable: keep a SMOOTHED tangent direction
+    // (tanDir) instead of the raw per-frame cross product. Smoothing averages out the noise
+    // that made the raw normal flip 180° on a near-straight drag; a genuine reversal still
+    // turns it around. When motion is near-radial (no tangential part) tanDir is just held.
+    if (prevP.current) {
+      const m = P.clone().sub(prevP.current);
+      const t = m.clone().sub(rHat.clone().multiplyScalar(m.dot(rHat))); // tangential part of motion
+      if (t.lengthSq() > 1e-7) {
+        t.normalize();
+        tanDir.current.lerp(t, 0.25);
+        if (tanDir.current.lengthSq() < 1e-6) tanDir.current.copy(t);
+        tanDir.current.normalize();
+      }
+    }
+    prevP.current = P.clone();
+
+    // Disk = great circle in the plane the radius sweeps = span(rHat, tanDir): e1 = rHat,
+    // e2 = tanDir orthogonalized against rHat.
+    const e1 = rHat.clone();
+    let e2 = tanDir.current.clone().sub(e1.clone().multiplyScalar(tanDir.current.dot(e1)));
+    if (e2.lengthSq() < 1e-8) e2 = Math.abs(e1.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    e2.sub(e1.clone().multiplyScalar(e2.dot(e1))).normalize();
     const dPts: number[] = [];
     const N = 96;
     for (let i = 0; i <= N; i++) {
@@ -86,8 +100,10 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Right triangle on that disk: hypotenuse = radius (C→P); base = h (C→Q, horizontal,
-    // pointing TOWARD the cursor); height = v (Q→P, along the pole). Right angle at Q.
+    // Right triangle: hypotenuse = radius (C→P); base = horizontal projection of the radius,
+    // pointing TOWARD the cursor (position-based ⇒ never flips); height drops to the pole axis.
+    const v = pole.clone().multiplyScalar(radius.dot(pole));
+    const h = radius.clone().sub(v);
     const Q = C.clone().add(h);
     tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
