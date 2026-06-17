@@ -9,7 +9,7 @@
 // Drawn with fat lines (Line2, pixel width) so the outlines are easy to see. Plot-only:
 // reads the cursor (cursor-store) + camera, derives geometry each frame.
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import * as THREE from "three";
 import { useThree, useFrame } from "@react-three/fiber";
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
@@ -19,7 +19,6 @@ import type { RFNode, NodeData } from "../types";
 import { computeContentSphere } from "./interaction-controls";
 import { useCursorStore } from "./cursor-store";
 import { useNodeGeometryStore } from "./node-geometry";
-import { postLog } from "../log/post";
 
 const LINE_WIDTH = 3; // px (≈3× the old 1px lines)
 
@@ -27,9 +26,6 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Re-derive when Go streams geometry (sphere center/radius move with the diagram).
   useNodeGeometryStore((s) => s.geoms);
   const { camera, gl, size } = useThree();
-  const prevP = useRef<THREE.Vector3 | null>(null);   // sphere point at the last normal update (anchor)
-  const anchorCursor = useRef<{ x: number; y: number } | null>(null); // cursor px at that anchor
-  const lastNormal = useRef(new THREE.Vector3(0, 0, 1)); // last disk normal (held between updates)
 
   // Fat-line objects (Line2) for the disk and triangle.
   const { disk, tri } = useMemo(() => {
@@ -68,45 +64,17 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
 
     const radius = P.clone().sub(C); // hypotenuse, length R
 
-    // Disk plane FOLLOWS THE MOUSE MOTION: spanned by the radius and the motion direction;
-    // normal = radius × motion (the rotation axis). Held when the cursor isn't moving.
-    // STABILIZED normal: only update once the cursor has moved a real distance (MOVE_THRESH
-    // px), and measure direction over that whole baseline. Frame-to-frame motion is tiny and
-    // noisy → the normal jittered every frame (constant flicker) and accumulated into a spin
-    // on a straight drag. Between updates the normal is HELD, so the disk sits still.
-    const MOVE_THRESH = 6; // px
-    let n = lastNormal.current.clone();
-    if (!anchorCursor.current || !prevP.current) {
-      anchorCursor.current = { x, y };
-      prevP.current = P.clone();
-    } else {
-      const sdx = x - anchorCursor.current.x;
-      const sdy = y - anchorCursor.current.y;
-      if (Math.hypot(sdx, sdy) >= MOVE_THRESH) {
-        const motion = P.clone().sub(prevP.current); // over the whole baseline, not one frame
-        const cand = new THREE.Vector3().crossVectors(radius, motion);
-        const crossLen = cand.length();
-        if (crossLen > 1e-9) {
-          cand.normalize();
-          const dotBefore = cand.dot(lastNormal.current);
-          if (dotBefore < 0) cand.negate(); // keep continuous with the last normal
-          n = cand;
-          lastNormal.current.copy(n);
-          postLog("panguide", {
-            sdxy: [Math.round(sdx), Math.round(sdy)],
-            crossLen: +crossLen.toFixed(4),
-            n: [+n.x.toFixed(2), +n.y.toFixed(2), +n.z.toFixed(2)],
-            negated: dotBefore < 0,
-          });
-        }
-        anchorCursor.current = { x, y };
-        prevP.current = P.clone();
-      }
-    }
-
-    // Disk = great circle (center C, radius R) in that plane: e1 along radius, e2 = n × e1.
-    const e1 = radius.clone().normalize();
-    const e2 = new THREE.Vector3().crossVectors(n, e1).normalize();
+    // POSITION-BASED disk (no motion, no flipping). The disk is the MERIDIAN great circle
+    // through the cursor: the plane of {horizontal-toward-cursor, pole}. It reorients toward
+    // wherever the cursor is (its azimuth follows the cursor). Because it's derived from the
+    // cursor POSITION, never from a motion direction, there's no normal whose sign can flip
+    // 180° — the cause of the jitter.
+    const v = pole.clone().multiplyScalar(radius.dot(pole)); // vertical leg (along the pole)
+    const h = radius.clone().sub(v);                          // horizontal leg, toward the cursor
+    let e1 = h.clone();
+    if (e1.lengthSq() < 1e-9) e1 = new THREE.Vector3(1, 0, 0); // cursor over a pole
+    e1.normalize();
+    const e2 = pole.clone();
     const dPts: number[] = [];
     const N = 96;
     for (let i = 0; i <= N; i++) {
@@ -118,12 +86,9 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     }
     disk.geometry.setPositions(dPts);
 
-    // Right triangle on the disk: hypotenuse = radius; base along the disk's horizontal axis
-    // (disk plane ∩ world-horizontal = n × pole); height drops from P to that axis.
-    let hAxis = new THREE.Vector3().crossVectors(n, pole);
-    if (hAxis.lengthSq() < 1e-9) hAxis = e1.clone();
-    hAxis.normalize();
-    const Q = C.clone().add(hAxis.clone().multiplyScalar(radius.dot(hAxis)));
+    // Right triangle on that disk: hypotenuse = radius (C→P); base = h (C→Q, horizontal,
+    // pointing TOWARD the cursor); height = v (Q→P, along the pole). Right angle at Q.
+    const Q = C.clone().add(h);
     tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
     // Fat lines need the viewport resolution to size their pixel width.
