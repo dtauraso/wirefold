@@ -29,19 +29,21 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const prevP = useRef<THREE.Vector3 | null>(null);  // last cursor point on the sphere
   const tanDir = useRef(new THREE.Vector3(1, 0, 0)); // smoothed drag direction (tangent), stable
 
-  // Fat-line objects (Line2) for the disk and triangle.
-  const { disk, tri } = useMemo(() => {
-    const mk = (hex: number) => {
+  // Fat-line objects (Line2) for the disk, triangle, and disk spokes.
+  const { disk, tri, spoke0, spokes } = useMemo(() => {
+    const mk = (hex: number, w = LINE_WIDTH) => {
       const geo = new LineGeometry();
       geo.setPositions([0, 0, 0, 0, 0, 0]); // seed so attributes exist before the first frame
-      const mat = new LineMaterial({ color: hex, linewidth: LINE_WIDTH, transparent: true, opacity: 0.9, depthTest: false });
+      const mat = new LineMaterial({ color: hex, linewidth: w, transparent: true, opacity: 0.9, depthTest: false });
       const line = new Line2(geo, mat);
       line.raycast = () => null;
       line.frustumCulled = false;
       line.renderOrder = 999;
       return line;
     };
-    return { disk: mk(0xffcc44), tri: mk(0x44ddff) };
+    // spoke0 = the radius to the cursor (the FIRST direction), highlighted red; spokes = the
+    // other three radii at 90° steps on the disk, white.
+    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4), spokes: mk(0xffffff, 2) };
   }, []);
 
   useFrame(() => {
@@ -111,6 +113,16 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
     tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
+    // Four radii on the disk, 90° apart, FIRST direction = toward the cursor (e1 = rHat → P).
+    const p0 = C.clone().add(e1.clone().multiplyScalar(R)); // = P (toward cursor)
+    const p1 = C.clone().add(e2.clone().multiplyScalar(R));
+    const p2 = C.clone().add(e1.clone().multiplyScalar(-R));
+    const p3 = C.clone().add(e2.clone().multiplyScalar(-R));
+    spoke0.geometry.setPositions([C.x, C.y, C.z, p0.x, p0.y, p0.z]);
+    spokes.geometry.setPositions([C.x, C.y, C.z, p1.x, p1.y, p1.z, C.x, C.y, C.z, p2.x, p2.y, p2.z, C.x, C.y, C.z, p3.x, p3.y, p3.z]);
+    (spoke0.material as LineMaterial).resolution.set(size.width, size.height);
+    (spokes.material as LineMaterial).resolution.set(size.width, size.height);
+
     // Fat lines need the viewport resolution to size their pixel width.
     (disk.material as LineMaterial).resolution.set(size.width, size.height);
     (tri.material as LineMaterial).resolution.set(size.width, size.height);
@@ -121,6 +133,8 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     <>
       <primitive object={disk} />
       <primitive object={tri} />
+      <primitive object={spoke0} />
+      <primitive object={spokes} />
     </>
   );
 }
