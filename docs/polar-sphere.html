@@ -264,7 +264,16 @@ function poleAxis(svg,cx,cy,R){
   line(svg,C.x,C.y,top.x,top.y,"#c79cff",2,"5 4"); // pole radius
   // φ arc (pole→P) and θ arc (refX→P azimuth) at center-ish
   const eqRef=proj(0,Math.PI/2,cx,cy,R);
-  line(svg,C.x,C.y,eqRef.x,eqRef.y,"#2b3350",1.5);
+  line(svg,C.x,C.y,eqRef.x,eqRef.y,"#57b6ff",1.5);   // refX (θ=0) radius in the equator
+  // azimuth θ: arc along the equator from refX (θ=0) to P's longitude (θ=TH)
+  const azPts=[]; for(let i=0;i<=44;i++) azPts.push(proj(TH*i/44, Math.PI/2, cx,cy,R));
+  svg.appendChild(poly(azPts,{fill:"none",stroke:"#57b6ff","stroke-width":3.5}));
+  const foot=proj(TH,Math.PI/2,cx,cy,R);
+  line(svg,C.x,C.y,foot.x,foot.y,"#57b6ff",1.5);     // radius to P's equator foot
+  line(svg,P.x,P.y,foot.x,foot.y,"#9aa6c0",1.5,"4 4"); // drop P → equator (down its meridian)
+  dot(svg,foot.x,foot.y,"#57b6ff",4);
+  const azMid=azPts[22];
+  label(svg, azMid.x-6, azMid.y+(azMid.front?18:-8), "θ azimuth","#57b6ff",12);
   dot(svg,C.x,C.y,"#e7ecf5",4); dot(svg,P.x,P.y,"#ff5566",5.5);
   label(svg,C.x-14,C.y+16,"C","#9aa6c0");
   label(svg,P.x+8,P.y,"P (r,θ,φ)","#ff5566",13);
