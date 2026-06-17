@@ -30,7 +30,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const tanDir = useRef(new THREE.Vector3(1, 0, 0)); // smoothed drag direction (tangent), stable
 
   // Fat-line objects (Line2) for the disk, triangle, and disk spokes.
-  const { disk, tri, spoke0, spokes, labels } = useMemo(() => {
+  const { disk, tri, spoke0 } = useMemo(() => {
     const mk = (hex: number, w = LINE_WIDTH) => {
       const geo = new LineGeometry();
       geo.setPositions([0, 0, 0, 0, 0, 0]); // seed so attributes exist before the first frame
@@ -41,24 +41,8 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       line.renderOrder = 999;
       return line;
     };
-    // spoke0 = the radius to the cursor (the FIRST direction), highlighted red; spokes = the
-    // other three radii at 90° steps on the disk, white.
-    // Number sprites 1–4 mark the ends of the four radii (1 = toward the cursor).
-    const numberSprite = (n: number, color: string) => {
-      const c = document.createElement("canvas");
-      c.width = c.height = 64;
-      const ctx = c.getContext("2d")!;
-      ctx.fillStyle = color;
-      ctx.font = "bold 48px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(n), 32, 34);
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
-      sp.renderOrder = 1000;
-      return sp;
-    };
-    const labels = [numberSprite(1, "#ff5555"), numberSprite(2, "#ffffff"), numberSprite(3, "#ffffff"), numberSprite(4, "#ffffff")];
-    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4), spokes: mk(0xffffff, 2), labels };
+    // spoke0 = the radius to the cursor (the radius r), highlighted red.
+    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4) };
   }, []);
 
   useFrame(() => {
@@ -128,25 +112,9 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
     tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
-    // Four radii on the disk, 90° apart, FIRST direction = toward the cursor (e1 = rHat → P).
-    const p0 = C.clone().add(e1.clone().multiplyScalar(R)); // = P (toward cursor)
-    const p1 = C.clone().add(e2.clone().multiplyScalar(R));
-    const p2 = C.clone().add(e1.clone().multiplyScalar(-R));
-    const p3 = C.clone().add(e2.clone().multiplyScalar(-R));
-    spoke0.geometry.setPositions([C.x, C.y, C.z, p0.x, p0.y, p0.z]);
-    spokes.geometry.setPositions([C.x, C.y, C.z, p1.x, p1.y, p1.z, C.x, C.y, C.z, p2.x, p2.y, p2.z, C.x, C.y, C.z, p3.x, p3.y, p3.z]);
+    // The radius r to the cursor (C → P).
+    spoke0.geometry.setPositions([C.x, C.y, C.z, P.x, P.y, P.z]);
     (spoke0.material as LineMaterial).resolution.set(size.width, size.height);
-    (spokes.material as LineMaterial).resolution.set(size.width, size.height);
-
-    // Number labels just past each radius end (1 = toward cursor, then 2,3,4 at 90° steps).
-    const ends = [p0, p1, p2, p3];
-    const dirs = [e1, e2, e1.clone().negate(), e2.clone().negate()];
-    const lblScale = R * 0.18;
-    for (let i = 0; i < 4; i++) {
-      const lp = ends[i].clone().add(dirs[i].clone().multiplyScalar(R * 0.12));
-      labels[i].position.copy(lp);
-      labels[i].scale.set(lblScale, lblScale, 1);
-    }
 
     // Fat lines need the viewport resolution to size their pixel width.
     (disk.material as LineMaterial).resolution.set(size.width, size.height);
@@ -159,8 +127,6 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       <primitive object={disk} />
       <primitive object={tri} />
       <primitive object={spoke0} />
-      <primitive object={spokes} />
-      {labels.map((l, i) => <primitive key={i} object={l} />)}
     </>
   );
 }
