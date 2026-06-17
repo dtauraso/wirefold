@@ -30,7 +30,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const tanDir = useRef(new THREE.Vector3(1, 0, 0)); // smoothed drag direction (tangent), stable
 
   // Fat-line objects (Line2) for the disk, triangle, and disk spokes.
-  const { disk, tri, spoke0 } = useMemo(() => {
+  const { disk, tri, spoke0, interLine } = useMemo(() => {
     const mk = (hex: number, w = LINE_WIDTH) => {
       const geo = new LineGeometry();
       geo.setPositions([0, 0, 0, 0, 0, 0]); // seed so attributes exist before the first frame
@@ -42,7 +42,8 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       return line;
     };
     // spoke0 = the radius to the cursor (the radius r), highlighted red.
-    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4) };
+    // interLine = where the HORIZONTAL torus (equator) meets the mouse-following disk.
+    return { disk: mk(0xffcc44), tri: mk(0x44ddff), spoke0: mk(0xff3333, 4), interLine: mk(0x66ff66, 4) };
   }, []);
 
   useFrame(() => {
@@ -116,6 +117,20 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     spoke0.geometry.setPositions([C.x, C.y, C.z, P.x, P.y, P.z]);
     (spoke0.material as LineMaterial).resolution.set(size.width, size.height);
 
+    // Intersection of the HORIZONTAL torus (equator, plane normal = pole) with the disk
+    // (plane normal = n): the diameter through their two crossing points, along pole × n.
+    const interDir = new THREE.Vector3().crossVectors(pole, n);
+    if (interDir.lengthSq() > 1e-8) {
+      interDir.normalize();
+      const ia = C.clone().add(interDir.clone().multiplyScalar(R));
+      const ib = C.clone().add(interDir.clone().multiplyScalar(-R));
+      interLine.geometry.setPositions([ia.x, ia.y, ia.z, ib.x, ib.y, ib.z]);
+      interLine.visible = true;
+    } else {
+      interLine.visible = false; // disk is horizontal → coincident with the equator
+    }
+    (interLine.material as LineMaterial).resolution.set(size.width, size.height);
+
     // Fat lines need the viewport resolution to size their pixel width.
     (disk.material as LineMaterial).resolution.set(size.width, size.height);
     (tri.material as LineMaterial).resolution.set(size.width, size.height);
@@ -127,6 +142,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       <primitive object={disk} />
       <primitive object={tri} />
       <primitive object={spoke0} />
+      <primitive object={interLine} />
     </>
   );
 }
