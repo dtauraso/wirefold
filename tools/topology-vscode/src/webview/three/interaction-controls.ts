@@ -424,17 +424,27 @@ export function useInteractionControls(
   // (k<1). Ray-pick the surface: hit = grabbed world direction from C; off the silhouette,
   // the limb → roll. Roll (rim) + tumble (pole) both from one sphere, no special case.
   const arcballPoint = useCallback(
-    (clientX: number, clientY: number, rect: DOMRect, cam: THREE.PerspectiveCamera, C: THREE.Vector3): THREE.Vector3 => {
-      const R = cam.position.distanceTo(C) * ARCBALL_FILL;
+    (
+      clientX: number, clientY: number, rect: DOMRect,
+      fovDeg: number, aspect: number,
+      eyePos: THREE.Vector3, eyeQuat: THREE.Quaternion, C: THREE.Vector3,
+    ): THREE.Vector3 => {
+      // Build the ray from a FROZEN camera pose (eyePos/eyeQuat snapshotted at gesture
+      // start), NOT the live camera — otherwise the moving camera changes this mapping
+      // every frame and the rotation feeds back on itself (jitter / inside-out flips).
+      const R = eyePos.distanceTo(C) * ARCBALL_FILL;
       const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
-      const ray = new THREE.Raycaster();
-      ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+      const t = Math.tan(((fovDeg * Math.PI) / 180) / 2);
+      const dir = new THREE.Vector3(ndcX * t * aspect, ndcY * t, -1)
+        .applyQuaternion(eyeQuat)
+        .normalize();
+      const ray = new THREE.Ray(eyePos.clone(), dir);
       const hit = new THREE.Vector3();
-      if (ray.ray.intersectSphere(new THREE.Sphere(C, R), hit)) {
+      if (ray.intersectSphere(new THREE.Sphere(C, R), hit)) {
         return hit.sub(C).normalize();
       }
       const foot = new THREE.Vector3();
-      ray.ray.closestPointToPoint(C, foot);
+      ray.closestPointToPoint(C, foot);
       return foot.sub(C).normalize();
     },
     [],
@@ -544,7 +554,7 @@ export function useInteractionControls(
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0, C);
+          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0.fov, cam0.aspect, cam0.position.clone(), cam0.quaternion.clone(), C);
         }
       }
 
@@ -640,7 +650,11 @@ export function useInteractionControls(
           // case. Swap (p1,arcP0)↔(arcP0,p1) to flip direction.
           const C = s.arcPivot;
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam, C);
+          // Sample p1 from the FROZEN start pose (start camera position = C + arcStartOffset,
+          // orientation = arcStartQuat), so the screen→sphere mapping doesn't move as the
+          // camera orbits → no feedback, no jitter/inside-out.
+          const eyePos = C.clone().add(s.arcStartOffset);
+          const p1 = arcballPoint(e.clientX, e.clientY, rect, cam.fov, cam.aspect, eyePos, s.arcStartQuat, C);
           const rotInv = new THREE.Quaternion().setFromUnitVectors(p1, s.arcP0);
           cam.position.copy(C).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
           cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
@@ -650,7 +664,7 @@ export function useInteractionControls(
           const distBefore = cam.position.length();
           constrainInsideLargeSphere(cam, R);
           postLog("rot", {
-            build: "arcball-camrel-v5",
+            build: "arcball-frozen-v6",
             offsetLen: Math.round(s.arcStartOffset.length()),
             grabR: Math.round(cam.position.distanceTo(C) * ARCBALL_FILL),
             clampedFrom: distBefore > R ? Math.round(distBefore) : 0,
