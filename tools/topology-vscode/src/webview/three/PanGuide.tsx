@@ -111,11 +111,11 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     disk.geometry.setPositions(dPts);
 
     // Triangle on the disk: hypotenuse = radius (C→P); base along the disk's horizontal axis
-    // (n × pole) forced toward the cursor (sign-independent → no flip); height the in-plane leg.
+    // (n × pole). Unlike the disk, the base KEEPS n's sign — so when the mouse changes
+    // direction (n → −n) the TRIANGLE flips to the other side, while the disk does not.
     let hAxis = new THREE.Vector3().crossVectors(n, pole);
     if (hAxis.lengthSq() < 1e-8) hAxis = e1.clone();
     hAxis.normalize();
-    if (radius.dot(hAxis) < 0) hAxis.negate();
     const Q = C.clone().add(hAxis.multiplyScalar(radius.dot(hAxis)));
     tri.geometry.setPositions([C.x, C.y, C.z, Q.x, Q.y, Q.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
