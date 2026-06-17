@@ -651,6 +651,7 @@ export function useInteractionControls(
           const distBefore = cam.position.length();
           constrainInsideLargeSphere(cam, R);
           postLog("rot", {
+            build: "pivot-ahead-v4",
             dx: Math.round(dx), dy: Math.round(dy),
             pivot: [Math.round(C.x), Math.round(C.y), Math.round(C.z)],
             offsetLen: Math.round(before.distanceTo(C)),
