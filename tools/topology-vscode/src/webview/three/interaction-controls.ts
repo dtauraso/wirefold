@@ -10,6 +10,7 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
+import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -520,11 +521,20 @@ export function useInteractionControls(
           // held for the whole gesture. It shares the arcball's viewport center, so
           // rotation orbits what you're looking at instead of a point that drifts to the
           // side as you pan. Panning changes what's at center → next gesture pivots there.
-          // Pivot = the scene point at the CENTER of the view (regionFocus), so rotation
-          // happens IN PLACE — the diagram doesn't swing away toward the edge (which it
-          // did when pivoting about the off-screen diagram bbox center).
-          const C = regionFocus(cam0);
-          s.arcPivot = C.clone();
+          // Pivot = a point straight ahead of the camera, at the diagram's depth but
+          // GUARANTEED a real distance in front (≥ PIVOT_MIN). regionFocus could return a
+          // point coincident with the camera (lever arm 0) → rotation spun the camera in
+          // place instead of orbiting (the view whirled to the edge). This always gives a
+          // nonzero lever arm so the camera ORBITS the point and rotation happens in place.
+          {
+            const fwd = new THREE.Vector3();
+            cam0.getWorldDirection(fwd);
+            const contentCenter = computeContentSphere(nodesRef.current).center;
+            const PIVOT_MIN = 100;
+            const ahead = Math.max(fwd.dot(contentCenter.clone().sub(cam0.position)), PIVOT_MIN);
+            s.arcPivot = cam0.position.clone().add(fwd.multiplyScalar(ahead));
+          }
+          const C = s.arcPivot;
           s.arcStartOffset = cam0.position.clone().sub(C);
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
@@ -632,11 +642,22 @@ export function useInteractionControls(
             .setFromAxisAngle(camUp, -dx * S)
             .multiply(new THREE.Quaternion().setFromAxisAngle(camRight, -dy * S));
           const C = s.arcPivot;
+          const before = cam.position.clone();
           cam.position.copy(C).add(cam.position.clone().sub(C).applyQuaternion(q));
           cam.quaternion.premultiply(q);
           cam.up.applyQuaternion(q);
           cam.updateMatrixWorld(true);
-          constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
+          const R = computeLargeSphereRadius(nodesRef.current);
+          const distBefore = cam.position.length();
+          constrainInsideLargeSphere(cam, R);
+          postLog("rot", {
+            dx: Math.round(dx), dy: Math.round(dy),
+            pivot: [Math.round(C.x), Math.round(C.y), Math.round(C.z)],
+            offsetLen: Math.round(before.distanceTo(C)),
+            moved: Math.round(before.distanceTo(cam.position)),
+            clampedFrom: distBefore > R ? Math.round(distBefore) : 0,
+            R: Math.round(R),
+          });
           commitCamera(cam);
           s.prevX = e.clientX;
           s.prevY = e.clientY;
