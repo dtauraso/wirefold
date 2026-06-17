@@ -55,7 +55,9 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const pole = new THREE.Vector3(0, 1, 0); // diagram top axis
 
     // Cursor → point P on the diagram sphere (raycast; clamp to the silhouette on miss).
-    const { x, y } = useCursorStore.getState();
+    const { x, y, inside } = useCursorStore.getState();
+    if (!frozen.current && !inside) { disk.visible = false; tri.visible = false; spoke0.visible = false; interLine.visible = false; return; }
+    disk.visible = true; tri.visible = true; spoke0.visible = true;
     const rect = gl.domElement.getBoundingClientRect();
     const ndcX = ((x - rect.left) / rect.width) * 2 - 1;
     const ndcY = -(((y - rect.top) / rect.height) * 2 - 1);
