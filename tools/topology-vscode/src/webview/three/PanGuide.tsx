@@ -30,7 +30,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const tanDir = useRef(new THREE.Vector3(1, 0, 0)); // smoothed drag direction (tangent), stable
 
   // Fat-line objects (Line2) for the disk, triangle, and disk spokes.
-  const { disk, tri, spoke0, spokes } = useMemo(() => {
+  const { disk, tri, spoke0, spokes, labels } = useMemo(() => {
     const mk = (hex: number, w = LINE_WIDTH) => {
       const geo = new LineGeometry();
       geo.setPositions([0, 0, 0, 0, 0, 0]); // seed so attributes exist before the first frame
