@@ -51,24 +51,25 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     const h = radius.clone().sub(v);                          // horizontal leg = base (pan offset)
     const Q = C.clone().add(h);                               // right-angle vertex
 
-    // Triangle outline (lineLoop auto-closes P→C): C → Q (base) → P (height).
+    // Triangle outline (lineLoop auto-closes P→C): C → Q (base, horizontal) → P (height,
+    // vertical). Right angle at Q (base ⊥ height); hypotenuse C→P = the radius.
     triRef.current.setFromPoints([C.clone(), Q.clone(), P.clone()]);
 
-    // Disk outline: latitude circle, center C+v, radius |h|, in the plane ⊥ pole.
-    const center = C.clone().add(v);
-    const hr = h.length();
+    // Disk outline: the GREAT CIRCLE the radius sweeps — center C, radius R, in the plane
+    // spanned by {horizontal-toward-mouse, pole}. Vertical, tilted toward the cursor (below
+    // center on the cursor side, above on the far side); the triangle lies on it.
     let e1 = h.clone();
-    if (e1.lengthSq() < 1e-9) e1 = new THREE.Vector3(1, 0, 0);
-    e1.normalize();
-    const e2 = new THREE.Vector3(-e1.z, 0, e1.x); // +90° about the pole (world up), no cross product
+    if (e1.lengthSq() < 1e-9) e1 = new THREE.Vector3(1, 0, 0); // cursor over a pole
+    e1.normalize();                       // horizontal, toward the cursor's azimuth
+    const e2 = pole.clone();              // vertical (the pole)
     const pts: THREE.Vector3[] = [];
-    const N = 72;
+    const N = 96;
     for (let i = 0; i <= N; i++) {
       const ang = (i / N) * Math.PI * 2;
       pts.push(
-        center.clone()
-          .add(e1.clone().multiplyScalar(Math.cos(ang) * hr))
-          .add(e2.clone().multiplyScalar(Math.sin(ang) * hr)),
+        C.clone()
+          .add(e1.clone().multiplyScalar(Math.cos(ang) * R))
+          .add(e2.clone().multiplyScalar(Math.sin(ang) * R)),
       );
     }
     diskRef.current.setFromPoints(pts);
