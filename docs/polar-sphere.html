@@ -177,6 +177,14 @@
 </section>
 
 <script>
+// ---- tabs ------------------------------------------------------------------
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".tab");
+  if (!btn) return;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === btn));
+  document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === btn.dataset.tab));
+});
+
 // ---- shared 3D projector ---------------------------------------------------
 // World: pole = +Y. dir(θ,φ) = (sinφ cosθ, cosφ, sinφ sinθ). View tilted about X so the
 // equator reads as an ellipse and we can see "above" the equator.
