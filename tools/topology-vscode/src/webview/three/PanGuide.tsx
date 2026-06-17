@@ -19,6 +19,7 @@ import type { RFNode, NodeData } from "../types";
 import { computeContentSphere } from "./interaction-controls";
 import { useCursorStore } from "./cursor-store";
 import { useNodeGeometryStore } from "./node-geometry";
+import { postLog } from "../log/post";
 
 const LINE_WIDTH = 3; // px (≈3× the old 1px lines)
 
@@ -78,6 +79,11 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       if (e2.lengthSq() < 1e-6) e2 = new THREE.Vector3(1, 0, 0).sub(e1.clone().multiplyScalar(e1.x));
       e2.normalize();
       frozen.current = { e1, e2, Pf: P.clone() };
+      postLog("panguide-freeze", {
+        cursor: [Math.round(x), Math.round(y)], // if this is (0,0)/stale, it froze before you moved
+        Pf: [+P.x.toFixed(1), +P.y.toFixed(1), +P.z.toFixed(1)],
+        e1: [+e1.x.toFixed(2), +e1.y.toFixed(2), +e1.z.toFixed(2)],
+      });
     }
     const { e1, e2, Pf } = frozen.current;
     const n = new THREE.Vector3().crossVectors(e1, e2); // frozen disk normal
