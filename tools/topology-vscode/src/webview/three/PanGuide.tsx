@@ -19,6 +19,7 @@ import type { RFNode, NodeData } from "../types";
 import { computeContentSphere } from "./interaction-controls";
 import { useCursorStore } from "./cursor-store";
 import { useNodeGeometryStore } from "./node-geometry";
+import { postLog } from "../log/post";
 
 const LINE_WIDTH = 3; // px (≈3× the old 1px lines)
 
@@ -73,13 +74,20 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       const motion = P.clone().sub(prevP.current);
       if (motion.lengthSq() > 1e-10) {
         const cand = new THREE.Vector3().crossVectors(radius, motion);
-        if (cand.lengthSq() > 1e-10) {
+        const crossLen = cand.length();              // = R·|motion|·sin(angle between radius & motion)
+        if (crossLen > 1e-10) {
           cand.normalize();
-          // Keep the normal CONTINUOUS with the last one — the raw cross product flips sign
-          // when motion wobbles across the radius, which flipped the triangle's right angle.
-          if (cand.dot(lastNormal.current) < 0) cand.negate();
+          const dotBefore = cand.dot(lastNormal.current);
+          if (dotBefore < 0) cand.negate();          // keep continuous with the last normal
           n = cand;
           lastNormal.current.copy(n);
+          postLog("panguide", {
+            mo: [+motion.x.toFixed(2), +motion.y.toFixed(2), +motion.z.toFixed(2)],
+            moLen: +motion.length().toFixed(3),
+            crossLen: +crossLen.toFixed(4),          // tiny ⇒ motion ∥ radius ⇒ normal ill-defined
+            n: [+n.x.toFixed(2), +n.y.toFixed(2), +n.z.toFixed(2)],
+            negated: dotBefore < 0,
+          });
         }
       }
     }
