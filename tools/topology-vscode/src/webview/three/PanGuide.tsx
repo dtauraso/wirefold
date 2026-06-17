@@ -24,6 +24,8 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const { camera, gl } = useThree();
   const diskRef = useRef<THREE.BufferGeometry>(null);
   const triRef = useRef<THREE.BufferGeometry>(null);
+  const prevP = useRef<THREE.Vector3 | null>(null);   // last cursor point on the sphere
+  const lastNormal = useRef(new THREE.Vector3(0, 0, 1)); // last disk normal (held when not moving)
 
   useFrame(() => {
     if (nodes.length < 1 || !diskRef.current || !triRef.current) return;
@@ -45,23 +47,24 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       P.sub(C).setLength(R).add(C);
     }
 
-    // Radius (hypotenuse) and its split into vertical (along pole) + horizontal (base).
-    const radius = P.clone().sub(C);
-    const v = pole.clone().multiplyScalar(radius.dot(pole)); // vertical leg
-    const h = radius.clone().sub(v);                          // horizontal leg = base (pan offset)
-    const Q = C.clone().add(h);                               // right-angle vertex
+    const radius = P.clone().sub(C); // hypotenuse, length R
 
-    // Triangle outline (lineLoop auto-closes P→C): C → Q (base, horizontal) → P (height,
-    // vertical). Right angle at Q (base ⊥ height); hypotenuse C→P = the radius.
-    triRef.current.setFromPoints([C.clone(), Q.clone(), P.clone()]);
+    // The DISK FOLLOWS THE MOUSE MOTION: its plane is the one the radius sweeps as the cursor
+    // moves = spanned by the radius and the cursor's motion direction. Normal = radius × motion
+    // (the rotation axis). When the cursor isn't moving, hold the last orientation.
+    let n = lastNormal.current.clone();
+    if (prevP.current) {
+      const motion = P.clone().sub(prevP.current);
+      if (motion.lengthSq() > 1e-10) {
+        const cand = new THREE.Vector3().crossVectors(radius, motion);
+        if (cand.lengthSq() > 1e-10) { n = cand.normalize(); lastNormal.current.copy(n); }
+      }
+    }
+    prevP.current = P.clone();
 
-    // Disk outline: the GREAT CIRCLE the radius sweeps — center C, radius R, in the plane
-    // spanned by {horizontal-toward-mouse, pole}. Vertical, tilted toward the cursor (below
-    // center on the cursor side, above on the far side); the triangle lies on it.
-    let e1 = h.clone();
-    if (e1.lengthSq() < 1e-9) e1 = new THREE.Vector3(1, 0, 0); // cursor over a pole
-    e1.normalize();                       // horizontal, toward the cursor's azimuth
-    const e2 = pole.clone();              // vertical (the pole)
+    // In-plane basis: e1 along the radius, e2 = n × e1 (the other in-plane axis).
+    const e1 = radius.clone().normalize();
+    const e2 = new THREE.Vector3().crossVectors(n, e1).normalize();
     const pts: THREE.Vector3[] = [];
     const N = 96;
     for (let i = 0; i <= N; i++) {
@@ -73,6 +76,15 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
       );
     }
     diskRef.current.setFromPoints(pts);
+
+    // Right triangle ON the disk: hypotenuse = radius (C→P); base along the disk's HORIZONTAL
+    // axis (where the disk plane meets the world-horizontal plane = n × pole); height drops
+    // from P perpendicular to that axis. base = the pan offset.
+    let hAxis = new THREE.Vector3().crossVectors(n, pole);
+    if (hAxis.lengthSq() < 1e-9) hAxis = e1.clone(); // disk lies flat → degenerate
+    hAxis.normalize();
+    const Q = C.clone().add(hAxis.clone().multiplyScalar(radius.dot(hAxis))); // foot on the horizontal axis
+    triRef.current.setFromPoints([C.clone(), Q.clone(), P.clone()]);
   });
 
   if (nodes.length < 1) return null;
