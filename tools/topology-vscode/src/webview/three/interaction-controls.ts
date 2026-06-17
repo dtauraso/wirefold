@@ -646,41 +646,45 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // POLAR SPHERE TRACKBALL. The cursor is a POLAR coordinate (ρ, θ) about the screen
-          // center. It maps to a sphere point by the AZIMUTHAL-EQUIDISTANT rule: the polar
-          // angle from the viewer-facing pole is LINEAR in ρ (φ = ρ/Rpix · π/2), azimuth = θ.
-          // Linear-in-ρ ⇒ a fixed pixel move = a fixed angular move at ANY r (uniform rate —
-          // NOT the Cartesian z=√(1−r²) orthographic map, which compresses near the rim and
-          // put the point in the wrong place). Past the rim (ρ>Rpix) φ keeps growing onto the
-          // BACK hemisphere — a true full sphere, no rim case. As the cursor moves the surface
-          // point follows a path; the radius sweeps a disk; the rotation axis is PERPENDICULAR
-          // to that disk = p_prev × p_cur (incremental, so no inside-out flip).
+          // POLAR ROTATION SYSTEM (from scratch — what arcball only gestured at). The cursor
+          // is a polar coordinate (ρ, θ) about the screen center. The rotation is the SUM of
+          // two independent parts measured from how the cursor moved in polar terms:
+          //   • ROLL  = Δθ  — how far the cursor swung AROUND the center. About the view axis.
+          //             r-independent (a quarter-turn around = 90° roll at any radius). A
+          //             straight sideways drag barely circles the center ⇒ barely any roll.
+          //   • TUMBLE = Δρ — how far the cursor moved IN/OUT radially. Tips the sphere about
+          //             the in-screen axis ⊥ the radius. Linear in ρ ⇒ uniform rate at any r.
+          // This is NOT the great-circle/arcball chord rule (which mis-reads a sideways drag
+          // as roll). Everything in EYE space (+x right, +y up, −z forward) to avoid y-flips.
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
-          const Rpix = 0.5 * Math.min(rect.width, rect.height); // ρ=Rpix → equator (rim)
-          const toSphere = (clientX: number, clientY: number) => {
-            const dx = clientX - cx;
-            const dy = -(clientY - cy); // eye-space: +y up
-            const rho = Math.hypot(dx, dy);
-            if (rho < 1e-6) return new THREE.Vector3(0, 0, 1); // pole facing the viewer
-            const theta = Math.atan2(dy, dx);
-            const phi = Math.min((rho / Rpix) * (Math.PI / 2), Math.PI); // linear in ρ, cap at antipode
-            const s = Math.sin(phi);
-            return new THREE.Vector3(s * Math.cos(theta), s * Math.sin(theta), Math.cos(phi));
-          };
-          const pPrev = toSphere(s.prevX, s.prevY);
-          const pCur = toSphere(e.clientX, e.clientY);
+          const Rpix = 0.5 * Math.min(rect.width, rect.height);
+          const ex0 = s.prevX - cx, ey0 = -(s.prevY - cy);
+          const ex1 = e.clientX - cx, ey1 = -(e.clientY - cy);
           s.prevX = e.clientX;
           s.prevY = e.clientY;
-          const axisEye = new THREE.Vector3().crossVectors(pPrev, pCur); // ⊥ disk r sweeps
-          const sinA = axisEye.length();
-          if (sinA > 1e-9) {
+          const rho0 = Math.hypot(ex0, ey0);
+          const rho1 = Math.hypot(ex1, ey1);
+          const a0 = Math.atan2(ey0, ex0);
+          const a1 = Math.atan2(ey1, ex1);
+          let dTheta = a1 - a0;
+          if (dTheta > Math.PI) dTheta -= 2 * Math.PI;       // wrap to (−π, π]
+          if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
+          if (rho0 < 8 || rho1 < 8) dTheta = 0;              // θ ill-defined at the dead center
+          const dPhi = ((rho1 - rho0) / Rpix) * (Math.PI / 2); // colatitude change, uniform rate
+          const aMid = a1; // azimuth for the tumble axis (current radial direction)
+          if (dTheta !== 0 || dPhi !== 0) {
             const C = s.arcPivot;
-            const angle = Math.atan2(sinA, pPrev.dot(pCur)); // robust past 90°
-            axisEye.normalize();
-            const axisWorld = axisEye.applyQuaternion(cam.quaternion).normalize();
-            const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
+            // ROLL about the view axis (eye +z), by Δθ.
+            const rollAxisWorld = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion).normalize();
+            const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxisWorld, dTheta);
+            // TUMBLE about the in-screen axis ⊥ the radius (radial dir = (cos aMid, sin aMid));
+            // perpendicular = (−sin aMid, cos aMid, 0)), by Δφ.
+            const tumbleAxisWorld = new THREE.Vector3(-Math.sin(aMid), Math.cos(aMid), 0)
+              .applyQuaternion(cam.quaternion).normalize();
+            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxisWorld, dPhi);
+            const qScene = qRoll.multiply(qTumble);
             const qCam = qScene.clone().invert(); // camera orbits opposite so content follows the cursor
             cam.position.sub(C).applyQuaternion(qCam).add(C);
             cam.quaternion.premultiply(qCam);
@@ -689,11 +693,10 @@ export function useInteractionControls(
             const R = computeLargeSphereRadius(nodesRef.current);
             constrainInsideLargeSphere(cam, R);
             postLog("rot", {
-              build: "polar-sphere-v13",
-              pPrev: [+pPrev.x.toFixed(2), +pPrev.y.toFixed(2), +pPrev.z.toFixed(2)],
-              pCur: [+pCur.x.toFixed(2), +pCur.y.toFixed(2), +pCur.z.toFixed(2)],
-              axisEye: [+axisEye.x.toFixed(2), +axisEye.y.toFixed(2), +axisEye.z.toFixed(2)],
-              angleDeg: +((angle * 180) / Math.PI).toFixed(1),
+              build: "polar-system-v14",
+              rho: [Math.round(rho0), Math.round(rho1)],
+              dThetaDeg: +((dTheta * 180) / Math.PI).toFixed(1),
+              dPhiDeg: +((dPhi * 180) / Math.PI).toFixed(1),
             });
             commitCamera(cam);
           }
