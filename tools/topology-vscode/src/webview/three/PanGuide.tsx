@@ -32,10 +32,12 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Fat-line objects (Line2) for the disk and triangle.
   const { disk, tri } = useMemo(() => {
     const mk = (hex: number) => {
+      const geo = new LineGeometry();
+      geo.setPositions([0, 0, 0, 0, 0, 0]); // seed so attributes exist before the first frame
       const mat = new LineMaterial({ color: hex, linewidth: LINE_WIDTH, transparent: true, opacity: 0.9, depthTest: false });
-      const line = new Line2(new LineGeometry(), mat);
-      line.computeLineDistances();
+      const line = new Line2(geo, mat);
       line.raycast = () => null;
+      line.frustumCulled = false;
       line.renderOrder = 999;
       return line;
     };
