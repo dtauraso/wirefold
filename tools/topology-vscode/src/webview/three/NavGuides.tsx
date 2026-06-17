@@ -4,8 +4,9 @@
 //     radius scaled to ARCBALL_FILL * camera-to-focus distance, updated each frame.
 // Both are purely decorative: raycast disabled, depthWrite false, transparent.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import * as THREE from "three";
+import { useThree, useFrame } from "@react-three/fiber";
 import type { RFNode, NodeData } from "../types";
 import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
@@ -114,18 +115,26 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
     [radiusKey, tubeKey],
   );
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
+  const camera = useThree((s) => s.camera);
+  const groupRef = useRef<THREE.Group>(null);
+  // The tori are VIEW-ALIGNED: the group tracks the camera's orientation each frame, so the
+  // tori stay put on screen (the horizontal torus level with the view) while the world-fixed
+  // diagram appears to rotate inside them. Rotation changes the diagram, not the tori.
+  useFrame(() => {
+    if (groupRef.current) groupRef.current.quaternion.copy(camera.quaternion);
+  });
   if (nodes.length < 1) return null;
 
   const pos: [number, number, number] = [cs.center.x, cs.center.y, cs.center.z];
   return (
-    <>
-      <mesh geometry={geoA} position={pos} raycast={() => null}>
+    <group ref={groupRef} position={pos}>
+      <mesh geometry={geoA} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
-      <mesh geometry={geoB} position={pos} rotation={rotB} raycast={() => null}>
+      <mesh geometry={geoB} rotation={rotB} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
-    </>
+    </group>
   );
 }
 
