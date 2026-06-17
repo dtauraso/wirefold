@@ -4,9 +4,8 @@
 //     radius scaled to ARCBALL_FILL * camera-to-focus distance, updated each frame.
 // Both are purely decorative: raycast disabled, depthWrite false, transparent.
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import * as THREE from "three";
-import { useThree, useFrame } from "@react-three/fiber";
 import type { RFNode, NodeData } from "../types";
 import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
@@ -119,19 +118,14 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // so the four great circles sit at 0/45/90/135.
   const rotC = useMemo(() => new THREE.Euler(Math.PI / 4, 0, 0), []);
   const rotD = useMemo(() => new THREE.Euler((3 * Math.PI) / 4, 0, 0), []);
-  const camera = useThree((s) => s.camera);
-  const groupRef = useRef<THREE.Group>(null);
-  // The tori are VIEW-ALIGNED: the group tracks the camera's orientation each frame, so the
-  // tori stay put on screen (the horizontal torus level with the view) while the world-fixed
-  // diagram appears to rotate inside them. Rotation changes the diagram, not the tori.
-  useFrame(() => {
-    if (groupRef.current) groupRef.current.quaternion.copy(camera.quaternion);
-  });
   if (nodes.length < 1) return null;
 
+  // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
+  // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
+  // diagram, not the camera.
   const pos: [number, number, number] = [cs.center.x, cs.center.y, cs.center.z];
   return (
-    <group ref={groupRef} position={pos}>
+    <group position={pos}>
       <mesh geometry={geoA} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
