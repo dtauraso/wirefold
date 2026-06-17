@@ -10,6 +10,7 @@ import type { RFNode, NodeData } from "../types";
 import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
+import { PanGuide } from "./PanGuide";
 
 // ---------------------------------------------------------------------------
 // Prism — axis-aligned bounding box of all node world positions.
@@ -136,6 +137,7 @@ export function NavGuides({ nodes }: { nodes: RFNode<NodeData>[] }) {
     <>
       <Prism nodes={nodes} />
       <ArcballSphere nodes={nodes} />
+      <PanGuide nodes={nodes} />
     </>
   );
 }

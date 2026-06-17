@@ -11,6 +11,7 @@ import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
 import { postLog } from "../log/post";
+import { useCursorStore } from "./cursor-store";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -607,6 +608,7 @@ export function useInteractionControls(
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const s = state.current;
+      useCursorStore.getState().set(e.clientX, e.clientY, true); // feed the polar pan guide (hover too)
       if (s.phase === "idle") return;
 
       const dx = e.clientX - s.downX;
