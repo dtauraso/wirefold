@@ -106,14 +106,18 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // and effectively disappear.
   const radiusKey = Math.round(cs.radius);
   const tubeKey = Math.round(tube * 10);
-  const { geoA, geoB } = useMemo(
+  const { geoA, geoB, interGeo } = useMemo(
     () => ({
       geoA: new THREE.TorusGeometry(radiusKey, tubeKey / 10, 12, 96),
       geoB: new THREE.TorusGeometry(radiusKey, tubeKey / 10, 12, 96),
+      // The two tori (XY-plane ring + XZ-plane ring) intersect along the X axis at ±R: a
+      // diameter through their two crossing points, drawn as a thin cylinder of the same tube.
+      interGeo: new THREE.CylinderGeometry(tubeKey / 10, tubeKey / 10, radiusKey * 2, 8),
     }),
     [radiusKey, tubeKey],
   );
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
+  const rotInter = useMemo(() => new THREE.Euler(0, 0, Math.PI / 2), []); // cylinder Y-axis → X
   if (nodes.length < 1) return null;
 
   const pos: [number, number, number] = [cs.center.x, cs.center.y, cs.center.z];
@@ -124,6 +128,9 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
       </mesh>
       <mesh geometry={geoB} position={pos} rotation={rotB} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <mesh geometry={interGeo} position={pos} rotation={rotInter} raycast={() => null}>
+        <meshBasicMaterial color="#ffcc66" transparent opacity={0.7} depthWrite={false} />
       </mesh>
     </>
   );
