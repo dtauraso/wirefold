@@ -4,16 +4,12 @@
 //     radius scaled to ARCBALL_FILL * camera-to-focus distance, updated each frame.
 // Both are purely decorative: raycast disabled, depthWrite false, transparent.
 
-import React, { useRef, useMemo } from "react";
-import { useThree, useFrame } from "@react-three/fiber";
+import React, { useMemo } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos } from "./geometry-helpers";
+import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
-
-// Fraction of camera-to-focus distance used as the arcball sphere radius.
-// Kept in sync with the arcball radius used in interaction-controls.ts.
-const ARCBALL_FILL = 0.75;
+import { computeContentSphere } from "./interaction-controls";
 
 // ---------------------------------------------------------------------------
 // Prism — axis-aligned bounding box of all node world positions.
@@ -95,56 +91,31 @@ function Prism({ nodes }: { nodes: RFNode<NodeData>[] }) {
 // ---------------------------------------------------------------------------
 
 function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
-  const { camera } = useThree();
+  // Re-derive when Go streams node geometry (positions change → content sphere moves).
+  useNodeGeometryStore((s) => s.geoms);
 
-  // Unit-radius torus geometries — scale the mesh each frame instead of
-  // rebuilding geometry. Major radius 1, tube radius 0.015, segments 64/16.
-  const torusGeoA = useMemo(() => new THREE.TorusGeometry(1, 0.015, 16, 64), []);
-  const torusGeoB = useMemo(() => new THREE.TorusGeometry(1, 0.015, 16, 64), []);
+  // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
+  // zooms WITH the diagram. Tube thickness matches the node spheres' tori
+  // (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
+  const { center, geoA, geoB } = useMemo(() => {
+    const cs = computeContentSphere(nodes);
+    const tube = nodes.length > 0 ? Math.max(0.5, nodeRadius(nodes[0]) * 0.08) : 1;
+    return {
+      center: cs.center,
+      geoA: new THREE.TorusGeometry(cs.radius, tube, 12, 96),
+      geoB: new THREE.TorusGeometry(cs.radius, tube, 12, 96),
+    };
+  }, [nodes]);
 
-  const refA = useRef<THREE.Mesh>(null);
-  const refB = useRef<THREE.Mesh>(null);
-
-  // Rotation for torus B: lies in XZ plane (rotate torusGeo's default XY plane 90° around X).
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
-
-  useFrame(() => {
-    const meshA = refA.current;
-    const meshB = refB.current;
-    if (!meshA || !meshB) return;
-
-    const forward = camera.getWorldDirection(new THREE.Vector3());
-
-    // Compute per-node depth along camera forward axis.
-    let minDepth = Infinity;
-    let maxDepth = -Infinity;
-    for (const n of nodes) {
-      const wp = nodeWorldPos(n);
-      const depth = forward.dot(wp.clone().sub(camera.position));
-      if (depth < minDepth) minDepth = depth;
-      if (depth > maxDepth) maxDepth = depth;
-    }
-
-    const midDepth = nodes.length > 0
-      ? Math.max((minDepth + maxDepth) / 2, 10)
-      : 100;
-
-    const focus = camera.position.clone().add(forward.clone().multiplyScalar(midDepth));
-    const R = ARCBALL_FILL * camera.position.distanceTo(focus);
-
-    meshA.position.copy(focus);
-    meshA.scale.setScalar(R);
-
-    meshB.position.copy(focus);
-    meshB.scale.setScalar(R);
-  });
+  if (nodes.length < 1) return null;
 
   return (
     <>
-      <mesh ref={refA} geometry={torusGeoA} raycast={() => null}>
+      <mesh geometry={geoA} position={center} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.25} depthWrite={false} />
       </mesh>
-      <mesh ref={refB} geometry={torusGeoB} rotation={rotB} raycast={() => null}>
+      <mesh geometry={geoB} position={center} rotation={rotB} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.25} depthWrite={false} />
       </mesh>
     </>
