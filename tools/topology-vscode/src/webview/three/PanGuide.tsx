@@ -31,6 +31,7 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const anchorP = useRef<THREE.Vector3 | null>(null);          // previous cursor sphere point
   const anchorXY = useRef<{ x: number; y: number } | null>(null);
   const lastN = useRef(new THREE.Vector3(0, 0, 1));            // current disk normal (sign irrelevant)
+  const lastGDir = useRef(new THREE.Vector3(1, 0, 0));         // green-line direction, held through degeneracy
 
   // Fat-line objects (Line2) for the disk, triangle, and disk spokes.
   const { disk, tri, spoke0, interLine } = useMemo(() => {
@@ -118,10 +119,14 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
     //   C→G = leg along the green line (the pan offset),
     //   G→P = the perpendicular leg,
     //   C→P = hypotenuse (the radius r). Right angle at G, on the green line.
-    let gDir = new THREE.Vector3().crossVectors(pole, n); // green-line direction
-    if (gDir.lengthSq() < 1e-8) gDir = e1.clone();
-    gDir.normalize();
-    const G = C.clone().add(gDir.multiplyScalar(radius.dot(gDir))); // foot on the green line
+    // Green-line direction = pole × n. When the disk nearly coincides with the horizontal torus
+    // (n ≈ pole, horizontal mouse motion), this collapses to noise and would flip — so HOLD the
+    // last good direction through that degenerate zone instead of using the noisy value.
+    const gRaw = new THREE.Vector3().crossVectors(pole, n);
+    const gDir = gRaw.lengthSq() > 0.01 ? gRaw.normalize() : lastGDir.current.clone();
+    if (gDir.dot(lastGDir.current) < 0) gDir.negate(); // keep it continuous
+    lastGDir.current.copy(gDir);
+    const G = C.clone().add(gDir.clone().multiplyScalar(radius.dot(gDir))); // foot on the green line
     tri.geometry.setPositions([C.x, C.y, C.z, G.x, G.y, G.z, P.x, P.y, P.z, C.x, C.y, C.z]);
 
     // The radius r to the cursor (C → P), no spin.
@@ -130,16 +135,11 @@ export function PanGuide({ nodes }: { nodes: RFNode<NodeData>[] }) {
 
     // Intersection of the HORIZONTAL torus (equator, plane normal = pole) with the disk
     // (plane normal = n): the diameter through their two crossing points, along pole × n.
-    const interDir = new THREE.Vector3().crossVectors(pole, n);
-    if (interDir.lengthSq() > 1e-8) {
-      interDir.normalize();
-      const ia = C.clone().add(interDir.clone().multiplyScalar(R));
-      const ib = C.clone().add(interDir.clone().multiplyScalar(-R));
-      interLine.geometry.setPositions([ia.x, ia.y, ia.z, ib.x, ib.y, ib.z]);
-      interLine.visible = true;
-    } else {
-      interLine.visible = false; // disk is horizontal → coincident with the equator
-    }
+    // Drawn green line uses the SAME held direction gDir, so it stays put through the degeneracy.
+    const ia = C.clone().add(gDir.clone().multiplyScalar(R));
+    const ib = C.clone().add(gDir.clone().multiplyScalar(-R));
+    interLine.geometry.setPositions([ia.x, ia.y, ia.z, ib.x, ib.y, ib.z]);
+    interLine.visible = true;
     (interLine.material as LineMaterial).resolution.set(size.width, size.height);
 
     // Fat lines need the viewport resolution to size their pixel width.
