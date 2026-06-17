@@ -124,11 +124,13 @@ export interface ControlState {
   // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
   emptyDown: boolean;
   // Arcball gesture-start snapshot
-  arcPivot: THREE.Vector3;        // orbit pivot (screen-center scene point), fixed for the gesture
+  arcPivot: THREE.Vector3;        // sphere center C (diagram content center), fixed for the gesture
   arcP0: THREE.Vector3;           // unit sphere point at gesture start
   arcStartOffset: THREE.Vector3; // cam.position - C at gesture start
   arcStartUp: THREE.Vector3;     // cam.up at gesture start
   arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
+  arcStartPos: THREE.Vector3;    // cam.position at gesture start (frozen pose for the cursor→sphere ray)
+  arcR: number;                  // world radius of the diagram sphere
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +169,8 @@ export function useInteractionControls(
     arcStartOffset: new THREE.Vector3(),
     arcStartUp: new THREE.Vector3(0, 1, 0),
     arcStartQuat: new THREE.Quaternion(),
+    arcStartPos: new THREE.Vector3(),
+    arcR: 1,
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -546,19 +550,19 @@ export function useInteractionControls(
           // place instead of orbiting (the view whirled to the edge). This always gives a
           // nonzero lever arm so the camera ORBITS the point and rotation happens in place.
           {
-            const fwd = new THREE.Vector3();
-            cam0.getWorldDirection(fwd);
-            const contentCenter = computeContentSphere(nodesRef.current).center;
-            const PIVOT_MIN = 100;
-            const ahead = Math.max(fwd.dot(contentCenter.clone().sub(cam0.position)), PIVOT_MIN);
-            s.arcPivot = cam0.position.clone().add(fwd.multiplyScalar(ahead));
+            // The sphere is FIXED TO THE DIAGRAM: centered on the content, radius = content
+            // radius. Its pole is the diagram's own up — NOT the camera — so the disk normal
+            // a drag sweeps lives in the diagram's frame and can lean between the view and the
+            // sphere's top, instead of being pinned to the view axis.
+            const cs = computeContentSphere(nodesRef.current);
+            s.arcPivot = cs.center.clone();
+            s.arcR = cs.radius;
           }
           const C = s.arcPivot;
           s.arcStartOffset = cam0.position.clone().sub(C);
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          s.arcP0 = arcballPoint(e.clientX, e.clientY, rect, cam0.fov, cam0.aspect, cam0.position.clone(), cam0.quaternion.clone(), C);
+          s.arcStartPos = cam0.position.clone();
         }
       }
 
@@ -646,57 +650,54 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // POLAR ROTATION SYSTEM (from scratch — what arcball only gestured at). The cursor
-          // is a polar coordinate (ρ, θ) about the screen center. The rotation is the SUM of
-          // two independent parts measured from how the cursor moved in polar terms:
-          //   • ROLL  = Δθ  — how far the cursor swung AROUND the center. About the view axis.
-          //             r-independent (a quarter-turn around = 90° roll at any radius). A
-          //             straight sideways drag barely circles the center ⇒ barely any roll.
-          //   • TUMBLE = Δρ — how far the cursor moved IN/OUT radially. Tips the sphere about
-          //             the in-screen axis ⊥ the radius. Linear in ρ ⇒ uniform rate at any r.
-          // This is NOT the great-circle/arcball chord rule (which mis-reads a sideways drag
-          // as roll). Everything in EYE space (+x right, +y up, −z forward) to avoid y-flips.
+          // WORLD-FIXED SPHERE. The sphere is fixed to the DIAGRAM (center C, radius arcR) with
+          // its OWN pole — not glued to the camera. The cursor maps to a point on that world
+          // sphere; the radius (C→point) sweeps a disk as the cursor moves, and the rotation
+          // axis is the disk's NORMAL **in world space** (radius_prev × radius_cur). Because the
+          // sphere's pole is the diagram's up, the normal leans between the view and the sphere's
+          // top by however far off-center the grab is — exactly "the view is not the camera view."
+          // The cursor→sphere ray is built from the FROZEN start pose so the mapping is stable as
+          // the camera orbits (no feedback); the rotation is applied incrementally to the live cam.
+          const C = s.arcPivot;
+          const R = s.arcR;
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const cx = rect.left + rect.width / 2;
-          const cy = rect.top + rect.height / 2;
-          const Rpix = 0.5 * Math.min(rect.width, rect.height);
-          const ex0 = s.prevX - cx, ey0 = -(s.prevY - cy);
-          const ex1 = e.clientX - cx, ey1 = -(e.clientY - cy);
+          // Cursor → world radius vector on the sphere, via a ray from the frozen start pose.
+          const toRadius = (clientX: number, clientY: number) => {
+            const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
+            const t = Math.tan((cam.fov * Math.PI) / 180 / 2);
+            const dir = new THREE.Vector3(ndcX * t * cam.aspect, ndcY * t, -1)
+              .applyQuaternion(s.arcStartQuat).normalize();
+            const ray = new THREE.Ray(s.arcStartPos.clone(), dir);
+            const hit = new THREE.Vector3();
+            if (ray.intersectSphere(new THREE.Sphere(C, R), hit)) return hit.sub(C).normalize();
+            // Miss: clamp to the silhouette (point on sphere nearest the ray).
+            const near = new THREE.Vector3();
+            ray.closestPointToPoint(C, near);
+            return near.sub(C).normalize();
+          };
+          const rPrev = toRadius(s.prevX, s.prevY);
+          const rCur = toRadius(e.clientX, e.clientY);
           s.prevX = e.clientX;
           s.prevY = e.clientY;
-          const rho0 = Math.hypot(ex0, ey0);
-          const rho1 = Math.hypot(ex1, ey1);
-          const a0 = Math.atan2(ey0, ex0);
-          const a1 = Math.atan2(ey1, ex1);
-          let dTheta = a1 - a0;
-          if (dTheta > Math.PI) dTheta -= 2 * Math.PI;       // wrap to (−π, π]
-          if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
-          if (rho0 < 8 || rho1 < 8) dTheta = 0;              // θ ill-defined at the dead center
-          const dPhi = ((rho1 - rho0) / Rpix) * (Math.PI / 2); // colatitude change, uniform rate
-          const aMid = a1; // azimuth for the tumble axis (current radial direction)
-          if (dTheta !== 0 || dPhi !== 0) {
-            const C = s.arcPivot;
-            // ROLL about the view axis (eye +z), by Δθ.
-            const rollAxisWorld = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion).normalize();
-            const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxisWorld, dTheta);
-            // TUMBLE about the in-screen axis ⊥ the radius (radial dir = (cos aMid, sin aMid));
-            // perpendicular = (−sin aMid, cos aMid, 0)), by Δφ.
-            const tumbleAxisWorld = new THREE.Vector3(-Math.sin(aMid), Math.cos(aMid), 0)
-              .applyQuaternion(cam.quaternion).normalize();
-            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxisWorld, dPhi);
-            const qScene = qRoll.multiply(qTumble);
+          const axisWorld = new THREE.Vector3().crossVectors(rPrev, rCur); // disk normal, world frame
+          const sinA = axisWorld.length();
+          if (sinA > 1e-9) {
+            const angle = Math.atan2(sinA, rPrev.dot(rCur));
+            axisWorld.normalize();
+            const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
             const qCam = qScene.clone().invert(); // camera orbits opposite so content follows the cursor
             cam.position.sub(C).applyQuaternion(qCam).add(C);
             cam.quaternion.premultiply(qCam);
             cam.up.applyQuaternion(qCam);
             cam.updateMatrixWorld(true);
-            const R = computeLargeSphereRadius(nodesRef.current);
-            constrainInsideLargeSphere(cam, R);
+            const Rcage = computeLargeSphereRadius(nodesRef.current);
+            constrainInsideLargeSphere(cam, Rcage);
             postLog("rot", {
-              build: "polar-system-v14",
-              rho: [Math.round(rho0), Math.round(rho1)],
-              dThetaDeg: +((dTheta * 180) / Math.PI).toFixed(1),
-              dPhiDeg: +((dPhi * 180) / Math.PI).toFixed(1),
+              build: "world-sphere-v15",
+              rPrev: [+rPrev.x.toFixed(2), +rPrev.y.toFixed(2), +rPrev.z.toFixed(2)],
+              rCur: [+rCur.x.toFixed(2), +rCur.y.toFixed(2), +rCur.z.toFixed(2)],
+              axisWorld: [+axisWorld.x.toFixed(2), +axisWorld.y.toFixed(2), +axisWorld.z.toFixed(2)],
+              angleDeg: +((angle * 180) / Math.PI).toFixed(1),
             });
             commitCamera(cam);
           }
