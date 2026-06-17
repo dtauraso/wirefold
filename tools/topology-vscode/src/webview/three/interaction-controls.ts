@@ -131,6 +131,15 @@ export interface ControlState {
   arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
   arcStartPos: THREE.Vector3;    // cam.position at gesture start (frozen pose for the cursor→sphere ray)
   arcR: number;                  // world radius of the diagram sphere
+  // Polar frame (frozen at gesture start). Pole = diagram top axis (world up). The cursor's
+  // screen polar (ρ, θ) about the sphere's screen center O maps to spherical (Φ from pole,
+  // Θ around pole). e1/e2 are the equatorial reference axes (front-horizontal, side) used to
+  // name the equatorial axis at a given azimuth Θ — no cross products on cursor points.
+  arcOx: number;                 // sphere center, screen x (client px)
+  arcOy: number;                 // sphere center, screen y (client px)
+  arcRpix: number;               // sphere radius on screen (px) ⇒ ρ=arcRpix is the equator
+  arcE1: THREE.Vector3;          // equatorial front-horizontal (azimuth Θ=0, toward camera)
+  arcE2: THREE.Vector3;          // equatorial side (Θ=+90°), = e1 turned 90° about the pole
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +180,11 @@ export function useInteractionControls(
     arcStartQuat: new THREE.Quaternion(),
     arcStartPos: new THREE.Vector3(),
     arcR: 1,
+    arcOx: 0,
+    arcOy: 0,
+    arcRpix: 1,
+    arcE1: new THREE.Vector3(0, 0, 1),
+    arcE2: new THREE.Vector3(1, 0, 0),
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -563,6 +577,25 @@ export function useInteractionControls(
           s.arcStartUp = cam0.up.clone();
           s.arcStartQuat = cam0.quaternion.clone();
           s.arcStartPos = cam0.position.clone();
+          {
+            // Freeze the polar frame for the gesture. Pole = diagram top (world up).
+            const rect0 = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            // Sphere center on screen (project C with the start camera).
+            const ndc = C.clone().project(cam0);
+            s.arcOx = rect0.left + (ndc.x * 0.5 + 0.5) * rect0.width;
+            s.arcOy = rect0.top + (-ndc.y * 0.5 + 0.5) * rect0.height;
+            // Sphere radius on screen: angular size → pixels.
+            const dist = Math.max(1e-3, cam0.position.distanceTo(C));
+            s.arcRpix = (s.arcR / dist) * (rect0.height / 2) / Math.tan((cam0.fov * Math.PI) / 180 / 2);
+            // Equatorial front-horizontal e1 = (camera→? no) direction C→camera with the pole
+            // (up) component removed; e2 = e1 turned +90° about the pole (xz-plane rotation).
+            const front = cam0.position.clone().sub(C);
+            front.y = 0;
+            if (front.lengthSq() < 1e-9) front.set(0, 0, 1); // camera over the pole
+            front.normalize();
+            s.arcE1 = front.clone();
+            s.arcE2 = new THREE.Vector3(-front.z, 0, front.x); // +90° about world up
+          }
         }
       }
 
@@ -650,41 +683,42 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // WORLD-FIXED SPHERE. The sphere is fixed to the DIAGRAM (center C, radius arcR) with
-          // its OWN pole — not glued to the camera. The cursor maps to a point on that world
-          // sphere; the radius (C→point) sweeps a disk as the cursor moves, and the rotation
-          // axis is the disk's NORMAL **in world space** (radius_prev × radius_cur). Because the
-          // sphere's pole is the diagram's up, the normal leans between the view and the sphere's
-          // top by however far off-center the grab is — exactly "the view is not the camera view."
-          // The cursor→sphere ray is built from the FROZEN start pose so the mapping is stable as
-          // the camera orbits (no feedback); the rotation is applied incrementally to the live cam.
+          // POLAR ROTATION. Pole = the diagram's TOP axis. The cursor's screen polar (ρ, θ)
+          // about the sphere's screen center maps to spherical coordinates on the diagram
+          // sphere: Φ = polar angle FROM THE TOP pole, Θ = azimuth AROUND the top. Screen
+          // center ⇒ the equator point facing the camera (Φ=90°, Θ=0); cursor up ⇒ toward the
+          // pole (Φ→0); cursor sideways ⇒ azimuth around the pole. The rotation is built from
+          // the angle CHANGES, each about an axis named by its polar position — no cross
+          // products, no xyz of cursor points:
+          //   • ΔΘ (azimuth around the pole) → rotation ABOUT THE POLE.
+          //   • ΔΦ (polar angle from the pole) → rotation about the EQUATORIAL axis at azimuth
+          //     Θ+90° (perpendicular to the meridian you're moving along).
           const C = s.arcPivot;
-          const R = s.arcR;
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          // Cursor → world radius vector on the sphere, via a ray from the frozen start pose.
-          const toRadius = (clientX: number, clientY: number) => {
-            const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
-            const t = Math.tan((cam.fov * Math.PI) / 180 / 2);
-            const dir = new THREE.Vector3(ndcX * t * cam.aspect, ndcY * t, -1)
-              .applyQuaternion(s.arcStartQuat).normalize();
-            const ray = new THREE.Ray(s.arcStartPos.clone(), dir);
-            const hit = new THREE.Vector3();
-            if (ray.intersectSphere(new THREE.Sphere(C, R), hit)) return hit.sub(C).normalize();
-            // Miss: clamp to the silhouette (point on sphere nearest the ray).
-            const near = new THREE.Vector3();
-            ray.closestPointToPoint(C, near);
-            return near.sub(C).normalize();
+          const HALF = Math.PI / 2;
+          // Cursor → (Φ from pole, Θ around pole), in the frozen polar frame.
+          const toSph = (clientX: number, clientY: number) => {
+            const sx = clientX - s.arcOx;
+            const sy = -(clientY - s.arcOy); // screen y up
+            const theta = (sx / s.arcRpix) * HALF;          // azimuth around the pole
+            let phi = HALF - (sy / s.arcRpix) * HALF;        // polar angle from the pole
+            phi = Math.max(0, Math.min(Math.PI, phi));
+            return { phi, theta };
           };
-          const rPrev = toRadius(s.prevX, s.prevY);
-          const rCur = toRadius(e.clientX, e.clientY);
+          const a = toSph(s.prevX, s.prevY);
+          const b = toSph(e.clientX, e.clientY);
           s.prevX = e.clientX;
           s.prevY = e.clientY;
-          const axisWorld = new THREE.Vector3().crossVectors(rPrev, rCur); // disk normal, world frame
-          const sinA = axisWorld.length();
-          if (sinA > 1e-9) {
-            const angle = Math.atan2(sinA, rPrev.dot(rCur));
-            axisWorld.normalize();
-            const qScene = new THREE.Quaternion().setFromAxisAngle(axisWorld, angle);
+          const dTheta = b.theta - a.theta; // around the pole
+          const dPhi = b.phi - a.phi;       // toward/away from the pole
+          if (dTheta !== 0 || dPhi !== 0) {
+            // Pole axis = diagram top (world up). Equatorial axis at azimuth Θ+90° named in the
+            // frozen equatorial basis: E(Θ+90°) = −sinΘ·e1 + cosΘ·e2.
+            const pole = new THREE.Vector3(0, 1, 0);
+            const tumbleAxis = s.arcE1.clone().multiplyScalar(-Math.sin(b.theta))
+              .add(s.arcE2.clone().multiplyScalar(Math.cos(b.theta))).normalize();
+            const qYaw = new THREE.Quaternion().setFromAxisAngle(pole, dTheta);
+            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxis, dPhi);
+            const qScene = qYaw.multiply(qTumble);
             const qCam = qScene.clone().invert(); // camera orbits opposite so content follows the cursor
             cam.position.sub(C).applyQuaternion(qCam).add(C);
             cam.quaternion.premultiply(qCam);
@@ -693,11 +727,11 @@ export function useInteractionControls(
             const Rcage = computeLargeSphereRadius(nodesRef.current);
             constrainInsideLargeSphere(cam, Rcage);
             postLog("rot", {
-              build: "world-sphere-v15",
-              rPrev: [+rPrev.x.toFixed(2), +rPrev.y.toFixed(2), +rPrev.z.toFixed(2)],
-              rCur: [+rCur.x.toFixed(2), +rCur.y.toFixed(2), +rCur.z.toFixed(2)],
-              axisWorld: [+axisWorld.x.toFixed(2), +axisWorld.y.toFixed(2), +axisWorld.z.toFixed(2)],
-              angleDeg: +((angle * 180) / Math.PI).toFixed(1),
+              build: "polar-pole-v17",
+              phiDeg: [+((a.phi * 180) / Math.PI).toFixed(0), +((b.phi * 180) / Math.PI).toFixed(0)],
+              thetaDeg: [+((a.theta * 180) / Math.PI).toFixed(0), +((b.theta * 180) / Math.PI).toFixed(0)],
+              dThetaDeg: +((dTheta * 180) / Math.PI).toFixed(1),
+              dPhiDeg: +((dPhi * 180) / Math.PI).toFixed(1),
             });
             commitCamera(cam);
           }
