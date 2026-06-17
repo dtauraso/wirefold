@@ -97,26 +97,31 @@ function ArcballSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori
   // (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
-  const { center, geoA, geoB } = useMemo(() => {
-    const cs = computeContentSphere(nodes);
-    const tube = nodes.length > 0 ? Math.max(0.5, nodeRadius(nodes[0]) * 0.08) : 1;
-    return {
-      center: cs.center,
-      geoA: new THREE.TorusGeometry(cs.radius, tube, 12, 96),
-      geoB: new THREE.TorusGeometry(cs.radius, tube, 12, 96),
-    };
-  }, [nodes]);
-
+  const cs = computeContentSphere(nodes);
+  const tube = nodes.length > 0 ? Math.max(0.5, nodeRadius(nodes[0]) * 0.08) : 1;
+  // Build geometry ONLY when the sphere actually changes (rounded radius/tube), not on
+  // every render — rebuilding each frame under node-geometry churn made the tori flicker
+  // and effectively disappear.
+  const radiusKey = Math.round(cs.radius);
+  const tubeKey = Math.round(tube * 10);
+  const { geoA, geoB } = useMemo(
+    () => ({
+      geoA: new THREE.TorusGeometry(radiusKey, tubeKey / 10, 12, 96),
+      geoB: new THREE.TorusGeometry(radiusKey, tubeKey / 10, 12, 96),
+    }),
+    [radiusKey, tubeKey],
+  );
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
   if (nodes.length < 1) return null;
 
+  const pos: [number, number, number] = [cs.center.x, cs.center.y, cs.center.z];
   return (
     <>
-      <mesh geometry={geoA} position={center} raycast={() => null}>
-        <meshBasicMaterial color="#cc8844" transparent opacity={0.25} depthWrite={false} />
+      <mesh geometry={geoA} position={pos} raycast={() => null}>
+        <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
-      <mesh geometry={geoB} position={center} rotation={rotB} raycast={() => null}>
-        <meshBasicMaterial color="#cc8844" transparent opacity={0.25} depthWrite={false} />
+      <mesh geometry={geoB} position={pos} rotation={rotB} raycast={() => null}>
+        <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
     </>
   );
