@@ -29,20 +29,24 @@ spatial model is exact, so the usual Cartesian approximations read as *wrong*, n
   The docs have NOT been updated yet — doing so is an open task.
 
 ### The polar PAN construction (user's exact spec — NOT yet coded)
-This lives on the **mouse's own polar sphere**, which is distinct from the diagram sphere:
+**PAN IS A TRANSLATION — the same action Cartesian pan describes. You do NOT travel around
+the sphere when you pan; the origin slides in a straight line.** The polar frame only
+*names* that slide's direction and magnitude in polar terms; θ/φ are frame labels, NOT an
+arc you sweep. This construction lives on the **mouse's own polar sphere** (distinct from
+the diagram sphere):
 - **Pole = the VIEW** (the view axis) — the mouse-sphere's pole is the view, not world Y.
 - **refX = the first line segment; `r` lies along it.** The mouse's horizontal travel is
-  reinterpreted as a radius: `Δx_cartesian → r_polar`. The top of the sphere sits at
-  distance `r` out along refX. (This `Δx → r` is the ONLY thing specified about the mouse;
-  do not extrapolate θ/φ mappings beyond it.)
+  reinterpreted as a radius: `Δx_cartesian → r_polar` (the slide's MAGNITUDE). The top of
+  the sphere sits at distance `r` out along refX. (This `Δx → r` is the ONLY thing
+  specified about the mouse; do not extrapolate other θ/φ mappings.)
 - **The pole and refX meet at 90°** (a quarter-turn of φ apart).
 - **A 3rd line sits at 90° of φ to BOTH** the pole and refX (the third orthogonal axis).
-  **That 3rd line is the polar pan** — the polar version of the Cartesian pan offset.
-  Pan = movement along this 3rd line (perpendicular to both the view and the r-axis).
-- So the frame is `{pole = view, refX (carries r = Δx), 3rd line = pan}`, mutually
-  perpendicular. Functionally pan then rebases the diagram-sphere origin + Go `reOrigin`
-  recomputes every node's (r,θ,φ) — but the OFFSET comes from this 3rd-line construction,
-  not a Cartesian screen delta.
+  **That 3rd line is the pan DIRECTION** — the polar version of the Cartesian pan offset.
+- **The pan = slide the origin by `r` along that 3rd line** (a linear translation,
+  identical in effect to the Cartesian pan, just with direction+magnitude expressed in the
+  polar frame). Then rebase the diagram-sphere origin by that slide + Go `reOrigin`
+  recomputes every node's (r,θ,φ). The OFFSET is `r` along the 3rd line, not a screen Δ
+  and not a sweep around the sphere.
 
 ### What is built (this branch)
 - **`polar.ts` — the polar toolkit** (new). `Polar {theta, phi}`, `PolarFrame`,
