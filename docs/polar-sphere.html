@@ -220,15 +220,14 @@
     <div class="prose">
       <h2>The mouse as its own polar sphere</h2>
       <p>Cartesian pan reads the drag as <code>(<span class="kb">Δx</span>, <span class="kg">Δy</span>)</code> — two independent <em>linear</em> screen distances, added straight into a world translation.</p>
-      <p>Now assume the mouse <strong>makes its own polar sphere</strong>. Then the drag isn't a flat vector — it's polar on that little sphere: the horizontal travel <code><span class="kb">Δx</span></code> becomes the <strong>radius <span class="k">r</span></strong>, and the drag direction becomes the azimuth <code><span class="kb">θ</span></code> (and, in 3D, a <code><span class="kp">φ</span></code>).</p>
-      <p><code><span class="kb">Δx</span><sub>cartesian</sub> &nbsp;→&nbsp; <span class="k">r</span><sub>polar</sub></code></p>
-      <h3>Why this matters</h3>
+      <p>Now assume the mouse <strong>makes its own polar sphere</strong>. The <em>one</em> thing reinterpreted is the magnitude: <code><span class="kb">Δx</span><sub>cartesian</sub> → <span class="k">r</span><sub>polar</sub></code>. On this sphere:</p>
       <ul>
-        <li><span class="kb">Δx</span> stops being a coordinate to <em>translate</em> by and becomes a <strong>length on a sphere</strong> — a radius.</li>
-        <li>That <span class="k">r</span> is exactly the radius the diagram's sphere needs — it feeds straight into the polar pan/zoom (the hypotenuse of the trig triangle, the dolly distance).</li>
-        <li>So the <strong>input itself is polar</strong>: there's no Cartesian delta left anywhere in the chain — not in the mouse, not in the model, not in the navigation.</li>
+        <li><span class="kp">pole = the view</span> (the view axis).</li>
+        <li><span class="k">refX</span> is the first segment; <span class="k">r</span> (= <span class="kb">Δx</span>) lies along it — the top of the sphere sits at <span class="k">r</span> out on refX.</li>
+        <li>a <span class="kg">3rd line</span> sits at 90° of <span class="kp">φ</span> to <strong>both</strong> the pole and refX — and <strong>that 3rd line is the pan direction</strong>.</li>
       </ul>
-      <div class="note">This is the last Cartesian holdout removed. Before, the mouse handed the system flat numbers and we converted. Here the mouse is already a polar sphere, so <span class="kb">Δx</span> arrives <em>as</em> <span class="k">r</span> — nothing to convert, nothing to degenerate.</div>
+      <div class="note"><strong>Pan is a TRANSLATION — the same action Cartesian pan does.</strong> You do <em>not</em> travel around the sphere; the origin <strong>slides in a straight line</strong> by <span class="k">r</span> along the <span class="kg">3rd line</span>. The sphere only <em>names</em> the slide's direction (the 3rd line, ⊥ view and refX) and magnitude (<span class="k">r</span>). The <span class="kp">φ</span> is a frame label, not an arc you sweep.</div>
+      <p>So the input itself is polar — <span class="kb">Δx</span> arrives <em>as</em> the slide length <span class="k">r</span>, with the direction given by the 3rd line — and the navigation stays a clean linear pan, no Cartesian delta and nothing to degenerate.</p>
     </div>
   </div>
 </section>
@@ -464,23 +463,29 @@ function poleAxis(svg,cx,cy,R){
   label(svg,30,250,"flat, linear: (Δx, Δy)","#9aa6c0",12);
 })();
 
-// ---- mouse: its own polar sphere, Δx → r -----------------------------------
+// ---- mouse: its own polar sphere — pole=view, r on refX, 3rd line = pan -----
 (function(){
-  const svg=document.getElementById("svgMousePolar"), cx=200, cy=165, R=120;
-  sphere(svg,cx,cy,R); poleAxis(svg,cx,cy,R);
-  sphereCurve(svg,t=>proj(t*2*Math.PI,Math.PI/2,cx,cy,R),120,cx,cy,R,"#66ff99",2); // equator
-  const TH=40*Math.PI/180, PH=Math.PI/2;            // point on the equator at azimuth θ
-  const P=proj(TH,PH,cx,cy,R), refX=proj(0,Math.PI/2,cx,cy,R);
-  // radius r = Δx (highlighted), from center to the point
-  line(svg,cx,cy,P.x,P.y,"#57b6ff",3.5);
-  line(svg,cx,cy,refX.x,refX.y,"#2b3350",1.5);
-  // azimuth arc
-  const az=[]; for(let i=0;i<=40;i++) az.push(proj(TH*i/40,Math.PI/2,cx,cy,R));
-  svg.appendChild(poly(az,{fill:"none",stroke:"#ffcc44","stroke-width":2.5}));
-  dot(svg,cx,cy,"#e7ecf5",4); dot(svg,P.x,P.y,"#57b6ff",5.5);
-  label(svg,(cx+P.x)/2-30,(cy+P.y)/2-6,"r = Δx","#57b6ff",14);
-  label(svg,az[20].x-4,az[20].y+16,"θ = drag dir","#ffcc44",12);
-  label(svg,cx-90,cy-110,"the mouse's own polar sphere","#9aa6c0",12);
+  const svg=document.getElementById("svgMousePolar"), cx=205, cy=170, R=118;
+  sphere(svg,cx,cy,R);
+  // pole = the view (vertical axis)
+  const top=proj(0,0,cx,cy,R), bot=proj(0,Math.PI,cx,cy,R);
+  line(svg,cx,bot.y+16,cx,top.y-16,"#c79cff",2);
+  label(svg,cx+8,top.y-8,"pole = view","#c79cff",12);
+  // refX (first segment) carrying r = Δx
+  const refX=proj(0,Math.PI/2,cx,cy,R);
+  line(svg,cx,cy,refX.x,refX.y,"#57b6ff",3.5);
+  label(svg,refX.x+6,refX.y+4,"refX: r = Δx","#57b6ff",12);
+  // 3rd line = pan direction (the other equatorial axis, ⟂ to both pole and refX)
+  const refY=proj(Math.PI/2,Math.PI/2,cx,cy,R);
+  line(svg,cx,cy,refY.x,refY.y,"#66ff99",2.5);
+  label(svg,refY.x-30,refY.y+16,"3rd line","#66ff99",12);
+  // the pan = slide the origin by r along the 3rd line (a TRANSLATION, not a sweep)
+  const dxp=(refY.x-cx), dyp=(refY.y-cy);
+  arrow(svg,cx,cy,cx+dxp*0.92,cy+dyp*0.92,"#ffcc44",3.5);
+  label(svg,cx+dxp*0.5-10,cy+dyp*0.5-8,"pan = slide r","#ffcc44",12);
+  dot(svg,cx,cy,"#e7ecf5",4.5);
+  label(svg,cx-95,cy-108,"mouse's polar sphere (pole = view)","#9aa6c0",12);
+  label(svg,cx-95,cy+118,"straight slide, not a sweep","#9aa6c0",11);
 })();
 </script>
 </body>
