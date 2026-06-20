@@ -8,96 +8,139 @@ needed) and proceed.
 
 ---
 
-## State at handoff (2026-06-16 — POLAR coordinate model MERGED to main)
+## Active branch: task/roll-axis-camera — NAVIGATION GOING FULLY POLAR (NOT merged)
 
-Context: `main` includes task/spherical-layout (merge a27ff1ec). The full design doc
-(polar-coordinate-model.md) was branch-local and stripped at merge — recover it from
-the task/spherical-layout branch history if needed.
+This branch started as "make roll/rotation work" and turned into a deeper decision:
+**navigation should be polar end-to-end (pan, zoom, rotate), with Cartesian demoted to
+pure plumbing (render + the cursor's raycast).** Driven by a hyperphantasic user whose
+spatial model is exact, so the usual Cartesian approximations read as *wrong*, not
+"fine."
 
-### Polar coordinate model — replaces the Cartesian non-rooted layout
-The diagram sits in a large container sphere (center = polar origin = center of the
-axis-aligned PRISM built from the node points). Every node's authoritative position is
-ONE outer polar coordinate (r,θ,φ) from the origin; ALL nodes are roots (flat, no
-parent chain — kills the 8↔1 feedback cycle). Each node is also a sphere center; its
-sphere R and surface coords are DERIVE-ON-READ measurements over the roots (soft
-membership — R grows around its nodes, never pins them; a move touches exactly one
-root, no cascade, no solver). Pole = +y. Cartesian appears only at three boundaries:
-camera, render, and saved files (world Cartesian in the prism frame); never on a node
-at runtime.
+### The decision (user endorsed)
+- **Everything polar.** The diagram is already polar (the merged polar layout model);
+  navigation is the last Cartesian holdout, and that's where all the friction lived.
+- **Diagram-sphere pole = the diagram's own top axis = world Y, FIXED** (the user chose
+  this — "do b" — over a camera-up pole). The diagram's polar frame is anchored to the
+  diagram, not the view. (The MOUSE/pan sphere is a SEPARATE sphere with a different
+  pole — see the pan construction below.)
+- **Cartesian is plumbing, not the model.** It survives only at two edges: the cursor's
+  raycast (input) and converting an angle pair to a world point for drawing (output).
+- This **overturns the old `pan/zoom = Cartesian prism` doctrine** in MODEL.md/CLAUDE.md.
+  The docs have NOT been updated yet — doing so is an open task.
 
-Go (nodes/Wiring): polar.go (conversions), prism.go (prism/rootSet/buildRoots),
-derived.go (sphereR / surfaceCoord / ring normals), node_move.go RootMove (root =
-authority, soft membership; replaced SphereDrag), lock.go chordLock (follower =
-mirror_φ(leader); the perpendicular-chord lock as a one-line polar invariant).
-Bridge: Go emits render-ready Cartesian + sphereR + two ring normals (vrx..frz) on
-node-geometry; pump = pure plotter. Render: SphereRing orients tori from the emitted
-normals. Camera: pan=2D-Cartesian, zoom=Cartesian, rotate=polar-orbit, camera
-constrained inside the large sphere (interaction-controls.ts).
+### The polar PAN construction (user's exact spec — NOT yet coded)
+**PAN IS A TRANSLATION — the same action Cartesian pan describes. You do NOT travel around
+the sphere when you pan; the origin slides in a straight line.** The polar frame only
+*names* that slide's direction and magnitude in polar terms; θ/φ are frame labels, NOT an
+arc you sweep. This construction lives on the **mouse's own polar sphere** (distinct from
+the diagram sphere):
+- **Pole = the VIEW** (the view axis) — the mouse-sphere's pole is the view, not world Y.
+- **refX = the first line segment; `r` lies along it.** The mouse's horizontal travel is
+  reinterpreted as a radius: `Δx_cartesian → r_polar` (the slide's MAGNITUDE). The top of
+  the sphere sits at distance `r` out along refX. (This `Δx → r` is the ONLY thing
+  specified about the mouse; do not extrapolate other θ/φ mappings.)
+- **The pole and refX meet at 90°** (a quarter-turn of φ apart).
+- **A 3rd line sits at 90° of φ to BOTH** the pole and refX (the third orthogonal axis).
+  **That 3rd line is the pan DIRECTION** — the polar version of the Cartesian pan offset.
+- **The pan = slide the origin by `r` along that 3rd line** (a linear translation,
+  identical in effect to the Cartesian pan, just with direction+magnitude expressed in the
+  polar frame). Then rebase the diagram-sphere origin by that slide + Go `reOrigin`
+  recomputes every node's (r,θ,φ). The OFFSET is `r` along the 3rd line, not a screen Δ
+  and not a sweep around the sphere.
 
-### Verified vs NOT verified
-- VERIFIED: go build ./... + go test ./... green (10 pkgs); tsc --noEmit clean;
-  vitest 71/71; npm build clean; all 8 guard scripts pass (incl. ts-computes-no-geometry,
-  no-await-on-bridge). Unit tests cover conversions, prism/roots round-trip, sphereR,
-  surface coords, ring normals, RootMove (one-root/soft-membership), chord lock.
-- NOT VERIFIED (needs user eyeball, why it's unmerged): live editor — spheres/tori/nodes
-  render from the Go stream (P6.4), camera feel (P7.7), chord-lock drag live (P8.4),
-  8-node load preserves positions in the editor (P2.6).
+### What is built (this branch)
+- **`polar.ts` — the polar toolkit** (new). `Polar {theta, phi}`, `PolarFrame`,
+  `makeFrame` / `toWorld` / `fromWorld` / `equatorDir` / `equatorPoint`. The ONLY
+  Cartesian is quarantined inside `makeFrame` (builds the equatorial ref axes once) and
+  `toWorld` (render output). Navigation code importing only this has no cross product in
+  reach — so the cross-product degeneracy (the 180° flips) cannot be expressed.
+- **Rotation = polar** (`interaction-controls.ts`, build marker `polar-pole-v17`).
+  Cursor screen-polar (ρ,θ) → spherical (Φ from the top pole, Θ around it); rotation is
+  built from the angle CHANGES about polar-named axes — ΔΘ rotates about the POLE, ΔΦ
+  about the EQUATORIAL axis at azimuth Θ+90°. No cross products of cursor points; log
+  reads in polar. NOTE: predates `polar.ts` and still builds its axes with a couple of
+  `Vector3` ops — moving it onto `polar.ts` is an open task.
+- **Pan GUIDE (visualization only)** — `PanGuide.tsx`, rebuilt on `polar.ts`, pole =
+  world Y. Draws from the cursor as (θ,φ): the **disk** (meridian at azimuth θ —
+  angle-defined, can't degenerate), the **green line** (equator/horizontal-torus diameter
+  at θ), the **red radius** (C→P), and the **trig right triangle** with the right angle at
+  the foot **G on the green line** (`R·sin φ` along θ), height `R·cos φ` up the pole,
+  hypotenuse = radius. Right angle on the green line by construction, every frame, no
+  flips. THIS IS A GUIDE — note it currently uses the world-Y diagram pole; the user's
+  pan construction above uses the VIEW as the pole, so the guide may need re-pointing when
+  pan is actually wired.
+- **Zoom GUIDE** — `ZoomGuide.tsx`: triangle C → camera(tip of r) → selected node,
+  hypotenuse = the zoom travel line. Visualization only.
+- **Tori reverted to WORLD-FIXED** (`NavGuides.tsx`): 4 great-circle tori at 0/45/90/135
+  about X; horizontal torus normal = world Y = the diagram pole.
+- **`docs/polar-sphere.html`** — 7-tab visual explainer (2D polar / 3D spherical / what 3D
+  adds / the frame / the pan triangle / Cartesian pan / mouse-as-polar), SVG diagrams from
+  one shared tilt-projected sphere fn. The "mouse-as-polar" tab over-states beyond `Δx→r`
+  (it sketches θ too) — trim it to just `Δx→r` and the 3rd-line pan when revisited.
+- `cursor-store.ts` (new): last canvas cursor px, feeds the guides.
 
-### Follow-ups / known limitations
-- nodeGeom.Center is KEPT as the derived render/geometry coordinate (port/edge arc math
-  still reads it); it is updated from roots on move. Full removal would mean rederiving
-  all port/edge geometry from roots — a larger follow-up, intentionally out of scope.
-- Prism is recomputed deterministically from points at load (not separately persisted);
-  on-disk format stays world Cartesian, so the 8-node topology needs no file migration.
-- Chord lock is registered in code (lock.go addChordLock); no editor UI to create locks yet.
+### NOT built / open (the real next steps)
+1. **Actual polar PAN is not wired.** The pan that runs is still the OLD Cartesian camera
+   translation + throttled `set-origin` (interaction-controls.ts ~line 904). Wire the
+   construction above: gesture → `Δx → r` on the mouse-sphere (pole = view) → the 3rd-line
+   pan offset → rebase the diagram-sphere origin → Go `reOrigin` recomputes node (r,θ,φ).
+2. **Actual polar ZOOM is not wired** (partly designed). `r` = camera's radial distance
+   from center (R on the sphere, <R inside); each zoom unit travels the hypotenuse toward
+   the SELECTED node; rotation/pan clears the zoom line.
+3. **Rotation needs hands-on editor verify** (direction/feel). Polar in code, untested by
+   the user this session; a reversed sense is a one-line flip.
+4. **Move rotation onto `polar.ts`** (it has its own vector math now).
+5. **Update MODEL.md + CLAUDE.md** to "navigation is polar end-to-end; Cartesian is
+   plumbing" — overturns the written `pan/zoom = Cartesian prism` line. Pending go-ahead.
+6. **Trim the explainer's mouse-as-polar tab** to just `Δx→r` + the 3rd-line pan.
 
-### Open follow-ups (deferred, separate branches)
-- **Roll-axis camera control** — rotation about the axis perpendicular to the view
-  (roll) has little control; long-standing, PRE-EXISTING (not introduced by the polar
-  work). Substance question about the arcball/roll axis (see
-  memory project_interaction_control_is_substance). Deserves its own branch.
-- **Spec-level lock declaration** — the chord lock coupling nodes 2 & 6 is wired by a
-  stopgap id-based registration in loader.go buildFromSpec (only when nodes 1/2/6
-  exist). Replace with a lock declaration in the topology spec so locks are data, not
-  hardcoded ids.
-- **nodeGeom.Center removal** — Center is still the derived render/geometry coordinate
-  (port/edge arc math reads it). Fully polar would rederive all port/edge geometry from
-  roots; larger follow-up, intentionally out of scope here.
+### Verify (NEVER run the sim)
+`cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js && npm run build`.
+Editor opens via the VS Code command (no backing file); reload = close panel → Reload
+Window → re-run command. Build markers grepped in `.probe/ts.jsonl` confirm the live
+bundle loaded (rotation logs `"build":"polar-pole-v17"`). Diagnostic screenshots from this
+session are under `docs/planning/visual-editor/screenshots/`. Git: run from repo root
+(`/Users/David/Documents/github/wirefold`) — Bash cwd resets, and `cd tools/...` then a
+repo-root path fails.
 
-### Status
-MERGED to main (2026-06-16). Polar coordinate model live; all 52 plan tasks done;
-editor-verified (render, chord lock, camera nav, load positions). go build/test, tsc,
-vitest, npm build, all 8 guards green.
+### Carry-forward (hard-won this session — READ THIS)
+- **THE AI DEFAULTS TO CARTESIAN AND IT SURVIVES CORRECTION.** Across ~17 rotation
+  rebuilds the assistant kept re-encoding the user's polar spec as Cartesian machinery
+  (cross products, world axes, `+Y`, orthographic maps) below the level it was watching,
+  reintroducing the exact pathologies (180° flips, cross-product degeneracy, world-vs-view
+  mismatch) the user objected to. "Be more careful" FAILED. The structural fix is
+  `polar.ts`: make the code only able to express polar so Cartesian has nowhere to sneak
+  in. New navigation work goes THROUGH the toolkit; do not reach for `Vector3.cross` in
+  navigation logic. (Memory: feedback_make_bug_class_unrepresentable,
+  feedback_users_interaction_spec_is_the_model.)
+- **The cross product IS the degeneracy.** `a × b → 0 with undefined direction` when a∥b
+  is the noise-flip. Angle arithmetic (`θ+90°`) has no such case. If a "fix" cycle starts
+  chasing flips/jitter/degeneracy, the cause is a cross product / Cartesian frame, not a
+  knob to tune.
+- **David's plain-language spec already names the exact model** — restate it as a concrete
+  angle/axis rule and implement that literally; don't pattern-match onto a textbook
+  algorithm (the Shoemake-arcball detour cost many cycles). "polar," "same rate at any r,"
+  "not cartesian" are correctness requirements, not vibes.
+- **Two great circles always meet at 2 points; only coincident circles degenerate.** The
+  pan green line was a `pole × n` that collapsed when the motion-disk coincided with the
+  horizontal torus — fixed structurally by making the disk a meridian (angle-defined).
 
-### Recently shipped to main (newest first)
-- **Node pick respects occlusion** (task/pick-occlusion): selecting/hovering a node now returns the FRONTMOST node body the cursor ray actually hits (true nearest-hit occlusion). Root cause: the node body sphere mesh had no nodeId tag, so a body hit was mapped to a node by scanning node positions for matching x,y ONLY (ignoring z) — so a node directly BEHIND another (same screen x,y, deeper z, e.g. node 7 behind node 3 after a depth drag) resolved to the front node. Fix: tag each body sphere with userData.nodeId and resolve the hit directly (z-aware); same path serves hover-highlight and click. File: tools/topology-vscode/src/webview/three/scene-content.tsx.
-- **Excitatory node kind + nodes 6,7** (merge 2e2154f0): new `Excitatory` node kind (nodes/excitatory/) — a sample-and-hold/excitatory-neuron: holds an int (starts -1), continuously PULSES its held value downstream, and UPDATES the held value when an input arrives. It DRIVES its output on its OWN goroutine (spawned in Update) while the main loop blocks on input — so the held value + its interior bead (EmitHeldBead, the general reflectBuild-injected single-bead path ChainInhibitor/HoldFlip use) update INSTANTLY on input, no drive-lag. Sized 90x60 like ChainInhibitor, distinct blue (#e1f5fe/#01579b). Wiring: node 6 Excitatory on path 1->6->5 (node 1 Input now FANS OUT to node 2 AND node 6 on SEPARATE goroutines node 1 initiates — concurrent, same value; required a second Input output port ToExcitatory since one Out port binds only one edge; 6->5.FromLeft; 2->5 dropped). Node 7 Excitatory on path 2->7->4 (2.ToNext1->7; 7->4.In; 3->4 dropped, node 3 output now dangles). Files: nodes/excitatory/{node.go,SPEC.md}, nodes/input/node.go, regenerated registries, topology/nodes/{6,7}/** + edges.
-- **Camera restores on reload** (same merge): the extension host now reads topology/view/scene.json and sends `sceneText` on the `load` post (extension.ts), so viewerState.camera3d is populated synchronously and the saved camera pose restores instead of auto-fitting to home every reload. Root cause was the host never delivering the scene sidecar to the webview (both load posts omitted sceneText).
-- **Node lattice placement** (merge da2564ec): node positions are discrete integer lattice cells (i,j,k) instead of free x/y — the node-scale twin of the port ring-anchor work. Go owns the cell->world mapping (worldPos = origin + cell*spacing) and streams positions; SPACING and BOX are DERIVED from the initial layout (min pairwise node distance / extent), NOT a hand-picked constant, so the graph keeps its shape (a magic 330 spacing had collapsed the graph into one cell and stacked nodes in depth -> occlusion; deriving it fixed that). Dragging snaps a node to a cell via zoom-INDEPENDENT pixel->cell steps (PX_PER_CELL=80); the two editable axes are chosen by camera orientation (orbit to expose depth). Migration snapped existing positions to nearest cell; node cell stored in topology/nodes/<id>/meta.json, schema+parser parity. Files: nodes/Wiring/lattice.go (latticeToWorld/worldToLattice), loader/loader_tree/node_move/stdin_reader/port_geometry, TS geometry-helpers.ts + parse-nodes-edges.ts + types. Also resolved a camera regression chain the lattice exposed: zoom focus now follows the node nearest SCREEN CENTER (was a fixed-depth target that, once nodes had depth, made zoom drift/stall on the wrong node).
-- **Edge direction arrowheads** (merge 376757c0): each edge renders a cone arrowhead at its TARGET end (apex on the target IN-port, oriented along (end-start)), showing source->target flow direction. Matches the tube's SHADING_PARAM_TUBE_COLOR/emissive and fade (faded edges' arrows fade too); raycast disabled (decorative). Derived from the Go-streamed edge segment (useEdgeGeometryStore), so it follows on node-move. Consts ARROW_HEIGHT=6, ARROW_RADIUS=3 (tube radius is 1.5) — tunable. File: tools/topology-vscode/src/webview/three/scene-content.tsx (inside SingleEdgeTube).
-- **Persistent-target camera navigation** (merge 6b3094ed): replaced per-gesture z=0-plane raycast anchoring with a camera-owned PERSISTENT TARGET point, so orbit/pan/dolly are TOTAL operations of (camera pose, target) — the edge-on/grazing singularity is structurally unreachable (it was the ray-vs-z=0 partial function diverging when the view went parallel to the ground). Orbit pivots around the target (the selection if one is selected, else a seeded scene-depth point); pan slides camera+target together on the view plane (scale = distance to target, fixes the earlier zoom-leak/swing/reversed-direction); dolly zooms toward the target; Fit sets target = scene center. Free 6-DOF arcball rotation unchanged (no clamp, no turntable). The target is RUNTIME-ONLY (re-seeded on load by projecting scene center onto the camera forward ray) — NOT persisted to scene.json yet. unprojectToPlane is retained ONLY for node-drag / port-drag / click-pick (placing things on the z=0 layout), not for camera gestures. Files: tools/topology-vscode/src/webview/three/interaction-controls.ts, ThreeView.tsx, camera-ui.tsx. Doc updated: docs/planning/visual-editor/camera-navigation.html. PRINCIPLE (carry-forward): camera gestures must be TOTAL functions of camera state; a singularity means the REPRESENTATION is wrong — fix it by anchoring on always-finite camera-owned state, NOT by clamping inputs (6-DOF is substance) or adding fallback band-aids (which only mask the partial function). Industry carries a target too (OrbitControls/Blender/Maya/CAD); adopt the target, reject their rotation constraints.
-- **3D camera navigation reference page** (merge 7a4ea597): added docs/planning/visual-editor/camera-navigation.html — a 5-tab visual reference (Controls / Camera model / Motions / Fit & persistence / Design) with 6 inline SVG diagrams documenting the editor's custom (non-OrbitControls) arcball camera: orbit = drag empty space (h->world Y, v->world X, pivot fixed at gesture start), pan = two-finger scroll, dolly = ctrl/pinch scroll (1.01^deltaY), Fit = Home button (bbox -> fov dist -> 1.2x pad -> square-on), roll reachable in math but NOT wired to input. Camera = PerspectiveCamera(fov50/near0.1/far20000), Camera3D{position,quaternion}; persistence via commitCamera -> scheduleViewSave(400ms) -> scene.json, restore via CameraRefBridge/CameraFitter. Source: tools/topology-vscode/src/webview/three/ (interaction-controls.ts, camera-ui.tsx, scene-content.tsx, ThreeView.tsx).
-- **Lint cleanup** (merge 9d405243): dead `comparePortLists` removed, `min`/`max`/range-over-int modernizations; removed the branch-local `port-ring-anchors-spec.html` from main (tracking + disk).
-- **Port ring-anchor layout** (merge 04704a57): node port PHYSICAL layout redesigned — replaced the directional `side`x`slot` grid (4 buckets) + free `anchor` vectors with ONE FLAT ARRAY of evenly-spaced ring anchors. Each port is a single `anchorId` index into the array. N = floor(2*pi*R/(d+p)), R = nodeRadius (node size per kind) so N varies by kind; d=8,p=2 (tunable consts in nodes/Wiring/port_geometry.go). Go owns the ring geometry + the drag-snap (snapToRingAnchorIndex); TS only unprojects the pointer (camera) to a world-space target and renders Go's stream. Editing a port reuses the `port-anchor` edit op (parity: messages.ts / handle-message.ts / stdin_reader.go). Verified working in editor (ports on ring, network runs, drag snaps). Key files: nodes/Wiring/port_geometry.go (ringAnchorCount/ringAnchorDir/nodeRadius/snapToRingAnchorIndex; portDir resolves ONLY via the ring), loader.go specPort {Name, AnchorId *int}, topology/nodes/*/{inputs,outputs}/*.json ({name, anchorId}), TS types.ts/parse-nodes-edges.ts/geometry-helpers.ts.
-- **Remove ReadGate kind + inactive subtree** (merge e699cc17): deleted the unused ReadGate node kind (package, generated registries, fixtures), removed topology/inactive/, renamed Input's port ToReadGate -> ToChainInhibitor.
-- **One-bead, node-drives-own-edges** (earlier merge 1a3bdb7f): network emits ONE bead per fire; each node drives its own outbound bead(s) to delivery on its OWN goroutine (no train, no seq, no per-bead walker). See nodes/Wiring/paced_wire.go (DriveBeadsToDelivery/advanceBeadLocked, EmitOneDriven, DriveAll). Memory: feedback_place_all_then_drive_concurrently.
+## Background: POLAR coordinate model is MERGED to main (2026-06-16)
 
-### Active node kinds (current topology, nodes 1-7)
-Kinds: Input, ChainInhibitor, HoldFlip, WindowAndGate, Excitatory (holds/pulses a value; sample-and-hold). Nodes: 1 Input, 2/3 ChainInhibitor, 4 HoldFlip, 5 WindowAndGate, 6/7 Excitatory. Paths: 1->{2,6}, 2->{3,7}, 6->5.FromLeft, 4->5.FromRight, 7->4, 2->1 feedback; dropped 2->5 and 3->4; node 3 output dangles.
+`main` has the polar layout (every node = one outer polar (r,θ,φ) from the prism-center
+origin; all nodes flat roots; sphere R/surface coords derive-on-read; pole=+y; Cartesian
+only at camera/render/save). Go: nodes/Wiring/{polar,prism,derived,node_move,lock}.go;
+bridge emits render-ready Cartesian + sphereR + ring normals; pump = plotter. This branch's
+navigation work is the camera-side counterpart: make navigation polar against that already-
+polar model. The full layout design doc was branch-local (stripped at merge); recover from
+task/spherical-layout history if needed. (Earlier shipped-to-main history — pick occlusion,
+Excitatory nodes 6/7, camera restore, node lattice, edge arrowheads, persistent-target
+camera, port ring-anchors, one-bead drive — is in git log; trimmed here to keep the
+active-branch state in focus.)
 
-### Carry-forward (hard-won this session)
-- GEOMETRY IS GO-OWNED (MODEL.md/CLAUDE.md): Go computes positions/rings/snaps + streams; TS only handles camera/input and renders Go's stream. TS computes no layout.
-- SWARM CAUTION: a background Agent dispatch fanned out into ~20 duplicate agents, duplicated commits, and committed one unrequested change (reverted). Keep subagents FOREGROUND; spot-check git log before pushing.
-- IDE DIAGNOSTICS WERE REPEATEDLY STALE this session (phantom broken imports / unused funcs that were actually wired). Verify against `go build` / grep, not the diagnostic panel.
-- When a node has multiple outbound edges, PLACE all beads then DRIVE all together in one loop (never per-edge in series) — see memory feedback_place_all_then_drive_concurrently.
-- Magic constants in spatial code (spacing/box) should be DERIVED from the content, not hand-picked — a fixed 330 lattice spacing collapsed the graph; deriving from layout fixed it. (Mirrors: a singularity/occlusion means the representation/scale is wrong, not the inputs.)
-- Fan-OUT needs separate Out ports (one Out binds only labels[0]); fan-IN needs separate In ports. To send the same value to N targets concurrently, the node spawns a goroutine per wire (node 1 does this for 2 and 6) or uses place-all + DriveAll.
-- Dragging at a tilted camera can move a node along the DEPTH axis (the editable axes are the two facing the camera), landing it directly behind another node (same i,j, different k) — an occlusion hazard; the pick now handles it (nearest body wins), but be aware nodes can stack in depth.
-- Sphere move/resize re-propagate from a fixed anchor — true "grab any node, rest flexes" needs per-edge directions + re-rooting (stored Dir is per-node relative to one BFS parent).
-
-### Carry-forward ideas (not blocking node-lattice)
-- Node 3's dangling ToNext1 port could be removed if a single-output ChainInhibitor is wanted.
-- Camera target is runtime-only — could be persisted to scene.json (extend Camera3D with a target, update serialize/parse + CameraRefBridge restore) so orbit pivot/zoom survive reload exactly; deferred — re-seeding from scene center is fine for now.
+### Active node kinds (topology, nodes 1-7)
+Input, ChainInhibitor (2/3), HoldFlip (4), WindowAndGate (5), Excitatory (6/7).
+Paths: 1→{2,6}, 2→{3,7}, 6→5.FromLeft, 4→5.FromRight, 7→4, 2→1 feedback; node 3 dangles.
 
 ## ALWAYS clause
 

@@ -1,6 +1,6 @@
 // interaction-controls.ts — useInteractionControls hook and related types.
 // Handles CLICK, NODE-DRAG, and SCROLL (dolly/pan) detection.
-// Single-pointer empty-space drag (arcball rotation) and dwell→PanPad are removed.
+// Single-pointer empty-space drag = free-roll great-circle rotation.
 
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
@@ -10,6 +10,9 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
+import { useCursorStore } from "./cursor-store";
+import { postLog } from "../log/post";
+import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, rotateAboutAxis, scaleRadius, deltaToPolar, planeSlide } from "./polar";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -50,6 +53,32 @@ function computeLargeSphereRadius(nodes: RFNode<NodeData>[]): number {
 }
 
 /**
+ * The diagram's WORLD-FIXED content sphere: center = bounding-box center of the node
+ * world positions, radius = farthest node from that center (+10% margin). This is the
+ * arcball — fixed in world space, so it zooms WITH the diagram (both grow as you dolly
+ * in) instead of staying screen-size. Exported shape used by the visible sphere too.
+ */
+export function computeContentSphere(nodes: RFNode<NodeData>[]): { center: THREE.Vector3; radius: number } {
+  const center = new THREE.Vector3();
+  if (!nodes || nodes.length === 0) return { center, radius: 100 };
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    min.min(p); max.max(p);
+  }
+  center.addVectors(min, max).multiplyScalar(0.5);
+  let r = 0;
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    r = Math.max(r, p.distanceTo(center));
+  }
+  return { center, radius: Math.max(r * 1.1, 1) };
+}
+
+/**
  * P7.5: Clamp the camera position so it stays on or inside the large
  * container sphere of radius R. If the camera is outside, project it back
  * to the surface (same direction, length = R). No-op when inside.
@@ -71,6 +100,11 @@ const CLICK_MAX_MS = 150;
 /** Pixel movement threshold between CLICK and DRAG. */
 const MOVE_SLOP_PX = 6;
 
+/** Arcball sphere radius as a fraction of camera→pivot distance (<1 ⇒ camera outside
+ *  the ball; large enough that the ball fills the view so there is no on-screen dead
+ *  zone). Exported so the visible arcball sphere matches the grab sphere. */
+export const ARCBALL_FILL = 0.4;
+
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
@@ -82,17 +116,18 @@ export interface ControlState {
   downX: number;
   downY: number;
   downTime: number;
-  // Previous pointer position (updated during rotating)
+  // Previous pointer position (updated each frame during drags, including rotation)
   prevX: number;
   prevY: number;
-  // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
+  // True when the pointer-down hit empty space (not a node or edge); gates free-roll rotation.
   emptyDown: boolean;
-  // Arcball pivot: captured once at gesture start (world space)
-  arcballPivot: THREE.Vector3;
-  // Two-cylinder gesture-start snapshot (anchored, world-fixed axes)
-  arcStartOffset: THREE.Vector3; // cam.position - pivot at gesture start
-  arcStartUp: THREE.Vector3;     // cam.up at gesture start
-  arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
+  // Rotation gesture pivot: content bounding-box center, fixed for the gesture.
+  rotPivot: THREE.Vector3;
+  // Sphere screen-center (pixels, client coords) and scale, frozen at pointer-down.
+  // Valid for the whole gesture: C stays at the same pixel as the camera orbits about it.
+  rotCx: number;
+  rotCy: number;
+  rotPxPerRad: number; // pixels per radian for screenToPolar
 }
 
 // ---------------------------------------------------------------------------
@@ -126,10 +161,8 @@ export function useInteractionControls(
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
     emptyDown: false,
-    arcballPivot: new THREE.Vector3(0, 0, 0),
-    arcStartOffset: new THREE.Vector3(),
-    arcStartUp: new THREE.Vector3(0, 1, 0),
-    arcStartQuat: new THREE.Quaternion(),
+    rotPivot: new THREE.Vector3(),
+    rotCx: 0, rotCy: 0, rotPxPerRad: 1,
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -204,6 +237,29 @@ export function useInteractionControls(
     [edgesRef],
   );
 
+  // Throttle set-origin IPC: one message per animation frame during pan.
+  const pendingOrigin = useRef<{ x: number; y: number; z: number } | null>(null);
+  const originRafPending = useRef(false);
+
+  const flushOrigin = useCallback((x: number, y: number, z: number) => {
+    vscode.postMessage({ type: "edit", op: "set-origin", x, y, z });
+  }, []);
+
+  const scheduleOrigin = useCallback((x: number, y: number, z: number) => {
+    pendingOrigin.current = { x, y, z };
+    if (!originRafPending.current) {
+      originRafPending.current = true;
+      requestAnimationFrame(() => {
+        originRafPending.current = false;
+        const p = pendingOrigin.current;
+        if (p) {
+          flushOrigin(p.x, p.y, p.z);
+          pendingOrigin.current = null;
+        }
+      });
+    }
+  }, [flushOrigin]);
+
   // Throttle port-anchor IPC: one message per animation frame during a port drag.
   const pendingAnchor = useRef<{
     nodeId: string;
@@ -257,7 +313,7 @@ export function useInteractionControls(
       const cam = cameraRef.current;
       if (!cam) return null;
       const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
-      const raycaster = new THREE.Raycaster();
+      const raycaster = new THREE.Raycaster(); // polar-nav-ok: node-drag/port-move plane hit, not rotation
       raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
       const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
       const target = new THREE.Vector3();
@@ -434,39 +490,53 @@ export function useInteractionControls(
           };
         }
       } else {
-        // Empty-space pointerdown: capture the arcball pivot. Orbit is a TOTAL
-        // operation over (camera pose, target) — both finite — so no z=0 raycast and
-        // no grazing singularity. If a node is selected, orbit around it (preserves
-        // the selection-pivot UX). Otherwise orbit around the REGION CENTER (model B):
-        // the mid-depth point straight ahead of the camera, recomputed now so it
-        // reflects the diagram's current depth slab.
+        // Empty-space pointer-down: compute the pivot and sphere screen mapping for
+        // motion-driven rotation. All sphere/angle math goes through polar.ts; this
+        // block only reads camera state and projects the pivot to screen once.
         const cam0 = cameraRef.current;
-        const selId = selectedIdRef.current;
-        const selNode = selId ? nodesRef.current.find((n) => n.id === selId) : null;
-        if (selNode) {
-          s.arcballPivot = nodeWorldPos(selNode);
-          if (cam0) targetRef.current.copy(s.arcballPivot);
-        } else if (cam0) {
-          s.arcballPivot = regionFocus(cam0).clone();
-          targetRef.current.copy(s.arcballPivot);
-        }
-        // Snapshot camera state for the anchored two-cylinder rotation.
         if (cam0) {
           cam0.updateMatrixWorld(true);
-          s.arcStartOffset = cam0.position.clone().sub(s.arcballPivot);
-          s.arcStartUp = cam0.up.clone();
-          s.arcStartQuat = cam0.quaternion.clone();
+          const cs = computeContentSphere(nodesRef.current);
+          s.rotPivot = cs.center.clone();
+
+          // Project the pivot to screen ONCE to get the sphere center in pixel coords.
+          // (This is the one allowed project() call — getting the center for screenToPolar,
+          // not building a rotation axis.) // polar-center-projection
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const pivotNdc = cs.center.clone().project(cam0); // polar-center-projection
+          s.rotCx = ((pivotNdc.x + 1) / 2) * rect.width + rect.left;
+          s.rotCy = ((-pivotNdc.y + 1) / 2) * rect.height + rect.top;
+
+          // Rpx: the content sphere's on-screen pixel radius. screenToPolar maps by the
+          // true sphere projection — rim (ρ=Rpx) → equator (φ=π/2) — so the grab point
+          // reaches the equator at the visible sphere edge, enabling roll there.
+          // Formula: project cs.radius through the perspective: (cs.radius/pivotDist) is
+          // the sine of the half-angle subtended; * (rect.height/2)/tan(fovVert/2) converts
+          // that to pixels. Clamped to ≥1 so there's no divide-by-zero in screenToPolar.
+          const pivotDist = cam0.position.distanceTo(cs.center);
+          const fovRad = (cam0.fov * Math.PI) / 180;
+          const Rpx = (cs.radius / pivotDist) * (rect.height / 2) / Math.tan(fovRad / 2);
+          // scale = Rpx·(2/π) so that φ = ρ/scale hits π/2 (the equator) exactly AT the
+          // circle's edge (ρ = Rpx) — the 90° handhold sits on the visible silhouette. Still
+          // one uniform unbounded rule (no clamp); past the edge φ keeps growing past π/2.
+          s.rotPxPerRad = Math.max(Rpx * (2 / Math.PI), 1);
+
+          // prevX/prevY seeded here so the pending→rotating transition (first move past
+          // MOVE_SLOP_PX) already has a valid baseline for the first motion frame.
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
         }
       }
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, ensureTarget, regionFocus, selectedIdRef, targetRef],
+    [cameraRef, nodesRef, pickRequest, incidentEdgeIds],
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const s = state.current;
+      useCursorStore.getState().set(e.clientX, e.clientY, true); // feed the polar pan guide (hover too)
       if (s.phase === "idle") return;
 
       const dx = e.clientX - s.downX;
@@ -481,7 +551,11 @@ export function useInteractionControls(
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
         } else if (s.emptyDown) {
-          // Empty-space drag: start arcball rotation.
+          // Empty-space drag: start motion-driven great-circle rotation.
+          // prevX/prevY were seeded at pointer-down; re-seed here in case the pointer
+          // moved during the slop window so the first frame arc is always tiny.
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
           s.phase = "rotating";
         }
       }
@@ -497,7 +571,7 @@ export function useInteractionControls(
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         if (cam) {
           const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-          const raycaster = new THREE.Raycaster();
+          const raycaster = new THREE.Raycaster(); // polar-nav-ok: node-drag plane hit, not rotation
           raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
           const normal = new THREE.Vector3();
           cam.getWorldDirection(normal); // plane faces the camera
@@ -540,31 +614,27 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          const pivot = s.arcballPivot;
-          const ROT_SPEED = 0.005;
-          // Two cylinders: both rotation axes lie in the node's plane (z=0) through
-          // the pivot. Horizontal drag rotates about world Y, vertical drag about
-          // world X. Decoupled, world-fixed axes; anchored to total drag from the
-          // down-point so a closed loop returns to start (no accumulation).
-          const angY = 1 * (e.clientX - s.downX) * ROT_SPEED; // horizontal -> azimuth
-          const angX = 1 * (e.clientY - s.downY) * ROT_SPEED; // vertical   -> elevation
-          // Turntable axes: yaw about WORLD up (keeps the horizon level), but pitch
-          // about the CAMERA's right axis (its local X at gesture start) — NOT world X.
-          // Using world X made "rotate down" pitch about a stale axis after any yaw,
-          // because the pitch axis never tracked the camera's orientation. The camera
-          // right is captured per gesture from arcStartQuat, so pitch always tilts the
-          // view up/down relative to the screen regardless of the current azimuth.
-          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(s.arcStartQuat);
-          const qx = new THREE.Quaternion().setFromAxisAngle(camRight, angX);
-          const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angY);
-          const rot = qy.clone().multiply(qx);
-          const rotInv = rot.clone().invert();
-          cam.position.copy(pivot).add(s.arcStartOffset.clone().applyQuaternion(rotInv));
-          cam.quaternion.copy(rotInv).multiply(s.arcStartQuat);
-          cam.up.copy(s.arcStartUp.clone().applyQuaternion(rotInv));
-          cam.updateMatrixWorld(true);
-          // P7.5: keep camera inside the large sphere after orbit.
-          constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
+          const C = s.rotPivot;
+          const CF = cameraFrame(cam.quaternion, C, 1);
+          const prev = screenToPolar(s.prevX - s.rotCx, s.prevY - s.rotCy, s.rotPxPerRad);
+          const curr = screenToPolar(e.clientX - s.rotCx, e.clientY - s.rotCy, s.rotPxPerRad);
+          const prevDir = toWorld(CF, prev).sub(C); // unit world dir of prev cursor point
+          const currDir = toWorld(CF, curr).sub(C); // unit world dir of curr cursor point
+          const { axis, angle } = arcAxisAngle(currDir, prevDir); // rotation carrying curr→prev
+          if (angle > 1e-6 && Number.isFinite(axis.x)) {
+            const fwd = new THREE.Vector3();
+            cam.getWorldDirection(fwd);
+            const offset = cam.position.clone().sub(C);
+            const newOffset = rotateAboutAxis(offset.clone().normalize(), axis, angle).multiplyScalar(offset.length());
+            const newFwd = rotateAboutAxis(fwd, axis, angle);
+            const newUp  = rotateAboutAxis(cam.up.clone().normalize(), axis, angle);
+            cam.position.copy(C).add(newOffset);
+            cam.up.copy(newUp);
+            cam.lookAt(cam.position.clone().add(newFwd)); // final conversion: directions → three.js orientation
+            cam.updateMatrixWorld(true);
+          }
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
           commitCamera(cam);
         }
       }
@@ -718,15 +788,10 @@ export function useInteractionControls(
         const ZOOM_BASE = 1.01;
         const MIN_DIST = 5;
         const factor = Math.pow(ZOOM_BASE, e.deltaY);
-        const offset = cam.position.clone().sub(target);
-        const len = offset.length();
-        if (Number.isFinite(len) && len > 1e-9) {
-          let f = factor;
-          if (len * f < MIN_DIST) f = MIN_DIST / len;
-          if (Number.isFinite(f)) {
-            cam.position.copy(target).add(offset.multiplyScalar(f));
-          }
-        }
+        // Polar radial zoom: scale the camera's radius r about the target node, angles held.
+        // r is an explicit coordinate inside scaleRadius (polar.ts); direction is preserved
+        // without a (θ,φ) decomposition, so no pole singularity is introduced.
+        cam.position.copy(scaleRadius(target, cam.position, factor, MIN_DIST));
         // P7.5: keep camera inside the large sphere after dolly.
         constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
       } else {
@@ -738,21 +803,17 @@ export function useInteractionControls(
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const target = ensureTarget(cam);
 
-        // Camera basis in world space (orientation unchanged by pan).
-        const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
-        const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
-
         const dist = cam.position.distanceTo(target);
-
         // Perspective world units per screen pixel at `dist` (vertical FOV).
         const fovRad = (cam.fov * Math.PI) / 180;
         const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / rect.height;
 
-        // deltaY positive = scroll down. Slide camera + target along the view plane.
-        // These two signs are the per-axis flip point if a direction still feels wrong.
-        const delta = right
-          .multiplyScalar(e.deltaX * worldPerPixel)
-          .add(up.multiplyScalar(-e.deltaY * worldPerPixel));
+        // INPUT EDGE: wheel pixels → polar (r, angle) in the screen plane (−deltaY = screen up).
+        // OUTPUT EDGE: planeSlide recombines (r, angle) onto the camera right/up basis (polar.ts).
+        // The handler holds only polar quantities; both camera + target slide by the same world
+        // delta (target rides along, look-direction preserved).
+        const { r, angle } = deltaToPolar(e.deltaX, -e.deltaY);
+        const delta = planeSlide(cam.quaternion, r, angle, worldPerPixel);
         cam.position.add(delta);
         target.add(delta);
 
@@ -761,11 +822,18 @@ export function useInteractionControls(
         // exactly the prior square-on behavior (a flat 2D slide in the z=0 plane).
         // P7.5: keep camera inside the large sphere after pan.
         constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
+        // Re-form the polar origin at the new screen-center: compute the world point
+        // straight ahead of the camera (regionFocus) and send set-origin to Go.
+        // Throttled to one per animation frame so a scroll burst sends at most one.
+        const newFocus = regionFocus(cam);
+        if (Number.isFinite(newFocus.x) && Number.isFinite(newFocus.y) && Number.isFinite(newFocus.z)) {
+          scheduleOrigin(newFocus.x, newFocus.y, newFocus.z);
+        }
       }
       // Commit camera position after each wheel step (scheduleViewSave debounces).
       commitCamera(cam);
     },
-    [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef],
+    [cameraRef, ensureTarget, pickRequest, nodesRef, targetRef, regionFocus, scheduleOrigin],
   );
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };

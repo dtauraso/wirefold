@@ -16,6 +16,8 @@ import { GlobalLabelsToggle, HomeButton } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene, computeOcclusionCounts } from "./scene-content";
+import { NavGuides } from "./NavGuides";
+import { PanPolarOverlay } from "./PanPolarOverlay";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 
@@ -231,6 +233,7 @@ export function ThreeView() {
             onNearestN={onNearestN}
             onCameraSettle={onCameraSettle}
           />
+          <NavGuides nodes={nodes} selectedId={selectedId} />
         </Canvas>
       </div>
 
@@ -310,6 +313,9 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
+
+      {/* Polar pan overlay — "mouse as polar" construction during a wheel-pan burst */}
+      <PanPolarOverlay />
 
     </div>
   );

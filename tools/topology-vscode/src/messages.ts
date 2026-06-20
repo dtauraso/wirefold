@@ -40,7 +40,8 @@ export type EditMsg =
       anchor: { x: number; y: number; z: number };
       keys: string[];
     }
-  | { type: "edit"; op: "scene"; scene: unknown };
+  | { type: "edit"; op: "scene"; scene: unknown }
+  | { type: "edit"; op: "set-origin"; x: number; y: number; z: number };
 
 export type WebviewToHostMsg =
   | { type: "ready" }
@@ -157,6 +158,12 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     }
     case "scene":
       return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
+    case "set-origin":
+      return typeof m.x === "number" && Number.isFinite(m.x) &&
+        typeof m.y === "number" && Number.isFinite(m.y) &&
+        typeof m.z === "number" && Number.isFinite(m.z)
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
     default:
       return undefined;
   }

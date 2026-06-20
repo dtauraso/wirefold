@@ -103,3 +103,6 @@ tools/topology-vscode/gen-node-defs
 .DS_Store
 
 .claude/scheduled_tasks.lock
+
+# Agent worktrees (temporary, per-agent scratch checkouts)
+.claude/worktrees/

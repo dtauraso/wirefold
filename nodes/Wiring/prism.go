@@ -118,3 +118,16 @@ func (rs rootSet) world(id string) (vec3, bool) {
 	}
 	return worldFromRoot(r, rs.origin), true
 }
+
+// reOrigin re-bases the polar frame to a new origin while preserving every
+// node's world Cartesian position. For each node: recover world from old root,
+// re-encode relative to newOrigin. The prism and radius fields are intentionally
+// NOT updated — the prism is a load-time bounding box used only to seed the
+// initial origin, not kept current during pan.
+func (rs *rootSet) reOrigin(newOrigin vec3) {
+	for id, root := range rs.roots {
+		w := worldFromRoot(root, rs.origin)
+		rs.roots[id] = rootFromCartesian(w, newOrigin)
+	}
+	rs.origin = newOrigin
+}

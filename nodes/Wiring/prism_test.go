@@ -78,3 +78,29 @@ func TestRootRoundTrip(t *testing.T) {
 		t.Errorf("root round-trip %v -> %v", pos, got)
 	}
 }
+
+// reOrigin preserves every node's world position within epsilon.
+func TestReOriginPreservesWorld(t *testing.T) {
+	const eps = 1e-9
+	centers := map[string]vec3{
+		"a": {0, 0, 0},
+		"b": {100, -6, 6},
+		"c": {90, -1, -47},
+		"d": {-30, 20, 10},
+	}
+	rs := buildRoots(centers)
+	newOrigin := vec3{X: 123.4, Y: -7.8, Z: 9.0}
+	rs.reOrigin(newOrigin)
+	for id, want := range centers {
+		got, ok := rs.world(id)
+		if !ok {
+			t.Fatalf("no world for %s after reOrigin", id)
+		}
+		if got.sub(want).length() > eps {
+			t.Errorf("node %s world = %v want %v after reOrigin", id, got, want)
+		}
+	}
+	if rs.origin != newOrigin {
+		t.Errorf("origin not updated: got %v want %v", rs.origin, newOrigin)
+	}
+}
