@@ -1,6 +1,6 @@
 // interaction-controls.ts — useInteractionControls hook and related types.
 // Handles CLICK, NODE-DRAG, and SCROLL (dolly/pan) detection.
-// Single-pointer empty-space drag (arcball rotation) and dwell→PanPad are removed.
+// Single-pointer empty-space drag = free-roll great-circle rotation.
 
 import { useRef, useCallback } from "react";
 import * as THREE from "three";
@@ -10,8 +10,9 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
-import { postLog } from "../log/post";
 import { useCursorStore } from "./cursor-store";
+import { postLog } from "../log/post";
+import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, rotateAboutAxis, scaleRadius, deltaToPolar, planeSlide } from "./polar";
 
 // ---------------------------------------------------------------------------
 // Camera persistence helper
@@ -104,10 +105,6 @@ const MOVE_SLOP_PX = 6;
  *  zone). Exported so the visible arcball sphere matches the grab sphere. */
 export const ARCBALL_FILL = 0.4;
 
-/** Rotation speed for the incremental screen-axis trackball: radians per pixel of cursor
- *  motion. Constant ⇒ rotation feels the same at any zoom level or sphere size. */
-const ROT_GAIN = 0.005;
-
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
@@ -119,28 +116,18 @@ export interface ControlState {
   downX: number;
   downY: number;
   downTime: number;
-  // Previous pointer position (updated during rotating)
+  // Previous pointer position (updated each frame during drags, including rotation)
   prevX: number;
   prevY: number;
-  // True when the pointer-down hit empty space (not a node or edge); gates arcball rotation.
+  // True when the pointer-down hit empty space (not a node or edge); gates free-roll rotation.
   emptyDown: boolean;
-  // Arcball gesture-start snapshot
-  arcPivot: THREE.Vector3;        // sphere center C (diagram content center), fixed for the gesture
-  arcP0: THREE.Vector3;           // unit sphere point at gesture start
-  arcStartOffset: THREE.Vector3; // cam.position - C at gesture start
-  arcStartUp: THREE.Vector3;     // cam.up at gesture start
-  arcStartQuat: THREE.Quaternion; // camera orientation at gesture start
-  arcStartPos: THREE.Vector3;    // cam.position at gesture start (frozen pose for the cursor→sphere ray)
-  arcR: number;                  // world radius of the diagram sphere
-  // Polar frame (frozen at gesture start). Pole = diagram top axis (world up). The cursor's
-  // screen polar (ρ, θ) about the sphere's screen center O maps to spherical (Φ from pole,
-  // Θ around pole). e1/e2 are the equatorial reference axes (front-horizontal, side) used to
-  // name the equatorial axis at a given azimuth Θ — no cross products on cursor points.
-  arcOx: number;                 // sphere center, screen x (client px)
-  arcOy: number;                 // sphere center, screen y (client px)
-  arcRpix: number;               // sphere radius on screen (px) ⇒ ρ=arcRpix is the equator
-  arcE1: THREE.Vector3;          // equatorial front-horizontal (azimuth Θ=0, toward camera)
-  arcE2: THREE.Vector3;          // equatorial side (Θ=+90°), = e1 turned 90° about the pole
+  // Rotation gesture pivot: content bounding-box center, fixed for the gesture.
+  rotPivot: THREE.Vector3;
+  // Sphere screen-center (pixels, client coords) and scale, frozen at pointer-down.
+  // Valid for the whole gesture: C stays at the same pixel as the camera orbits about it.
+  rotCx: number;
+  rotCy: number;
+  rotPxPerRad: number; // pixels per radian for screenToPolar
 }
 
 // ---------------------------------------------------------------------------
@@ -174,18 +161,8 @@ export function useInteractionControls(
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
     emptyDown: false,
-    arcPivot: new THREE.Vector3(),
-    arcP0: new THREE.Vector3(),
-    arcStartOffset: new THREE.Vector3(),
-    arcStartUp: new THREE.Vector3(0, 1, 0),
-    arcStartQuat: new THREE.Quaternion(),
-    arcStartPos: new THREE.Vector3(),
-    arcR: 1,
-    arcOx: 0,
-    arcOy: 0,
-    arcRpix: 1,
-    arcE1: new THREE.Vector3(0, 0, 1),
-    arcE2: new THREE.Vector3(1, 0, 0),
+    rotPivot: new THREE.Vector3(),
+    rotCx: 0, rotCy: 0, rotPxPerRad: 1,
   });
 
   // Node-drag state: set when pointer-down lands on a node.
@@ -336,7 +313,7 @@ export function useInteractionControls(
       const cam = cameraRef.current;
       if (!cam) return null;
       const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
-      const raycaster = new THREE.Raycaster();
+      const raycaster = new THREE.Raycaster(); // polar-nav-ok: node-drag/port-move plane hit, not rotation
       raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
       const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
       const target = new THREE.Vector3();
@@ -435,44 +412,6 @@ export function useInteractionControls(
     [nodesRef, ensureTarget],
   );
 
-  // TRUE 3-D arcball: a real sphere at the pivot C, sized so the camera is OUTSIDE it
-  // and it fills the view (R = ARCBALL_FILL·dist, < dist). Raycast the cursor onto it;
-  // the hit is the grabbed world-space unit direction from C. Off the silhouette, use
-  // the limb (nearest sphere point to the ray) → roll. No 2-D screen projection, no
-  // hemisphere/dome, no z=0 rim — you grab the actual sphere, so there is no dead zone
-  // anywhere the sphere covers the view.
-  // Real sphere at pivot C, CAMERA-RELATIVE radius R = ARCBALL_FILL·dist(cam,C). Because
-  // R/dist is constant, the sphere subtends a constant angular size on screen at any zoom
-  // → rotation speed is constant regardless of size, and the camera is always OUTSIDE it
-  // (k<1). Ray-pick the surface: hit = grabbed world direction from C; off the silhouette,
-  // the limb → roll. Roll (rim) + tumble (pole) both from one sphere, no special case.
-  const arcballPoint = useCallback(
-    (
-      clientX: number, clientY: number, rect: DOMRect,
-      fovDeg: number, aspect: number,
-      eyePos: THREE.Vector3, eyeQuat: THREE.Quaternion, C: THREE.Vector3,
-    ): THREE.Vector3 => {
-      // Build the ray from a FROZEN camera pose (eyePos/eyeQuat snapshotted at gesture
-      // start), NOT the live camera — otherwise the moving camera changes this mapping
-      // every frame and the rotation feeds back on itself (jitter / inside-out flips).
-      const R = eyePos.distanceTo(C) * ARCBALL_FILL;
-      const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
-      const t = Math.tan(((fovDeg * Math.PI) / 180) / 2);
-      const dir = new THREE.Vector3(ndcX * t * aspect, ndcY * t, -1)
-        .applyQuaternion(eyeQuat)
-        .normalize();
-      const ray = new THREE.Ray(eyePos.clone(), dir);
-      const hit = new THREE.Vector3();
-      if (ray.intersectSphere(new THREE.Sphere(C, R), hit)) {
-        return hit.sub(C).normalize();
-      }
-      const foot = new THREE.Vector3();
-      ray.closestPointToPoint(C, foot);
-      return foot.sub(C).normalize();
-    },
-    [],
-  );
-
   // ------ helpers ------
 
   /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
@@ -551,58 +490,47 @@ export function useInteractionControls(
           };
         }
       } else {
-        // Empty-space pointerdown: snapshot camera state for true arcball rotation.
+        // Empty-space pointer-down: compute the pivot and sphere screen mapping for
+        // motion-driven rotation. All sphere/angle math goes through polar.ts; this
+        // block only reads camera state and projects the pivot to screen once.
         const cam0 = cameraRef.current;
         if (cam0) {
           cam0.updateMatrixWorld(true);
-          // Pivot = the scene point straight ahead (screen center), snapshotted now and
-          // held for the whole gesture. It shares the arcball's viewport center, so
-          // rotation orbits what you're looking at instead of a point that drifts to the
-          // side as you pan. Panning changes what's at center → next gesture pivots there.
-          // Pivot = a point straight ahead of the camera, at the diagram's depth but
-          // GUARANTEED a real distance in front (≥ PIVOT_MIN). regionFocus could return a
-          // point coincident with the camera (lever arm 0) → rotation spun the camera in
-          // place instead of orbiting (the view whirled to the edge). This always gives a
-          // nonzero lever arm so the camera ORBITS the point and rotation happens in place.
-          {
-            // The sphere is FIXED TO THE DIAGRAM: centered on the content, radius = content
-            // radius. Its pole is the diagram's own up — NOT the camera — so the disk normal
-            // a drag sweeps lives in the diagram's frame and can lean between the view and the
-            // sphere's top, instead of being pinned to the view axis.
-            const cs = computeContentSphere(nodesRef.current);
-            s.arcPivot = cs.center.clone();
-            s.arcR = cs.radius;
-          }
-          const C = s.arcPivot;
-          s.arcStartOffset = cam0.position.clone().sub(C);
-          s.arcStartUp = cam0.up.clone();
-          s.arcStartQuat = cam0.quaternion.clone();
-          s.arcStartPos = cam0.position.clone();
-          {
-            // Freeze the polar frame for the gesture. Pole = diagram top (world up).
-            const rect0 = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            // Sphere center on screen (project C with the start camera).
-            const ndc = C.clone().project(cam0);
-            s.arcOx = rect0.left + (ndc.x * 0.5 + 0.5) * rect0.width;
-            s.arcOy = rect0.top + (-ndc.y * 0.5 + 0.5) * rect0.height;
-            // Sphere radius on screen: angular size → pixels.
-            const dist = Math.max(1e-3, cam0.position.distanceTo(C));
-            s.arcRpix = (s.arcR / dist) * (rect0.height / 2) / Math.tan((cam0.fov * Math.PI) / 180 / 2);
-            // Equatorial front-horizontal e1 = (camera→? no) direction C→camera with the pole
-            // (up) component removed; e2 = e1 turned +90° about the pole (xz-plane rotation).
-            const front = cam0.position.clone().sub(C);
-            front.y = 0;
-            if (front.lengthSq() < 1e-9) front.set(0, 0, 1); // camera over the pole
-            front.normalize();
-            s.arcE1 = front.clone();
-            s.arcE2 = new THREE.Vector3(-front.z, 0, front.x); // +90° about world up
-          }
+          const cs = computeContentSphere(nodesRef.current);
+          s.rotPivot = cs.center.clone();
+
+          // Project the pivot to screen ONCE to get the sphere center in pixel coords.
+          // (This is the one allowed project() call — getting the center for screenToPolar,
+          // not building a rotation axis.) // polar-center-projection
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const pivotNdc = cs.center.clone().project(cam0); // polar-center-projection
+          s.rotCx = ((pivotNdc.x + 1) / 2) * rect.width + rect.left;
+          s.rotCy = ((-pivotNdc.y + 1) / 2) * rect.height + rect.top;
+
+          // Rpx: the content sphere's on-screen pixel radius. screenToPolar maps by the
+          // true sphere projection — rim (ρ=Rpx) → equator (φ=π/2) — so the grab point
+          // reaches the equator at the visible sphere edge, enabling roll there.
+          // Formula: project cs.radius through the perspective: (cs.radius/pivotDist) is
+          // the sine of the half-angle subtended; * (rect.height/2)/tan(fovVert/2) converts
+          // that to pixels. Clamped to ≥1 so there's no divide-by-zero in screenToPolar.
+          const pivotDist = cam0.position.distanceTo(cs.center);
+          const fovRad = (cam0.fov * Math.PI) / 180;
+          const Rpx = (cs.radius / pivotDist) * (rect.height / 2) / Math.tan(fovRad / 2);
+          // scale = Rpx·(2/π) so that φ = ρ/scale hits π/2 (the equator) exactly AT the
+          // circle's edge (ρ = Rpx) — the 90° handhold sits on the visible silhouette. Still
+          // one uniform unbounded rule (no clamp); past the edge φ keeps growing past π/2.
+          s.rotPxPerRad = Math.max(Rpx * (2 / Math.PI), 1);
+
+          // prevX/prevY seeded here so the pending→rotating transition (first move past
+          // MOVE_SLOP_PX) already has a valid baseline for the first motion frame.
+          s.prevX = e.clientX;
+          s.prevY = e.clientY;
         }
       }
 
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     },
-    [cameraRef, nodesRef, pickRequest, incidentEdgeIds, arcballPoint],
+    [cameraRef, nodesRef, pickRequest, incidentEdgeIds],
   );
 
   const onPointerMove = useCallback(
@@ -623,11 +551,12 @@ export function useInteractionControls(
         } else if (nodeDragRef.current) {
           s.phase = "dragging";
         } else if (s.emptyDown) {
-          // Empty-space drag: start trackball rotation. Seed prevX/Y so the first frame's
-          // delta is measured from here (no jump from the down-point + slop).
-          s.phase = "rotating";
+          // Empty-space drag: start motion-driven great-circle rotation.
+          // prevX/prevY were seeded at pointer-down; re-seed here in case the pointer
+          // moved during the slop window so the first frame arc is always tiny.
           s.prevX = e.clientX;
           s.prevY = e.clientY;
+          s.phase = "rotating";
         }
       }
 
@@ -642,7 +571,7 @@ export function useInteractionControls(
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         if (cam) {
           const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
-          const raycaster = new THREE.Raycaster();
+          const raycaster = new THREE.Raycaster(); // polar-nav-ok: node-drag plane hit, not rotation
           raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
           const normal = new THREE.Vector3();
           cam.getWorldDirection(normal); // plane faces the camera
@@ -685,62 +614,32 @@ export function useInteractionControls(
       if (s.phase === "rotating") {
         const cam = cameraRef.current;
         if (cam) {
-          // POLAR ROTATION. Pole = the diagram's TOP axis. The cursor's screen polar (ρ, θ)
-          // about the sphere's screen center maps to spherical coordinates on the diagram
-          // sphere: Φ = polar angle FROM THE TOP pole, Θ = azimuth AROUND the top. Screen
-          // center ⇒ the equator point facing the camera (Φ=90°, Θ=0); cursor up ⇒ toward the
-          // pole (Φ→0); cursor sideways ⇒ azimuth around the pole. The rotation is built from
-          // the angle CHANGES, each about an axis named by its polar position — no cross
-          // products, no xyz of cursor points:
-          //   • ΔΘ (azimuth around the pole) → rotation ABOUT THE POLE.
-          //   • ΔΦ (polar angle from the pole) → rotation about the EQUATORIAL axis at azimuth
-          //     Θ+90° (perpendicular to the meridian you're moving along).
-          const C = s.arcPivot;
-          const HALF = Math.PI / 2;
-          // Cursor → (Φ from pole, Θ around pole), in the frozen polar frame.
-          const toSph = (clientX: number, clientY: number) => {
-            const sx = clientX - s.arcOx;
-            const sy = -(clientY - s.arcOy); // screen y up
-            const theta = (sx / s.arcRpix) * HALF;          // azimuth around the pole
-            let phi = HALF - (sy / s.arcRpix) * HALF;        // polar angle from the pole
-            phi = Math.max(0, Math.min(Math.PI, phi));
-            return { phi, theta };
-          };
-          const a = toSph(s.prevX, s.prevY);
-          const b = toSph(e.clientX, e.clientY);
+          const C = s.rotPivot;
+          const CF = cameraFrame(cam.quaternion, C, 1);
+          const prev = screenToPolar(s.prevX - s.rotCx, s.prevY - s.rotCy, s.rotPxPerRad);
+          const curr = screenToPolar(e.clientX - s.rotCx, e.clientY - s.rotCy, s.rotPxPerRad);
+          const prevDir = toWorld(CF, prev).sub(C); // unit world dir of prev cursor point
+          const currDir = toWorld(CF, curr).sub(C); // unit world dir of curr cursor point
+          const { axis, angle } = arcAxisAngle(currDir, prevDir); // rotation carrying curr→prev
+          if (angle > 1e-6 && Number.isFinite(axis.x)) {
+            const fwd = new THREE.Vector3();
+            cam.getWorldDirection(fwd);
+            const offset = cam.position.clone().sub(C);
+            const newOffset = rotateAboutAxis(offset.clone().normalize(), axis, angle).multiplyScalar(offset.length());
+            const newFwd = rotateAboutAxis(fwd, axis, angle);
+            const newUp  = rotateAboutAxis(cam.up.clone().normalize(), axis, angle);
+            cam.position.copy(C).add(newOffset);
+            cam.up.copy(newUp);
+            cam.lookAt(cam.position.clone().add(newFwd)); // final conversion: directions → three.js orientation
+            cam.updateMatrixWorld(true);
+          }
           s.prevX = e.clientX;
           s.prevY = e.clientY;
-          const dTheta = b.theta - a.theta; // around the pole
-          const dPhi = b.phi - a.phi;       // toward/away from the pole
-          if (dTheta !== 0 || dPhi !== 0) {
-            // Pole axis = diagram top (world up). Equatorial axis at azimuth Θ+90° named in the
-            // frozen equatorial basis: E(Θ+90°) = −sinΘ·e1 + cosΘ·e2.
-            const pole = new THREE.Vector3(0, 1, 0);
-            const tumbleAxis = s.arcE1.clone().multiplyScalar(-Math.sin(b.theta))
-              .add(s.arcE2.clone().multiplyScalar(Math.cos(b.theta))).normalize();
-            const qYaw = new THREE.Quaternion().setFromAxisAngle(pole, dTheta);
-            const qTumble = new THREE.Quaternion().setFromAxisAngle(tumbleAxis, dPhi);
-            const qScene = qYaw.multiply(qTumble);
-            const qCam = qScene.clone().invert(); // camera orbits opposite so content follows the cursor
-            cam.position.sub(C).applyQuaternion(qCam).add(C);
-            cam.quaternion.premultiply(qCam);
-            cam.up.applyQuaternion(qCam);
-            cam.updateMatrixWorld(true);
-            const Rcage = computeLargeSphereRadius(nodesRef.current);
-            constrainInsideLargeSphere(cam, Rcage);
-            postLog("rot", {
-              build: "polar-pole-v17",
-              phiDeg: [+((a.phi * 180) / Math.PI).toFixed(0), +((b.phi * 180) / Math.PI).toFixed(0)],
-              thetaDeg: [+((a.theta * 180) / Math.PI).toFixed(0), +((b.theta * 180) / Math.PI).toFixed(0)],
-              dThetaDeg: +((dTheta * 180) / Math.PI).toFixed(1),
-              dPhiDeg: +((dPhi * 180) / Math.PI).toFixed(1),
-            });
-            commitCamera(cam);
-          }
+          commitCamera(cam);
         }
       }
     },
-    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane, arcballPoint],
+    [cameraRef, nodesRef, scheduleNodeMove, schedulePortAnchor, unprojectToPlane],
   );
 
   const onPointerUp = useCallback(
@@ -889,15 +788,10 @@ export function useInteractionControls(
         const ZOOM_BASE = 1.01;
         const MIN_DIST = 5;
         const factor = Math.pow(ZOOM_BASE, e.deltaY);
-        const offset = cam.position.clone().sub(target);
-        const len = offset.length();
-        if (Number.isFinite(len) && len > 1e-9) {
-          let f = factor;
-          if (len * f < MIN_DIST) f = MIN_DIST / len;
-          if (Number.isFinite(f)) {
-            cam.position.copy(target).add(offset.multiplyScalar(f));
-          }
-        }
+        // Polar radial zoom: scale the camera's radius r about the target node, angles held.
+        // r is an explicit coordinate inside scaleRadius (polar.ts); direction is preserved
+        // without a (θ,φ) decomposition, so no pole singularity is introduced.
+        cam.position.copy(scaleRadius(target, cam.position, factor, MIN_DIST));
         // P7.5: keep camera inside the large sphere after dolly.
         constrainInsideLargeSphere(cam, computeLargeSphereRadius(nodesRef.current));
       } else {
@@ -909,21 +803,17 @@ export function useInteractionControls(
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const target = ensureTarget(cam);
 
-        // Camera basis in world space (orientation unchanged by pan).
-        const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
-        const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
-
         const dist = cam.position.distanceTo(target);
-
         // Perspective world units per screen pixel at `dist` (vertical FOV).
         const fovRad = (cam.fov * Math.PI) / 180;
         const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / rect.height;
 
-        // deltaY positive = scroll down. Slide camera + target along the view plane.
-        // These two signs are the per-axis flip point if a direction still feels wrong.
-        const delta = right
-          .multiplyScalar(e.deltaX * worldPerPixel)
-          .add(up.multiplyScalar(-e.deltaY * worldPerPixel));
+        // INPUT EDGE: wheel pixels → polar (r, angle) in the screen plane (−deltaY = screen up).
+        // OUTPUT EDGE: planeSlide recombines (r, angle) onto the camera right/up basis (polar.ts).
+        // The handler holds only polar quantities; both camera + target slide by the same world
+        // delta (target rides along, look-direction preserved).
+        const { r, angle } = deltaToPolar(e.deltaX, -e.deltaY);
+        const delta = planeSlide(cam.quaternion, r, angle, worldPerPixel);
         cam.position.add(delta);
         target.add(delta);
 
