@@ -9,7 +9,6 @@ import type { RFNode, NodeData } from "../types";
 import { nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
-import { ZoomGuide } from "./ZoomGuide";
 
 // ---------------------------------------------------------------------------
 // PolarSphere — two perpendicular tori tracking the polar rotation-sphere center.
@@ -60,11 +59,10 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
 // NavGuides — combined export
 // ---------------------------------------------------------------------------
 
-export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
+export function NavGuides({ nodes }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
   return (
     <>
       <PolarSphere nodes={nodes} />
-      <ZoomGuide nodes={nodes} selectedId={selectedId ?? null} />
     </>
   );
 }
