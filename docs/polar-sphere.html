@@ -60,6 +60,10 @@
   <button class="tab" data-tab="ttri">The pan triangle</button>
   <button class="tab" data-tab="tcart">Cartesian pan</button>
   <button class="tab" data-tab="tmouse">Mouse as polar</button>
+  <button class="tab" data-tab="trecenter">pan → recenter</button>
+  <button class="tab" data-tab="tzoom">Zoom</button>
+  <button class="tab" data-tab="trot">Rotation</button>
+  <button class="tab" data-tab="tplan">Plan</button>
 </nav>
 
 <!-- 2D ----------------------------------------------------------------------->
@@ -76,9 +80,8 @@
         <li><span class="k">r</span> — distance from the center.</li>
         <li><span class="kb">θ</span> — the angle around the center, from a reference direction.</li>
       </ul>
-      <p>The point sits where the <strong>radius</strong> (length <span class="k">r</span>, pointing at angle <span class="kb">θ</span>) lands on the circle. Converting to Cartesian is the schoolbook right triangle:</p>
-      <p><code>x = r·cos θ</code> &nbsp; <code>y = r·sin θ</code></p>
-      <p>The radius is the <strong>hypotenuse</strong>; its horizontal and vertical shadows are the legs. Everything in 2D lives in this one plane — there is only <em>one</em> circle and <em>one</em> angle to turn through.</p>
+      <p>The point sits where the <strong>radius</strong> (length <span class="k">r</span>, pointing at angle <span class="kb">θ</span>) lands on the circle. Two numbers — one length, one turn — name it completely.</p>
+      <p>Everything in 2D lives in this one plane: there is only <em>one</em> circle and <em>one</em> angle to turn through. To move the point you change <span class="k">r</span> (out or in) or change <span class="kb">θ</span> (turn around the center) — nothing else.</p>
     </div>
   </div>
 </section>
@@ -96,7 +99,7 @@
       <ul>
         <li><span class="k">r</span> — distance from the center (on the surface, <code>r = R</code>). This is <strong>zoom</strong>.</li>
         <li><span class="kp">φ</span> — the <strong>polar angle</strong>: how far the radius tips <em>down from the pole</em>. <code>0</code> at the top pole, <code>90°</code> at the equator, <code>180°</code> at the bottom.</li>
-        <li><span class="kb">θ</span> — the <strong>azimuth</strong>: how far <em>around</em> the pole, measured in the equatorial plane.</li>
+        <li><span class="kb">θ</span> — how far <em>around</em> the pole the radius is turned, measured along the equator.</li>
       </ul>
       <p>Direction to the point, then scale by <code>R</code>:</p>
       <p><code>dir = cos <span class="kp">φ</span>·<span class="kp">pole</span> + sin <span class="kp">φ</span>·(cos <span class="kb">θ</span>·refX + sin <span class="kb">θ</span>·refY)</code></p>
@@ -168,7 +171,7 @@
       <p>This is the 2D right triangle (<code>x = r cos θ</code>) lifted onto the sphere — the construction the editor's pan guide draws:</p>
       <ul>
         <li><span class="kr">hypotenuse</span> — the radius <code>C → P</code> to the cursor point (length <code>R</code>).</li>
-        <li><span class="kg">green line</span> — the equator (horizontal torus) diameter at the cursor's azimuth <span class="kb">θ</span>.</li>
+        <li><span class="kg">green line</span> — the equator (horizontal torus) diameter at the cursor's turn <span class="kb">θ</span>.</li>
         <li><strong>foot G</strong> — the cursor's horizontal shadow, <code>R·sin <span class="kp">φ</span></code> along <span class="kb">θ</span>, sitting <em>on</em> the green line.</li>
         <li>the <strong>right angle is at G</strong>: <code>C→G</code> (the pan offset) is horizontal, <code>G→P</code> (= <code>R·cos <span class="kp">φ</span></code>) runs straight up the pole — perpendicular by construction, every frame.</li>
       </ul>
@@ -191,7 +194,8 @@
     </figure>
     <div class="prose">
       <h2>How Cartesian does pan</h2>
-      <p>Pan in CAD/3D tools (and the editor's current pan) is a flat <strong>screen-space translation</strong>. The drag <code>(Δx, Δy)</code> in pixels becomes a world vector along the camera's own right/up axes:</p>
+      <p>Pan in CAD/3D tools is a flat <strong>screen-space translation</strong>. The drag <code>(Δx, Δy)</code> in pixels becomes a world vector along the camera's own right/up axes:</p>
+      <div class="note"><strong>The editor now pans polar</strong> (the "Mouse as polar" / "pan → recenter" tabs): the wheel <code>(Δx, Δy)</code> is converted to <code>(r, angle)</code> at the input edge, the slide runs in the refX–pole plane, an overlay shows the construction during the burst, and the polar origin recenters. Cartesian survives only at the <code>(right, up)</code> output edge — this tab is the contrast it replaced.</div>
       <p><code>Δ = right·(Δx·s) + up·(−Δy·s)</code></p>
       <p>where <code>s</code> = world-units-per-pixel at the look distance. Then <strong>both the camera and its target move by the same Δ</strong>:</p>
       <ul>
@@ -215,20 +219,202 @@
     </figure>
     <figure class="fig">
       <svg id="svgMousePolar" width="400" height="320"></svg>
-      <figcaption>The mouse's own polar sphere: <span class="kb">Δx</span> <em>is</em> the radius <span class="k">r</span>.</figcaption>
+      <figcaption>The mouse's own polar sphere: pole = up, refX = horizontal; the drag becomes <code>(<span class="k">r</span>, angle)</code>.</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg id="svgMouseCenter" width="420" height="340"></svg>
+      <figcaption>Cursor = center; pole = up, refX = horizontal; the <span class="kg">3rd line</span> is the view (into the screen).</figcaption>
     </figure>
     <div class="prose">
       <h2>The mouse as its own polar sphere</h2>
+      <div class="note"><strong>What the input provides:</strong> the browser reports every gesture in Cartesian — a wheel/trackpad <code>WheelEvent</code> hands you <code>(<span class="kb">deltaX</span>, <span class="kg">deltaY</span>)</code> in pixels (a <code>PointerEvent</code> hands you <code>clientX, clientY</code>). There is no polar event; this is the irreducible <strong>input edge</strong>, the mirror of the <code>toWorld</code> edge that feeds three.js. It is reinterpreted as polar at the <em>first</em> step — <code><span class="k">r</span> = hypot(<span class="kb">Δx</span>, <span class="kg">Δy</span>)</code>, <code>angle = atan2(<span class="kg">Δy</span>, <span class="kb">Δx</span>)</code> from refX — and nothing Cartesian flows past it.</div>
       <p>Cartesian pan reads the drag as <code>(<span class="kb">Δx</span>, <span class="kg">Δy</span>)</code> — two independent <em>linear</em> screen distances, added straight into a world translation.</p>
-      <p>Now assume the mouse <strong>makes its own polar sphere</strong>. The <em>one</em> thing reinterpreted is the magnitude: <code><span class="kb">Δx</span><sub>cartesian</sub> → <span class="k">r</span><sub>polar</sub></code>. On this sphere:</p>
+      <p>Now assume the mouse <strong>makes its own polar sphere</strong>, in the conventional frame:</p>
       <ul>
-        <li><span class="kp">pole = the view</span> (the view axis).</li>
-        <li><span class="k">refX</span> is the first segment; <span class="k">r</span> (= <span class="kb">Δx</span>) lies along it — the top of the sphere sits at <span class="k">r</span> out on refX.</li>
-        <li>a <span class="kg">3rd line</span> sits at 90° of <span class="kp">φ</span> to <strong>both</strong> the pole and refX — and <strong>that 3rd line is the pan direction</strong>.</li>
+        <li><span class="kp">pole = up</span>.</li>
+        <li><span class="k">refX = horizontal</span>; <span class="k">r</span> (= <span class="kb">Δx</span>) lies along it to the surface.</li>
+        <li>the <span class="kg">3rd line</span> (refY), ⊥ to <strong>both</strong> pole and refX, is the <strong>view</strong> — it points into the screen, the direction you look along.</li>
       </ul>
-      <div class="note"><strong>Pan is a TRANSLATION — the same action Cartesian pan does.</strong> You do <em>not</em> travel around the sphere; the origin <strong>slides in a straight line</strong> by <span class="k">r</span> along the <span class="kg">3rd line</span>. The sphere only <em>names</em> the slide's direction (the 3rd line, ⊥ view and refX) and magnitude (<span class="k">r</span>). The <span class="kp">φ</span> is a frame label, not an arc you sweep.</div>
-      <p>So the input itself is polar — <span class="kb">Δx</span> arrives <em>as</em> the slide length <span class="k">r</span>, with the direction given by the 3rd line — and the navigation stays a clean linear pan, no Cartesian delta and nothing to degenerate.</p>
+      <p>So the drag lives in the plane facing you — the <strong>refX–pole plane</strong> (horizontal × up = the screen). The pan is a slide there by <span class="k">r</span> at <code>angle</code>: <span class="kb">Δx</span> along refX, <span class="kg">Δy</span> along the pole. The <span class="kg">3rd line</span> (the view) is never moved — you slide across the face of the sphere, perpendicular to your view.</p>
+      <p>The frame is fixed by the one direction map — the <span class="kg">3rd line</span> is the quarter-turn of refX about the pole, in angles only:</p>
+      <p><code>pole : <span class="kp">φ</span> = 0</code> &nbsp;·&nbsp; <code>refX : <span class="kp">φ</span> = 90°, <span class="kb">θ</span> = 0</code> &nbsp;·&nbsp; <code><span class="kg">line3</span> (view) : <span class="kp">φ</span> = 90°, <span class="kb">θ</span> = 90°</code></p>
+      <p><code>d(<span class="kb">θ</span>,<span class="kp">φ</span>) = cos <span class="kp">φ</span> · pole + sin <span class="kp">φ</span> · (cos <span class="kb">θ</span> · refX + sin <span class="kb">θ</span> · <span class="kg">line3</span>)</code>, with <code>pole = d(<span class="kb">θ</span>,0)</code>, <code>refX = d(0,90°)</code>, <code><span class="kg">line3</span> = d(90°,90°)</code> — ⊥ to both by the angle alone, no cross product.</p>
+      <div class="note"><strong>Pan is a TRANSLATION — the same action Cartesian pan does.</strong> The origin <strong>slides in a straight line</strong> in the <strong>refX–pole plane</strong> (the screen) by <span class="k">r</span> at <code>angle</code> — <span class="kb">Δx</span> along refX, <span class="kg">Δy</span> along the pole. Nothing rotates; the view (the <span class="kg">3rd line</span>) holds still.</div>
+      <p>So the input itself is polar — <code>(<span class="kb">Δx</span>, <span class="kg">Δy</span>)</code> arrives as <code>(<span class="k">r</span>, angle)</code> and the slide stays a clean linear pan in the screen plane — no Cartesian delta in the middle, nothing to degenerate.</p>
+      <p><strong>Where is the cursor?</strong> The cursor is the <strong>center</strong> of its polar sphere. <span class="kp">pole = up</span>, <span class="k">refX = horizontal</span>, and the <span class="kg">3rd line</span> is the <strong>view</strong> pointing into the screen — you look along it. The drag's <span class="k">r</span> places the radius point on the surface in the refX–pole plane; at the first instant <span class="k">r</span> = 0, so center and point coincide; as you drag it opens out to <span class="k">r</span>, and the origin slides by that vector (right figure).</p>
     </div>
+  </div>
+</section>
+
+<!-- 3RD LINE -> RECENTER ----------------------------------------------------->
+<section class="panel" id="trecenter">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgRecenter" width="460" height="420"></svg>
+      <figcaption>Center of the polar sphere recenters by the pan slide: <span class="k">C</span> → <span class="k">C′</span>.</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg id="svgRecenterCam" width="480" height="300"></svg>
+      <figcaption>Camera change map: the camera and the center ride the pan slide together.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>The pan recenters the scene's sphere</h2>
+      <p>The mouse's polar sphere hands us a <strong>pan slide</strong>: a vector of length <span class="k">r</span> at <code>angle</code> in the <strong>refX–pole plane</strong> (the screen) — <code><span class="k">r</span> = hypot(<span class="kb">Δx</span>, <span class="kg">Δy</span>)</code>, <code>angle = atan2(<span class="kg">Δy</span>, <span class="kb">Δx</span>)</code> from refX. (The <span class="kg">3rd line</span> — the view — isn't involved; the pan lives in the plane facing you.)</p>
+      <p>Applying the pan is one move: the scene's sphere <strong>origin slides by that vector</strong>, rebased from <span class="k">C</span> to <span class="k">C′</span> — a straight slide, the same distance the drag carried.</p>
+      <ul>
+        <li>nothing rotates and no camera travels through space — only the origin is rebased;</li>
+        <li>then every node's <code>(<span class="k">r</span>, <span class="kb">θ</span>, <span class="kp">φ</span>)</code> is <strong>recomputed about <span class="k">C′</span></strong> (the red radius below is the node's new <span class="k">r′</span>);</li>
+        <li>the slide's length is the drag's <span class="k">r</span>, so the recenter distance <em>is</em> the drag.</li>
+      </ul>
+      <p>The <strong>camera rides the same pan slide</strong> as the center, so its own <code>(<span class="k">r</span>, <span class="kb">θ</span>, <span class="kp">φ</span>)</code> about the center never changes — the view holds steady while the origin moves under it (right figure).</p>
+      <p>So the mouse's little polar sphere passes its <strong>pan slide</strong> straight to the scene's big sphere as the recenter vector — direction and distance in one.</p>
+      <div class="note"><strong>Implemented — this is the editor's pan</strong> (replacing the Cartesian one). The gesture is a wheel/trackpad scroll burst:
+        <br>· <strong>Input edge:</strong> each event's <code>(<span class="kb">Δx</span>, <span class="kg">Δy</span>)</code> → <code>(<span class="k">r</span>, angle)</code> at once (<code>deltaToPolar</code>); no raw x/y flows past it.
+        <br>· <strong>Visual:</strong> during the burst the mouse's polar sphere is drawn centered on the <em>panned-to</em> location (the start anchor trails), with the <strong>pan slide</strong> of length <span class="k">r</span> shown in the refX–pole plane. It lingers ~450&nbsp;ms after the last event, then clears.
+        <br>· <strong>Motion:</strong> slide camera + target by <span class="k">r</span> in the refX–pole plane (the <code>(right, up)</code> output edge), then recenter the polar origin (<code>set-origin</code>) — <span class="k">C</span> → <span class="k">C′</span>.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ROTATION ----------------------------------------------------------------->
+<section class="panel" id="trot">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgRot" width="500" height="420"></svg>
+      <figcaption>Rotation = carry the grabbed point <span class="kr">P₀</span> to the cursor <span class="kr">P₁</span> along a great circle.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>Rotation: drag along a great circle</h2>
+      <p>An empty-space drag rotates the view. You <strong>grab</strong> the point <span class="kr">P₀</span> under the cursor on the sphere; dragging carries the cursor to <span class="kr">P₁</span>.</p>
+      <p>The view turns by the single <strong>great-circle</strong> move that carries <span class="kr">P₀</span> → <span class="kr">P₁</span> — the geodesic arc between the two points. The turn <strong>amount</strong> is that arc (the angle between them about the center).</p>
+      <p>In polar — <span class="kr">P₀</span> = (<span class="kb">θ₀</span>, <span class="kp">φ₀</span>), <span class="kr">P₁</span> = (<span class="kb">θ₁</span>, <span class="kp">φ₁</span>) about the pole. That is all it takes:</p>
+      <p>The rotation is just <strong>carry <code>(<span class="kb">θ₀</span>, <span class="kp">φ₀</span>) → (<span class="kb">θ₁</span>, <span class="kp">φ₁</span>)</code> along the great circle through them</strong>. The two angle pairs fully specify it — no extra quantity to supply, no axis to name, and no need to compute <em>how far</em> it turned (that arc is only a display readout; the rotation is built and applied straight from the two endpoints).</p>
+      <div class="note"><strong>No axis to pick, and no dome.</strong> The rotation is fixed by the two points and the great circle through them — there is no separate yaw/pitch/roll or sign to choose, so the wrong-axis bug can't be expressed. The cursor maps straight onto the sphere's surface (a point on the great circle), not onto a raised dome/hemisphere — so there is no in-dome vs off-dome seam.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ZOOM --------------------------------------------------------------------->
+<section class="panel" id="tzoom">
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgZoom" width="460" height="410"></svg>
+      <figcaption>Selected node = target. View · center · node form a triangle; the <span class="kr">hypotenuse</span> is the zoom line.</figcaption>
+    </figure>
+    <div class="prose">
+      <h2>Zoom: the view–center–node triangle</h2>
+      <p>When a node is selected it becomes the zoom <strong>target</strong>. Three points then form a triangle:</p>
+      <ul>
+        <li><strong>view</strong> — the camera;</li>
+        <li><span class="k">C</span> — the center of the sphere;</li>
+        <li><strong>node</strong> — the selected target, on the sphere.</li>
+      </ul>
+      <p>The <span class="kr">hypotenuse</span> — the <strong>view → node</strong> side — is the <strong>zoom line</strong>: a dolly slides the camera along it, <em>toward</em> the node (<strong>zoom in</strong>) or <em>away</em> (<strong>zoom out</strong>). The right angle sits at <span class="k">C</span>, with the legs the radius <span class="k">C → node</span> and the camera's offset <span class="k">C → view</span>.</p>
+      <p>In polar, take the <strong>node <code>N</code> as the pole</strong>. The view <code>V</code> is a radius–direction about it, and the zoom line <em>is</em> that radius:</p>
+      <p><code><span class="kr">d</span></code> = radius of <code>V</code> about <code>N</code>, along the held direction <code>û</code> (the <span class="kr">hypotenuse</span>). Zoom is a <strong>pure radius change</strong> — angles held: <code><span class="kr">d</span>′ = max(<span class="kr">d</span>·f, MIN_DIST)</code>, &nbsp; <code>f = 1.01<sup>s</sup></code>, &nbsp; <code>V′ = N + <span class="kr">d</span>′·û</code>, where <code>s</code> = the scroll amount (a scalar from the wheel at the input edge). &nbsp; <code>s</code> &gt; 0 → <strong>zoom out</strong>; <code>s</code> &lt; 0 → <strong>zoom in</strong>.</p>
+      <p>The <strong>view·center·node</strong> triangle ties <span class="kr">d</span> to the scene sphere by the <strong>law of cosines</strong> about <span class="k">C</span>: <code><span class="kr">d</span>² = ρ² + R² − 2·ρ·R·cos <span class="kb">γ</span></code>, where <code>ρ</code> = radius of <code>V</code> about <span class="k">C</span>, <code>R</code> = radius of <code>N</code> about <span class="k">C</span> (the sphere), and <span class="kb">γ</span> = the angle at <span class="k">C</span> between the two radii. The right-angle construction (<span class="kb">γ</span> = 90°) collapses it to <code><span class="kr">d</span>² = ρ² + R²</code>.</p>
+      <div class="note"><strong>Re-aim:</strong> a zoom first re-targets the node nearest the cursor, so the hypotenuse always points at a real node — you zoom toward whatever the mouse is on.</div>
+    </div>
+  </div>
+  <div class="row">
+    <figure class="fig">
+      <svg id="svgZoomIn" width="380" height="300"></svg>
+      <figcaption>Zoom in — camera moves toward the node; <span class="kb">γ</span> at <span class="k">C</span> shrinks.</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg id="svgZoomOut" width="380" height="300"></svg>
+      <figcaption>Zoom out — camera moves away; <span class="kb">γ</span> at <span class="k">C</span> grows.</figcaption>
+    </figure>
+    <div class="prose">
+      <h3>The angle that changes</h3>
+      <p>Zoom holds the camera's direction <em>about the node</em> (pure radius change), so the angle that <strong>moves</strong> is <span class="kb">γ</span> at the center — between <code>C → view</code> and <code>C → node</code>.</p>
+      <ul>
+        <li><strong>Zoom in:</strong> <code>C → view</code> rotates toward the node, so <span class="kb">γ</span> shrinks (→ 0 as the camera reaches the node).</li>
+        <li><strong>Zoom out:</strong> <code>C → view</code> swings away, so <span class="kb">γ</span> grows.</li>
+      </ul>
+      <p>The right-angle construction above is just the single frame where <span class="kb">γ</span> = 90°.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PLAN --------------------------------------------------------------------->
+<section class="panel" id="tplan">
+  <div class="prose" style="max-width:900px">
+    <h2>Plan: apply the polar rotate / pan / zoom to the code</h2>
+    <p>Goal: navigation math is polar; the camera stays renderer-native (three.js position + quaternion). Rotate, pan, and zoom become polar operations; Cartesian is confined to the camera's storage and the conversion edges in <code>polar.ts</code>. This removes the round-trip, the pole clamp, and the seam (see the Rotation / pan → recenter / Zoom tabs for the per-op math).</p>
+    <div class="note"><strong>Architecture that actually shipped:</strong> The camera is <strong>NOT</strong> angle-of-record. The camera stays renderer-native — three.js owns it as a position vector + orientation quaternion (the medium). All navigation <strong>math</strong> is polar; Cartesian is confined to two places only: (a) the camera's storage, and (b) the conversion edges in <code>polar.ts</code> (<code>makeFrame</code>, <code>cameraFrame</code>, <code>toWorld</code>, <code>fromWorld</code>, <code>screenToPolar</code>, <code>deltaToPolar</code>). The navigation handler (<code>interaction-controls.ts</code>) holds only polar quantities. Two grep guards enforce this and are wired into the Stop hook: <code>check-polar-only-nav.sh</code> (no Cartesian rotation math in the handler) and <code>check-no-camera-roundtrip.sh</code> (camera state never reconstructed from a position). The split is: Go owns the diagram (polar <code>(<span class="k">r</span>,<span class="kb">θ</span>,<span class="kp">φ</span>)</code>), TS owns the camera (Cartesian medium). Where a quaternion is read (in <code>cameraFrame</code>/pan), it is <em>reading</em> the renderer's orientation, not doing Euler-angle math — no gimbal lock.</div>
+
+    <h3>Phase 0 — Foundation: angle-of-record camera store <span style="color:var(--red)">[SUPERSEDED — not built]</span></h3>
+    <p>The original plan was to store the camera as <code>{ frame, <span class="k">r</span>, <span class="kb">θ</span>, <span class="kp">φ</span>, roll }</code> in a dedicated <code>camera-polar-store.ts</code>, making angles the source of truth. <strong>This was deliberately abandoned.</strong> Storing orientation as angles reintroduces the very pole singularity we were eliminating — at a pole, <span class="kb">θ</span> is undefined, so the angle-of-record representation breaks there. Instead, the camera stays renderer-native (position + quaternion), and polar-only discipline is enforced by guard scripts rather than by the data structure. <code>camera-polar-store.ts</code> was written and then deleted.</p>
+    <ul>
+      <li><strong>0.1–0.5</strong> (angle-of-record store, forward render hook, load conversion): <strong>abandoned</strong> — wrong shape; the guard-enforced renderer-native approach replaced all of these.</li>
+    </ul>
+
+    <h3>Phase 1 — Point every camera consumer at the new state <span style="color:var(--red)">[SUPERSEDED — not built]</span></h3>
+    <p>Superseded along with Phase 0. There is no <code>camera-polar-store</code> for consumers to point at. Camera readers (<code>cameraRef</code>, raycasts, label projection, <code>NavGuides</code>) continue to use the live three.js camera directly — that is correct because the camera is the medium. The <code>computeContentSphere</code> center is still used to build the polar frame for each gesture.</p>
+
+    <h3>Phase 2 — Pan <span style="color:var(--green)">[DONE]</span></h3>
+    <p>Wheel pixels → polar <code>(<span class="k">r</span>, angle)</code> via <code>deltaToPolar</code> (input edge in <code>polar.ts</code>); <code>planeSlide</code> (also in <code>polar.ts</code>) recombines onto the camera's right/up basis (output edge); camera + target slide together; <code>set-origin</code> to Go re-bases the node frame. The navigation handler (<code>interaction-controls.ts</code>) holds only the polar <code>(r, angle)</code> — no raw Cartesian delta flows past the input edge.</p>
+    <ul>
+      <li><strong>2.1</strong> Input edge <code>deltaToPolar(Δx, Δy)</code> → <code>(<span class="k">r</span>, angle)</code> — <strong>done</strong>.</li>
+      <li><strong>2.2</strong> Slide camera + target in refX–pole plane by <code>r</code> at <code>angle</code> — <strong>done</strong>.</li>
+      <li><strong>2.3</strong> Recenter: <code>set-origin</code> to Go; node <code>(<span class="k">r</span>,<span class="kb">θ</span>,<span class="kp">φ</span>)</code> recomputed about <code>C′</code> — <strong>done</strong>.</li>
+      <li><strong>2.4</strong> <code>PanPolarOverlay</code> + ~450&nbsp;ms linger — <strong>done</strong>.</li>
+    </ul>
+
+    <h3>Phase 3 — Rotation <span style="color:var(--green)">[DONE — motion-driven incremental great circle, not the original frozen-grab spec]</span></h3>
+    <p>Shipped as <strong>motion-driven incremental great-circle rotation</strong>, not the original frozen-grab/single-big-arc design. Each pointer-move event rotates by the small arc between the previous frame's cursor point and the current one. The rotation axis comes from <code>θ + 90°</code> (an equatorial direction perpendicular to the motion) — pure angle arithmetic, no cross product of the two cursor points. Applied via <code>arcAxisAngle</code> + <code>rotateAboutAxis</code> in <code>polar.ts</code>. No quaternion in the rotation math; no antipode singularity (consecutive points are only a few pixels apart so they are never antipodal); no flip; free roll rides along; pole-crossing is smooth.</p>
+    <p><strong>Rejected approaches</strong> (don't retry these): Cartesian arcball + Bell/Holroyd edge map (silhouette fold) — built and rejected; frozen-grab single-big-arc (antipode flip at large drags) — built and rejected; turntable (no free roll) — rejected by design.</p>
+    <ul>
+      <li><strong>3.1–3.2</strong> Empty-space pointer-drag gesture, discrimination from click/node-drag/wiring — <strong>done</strong>.</li>
+      <li><strong>3.3</strong> Per-frame cursor→sphere point; incremental arc — <strong>done</strong> (not frozen-grab).</li>
+      <li><strong>3.4</strong> Axis = <code>θ + 90°</code>, <code>θ += angle</code> in frame poled at the axis — <strong>done</strong> (no quaternion, no cross product, no clamp).</li>
+      <li><strong>3.5</strong> Roll widget composition — <strong>done</strong>.</li>
+    </ul>
+
+    <h3>Phase 4 — Zoom <span style="color:var(--green)">[DONE]</span></h3>
+    <p>ctrl+wheel / pinch snaps to the node nearest the cursor and scales the camera's explicit polar radius <code>r</code> about that node (<code>scaleRadius</code> in <code>polar.ts</code>), angles held; floored at <code>MIN_DIST</code>; clamped inside the large sphere. Radial-only, no degeneracy.</p>
+    <ul>
+      <li><strong>4.1</strong> Re-aim to nearest node in NDC — <strong>done</strong>.</li>
+      <li><strong>4.2</strong> <code>d′ = max(d·f, MIN_DIST)</code>, <code>f = 1.01<sup>s</sup></code>; angles held — <strong>done</strong>.</li>
+      <li><strong>4.3–4.4</strong> Node-anchored dolly; <code>constrainInsideLargeSphere</code> — <strong>done</strong>.</li>
+    </ul>
+
+    <h3>Phase 5 — Home / Fit + save &amp; restore <span style="color:var(--accent)">[PARTIAL / re-scoped]</span></h3>
+    <p>Home/Fit works (fits all nodes square-on, levels roll). Save/restore works and is <strong>correct as-is</strong>: the camera persists as position + quaternion (Cartesian), serialized by TS and written opaquely by Go via the <code>scene</code> edit op.</p>
+    <p>Sub-items 5.2/5.3 (persist as <code>(r,θ,φ,roll)</code> angles) are <strong>superseded</strong> — the camera is the viewer's medium, so Cartesian storage is correct, not a gap; persisting as angles would reintroduce the rejected angle-of-record representation for no functional gain. Optional not done: animate the Home/Fit transition.</p>
+    <ul>
+      <li><strong>5.1</strong> Home/Fit frames content, levels roll — <strong>done</strong>.</li>
+      <li><strong>5.2–5.3</strong> Persist as angles — <strong>superseded</strong> (Cartesian storage is correct).</li>
+    </ul>
+
+    <h3>Phase 6 — Prove no round-trip <span style="color:var(--green)">[DONE]</span></h3>
+    <p>Both guards exist, pass, and are wired into the Stop hook (<code>scripts/stop-checks.sh</code>). The pole test (orbit straight through a pole — smooth, no jump) passes by hand.</p>
+    <ul>
+      <li><strong>6.1</strong> <code>check-no-camera-roundtrip.sh</code> — <strong>written, passing, wired into Stop hook</strong>.</li>
+      <li><strong>6.2</strong> <code>check-polar-only-nav.sh</code> (no Cartesian rotation math in the handler) — <strong>written, passing, wired into Stop hook</strong>.</li>
+      <li><strong>6.3</strong> Pole test — <strong>passes</strong>: orbit through a pole is smooth, roll preserved, no jump.</li>
+      <li><strong>6.4</strong> Dead Cartesian scaffolding removed; <code>tsc --noEmit</code> clean — <strong>done</strong>.</li>
+    </ul>
+
+    <h3>Phase 7 — Verify end-to-end &amp; sync the spec <span style="color:var(--accent)">[IN PROGRESS]</span></h3>
+    <p>This doc update is part of Phase 7. Remaining: a hands-on no-regression pass (click-select, node-drag, wiring, edges still work).</p>
+    <ul>
+      <li><strong>7.1</strong> <code>npm run build</code> + <code>tsc --noEmit</code> + guards clean — <strong>done</strong>.</li>
+      <li><strong>7.2</strong> Editor pass: rotate / pan / zoom; pole test; roll; recenter; node-zoom; save→restore; Home/Fit; <strong>no regressions</strong> — <strong>remaining</strong>.</li>
+      <li><strong>7.3</strong> Update spec doc (this Plan tab) — <strong>in progress (this edit)</strong>.</li>
+      <li><strong>7.4</strong> Keep this Plan tab current — <strong>ongoing</strong>.</li>
+    </ul>
+
+    <h3>Phase 8 — Hardening &amp; edge cases <span style="color:var(--dim)">[DEFERRED — friction-driven]</span></h3>
+    <p>Deferred per the post-v0 posture: implement when real-world friction appears, not speculatively.</p>
+    <ul>
+      <li><strong>8.1</strong> Degenerate scenes: empty graph / single node / all-coincident nodes.</li>
+      <li><strong>8.2</strong> Cursor off the sphere → closest-point fallback (rotation &amp; pick).</li>
+      <li><strong>8.3</strong> Burst pan: one <code>set-origin</code> per frame; large scenes stay smooth.</li>
+      <li><strong>8.4</strong> Gesture conflicts: pan (wheel) vs zoom (ctrl+wheel) vs rotate (drag) vs node-drag / wiring — clean discrimination.</li>
+      <li><strong>8.5</strong> Touch: pinch = zoom, drag = rotate/pan.</li>
+    </ul>
   </div>
 </section>
 
@@ -245,9 +431,13 @@ document.getElementById("tabs").addEventListener("click", (e) => {
 // World: pole = +Y. dir(θ,φ) = (sinφ cosθ, cosφ, sinφ sinθ). View tilted about X so the
 // equator reads as an ellipse and we can see "above" the equator.
 const TILT = -22 * Math.PI / 180;
+// small yaw about the vertical (pole) axis: keeps the pole vertical but spreads
+// the equatorial axes apart in screen-x, so the 3rd line no longer hides behind it.
+const YAW = 28 * Math.PI / 180;
 function dirOf(th, ph){ return { x: Math.sin(ph)*Math.cos(th), y: Math.cos(ph), z: Math.sin(ph)*Math.sin(th) }; }
 function proj(th, ph, cx, cy, R){
-  const d = dirOf(th, ph);
+  const d0 = dirOf(th, ph);
+  const d = { x: d0.x*Math.cos(YAW) + d0.z*Math.sin(YAW), y: d0.y, z: -d0.x*Math.sin(YAW) + d0.z*Math.cos(YAW) };
   const y2 = d.y*Math.cos(TILT) - d.z*Math.sin(TILT);
   const z2 = d.y*Math.sin(TILT) + d.z*Math.cos(TILT);
   return { x: cx + R*d.x, y: cy - R*y2, front: z2 >= -0.02 };
@@ -334,15 +524,14 @@ function poleAxis(svg,cx,cy,R){
   line(svg,C.x,C.y,foot.x,foot.y,"#57b6ff",1.5);     // radius to P's equator foot
   line(svg,P.x,P.y,foot.x,foot.y,"#9aa6c0",1.5,"4 4"); // drop P → equator (down its meridian)
   dot(svg,foot.x,foot.y,"#57b6ff",4);
-  const azMid=azPts[22];
-  label(svg, azMid.x-6, azMid.y+(azMid.front?18:-8), "θ azimuth","#57b6ff",12);
+  label(svg, foot.x-66, foot.y+28, "θ turn","#57b6ff",12);
   dot(svg,C.x,C.y,"#e7ecf5",4); dot(svg,P.x,P.y,"#ff5566",5.5);
   label(svg,C.x-14,C.y+16,"C","#9aa6c0");
   label(svg,P.x+8,P.y,"P (r,θ,φ)","#ff5566",13);
-  label(svg,(C.x+P.x)/2+4,(C.y+P.y)/2-4,"r","#ff5566");
+  label(svg,(C.x+P.x)/2-16,(C.y+P.y)/2-8,"r","#ff5566");
   label(svg,C.x+10,C.y-40,"φ","#c79cff",15);
-  label(svg,eqRef.x-2,eqRef.y+16,"refX (θ=0)","#9aa6c0",11);
-  label(svg,proj(Math.PI/2,Math.PI/2,cx,cy,R).x-30,proj(Math.PI/2,Math.PI/2,cx,cy,R).y+4,"equator","#66ff99",11);
+  label(svg,eqRef.x+8,eqRef.y+14,"refX (θ=0)","#9aa6c0",11);
+  label(svg,proj(2.35,Math.PI/2,cx,cy,R).x-46,proj(2.35,Math.PI/2,cx,cy,R).y-4,"equator","#66ff99",11);
 })();
 
 // ---- diff: radius sweeping a tilted disk -----------------------------------
@@ -358,8 +547,8 @@ function poleAxis(svg,cx,cy,R){
     if(!p.front){}
   }
   dot(svg,cx,cy,"#e7ecf5",4);
-  label(svg,cx-120,cy-120,"the radius sweeps a DISK","#ffcc44",13);
-  label(svg,cx-120,cy-102,"(a full circle in 3D, not a line)","#9aa6c0",12);
+  label(svg,cx-135,cy-178,"the radius sweeps a DISK","#ffcc44",13);
+  label(svg,cx-135,cy-160,"(a full circle in 3D, not a line)","#9aa6c0",12);
 })();
 
 // ---- frame -----------------------------------------------------------------
@@ -403,9 +592,9 @@ function poleAxis(svg,cx,cy,R){
   label(svg,cx-14,cy+18,"C","#9aa6c0");
   label(svg,P.x+8,P.y,"P (cursor)","#ff5566",12);
   label(svg,G.x+6,G.y+14,"G (right angle)","#ffcc44",11);
-  label(svg,(cx+P.x)/2+4,(cy+P.y)/2-4,"r","#ff5566");
+  label(svg,(cx+P.x)/2-18,(cy+P.y)/2-6,"r","#ff5566");
   label(svg,gB.x-4,gB.y+14,"green line","#66ff99",11);
-  label(svg,(G.x+P.x)/2+6,(G.y+P.y)/2,"R·cosφ","#57b6ff",11);
+  label(svg,(G.x+P.x)/2+6,(G.y+P.y)/2,"r·cosφ","#57b6ff",11);
 })();
 
 // ---- Cartesian pan: screen-space rigid slide -------------------------------
@@ -443,7 +632,7 @@ function poleAxis(svg,cx,cy,R){
   arrow(svg,C[0],C[1],C2[0],C2[1],"#66ff99",2.5);
   arrow(svg,T[0],T[1],T2[0],T2[1],"#66ff99",2.5);
   label(svg,C2[0]-30,C2[1]-16,"camera","#57b6ff",12);
-  label(svg,T2[0]+8,T2[1],"target","#ffcc44",12);
+  label(svg,T2[0]-30,T2[1]-12,"target","#ffcc44",12);
   label(svg,150,40,"same Δ on both","#66ff99",12);
   label(svg,150,58,"→ look direction unchanged","#9aa6c0",12);
 })();
@@ -463,30 +652,198 @@ function poleAxis(svg,cx,cy,R){
   label(svg,30,250,"flat, linear: (Δx, Δy)","#9aa6c0",12);
 })();
 
-// ---- mouse: its own polar sphere — pole=view, r on refX, 3rd line = pan -----
+// ---- mouse: its own polar sphere — pole=up, refX=horizontal, 3rd line=view --
 (function(){
-  const svg=document.getElementById("svgMousePolar"), cx=205, cy=170, R=118;
-  sphere(svg,cx,cy,R);
-  // pole = the view (vertical axis)
-  const top=proj(0,0,cx,cy,R), bot=proj(0,Math.PI,cx,cy,R);
-  line(svg,cx,bot.y+16,cx,top.y-16,"#c79cff",2);
-  label(svg,cx+8,top.y-8,"pole = view","#c79cff",12);
-  // refX (first segment) carrying r = Δx
-  const refX=proj(0,Math.PI/2,cx,cy,R);
-  line(svg,cx,cy,refX.x,refX.y,"#57b6ff",3.5);
-  label(svg,refX.x+6,refX.y+4,"refX: r = Δx","#57b6ff",12);
-  // 3rd line = pan direction (the other equatorial axis, ⟂ to both pole and refX)
-  const refY=proj(Math.PI/2,Math.PI/2,cx,cy,R);
-  line(svg,cx,cy,refY.x,refY.y,"#66ff99",2.5);
-  label(svg,refY.x-30,refY.y+16,"3rd line","#66ff99",12);
-  // the pan = slide the origin by r along the 3rd line (a TRANSLATION, not a sweep)
-  const dxp=(refY.x-cx), dyp=(refY.y-cy);
-  arrow(svg,cx,cy,cx+dxp*0.92,cy+dyp*0.92,"#ffcc44",3.5);
-  label(svg,cx+dxp*0.5-10,cy+dyp*0.5-8,"pan = slide r","#ffcc44",12);
-  dot(svg,cx,cy,"#e7ecf5",4.5);
-  label(svg,cx-95,cy-108,"mouse's polar sphere (pole = view)","#9aa6c0",12);
-  label(svg,cx-95,cy+118,"straight slide, not a sweep","#9aa6c0",11);
+  const svg=document.getElementById("svgMousePolar"), cx=205, cy=175, R=115;
+  svg.appendChild(el("circle",{cx,cy,r:R,fill:"#10182e",stroke:"#2f3a5c","stroke-width":1.5}));
+  svg.appendChild(el("circle",{cx,cy,r:R*0.6,fill:"none",stroke:"#222a44","stroke-width":1}));
+  // pole = up
+  line(svg,cx,cy-R,cx,cy+R,"#c79cff",2); label(svg,cx+8,cy-R+16,"pole (up)","#c79cff",12);
+  // refX = horizontal
+  line(svg,cx,cy,cx+R,cy,"#57b6ff",3); label(svg,cx+R-96,cy+18,"refX (horizontal)","#57b6ff",12);
+  // 3rd line = view (into the screen): ⊙, ⟂ to both pole and refX
+  svg.appendChild(el("circle",{cx,cy,r:10,fill:"none",stroke:"#66ff99","stroke-width":2}));
+  // pan = slide in the refX–pole plane (the screen) by r at angle θ
+  arrow(svg,cx,cy,cx+74,cy-58,"#ffcc44",3.5);
+  label(svg,cx+30,cy-62,"pan = slide r","#ffcc44",12);
+  dot(svg,cx,cy,"#e7ecf5",4);
+  label(svg,cx-95,cy-R-6,"mouse's polar sphere (pole = up)","#9aa6c0",12);
+  label(svg,cx-118,cy+46,"3rd line = view ⊙ (into screen)","#66ff99",11);
+  label(svg,cx-95,cy+R+18,"pan slides in the refX–pole plane","#9aa6c0",11);
 })();
+
+// ---- mouse: cursor = center, pole = up, refX = horizontal ------------------
+(function(){
+  const svg=document.getElementById("svgMouseCenter"), cx=210, cy=175, R=118;
+  svg.appendChild(el("circle",{cx,cy,r:R,fill:"#10182e",stroke:"#2f3a5c","stroke-width":1.5}));
+  svg.appendChild(el("circle",{cx,cy,r:R*0.6,fill:"none",stroke:"#222a44","stroke-width":1}));
+  label(svg,cx-150,cy-R-2,"cursor = center, pole = up","#9aa6c0",11);
+  // pole = up
+  line(svg,cx,cy-R,cx,cy+R,"#c79cff",2); label(svg,cx+8,cy-R+16,"pole (up)","#c79cff",12);
+  // refX = horizontal; r = Δx out along it to the surface (radius point)
+  line(svg,cx,cy,cx+R,cy,"#57b6ff",3.5); dot(svg,cx+R,cy,"#57b6ff",6);
+  label(svg,cx+R-150,cy+18,"radius point: r = Δx","#57b6ff",12);
+  // 3rd line = view (into screen) ⊙ at center; the cursor sits here
+  svg.appendChild(el("circle",{cx,cy,r:10,fill:"none",stroke:"#66ff99","stroke-width":2}));
+  dot(svg,cx,cy,"#ffcc44",5);
+  label(svg,cx-150,cy+24,"cursor = center","#ffcc44",12);
+  label(svg,cx-150,cy+42,"3rd line = view ⊙ (into screen)","#66ff99",11);
+})();
+
+// ---- 3rd line -> recenter the scene sphere ---------------------------------
+(function(){
+  const svg=document.getElementById("svgRecenter"), R=92;
+  const C0={x:150,y:225}, drag={x:104,y:-58};          // 3rd-line slide: direction + magnitude r
+  const C1={x:C0.x+drag.x,y:C0.y+drag.y};
+  // old sphere — faint ghost outline
+  svg.appendChild(el("circle",{cx:C0.x,cy:C0.y,r:R,fill:"none",stroke:"#2b3350","stroke-width":1.5,"stroke-dasharray":"5 5"}));
+  // new sphere — solid scaffold
+  sphere(svg,C1.x,C1.y,R);
+  // a node, fixed on screen; its radius is recomputed about the NEW center
+  const P={x:C1.x+70,y:C1.y+44};
+  line(svg,C0.x,C0.y,P.x,P.y,"#5a6275",1.5,"4 4");     // old radius about C
+  line(svg,C1.x,C1.y,P.x,P.y,"#ff5566",2.5);            // new radius r′ about C′
+  // the 3rd-line drag = the recenter vector
+  arrow(svg,C0.x,C0.y,C1.x,C1.y,"#66ff99",3.5);
+  dot(svg,C0.x,C0.y,"#9aa6c0",4); dot(svg,C1.x,C1.y,"#e7ecf5",4.5); dot(svg,P.x,P.y,"#ff5566",5);
+  label(svg,C0.x-58,C0.y+6,"C (old)","#9aa6c0",12);
+  label(svg,C1.x+6,C1.y-6,"C′ (new)","#e7ecf5",12);
+  label(svg,40,C1.y-18,"pan slide = r","#66ff99",12);
+  label(svg,P.x+8,P.y+4,"node","#ff5566",12);
+  label(svg,(C1.x+P.x)/2-2,(C1.y+P.y)/2-6,"r′","#ff5566",12);
+})();
+
+// ---- rotation: drag P0 -> P1 along a great circle (pole = up, refX = horizontal) --
+(function(){
+  const svg=document.getElementById("svgRot"), cx=235, cy=205, R=150;
+  sphere(svg,cx,cy,R);
+  const cosY=Math.cos(YAW), sinY=Math.sin(YAW), cosT=Math.cos(TILT), sinT=Math.sin(TILT);
+  function projDir(d){ const x=d.x*cosY+d.z*sinY, z=-d.x*sinY+d.z*cosY, y=d.y; const y2=y*cosT-z*sinT, z2=y*sinT+z*cosT; return {x:cx+R*x,y:cy-R*y2,front:z2>=-0.02}; }
+  function slerp(a,b,t){ let dt=a.x*b.x+a.y*b.y+a.z*b.z; dt=Math.max(-1,Math.min(1,dt)); const O=Math.acos(dt); if(O<1e-6) return a; const s=Math.sin(O),u=Math.sin((1-t)*O)/s,v=Math.sin(t*O)/s; return {x:u*a.x+v*b.x,y:u*a.y+v*b.y,z:u*a.z+v*b.z}; }
+  // pole = up
+  const top=proj(0,0,cx,cy,R), bot=proj(0,Math.PI,cx,cy,R);
+  line(svg,cx,bot.y+18,cx,top.y-18,"#c79cff",2); label(svg,top.x+8,top.y-10,"pole (up)","#c79cff",12);
+  // refX = horizontal (the θ = 0 reference on the equator)
+  const refX=proj(0,Math.PI/2,cx,cy,R);
+  line(svg,cx,cy,refX.x,refX.y,"#57b6ff",1.6); dot(svg,refX.x,refX.y,"#57b6ff",4);
+  label(svg,refX.x-128,refX.y+18,"refX (horizontal)","#57b6ff",11);
+  // two well-separated points (opposite sides, clear of the pole)
+  const TH0=42*Math.PI/180, PH0=74*Math.PI/180, TH1=146*Math.PI/180, PH1=74*Math.PI/180;
+  const d0=dirOf(TH0,PH0), d1=dirOf(TH1,PH1), P0=projDir(d0), P1=projDir(d1);
+  line(svg,cx,cy,P0.x,P0.y,"#7a8398",1.5); line(svg,cx,cy,P1.x,P1.y,"#7a8398",1.5);
+  // φ arcs (pole → P, the polar angle of each point)
+  sphereCurve(svg,s=>projDir(dirOf(TH0,PH0*s)),48,cx,cy,R,"#c79cff",2);
+  sphereCurve(svg,s=>projDir(dirOf(TH1,PH1*s)),48,cx,cy,R,"#c79cff",2);
+  // great-circle arc P0 -> P1 (front solid, back dashed)
+  sphereCurve(svg,t=>projDir(slerp(d0,d1,t)),80,cx,cy,R,"#ff5566",3);
+  const pa=projDir(slerp(d0,d1,0.9)); arrow(svg,pa.x,pa.y,P1.x,P1.y,"#ff5566",3);
+  dot(svg,cx,cy,"#e7ecf5",4); dot(svg,P0.x,P0.y,"#ffcc44",6); dot(svg,P1.x,P1.y,"#ff5566",6);
+  const m0=projDir(dirOf(TH0,PH0*0.5)), m1=projDir(dirOf(TH1,PH1*0.5)), mc=projDir(slerp(d0,d1,0.5));
+  label(svg,m0.x+6,m0.y+2,"φ₀","#c79cff",12);
+  label(svg,m1.x-22,m1.y+2,"φ₁","#c79cff",12);
+  label(svg,mc.x-34,mc.y+44,"great circle","#ff5566",11);
+  label(svg,P0.x+10,P0.y+6,"P₀ (θ₀, φ₀)","#ffcc44",12);
+  label(svg,P1.x-120,P1.y+6,"P₁ (θ₁, φ₁)","#ff5566",12);
+  label(svg,cx-150,26,"carry (θ₀,φ₀) → (θ₁,φ₁) along the great circle","#9aa6c0",12);
+})();
+
+// ---- zoom: view–center–node triangle, hypotenuse = zoom line --------------
+(function(){
+  const svg=document.getElementById("svgZoom"), cx=230, cy=210, R=175;
+  // sphere large enough to hold the viewer inside it
+  svg.appendChild(el("circle",{cx,cy,r:R,fill:"#10182e",stroke:"#2f3a5c","stroke-width":1.5}));
+  const C={x:cx,y:cy}, N={x:cx+120,y:cy}, V={x:cx,y:cy-150};
+  // legs: C→node (radius) and C→view (camera offset)
+  line(svg,C.x,C.y,N.x,N.y,"#ffcc44",2.5);
+  line(svg,C.x,C.y,V.x,V.y,"#9aa6c0",2,"5 4");
+  // hypotenuse = zoom line (double-headed): toward node = zoom in, toward view = zoom out
+  arrow(svg,V.x,V.y,N.x,N.y,"#ff5566",3);
+  arrow(svg,N.x,N.y,V.x,V.y,"#ff5566",3);
+  // right angle at C (between C→node and C→view)
+  const sq=12;
+  svg.appendChild(poly([{x:C.x,y:C.y-sq},{x:C.x+sq,y:C.y-sq},{x:C.x+sq,y:C.y}],{fill:"none",stroke:"#e7ecf5","stroke-width":1.4}));
+  // camera wedge at the view (apex toward the node)
+  svg.appendChild(el("path",{d:`M ${V.x+10} ${V.y+10} L ${V.x-12} ${V.y-8} L ${V.x+14} ${V.y-12} Z`,fill:"none",stroke:"#57b6ff","stroke-width":2}));
+  dot(svg,C.x,C.y,"#e7ecf5",4.5); dot(svg,N.x,N.y,"#ffcc44",6); dot(svg,V.x,V.y,"#57b6ff",5);
+  label(svg,V.x-46,V.y-14,"view","#57b6ff",12);
+  label(svg,C.x-58,C.y+18,"C (sphere center)","#9aa6c0",12);
+  label(svg,N.x+8,N.y+4,"node (target)","#ffcc44",12);
+  label(svg,(V.x+N.x)/2+12,(V.y+N.y)/2-6,"hypotenuse =","#ff5566",12);
+  label(svg,(V.x+N.x)/2+12,(V.y+N.y)/2+10,"zoom in ⟷ out","#ff5566",12);
+})();
+
+// ---- zoom in: camera → node, γ at C shrinks -------------------------------
+(function(){
+  const svg=document.getElementById("svgZoomIn"), C={x:150,y:160}, R=130;
+  function arc(V,ar,col){ const a=Math.atan2(V.y-C.y,V.x-C.x),pts=[],M=16; for(let i=0;i<=M;i++){const t=a*(i/M);pts.push({x:C.x+Math.cos(t)*ar,y:C.y+Math.sin(t)*ar});} svg.appendChild(poly(pts,{fill:"none",stroke:col,"stroke-width":2})); const am=a/2; return [C.x+Math.cos(am)*(ar+18),C.y+Math.sin(am)*(ar+18)]; }
+  function cam(V,col,op){ svg.appendChild(el("path",{d:`M ${V.x} ${V.y} L ${V.x-13} ${V.y-7} L ${V.x-13} ${V.y+7} Z`,fill:"none",stroke:col,"stroke-width":2,"stroke-opacity":op})); }
+  svg.appendChild(el("circle",{cx:C.x,cy:C.y,r:R,fill:"#10182e",stroke:"#2f3a5c","stroke-width":1.5}));
+  const N={x:C.x+85,y:C.y}, u={x:-0.270,y:-0.963};
+  const Vs={x:N.x+120*u.x,y:N.y+120*u.y};  // start (far)
+  const Ve={x:N.x+55*u.x,y:N.y+55*u.y};    // end (near)
+  line(svg,C.x,C.y,N.x,N.y,"#ffcc44",2); dot(svg,N.x,N.y,"#ffcc44",5.5); label(svg,N.x+6,N.y+4,"node N","#ffcc44",11);
+  line(svg,Vs.x,Vs.y,N.x,N.y,"#46537a",1.5,"4 4");
+  line(svg,C.x,C.y,Vs.x,Vs.y,"#7a8398",1.5);
+  arc(Vs,60,"#9aa6c0"); cam(Vs,"#9aa6c0",0.6);
+  line(svg,C.x,C.y,Ve.x,Ve.y,"#57b6ff",2);
+  arc(Ve,34,"#57b6ff"); cam(Ve,"#57b6ff",1);
+  arrow(svg,Vs.x,Vs.y,Ve.x,Ve.y,"#66ff99",2.5);
+  dot(svg,C.x,C.y,"#e7ecf5",4); label(svg,C.x-16,C.y+16,"C","#9aa6c0",11);
+  // γ values in the open lower area, color-matched to their arcs (start dim, end blue)
+  label(svg,C.x+44,C.y+50,"γ=65°  (far)","#9aa6c0",12);
+  label(svg,C.x+44,C.y+72,"γ=37°  (near)","#57b6ff",12);
+  label(svg,18,24,"zoom in: V → N, γ shrinks","#66ff99",12);
+})();
+
+// ---- zoom out: camera away, γ at C grows ----------------------------------
+(function(){
+  const svg=document.getElementById("svgZoomOut"), C={x:150,y:160}, R=130;
+  function arc(V,ar,col){ const a=Math.atan2(V.y-C.y,V.x-C.x),pts=[],M=16; for(let i=0;i<=M;i++){const t=a*(i/M);pts.push({x:C.x+Math.cos(t)*ar,y:C.y+Math.sin(t)*ar});} svg.appendChild(poly(pts,{fill:"none",stroke:col,"stroke-width":2})); const am=a/2; return [C.x+Math.cos(am)*(ar+18),C.y+Math.sin(am)*(ar+18)]; }
+  function cam(V,col,op){ svg.appendChild(el("path",{d:`M ${V.x} ${V.y} L ${V.x-13} ${V.y-7} L ${V.x-13} ${V.y+7} Z`,fill:"none",stroke:col,"stroke-width":2,"stroke-opacity":op})); }
+  svg.appendChild(el("circle",{cx:C.x,cy:C.y,r:R,fill:"#10182e",stroke:"#2f3a5c","stroke-width":1.5}));
+  const N={x:C.x+85,y:C.y}, u={x:-0.270,y:-0.963};
+  const Vs={x:N.x+55*u.x,y:N.y+55*u.y};    // start (near)
+  const Ve={x:N.x+120*u.x,y:N.y+120*u.y};  // end (far)
+  line(svg,C.x,C.y,N.x,N.y,"#ffcc44",2); dot(svg,N.x,N.y,"#ffcc44",5.5); label(svg,N.x+6,N.y+4,"node N","#ffcc44",11);
+  line(svg,Ve.x,Ve.y,N.x,N.y,"#46537a",1.5,"4 4");
+  line(svg,C.x,C.y,Vs.x,Vs.y,"#7a8398",1.5);
+  arc(Vs,34,"#9aa6c0"); cam(Vs,"#9aa6c0",0.6);
+  line(svg,C.x,C.y,Ve.x,Ve.y,"#57b6ff",2);
+  arc(Ve,60,"#57b6ff"); cam(Ve,"#57b6ff",1);
+  arrow(svg,Vs.x,Vs.y,Ve.x,Ve.y,"#66ff99",2.5);
+  dot(svg,C.x,C.y,"#e7ecf5",4); label(svg,C.x-16,C.y+16,"C","#9aa6c0",11);
+  // γ values in the open lower area, color-matched to their arcs (start dim, end blue)
+  label(svg,C.x+44,C.y+50,"γ=37°  (near)","#9aa6c0",12);
+  label(svg,C.x+44,C.y+72,"γ=65°  (far)","#57b6ff",12);
+  label(svg,18,24,"zoom out: V away, γ grows","#66ff99",12);
+})();
+
+// ---- recenter: camera change map (camera + center ride the 3rd line) -------
+(function(){
+  const svg=document.getElementById("svgRecenterCam");
+  const sx=72, sy=-46;                                   // the 3rd-line slide: direction + magnitude r
+  function cam(x,y,c,ghost){
+    const op=ghost?0.4:1;
+    svg.appendChild(el("path",{d:`M ${x} ${y} L ${x-22} ${y-10} L ${x-22} ${y+10} Z`,fill:"none",stroke:c,"stroke-width":2,"stroke-opacity":op}));
+  }
+  const C=[90,235], O=[300,170];                         // camera, sphere center (old)
+  cam(C[0],C[1],"#57b6ff",true);
+  svg.appendChild(el("circle",{cx:O[0],cy:O[1],r:26,fill:"none",stroke:"#566","stroke-width":1.5,"stroke-dasharray":"4 4"}));
+  dot(svg,O[0],O[1],"#566",4);
+  line(svg,C[0],C[1],O[0],O[1],"#2b3350",1.5);
+  const C2=[C[0]+sx,C[1]+sy], O2=[O[0]+sx,O[1]+sy];      // both ride the 3rd line by r
+  cam(C2[0],C2[1],"#57b6ff",false);
+  svg.appendChild(el("circle",{cx:O2[0],cy:O2[1],r:26,fill:"none",stroke:"#c79cff","stroke-width":1.8}));
+  dot(svg,O2[0],O2[1],"#e7ecf5",4.5);
+  line(svg,C2[0],C2[1],O2[0],O2[1],"#57b6ff",2);         // view line — parallel (unchanged)
+  arrow(svg,C[0],C[1],C2[0],C2[1],"#66ff99",2.5);
+  arrow(svg,O[0],O[1],O2[0],O2[1],"#66ff99",2.5);
+  label(svg,C2[0]-30,C2[1]-14,"camera","#57b6ff",12);
+  label(svg,O2[0]-148,O2[1]-30,"sphere center","#c79cff",12);
+  label(svg,120,30,"both ride the pan slide by r","#66ff99",12);
+  label(svg,120,48,"→ camera's (r, φ, θ) unchanged","#9aa6c0",12);
+})();
+
 </script>
 </body>
 </html>
