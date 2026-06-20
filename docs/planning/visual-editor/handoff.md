@@ -8,151 +8,76 @@ needed) and proceed.
 
 ---
 
-## Active branch: task/roll-axis-camera — NAVIGATION GOING FULLY POLAR (NOT merged)
+## Active branch: none — polar navigation SHIPPED to `main`
 
-This branch started as "make roll/rotation work" and turned into a deeper decision:
-**navigation should be polar end-to-end (pan, zoom, rotate), with Cartesian demoted to
-pure plumbing (render + the cursor's raycast).** Driven by a hyperphantasic user whose
-spatial model is exact, so the usual Cartesian approximations read as *wrong*, not
-"fine."
+The polar-navigation work is merged to `main` (merge `3230850c`, pushed to origin) and
+all its task branches are deleted. There is no in-flight branch. Start new work from
+`main` with a fresh `task/<short-name>` branch.
 
-### The decision (user endorsed)
-- **Everything polar.** The diagram is already polar (the merged polar layout model);
-  navigation is the last Cartesian holdout, and that's where all the friction lived.
-- **Diagram-sphere pole = the diagram's own top axis = world Y, FIXED** (the user chose
-  this — "do b" — over a camera-up pole). The diagram's polar frame is anchored to the
-  diagram, not the view. (The MOUSE/pan sphere is a SEPARATE sphere with a different
-  pole — see the pan construction below.)
-- **Cartesian is plumbing, not the model.** It survives only at two edges: the cursor's
-  raycast (input) and converting an angle pair to a world point for drawing (output).
-- This **overturns the old `pan/zoom = Cartesian prism` doctrine** in MODEL.md/CLAUDE.md.
-  The docs have NOT been updated yet — doing so is an open task.
+## What shipped
 
-### The polar PAN construction (user's exact spec — NOT yet coded)
-**PAN IS A TRANSLATION — the same action Cartesian pan describes. You do NOT travel around
-the sphere when you pan; the origin slides in a straight line.** The polar frame only
-*names* that slide's direction and magnitude in polar terms; θ/φ are frame labels, NOT an
-arc you sweep. This construction lives on the **mouse's own polar sphere** (distinct from
-the diagram sphere):
-- **Pole = the VIEW** (the view axis) — the mouse-sphere's pole is the view, not world Y.
-- **refX = the first line segment; `r` lies along it.** The mouse's horizontal travel is
-  reinterpreted as a radius: `Δx_cartesian → r_polar` (the slide's MAGNITUDE). The top of
-  the sphere sits at distance `r` out along refX. (This `Δx → r` is the ONLY thing
-  specified about the mouse; do not extrapolate other θ/φ mappings.)
-- **The pole and refX meet at 90°** (a quarter-turn of φ apart).
-- **A 3rd line sits at 90° of φ to BOTH** the pole and refX (the third orthogonal axis).
-  **That 3rd line is the pan DIRECTION** — the polar version of the Cartesian pan offset.
-- **The pan = slide the origin by `r` along that 3rd line** (a linear translation,
-  identical in effect to the Cartesian pan, just with direction+magnitude expressed in the
-  polar frame). Then rebase the diagram-sphere origin by that slide + Go `reOrigin`
-  recomputes every node's (r,θ,φ). The OFFSET is `r` along the 3rd line, not a screen Δ
-  and not a sweep around the sphere.
+**Navigation is polar; Cartesian is confined to two edges.** The camera stays
+renderer-native (three.js `position` vector + orientation quaternion — the medium, owned
+by TS, saved to `topology.scene.json` opaquely through Go's `writeScene`). All navigation
+MATH is polar, and the only Cartesian lives in (a) the camera's storage and (b) the
+conversion helpers in `tools/topology-vscode/src/webview/three/polar.ts`. The handler
+`interaction-controls.ts` holds only polar quantities.
 
-### What is built (this branch)
-- **`polar.ts` — the polar toolkit** (new). `Polar {theta, phi}`, `PolarFrame`,
-  `makeFrame` / `toWorld` / `fromWorld` / `equatorDir` / `equatorPoint`. The ONLY
-  Cartesian is quarantined inside `makeFrame` (builds the equatorial ref axes once) and
-  `toWorld` (render output). Navigation code importing only this has no cross product in
-  reach — so the cross-product degeneracy (the 180° flips) cannot be expressed.
-- **Rotation = polar** (`interaction-controls.ts`, build marker `polar-pole-v17`).
-  Cursor screen-polar (ρ,θ) → spherical (Φ from the top pole, Θ around it); rotation is
-  built from the angle CHANGES about polar-named axes — ΔΘ rotates about the POLE, ΔΦ
-  about the EQUATORIAL axis at azimuth Θ+90°. No cross products of cursor points; log
-  reads in polar. NOTE: predates `polar.ts` and still builds its axes with a couple of
-  `Vector3` ops — moving it onto `polar.ts` is an open task.
-- **Pan GUIDE (visualization only)** — `PanGuide.tsx`, rebuilt on `polar.ts`, pole =
-  world Y. Draws from the cursor as (θ,φ): the **disk** (meridian at azimuth θ —
-  angle-defined, can't degenerate), the **green line** (equator/horizontal-torus diameter
-  at θ), the **red radius** (C→P), and the **trig right triangle** with the right angle at
-  the foot **G on the green line** (`R·sin φ` along θ), height `R·cos φ` up the pole,
-  hypotenuse = radius. Right angle on the green line by construction, every frame, no
-  flips. THIS IS A GUIDE — note it currently uses the world-Y diagram pole; the user's
-  pan construction above uses the VIEW as the pole, so the guide may need re-pointing when
-  pan is actually wired.
-- **Zoom GUIDE** — `ZoomGuide.tsx`: triangle C → camera(tip of r) → selected node,
-  hypotenuse = the zoom travel line. Visualization only.
-- **Tori reverted to WORLD-FIXED** (`NavGuides.tsx`): 4 great-circle tori at 0/45/90/135
-  about X; horizontal torus normal = world Y = the diagram pole.
-- **`docs/polar-sphere.html`** — 7-tab visual explainer (2D polar / 3D spherical / what 3D
-  adds / the frame / the pan triangle / Cartesian pan / mouse-as-polar), SVG diagrams from
-  one shared tilt-projected sphere fn. The "mouse-as-polar" tab over-states beyond `Δx→r`
-  (it sketches θ too) — trim it to just `Δx→r` and the 3rd-line pan when revisited.
-- `cursor-store.ts` (new): last canvas cursor px, feeds the guides.
+- **Pan** — wheel px → polar `(r, angle)` via `deltaToPolar` (input edge); `planeSlide`
+  recombines onto the camera right/up basis (output edge); camera + target slide together;
+  `set-origin` to Go re-bases the node frame.
+- **Rotation** — MOTION-DRIVEN great circle (empty-space drag). Each frame rotates by the
+  small arc between last and current cursor points; axis from `θ + 90°` (no cursor-point
+  cross product, no quaternion), applied via `arcAxisAngle` + `rotateAboutAxis`. Roll works
+  (it accumulates from curved drags); screen-relative, so a horizontal drag stays horizontal
+  only when the view is upright — that is the accepted tradeoff of motion-driven.
+- **Zoom** — `scaleRadius`: explicit polar `r` about the node nearest the cursor; angles
+  held; floored at MIN_DIST; clamped inside the large sphere.
+- **Diagram layout** is polar in Go (`(r,θ,φ)`); co-sphere radius coupling in
+  `node_move.go` resizes the sphere(s) a dragged surface node sits on (this superseded the
+  old `x-lock` and `drag-resize-sphere` branches, both deleted as redundant).
 
-### NOT built / open (the real next steps)
-1. **Actual polar PAN is not wired.** The pan that runs is still the OLD Cartesian camera
-   translation + throttled `set-origin` (interaction-controls.ts ~line 904). Wire the
-   construction above: gesture → `Δx → r` on the mouse-sphere (pole = view) → the 3rd-line
-   pan offset → rebase the diagram-sphere origin → Go `reOrigin` recomputes node (r,θ,φ).
-2. **Actual polar ZOOM is not wired** (partly designed). `r` = camera's radial distance
-   from center (R on the sphere, <R inside); each zoom unit travels the hypotenuse toward
-   the SELECTED node; rotation/pan clears the zoom line.
-3. **Rotation needs hands-on editor verify** (direction/feel). Polar in code, untested by
-   the user this session; a reversed sense is a one-line flip.
-4. **Move rotation onto `polar.ts`** (it has its own vector math now).
-5. **Update MODEL.md + CLAUDE.md** to "navigation is polar end-to-end; Cartesian is
-   plumbing" — overturns the written `pan/zoom = Cartesian prism` line. Pending go-ahead.
-6. **Trim the explainer's mouse-as-polar tab** to just `Δx→r` + the 3rd-line pan.
+**Guards (code self-defends).** Two greps wired into the Stop hook
+(`scripts/stop-checks.sh`):
+- `tools/check-polar-only-nav.sh` — no Cartesian rotation math
+  (`setFromUnitVectors`/`cross`/`setFromAxisAngle`/`setFromMatrixColumn`/`Spherical`/`Raycaster`/`unproject`)
+  in the nav handler.
+- `tools/check-no-camera-roundtrip.sh` — camera state never reconstructed from a position.
+
+**Explainer.** `docs/polar-sphere.html` "Plan" tab is synced to the shipped architecture
+(camera = Cartesian medium; rotation = motion-driven; Phases 0/1 angle-of-record and
+5.2/5.3 angle-persistence marked superseded by design).
+
+## Carry-forward (hard-won — READ THIS)
+
+- **THE AI DEFAULTS TO CARTESIAN AND IT SURVIVES CORRECTION.** Across ~dozens of rotation
+  rebuilds the assistant kept re-encoding the polar spec as Cartesian machinery (arcball +
+  Bell/Holroyd edge map, frozen-grab single-big-arc → antipode flip, turntable → no roll,
+  grab-a-point → finite-sphere rim + snap). Each time it added a clamp/guard/fold at the
+  boundary instead of defining honest behavior. The structural defense is `polar.ts` + the
+  guard: navigation goes THROUGH the toolkit; do not reach for `Vector3.cross`, sphere
+  raycasts, or angle-stored orientation in nav logic. (Memory:
+  `feedback_make_bug_class_unrepresentable`, `feedback_users_interaction_spec_is_the_model`.)
+- **A finite sphere viewed from outside has a real rim** (visible cap ≈ `acos(R/D)`, not
+  90°). "Grab a point on the sphere" inherits that rim; "motion-driven" has no sphere and no
+  rim. The user chose motion-driven knowing the tradeoffs (path-dependent roll, not
+  pixel-locked).
+- **Run the guards before declaring nav work done**; the Stop hook does it automatically.
+  NEVER run the sim in the foreground.
+
+## Open / next (friction-driven, nothing in flight)
+
+1. **Phase 8 hardening** (deferred per post-v0 posture): degenerate scenes (empty graph,
+   single node), gesture-conflict edge cases, touch/pinch. Do when the friction appears.
+2. **Phase 5 polish** (optional): animate the Home/Fit transition. Save/restore already
+   works (position + quaternion) and is correct as-is — do NOT migrate it to angle
+   persistence (that reintroduces the rejected angle-of-record representation).
+3. Possible dead exports in `polar.ts` (`cameraFrame`, `screenToPolar`) after the
+   motion-driven revert — prune if confirmed unused.
 
 ### Verify (NEVER run the sim)
-`cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js && npm run build`.
-Editor opens via the VS Code command (no backing file); reload = close panel → Reload
-Window → re-run command. Build markers grepped in `.probe/ts.jsonl` confirm the live
-bundle loaded (rotation logs `"build":"polar-pole-v17"`). Diagnostic screenshots from this
-session are under `docs/planning/visual-editor/screenshots/`. Git: run from repo root
-(`/Users/David/Documents/github/wirefold`) — Bash cwd resets, and `cd tools/...` then a
-repo-root path fails.
-
-### Carry-forward (hard-won this session — READ THIS)
-- **THE AI DEFAULTS TO CARTESIAN AND IT SURVIVES CORRECTION.** Across ~17 rotation
-  rebuilds the assistant kept re-encoding the user's polar spec as Cartesian machinery
-  (cross products, world axes, `+Y`, orthographic maps) below the level it was watching,
-  reintroducing the exact pathologies (180° flips, cross-product degeneracy, world-vs-view
-  mismatch) the user objected to. "Be more careful" FAILED. The structural fix is
-  `polar.ts`: make the code only able to express polar so Cartesian has nowhere to sneak
-  in. New navigation work goes THROUGH the toolkit; do not reach for `Vector3.cross` in
-  navigation logic. (Memory: feedback_make_bug_class_unrepresentable,
-  feedback_users_interaction_spec_is_the_model.)
-- **The cross product IS the degeneracy.** `a × b → 0 with undefined direction` when a∥b
-  is the noise-flip. Angle arithmetic (`θ+90°`) has no such case. If a "fix" cycle starts
-  chasing flips/jitter/degeneracy, the cause is a cross product / Cartesian frame, not a
-  knob to tune.
-- **David's plain-language spec already names the exact model** — restate it as a concrete
-  angle/axis rule and implement that literally; don't pattern-match onto a textbook
-  algorithm (the Shoemake-arcball detour cost many cycles). "polar," "same rate at any r,"
-  "not cartesian" are correctness requirements, not vibes.
-- **Two great circles always meet at 2 points; only coincident circles degenerate.** The
-  pan green line was a `pole × n` that collapsed when the motion-disk coincided with the
-  horizontal torus — fixed structurally by making the disk a meridian (angle-defined).
-
-## Background: POLAR coordinate model is MERGED to main (2026-06-16)
-
-`main` has the polar layout (every node = one outer polar (r,θ,φ) from the prism-center
-origin; all nodes flat roots; sphere R/surface coords derive-on-read; pole=+y; Cartesian
-only at camera/render/save). Go: nodes/Wiring/{polar,prism,derived,node_move,lock}.go;
-bridge emits render-ready Cartesian + sphereR + ring normals; pump = plotter. This branch's
-navigation work is the camera-side counterpart: make navigation polar against that already-
-polar model. The full layout design doc was branch-local (stripped at merge); recover from
-task/spherical-layout history if needed. (Earlier shipped-to-main history — pick occlusion,
-Excitatory nodes 6/7, camera restore, node lattice, edge arrowheads, persistent-target
-camera, port ring-anchors, one-bead drive — is in git log; trimmed here to keep the
-active-branch state in focus.)
-
-### Active node kinds (topology, nodes 1-7)
-Input, ChainInhibitor (2/3), HoldFlip (4), WindowAndGate (5), Excitatory (6/7).
-Paths: 1→{2,6}, 2→{3,7}, 6→5.FromLeft, 4→5.FromRight, 7→4, 2→1 feedback; node 3 dangles.
-
-## ALWAYS clause
-
-At end of session, overwrite this file with a freshly-rendered prompt tailored to the
-state you're leaving the branch in, and commit the re-rendered handoff ON THE ACTIVE TASK
-BRANCH so it merges to main with the work — do NOT make standalone handoff commits directly
-to main. When there is no task branch in flight, fold the handoff update into the next task
-branch when it starts (the handoff is shared, not branch-local-stripped, so it merges
-cleanly); if you genuinely must commit it on main, PUSH immediately so main is never left
-with a loose unpushed commit. The principle: main advances only through merges.
-Do not rely on chat history; the next AI may be a fresh model with no
-transcript. The rendered handoff must itself contain this same ALWAYS clause so the loop
-is self-perpetuating across sessions. Use
-[continuation-prompt-template.md](continuation-prompt-template.md) as the structural
-source of truth; update the template when an invariant changes.
+`cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js && npm run build`,
+then `bash tools/check-polar-only-nav.sh` and `bash tools/check-no-camera-roundtrip.sh`
+from the repo root. Editor opens via the VS Code command; reload = close panel → Reload
+Window → re-run command. Runtime logs are `.probe/*.jsonl`. Git: run from repo root
+(`/Users/David/Documents/github/wirefold`).
