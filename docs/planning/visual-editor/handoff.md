@@ -72,8 +72,8 @@ conversion helpers in `tools/topology-vscode/src/webview/three/polar.ts`. The ha
 2. **Phase 5 polish** (optional): animate the Home/Fit transition. Save/restore already
    works (position + quaternion) and is correct as-is — do NOT migrate it to angle
    persistence (that reintroduces the rejected angle-of-record representation).
-3. Possible dead exports in `polar.ts` (`cameraFrame`, `screenToPolar`) after the
-   motion-driven revert — prune if confirmed unused.
+3. ~~Possible dead exports in `polar.ts` (`cameraFrame`, `screenToPolar`)~~ — checked
+   2026-06-20: both are live (`interaction-controls.ts:618–620`, rotation path). Not dead.
 
 ### Verify (NEVER run the sim)
 `cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js && npm run build`,
