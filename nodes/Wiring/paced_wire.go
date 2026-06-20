@@ -671,7 +671,16 @@ func (pw *PacedWire) watchCtx(ctx context.Context) chan struct{} {
 	go func() {
 		select {
 		case <-ctx.Done():
+			// Hold mu around the broadcast (like every other Broadcast in this
+			// file) so it cannot land in a waiter's check→Wait window. The wait
+			// predicates that gate on ctx (e.g. Recv's ctx.Err()) are evaluated
+			// under mu but ctx itself is not mu-protected; without this the
+			// cancel broadcast can be lost and the waiter blocks until the next
+			// unrelated broadcast — or forever, when cancel arrives with no
+			// accompanying teardown.
+			pw.mu.Lock()
 			pw.cond.Broadcast()
+			pw.mu.Unlock()
 		case <-done:
 		}
 	}()
