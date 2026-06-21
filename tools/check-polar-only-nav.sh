@@ -16,19 +16,24 @@
 set -euo pipefail
 
 # Only check the nav handler file(s) — NOT polar.ts (it is the quarantine).
-NAV_FILE="tools/topology-vscode/src/webview/three/interaction-controls.ts"
+# The hook lives in interaction-controls.ts; the handler bodies live in
+# interaction-handlers.ts. Both must stay polar-only.
+NAV_FILES=(
+  "tools/topology-vscode/src/webview/three/interaction-controls.ts"
+  "tools/topology-vscode/src/webview/three/interaction-handlers.ts"
+)
 
 # Banned symbols: Cartesian rotation/axis math that belongs in polar.ts.
 PATTERN='setFromUnitVectors|\.cross\(|new THREE\.Raycaster|\.unproject\(|setFromAxisAngle|setFromMatrixColumn|new THREE\.Spherical'
 
 # Lines marked `// polar-nav-ok` are exempted (node-drag/pan — not in the rotation path).
-hits=$(grep -nE "$PATTERN" "$NAV_FILE" 2>/dev/null | grep -v 'polar-nav-ok' || true)
+hits=$(grep -nE "$PATTERN" "${NAV_FILES[@]}" 2>/dev/null | grep -v 'polar-nav-ok' || true)
 
 if [ -n "$hits" ]; then
-  echo "✗ polar-nav violation(s) found in $NAV_FILE — all rotation/axis math must live in polar.ts:"
+  echo "✗ polar-nav violation(s) found — all rotation/axis math must live in polar.ts:"
   echo "$hits"
   echo "  (banned: setFromUnitVectors, .cross(, new THREE.Raycaster, .unproject(, setFromAxisAngle, setFromMatrixColumn, new THREE.Spherical)"
   exit 1
 fi
 
-echo "✓ polar-only nav: no banned Cartesian rotation math in $NAV_FILE."
+echo "✓ polar-only nav: no banned Cartesian rotation math in ${NAV_FILES[*]}."
