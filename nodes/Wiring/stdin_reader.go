@@ -29,6 +29,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -118,8 +119,9 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			lineCh <- sc.Text()
 		}
 		if err := sc.Err(); err != nil {
-			// Scan encountered an error reading from r; log and continue.
-			// The channel close will unblock the main select loop.
+			// Scan encountered an error; write to stderr (stdout is the Go→TS trace stream).
+			// The channel close below will unblock the main select loop.
+			fmt.Fprintf(os.Stderr, "stdin_reader: scan error: %v\n", err)
 		}
 		close(lineCh)
 	}()

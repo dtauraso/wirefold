@@ -179,31 +179,6 @@ export function pointerRingAnchor(
 // Camera geometry
 // ---------------------------------------------------------------------------
 
-/**
- * True perpendicular distance from camera to the z=0 plane (content plane).
- * This is the projection of the camera-to-origin vector onto the camera forward
- * direction, computed as: |cam.position · viewDir| where viewDir is the camera
- * forward in world space. Correct after arbitrary rotation (not just looking down -Z).
- * Clamped to a minimum of 10 to avoid zero/negative values.
- */
-export function camToPlaneDistance(cam: THREE.PerspectiveCamera): number {
-  // Camera forward in world space (points away from camera, into scene).
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-  // Distance = projection of camera position onto the (negated) forward vector.
-  // The z=0 plane has normal (0,0,1). Distance = |cam.position · (0,0,1)| = |cam.position.z|
-  // when looking straight down. After rotation, use the component of the camera
-  // position along the view axis (how far back the camera is from z=0 along view).
-  // More precisely: distance from cam to the plane along the view ray.
-  // Ray: origin=cam.position, dir=forward. Plane: z=0, normal=(0,0,1).
-  // t = -cam.position.z / forward.z  (ray-plane intersection param)
-  // If forward.z ≈ 0 (camera looking sideways), fall back to |cam.position.z|.
-  const fwdZ = forward.z;
-  if (Math.abs(fwdZ) > 0.01) {
-    return Math.max(Math.abs(-cam.position.z / fwdZ), 10);
-  }
-  return Math.max(Math.abs(cam.position.z), 10);
-}
-
 // ---------------------------------------------------------------------------
 // NDC ↔ pixel helpers
 // ---------------------------------------------------------------------------

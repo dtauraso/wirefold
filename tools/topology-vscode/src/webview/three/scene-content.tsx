@@ -619,6 +619,9 @@ export function InteriorBeads({ nodeId }: { nodeId: string }) {
 // Arrowhead cone dims — visibly larger than the 1.5 tube radius. Tunable.
 const ARROW_HEIGHT = 6;
 const ARROW_RADIUS = 3;
+// Port hit tolerance (pixels): a port wins over a node-body hit only if its
+// ray distance is at most this many units closer than the nearest body hit.
+const PORT_HIT_TOL = 8;
 
 export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
@@ -959,7 +962,6 @@ export function RaycasterHelper({
         // the body is the intended target → return null so the caller falls through
         // to the node-drag path. (Reducing lattice spacing only enlarged the relative
         // body target enough to sometimes clear ports — a symptom mask, not the fix.)
-        const PORT_HIT_TOL = 8;
         let portHit: { id: string; dist: number } | null = null;
         let nodeHitDist: number | null = null;
         for (const hit of hits) {
@@ -1023,7 +1025,6 @@ export function RaycasterHelper({
       }
 
       // Default path: scan ALL hits nearest-first, capture nearest of each category.
-      const PORT_HIT_TOL = 8;
       let portHit: { id: string; dist: number } | null = null;
       let edgeHit: { id: string; dist: number } | null = null;
       let nodeHit: { id: string; dist: number } | null = null;
