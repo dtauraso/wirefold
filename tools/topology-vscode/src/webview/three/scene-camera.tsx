@@ -1,0 +1,221 @@
+// scene-camera.tsx — CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker.
+import React, { useEffect, useRef } from "react";
+import { useThree, useFrame } from "@react-three/fiber";
+import * as THREE from "three";
+import type { RFNode, NodeData } from "../types";
+import type { Camera3D } from "../state/viewer/types";
+import { useThreeStore } from "./store";
+import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
+import { boundingBox, nodeWorldPos, nodeTopWorldPos, ndcToPixel, nodeRadius } from "./geometry-helpers";
+import { postLog } from "../log/post";
+
+/** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
+export const NEAREST_N = 8;
+
+// ---------------------------------------------------------------------------
+// Camera fitter: perspective camera framed head-on to show graph flat at z=0.
+// Fits once, but waits until nodes are actually non-empty (not just on mount).
+// ---------------------------------------------------------------------------
+
+export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeData>[]; hasRestoredCamera?: boolean }) {
+  const { camera, size } = useThree();
+  const loadEpoch = useThreeStore((s) => s.loadEpoch);
+  // Subscribe to the Go node-geometry store so the effect re-runs when Go's
+  // node-geometry trace stream populates centers after load (it lands ~1 frame
+  // AFTER store:load). The first fit must wait for this, or it frames the
+  // pre-emit fallback coords instead of the real Go-streamed centers.
+  const geoms = useNodeGeometryStore((s) => s.geoms);
+  // Track the last epoch we actually fitted for. The effect may run several
+  // times as size/nodes/geometry settle on first load; we fit only the first
+  // time everything is ready for a given epoch, and never again until the next load.
+  const lastFittedEpoch = useRef<number>(-1);
+  useEffect(() => {
+    // Already fitted for this load epoch (e.g. a node drag re-triggered us).
+    if (lastFittedEpoch.current === loadEpoch) return;
+    // Skip if no content or canvas not yet sized — re-runs when either settles.
+    if (nodes.length === 0) return;
+    if (size.width === 0 || size.height === 0) return;
+    // Skip auto-fit when the saved camera is being restored.
+    if (hasRestoredCamera) return;
+    // Wait until Go geometry has landed for EVERY current node, so we frame the
+    // ACTUAL rendered centers (g.center) and not the pre-emit fallback. Re-runs
+    // when `geoms` gains the last node's center. (geoms read so the dep is live.)
+    void geoms;
+    if (!nodes.every((n) => getNodeGeometry(n.id) !== undefined)) return;
+    lastFittedEpoch.current = loadEpoch;
+    const persp = camera as THREE.PerspectiveCamera;
+    const PAD = 80;
+    // boundingBox reads nodeWorldPos (Go g.center, already Three y-up world
+    // coords) — the SAME source GraphNode renders the node group from. So the
+    // center is used DIRECTLY with no y-negation: negating here (the old bug)
+    // framed the mirror-image y and pushed the nodes off-screen until manual Fit.
+    // This now matches HomeButton's math (camera-ui.tsx), which works.
+    const { minX, maxX, minY, maxY } = boundingBox(nodes);
+    const gw = (maxX - minX) + 2 * PAD;
+    const gh = (maxY - minY) + 2 * PAD;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2; // nodeWorldPos is already y-up world — no negate
+    postLog("lifecycle", { phase: "camera-fit", nodeCount: nodes.length, cx, cy, minX, maxX, minY, maxY });
+    const aspect = size.width / size.height;
+    // Choose z so the graph fills the view.
+    const fovRad = (persp.fov * Math.PI) / 180;
+    const zForH = gh / 2 / Math.tan(fovRad / 2);
+    const zForW = gw / 2 / aspect / Math.tan(fovRad / 2);
+    const z = Math.max(zForH, zForW) + 50;
+    persp.position.set(cx, cy, z);
+    persp.up.set(0, 1, 0);
+    persp.lookAt(cx, cy, 0);
+    persp.near = 0.1;
+    persp.far = 20000;
+    persp.updateProjectionMatrix();
+  // Re-run when size/nodes/geometry settle; the lastFittedEpoch ref makes it fit
+  // once per load epoch and never on drag (same epoch).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadEpoch, size.width, size.height, nodes.length, geoms]);
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// CameraRef bridge: exposes the live camera to React state outside the Canvas.
+// ---------------------------------------------------------------------------
+
+export function CameraRefBridge({
+  cameraRef,
+  initialCamera3d,
+}: {
+  cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+  initialCamera3d?: Camera3D;
+}) {
+  const { camera } = useThree();
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    cameraRef.current = cam; // always keep the ref current
+    // Restore the saved camera ONCE. Without this guard, every commitCamera during a
+    // drag mutates viewerState.camera3d → this effect re-runs → it re-applies the saved
+    // pose on top of the live rotation each frame, FIGHTING the gesture (jitter) and
+    // partly undoing it (slow). We still re-run (restoredRef stays false) until a real
+    // saved pose is available, so the async load() case is covered; once applied we stop.
+    if (restoredRef.current) return;
+    if (initialCamera3d) {
+      cam.position.set(...initialCamera3d.position);
+      if (initialCamera3d.quaternion) {
+        const [qx, qy, qz, qw] = initialCamera3d.quaternion;
+        cam.quaternion.set(qx, qy, qz, qw);
+        cam.updateMatrixWorld(true);
+        restoredRef.current = true; // restored a real pose → ignore later commits
+        return;
+      }
+    }
+    // No saved quaternion yet: default square-on orientation (don't mark restored, so a
+    // later load can still apply the saved pose).
+    cam.up.set(0, 1, 0);
+    cam.lookAt(cam.position.x, cam.position.y, 0);
+    cam.updateMatrixWorld(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera, cameraRef, initialCamera3d]);
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// LabelProjector: runs every N frames (throttled) to project node world
+// positions to screen. Projects only the visible set (hovered ∪ selected ∪
+// nearest-N) plus a full refresh every 6 frames for smooth camera motion.
+// Updates positions via a ref callback (no React state → no re-render cost).
+// ---------------------------------------------------------------------------
+
+export function LabelProjector({
+  nodes,
+  onPositions,
+}: {
+  nodes: RFNode<NodeData>[];
+  onPositions: (positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => void;
+}) {
+  const { camera, size } = useThree();
+  const frameCountRef = useRef(0);
+
+  useFrame(() => {
+    frameCountRef.current++;
+    // Project every 2 frames (~30fps) for label smoothness during camera motion.
+    // This is much cheaper than every frame while still tracking well visually.
+    if (frameCountRef.current % 2 !== 0) return;
+    const positions = nodes.map((n) => {
+      const top = nodeTopWorldPos(n);
+      top.project(camera);
+      const topPx = ndcToPixel(top.x, top.y, size);
+      const center = nodeWorldPos(n);
+      center.project(camera);
+      const centerPx = ndcToPixel(center.x, center.y, size);
+      return { id: n.id, px: topPx.px, py: topPx.py, cx: centerPx.px, cy: centerPx.py };
+    });
+    onPositions(positions);
+  });
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// CameraSettleDetector: fires onSettle ~250ms after the camera stops moving.
+// Compares camera matrix each frame; on change resets a debounce timer.
+// ---------------------------------------------------------------------------
+
+export function CameraSettleDetector({
+  onSettle,
+}: {
+  onSettle: () => void;
+}) {
+  const { camera } = useThree();
+  const lastMatrix = useRef<string>("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useFrame(() => {
+    // Snapshot the camera matrix as a compact string (16 floats, 2 decimal places).
+    camera.updateMatrixWorld();
+    const key = camera.matrixWorld.elements.map((v) => v.toFixed(2)).join(",");
+    if (key !== lastMatrix.current) {
+      lastMatrix.current = key;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        onSettle();
+      }, 250);
+    }
+  });
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// NearestNTracker: computes nearest-N nodes to camera each frame (throttled).
+// Notifies via callback so the outer React tree can re-render label visibility.
+// ---------------------------------------------------------------------------
+
+export function NearestNTracker({
+  nodes,
+  onNearestN,
+}: {
+  nodes: RFNode<NodeData>[];
+  onNearestN: (ids: Set<string>) => void;
+}) {
+  const { camera } = useThree();
+  const lastIds = useRef<string>("");
+  // useRef so frameCount persists across renders without resetting.
+  const frameCountRef = useRef(0);
+
+  useFrame(() => {
+    frameCountRef.current++;
+    if (frameCountRef.current % 6 !== 0) return; // throttle: recompute ~10fps
+    const sorted = nodes
+      .map((n) => ({ id: n.id, dist: nodeWorldPos(n).distanceTo(camera.position) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, NEAREST_N)
+      .map((x) => x.id);
+    const key = sorted.join(",");
+    if (key !== lastIds.current) {
+      lastIds.current = key;
+      onNearestN(new Set(sorted));
+    }
+  });
+
+  return null;
+}
