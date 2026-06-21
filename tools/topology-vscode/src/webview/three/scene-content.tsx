@@ -47,6 +47,16 @@ export function RaycasterHelper({
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
 
+      if (opts?.handholdOnly) {
+        // A handhold grab only needs detection (which disk to rotate on is decided by
+        // the first two drag points, not which handhold). Return a sentinel on the
+        // nearest handhold hit so the caller can switch into constrained rotation.
+        for (const hit of hits) {
+          if ((hit.object as THREE.Mesh).userData?.handhold === true) return "handhold";
+        }
+        return null;
+      }
+
       if (opts?.ringOnly) {
         for (const hit of hits) {
           const hitObj = hit.object as THREE.Mesh;

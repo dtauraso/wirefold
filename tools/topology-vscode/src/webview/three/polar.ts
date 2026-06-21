@@ -108,6 +108,22 @@ export function arcAxisAngle(from: THREE.Vector3, to: THREE.Vector3): { axis: TH
   return { axis, angle: p.phi };
 }
 
+/** The signed rotation about a FIXED `axis` that carries unit direction `from` to `to`,
+ *  measured as the azimuth difference in a frame poled at the axis (θ_to − θ_from), wrapped
+ *  to (−π, π]. This is the locked-disk quantity: the disk normal is `axis`, and the result is
+ *  how far to spin about it so `from`'s in-plane bearing reaches `to`'s — pure angle arithmetic
+ *  (the only Cartesian is the makeFrame/fromWorld edges). Used by handhold-constrained rotation
+ *  where the axis is frozen at gesture start and only the angle tracks the cursor. */
+export function angleAboutAxis(from: THREE.Vector3, to: THREE.Vector3, axis: THREE.Vector3): number {
+  const f = makeFrame(_ORIGIN.clone(), 1, axis);
+  const a = fromWorld(f, from);
+  const b = fromWorld(f, to);
+  let d = b.theta - a.theta;
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
 /** Rotate a unit direction `v` about a unit `axis` by `angle` radians — the rotation IS
  *  `θ += angle` in a frame poled at the axis. No quaternion, no Rodrigues. A point on the axis
  *  (φ≈0) is unmoved because the θ term is scaled by sin(φ)→0 — harmless. */

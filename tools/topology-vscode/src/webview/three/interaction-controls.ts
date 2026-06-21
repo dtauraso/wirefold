@@ -48,7 +48,7 @@ export const ARCBALL_FILL = 0.4;
 
 export interface ControlState {
   // Interaction phase
-  phase: "idle" | "pending" | "dragging" | "rotating" | "wiring" | "port-move";
+  phase: "idle" | "pending" | "dragging" | "rotating" | "handhold-rotating" | "wiring" | "port-move";
   // Pointer-down snapshot
   downX: number;
   downY: number;
@@ -58,6 +58,11 @@ export interface ControlState {
   prevY: number;
   // True when the pointer-down hit empty space (not a node or edge); gates free-roll rotation.
   emptyDown: boolean;
+  // True when the pointer-down hit a handhold; gates the constrained locked-disk rotation.
+  handholdDown: boolean;
+  // Locked rotation disk normal (axis) for "handhold-rotating", frozen from the first two
+  // cursor points and reused for the whole gesture. null until the first move locks it.
+  rotAxis: THREE.Vector3 | null;
   // Rotation gesture pivot: content bounding-box center, fixed for the gesture.
   rotPivot: THREE.Vector3;
   // Sphere screen-center (pixels, client coords) and scale, frozen at pointer-down.
@@ -76,6 +81,7 @@ export interface PickOptions {
   nodesOnly?: boolean;
   ringOnly?: boolean;
   portOnly?: boolean;
+  handholdOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +104,8 @@ export function useInteractionControls(
     downX: 0, downY: 0, downTime: 0,
     prevX: 0, prevY: 0,
     emptyDown: false,
+    handholdDown: false,
+    rotAxis: null,
     rotPivot: new THREE.Vector3(),
     rotCx: 0, rotCy: 0, rotPxPerRad: 1,
   });
