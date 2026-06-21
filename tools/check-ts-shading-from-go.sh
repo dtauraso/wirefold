@@ -27,10 +27,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-SCENE_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/three/scene-content.tsx"
+# Scan the whole three/ render dir, not a single file: scene-content.tsx was split
+# into cohesive modules (scene-graph.tsx glass/wire material, scene-env.tsx env map
+# + lights, scene-beads.tsx beads), so the shading code now lives across several
+# files. Scanning the dir keeps the guard robust to future relocations.
+SCAN_DIR="$REPO_ROOT/tools/topology-vscode/src/webview/three"
 
-if [[ ! -f "$SCENE_FILE" ]]; then
-  echo "ts-shading-from-go: scene-content.tsx not found at $SCENE_FILE" >&2
+if [[ ! -d "$SCAN_DIR" ]]; then
+  echo "ts-shading-from-go: render dir not found at $SCAN_DIR" >&2
   exit 1
 fi
 
@@ -73,23 +77,23 @@ for pat in "${FORBIDDEN[@]}"; do
     [[ -z "$line" ]] && continue
     printf '%s  (forbidden shading literal: %s)\n' "$line" "$pat"
     HITS=$((HITS + 1))
-  done < <(grep -nE "$pat" "$SCENE_FILE" 2>/dev/null || true)
+  done < <(grep -rnE --include='*.ts' --include='*.tsx' "$pat" "$SCAN_DIR" 2>/dev/null || true)
 done
 
-# Positive assertion: scene-content.tsx must import the Go-supplied shading params.
+# Positive assertion: the render dir must import the Go-supplied shading params.
 # If the import is gone, TS is no longer sourcing shading from Go even if no
 # forbidden literal is present (e.g. someone inlined a different value).
-if ! grep -q 'from "../../schema/shading-params"' "$SCENE_FILE"; then
-  echo 'ts-shading-from-go: scene-content.tsx does not import from "../../schema/shading-params" — shading params must come from Go'
+if ! grep -rq --include='*.ts' --include='*.tsx' 'from "../../schema/shading-params"' "$SCAN_DIR"; then
+  echo 'ts-shading-from-go: three/ does not import from "../../schema/shading-params" — shading params must come from Go'
   HITS=$((HITS + 1))
 fi
-if ! grep -q 'SHADING_PARAM_NODE_TRANSMISSION' "$SCENE_FILE"; then
+if ! grep -rq --include='*.ts' --include='*.tsx' 'SHADING_PARAM_NODE_TRANSMISSION' "$SCAN_DIR"; then
   echo 'ts-shading-from-go: SHADING_PARAM_NODE_TRANSMISSION not used — node glass material is not reading Go params'
   HITS=$((HITS + 1))
 fi
 
 if [[ $HITS -eq 0 ]]; then
-  echo "ts-shading-from-go: clean (TS binds Go-supplied shading params; no relocated shading literals in scene-content.tsx)"
+  echo "ts-shading-from-go: clean (TS binds Go-supplied shading params; no relocated shading literals in three/)"
   exit 0
 fi
 
