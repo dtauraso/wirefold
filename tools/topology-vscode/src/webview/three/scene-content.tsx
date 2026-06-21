@@ -113,6 +113,7 @@ export function RaycasterHelper({
         // A port sphere hit resolves to its node (via userData.nodeId).
         for (const hit of hits) {
           const hitObj = hit.object as THREE.Mesh;
+          if (hitObj.userData?.handhold) continue; // grab affordance, never a node
           if (hitObj.userData?.edgeId) continue; // skip edges
           if (hitObj.userData?.port) {
             // Port sphere — resolve to its owning node.
@@ -148,6 +149,10 @@ export function RaycasterHelper({
 
       for (const hit of hits) {
         const hitObj = hit.object as THREE.Mesh;
+        // Handholds are a grab affordance handled by the handholdOnly pick path; never
+        // a node/port/edge. Skip here so the x/y-proximity fallback below can't
+        // misattribute one (parent at origin) to the node at the origin.
+        if (hitObj.userData?.handhold) continue;
         if (!portHit && hitObj.userData?.portId) {
           portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
           continue;
