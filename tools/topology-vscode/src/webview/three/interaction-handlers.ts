@@ -10,7 +10,7 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
-import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, rotateAboutAxis, scaleRadius, deltaToPolar, planeSlide } from "./polar";
+import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, angleAboutAxis, rotateAboutAxis, scaleRadius, deltaToPolar, planeSlide } from "./polar";
 import type { ControlState, PickOptions } from "./interaction-controls";
 import { computeContentSphere } from "./interaction-controls";
 
@@ -231,6 +231,38 @@ export function regionFocus(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): 
 // pointer event handlers (bodies moved verbatim from the hook)
 // ---------------------------------------------------------------------------
 
+/**
+ * Seed the content-sphere screen mapping used by BOTH rotation paths (empty-space
+ * free-roll and handhold-constrained). Computes the world pivot (content-sphere center),
+ * projects it to screen once for the pixel center, and the px-per-radian scale, then seeds
+ * prevX/prevY. All sphere/angle math stays in polar.ts; this only reads camera state and
+ * does the one allowed pivot projection. Mirrors the original inline empty-space block.
+ */
+function beginSphereRotation(
+  ctx: InteractionCtx,
+  s: ControlState,
+  cam0: THREE.PerspectiveCamera,
+  rect: DOMRect,
+  clientX: number,
+  clientY: number,
+) {
+  cam0.updateMatrixWorld(true);
+  const cs = computeContentSphere(ctx.nodesRef.current);
+  s.rotPivot = cs.center.clone();
+
+  const pivotNdc = cs.center.clone().project(cam0); // polar-center-projection
+  s.rotCx = ((pivotNdc.x + 1) / 2) * rect.width + rect.left;
+  s.rotCy = ((-pivotNdc.y + 1) / 2) * rect.height + rect.top;
+
+  const pivotDist = cam0.position.distanceTo(cs.center);
+  const fovRad = (cam0.fov * Math.PI) / 180;
+  const Rpx = (cs.radius / pivotDist) * (rect.height / 2) / Math.tan(fovRad / 2);
+  s.rotPxPerRad = Math.max(Rpx * (2 / Math.PI), 1);
+
+  s.prevX = clientX;
+  s.prevY = clientY;
+}
+
 export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTMLDivElement>) {
   const s = ctx.state.current;
   s.downX = e.clientX;
@@ -240,6 +272,8 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
   s.prevY = e.clientY;
   s.phase = "pending";
   s.emptyDown = false;
+  s.handholdDown = false;
+  s.rotAxis = null;
 
   // Clear previous drag/wiring state.
   ctx.nodeDragRef.current = null;
@@ -275,6 +309,21 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
     return;
   }
 
+  // Check for a handhold grab BEFORE the node pick: a handhold starts constrained
+  // (locked-disk) rotation. Set up the same content-sphere mapping the empty-space
+  // path uses; the first move locks the disk axis (see handlePointerMove).
+  const handholdHit = ctx.pickRequest.current?.(ndcX, ndcY, { handholdOnly: true }) ?? null;
+  if (handholdHit !== null) {
+    const cam0 = ctx.cameraRef.current;
+    if (cam0) {
+      s.handholdDown = true;
+      beginSphereRotation(ctx, s, cam0, rect, e.clientX, e.clientY);
+    }
+    s.phase = "pending";
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    return;
+  }
+
   const hitId = ctx.pickRequest.current?.(ndcX, ndcY) ?? null;
   s.emptyDown = (hitId === null);
 
@@ -298,36 +347,10 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
     // block only reads camera state and projects the pivot to screen once.
     const cam0 = ctx.cameraRef.current;
     if (cam0) {
-      cam0.updateMatrixWorld(true);
-      const cs = computeContentSphere(ctx.nodesRef.current);
-      s.rotPivot = cs.center.clone();
-
-      // Project the pivot to screen ONCE to get the sphere center in pixel coords.
-      // (This is the one allowed project() call — getting the center for screenToPolar,
-      // not building a rotation axis.) // polar-center-projection
+      // Seed the content-sphere screen mapping (pivot, pixel center, px-per-radian,
+      // prevX/prevY). Shared with the handhold path — see beginSphereRotation.
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-      const pivotNdc = cs.center.clone().project(cam0); // polar-center-projection
-      s.rotCx = ((pivotNdc.x + 1) / 2) * rect.width + rect.left;
-      s.rotCy = ((-pivotNdc.y + 1) / 2) * rect.height + rect.top;
-
-      // Rpx: the content sphere's on-screen pixel radius. screenToPolar maps by the
-      // true sphere projection — rim (ρ=Rpx) → equator (φ=π/2) — so the grab point
-      // reaches the equator at the visible sphere edge, enabling roll there.
-      // Formula: project cs.radius through the perspective: (cs.radius/pivotDist) is
-      // the sine of the half-angle subtended; * (rect.height/2)/tan(fovVert/2) converts
-      // that to pixels. Clamped to ≥1 so there's no divide-by-zero in screenToPolar.
-      const pivotDist = cam0.position.distanceTo(cs.center);
-      const fovRad = (cam0.fov * Math.PI) / 180;
-      const Rpx = (cs.radius / pivotDist) * (rect.height / 2) / Math.tan(fovRad / 2);
-      // scale = Rpx·(2/π) so that φ = ρ/scale hits π/2 (the equator) exactly AT the
-      // circle's edge (ρ = Rpx) — the 90° handhold sits on the visible silhouette. Still
-      // one uniform unbounded rule (no clamp); past the edge φ keeps growing past π/2.
-      s.rotPxPerRad = Math.max(Rpx * (2 / Math.PI), 1);
-
-      // prevX/prevY seeded here so the pending→rotating transition (first move past
-      // MOVE_SLOP_PX) already has a valid baseline for the first motion frame.
-      s.prevX = e.clientX;
-      s.prevY = e.clientY;
+      beginSphereRotation(ctx, s, cam0, rect, e.clientX, e.clientY);
     }
   }
 
@@ -350,6 +373,13 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
       s.phase = "wiring";
     } else if (ctx.nodeDragRef.current) {
       s.phase = "dragging";
+    } else if (s.handholdDown) {
+      // Handhold grab: start constrained (locked-disk) rotation. Re-seed prevX/prevY
+      // and clear any stale axis so the first move locks the disk from two fresh points.
+      s.prevX = e.clientX;
+      s.prevY = e.clientY;
+      s.rotAxis = null;
+      s.phase = "handhold-rotating";
     } else if (s.emptyDown) {
       // Empty-space drag: start motion-driven great-circle rotation.
       // prevX/prevY were seeded at pointer-down; re-seed here in case the pointer
@@ -438,6 +468,47 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
       commitCamera(cam);
     }
   }
+
+  if (s.phase === "handhold-rotating") {
+    // Constrained rotation: the rotation DISK is locked from the first two cursor
+    // points and reused for the whole gesture. After locking, only the angle about
+    // that fixed axis tracks the cursor — wherever it goes — so the turn is clean
+    // (90° handholds give repeatable square turns). All axis/angle math is in polar.ts.
+    const cam = ctx.cameraRef.current;
+    if (cam) {
+      const C = s.rotPivot;
+      const CF = cameraFrame(cam.quaternion, C, 1);
+      const prev = screenToPolar(s.prevX - s.rotCx, s.prevY - s.rotCy, s.rotPxPerRad);
+      const curr = screenToPolar(e.clientX - s.rotCx, e.clientY - s.rotCy, s.rotPxPerRad);
+      const prevDir = toWorld(CF, prev).sub(C);
+      const currDir = toWorld(CF, curr).sub(C);
+      // Lock the disk normal from the FIRST two points (the arc's axis); reuse it after.
+      if (!s.rotAxis) {
+        const { axis, angle } = arcAxisAngle(currDir, prevDir);
+        if (angle > 1e-6 && Number.isFinite(axis.x)) s.rotAxis = axis.clone();
+      }
+      if (s.rotAxis) {
+        // Rotation about the LOCKED axis carrying curr→prev (same follow convention as
+        // the free path's arcAxisAngle(currDir, prevDir)).
+        const angle = angleAboutAxis(currDir, prevDir, s.rotAxis);
+        if (Math.abs(angle) > 1e-6) {
+          const fwd = new THREE.Vector3();
+          cam.getWorldDirection(fwd);
+          const offset = cam.position.clone().sub(C);
+          const newOffset = rotateAboutAxis(offset.clone().normalize(), s.rotAxis, angle).multiplyScalar(offset.length());
+          const newFwd = rotateAboutAxis(fwd, s.rotAxis, angle);
+          const newUp = rotateAboutAxis(cam.up.clone().normalize(), s.rotAxis, angle);
+          cam.position.copy(C).add(newOffset);
+          cam.up.copy(newUp);
+          cam.lookAt(cam.position.clone().add(newFwd));
+          cam.updateMatrixWorld(true);
+        }
+      }
+      s.prevX = e.clientX;
+      s.prevY = e.clientY;
+      commitCamera(cam);
+    }
+  }
 }
 
 export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLDivElement>) {
@@ -505,9 +576,11 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
     return;
   }
 
-  // Arcball rotation completed: reset state without triggering select.
-  if (s.phase === "rotating") {
+  // Rotation completed (free OR handhold-constrained): reset without triggering select.
+  if (s.phase === "rotating" || s.phase === "handhold-rotating") {
     ctx.nodeDragRef.current = null;
+    s.handholdDown = false;
+    s.rotAxis = null;
     s.phase = "idle";
     return;
   }

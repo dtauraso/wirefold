@@ -37,6 +37,26 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
     [radiusKey, tubeKey],
   );
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
+
+  // Handholds: 4 grab points per torus, 90° apart. Grabbing one starts a CONSTRAINED
+  // rotation — the first two cursor points lock the rotation disk (see
+  // interaction-handlers.ts "handhold-rotating"). These are the only PICKABLE part of
+  // the nav overlay (the tori stay raycast-disabled); each carries userData.handhold.
+  // Placed in the torus's own local frame: geoA lies in XY (handholds at z=0), geoB is
+  // the same ring under rotB, so its handhold group shares that rotation.
+  const hhAngles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
+  const hhRadius = Math.max(radiusKey * 0.04, 3); // grabbable, scales with the sphere
+  const handholds = (rotation?: THREE.Euler) => (
+    <group rotation={rotation}>
+      {hhAngles.map((a, i) => (
+        <mesh key={i} position={[radiusKey * Math.cos(a), radiusKey * Math.sin(a), 0]} userData={{ handhold: true }}>
+          <sphereGeometry args={[hhRadius, 16, 16]} />
+          <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+        </mesh>
+      ))}
+    </group>
+  );
+
   if (nodes.length < 1) return null;
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
@@ -51,6 +71,9 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
       <mesh geometry={geoB} rotation={rotB} raycast={() => null}>
         <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
       </mesh>
+      {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. */}
+      {handholds()}
+      {handholds(rotB)}
     </group>
   );
 }
