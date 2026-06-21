@@ -47,8 +47,8 @@ func TestPolar2CartKnown(t *testing.T) {
 	}
 }
 
-// mirror across the φ=0 vertical disk (the chord-lock invariant, spec §7):
-// flipping the sign of φ flips only z; x and y are unchanged.
+// polar2cart symmetry: flipping the sign of φ (azimuth about +y) flips only z;
+// x and y are unchanged. (A pure coordinate property; no longer used by a lock.)
 func TestPolarMirrorPhiFlipsOnlyZ(t *testing.T) {
 	const eps = 1e-9
 	p := polar{R: 4, Theta: 1.1, Phi: 0.7}

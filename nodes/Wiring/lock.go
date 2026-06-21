@@ -2,20 +2,22 @@ package Wiring
 
 // lock.go — polar layout locks (docs/planning/visual-editor/polar-coordinate-model.md
 // §4, §7). A lock is a RELATIONSHIP between roots, applied after a RootMove —
-// not stored secondary state. The canonical example is the perpendicular-chord
-// lock: a follower node mirrors a leader across a center's vertical disk
-// (same r, same θ, opposite φ in the center's local frame, pole = +y).
+// not stored secondary state. The active example is the theta lock: a follower
+// node shares a leader's θ (the angle from the center's +y up-pole) while keeping
+// its own azimuth φ and radius. So the two stay on the same latitude ring around
+// the center (same angle-from-pole), at their own longitudes.
 
-// chordLock binds Follower to mirror Leader across Center's vertical (φ=0) disk.
-type chordLock struct {
+// thetaLock binds Follower to share Leader's θ about Center (pole = +y), keeping
+// the Follower's own φ and r. Equalizes the angle-from-the-up-pole for the pair.
+type thetaLock struct {
 	Center   string
 	Leader   string
 	Follower string
 }
 
-// addChordLock registers a chord lock.
-func (md *MoveDispatch) addChordLock(center, leader, follower string) {
-	md.locks = append(md.locks, chordLock{Center: center, Leader: leader, Follower: follower})
+// addThetaLock registers a theta lock.
+func (md *MoveDispatch) addThetaLock(center, leader, follower string) {
+	md.locks = append(md.locks, thetaLock{Center: center, Leader: leader, Follower: follower})
 }
 
 // applyLocks re-derives any follower whose lock references the moved node
@@ -30,13 +32,20 @@ func (md *MoveDispatch) applyLocks(movedID string) {
 		if !ok {
 			continue
 		}
-		// Leader relative to the center (local frame, pole +y), then mirror φ.
+		// Leader and follower in the center's local frame (pole +y).
 		lp, ok := md.roots.surfaceCoord(lk.Center, lk.Leader)
 		if !ok {
 			continue
 		}
-		mirror := polar{R: lp.R, Theta: lp.Theta, Phi: -lp.Phi}
-		fw := polar2cart(mirror).add(cw) // follower world position
+		fp, ok := md.roots.surfaceCoord(lk.Center, lk.Follower)
+		if !ok {
+			continue
+		}
+		// Lock: the follower adopts the leader's θ (angle from the +y up-pole) and
+		// keeps its OWN azimuth φ and radius. Both then sit at the same angle-from-pole
+		// (same latitude ring) on opposite/own longitudes — not mirrored across a disk.
+		locked := polar{R: fp.R, Theta: lp.Theta, Phi: fp.Phi}
+		fw := polar2cart(locked).add(cw) // follower world position
 		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
 
 		// Fan the follower (new center) + recompute reach so any sphere it sits on

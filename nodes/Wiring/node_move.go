@@ -295,7 +295,7 @@ type MoveDispatch struct {
 	// the polar move/lock logic; world positions recover via roots.world(id).
 	roots rootSet
 	// locks are polar relationships re-derived after a RootMove (lock.go).
-	locks []chordLock
+	locks []thetaLock
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
