@@ -287,6 +287,19 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			md.addThetaLock("1", "2", "6")
 			md.addThetaLock("1", "6", "2")
 		}
+
+		// Couple nodes 3 and 7 on node 2's sphere via a bidirectional theta lock
+		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
+		// makes the other share its θ (angle from node 2's +y up-pole), so the two
+		// stay on the same latitude ring around node 2 while keeping their own
+		// longitudes. Stopgap registration by id (no spec-level lock declaration
+		// yet); only wired when all three nodes exist.
+		_, has3 := centers["3"]
+		_, has7 := centers["7"]
+		if has2 && has3 && has7 {
+			md.addThetaLock("2", "3", "7")
+			md.addThetaLock("2", "7", "3")
+		}
 	}
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
