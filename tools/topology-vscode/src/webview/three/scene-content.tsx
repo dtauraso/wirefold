@@ -121,22 +121,12 @@ export function RaycasterHelper({
             if (opts.excludeId && nId === opts.excludeId) continue;
             return nId;
           }
-          if (hitObj.userData?.body === true && hitObj.userData?.nodeId) {
+          if (hitObj.userData?.nodeId) {
+            // body sphere, ring torus, or any node-attached mesh — resolved by the
+            // explicit nodeId tag, not by z-blind/type-blind x/y parent proximity.
             const nId = hitObj.userData.nodeId as string;
             if (opts.excludeId && nId === opts.excludeId) continue;
             return nId;
-          }
-          const hitPoint = hitObj.parent;
-          if (!hitPoint) continue;
-          for (const n of nodes) {
-            if (opts.excludeId && n.id === opts.excludeId) continue;
-            const wp = nodeWorldPos(n);
-            if (
-              Math.abs(hitPoint.position.x - wp.x) < 1 &&
-              Math.abs(hitPoint.position.y - wp.y) < 1
-            ) {
-              return n.id;
-            }
           }
         }
         return null;
@@ -161,30 +151,14 @@ export function RaycasterHelper({
           edgeHit = { id: hitObj.userData.edgeId as string, dist: hit.distance };
           continue;
         }
-        if (!nodeHit) {
-          // Resolve a node-body hit to its node id. Prefer the explicit
-          // userData.nodeId on the body sphere (exact, z-aware: the NEAREST body
-          // sphere the ray hits wins). Fall back to x,y proximity only for older
-          // meshes without the tag. The old x,y-only scan returned whichever node
-          // appeared first in `nodes` sharing the same x,y, so a node directly
-          // BEHIND another (same screen x,y, deeper z) could hijack the pick.
-          if (hitObj.userData?.body === true && hitObj.userData?.nodeId) {
-            nodeHit = { id: hitObj.userData.nodeId as string, dist: hit.distance };
-          } else {
-            const hitPoint = hitObj.parent;
-            if (hitPoint) {
-              for (const n of nodes) {
-                const wp = nodeWorldPos(n);
-                if (
-                  Math.abs(hitPoint.position.x - wp.x) < 1 &&
-                  Math.abs(hitPoint.position.y - wp.y) < 1
-                ) {
-                  nodeHit = { id: n.id, dist: hit.distance };
-                  break;
-                }
-              }
-            }
-          }
+        if (!nodeHit && hitObj.userData?.nodeId) {
+          // Resolve a node hit to its node id by the explicit userData.nodeId tag —
+          // carried by the body sphere AND the ring torus AND port spheres. Z-aware
+          // (the NEAREST tagged mesh wins). This replaces the old x,y parent-proximity
+          // fallback, which was z-blind and type-blind: it matched ANY untagged mesh
+          // whose parent sat near a node's x,y (e.g. a handhold parented at the origin
+          // → the origin node), and could pick a node BEHIND another at the same x,y.
+          nodeHit = { id: hitObj.userData.nodeId as string, dist: hit.distance };
         }
       }
 
