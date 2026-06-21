@@ -6,7 +6,6 @@ import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
-import { nodeWorldPos } from "./geometry-helpers";
 import type { PickOptions } from "./interaction-controls";
 import {
   SHADING_PARAM_SCENE_AMBIENT_INTENSITY,
@@ -87,19 +86,11 @@ export function RaycasterHelper({
             portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
             continue;
           }
-          if (nodeHitDist === null) {
-            const hitPoint = hitObj.parent;
-            if (!hitPoint) continue;
-            for (const n of nodes) {
-              const wp = nodeWorldPos(n);
-              if (
-                Math.abs(hitPoint.position.x - wp.x) < 1 &&
-                Math.abs(hitPoint.position.y - wp.y) < 1
-              ) {
-                nodeHitDist = hit.distance;
-                break;
-              }
-            }
+          if (nodeHitDist === null && hitObj.userData?.body === true) {
+            // Nearest node-body hit distance, by the body tag — z-aware and not
+            // confusable with overlay meshes (the old x/y parent-proximity match
+            // counted e.g. a handhold parented at the origin as a "node" here).
+            nodeHitDist = hit.distance;
           }
         }
         if (portHit && (nodeHitDist === null || portHit.dist <= nodeHitDist + PORT_HIT_TOL)) {
