@@ -7,14 +7,15 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// Chord lock: node 6 mirrors node 2 across node 1's vertical (φ=0) disk.
-// Center 1 at origin; surface nodes 2 and 6 via edges 1→2, 1→6. Dragging node 2
-// should set node 6 = mirror_φ(node 2): same r, same θ (same y, same x), z negated.
-func buildChordLockFixture() (*MoveDispatch, context.CancelFunc) {
+// Theta lock: node 6 shares node 2's θ (angle from node 1's +y up-pole) while
+// keeping its own azimuth φ and radius. Center 1 at origin; surface nodes 2 and 6
+// via edges 1→2, 1→6. Dragging node 2 should leave node 6 on the same latitude ring
+// as node 2 (equal θ), unchanged in φ and r.
+func buildThetaLockFixture() (*MoveDispatch, context.CancelFunc) {
 	centers := map[string]vec3{
 		"1": {0, 0, 0},
-		"2": {10, 0, 5},
-		"6": {10, 0, -5}, // initial mirror of 2 across the φ=0 (z=0) disk
+		"2": {10, 0, 5},  // θ=π/2, φ=atan2(5,10)
+		"6": {10, 0, -5}, // θ=π/2, φ=atan2(-5,10) — own longitude
 	}
 	geoms := map[string]nodeGeom{}
 	for id, c := range centers {
@@ -28,33 +29,36 @@ func buildChordLockFixture() (*MoveDispatch, context.CancelFunc) {
 	tr := T.New(256)
 	md := newMoveDispatch(geoms, edges, tr)
 	md.setRoots(buildRoots(centers))
-	md.addChordLock("1", "2", "6")
+	md.addThetaLock("1", "2", "6")
 	ctx, cancel := context.WithCancel(context.Background())
 	md.Start(ctx)
 	return md, cancel
 }
 
-func TestChordLockMirrorsFollower(t *testing.T) {
-	md, cancel := buildChordLockFixture()
+func TestThetaLockEqualizesAngleFromPole(t *testing.T) {
+	md, cancel := buildThetaLockFixture()
 	defer cancel()
 	const eps = 1e-6
 
-	// Drag node 2 to a new spot (different x, y, z).
+	// Follower 6's own φ and r BEFORE the move — the lock must preserve these.
+	before, _ := md.roots.surfaceCoord("1", "6")
+
+	// Drag node 2 to a new spot, changing its θ (angle from the +y pole).
 	md.RootMove("2", vec3{X: 8, Y: 4, Z: 7})
 
-	w2, _ := md.roots.world("2")
-	w6, _ := md.roots.world("6")
-	c1, _ := md.roots.world("1")
+	p2, _ := md.roots.surfaceCoord("1", "2")
+	p6, _ := md.roots.surfaceCoord("1", "6")
 
-	// Center 1 at origin → mirror across z=0: 6 = (2.x, 2.y, -2.z).
-	want := vec3{X: w2.X, Y: w2.Y, Z: 2*c1.Z - w2.Z}
-	if w6.sub(want).length() > eps {
-		t.Errorf("follower 6 = %v want %v (mirror of 2=%v across disk)", w6, want, w2)
+	// θ equalized: 6 now shares 2's angle from node 1's up-pole.
+	if d := p6.Theta - p2.Theta; d < -eps || d > eps {
+		t.Errorf("follower θ=%v != leader θ=%v (angle-from-pole not equalized)", p6.Theta, p2.Theta)
 	}
-	// Both stay on node 1's sphere (equal distance from center).
-	d2 := w2.sub(c1).length()
-	d6 := w6.sub(c1).length()
-	if d6 < d2-eps || d6 > d2+eps {
-		t.Errorf("6 distance %v != 2 distance %v from center", d6, d2)
+	// 6 keeps its OWN azimuth φ (own longitude) — not mirrored, not copied from 2.
+	if d := p6.Phi - before.Phi; d < -eps || d > eps {
+		t.Errorf("follower φ changed: %v != %v (own longitude not preserved)", p6.Phi, before.Phi)
+	}
+	// Both end on node 1's sphere, so they share radius (the reach radius) by construction.
+	if d := p6.R - p2.R; d < -eps || d > eps {
+		t.Errorf("6 radius %v != 2 radius %v (not on the same sphere)", p6.R, p2.R)
 	}
 }
