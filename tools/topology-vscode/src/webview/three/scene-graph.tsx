@@ -231,30 +231,6 @@ export function SphereRing({
   const vrQ = new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, vrNormal);
   const frQ = new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, frNormal);
 
-  // Handholds: 4 grab points per torus, spaced 90° around the ring. Grabbing a
-  // handhold starts a CONSTRAINED rotation — the first two cursor points lock the
-  // rotation disk (see interaction-handlers.ts "handhold-rotating"). They are the
-  // only pickable part of the sphere overlay (the tori themselves stay noRaycast);
-  // each carries userData.handhold so the pick path can detect the grab.
-  const hhAngles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
-  const hhRadius = Math.max(R * 0.05, tube * 3); // grabbable, scales with the sphere
-  const handholds = (q: THREE.Quaternion) => (
-    <group quaternion={q}>
-      {hhAngles.map((a, i) => (
-        <mesh key={i} position={[R * Math.cos(a), R * Math.sin(a), 0]} userData={{ handhold: true }}>
-          <sphereGeometry args={[hhRadius, 16, 16]} />
-          <meshStandardMaterial
-            color={ringColor}
-            emissive={ringColor}
-            emissiveIntensity={0.6}
-            transparent
-            opacity={0.9}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-
   const ringMat = (
     <meshStandardMaterial
       color={ringColor}
@@ -279,9 +255,6 @@ export function SphereRing({
         <torusGeometry args={[R, tube, 12, 96]} />
         {ringMat}
       </mesh>
-      {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. */}
-      {handholds(vrQ)}
-      {handholds(frQ)}
     </group>
   );
 }
