@@ -87,6 +87,8 @@ type stdinMsg struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
 	Z float64 `json:"z"`
+	// Viewpoint is the payload for op=="viewpoint"; nil when the op is anything else.
+	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -94,6 +96,36 @@ type anchorVec struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
 	Z float64 `json:"z"`
+}
+
+// viewpointMsg carries the payload for a "viewpoint" op edit message. Kind
+// discriminates the sub-operation:
+//   - "set":   install a known camera state (all fields populated); emits a camera event.
+//   - "orbit": apply from→to great-circle rotation (FromTheta/FromPhi, ToTheta/ToPhi).
+//   - "zoom":  scale orbit radius by Factor.
+//   - "pan":   slide pivot by world delta (Dx/Dy/Dz).
+type viewpointMsg struct {
+	Kind string `json:"kind"`
+	// orbit
+	FromTheta float64 `json:"fromTheta,omitempty"`
+	FromPhi   float64 `json:"fromPhi,omitempty"`
+	ToTheta   float64 `json:"toTheta,omitempty"`
+	ToPhi     float64 `json:"toPhi,omitempty"`
+	// zoom
+	Factor float64 `json:"factor,omitempty"`
+	// pan
+	Dx float64 `json:"dx,omitempty"`
+	Dy float64 `json:"dy,omitempty"`
+	Dz float64 `json:"dz,omitempty"`
+	// set
+	PivotX   float64 `json:"pivotX,omitempty"`
+	PivotY   float64 `json:"pivotY,omitempty"`
+	PivotZ   float64 `json:"pivotZ,omitempty"`
+	R        float64 `json:"r,omitempty"`
+	PosTheta float64 `json:"posTheta,omitempty"`
+	PosPhi   float64 `json:"posPhi,omitempty"`
+	UpTheta  float64 `json:"upTheta,omitempty"`
+	UpPhi    float64 `json:"upPhi,omitempty"`
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
@@ -294,6 +326,32 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 	case msg.Op == "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {
 			_ = writeScene(treeRoot, msg.Scene)
+		}
+	case msg.Op == "viewpoint":
+		// Update the polar camera viewpoint and emit a camera trace event. Fire-and-forget.
+		if md == nil || msg.Viewpoint == nil {
+			return
+		}
+		vp := msg.Viewpoint
+		switch vp.Kind {
+		case "set":
+			md.SetViewpoint(
+				vec3{X: vp.PivotX, Y: vp.PivotY, Z: vp.PivotZ},
+				vp.R,
+				dir{Theta: vp.PosTheta, Phi: vp.PosPhi},
+				dir{Theta: vp.UpTheta, Phi: vp.UpPhi},
+			)
+			md.EmitViewpoint(tr)
+		case "orbit":
+			md.OrbitViewpoint(
+				dir{Theta: vp.FromTheta, Phi: vp.FromPhi},
+				dir{Theta: vp.ToTheta, Phi: vp.ToPhi},
+				tr,
+			)
+		case "zoom":
+			md.ZoomViewpoint(vp.Factor, tr)
+		case "pan":
+			md.PanViewpoint(vec3{X: vp.Dx, Y: vp.Dy, Z: vp.Dz}, tr)
 		}
 	case msg.Op == "set-origin":
 		// Re-base the polar frame to the camera's new pan focus. World positions are

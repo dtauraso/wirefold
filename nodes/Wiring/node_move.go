@@ -296,6 +296,11 @@ type MoveDispatch struct {
 	roots rootSet
 	// locks are polar relationships re-derived after a RootMove (lock.go).
 	locks []thetaLock
+	// vp is the polar camera viewpoint state. Mutated by SetViewpoint/OrbitViewpoint/
+	// ZoomViewpoint/PanViewpoint; emitted via EmitViewpoint. Owned entirely by
+	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
+	// runs in a single goroutine).
+	vp viewpoint
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -525,5 +530,43 @@ func (md *MoveDispatch) NodeKind(nodeID string) string {
 // Call from the stdin reader on op=="set-origin".
 func (md *MoveDispatch) SetOrigin(o vec3, _ *T.Trace) {
 	md.roots.reOrigin(o)
+}
+
+// SetViewpoint installs a known camera state without emitting. Used by the "set"
+// viewpoint op to seed the viewpoint from persisted or initial values, followed by
+// EmitViewpoint to broadcast it.
+func (md *MoveDispatch) SetViewpoint(pivot vec3, r float64, pos, up dir) {
+	md.vp.pivot = pivot
+	md.vp.r = r
+	md.vp.pos = pos
+	md.vp.up = up
+}
+
+// EmitViewpoint emits the current camera viewpoint state as a camera trace event.
+func (md *MoveDispatch) EmitViewpoint(tr *T.Trace) {
+	if tr == nil {
+		return
+	}
+	tr.Camera(md.vp.pivot.X, md.vp.pivot.Y, md.vp.pivot.Z, md.vp.r,
+		md.vp.pos.Theta, md.vp.pos.Phi,
+		md.vp.up.Theta, md.vp.up.Phi)
+}
+
+// OrbitViewpoint applies a great-circle orbit (carrying from→to) and emits the new state.
+func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) {
+	md.vp.orbit(from, to)
+	md.EmitViewpoint(tr)
+}
+
+// ZoomViewpoint scales the orbit radius by factor and emits the new state.
+func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) {
+	md.vp.zoom(factor)
+	md.EmitViewpoint(tr)
+}
+
+// PanViewpoint slides the orbit pivot by a world delta and emits the new state.
+func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
+	md.vp.pan(delta)
+	md.EmitViewpoint(tr)
 }
 

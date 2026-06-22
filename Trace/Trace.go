@@ -70,13 +70,19 @@ const (
 	// so TS clears it (absence can't be rendered, presence can).
 	// Discrete positions only this phase — beads snap to their slots (no slide yet).
 	KindNodeBead = "node-bead"
+	// KindCamera carries the polar camera viewpoint state on camera events. Go emits
+	// it whenever the camera is set, orbited, zoomed, or panned, so the renderer can
+	// reconstruct the camera pose without computing any geometry itself. Fields:
+	// px/py/pz = pivot world position; r = orbit radius; posTheta/posPhi = pivot→camera
+	// direction (spherical); upTheta/upPhi = up-hint direction (spherical).
+	KindCamera = "camera"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -149,6 +155,13 @@ type Event struct {
 	// FRX/FRY/FRZ carry the flat (equatorial) great-circle ring normal on node-geometry
 	// events (KindNodeGeometry). Companion to VRX/VRY/VRZ above.
 	FRX, FRY, FRZ float64
+	// PX/PY/PZ carry the camera pivot world position on camera events (KindCamera).
+	// R is the orbit radius; PosTheta/PosPhi are the pivot→camera direction (spherical);
+	// UpTheta/UpPhi are the up-hint direction (spherical). Set on camera events only.
+	PX, PY, PZ float64
+	R          float64
+	PosTheta, PosPhi float64
+	UpTheta,  UpPhi  float64
 	// Row/Col identify an interior bead's grid slot on node-bead events
 	// (KindNodeBead): Row 0 = top/backup, Row 1 = bottom/working; Col is the
 	// position in that row's slice. Keyed by Node + (Row,Col). X/Y/Z carry the
@@ -312,6 +325,13 @@ func (t *Trace) Arrive(node, port string, value int, bead uint64) {
 // Discrete positions only — beads snap to their slots; no slide interpolation yet.
 func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x, y, z float64) {
 	t.emit(Event{Kind: KindNodeBead, Node: nodeID, Row: row, Col: col, Present: present, Value: value, X: x, Y: y, Z: z, hasPos: true})
+}
+
+// Camera emits the polar camera viewpoint state: pivot world position (px,py,pz),
+// orbit radius r, pivot→camera direction (posTheta,posPhi), and up-hint direction
+// (upTheta,upPhi). Go emits this whenever the camera is set, orbited, zoomed, or panned.
+func (t *Trace) Camera(px, py, pz, r, posTheta, posPhi, upTheta, upPhi float64) {
+	t.emit(Event{Kind: KindCamera, PX: px, PY: py, PZ: pz, R: r, PosTheta: posTheta, PosPhi: posPhi, UpTheta: upTheta, UpPhi: upPhi})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -590,6 +610,21 @@ func marshalEvent(e Event) ([]byte, error) {
 	case KindNodeBead:
 		// row/col/present/value/position always emitted (0/false is valid for each).
 		return json.Marshal(nodeBead{Step: e.Step, Kind: e.Kind, Node: e.Node, Row: e.Row, Col: e.Col, Present: e.Present, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
+	case KindCamera:
+		// All camera fields always emitted (0 is valid for any angle or position).
+		type camera struct {
+			Step     int     `json:"step"`
+			Kind     string  `json:"kind"`
+			PX       float64 `json:"px"`
+			PY       float64 `json:"py"`
+			PZ       float64 `json:"pz"`
+			R        float64 `json:"r"`
+			PosTheta float64 `json:"posTheta"`
+			PosPhi   float64 `json:"posPhi"`
+			UpTheta  float64 `json:"upTheta"`
+			UpPhi    float64 `json:"upPhi"`
+		}
+		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}
