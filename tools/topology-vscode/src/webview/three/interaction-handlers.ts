@@ -375,10 +375,12 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
     } else if (ctx.nodeDragRef.current) {
       s.phase = "dragging";
     } else if (s.handholdDown) {
-      // Handhold grab: start constrained (locked-disk) rotation. Re-seed prevX/prevY
-      // and clear any stale axis so the first move locks the disk from two fresh points.
-      s.prevX = e.clientX;
-      s.prevY = e.clientY;
+      // Handhold grab: start constrained (locked-disk) rotation. Seed prevX/prevY from
+      // the grab point (mousedown), not the slop-crossing point, so the first
+      // sendViewpointOrbitLocked call's arc is grab→first-move and the locked disk is
+      // the great circle through exactly those two points.
+      s.prevX = s.downX;
+      s.prevY = s.downY;
       s.rotAxis = null;
       s.phase = "handhold-rotating";
       // Seed Go with the current camera so its polar state matches (same as empty-space branch).
