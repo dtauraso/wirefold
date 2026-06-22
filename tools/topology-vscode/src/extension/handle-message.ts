@@ -127,6 +127,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "set-origin") {
         // Re-base the polar frame to the camera's new pan focus. Fire-and-forget.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "set-origin", x: msg.x, y: msg.y, z: msg.z }));
+      } else if (msg.op === "viewpoint") {
+        // Polar camera nav: forward the viewpoint payload verbatim. Fire-and-forget.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "viewpoint", viewpoint: msg.viewpoint }));
       }
       return;
   }
