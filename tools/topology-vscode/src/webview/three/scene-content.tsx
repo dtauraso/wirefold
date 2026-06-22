@@ -13,6 +13,7 @@ import {
 } from "../../schema/shading-params";
 import { ProceduralEnvProvider } from "./scene-env";
 import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker } from "./scene-camera";
+import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
@@ -241,6 +242,7 @@ export function Scene({
     <ProceduralEnvProvider>
       <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
       <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCamera3d} />
+      <CameraFromStore />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <NearestNTracker nodes={nodes} onNearestN={onNearestN} />
