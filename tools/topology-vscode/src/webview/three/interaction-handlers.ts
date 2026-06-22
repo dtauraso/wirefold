@@ -10,7 +10,8 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
-import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, angleAboutAxis, rotateAboutAxis, scaleRadius, deltaToPolar, planeSlide } from "./polar";
+import { cameraFrame, screenToPolar, toWorld, deltaToPolar, planeSlide } from "./polar";
+import { sendViewpointSet, sendViewpointOrbit, sendViewpointOrbitLocked, sendViewpointPan, worldDirToAngles } from "./viewpoint-bridge";
 import type { ControlState, PickOptions } from "./interaction-controls";
 import { computeContentSphere } from "./interaction-controls";
 
@@ -374,12 +375,25 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
     } else if (ctx.nodeDragRef.current) {
       s.phase = "dragging";
     } else if (s.handholdDown) {
-      // Handhold grab: start constrained (locked-disk) rotation. Re-seed prevX/prevY
-      // and clear any stale axis so the first move locks the disk from two fresh points.
-      s.prevX = e.clientX;
-      s.prevY = e.clientY;
+      // Handhold grab: start constrained (locked-disk) rotation. Seed prevX/prevY from
+      // the grab point (mousedown), not the slop-crossing point, so the first
+      // sendViewpointOrbitLocked call's arc is grab→first-move and the locked disk is
+      // the great circle through exactly those two points.
+      s.prevX = s.downX;
+      s.prevY = s.downY;
       s.rotAxis = null;
       s.phase = "handhold-rotating";
+      // Seed Go with the current camera so its polar state matches (same as empty-space branch).
+      const cam0 = ctx.cameraRef.current;
+      if (cam0) {
+        const pivot: [number, number, number] = [s.rotPivot.x, s.rotPivot.y, s.rotPivot.z];
+        const r = cam0.position.distanceTo(s.rotPivot);
+        const posDir = cam0.position.clone().sub(s.rotPivot).normalize();
+        const upDir = cam0.up.clone().normalize();
+        const pos = worldDirToAngles(posDir);
+        const up = worldDirToAngles(upDir);
+        sendViewpointSet(pivot, r, pos, up);
+      }
     } else if (s.emptyDown) {
       // Empty-space drag: start motion-driven great-circle rotation.
       // prevX/prevY were seeded at pointer-down; re-seed here in case the pointer
@@ -387,6 +401,18 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
       s.prevX = e.clientX;
       s.prevY = e.clientY;
       s.phase = "rotating";
+      // Seed Go with the current camera so its polar state matches whatever the camera
+      // is now (covers prior local pan/zoom).
+      const cam0 = ctx.cameraRef.current;
+      if (cam0) {
+        const pivot: [number, number, number] = [s.rotPivot.x, s.rotPivot.y, s.rotPivot.z];
+        const r = cam0.position.distanceTo(s.rotPivot);
+        const posDir = cam0.position.clone().sub(s.rotPivot).normalize();
+        const upDir = cam0.up.clone().normalize();
+        const pos = worldDirToAngles(posDir);
+        const up = worldDirToAngles(upDir);
+        sendViewpointSet(pivot, r, pos, up);
+      }
     }
   }
 
@@ -448,65 +474,33 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
       const CF = cameraFrame(cam.quaternion, C, 1);
       const prev = screenToPolar(s.prevX - s.rotCx, s.prevY - s.rotCy, s.rotPxPerRad);
       const curr = screenToPolar(e.clientX - s.rotCx, e.clientY - s.rotCy, s.rotPxPerRad);
-      const prevDir = toWorld(CF, prev).sub(C); // unit world dir of prev cursor point
-      const currDir = toWorld(CF, curr).sub(C); // unit world dir of curr cursor point
-      const { axis, angle } = arcAxisAngle(currDir, prevDir); // rotation carrying curr→prev
-      if (angle > 1e-6 && Number.isFinite(axis.x)) {
-        const fwd = new THREE.Vector3();
-        cam.getWorldDirection(fwd);
-        const offset = cam.position.clone().sub(C);
-        const newOffset = rotateAboutAxis(offset.clone().normalize(), axis, angle).multiplyScalar(offset.length());
-        const newFwd = rotateAboutAxis(fwd, axis, angle);
-        const newUp  = rotateAboutAxis(cam.up.clone().normalize(), axis, angle);
-        cam.position.copy(C).add(newOffset);
-        cam.up.copy(newUp);
-        cam.lookAt(cam.position.clone().add(newFwd)); // final conversion: directions → three.js orientation
-        cam.updateMatrixWorld(true);
-      }
+      const prevDir = toWorld(CF, prev).sub(C).normalize(); // unit world dir of prev cursor point
+      const currDir = toWorld(CF, curr).sub(C).normalize(); // unit world dir of curr cursor point
+      // Send orbit to Go: curr→prev matches today's arcAxisAngle(currDir, prevDir) convention.
+      // Go owns the camera; CameraFromStore applies the result back to three.js.
+      sendViewpointOrbit(worldDirToAngles(currDir), worldDirToAngles(prevDir));
       s.prevX = e.clientX;
       s.prevY = e.clientY;
-      commitCamera(cam);
     }
   }
 
   if (s.phase === "handhold-rotating") {
-    // Constrained rotation: the rotation DISK is locked from the first two cursor
-    // points and reused for the whole gesture. After locking, only the angle about
-    // that fixed axis tracks the cursor — wherever it goes — so the turn is clean
-    // (90° handholds give repeatable square turns). All axis/angle math is in polar.ts.
+    // Constrained rotation: Go owns the axis lock and angle accumulation (via
+    // orbit-locked). TS computes prevDir/currDir as world directions from C and sends
+    // sendViewpointOrbitLocked(curr, prev) — curr→prev matches the free-orbit convention.
+    // Go locks the axis on the first call and reuses it; the lock clears on the next
+    // sendViewpointSet (gesture start or next handhold).
     const cam = ctx.cameraRef.current;
     if (cam) {
       const C = s.rotPivot;
       const CF = cameraFrame(cam.quaternion, C, 1);
       const prev = screenToPolar(s.prevX - s.rotCx, s.prevY - s.rotCy, s.rotPxPerRad);
       const curr = screenToPolar(e.clientX - s.rotCx, e.clientY - s.rotCy, s.rotPxPerRad);
-      const prevDir = toWorld(CF, prev).sub(C);
-      const currDir = toWorld(CF, curr).sub(C);
-      // Lock the disk normal from the FIRST two points (the arc's axis); reuse it after.
-      if (!s.rotAxis) {
-        const { axis, angle } = arcAxisAngle(currDir, prevDir);
-        if (angle > 1e-6 && Number.isFinite(axis.x)) s.rotAxis = axis.clone();
-      }
-      if (s.rotAxis) {
-        // Rotation about the LOCKED axis carrying curr→prev (same follow convention as
-        // the free path's arcAxisAngle(currDir, prevDir)).
-        const angle = angleAboutAxis(currDir, prevDir, s.rotAxis);
-        if (Math.abs(angle) > 1e-6) {
-          const fwd = new THREE.Vector3();
-          cam.getWorldDirection(fwd);
-          const offset = cam.position.clone().sub(C);
-          const newOffset = rotateAboutAxis(offset.clone().normalize(), s.rotAxis, angle).multiplyScalar(offset.length());
-          const newFwd = rotateAboutAxis(fwd, s.rotAxis, angle);
-          const newUp = rotateAboutAxis(cam.up.clone().normalize(), s.rotAxis, angle);
-          cam.position.copy(C).add(newOffset);
-          cam.up.copy(newUp);
-          cam.lookAt(cam.position.clone().add(newFwd));
-          cam.updateMatrixWorld(true);
-        }
-      }
+      const prevDir = toWorld(CF, prev).sub(C).normalize();
+      const currDir = toWorld(CF, curr).sub(C).normalize();
+      sendViewpointOrbitLocked(worldDirToAngles(currDir), worldDirToAngles(prevDir));
       s.prevX = e.clientX;
       s.prevY = e.clientY;
-      commitCamera(cam);
     }
   }
 }
@@ -613,89 +607,60 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
   // Prevent browser scroll / back-nav gestures (requires non-passive listener).
   e.preventDefault();
 
+  const up = worldDirToAngles(cam.up.clone().normalize());
+
   if (e.ctrlKey) {
-    // DOLLY toward the persistent target: scale the camera's offset from the
-    // target multiplicatively. Defined purely from (camera pose, target) — both
-    // finite — so it's a total operation with no z=0 raycast. >1 deltaY zooms
-    // out. MIN_DIST floors |offset| so the camera never reaches/crosses target.
-    //
-    // RE-AIM: before zooming, snap the persistent target onto the NODE NEAREST
-    // THE CURSOR — zoom in toward the node the mouse is on. Convert the pointer to
-    // NDC, project each node's world center to NDC, and pick the one with the
-    // smallest distance from the cursor's NDC. This always selects a real node
-    // (never an edge, never null, never an occluding neighbor), and zooming toward
-    // it keeps that node under the cursor. If no node is finite/in-front, we leave
-    // targetRef as-is and zoom toward the existing persistent focus — no z=0 plane
-    // dependency either way.
+    // ZOOM TO CURSOR is a DOLLY, which in the polar model is a PAN (a pivot translation),
+    // not a radius change: translating the eye and pivot by the same world vector keeps r
+    // and pos fixed, so the view direction never changes (no re-aim/flip) and the node
+    // under the cursor stays put. delta = (1-factor)(P - eye) steps the eye a `factor`
+    // amount along eye→P; floored so a zoom-in never reaches P. We seed Go with the
+    // current camera (covers any local drift), then send the pan — Go owns the dolly.
+    const ZOOM_BASE = 1.01;
+    const MIN_DIST = 5;
     const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
     const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
-    let cursorNode: string | null = null;
     let cursorNdcDist = Infinity;
-    let cursorPos: THREE.Vector3 | null = null;
+    let target: THREE.Vector3 | null = null;
     for (const n of ctx.nodesRef.current) {
       const c = nodeWorldPos(n);
       if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) continue;
       const ndc = c.clone().project(cam);
       if (ndc.z > 1) continue; // behind the camera / beyond far plane
-      const dx = ndc.x - mouseNdcX;
-      const dy = ndc.y - mouseNdcY;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < cursorNdcDist) {
-        cursorNdcDist = d;
-        cursorNode = n.id;
-        cursorPos = c;
-      }
+      const d = Math.hypot(ndc.x - mouseNdcX, ndc.y - mouseNdcY);
+      if (d < cursorNdcDist) { cursorNdcDist = d; target = c; }
     }
-    if (cursorPos) {
-      ctx.targetRef.current.copy(cursorPos);
-    }
-    const target = ensureTarget(ctx, cam);
-    const ZOOM_BASE = 1.01;
-    const MIN_DIST = 5;
-    const factor = Math.pow(ZOOM_BASE, e.deltaY);
-    // Polar radial zoom: scale the camera's radius r about the target node, angles held.
-    // r is an explicit coordinate inside scaleRadius (polar.ts); direction is preserved
-    // without a (θ,φ) decomposition, so no pole singularity is introduced.
-    cam.position.copy(scaleRadius(target, cam.position, factor, MIN_DIST));
-    // P7.5: keep camera inside the large sphere after dolly.
-    constrainInsideLargeSphere(cam, computeLargeSphereRadius(ctx.nodesRef.current));
+    const P = target ?? regionFocus(ctx, cam); // node to dolly toward
+    const toP = P.clone().sub(cam.position);
+    const distP = toP.length();
+    let factor = Math.pow(ZOOM_BASE, e.deltaY);
+    if (distP * factor < MIN_DIST) factor = MIN_DIST / distP; // never reach P
+    const delta = toP.multiplyScalar(1 - factor); // eye step along eye→P
+    const pivot = regionFocus(ctx, cam);
+    const r = cam.position.distanceTo(pivot);
+    const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
+    sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
+    sendViewpointPan(delta.x, delta.y, delta.z);
   } else {
-    // PAN = pure 2D screen-space translation along the camera's own right/up
-    // basis, translating BOTH the camera AND the persistent target by the same
-    // vector (target rides along, so the look-direction is preserved). The only
-    // depth is `dist` = |camPos - target| — finite, stable for the whole gesture,
-    // no z=0 raycast. Defined purely from (camera pose, target).
+    const pivot = regionFocus(ctx, cam);
+    const r = cam.position.distanceTo(pivot);
+    const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
+    // PAN = 2D screen-space slide along the camera's right/up basis. The world delta is
+    // computed locally (camera pose + view depth) and handed to Go; Go moves the pivot
+    // and returns the new camera state.
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const target = ensureTarget(ctx, cam);
-
-    const dist = cam.position.distanceTo(target);
-    // Perspective world units per screen pixel at `dist` (vertical FOV).
     const fovRad = (cam.fov * Math.PI) / 180;
-    const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / rect.height;
+    const worldPerPixel = (2 * r * Math.tan(fovRad / 2)) / rect.height;
+    const { r: pr, angle } = deltaToPolar(e.deltaX, -e.deltaY);
+    const delta = planeSlide(cam.quaternion, pr, angle, worldPerPixel);
 
-    // INPUT EDGE: wheel pixels → polar (r, angle) in the screen plane (−deltaY = screen up).
-    // OUTPUT EDGE: planeSlide recombines (r, angle) onto the camera right/up basis (polar.ts).
-    // The handler holds only polar quantities; both camera + target slide by the same world
-    // delta (target rides along, look-direction preserved).
-    const { r, angle } = deltaToPolar(e.deltaX, -e.deltaY);
-    const delta = planeSlide(cam.quaternion, r, angle, worldPerPixel);
-    cam.position.add(delta);
-    target.add(delta);
+    sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
+    sendViewpointPan(delta.x, delta.y, delta.z);
 
-    // Square-on check: cam looks down -z, so right=(1,0,0), up=(0,1,0). Then this
-    // is a world-XY translation scaled by worldPerPixel at the look-distance —
-    // exactly the prior square-on behavior (a flat 2D slide in the z=0 plane).
-    // P7.5: keep camera inside the large sphere after pan.
-    constrainInsideLargeSphere(cam, computeLargeSphereRadius(ctx.nodesRef.current));
-    // Re-form the polar origin at the new screen-center: compute the world point
-    // straight ahead of the camera (regionFocus) and send set-origin to Go.
-    // Throttled to one per animation frame so a scroll burst sends at most one.
-    const newFocus = regionFocus(ctx, cam);
-    if (Number.isFinite(newFocus.x) && Number.isFinite(newFocus.y) && Number.isFinite(newFocus.z)) {
-      ctx.scheduleOrigin(newFocus.x, newFocus.y, newFocus.z);
+    // Re-base the polar layout origin at the new screen-center (throttled per frame).
+    if (Number.isFinite(pivot.x) && Number.isFinite(pivot.y) && Number.isFinite(pivot.z)) {
+      ctx.scheduleOrigin(pivot.x, pivot.y, pivot.z);
     }
   }
-  // Commit camera position after each wheel step (scheduleViewSave debounces).
-  commitCamera(cam);
 }

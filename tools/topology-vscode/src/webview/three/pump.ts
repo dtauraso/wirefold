@@ -26,7 +26,10 @@
 
 import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
+import { useCameraStore } from "./camera-store";
 import { useThreeStore } from "./store";
+import { patchViewerState } from "../state/viewer-state";
+import { scheduleViewSave } from "../save";
 import { postLog } from "../log/post";
 import { setPulsePos, clearPulse } from "./pulse-state";
 import { setInteriorBead } from "./interior-bead-state";
@@ -159,6 +162,19 @@ export function handleTraceEvent(event: TraceEvent): void {
       // dest port until consume, which in a ring can lag arrival noticeably.
       const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
       postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null });
+      return;
+    }
+    case "camera": {
+      const e = event as Extract<TraceEvent, { kind: "camera" }>;
+      const polar = {
+        pivot: [e.px, e.py, e.pz] as [number, number, number],
+        r: e.r,
+        pos: [e.posTheta, e.posPhi] as [number, number],
+        up: [e.upTheta, e.upPhi] as [number, number],
+      };
+      useCameraStore.getState().set(polar);
+      patchViewerState((v) => { v.cameraPolar = polar; });
+      scheduleViewSave();
       return;
     }
     default:

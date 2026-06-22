@@ -6,6 +6,7 @@ import type {
   Camera, Camera3D, EdgeView, LegacyCameraBox,
   NodeView,
 } from "./types";
+import type { PolarCamera } from "../../three/camera-store";
 
 export { isObj };
 
@@ -38,6 +39,25 @@ export function parseCamera3d(v: unknown): Camera3D | undefined {
   return {
     position: [pos[0] as number, pos[1] as number, pos[2] as number],
     quaternion: [quat[0] as number, quat[1] as number, quat[2] as number, quat[3] as number],
+  };
+}
+
+export function parsePolarCamera(v: unknown): PolarCamera | undefined {
+  if (!isObj(v)) return undefined;
+  const pivot = v.pivot;
+  const pos = v.pos;
+  const up = v.up;
+  if (
+    !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(isNum) ||
+    !isNum(v.r) ||
+    !Array.isArray(pos) || pos.length !== 2 || !pos.every(isNum) ||
+    !Array.isArray(up) || up.length !== 2 || !up.every(isNum)
+  ) return undefined;
+  return {
+    pivot: [pivot[0] as number, pivot[1] as number, pivot[2] as number],
+    r: v.r as number,
+    pos: [pos[0] as number, pos[1] as number],
+    up: [up[0] as number, up[1] as number],
   };
 }
 
