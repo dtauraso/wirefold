@@ -615,66 +615,38 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
   // Prevent browser scroll / back-nav gestures (requires non-passive listener).
   e.preventDefault();
 
+  // The pivot for BOTH wheel gestures is the point straight ahead on the camera's
+  // forward ray (regionFocus). Seeding Go with the camera about a pivot ON the view
+  // ray means applying lookAt(pivot) reproduces the current view direction — so zoom
+  // dollies and pan slides without re-aiming. (Using the cursor-nearest node or the
+  // stale persistent target re-aimed lookAt at it, swinging the view — the "flip".)
+  const pivot = regionFocus(ctx, cam);
+  const r = cam.position.distanceTo(pivot);
+  const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
+  const up = worldDirToAngles(cam.up.clone().normalize());
+
   if (e.ctrlKey) {
-    // DOLLY toward the nearest node under the cursor (or the persistent target).
-    // Seed Go with the current camera about that pivot, then send the zoom factor.
-    // Go floors zoom at its own min distance; the large-sphere clamp is dropped.
-    const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
-    const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
-    let cursorNdcDist = Infinity;
-    let cursorPos: THREE.Vector3 | null = null;
-    for (const n of ctx.nodesRef.current) {
-      const c = nodeWorldPos(n);
-      if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) continue;
-      const ndc = c.clone().project(cam);
-      if (ndc.z > 1) continue; // behind the camera / beyond far plane
-      const dx = ndc.x - mouseNdcX;
-      const dy = ndc.y - mouseNdcY;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < cursorNdcDist) {
-        cursorNdcDist = d;
-        cursorPos = c;
-      }
-    }
-    if (cursorPos) {
-      ctx.targetRef.current.copy(cursorPos);
-    }
-    const pivot = cursorPos ?? ensureTarget(ctx, cam);
+    // DOLLY along the current view direction. Go floors zoom at its own min distance;
+    // the large-sphere clamp is dropped.
     const ZOOM_BASE = 1.01;
-    const r = cam.position.distanceTo(pivot);
-    const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
-    const up = worldDirToAngles(cam.up.clone().normalize());
     sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
-    const factor = Math.pow(ZOOM_BASE, e.deltaY);
-    sendViewpointZoom(factor);
+    sendViewpointZoom(Math.pow(ZOOM_BASE, e.deltaY));
   } else {
-    // PAN = pure 2D screen-space translation along the camera's own right/up basis.
-    // World-space delta is computed locally (from camera pose + target distance) then
-    // handed to Go via sendViewpointPan; Go applies it and returns the new camera state.
+    // PAN = 2D screen-space slide along the camera's right/up basis. The world delta is
+    // computed locally (camera pose + view depth) and handed to Go; Go moves the pivot
+    // and returns the new camera state.
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const target = ensureTarget(ctx, cam);
-
-    const dist = cam.position.distanceTo(target);
-    // Perspective world units per screen pixel at `dist` (vertical FOV).
     const fovRad = (cam.fov * Math.PI) / 180;
-    const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / rect.height;
+    const worldPerPixel = (2 * r * Math.tan(fovRad / 2)) / rect.height;
+    const { r: pr, angle } = deltaToPolar(e.deltaX, -e.deltaY);
+    const delta = planeSlide(cam.quaternion, pr, angle, worldPerPixel);
 
-    const { r, angle } = deltaToPolar(e.deltaX, -e.deltaY);
-    const delta = planeSlide(cam.quaternion, r, angle, worldPerPixel);
-
-    const rPan = cam.position.distanceTo(target);
-    const posPan = worldDirToAngles(cam.position.clone().sub(target).normalize());
-    const upPan = worldDirToAngles(cam.up.clone().normalize());
-    sendViewpointSet([target.x, target.y, target.z], rPan, posPan, upPan);
+    sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
     sendViewpointPan(delta.x, delta.y, delta.z);
 
-    // Re-form the polar origin at the new screen-center: compute the world point
-    // straight ahead of the camera (regionFocus) and send set-origin to Go.
-    // Throttled to one per animation frame so a scroll burst sends at most one.
-    const newFocus = regionFocus(ctx, cam);
-    if (Number.isFinite(newFocus.x) && Number.isFinite(newFocus.y) && Number.isFinite(newFocus.z)) {
-      ctx.scheduleOrigin(newFocus.x, newFocus.y, newFocus.z);
+    // Re-base the polar layout origin at the new screen-center (throttled per frame).
+    if (Number.isFinite(pivot.x) && Number.isFinite(pivot.y) && Number.isFinite(pivot.z)) {
+      ctx.scheduleOrigin(pivot.x, pivot.y, pivot.z);
     }
   }
 }
