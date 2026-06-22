@@ -348,6 +348,12 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 				dir{Theta: vp.ToTheta, Phi: vp.ToPhi},
 				tr,
 			)
+		case "orbit-locked":
+			md.OrbitLockedViewpoint(
+				dir{Theta: vp.FromTheta, Phi: vp.FromPhi},
+				dir{Theta: vp.ToTheta, Phi: vp.ToPhi},
+				tr,
+			)
 		case "zoom":
 			md.ZoomViewpoint(vp.Factor, tr)
 		case "pan":

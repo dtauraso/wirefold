@@ -54,6 +54,7 @@ export type EditMsg =
             upTheta?: number; upPhi?: number;
           }
         | { kind: "orbit"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
+        | { kind: "orbit-locked"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
         | { kind: "zoom"; factor: number }
         | { kind: "pan"; dx: number; dy: number; dz: number };
     };

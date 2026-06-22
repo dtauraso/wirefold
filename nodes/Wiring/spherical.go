@@ -90,3 +90,21 @@ func arcBetween(from, to dir) rot {
 	axis := fromAxisFrame(from, math.Pi/2, psi+math.Pi/2)
 	return rot{Axis: axis, Angle: c}
 }
+
+// angleAboutAxis returns the signed rotation about a fixed `axis` direction that carries
+// `from` to `to`, measured as the azimuth difference in the frame poled at the axis
+// (psi_to − psi_from), wrapped to (−π, π]. This is the locked-disk quantity for
+// handhold-constrained rotation: the axis is frozen at gesture start; only the angle about
+// it tracks the cursor. Mirrors polar.ts angleAboutAxis (spherical edition).
+func angleAboutAxis(from, to, axis dir) float64 {
+	_, psiFrom := azimuthFrom(axis, from)
+	_, psiTo := azimuthFrom(axis, to)
+	d := psiTo - psiFrom
+	for d > math.Pi {
+		d -= 2 * math.Pi
+	}
+	for d <= -math.Pi {
+		d += 2 * math.Pi
+	}
+	return d
+}

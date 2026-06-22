@@ -66,6 +66,20 @@ export function sendViewpointOrbit(
   });
 }
 
+/** Tell Go to orbit from one spherical position to another with a locked axis. */
+export function sendViewpointOrbitLocked(
+  from: [number, number],
+  to: [number, number],
+): void {
+  const [fromTheta, fromPhi] = from;
+  const [toTheta, toPhi] = to;
+  vscode.postMessage({
+    type: "edit",
+    op: "viewpoint",
+    viewpoint: { kind: "orbit-locked", fromTheta, fromPhi, toTheta, toPhi },
+  });
+}
+
 /** Tell Go to zoom by a multiplicative factor. */
 export function sendViewpointZoom(factor: number): void {
   vscode.postMessage({

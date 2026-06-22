@@ -534,12 +534,14 @@ func (md *MoveDispatch) SetOrigin(o vec3, _ *T.Trace) {
 
 // SetViewpoint installs a known camera state without emitting. Used by the "set"
 // viewpoint op to seed the viewpoint from persisted or initial values, followed by
-// EmitViewpoint to broadcast it.
+// EmitViewpoint to broadcast it. Also clears any locked rotation axis from a prior
+// handhold gesture so the next gesture starts fresh.
 func (md *MoveDispatch) SetViewpoint(pivot vec3, r float64, pos, up dir) {
 	md.vp.pivot = pivot
 	md.vp.r = r
 	md.vp.pos = pos
 	md.vp.up = up
+	md.vp.lockedAxis = nil
 }
 
 // EmitViewpoint emits the current camera viewpoint state as a camera trace event.
@@ -555,6 +557,14 @@ func (md *MoveDispatch) EmitViewpoint(tr *T.Trace) {
 // OrbitViewpoint applies a great-circle orbit (carrying from→to) and emits the new state.
 func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) {
 	md.vp.orbit(from, to)
+	md.EmitViewpoint(tr)
+}
+
+// OrbitLockedViewpoint applies a handhold-constrained orbit: the first call locks the
+// rotation axis from the from→to arc; subsequent calls keep the same axis. The lock is
+// cleared by the next SetViewpoint. Emits a camera event each call.
+func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
+	md.vp.orbitLocked(from, to)
 	md.EmitViewpoint(tr)
 }
 

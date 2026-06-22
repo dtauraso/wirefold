@@ -10,8 +10,8 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
-import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, angleAboutAxis, rotateAboutAxis, deltaToPolar, planeSlide } from "./polar";
-import { sendViewpointSet, sendViewpointOrbit, sendViewpointPan, worldDirToAngles } from "./viewpoint-bridge";
+import { cameraFrame, screenToPolar, toWorld, deltaToPolar, planeSlide } from "./polar";
+import { sendViewpointSet, sendViewpointOrbit, sendViewpointOrbitLocked, sendViewpointPan, worldDirToAngles } from "./viewpoint-bridge";
 import type { ControlState, PickOptions } from "./interaction-controls";
 import { computeContentSphere } from "./interaction-controls";
 
@@ -381,6 +381,17 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
       s.prevY = e.clientY;
       s.rotAxis = null;
       s.phase = "handhold-rotating";
+      // Seed Go with the current camera so its polar state matches (same as empty-space branch).
+      const cam0 = ctx.cameraRef.current;
+      if (cam0) {
+        const pivot: [number, number, number] = [s.rotPivot.x, s.rotPivot.y, s.rotPivot.z];
+        const r = cam0.position.distanceTo(s.rotPivot);
+        const posDir = cam0.position.clone().sub(s.rotPivot).normalize();
+        const upDir = cam0.up.clone().normalize();
+        const pos = worldDirToAngles(posDir);
+        const up = worldDirToAngles(upDir);
+        sendViewpointSet(pivot, r, pos, up);
+      }
     } else if (s.emptyDown) {
       // Empty-space drag: start motion-driven great-circle rotation.
       // prevX/prevY were seeded at pointer-down; re-seed here in case the pointer
@@ -472,43 +483,22 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
   }
 
   if (s.phase === "handhold-rotating") {
-    // Constrained rotation: the rotation DISK is locked from the first two cursor
-    // points and reused for the whole gesture. After locking, only the angle about
-    // that fixed axis tracks the cursor — wherever it goes — so the turn is clean
-    // (90° handholds give repeatable square turns). All axis/angle math is in polar.ts.
+    // Constrained rotation: Go owns the axis lock and angle accumulation (via
+    // orbit-locked). TS computes prevDir/currDir as world directions from C and sends
+    // sendViewpointOrbitLocked(curr, prev) — curr→prev matches the free-orbit convention.
+    // Go locks the axis on the first call and reuses it; the lock clears on the next
+    // sendViewpointSet (gesture start or next handhold).
     const cam = ctx.cameraRef.current;
     if (cam) {
       const C = s.rotPivot;
       const CF = cameraFrame(cam.quaternion, C, 1);
       const prev = screenToPolar(s.prevX - s.rotCx, s.prevY - s.rotCy, s.rotPxPerRad);
       const curr = screenToPolar(e.clientX - s.rotCx, e.clientY - s.rotCy, s.rotPxPerRad);
-      const prevDir = toWorld(CF, prev).sub(C);
-      const currDir = toWorld(CF, curr).sub(C);
-      // Lock the disk normal from the FIRST two points (the arc's axis); reuse it after.
-      if (!s.rotAxis) {
-        const { axis, angle } = arcAxisAngle(currDir, prevDir);
-        if (angle > 1e-6 && Number.isFinite(axis.x)) s.rotAxis = axis.clone();
-      }
-      if (s.rotAxis) {
-        // Rotation about the LOCKED axis carrying curr→prev (same follow convention as
-        // the free path's arcAxisAngle(currDir, prevDir)).
-        const angle = angleAboutAxis(currDir, prevDir, s.rotAxis);
-        if (Math.abs(angle) > 1e-6) {
-          const fwd = new THREE.Vector3();
-          cam.getWorldDirection(fwd);
-          const offset = cam.position.clone().sub(C);
-          const newOffset = rotateAboutAxis(offset.clone().normalize(), s.rotAxis, angle).multiplyScalar(offset.length());
-          const newFwd = rotateAboutAxis(fwd, s.rotAxis, angle);
-          const newUp = rotateAboutAxis(cam.up.clone().normalize(), s.rotAxis, angle);
-          cam.position.copy(C).add(newOffset);
-          cam.up.copy(newUp);
-          cam.lookAt(cam.position.clone().add(newFwd));
-          cam.updateMatrixWorld(true);
-        }
-      }
+      const prevDir = toWorld(CF, prev).sub(C).normalize();
+      const currDir = toWorld(CF, curr).sub(C).normalize();
+      sendViewpointOrbitLocked(worldDirToAngles(currDir), worldDirToAngles(prevDir));
       s.prevX = e.clientX;
       s.prevY = e.clientY;
-      commitCamera(cam);
     }
   }
 }

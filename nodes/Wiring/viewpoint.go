@@ -13,10 +13,11 @@ package Wiring
 const viewpointMinDist = 5.0
 
 type viewpoint struct {
-	pivot vec3    // world orbit center (anchor point; not rotation math)
-	r     float64 // distance from pivot to camera
-	pos   dir     // direction pivot → camera
-	up    dir     // up-hint direction (carries roll)
+	pivot      vec3    // world orbit center (anchor point; not rotation math)
+	r          float64 // distance from pivot to camera
+	pos        dir     // direction pivot → camera
+	up         dir     // up-hint direction (carries roll)
+	lockedAxis *dir    // locked rotation axis for handhold-constrained orbit; nil between gestures
 }
 
 // rotate spins the whole camera frame (position direction AND up) by the same rotation,
@@ -30,6 +31,18 @@ func (v *viewpoint) rotate(rt rot) {
 // follows the cursor (the motion-driven great-circle gesture).
 func (v *viewpoint) orbit(from, to dir) {
 	v.rotate(arcBetween(from, to))
+}
+
+// orbitLocked performs a handhold-constrained rotation: the first call locks the rotation
+// axis from the from→to arc; subsequent calls keep the same axis and track only the angle.
+// The lock is cleared by SetViewpoint (gesture end). Mirrors the TS handhold path.
+func (v *viewpoint) orbitLocked(from, to dir) {
+	if v.lockedAxis == nil {
+		ax := arcBetween(from, to).Axis
+		v.lockedAxis = &ax
+	}
+	angle := angleAboutAxis(from, to, *v.lockedAxis)
+	v.rotate(rot{Axis: *v.lockedAxis, Angle: angle})
 }
 
 // zoom scales the orbit radius about the pivot, floored so the camera never reaches it.
