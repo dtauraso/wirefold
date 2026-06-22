@@ -10,8 +10,8 @@ import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geome
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
-import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, angleAboutAxis, rotateAboutAxis, scaleRadius, deltaToPolar, planeSlide } from "./polar";
-import { sendViewpointSet, sendViewpointOrbit, worldDirToAngles } from "./viewpoint-bridge";
+import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, angleAboutAxis, rotateAboutAxis, deltaToPolar, planeSlide } from "./polar";
+import { sendViewpointSet, sendViewpointOrbit, sendViewpointZoom, sendViewpointPan, worldDirToAngles } from "./viewpoint-bridge";
 import type { ControlState, PickOptions } from "./interaction-controls";
 import { computeContentSphere } from "./interaction-controls";
 
@@ -616,23 +616,12 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
   e.preventDefault();
 
   if (e.ctrlKey) {
-    // DOLLY toward the persistent target: scale the camera's offset from the
-    // target multiplicatively. Defined purely from (camera pose, target) — both
-    // finite — so it's a total operation with no z=0 raycast. >1 deltaY zooms
-    // out. MIN_DIST floors |offset| so the camera never reaches/crosses target.
-    //
-    // RE-AIM: before zooming, snap the persistent target onto the NODE NEAREST
-    // THE CURSOR — zoom in toward the node the mouse is on. Convert the pointer to
-    // NDC, project each node's world center to NDC, and pick the one with the
-    // smallest distance from the cursor's NDC. This always selects a real node
-    // (never an edge, never null, never an occluding neighbor), and zooming toward
-    // it keeps that node under the cursor. If no node is finite/in-front, we leave
-    // targetRef as-is and zoom toward the existing persistent focus — no z=0 plane
-    // dependency either way.
+    // DOLLY toward the nearest node under the cursor (or the persistent target).
+    // Seed Go with the current camera about that pivot, then send the zoom factor.
+    // Go floors zoom at its own min distance; the large-sphere clamp is dropped.
     const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
     const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
-    let cursorNode: string | null = null;
     let cursorNdcDist = Infinity;
     let cursorPos: THREE.Vector3 | null = null;
     for (const n of ctx.nodesRef.current) {
@@ -645,29 +634,24 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d < cursorNdcDist) {
         cursorNdcDist = d;
-        cursorNode = n.id;
         cursorPos = c;
       }
     }
     if (cursorPos) {
       ctx.targetRef.current.copy(cursorPos);
     }
-    const target = ensureTarget(ctx, cam);
+    const pivot = cursorPos ?? ensureTarget(ctx, cam);
     const ZOOM_BASE = 1.01;
-    const MIN_DIST = 5;
+    const r = cam.position.distanceTo(pivot);
+    const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
+    const up = worldDirToAngles(cam.up.clone().normalize());
+    sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
     const factor = Math.pow(ZOOM_BASE, e.deltaY);
-    // Polar radial zoom: scale the camera's radius r about the target node, angles held.
-    // r is an explicit coordinate inside scaleRadius (polar.ts); direction is preserved
-    // without a (θ,φ) decomposition, so no pole singularity is introduced.
-    cam.position.copy(scaleRadius(target, cam.position, factor, MIN_DIST));
-    // P7.5: keep camera inside the large sphere after dolly.
-    constrainInsideLargeSphere(cam, computeLargeSphereRadius(ctx.nodesRef.current));
+    sendViewpointZoom(factor);
   } else {
-    // PAN = pure 2D screen-space translation along the camera's own right/up
-    // basis, translating BOTH the camera AND the persistent target by the same
-    // vector (target rides along, so the look-direction is preserved). The only
-    // depth is `dist` = |camPos - target| — finite, stable for the whole gesture,
-    // no z=0 raycast. Defined purely from (camera pose, target).
+    // PAN = pure 2D screen-space translation along the camera's own right/up basis.
+    // World-space delta is computed locally (from camera pose + target distance) then
+    // handed to Go via sendViewpointPan; Go applies it and returns the new camera state.
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const target = ensureTarget(ctx, cam);
 
@@ -676,20 +660,15 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
     const fovRad = (cam.fov * Math.PI) / 180;
     const worldPerPixel = (2 * dist * Math.tan(fovRad / 2)) / rect.height;
 
-    // INPUT EDGE: wheel pixels → polar (r, angle) in the screen plane (−deltaY = screen up).
-    // OUTPUT EDGE: planeSlide recombines (r, angle) onto the camera right/up basis (polar.ts).
-    // The handler holds only polar quantities; both camera + target slide by the same world
-    // delta (target rides along, look-direction preserved).
     const { r, angle } = deltaToPolar(e.deltaX, -e.deltaY);
     const delta = planeSlide(cam.quaternion, r, angle, worldPerPixel);
-    cam.position.add(delta);
-    target.add(delta);
 
-    // Square-on check: cam looks down -z, so right=(1,0,0), up=(0,1,0). Then this
-    // is a world-XY translation scaled by worldPerPixel at the look-distance —
-    // exactly the prior square-on behavior (a flat 2D slide in the z=0 plane).
-    // P7.5: keep camera inside the large sphere after pan.
-    constrainInsideLargeSphere(cam, computeLargeSphereRadius(ctx.nodesRef.current));
+    const rPan = cam.position.distanceTo(target);
+    const posPan = worldDirToAngles(cam.position.clone().sub(target).normalize());
+    const upPan = worldDirToAngles(cam.up.clone().normalize());
+    sendViewpointSet([target.x, target.y, target.z], rPan, posPan, upPan);
+    sendViewpointPan(delta.x, delta.y, delta.z);
+
     // Re-form the polar origin at the new screen-center: compute the world point
     // straight ahead of the camera (regionFocus) and send set-origin to Go.
     // Throttled to one per animation frame so a scroll burst sends at most one.
@@ -698,6 +677,4 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
       ctx.scheduleOrigin(newFocus.x, newFocus.y, newFocus.z);
     }
   }
-  // Commit camera position after each wheel step (scheduleViewSave debounces).
-  commitCamera(cam);
 }
