@@ -615,23 +615,46 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
   // Prevent browser scroll / back-nav gestures (requires non-passive listener).
   e.preventDefault();
 
-  // The pivot for BOTH wheel gestures is the point straight ahead on the camera's
-  // forward ray (regionFocus). Seeding Go with the camera about a pivot ON the view
-  // ray means applying lookAt(pivot) reproduces the current view direction — so zoom
-  // dollies and pan slides without re-aiming. (Using the cursor-nearest node or the
-  // stale persistent target re-aimed lookAt at it, swinging the view — the "flip".)
-  const pivot = regionFocus(ctx, cam);
-  const r = cam.position.distanceTo(pivot);
-  const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
   const up = worldDirToAngles(cam.up.clone().normalize());
 
   if (e.ctrlKey) {
-    // DOLLY along the current view direction. Go floors zoom at its own min distance;
-    // the large-sphere clamp is dropped.
+    // ZOOM TO CURSOR: dolly the eye toward the node nearest the cursor while keeping the
+    // VIEW DIRECTION fixed — so that node stays put under the cursor and the view never
+    // re-aims (the earlier flip was from forcing lookAt at the node, changing direction).
+    // We move the eye along the eye→target line by `factor`, then express the result as a
+    // polar state whose pivot lies on the UNCHANGED forward ray (so lookAt reproduces the
+    // same direction). Falls back to the view-center point when no node is in front.
     const ZOOM_BASE = 1.01;
-    sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
-    sendViewpointZoom(Math.pow(ZOOM_BASE, e.deltaY));
+    const MIN_DIST = 5;
+    const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
+    const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
+    let cursorNdcDist = Infinity;
+    let target: THREE.Vector3 | null = null;
+    for (const n of ctx.nodesRef.current) {
+      const c = nodeWorldPos(n);
+      if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) continue;
+      const ndc = c.clone().project(cam);
+      if (ndc.z > 1) continue; // behind the camera / beyond far plane
+      const d = Math.hypot(ndc.x - mouseNdcX, ndc.y - mouseNdcY);
+      if (d < cursorNdcDist) { cursorNdcDist = d; target = c; }
+    }
+    const P = target ?? regionFocus(ctx, cam); // point to dolly toward
+    const factor = Math.pow(ZOOM_BASE, e.deltaY);
+    // New eye = move along the P→eye line by factor, floored so it never reaches P.
+    const toEye = cam.position.clone().sub(P);
+    const newEye = P.clone().add(toEye.setLength(Math.max(toEye.length() * factor, MIN_DIST)));
+    // Keep the current view direction; put the pivot on that ray at the target's depth.
+    const fwd = new THREE.Vector3();
+    cam.getWorldDirection(fwd); // unit, current view direction (unchanged)
+    const depth = Math.max(fwd.dot(P.clone().sub(newEye)), MIN_DIST);
+    const pivot = newEye.clone().add(fwd.clone().multiplyScalar(depth));
+    const pos = worldDirToAngles(newEye.clone().sub(pivot).normalize());
+    sendViewpointSet([pivot.x, pivot.y, pivot.z], depth, pos, up);
   } else {
+    const pivot = regionFocus(ctx, cam);
+    const r = cam.position.distanceTo(pivot);
+    const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
     // PAN = 2D screen-space slide along the camera's right/up basis. The world delta is
     // computed locally (camera pose + view depth) and handed to Go; Go moves the pivot
     // and returns the new camera state.
