@@ -11,7 +11,7 @@ import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
 import { cameraFrame, screenToPolar, toWorld, arcAxisAngle, angleAboutAxis, rotateAboutAxis, deltaToPolar, planeSlide } from "./polar";
-import { sendViewpointSet, sendViewpointOrbit, sendViewpointZoom, sendViewpointPan, worldDirToAngles } from "./viewpoint-bridge";
+import { sendViewpointSet, sendViewpointOrbit, sendViewpointPan, worldDirToAngles } from "./viewpoint-bridge";
 import type { ControlState, PickOptions } from "./interaction-controls";
 import { computeContentSphere } from "./interaction-controls";
 
@@ -618,12 +618,12 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
   const up = worldDirToAngles(cam.up.clone().normalize());
 
   if (e.ctrlKey) {
-    // ZOOM TO CURSOR: dolly the eye toward the node nearest the cursor while keeping the
-    // VIEW DIRECTION fixed — so that node stays put under the cursor and the view never
-    // re-aims (the earlier flip was from forcing lookAt at the node, changing direction).
-    // We move the eye along the eye→target line by `factor`, then express the result as a
-    // polar state whose pivot lies on the UNCHANGED forward ray (so lookAt reproduces the
-    // same direction). Falls back to the view-center point when no node is in front.
+    // ZOOM TO CURSOR is a DOLLY, which in the polar model is a PAN (a pivot translation),
+    // not a radius change: translating the eye and pivot by the same world vector keeps r
+    // and pos fixed, so the view direction never changes (no re-aim/flip) and the node
+    // under the cursor stays put. delta = (1-factor)(P - eye) steps the eye a `factor`
+    // amount along eye→P; floored so a zoom-in never reaches P. We seed Go with the
+    // current camera (covers any local drift), then send the pan — Go owns the dolly.
     const ZOOM_BASE = 1.01;
     const MIN_DIST = 5;
     const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -639,18 +639,17 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
       const d = Math.hypot(ndc.x - mouseNdcX, ndc.y - mouseNdcY);
       if (d < cursorNdcDist) { cursorNdcDist = d; target = c; }
     }
-    const P = target ?? regionFocus(ctx, cam); // point to dolly toward
-    const factor = Math.pow(ZOOM_BASE, e.deltaY);
-    // New eye = move along the P→eye line by factor, floored so it never reaches P.
-    const toEye = cam.position.clone().sub(P);
-    const newEye = P.clone().add(toEye.setLength(Math.max(toEye.length() * factor, MIN_DIST)));
-    // Keep the current view direction; put the pivot on that ray at the target's depth.
-    const fwd = new THREE.Vector3();
-    cam.getWorldDirection(fwd); // unit, current view direction (unchanged)
-    const depth = Math.max(fwd.dot(P.clone().sub(newEye)), MIN_DIST);
-    const pivot = newEye.clone().add(fwd.clone().multiplyScalar(depth));
-    const pos = worldDirToAngles(newEye.clone().sub(pivot).normalize());
-    sendViewpointSet([pivot.x, pivot.y, pivot.z], depth, pos, up);
+    const P = target ?? regionFocus(ctx, cam); // node to dolly toward
+    const toP = P.clone().sub(cam.position);
+    const distP = toP.length();
+    let factor = Math.pow(ZOOM_BASE, e.deltaY);
+    if (distP * factor < MIN_DIST) factor = MIN_DIST / distP; // never reach P
+    const delta = toP.multiplyScalar(1 - factor); // eye step along eye→P
+    const pivot = regionFocus(ctx, cam);
+    const r = cam.position.distanceTo(pivot);
+    const pos = worldDirToAngles(cam.position.clone().sub(pivot).normalize());
+    sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
+    sendViewpointPan(delta.x, delta.y, delta.z);
   } else {
     const pivot = regionFocus(ctx, cam);
     const r = cam.position.distanceTo(pivot);
