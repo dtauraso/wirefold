@@ -1,9 +1,11 @@
-// scene-camera.tsx — CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker.
+// scene-camera.tsx — CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker, PolarCameraRestorer.
 import React, { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
+import type { PolarCamera } from "./camera-store";
+import { sendViewpointSet } from "./viewpoint-bridge";
 import { useThreeStore } from "./store";
 import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
 import { boundingBox, nodeWorldPos, nodeTopWorldPos, ndcToPixel, nodeRadius } from "./geometry-helpers";
@@ -182,6 +184,24 @@ export function CameraSettleDetector({
     }
   });
 
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// PolarCameraRestorer: on mount, sends the saved polar camera to Go once.
+// Go echoes it back as a "camera" trace event, which CameraFromStore applies.
+// Guarded by a ref so it fires exactly once even if the prop reference changes.
+// ---------------------------------------------------------------------------
+
+export function PolarCameraRestorer({ initialCameraPolar }: { initialCameraPolar: PolarCamera }) {
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (sentRef.current) return;
+    sentRef.current = true;
+    sendViewpointSet(initialCameraPolar.pivot, initialCameraPolar.r, initialCameraPolar.pos, initialCameraPolar.up);
+  // Run once on mount — prop is the initial value and won't change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return null;
 }
 

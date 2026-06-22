@@ -28,6 +28,8 @@ import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
 import { useCameraStore } from "./camera-store";
 import { useThreeStore } from "./store";
+import { patchViewerState } from "../state/viewer-state";
+import { scheduleViewSave } from "../save";
 import { postLog } from "../log/post";
 import { setPulsePos, clearPulse } from "./pulse-state";
 import { setInteriorBead } from "./interior-bead-state";
@@ -164,12 +166,15 @@ export function handleTraceEvent(event: TraceEvent): void {
     }
     case "camera": {
       const e = event as Extract<TraceEvent, { kind: "camera" }>;
-      useCameraStore.getState().set({
-        pivot: [e.px, e.py, e.pz],
+      const polar = {
+        pivot: [e.px, e.py, e.pz] as [number, number, number],
         r: e.r,
-        pos: [e.posTheta, e.posPhi],
-        up: [e.upTheta, e.upPhi],
-      });
+        pos: [e.posTheta, e.posPhi] as [number, number],
+        up: [e.upTheta, e.upPhi] as [number, number],
+      };
+      useCameraStore.getState().set(polar);
+      patchViewerState((v) => { v.cameraPolar = polar; });
+      scheduleViewSave();
       return;
     }
     default:

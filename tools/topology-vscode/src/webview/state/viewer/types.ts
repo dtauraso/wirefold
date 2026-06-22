@@ -5,9 +5,12 @@
 import type { StateValue } from "../../../schema";
 import {
   isObj, isStrArr,
-  parseCamera, parseCamera3d,
+  parseCamera, parseCamera3d, parsePolarCamera,
   parseNodeViews, parseEdgeViews,
 } from "./parse";
+// PolarCamera is Go's canonical camera representation — reuse the type from camera-store
+// to avoid duplication.
+export type { PolarCamera } from "../../three/camera-store";
 
 // Canonical camera is React Flow's pan/zoom: `{x, y, zoom}`. The lit-html
 // era persisted an SVG viewBox `{x, y, w, h}`; we still read those on load
@@ -42,6 +45,7 @@ export type EdgeView = {
 export type ViewerState = {
   camera?: Camera | LegacyCameraBox;
   camera3d?: Camera3D;
+  cameraPolar?: import("../../three/camera-store").PolarCamera;
   lastSelectionIds?: string[];
   nodes?: Record<string, NodeView>;
   edges?: Record<string, EdgeView>;
@@ -77,6 +81,11 @@ export function parseViewerState(text: string | undefined): ViewerState {
     const cam3d = parseCamera3d(raw.camera3d);
     if (cam3d) out.camera3d = cam3d;
     else console.warn("topology.view.json: dropping malformed camera3d");
+  }
+  if (raw.cameraPolar !== undefined) {
+    const cp = parsePolarCamera(raw.cameraPolar);
+    if (cp) out.cameraPolar = cp;
+    else console.warn("topology.view.json: dropping malformed cameraPolar");
   }
   if (raw.lastSelectionIds !== undefined) {
     if (isStrArr(raw.lastSelectionIds)) out.lastSelectionIds = raw.lastSelectionIds;
@@ -130,13 +139,14 @@ export function serializeViewerState(s: ViewerState): string {
   return JSON.stringify(withStableViewOrder(s), null, 2) + "\n";
 }
 
-// Scene-only fields (camera, camera3d, labelsGlobalHidden) — for topology.scene.json.
-export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "labelsGlobalHidden">;
+// Scene-only fields (camera, camera3d, cameraPolar, labelsGlobalHidden) — for topology.scene.json.
+export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden">;
 
 export function serializeSceneState(s: ViewerState): string {
   const scene: SceneState = {};
   if (s.camera !== undefined) scene.camera = s.camera;
   if (s.camera3d !== undefined) scene.camera3d = s.camera3d;
+  if (s.cameraPolar !== undefined) scene.cameraPolar = s.cameraPolar;
   if (s.labelsGlobalHidden !== undefined) scene.labelsGlobalHidden = s.labelsGlobalHidden;
   return JSON.stringify(scene, null, 2) + "\n";
 }
@@ -147,6 +157,7 @@ export function mergeSceneIntoViewerState(base: ViewerState, sceneParsed: Viewer
   const out: ViewerState = { ...base };
   if (sceneParsed.camera !== undefined) out.camera = sceneParsed.camera;
   if (sceneParsed.camera3d !== undefined) out.camera3d = sceneParsed.camera3d;
+  if (sceneParsed.cameraPolar !== undefined) out.cameraPolar = sceneParsed.cameraPolar;
   if (sceneParsed.labelsGlobalHidden !== undefined) out.labelsGlobalHidden = sceneParsed.labelsGlobalHidden;
   else delete out.labelsGlobalHidden; // absent = false (labels shown)
   return out;

@@ -229,6 +229,7 @@ export function ThreeView() {
             hoveredId={hoveredId}
             cameraRef={cameraRef}
             initialCamera3d={viewerState.camera3d}
+            initialCameraPolar={viewerState.cameraPolar}
             onPickRequest={pickRequest}
             onPositions={onPositions}
             onNearestN={onNearestN}

@@ -6,13 +6,14 @@ import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { Camera3D } from "../state/viewer/types";
+import type { PolarCamera } from "./camera-store";
 import type { PickOptions } from "./interaction-controls";
 import {
   SHADING_PARAM_SCENE_AMBIENT_INTENSITY,
   SHADING_PARAM_SCENE_DIR_INTENSITY,
 } from "../../schema/shading-params";
 import { ProceduralEnvProvider } from "./scene-env";
-import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker } from "./scene-camera";
+import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker, PolarCameraRestorer } from "./scene-camera";
 import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 
@@ -191,6 +192,7 @@ export function Scene({
   hoveredId,
   cameraRef,
   initialCamera3d,
+  initialCameraPolar,
   onPickRequest,
   onPositions,
   onNearestN,
@@ -203,6 +205,7 @@ export function Scene({
   hoveredId: string | null;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   initialCamera3d?: Camera3D;
+  initialCameraPolar?: PolarCamera;
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
@@ -237,11 +240,13 @@ export function Scene({
       if (e.source === ownerId && e.target) surfaceIds.add(e.target);
     }
   }
-  const hasRestoredCamera = initialCamera3d !== undefined;
+  // cameraPolar takes precedence; if present, skip camera3d restore and suppress auto-fit.
+  const hasRestoredCamera = initialCameraPolar !== undefined || initialCamera3d !== undefined;
   return (
     <ProceduralEnvProvider>
       <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
-      <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCamera3d} />
+      <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCameraPolar === undefined ? initialCamera3d : undefined} />
+      {initialCameraPolar !== undefined && <PolarCameraRestorer initialCameraPolar={initialCameraPolar} />}
       <CameraFromStore />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
