@@ -13,8 +13,6 @@ import "math"
 // Pole convention matches polar.go: θ = angle from +y (0=up, π=down), φ = azimuth around
 // +y (0 = +x, increasing toward +z).
 
-const sphEps = 1e-9
-
 // dir is a direction on the unit sphere (pole = +y).
 type dir struct {
 	Theta float64 // angle from +y, 0..π
@@ -47,50 +45,32 @@ func angularDistance(a, b dir) float64 {
 }
 
 // azimuthFrom expresses p in the frame POLED at `pole`: returns the colatitude c
-// (= angularDistance(pole, p)) and the position angle psi of p about the pole, measured
-// from the half-great-circle pole→+y (ψ=0). Pure spherical trig (cosine + sine rules in
-// the triangle +y–pole–p). When the pole is itself ±y the +y reference is degenerate, so
-// the base azimuth φ is used directly (rotation about ±y is just φ ± angle).
+// (= angularDistance(pole, p)) and the bearing psi of p about the pole. The bearing is an
+// atan2 of two UNNORMALIZED terms (the great-circle bearing formula) — there is no
+// division anywhere, so the pole and axis-coincidence cases resolve as atan2(0,0)=0 (a
+// finite, correct value, since azimuth is arbitrary there) with no special case.
 func azimuthFrom(pole, p dir) (c, psi float64) {
 	c = angularDistance(pole, p)
-	st := math.Sin(pole.Theta)
-	if st < sphEps {
-		// Rotation about ±y is φ ± angle (right-hand). About +y a positive turn
-		// DECREASES φ (carries +z→+x), so the pole-frame azimuth runs as -φ; about
-		// -y it runs as +φ. (Verified against the Rodrigues oracle.)
-		if pole.Theta < math.Pi/2 { // pole = +y
-			return p.Theta, -p.Phi
-		}
-		return math.Pi - p.Theta, p.Phi // pole = -y
-	}
-	if math.Sin(c) < sphEps {
-		return c, 0 // p on the pole axis: azimuth undefined
-	}
 	dphi := p.Phi - pole.Phi
-	sPsi := math.Sin(p.Theta) * math.Sin(dphi)
-	cPsi := (math.Cos(p.Theta) - math.Cos(pole.Theta)*math.Cos(c)) / st
-	return c, math.Atan2(sPsi, cPsi)
+	psi = math.Atan2(
+		math.Sin(p.Theta)*math.Sin(dphi),
+		math.Sin(pole.Theta)*math.Cos(p.Theta)-math.Cos(pole.Theta)*math.Sin(p.Theta)*math.Cos(dphi),
+	)
+	return c, psi
 }
 
-// fromAxisFrame is the inverse of azimuthFrom: given a colatitude c and position angle psi
-// in the frame poled at `pole`, return the base direction. (Cosine rule for the new θ,
-// then sine+cosine rules for the azimuth offset Δφ about +y.)
+// fromAxisFrame is the inverse of azimuthFrom: given a colatitude c and bearing psi in the
+// frame poled at `pole`, return the base direction. The new θ comes from the cosine rule
+// (acos, clamped only to its valid [-1,1] domain — exact, not a tolerance), and the
+// azimuth offset Δφ is again an atan2 of two unnormalized terms — no division, no poles.
 func fromAxisFrame(pole dir, c, psi float64) dir {
-	st := math.Sin(pole.Theta)
-	if st < sphEps {
-		if pole.Theta < math.Pi/2 { // pole = +y (azimuth runs as -φ; see azimuthFrom)
-			return dir{Theta: c, Phi: wrapPi(-psi)}
-		}
-		return dir{Theta: math.Pi - c, Phi: wrapPi(psi)} // pole = -y
-	}
-	ct := clamp(math.Cos(pole.Theta)*math.Cos(c)+st*math.Sin(c)*math.Cos(psi), -1, 1)
-	thetaP := math.Acos(ct)
-	if math.Sin(thetaP) < sphEps {
-		return dir{Theta: thetaP, Phi: pole.Phi} // result on a pole: φ undefined
-	}
-	sDphi := math.Sin(c) * math.Sin(psi)
-	cDphi := (math.Cos(c) - math.Cos(pole.Theta)*ct) / st
-	return dir{Theta: thetaP, Phi: wrapPi(pole.Phi + math.Atan2(sDphi, cDphi))}
+	cosT := clamp(math.Cos(pole.Theta)*math.Cos(c)+math.Sin(pole.Theta)*math.Sin(c)*math.Cos(psi), -1, 1)
+	theta := math.Acos(cosT)
+	dphi := math.Atan2(
+		math.Sin(c)*math.Sin(psi),
+		math.Sin(pole.Theta)*math.Cos(c)-math.Cos(pole.Theta)*math.Sin(c)*math.Cos(psi),
+	)
+	return dir{Theta: theta, Phi: wrapPi(pole.Phi + dphi)}
 }
 
 // rotateDir turns direction p by `angle` (right-hand) about the `axis` direction. The
