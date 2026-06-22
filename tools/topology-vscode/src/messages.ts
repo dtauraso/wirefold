@@ -41,7 +41,22 @@ export type EditMsg =
       keys: string[];
     }
   | { type: "edit"; op: "scene"; scene: unknown }
-  | { type: "edit"; op: "set-origin"; x: number; y: number; z: number };
+  | { type: "edit"; op: "set-origin"; x: number; y: number; z: number }
+  | {
+      type: "edit";
+      op: "viewpoint";
+      viewpoint:
+        | {
+            kind: "set";
+            pivotX?: number; pivotY?: number; pivotZ?: number;
+            r?: number;
+            posTheta?: number; posPhi?: number;
+            upTheta?: number; upPhi?: number;
+          }
+        | { kind: "orbit"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
+        | { kind: "zoom"; factor: number }
+        | { kind: "pan"; dx: number; dy: number; dz: number };
+    };
 
 export type WebviewToHostMsg =
   | { type: "ready" }
@@ -81,7 +96,8 @@ export type TraceEvent =
   | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number; bead?: number }
   | { step: number; kind: "arrive"; node: string; port: string; value?: number; bead?: number }
   | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
-  | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number };
+  | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
+  | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -164,6 +180,14 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
         typeof m.z === "number" && Number.isFinite(m.z)
         ? (m as unknown as WebviewToHostMsg)
         : undefined;
+    case "viewpoint": {
+      // viewpoint must have a nested object with a string kind discriminator.
+      const vp = m.viewpoint;
+      if (!vp || typeof vp !== "object") return undefined;
+      const v = vp as Record<string, unknown>;
+      if (typeof v.kind !== "string") return undefined;
+      return (m as unknown as WebviewToHostMsg);
+    }
     default:
       return undefined;
   }

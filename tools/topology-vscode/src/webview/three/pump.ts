@@ -26,6 +26,7 @@
 
 import type { TraceEvent } from "../../messages";
 import type { TraceEventKind } from "./trace-kinds";
+import { useCameraStore } from "./camera-store";
 import { useThreeStore } from "./store";
 import { postLog } from "../log/post";
 import { setPulsePos, clearPulse } from "./pulse-state";
@@ -159,6 +160,16 @@ export function handleTraceEvent(event: TraceEvent): void {
       // dest port until consume, which in a ring can lag arrival noticeably.
       const { node, port } = event as Extract<TraceEvent, { kind: "done" }>;
       postLog("phase4.pump.done", { layer: "pump.done", step, node, port: port ?? null });
+      return;
+    }
+    case "camera": {
+      const e = event as Extract<TraceEvent, { kind: "camera" }>;
+      useCameraStore.getState().set({
+        pivot: [e.px, e.py, e.pz],
+        r: e.r,
+        pos: [e.posTheta, e.posPhi],
+        up: [e.upTheta, e.upPhi],
+      });
       return;
     }
     default:
