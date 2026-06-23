@@ -286,6 +286,22 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		if has1 && has2 && has6 {
 			md.addThetaLock("1", "2", "6")
 			md.addThetaLock("1", "6", "2")
+
+			// Dynamic port auto-aim for edges 1→2 and 1→6: the four ports
+			// on these edges point toward their connected node's current center
+			// rather than using a fixed ring-anchor direction. Handle names are
+			// read from topology/edges/1To2.json and 1To6.json.
+			aimedPorts := AimedPortRegistry{
+				// Edge 1→2: node 1's output port ToHoldNewSendOld aims at node 2
+				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
+				// Edge 1→2: node 2's input port FromPrevHoldNewSendOldNode aims at node 1
+				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
+				// Edge 1→6: node 1's output port ToExcitatory aims at node 6
+				{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
+				// Edge 1→6: node 6's input port FromInput aims at node 1
+				{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
+			}
+			md.installAimedPorts(aimedPorts)
 		}
 
 		// Couple nodes 3 and 7 on node 2's sphere via a bidirectional theta lock
