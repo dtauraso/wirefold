@@ -308,6 +308,16 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
 				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
 			}
+			// Edge 2→3: node 2's output ToNext0 aims at node 3, node 3's input In back at 2.
+			if _, has3 := centers["3"]; has3 {
+				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
+				aimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
+			}
+			// Edge 2→7: node 2's output ToNext1 aims at node 7, node 7's input FromInput back at 2.
+			if _, has7 := centers["7"]; has7 {
+				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
+				aimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
+			}
 			md.installAimedPorts(aimedPorts)
 		}
 
