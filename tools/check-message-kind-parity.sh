@@ -21,8 +21,15 @@ kinds_from_go() {
     grep -oE 'msg\.Type[[:space:]]*[!=]=[[:space:]]*"[^"]+"' "$STDIN_READER" \
       | grep -oE '"[^"]+"' \
       | tr -d '"'
-    # Extract case literals from switch msg.Type blocks.
-    grep -A 200 'switch msg\.Type' "$STDIN_READER" \
+    # Extract case literals from ONLY the `switch msg.Type` block. Bound the window
+    # to that switch (stop at the next `switch`), so nested op/sub-kind switches like
+    # `switch vp.Kind` (the op="viewpoint" payload kinds set/orbit/zoom/...) are NOT
+    # mistaken for top-level message types. (A fixed -A window spilled into them.)
+    awk '
+      /switch[[:space:]]+msg\.Type/ { inblk=1; next }
+      inblk && /switch[[:space:]]/  { inblk=0 }
+      inblk
+    ' "$STDIN_READER" \
       | grep -oE 'case[[:space:]]+"[^"]+"' \
       | grep -oE '"[^"]+"' \
       | tr -d '"'
