@@ -132,14 +132,21 @@ export function parsePortId(pid: string): { nodeId: string; isInput: boolean; po
   return { nodeId, isInput: dir === "in", portName };
 }
 
-/** Unproject a pointer position (client coords) to the z=0 world plane. */
-export function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 | null {
+/**
+ * Unproject a pointer position (client coords) onto a horizontal world plane (normal +z)
+ * at height `planeZ`. The node rings lie in the z = nodeCenter.z plane (ring normal is
+ * (0,0,1)), so port-move must project onto THAT plane, not a fixed z=0 — otherwise a node
+ * off the z=0 plane (e.g. node 8 at z≈-20) gets a hit ~20 units out of its ring plane and
+ * a badly skewed anchor. Defaults to z=0 for any legacy caller.
+ */
+export function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: number, rect: DOMRect, planeZ = 0): THREE.Vector3 | null {
   const cam = ctx.cameraRef.current;
   if (!cam) return null;
   const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
   const raycaster = new THREE.Raycaster(); // polar-nav-ok: node-drag/port-move plane hit, not rotation
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
-  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  // Plane z = planeZ  ⇔  (0,0,1)·p − planeZ = 0, so the plane constant is −planeZ.
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -planeZ);
   const target = new THREE.Vector3();
   const hit = raycaster.ray.intersectPlane(plane, target);
   return hit ? target : null;
@@ -451,7 +458,7 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
     // streams) — same optimistic-follow path node-drag uses for the node body.
     const pm = ctx.portMoveRef.current;
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    const planePoint = unprojectToPlane(ctx, e.clientX, e.clientY, rect);
+    const planePoint = unprojectToPlane(ctx, e.clientX, e.clientY, rect, pm.nodeCenter.z);
     if (planePoint) {
       const anchor = pointerRingAnchor(pm.nodeCenter, planePoint);
       if (anchor) {
@@ -537,7 +544,7 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
   if (s.phase === "port-move" && ctx.portMoveRef.current) {
     const pm = ctx.portMoveRef.current;
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    const planePoint = unprojectToPlane(ctx, e.clientX, e.clientY, rect);
+    const planePoint = unprojectToPlane(ctx, e.clientX, e.clientY, rect, pm.nodeCenter.z);
     if (planePoint) {
       const anchor = pointerRingAnchor(pm.nodeCenter, planePoint);
       if (anchor) {
