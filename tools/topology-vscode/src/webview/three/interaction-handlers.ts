@@ -240,11 +240,14 @@ export function regionFocus(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): 
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the content-sphere screen mapping used by BOTH rotation paths (empty-space
- * free-roll and handhold-constrained). Computes the world pivot (content-sphere center),
- * projects it to screen once for the pixel center, and the px-per-radian scale, then seeds
- * prevX/prevY. All sphere/angle math stays in polar.ts; this only reads camera state and
- * does the one allowed pivot projection. Mirrors the original inline empty-space block.
+ * Seed the screen mapping used by BOTH rotation paths (empty-space free-roll and
+ * handhold-constrained). The orbit PIVOT is the point straight ahead on the camera's
+ * forward ray (regionFocus) — the point the camera is already looking at — NOT the
+ * content-sphere center. Pivoting on the current look point means the seed's
+ * lookAt(pivot) reproduces the current view direction, so rotation starts with no snap
+ * (matching zoom/pan, which also pivot on regionFocus). Using the content center re-aimed
+ * lookAt at it, swinging the view when the camera had been panned away — the rotation
+ * "snap". The content sphere's radius is still used only for the px-per-radian sensitivity.
  */
 function beginSphereRotation(
   ctx: InteractionCtx,
@@ -255,14 +258,15 @@ function beginSphereRotation(
   clientY: number,
 ) {
   cam0.updateMatrixWorld(true);
-  const cs = computeContentSphere(ctx.nodesRef.current);
-  s.rotPivot = cs.center.clone();
+  const pivot = regionFocus(ctx, cam0); // the current look point on the forward ray
+  s.rotPivot = pivot.clone();
 
-  const pivotNdc = cs.center.clone().project(cam0); // polar-center-projection
+  const pivotNdc = pivot.clone().project(cam0); // polar-center-projection (≈ screen center)
   s.rotCx = ((pivotNdc.x + 1) / 2) * rect.width + rect.left;
   s.rotCy = ((-pivotNdc.y + 1) / 2) * rect.height + rect.top;
 
-  const pivotDist = cam0.position.distanceTo(cs.center);
+  const cs = computeContentSphere(ctx.nodesRef.current); // radius only, for sensitivity
+  const pivotDist = cam0.position.distanceTo(pivot);
   const fovRad = (cam0.fov * Math.PI) / 180;
   const Rpx = (cs.radius / pivotDist) * (rect.height / 2) / Math.tan(fovRad / 2);
   s.rotPxPerRad = Math.max(Rpx * (2 / Math.PI), 1);
