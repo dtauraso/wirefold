@@ -1,17 +1,17 @@
-# ExcitatoryNode
+# PulseNode
 
 ## View
 
 | Field | Value |
 |-------|-------|
-| kind | excitatory |
+| kind | pulse |
 | bg | #e1f5fe |
 | border | #01579b |
 | text | #01579b |
 | accent | #01579b |
 | minWidth | 90 |
-| defaultLabel | excitatory |
-| role | excitatory |
+| defaultLabel | pulse |
+| role | pulse |
 | shape | rect |
 | fill | #e1f5fe |
 | stroke | #01579b |
@@ -30,7 +30,7 @@
 Sample-and-hold. Holds one int value (initialized to -1) and drives it out
 continuously, even before any input arrives. When a value arrives on FromInput,
 the held value is updated and subsequent outputs emit the new value. The output
-is not precondition-gated — Excitatory self-emits -1 from the start.
+is not precondition-gated — Pulse self-emits -1 from the start.
 
 ## Runtime status
 
