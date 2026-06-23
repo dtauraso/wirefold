@@ -501,6 +501,36 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
 }
 
+// emitNodeGeometryAimed is like emitNodeGeometry but uses portDirAimed for
+// every port, so registered ports point dynamically toward their connected
+// node's current center. Non-registered ports fall back to portDir.
+func emitNodeGeometryAimed(tr *T.Trace, nodeName string, g nodeGeom, registry AimedPortRegistry, centerOf func(string) (vec3, bool)) {
+	center := nodeWorldPos(g)
+	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
+	appendPort := func(name string, isInput bool) {
+		pos := portWorldPosAimed(g, name, isInput, nodeName, registry, centerOf)
+		dir, _ := portDirAimed(g, name, isInput, nodeName, registry, centerOf)
+		ports = append(ports, T.PortGeom{
+			Name: name, IsInput: isInput,
+			PX: pos.X, PY: pos.Y, PZ: pos.Z,
+			DX: dir.X, DY: dir.Y, DZ: dir.Z,
+		})
+	}
+	for _, p := range g.Inputs {
+		appendPort(p.Name, true)
+	}
+	for _, p := range g.Outputs {
+		appendPort(p.Name, false)
+	}
+	sphereR := nodeR(g)
+	if g.ReachR > 0 {
+		sphereR = g.ReachR
+	}
+	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
+		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
+		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
+}
+
 // emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one
 // node-bead event per fixed slot (rows {0,1} × cols {0,1}). The event's x/y/z
 // carry the NODE-LOCAL OFFSET (interiorSlotOffset, relative to the node center —
