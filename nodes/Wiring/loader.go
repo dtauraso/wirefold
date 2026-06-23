@@ -203,6 +203,53 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		}
 	}
 
+	// Build the aimed-port registry early so the initial edge-geometry loop can use
+	// aimed port directions (radial toward connected node) rather than ring-anchor
+	// directions. Same guard logic as the theta-lock block below; nil registry
+	// falls back to non-aimed for all ports.
+	var initialAimedPorts AimedPortRegistry
+	{
+		centers := map[string]vec3{}
+		for id, g := range nodeGeoms {
+			if g.Center != nil {
+				centers[id] = *g.Center
+			}
+		}
+		_, has1 := centers["1"]
+		_, has2 := centers["2"]
+		_, has6 := centers["6"]
+		if has1 && has2 && has6 {
+			initialAimedPorts = AimedPortRegistry{
+				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
+				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
+				{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
+				{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
+			}
+			if _, has8 := centers["8"]; has8 {
+				initialAimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
+				initialAimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
+			}
+			if _, has3 := centers["3"]; has3 {
+				initialAimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
+				initialAimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
+			}
+			if _, has7 := centers["7"]; has7 {
+				initialAimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
+				initialAimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
+			}
+		}
+	}
+
+	// centerOf closure for portDirAimed during initial edge-geometry construction:
+	// reads static world centers from nodeGeoms (before movers are running).
+	centerOf := func(id string) (vec3, bool) {
+		g, ok := nodeGeoms[id]
+		if !ok || g.Center == nil {
+			return vec3{}, false
+		}
+		return *g.Center, true
+	}
+
 	// Allocate one *PacedWire per destination port (fan-in safe).
 	// destWire: "destNode.destPort" → *PacedWire (owned by the destination).
 	// edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
@@ -220,18 +267,18 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	edgeSegments := map[string]wireSegment{}
 	for _, e := range spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
-		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry.
-		arcLength := arcLengthBetweenPorts(
-			nodeGeoms[e.Source], e.SourceHandle,
-			nodeGeoms[e.Target], e.TargetHandle,
+		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry,
+		// using aimed port directions for registered ports (radial toward connected node)
+		// rather than ring-anchor positions. Non-registered ports fall back to portWorldPos.
+		seg := segmentBetweenPortsAimed(
+			nodeGeoms[e.Source], e.SourceHandle, e.Source,
+			nodeGeoms[e.Target], e.TargetHandle, e.Target,
+			initialAimedPorts, centerOf,
 		)
+		arcLength := chordLength(seg.Start, seg.End)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
-		seg := segmentBetweenPorts(
-			nodeGeoms[e.Source], e.SourceHandle,
-			nodeGeoms[e.Target], e.TargetHandle,
-		)
 		edgeSegments[e.Label] = seg
 		pw, exists := destWire[destKey]
 		if !exists {
@@ -307,6 +354,16 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			if _, has8 := centers["8"]; has8 {
 				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
 				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
+			}
+			// Edge 2→3: node 2's output ToNext0 aims at node 3, node 3's input In back at 2.
+			if _, has3 := centers["3"]; has3 {
+				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
+				aimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
+			}
+			// Edge 2→7: node 2's output ToNext1 aims at node 7, node 7's input FromInput back at 2.
+			if _, has7 := centers["7"]; has7 {
+				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
+				aimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
 			}
 			md.installAimedPorts(aimedPorts)
 		}

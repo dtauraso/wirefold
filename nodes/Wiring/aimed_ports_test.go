@@ -92,6 +92,51 @@ func TestPortDirAimed_Node1AimsAtNode2_AfterMove(t *testing.T) {
 	}
 }
 
+// TestLoaderInitialEdgeSegment_AimedPortUsesRadialNotRingAnchor verifies the fix
+// introduced in loader.go: when the aimed-port registry is built BEFORE the
+// initial edge-geometry loop, the edge segment's start position equals
+// center + nodeRadius*normalize(target-center), NOT the ring-anchor position.
+//
+// Setup: node "1" at origin, node "2" at (5,0,0).
+// Edge 1→2 uses output port "ToHoldNewSendOld" (registered aimed → node 2).
+// Expected start: along +X from node 1's center.
+// Ring-anchor fallback would return a non-+X direction (ringAnchorDir at index 0
+// which for a multi-port node is not guaranteed +X), so any mismatch flags regression.
+func TestLoaderInitialEdgeSegment_AimedPortUsesRadialNotRingAnchor(t *testing.T) {
+	node1Center := vec3{X: 0, Y: 0, Z: 0}
+	node2Center := vec3{X: 5, Y: 0, Z: 0}
+
+	geom1 := buildGeom("HoldNewSendOld", node1Center)
+	geom2 := buildGeom("HoldNewSendOld", node2Center)
+
+	// Registry matching what loader.go builds for edges 1→2.
+	registry := AimedPortRegistry{
+		{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
+		{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
+	}
+	centers := map[string]vec3{"1": node1Center, "2": node2Center}
+	centerOf := func(id string) (vec3, bool) {
+		c, ok := centers[id]
+		return c, ok
+	}
+
+	seg := segmentBetweenPortsAimed(geom1, "ToHoldNewSendOld", "1", geom2, "FromPrevHoldNewSendOldNode", "2", registry, centerOf)
+
+	// Start should be node1Center + nodeRadius * (1,0,0).
+	r := nodeRadius(geom1.Kind)
+	wantStart := vec3{X: r, Y: 0, Z: 0}
+	const eps = 1e-9
+	if !approxVec3(seg.Start, wantStart, eps) {
+		t.Errorf("initial edge segment Start = %+v; want aimed radial %+v (nodeRadius=%v); ring-anchor bug if non-+X", seg.Start, wantStart, r)
+	}
+
+	// End should be node2Center + nodeRadius * (-1,0,0) (aimed back at node 1).
+	wantEnd := vec3{X: node2Center.X - r, Y: 0, Z: 0}
+	if !approxVec3(seg.End, wantEnd, eps) {
+		t.Errorf("initial edge segment End = %+v; want aimed radial %+v", seg.End, wantEnd)
+	}
+}
+
 // TestPortDirAimed_NonRegisteredPort verifies that a non-registered port still
 // returns a non-zero direction via the portDir fallback.
 func TestPortDirAimed_NonRegisteredPort(t *testing.T) {
