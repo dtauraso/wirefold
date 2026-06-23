@@ -287,10 +287,10 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			md.addThetaLock("1", "2", "6")
 			md.addThetaLock("1", "6", "2")
 
-			// Dynamic port auto-aim for edges 1→2 and 1→6: the four ports
+			// Dynamic port auto-aim for edges 1→2 and 1→6 (and 1→8 below): the ports
 			// on these edges point toward their connected node's current center
 			// rather than using a fixed ring-anchor direction. Handle names are
-			// read from topology/edges/1To2.json and 1To6.json.
+			// read from topology/edges/1To2.json, 1To6.json, 1To8.json.
 			aimedPorts := AimedPortRegistry{
 				// Edge 1→2: node 1's output port ToHoldNewSendOld aims at node 2
 				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
@@ -300,6 +300,13 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
 				// Edge 1→6: node 6's input port FromInput aims at node 1
 				{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
+			}
+			// Edge 1→8: node 1's output port ToPacer aims at node 8, and node 8's
+			// input port FromInput aims back at node 1 (node 8's FeedbackOut, the 8→1
+			// edge, is NOT aimed — it stays a manually movable ring-anchored port).
+			if _, has8 := centers["8"]; has8 {
+				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
+				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
 			}
 			md.installAimedPorts(aimedPorts)
 		}
