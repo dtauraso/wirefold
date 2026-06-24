@@ -590,6 +590,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
 	md.applyLocks(nodeID)
+	md.logPairTheta(nodeID) // diag: θ3/θ7 after EVERY move (catches follower-drag / divergence)
 	return true
 }
 

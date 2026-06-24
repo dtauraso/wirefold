@@ -22,6 +22,23 @@ func (md *MoveDispatch) addThetaLock(center, leader, follower string) {
 	md.locks = append(md.locks, thetaLock{Center: center, Leader: leader, Follower: follower})
 }
 
+// logPairTheta (diagnostic) emits θ of nodes 3 and 7 about node 2 after a move —
+// for EVERY RootMove, whether or not a lock fired. Unlike the per-lock breadcrumb
+// (which is tautological), this catches a follower-drag that never fires the lock
+// (you'd see moved=7 with th3≠th7) and any real divergence in the roots.
+func (md *MoveDispatch) logPairTheta(movedID string) {
+	if md.tr == nil {
+		return
+	}
+	t3, ok3 := md.roots.surfaceCoord("2", "3")
+	t7, ok7 := md.roots.surfaceCoord("2", "7")
+	if !ok3 || !ok7 {
+		return
+	}
+	md.tr.Breadcrumb("pair_theta", movedID, "",
+		fmt.Sprintf("moved=%s th3=%.4f th7=%.4f d=%.4f", movedID, t3.Theta, t7.Theta, t3.Theta-t7.Theta))
+}
+
 // applyLocks re-derives any follower whose lock references the moved node
 // (as leader or center), updating the follower's root + center and fanning it.
 // Soft membership is preserved: only locked followers move, derived from roots.
