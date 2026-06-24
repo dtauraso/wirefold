@@ -65,7 +65,17 @@ func (g *Node) Update(ctx context.Context) {
 		}
 
 		if !g.HasValue {
-			if v, ok := g.In.PollRecv(); ok {
+			// Drain-to-latest: consume ALL queued beads, keeping only the most
+			// recent. This prevents HoldFlip from processing a stale FIFO backlog
+			// when the upstream (e.g. Pulse) floods duplicate values — the node
+			// acts on the current value, not an old one. PollRecv pops on read
+			// (paced-wire "Recv/PollRecv consume on read"); Done() is a no-op in
+			// paced mode, so draining multiple beads is safe.
+			for {
+				v, ok := g.In.PollRecv()
+				if !ok {
+					break
+				}
 				g.Value = v
 				g.HasValue = true
 			}
