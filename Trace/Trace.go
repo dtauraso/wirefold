@@ -436,16 +436,23 @@ func writeAll(events []Event, w io.Writer, marshal func(Event) ([]byte, error)) 
 
 func (t *Trace) drain() {
 	record := func(ev Event) {
+		// Hold the lock ACROSS the sink write. Breadcrumb() and Close() also write to
+		// the sink under t.mu; if we unlocked before writing (as before), an event's
+		// two writes (body, '\n') could interleave with a breadcrumb's writes, fusing
+		// two JSON objects onto one line. That garbled the stdout stream — the extension's
+		// line parser then rejected the fused line and dumped it to the "topology run"
+		// Output channel, and the pump could misparse events. Serialized writes keep every
+		// line a single newline-delimited JSON object.
 		t.mu.Lock()
 		ev.Step = len(t.events)
 		t.events = append(t.events, ev)
-		t.mu.Unlock()
 		if t.sink != nil {
 			if b, err := marshalEvent(ev); err == nil {
 				_, _ = t.sink.Write(b)
 				_, _ = t.sink.Write([]byte{'\n'})
 			}
 		}
+		t.mu.Unlock()
 	}
 	for {
 		select {
