@@ -57,6 +57,14 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
     </group>
   );
 
+  // +Y pole axis marker: cylinder + cone pointing world +y, anchored at cs.center.
+  // Vivid green so it's instantly distinguishable from the orange tori.
+  // Not pickable, not shaded, depthWrite false — purely decorative.
+  const poleLen = radiusKey * 1.3;
+  const poleRadius = Math.max(radiusKey * 0.01, 1);
+  const coneH = radiusKey * 0.12;
+  const coneBaseR = radiusKey * 0.05;
+
   if (nodes.length < 1) return null;
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
@@ -74,6 +82,15 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
       {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. */}
       {handholds()}
       {handholds(rotB)}
+      {/* +Y pole axis: thin cylinder rising from center, capped with a cone arrowhead. */}
+      <mesh position={[0, poleLen / 2, 0]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#22dd55" depthWrite={false} />
+      </mesh>
+      <mesh position={[0, poleLen + coneH / 2, 0]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#22dd55" depthWrite={false} />
+      </mesh>
     </group>
   );
 }
