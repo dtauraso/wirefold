@@ -91,6 +91,24 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
         <coneGeometry args={[coneBaseR, coneH, 12]} />
         <meshBasicMaterial color="#22dd55" depthWrite={false} />
       </mesh>
+      {/* +X equatorial reference axis (φ=0, red): rotation [0,0,-π/2] turns +Y→+X */}
+      <mesh position={[poleLen / 2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#dd3333" depthWrite={false} />
+      </mesh>
+      <mesh position={[poleLen + coneH / 2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#dd3333" depthWrite={false} />
+      </mesh>
+      {/* +Z equatorial reference axis (φ=90°, blue): rotation [π/2,0,0] turns +Y→+Z */}
+      <mesh position={[0, 0, poleLen / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#3366dd" depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 0, poleLen + coneH / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#3366dd" depthWrite={false} />
+      </mesh>
     </group>
   );
 }
