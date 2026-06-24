@@ -273,6 +273,42 @@ func TestSkipMinusOnePlaceholder(t *testing.T) {
 	}
 }
 
+// TestLatestPerSide: a side tracks the MOST-RECENT real bead. Right gets 1 then 0;
+// the slot must hold 0 (the latest), so AND(1,0)=0. (Holding the first, 1, → AND(1,1)=1.)
+func TestLatestPerSide(t *testing.T) {
+	tr := T.New(0)
+	defer tr.Close()
+
+	left := newInputWire(100, tr, "irg", "FromLeft")
+	right := newInputWire(100, tr, "irg", "FromRight")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	out := make(chan int, 4)
+	node := &Node{
+		Fire:      func() {},
+		FromLeft:  Wiring.NewInPaced(left, ctx, "irg", "FromLeft", tr),
+		FromRight: Wiring.NewInPaced(right, ctx, "irg", "FromRight", tr),
+		ToPassed:  Wiring.NewOut(out, "irg", "ToPassed", tr),
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+
+	send(t, left, 1)
+	send(t, right, 1) // first real value
+	send(t, right, 0) // newer real value — the slot must update to this
+
+	select {
+	case v := <-out:
+		if v != 0 {
+			t.Fatalf("latest-per-side: got AND=%d, want 0 (right should hold latest 0, not first 1)", v)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("node did not fire")
+	}
+}
+
 // TestWindowFire: both inputs delivered within W → node fires once, both consumed.
 func TestWindowFire(t *testing.T) {
 	tr := T.New(0)

@@ -111,6 +111,24 @@ func (g *Node) Update(ctx context.Context) {
 	}
 	emitInputs() // initial empty interior
 
+	// drainLatestReal consumes ALL queued beads on a side and returns the most-recent
+	// REAL value (discarding -1 "no value" placeholders). got=false when nothing real
+	// was queued. Used so each slot tracks the latest bead, not the first one caught.
+	drainLatestReal := func(in *Wiring.In) (int, bool) {
+		v, got := -1, false
+		for {
+			nv, ok := in.PollRecv()
+			if !ok {
+				break
+			}
+			if nv != -1 {
+				v = nv
+				got = true
+			}
+		}
+		return v, got
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -118,37 +136,20 @@ func (g *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		// -1 is the "no value" placeholder (upstream nodes drive it before they hold a
-		// real value); it is NOT a value to be received. Discard any -1s and only fill
-		// a slot with a real value, so the gate coincides real beads, not placeholders.
-		if !g.HasLeft {
-			for {
-				v, ok := g.FromLeft.PollRecv()
-				if !ok {
-					break
-				}
-				if v != -1 {
-					g.Left = v
-					g.HasLeft = true
-					emitInputs()
-					break
-				}
-			}
+		// Each side tracks the MOST-RECENT real bead: drain to the latest value
+		// (discarding -1 "no value" placeholders) and update the slot even if already
+		// held, so the display shows the current bead per side rather than the first
+		// one caught. -1 never fills a slot.
+		if v, got := drainLatestReal(g.FromLeft); got && (!g.HasLeft || g.Left != v) {
+			g.Left = v
+			g.HasLeft = true
+			emitInputs()
 		}
 
-		if !g.HasRight {
-			for {
-				v, ok := g.FromRight.PollRecv()
-				if !ok {
-					break
-				}
-				if v != -1 {
-					g.Right = v
-					g.HasRight = true
-					emitInputs()
-					break
-				}
-			}
+		if v, got := drainLatestReal(g.FromRight); got && (!g.HasRight || g.Right != v) {
+			g.Right = v
+			g.HasRight = true
+			emitInputs()
 		}
 
 		// Window opens on the first input that arrives.
