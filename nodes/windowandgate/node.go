@@ -118,19 +118,36 @@ func (g *Node) Update(ctx context.Context) {
 		default:
 		}
 
+		// -1 is the "no value" placeholder (upstream nodes drive it before they hold a
+		// real value); it is NOT a value to be received. Discard any -1s and only fill
+		// a slot with a real value, so the gate coincides real beads, not placeholders.
 		if !g.HasLeft {
-			if v, ok := g.FromLeft.PollRecv(); ok {
-				g.Left = v
-				g.HasLeft = true
-				emitInputs()
+			for {
+				v, ok := g.FromLeft.PollRecv()
+				if !ok {
+					break
+				}
+				if v != -1 {
+					g.Left = v
+					g.HasLeft = true
+					emitInputs()
+					break
+				}
 			}
 		}
 
 		if !g.HasRight {
-			if v, ok := g.FromRight.PollRecv(); ok {
-				g.Right = v
-				g.HasRight = true
-				emitInputs()
+			for {
+				v, ok := g.FromRight.PollRecv()
+				if !ok {
+					break
+				}
+				if v != -1 {
+					g.Right = v
+					g.HasRight = true
+					emitInputs()
+					break
+				}
 			}
 		}
 
