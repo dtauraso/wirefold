@@ -59,6 +59,15 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
     </group>
   );
 
+  // Polar frame axis markers: pole (+y, green) and the two equatorial references
+  // (+x = φ0, red; +z = φ90, blue), three.js X=red/Y=green/Z=blue. Camera-independent,
+  // anchored at cs.center, decorative (not pickable). They show the layout's true frame
+  // regardless of camera, and do NOT toggle with the scene tori.
+  const poleLen = radiusKey * 1.3;
+  const poleRadius = Math.max(radiusKey * 0.01, 1);
+  const coneH = radiusKey * 0.12;
+  const coneBaseR = radiusKey * 0.05;
+
   if (nodes.length < 1) return null;
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
@@ -80,6 +89,33 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
       {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. */}
       {handholds()}
       {handholds(rotB)}
+      {/* +Y pole (green): cylinder + cone arrowhead pointing world +y. */}
+      <mesh position={[0, poleLen / 2, 0]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#22dd55" depthWrite={false} />
+      </mesh>
+      <mesh position={[0, poleLen + coneH / 2, 0]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#22dd55" depthWrite={false} />
+      </mesh>
+      {/* +X equatorial reference (φ=0, red): rotation [0,0,-π/2] turns +Y→+X. */}
+      <mesh position={[poleLen / 2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#dd3333" depthWrite={false} />
+      </mesh>
+      <mesh position={[poleLen + coneH / 2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#dd3333" depthWrite={false} />
+      </mesh>
+      {/* +Z equatorial reference (φ=90°, blue): rotation [π/2,0,0] turns +Y→+Z. */}
+      <mesh position={[0, 0, poleLen / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#3366dd" depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 0, poleLen + coneH / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#3366dd" depthWrite={false} />
+      </mesh>
     </group>
   );
 }
