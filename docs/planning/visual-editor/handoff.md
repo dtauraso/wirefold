@@ -8,76 +8,108 @@ needed) and proceed.
 
 ---
 
-## Active branch: none — polar navigation SHIPPED to `main`
+## Active branch: `task/theta-lock-diag` (in flight, diagnostic) — else `main` is current
 
-The polar-navigation work is merged to `main` (merge `3230850c`, pushed to origin) and
-all its task branches are deleted. There is no in-flight branch. Start new work from
-`main` with a fresh `task/<short-name>` branch.
+`task/theta-lock-diag` adds a diagnostic only (no behavior change): a `theta_lock`
+breadcrumb in `applyLocks` (lock.go) logging `moved=<node> leadTh=… follBefore=…
+follAfter=…` per fired lock. It exists to diagnose a reported **persistent θ mismatch
+between nodes 3 and 7 after dragging near the +y pole**. Awaiting a fresh repro: reload
+onto that branch, drag 3/7 near the pole so they end mismatched, then read the
+`theta_lock` lines in `.probe/go.jsonl`:
+- no `theta_lock` lines during the drag → `applyLocks` isn't firing for that move;
+- `follAfter` ≠ `leadTh` → the lock fires but is undone (something re-moves the follower).
 
-## What shipped
+All other work this session is **merged to `main`**. Start new work from `main` with a
+fresh `task/<short-name>` branch.
 
-**Navigation is polar; Cartesian is confined to two edges.** The camera stays
-renderer-native (three.js `position` vector + orientation quaternion — the medium, owned
-by TS, saved to `topology.scene.json` opaquely through Go's `writeScene`). All navigation
-MATH is polar, and the only Cartesian lives in (a) the camera's storage and (b) the
-conversion helpers in `tools/topology-vscode/src/webview/three/polar.ts`. The handler
-`interaction-controls.ts` holds only polar quantities.
+## What shipped (this session, all on `main`)
 
-- **Pan** — wheel px → polar `(r, angle)` via `deltaToPolar` (input edge); `planeSlide`
-  recombines onto the camera right/up basis (output edge); camera + target slide together;
-  `set-origin` to Go re-bases the node frame.
-- **Rotation** — MOTION-DRIVEN great circle (empty-space drag). Each frame rotates by the
-  small arc between last and current cursor points; axis from `θ + 90°` (no cursor-point
-  cross product, no quaternion), applied via `arcAxisAngle` + `rotateAboutAxis`. Roll works
-  (it accumulates from curved drags); screen-relative, so a horizontal drag stays horizontal
-  only when the view is upright — that is the accepted tradeoff of motion-driven.
-- **Zoom** — `scaleRadius`: explicit polar `r` about the node nearest the cursor; angles
-  held; floored at MIN_DIST; clamped inside the large sphere.
-- **Diagram layout** is polar in Go (`(r,θ,φ)`); co-sphere radius coupling in
-  `node_move.go` resizes the sphere(s) a dragged surface node sits on (this superseded the
-  old `x-lock` and `drag-resize-sphere` branches, both deleted as redundant).
+**Viewpoint nav math moved TS → Go.** The camera is now Go-owned and POLAR. Go holds the
+state `(pivot, r, pos, up)` (`nodes/Wiring/viewpoint.go`) and does angle-only spherical
+trig (`spherical.go`: `dir{θ,φ}`, `rot{axis,angle}`, `rotateDir`/`arcBetween`/
+`angleAboutAxis`). The trig is **epsilon-free** — it uses the great-circle bearing form
+(`atan2` of two unnormalized terms), so there is NO `/sinθ` and no pole special-case in
+the camera math. All four gestures route through Go: an `edit` op `viewpoint`
+(`kind` = set/orbit/orbit-locked/zoom/pan, stdin_reader.go) in, a `camera` trace event
+(Trace.go) out. TS does only the two edge conversions (pointer px→angles in;
+polar→three.js out, where three.js builds the quaternion at draw) — `viewpoint-bridge.ts`,
+`CameraFromStore.tsx`. Camera persists as `cameraPolar` in scene.json. The ONLY Cartesian
+in Go is the `pivot` world point (translated, never rotated). Zoom-to-cursor is a dolly =
+a pan (`pan` op), not a radius change. Empty-space rotation and handhold (locked-disk)
+rotation both go through Go; the handhold disk is anchored at the grab point.
 
-**Guards (code self-defends).** Two greps wired into the Stop hook
-(`scripts/stop-checks.sh`):
-- `tools/check-polar-only-nav.sh` — no Cartesian rotation math
-  (`setFromUnitVectors`/`cross`/`setFromAxisAngle`/`setFromMatrixColumn`/`Spherical`/`Raycaster`/`unproject`)
-  in the nav handler.
-- `tools/check-no-camera-roundtrip.sh` — camera state never reconstructed from a position.
+**Pick resolution** resolves nodes by `userData.nodeId`/`body` tags across all pick paths
+(default/nodesOnly/portOnly); the z-blind x/y-proximity fallback is gone; handholds are
+excluded from node picks.
 
-**Explainer.** `docs/polar-sphere.html` "Plan" tab is synced to the shipped architecture
-(camera = Cartesian medium; rotation = motion-driven; Phases 0/1 angle-of-record and
-5.2/5.3 angle-persistence marked superseded by design).
+**Port-move** projects the pointer onto the node's own ring plane (`z = nodeCenter.z`),
+not a fixed `z=0` (fixes node 8 / any node off z=0).
+
+**Dynamic port auto-aim** (`AimedPortRegistry`, `aimed_ports.go` + loader.go): for edges
+1→2, 1→6, 1→8, 2→3, 2→7 the source port aims at its child and the child's input aims back,
+so those edges are radial spokes — applied from LOAD (loader.go initial edge geometry uses
+`segmentBetweenPortsAimed`), not just after a move. Node 8's `FeedbackOut` (8→1) stays
+ring-anchored and manually movable.
+
+**θ-lock** (`thetaLock`, lock.go): nodes 2 & 6 on node 1, and nodes 3 & 7 on node 2, share
+θ (angle from the center's +y up-pole) while each keeps its own φ — same latitude ring.
+Registered by id in loader.go (stopgap, like the chord lock).
+
+**Node kind `Excitatory` → `Pulse`** (pure rename; package `nodes/pulse`, regenerated
+NODE_DEFS / kinds_generated / node_dims; topology nodes 6,7 are type `Pulse`).
+
+**HoldFlip (node 4)** mirrors Pulse: a main loop drains input to the LATEST value and
+updates the interior bead immediately; a drive goroutine continuously pulses the flip
+(`1-held`). So node 4 tracks upstream's current value with no display lag. *Behavior
+change:* output is continuous-drive (not one-per-input), and before any input it drives
+the `-1` empty placeholder.
+
+**WindowAndGate (node 5)** discards `-1` "no value" placeholders (only a real value fills
+a slot) and re-samples each side to the most-recent real bead, so each slot shows the
+current bead.
+
+**Trace** serializes stdout writes: `drain()` holds the mutex across the sink write so
+event and breadcrumb writes can't interleave into garbled lines (those garbled lines were
+leaking into the VS Code "topology run" Output channel).
 
 ## Carry-forward (hard-won — READ THIS)
 
-- **THE AI DEFAULTS TO CARTESIAN AND IT SURVIVES CORRECTION.** Across ~dozens of rotation
-  rebuilds the assistant kept re-encoding the polar spec as Cartesian machinery (arcball +
-  Bell/Holroyd edge map, frozen-grab single-big-arc → antipode flip, turntable → no roll,
-  grab-a-point → finite-sphere rim + snap). Each time it added a clamp/guard/fold at the
-  boundary instead of defining honest behavior. The structural defense is `polar.ts` + the
-  guard: navigation goes THROUGH the toolkit; do not reach for `Vector3.cross`, sphere
-  raycasts, or angle-stored orientation in nav logic. (Memory:
-  `feedback_make_bug_class_unrepresentable`, `feedback_users_interaction_spec_is_the_model`.)
-- **A finite sphere viewed from outside has a real rim** (visible cap ≈ `acos(R/D)`, not
-  90°). "Grab a point on the sphere" inherits that rim; "motion-driven" has no sphere and no
-  rim. The user chose motion-driven knowing the tradeoffs (path-dependent roll, not
-  pixel-locked).
-- **Run the guards before declaring nav work done**; the Stop hook does it automatically.
-  NEVER run the sim in the foreground.
+- **`-1` is the "no value / empty" sentinel.** It displays as nothing (correct) and should
+  ideally never be a bead on a wire. But Pulse and HoldFlip currently DRIVE `-1`
+  continuously before they hold a real value, polluting downstream (node 5 had to learn to
+  ignore `-1`). Open: stop emitting `-1` at the source so wires carry only real beads.
+- **The (θ,φ) chart is singular at the +y pole in the LAYOUT.** `surfaceCoord`→`cart2polar`
+  snaps φ to 0 on the axis; the θ-lock keeps each node's φ, so near the pole positions get
+  unstable (φ blows up). The CAMERA math (spherical.go) already avoids this via the
+  bearing form; the layout/lock does NOT yet. If the θ-lock needs a pole fix, mirror the
+  bearing-form approach.
+- **`.probe/*.jsonl` are written by the LIVE editor run and can be minutes stale.** Check
+  freshness (last `ts_ms` vs now) before concluding anything — several diagnoses this
+  session were derailed by reading a stale log that didn't contain the live failure.
+- **Subagents have committed/pushed despite "do not commit."** Spot-check `git log` and
+  amend; force-with-lease on your own just-pushed branch is fine.
+- **NEVER run the sim in the foreground** (it can fail to exit and hang). Background it or
+  use `tools/run-bounded.sh`.
 
-## Open / next (friction-driven, nothing in flight)
+## Open / next (friction-driven)
 
-1. **Phase 8 hardening** (deferred per post-v0 posture): degenerate scenes (empty graph,
-   single node), gesture-conflict edge cases, touch/pinch. Do when the friction appears.
-2. **Phase 5 polish** (optional): animate the Home/Fit transition. Save/restore already
-   works (position + quaternion) and is correct as-is — do NOT migrate it to angle
-   persistence (that reintroduces the rejected angle-of-record representation).
-3. ~~Possible dead exports in `polar.ts` (`cameraFrame`, `screenToPolar`)~~ — checked
-   2026-06-20: both are live (`interaction-controls.ts:618–620`, rotation path). Not dead.
+1. **`task/theta-lock-diag`** — diagnose the persistent θ mismatch between nodes 3 and 7
+   after dragging near the pole (repro + read `theta_lock` breadcrumbs; see Active branch).
+2. **Pre-existing `MoveDispatch` data race** (under `-race`): `heldCenters`/`applyLocks`
+   (node_move.go:~455, lock.go) reads `centers` concurrently with a `nodeMover.handle`
+   write (node_move.go:~129). Not caught by stop-checks (no `-race`). Its own fix branch.
+3. **Stop emitting `-1` placeholders at the source** — Pulse + HoldFlip drive only when
+   `held != -1`, so wires carry only real beads (cleans the whole chain).
+4. **node 4 continuous-pulse → event-driven output** (optional; the flood to node 5 is
+   why node 5 needed the `-1`/latest fixes).
+5. **Layout pole singularity** (φ blow-up near +y) — apply the epsilon-free bearing form to
+   the θ-lock if the pole behavior needs to be stable.
 
 ### Verify (NEVER run the sim)
+`go build ./... && go test ./...`, then
 `cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js && npm run build`,
-then `bash tools/check-polar-only-nav.sh` and `bash tools/check-no-camera-roundtrip.sh`
-from the repo root. Editor opens via the VS Code command; reload = close panel → Reload
-Window → re-run command. Runtime logs are `.probe/*.jsonl`. Git: run from repo root
-(`/Users/David/Documents/github/wirefold`).
+then from the repo root `bash scripts/stop-checks.sh` (must exit 0 — it runs the guard
+suite incl. message-kind-parity, polar-only-nav, no-camera-roundtrip). Editor opens via
+the VS Code command; an extension-host change needs Developer: Reload Window (reopening a
+file only reloads the webview). Runtime logs are `.probe/*.jsonl` (check freshness). Git:
+run from repo root (`/Users/David/Documents/github/wirefold`).
