@@ -55,16 +55,16 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("node \"6\" not found")
 	}
-	if n6.Type != "Excitatory" {
-		t.Errorf("node \"6\" type: got %q, want \"Excitatory\"", n6.Type)
+	if n6.Type != "Pulse" {
+		t.Errorf("node \"6\" type: got %q, want \"Pulse\"", n6.Type)
 	}
 
 	n7, ok := nodeByID["7"]
 	if !ok {
 		t.Fatal("node \"7\" not found")
 	}
-	if n7.Type != "Excitatory" {
-		t.Errorf("node \"7\" type: got %q, want \"Excitatory\"", n7.Type)
+	if n7.Type != "Pulse" {
+		t.Errorf("node \"7\" type: got %q, want \"Pulse\"", n7.Type)
 	}
 
 	// View positions should be populated for all nodes (view.nodes is kept as
@@ -150,7 +150,7 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Error("edge \"2To5\" should have been removed")
 	}
 
-	// Node 7 (Excitatory) is wired 2 -> 7 -> 4; node 3 no longer feeds node 4.
+	// Node 7 (Pulse) is wired 2 -> 7 -> 4; node 3 no longer feeds node 4.
 	e2to7, ok := edgeByLabel["2To7"]
 	if !ok {
 		t.Fatal("edge \"2To7\" not found")

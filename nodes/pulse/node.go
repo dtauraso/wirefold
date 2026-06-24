@@ -1,4 +1,4 @@
-package excitatory
+package pulse
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// Node is a sample-and-hold excitatory. It HOLDS one int value (the thing it is
+// Node is a sample-and-hold pulse. It HOLDS one int value (the thing it is
 // outputting), initialized to -1, and drives that held value out continuously.
 // Even before any input arrives it emits -1. When an input value arrives on
 // FromInput, it UPDATES the held value; subsequent outputs emit the new value.
@@ -24,7 +24,7 @@ import (
 //     when held changes the next pulse carries the new value.
 // held is shared via sync/atomic so the two goroutines don't race.
 //
-// The output is NOT precondition-gated: Excitatory self-emits -1 from the start
+// The output is NOT precondition-gated: Pulse self-emits -1 from the start
 // (like the Input bootstrap), it is not inert until fed.
 type Node struct {
 	Fire         func()
@@ -85,5 +85,5 @@ func (g *Node) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("Excitatory", func() any { return &Node{} })
+	Wiring.Register("Pulse", func() any { return &Node{} })
 }

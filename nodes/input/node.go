@@ -25,9 +25,9 @@ type Node struct {
 	Init        []int `wire:"data.init"`
 	Repeat      bool  `wire:"data.repeat"`
 	ToHoldNewSendOld *Wiring.Out
-	// ToExcitatory fans the emitted value out to an Excitatory node (sample-and-hold). It is
+	// ToExcitatory fans the emitted value out to a Pulse node (sample-and-hold). It is
 	// optional: when unwired (Wired()==false) the emit is skipped so existing
-	// topologies without an Excitatory are unaffected.
+	// topologies without a Pulse are unaffected.
 	ToExcitatory *Wiring.Out
 	// ToPacer fans the emitted value out to a Pacer node (sample-and-hold,
 	// change-step feedback). Optional: when unwired (Wired()==false) the emit
