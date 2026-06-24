@@ -368,5 +368,12 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.SetOrigin(vec3{X: msg.X, Y: msg.Y, Z: msg.Z}, tr)
+	case msg.Op == "tori-vis":
+		// Toggle the polar-guide tori visibility and emit a scene-tori event.
+		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).
+		if md == nil {
+			return
+		}
+		md.ToggleSceneTori(tr)
 	}
 }

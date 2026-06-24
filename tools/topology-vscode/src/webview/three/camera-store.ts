@@ -1,5 +1,5 @@
-// camera-store.ts — Go-owned polar camera state, written by pump on "camera" trace events.
-// The store holds the last camera snapshot reported by Go; consumers read it for rendering.
+// camera-store.ts — Go-owned scene state, written by pump on trace events.
+// The store holds the last snapshot reported by Go; consumers read it for rendering.
 
 import { create } from "zustand";
 
@@ -12,12 +12,16 @@ export type PolarCamera = {
 
 interface CameraState {
   camera: PolarCamera | null;
+  sceneToriVisible: boolean;
   set: (c: PolarCamera) => void;
+  setSceneToriVisible: (v: boolean) => void;
 }
 
 export const useCameraStore = create<CameraState>((set) => ({
   camera: null,
+  sceneToriVisible: true,
   set: (c) => set({ camera: c }),
+  setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
 }));
 
 export function getCameraState(): CameraState {

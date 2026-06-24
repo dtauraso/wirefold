@@ -1,12 +1,14 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// GlobalLabelsToggle, HomeButton — no scene/Go logic.
+// GlobalLabelsToggle, HomeButton, RingsToggle — no scene/Go logic.
 
-import { useCallback } from "react";
+import React, { useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
+import { vscode } from "../vscode-api";
+import { useCameraStore } from "./camera-store";
 
 /** Write current camera position + quaternion to viewerState and schedule a save. */
 function commitCamera(cam: THREE.PerspectiveCamera) {
@@ -95,6 +97,42 @@ export function HomeButton({
       }}
     >
       ⌂ fit
+    </div>
+  );
+}
+
+/** RINGS TOGGLE: top-right button to show/hide the polar-guide tori. Fire-and-forget to Go. */
+export function RingsToggle() {
+  const visible = useCameraStore((s) => s.sceneToriVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via scene-tori.
+    vscode.postMessage({ type: "edit", op: "tori-vis" });
+  }, []);
+  return (
+    <div
+      onClick={onClick}
+      title={visible ? "Hide polar rings" : "Show polar rings"}
+      style={{
+        position: "absolute",
+        top: 76,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: visible ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ◎ rings
     </div>
   );
 }

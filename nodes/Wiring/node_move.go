@@ -326,6 +326,9 @@ type MoveDispatch struct {
 	vp viewpoint
 	// tr is the trace sink; used for diagnostic breadcrumbs (e.g. theta_lock).
 	tr *T.Trace
+	// sceneToriVisible is the current polar-guide tori visibility. true by default
+	// (tori shown on startup). Toggled by ToggleSceneTori; emitted via EmitSceneTori.
+	sceneToriVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -337,11 +340,12 @@ func (md *MoveDispatch) setRoots(rs rootSet) { md.roots = rs }
 // later by Bind once node construction has populated them.
 func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace) *MoveDispatch {
 	md := &MoveDispatch{
-		dispatch:   map[string]chan moveMsg{},
-		nodeMovers: map[string]*nodeMover{},
-		edgeMovers: map[string]*edgeMover{},
-		edgeOut:    map[string]*Out{},
-		tr:         tr,
+		dispatch:         map[string]chan moveMsg{},
+		nodeMovers:       map[string]*nodeMover{},
+		edgeMovers:       map[string]*edgeMover{},
+		edgeOut:          map[string]*Out{},
+		tr:               tr,
+		sceneToriVisible: true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -590,7 +594,6 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
 	md.applyLocks(nodeID)
-	md.logPairTheta(nodeID) // diag: θ3/θ7 after EVERY move (catches follower-drag / divergence)
 	return true
 }
 
@@ -679,5 +682,18 @@ func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) {
 func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	md.vp.pan(delta)
 	md.EmitViewpoint(tr)
+}
+
+// ToggleSceneTori flips the polar-guide tori visibility and emits a scene-tori event.
+// Called from applyEdit on op="tori-vis"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace) {
+	md.sceneToriVisible = !md.sceneToriVisible
+	tr.SceneTori(md.sceneToriVisible)
+}
+
+// EmitSceneTori emits the current tori visibility without toggling it. Use this on
+// startup or geometry-resend to seed the renderer's initial state.
+func (md *MoveDispatch) EmitSceneTori(tr *T.Trace) {
+	tr.SceneTori(md.sceneToriVisible)
 }
 
