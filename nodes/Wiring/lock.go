@@ -1,5 +1,7 @@
 package Wiring
 
+import "fmt"
+
 // lock.go — polar layout locks (docs/planning/visual-editor/polar-coordinate-model.md
 // §4, §7). A lock is a RELATIONSHIP between roots, applied after a RootMove —
 // not stored secondary state. The active example is the theta lock: a follower
@@ -54,5 +56,16 @@ func (md *MoveDispatch) applyLocks(movedID string) {
 		centers[lk.Follower] = fw
 		reach := reachRFromCenters(centers, md.heldEdges())
 		md.fanCenters(map[string]vec3{lk.Follower: fw}, reach)
+
+		// DIAGNOSTIC (task/theta-lock-diag): record what the lock did. leadTh is the
+		// θ we copied; follAfter is the follower's θ re-derived from its new position.
+		// If follAfter != leadTh the lock didn't stick; if no theta_lock breadcrumbs
+		// appear during a drag, applyLocks isn't firing for that move.
+		if md.tr != nil {
+			af, _ := md.roots.surfaceCoord(lk.Center, lk.Follower)
+			md.tr.Breadcrumb("theta_lock", lk.Follower, lk.Leader,
+				fmt.Sprintf("moved=%s leadTh=%.4f follBefore=%.4f follAfter=%.4f",
+					movedID, lp.Theta, fp.Theta, af.Theta))
+		}
 	}
 }

@@ -324,6 +324,8 @@ type MoveDispatch struct {
 	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
 	// runs in a single goroutine).
 	vp viewpoint
+	// tr is the trace sink; used for diagnostic breadcrumbs (e.g. theta_lock).
+	tr *T.Trace
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -339,6 +341,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nodeMovers: map[string]*nodeMover{},
 		edgeMovers: map[string]*edgeMover{},
 		edgeOut:    map[string]*Out{},
+		tr:         tr,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
