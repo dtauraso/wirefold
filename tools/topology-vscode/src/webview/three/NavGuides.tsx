@@ -16,6 +16,29 @@ import { useCameraStore } from "./camera-store";
 // Major radius = ARCBALL_FILL * camera-to-focus distance; updated every frame.
 // ---------------------------------------------------------------------------
 
+// AxisLabel — canvas-texture Sprite billboard; always faces the camera, no font asset needed.
+function AxisLabel({ text, color, position, size }: {
+  text: string; color: string; position: [number, number, number]; size: number;
+}) {
+  const texture = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    const ctx = c.getContext("2d")!;
+    ctx.font = "bold 44px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(text, 128, 32);
+    const t = new THREE.CanvasTexture(c);
+    t.needsUpdate = true;
+    return t;
+  }, [text, color]);
+  return (
+    <sprite position={position} scale={[size * 4, size, 1]} raycast={() => null}>
+      <spriteMaterial map={texture} transparent depthWrite={false} depthTest={false} />
+    </sprite>
+  );
+}
+
 function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
   useNodeGeometryStore((s) => s.geoms);
@@ -116,6 +139,10 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
         <coneGeometry args={[coneBaseR, coneH, 12]} />
         <meshBasicMaterial color="#3366dd" depthWrite={false} />
       </mesh>
+      {/* Axis labels — billboard sprites, always face the camera, outside the tori toggle. */}
+      <AxisLabel text="+Y pole" color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
+      <AxisLabel text="+X φ0" color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
+      <AxisLabel text="+Z φ90" color="#3366dd" position={[0, 0, poleLen + coneH * 2]} size={poleLen * 0.12} />
     </group>
   );
 }
