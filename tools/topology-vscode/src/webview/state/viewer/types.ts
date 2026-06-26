@@ -60,6 +60,8 @@ export type ViewerState = {
   scenePolesVisible?: boolean;
   // nodePolesVisible: whether per-node pole frames are shown. undefined = shown (default true).
   nodePolesVisible?: boolean;
+  // angleLabelsVisible: whether the θ/φ angle arcs+labels are shown. undefined = shown (default true).
+  angleLabelsVisible?: boolean;
 };
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};

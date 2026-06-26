@@ -363,6 +363,9 @@ type MoveDispatch struct {
 	// nodePolesVisible is the current per-node pole frame visibility. true by default.
 	// Toggled by ToggleNodePoles; emitted via EmitNodePoles.
 	nodePolesVisible bool
+	// angleLabelsVisible is the current θ/φ angle arc+label visibility. true by default.
+	// Toggled by ToggleAngleLabels; emitted via EmitAngleLabels.
+	angleLabelsVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -379,9 +382,10 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		edgeMovers:       map[string]*edgeMover{},
 		edgeOut:          map[string]*Out{},
 		tr:               tr,
-		sceneToriVisible: true,
-		scenePolesVisible: true,
-		nodePolesVisible:  true,
+		sceneToriVisible:   true,
+		scenePolesVisible:  true,
+		nodePolesVisible:   true,
+		angleLabelsVisible: true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -777,5 +781,22 @@ func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace) {
 // EmitNodePoles emits the current per-node pole frame visibility without toggling it.
 func (md *MoveDispatch) EmitNodePoles(tr *T.Trace) {
 	tr.NodePoles(md.nodePolesVisible)
+}
+
+// ToggleAngleLabels flips the θ/φ angle arc+label visibility and emits an angle-labels event.
+// Called from applyEdit on op="angle-labels"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace) {
+	md.angleLabelsVisible = !md.angleLabelsVisible
+	tr.AngleLabels(md.angleLabelsVisible)
+}
+
+// EmitAngleLabels emits the current angle arc+label visibility without toggling it.
+func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace) {
+	tr.AngleLabels(md.angleLabelsVisible)
+}
+
+// AngleLabels returns the current angle arc+label visibility.
+func (md *MoveDispatch) AngleLabels() bool {
+	return md.angleLabelsVisible
 }
 

@@ -180,6 +180,7 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
   const scenePolesVisible = useCameraStore((s) => s.scenePolesVisible);
   const nodePolesVisible = useCameraStore((s) => s.nodePolesVisible);
+  const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
 
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori
@@ -269,17 +270,17 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
-      {node2Center && node3 && (
+      {angleLabelsVisible !== false && node2Center && node3 && (
         <ThetaArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
       )}
-      {node2Center && node7 && (
+      {angleLabelsVisible !== false && node2Center && node7 && (
         <ThetaArc center={node2Center} sample={nodeWorldPos(node7)} color="#00ccff" tube={thetaTube} />
       )}
       {/* Horizontal φ arcs from +x reference to node 3 (orange) and node 7 (cyan). */}
-      {node2Center && node3 && (
+      {angleLabelsVisible !== false && node2Center && node3 && (
         <PhiArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
       )}
-      {node2Center && node7 && (
+      {angleLabelsVisible !== false && node2Center && node7 && (
         <PhiArc center={node2Center} sample={nodeWorldPos(node7)} color="#00ccff" tube={thetaTube} />
       )}
     </>

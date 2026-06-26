@@ -88,13 +88,17 @@ const (
 	// the visibility is toggled (op="node-poles"), so the renderer shows or hides
 	// PolarFrames drawn at every node sphere.
 	KindNodePoles = "node-poles"
+	// KindAngleLabels carries the θ/φ angle arc+label visibility state. Go emits it when
+	// the visibility is toggled (op="angle-labels"), so the renderer shows or hides the
+	// ThetaArc/PhiArc overlays in NavGuides.
+	KindAngleLabels = "angle-labels"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -366,6 +370,12 @@ func (t *Trace) ScenePoles(visible bool) {
 // visible=false = hidden. Go emits this on op="node-poles".
 func (t *Trace) NodePoles(visible bool) {
 	t.emit(Event{Kind: KindNodePoles, Visible: visible})
+}
+
+// AngleLabels emits the θ/φ angle arc+label visibility state. visible=true = shown;
+// visible=false = arcs hidden. Go emits this on op="angle-labels".
+func (t *Trace) AngleLabels(visible bool) {
+	t.emit(Event{Kind: KindAngleLabels, Visible: visible})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -666,7 +676,7 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
-	case KindSceneTori, KindScenePoles, KindNodePoles:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

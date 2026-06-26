@@ -15,10 +15,12 @@ interface CameraState {
   sceneToriVisible: boolean;
   scenePolesVisible: boolean;
   nodePolesVisible: boolean;
+  angleLabelsVisible: boolean;
   set: (c: PolarCamera) => void;
   setSceneToriVisible: (v: boolean) => void;
   setScenePolesVisible: (v: boolean) => void;
   setNodePolesVisible: (v: boolean) => void;
+  setAngleLabelsVisible: (v: boolean) => void;
 }
 
 export const useCameraStore = create<CameraState>((set) => ({
@@ -26,10 +28,12 @@ export const useCameraStore = create<CameraState>((set) => ({
   sceneToriVisible: true,
   scenePolesVisible: true,
   nodePolesVisible: true,
+  angleLabelsVisible: true,
   set: (c) => set({ camera: c }),
   setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
   setScenePolesVisible: (v) => set({ scenePolesVisible: v }),
   setNodePolesVisible: (v) => set({ nodePolesVisible: v }),
+  setAngleLabelsVisible: (v) => set({ angleLabelsVisible: v }),
 }));
 
 export function getCameraState(): CameraState {

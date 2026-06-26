@@ -1,5 +1,6 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// GlobalLabelsToggle, HomeButton, RingsToggle — no scene/Go logic.
+// GlobalLabelsToggle, HomeButton, RingsToggle, ScenePolesToggle, NodePolesToggle,
+// AngleLabelsToggle — no scene/Go logic.
 
 import React, { useCallback } from "react";
 import * as THREE from "three";
@@ -208,6 +209,42 @@ export function NodePolesToggle() {
       }}
     >
       ⊹ node poles
+    </div>
+  );
+}
+
+/** ANGLE LABELS TOGGLE: top-right button to show/hide θ/φ angle arcs+labels. Fire-and-forget to Go. */
+export function AngleLabelsToggle() {
+  const visible = useCameraStore((s) => s.angleLabelsVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via angle-labels.
+    vscode.postMessage({ type: "edit", op: "angle-labels" });
+  }, []);
+  return (
+    <div
+      onClick={onClick}
+      title={visible ? "Hide angle arcs+labels" : "Show angle arcs+labels"}
+      style={{
+        position: "absolute",
+        top: 160,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: visible ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      θφ 2→3/7
     </div>
   );
 }

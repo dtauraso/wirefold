@@ -45,6 +45,7 @@ export type EditMsg =
   | { type: "edit"; op: "tori-vis" }
   | { type: "edit"; op: "scene-poles" }
   | { type: "edit"; op: "node-poles" }
+  | { type: "edit"; op: "angle-labels" }
   | {
       type: "edit";
       op: "viewpoint";
@@ -104,7 +105,8 @@ export type TraceEvent =
   | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
   | { step: number; kind: "scene-tori"; visible: boolean }
   | { step: number; kind: "scene-poles"; visible: boolean }
-  | { step: number; kind: "node-poles"; visible: boolean };
+  | { step: number; kind: "node-poles"; visible: boolean }
+  | { step: number; kind: "angle-labels"; visible: boolean };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -198,6 +200,7 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "tori-vis":
     case "scene-poles":
     case "node-poles":
+    case "angle-labels":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     default:

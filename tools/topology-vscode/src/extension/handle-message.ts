@@ -139,6 +139,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "node-poles") {
         // Toggle per-node pole frame visibility. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "node-poles" }));
+      } else if (msg.op === "angle-labels") {
+        // Toggle the 2→3 / 2→7 θ/φ angle-label arcs. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "angle-labels" }));
       }
       return;
   }

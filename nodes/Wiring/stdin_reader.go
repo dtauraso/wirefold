@@ -391,5 +391,12 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleNodePoles(tr)
+	case msg.Op == "angle-labels":
+		// Toggle the θ/φ angle arc+label visibility and emit an angle-labels event.
+		// Fire-and-forget from TS; no payload needed.
+		if md == nil {
+			return
+		}
+		md.ToggleAngleLabels(tr)
 	}
 }

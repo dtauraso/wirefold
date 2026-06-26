@@ -197,6 +197,12 @@ export function handleTraceEvent(event: TraceEvent): void {
       patchViewerState((v) => { v.nodePolesVisible = e.visible; });
       return;
     }
+    case "angle-labels": {
+      const e = event as Extract<TraceEvent, { kind: "angle-labels" }>;
+      useCameraStore.getState().setAngleLabelsVisible(e.visible);
+      patchViewerState((v) => { v.angleLabelsVisible = e.visible; });
+      return;
+    }
     default:
       assertNever(k);
   }
