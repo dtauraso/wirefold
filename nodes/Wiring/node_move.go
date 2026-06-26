@@ -595,6 +595,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	md.fanCenters(emit, reach)
 	md.applyLocks(nodeID)
 	md.logPairPhi(nodeID) // DIAGNOSTIC: φ3/φ7 mirror consistency (sum≈0)
+	md.logPair26(nodeID)  // DIAGNOSTIC: node 2/6 about node 1 (θ2 jump check)
 	return true
 }
 

@@ -49,6 +49,24 @@ func (md *MoveDispatch) logPairPhi(movedID string) {
 			movedID, p3.Phi, p7.Phi, p3.Phi+p7.Phi, p3.Theta, p7.Theta))
 }
 
+// logPair26 (diagnostic) emits θ/φ/r of nodes 2 and 6 about node 1 after a move,
+// to localize the "node 2 jumps when dragged" report. dth = θ2−θ6 should stay ≈0
+// (theta lock); a jumping θ2 or r2 across a drag flags an unstable drag authority on
+// node 2 (which is uniquely also the center of the 3/7 mirror lock).
+func (md *MoveDispatch) logPair26(movedID string) {
+	if md.tr == nil {
+		return
+	}
+	p2, ok2 := md.roots.surfaceCoord("1", "2")
+	p6, ok6 := md.roots.surfaceCoord("1", "6")
+	if !ok2 || !ok6 {
+		return
+	}
+	md.tr.Breadcrumb("pair_26", movedID, "",
+		fmt.Sprintf("moved=%s th2=%.4f th6=%.4f dth=%.4f phi2=%.4f phi6=%.4f r2=%.2f r6=%.2f",
+			movedID, p2.Theta, p6.Theta, p2.Theta-p6.Theta, p2.Phi, p6.Phi, p2.R, p6.R))
+}
+
 // applyLocks re-derives any follower whose lock references the moved node
 // (as leader or center), updating the follower's root + center and fanning it.
 // Soft membership is preserved: only locked followers move, derived from roots.
