@@ -5,6 +5,7 @@ import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
 import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
+import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 
 export type { RunStatus };
 
@@ -128,12 +129,12 @@ export class BuildAndRunRunner {
     if (topologyPath) this.topologyPath = topologyPath;
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
-    const probeDir = path.join(folder.uri.fsPath, ".probe");
+    const probeDir = path.join(folder.uri.fsPath, PROBE_DIR);
     fs.mkdirSync(probeDir, { recursive: true });
-    this.probeFile = path.join(probeDir, "go.jsonl");
-    this.goErrorsFile = path.join(probeDir, "go-errors.jsonl");
-    this.tsFile = path.join(probeDir, "ts.jsonl");
-    this.tsErrorsFile = path.join(probeDir, "ts-errors.jsonl");
+    this.probeFile = path.join(probeDir, PROBE_FILES.go);
+    this.goErrorsFile = path.join(probeDir, PROBE_FILES.goErrors);
+    this.tsFile = path.join(probeDir, PROBE_FILES.ts);
+    this.tsErrorsFile = path.join(probeDir, PROBE_FILES.tsErrors);
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);

@@ -16,6 +16,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROBE_DIR="$REPO_ROOT/.probe"
 
+# These four names are the canonical .probe/ log files. The TS writers source
+# them from tools/topology-vscode/src/probe-files.ts (PROBE_FILES); shell can't
+# import it, so they are duplicated here — keep both in sync on any rename.
 GO_FILE="$PROBE_DIR/go.jsonl"
 GO_ERR_FILE="$PROBE_DIR/go-errors.jsonl"
 TS_FILE="$PROBE_DIR/ts.jsonl"
