@@ -127,6 +127,33 @@ standalone handoff/doc commits directly to main; main advances only through merg
 This follows the Workflow rule "if on the default branch, branch first" — branch first,
 fold the handoff update into that task branch.
 
+**Write before compacting.** Save important context to a file/memory/handoff before
+`/compact` — compaction keeps the things on the left and loses the things on the right
+(borrowed, ECC strategic-compact):
+
+| Persists | Lost |
+|----------|------|
+| CLAUDE.md / MODEL.md instructions | Intermediate reasoning and analysis |
+| `memory/` files | File contents you previously read |
+| Git state (commits, branches) | Multi-step conversation context |
+| Files on disk | Tool call history and counts |
+| Planning docs / handoff.md | Preferences stated only verbally (not in a file) |
+
+## Drift checklist
+
+Before declaring agent/model behavior healthy (or when "the AI is getting worse"),
+run these (borrowed, ECC agent-architecture-audit — keep the questions, not the rest):
+
+1. Can the model skip a required step/tool and still answer? → not code-gated.
+2. Does old conversation content appear in new turns? → context contamination.
+3. Is the same info in CLAUDE.md AND `memory/` AND history? → context duplication.
+4. Does a second pass silently rewrite the answer before delivery? → hidden repair loop.
+5. Does output differ between what was generated and what's delivered? → rendering corruption.
+6. Are "must do X" rules only in prose, never enforced in code? → discipline failure.
+7. Can the agent's own monologue become persistent `memory/`? → memory poisoning.
+
+Fix order is code-first: enforce in code (a guard/hook) before adding more prose.
+
 ## Posture (post-v0)
 
 Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.

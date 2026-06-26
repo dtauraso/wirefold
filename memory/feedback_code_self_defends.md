@@ -33,3 +33,7 @@ against it.
   entry.
 - Decision-point comments: inline `// NOT a scheduler — see MODEL.md` at key
   sites catches drift during code review.
+
+**Citable phrasing (borrowed, ECC agent-architecture-audit):**
+- "Code-gate tool requirements — enforce in code, not just prompt text."
+- "Do not accept 'must use tool' in prompt text when code never enforces it."
