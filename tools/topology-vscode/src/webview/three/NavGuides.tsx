@@ -237,13 +237,13 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
   const node7 = nodes.find((n) => n.id === "7");
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
-  // Per-node pole frame: show ONLY when the SELECTED node is a sphere CENTER, and only
-  // that node's own frame (not every node). A node centers a sphere iff it has an
-  // outgoing edge to a surface child. Selecting a pure surface node shows no frame.
-  const selectedCenter =
-    selectedId && edges.some((e) => e.source === selectedId)
-      ? nodes.find((n) => n.id === selectedId) ?? null
-      : null;
+  // Node pole frame: the SELECTED node picks which sphere(s) to frame — show the pole
+  // frame of each CENTER whose sphere the selected node sits on (the sources of the
+  // selected node's incoming edges, like scene-content's "surface" sphereOwners). A node
+  // can be on several spheres. Nothing selected ⇒ no node-pole frame.
+  const sphereCenters = selectedId
+    ? nodes.filter((n) => edges.some((e) => e.target === selectedId && e.source === n.id))
+    : [];
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
@@ -268,14 +268,15 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
       </group>
       {/* Scene pole frame at the content-sphere center. */}
       {scenePolesVisible !== false && <PolarFrame center={cs.center} scale={radiusKey} />}
-      {/* Node pole frame — only the SELECTED sphere-center node's frame (see selectedCenter). */}
-      {nodePolesVisible !== false && selectedCenter && (
+      {/* Node pole frame(s) — the center(s) of the sphere(s) the selected node sits on. */}
+      {nodePolesVisible !== false && sphereCenters.map((center) => (
         <PolarFrame
-          center={nodeWorldPos(selectedCenter)}
-          scale={nodeRadius(selectedCenter)}
-          tag={`(${selectedCenter.id})`}
+          key={center.id}
+          center={nodeWorldPos(center)}
+          scale={nodeRadius(center)}
+          tag={`(${center.id})`}
         />
-      )}
+      ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
       {angleLabelsVisible !== false && node2Center && node3 && (
         <ThetaArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
