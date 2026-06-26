@@ -142,6 +142,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "angle-labels") {
         // Toggle the 2→3 / 2→7 θ/φ angle-label arcs. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "angle-labels" }));
+      } else if (msg.op === "sel-sphere-poles") {
+        // Toggle the selection-sphere pole axis markers. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "sel-sphere-poles" }));
       }
       return;
   }

@@ -176,10 +176,11 @@ function PhiArc({ center, sample, color, tube }: {
 
 function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; edges: RFEdge[]; selectedId?: string | null }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
-  useNodeGeometryStore((s) => s.geoms);
+  const geoms = useNodeGeometryStore((s) => s.geoms);
   const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
   const scenePolesVisible = useCameraStore((s) => s.scenePolesVisible);
   const nodePolesVisible = useCameraStore((s) => s.nodePolesVisible);
+  const selSpherePolesVisible = useCameraStore((s) => s.selSpherePolesVisible);
   const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
 
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
@@ -237,11 +238,13 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
   const node7 = nodes.find((n) => n.id === "7");
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
-  // Node pole frame: the SELECTED node decides which sphere(s) to frame, then we show the
-  // pole frame of that sphere's CENTER. If the selected node centers its own sphere (has an
-  // outgoing edge to a surface child) the center is ITSELF; otherwise the centers are the
-  // sources of its incoming edges (the sphere(s) it sits on — a node can be on several).
-  // Nothing selected ⇒ no node-pole frame.
+  // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
+  // independent of the per-node poles below). The SELECTED node decides which sphere(s) to
+  // frame, then we draw the pole frame of that sphere's CENTER at full SPHERE scale (the
+  // center's Go-streamed sphereR). If the selected node centers its own sphere (has an
+  // outgoing edge) the center is ITSELF; otherwise the centers are the sources of its
+  // incoming edges (the sphere(s) it sits on — a node can be on several). Nothing selected
+  // ⇒ no frame.
   const sphereCenters = !selectedId
     ? []
     : edges.some((e) => e.source === selectedId)
@@ -271,12 +274,22 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
       </group>
       {/* Scene pole frame at the content-sphere center. */}
       {scenePolesVisible !== false && <PolarFrame center={cs.center} scale={radiusKey} />}
-      {/* Node pole frame(s) — the center(s) of the sphere(s) the selected node sits on. */}
-      {nodePolesVisible !== false && sphereCenters.map((center) => (
+      {/* Per-node pole frames — one PolarFrame per node, gated behind nodePolesVisible. */}
+      {nodePolesVisible !== false && nodes.map((node) => (
         <PolarFrame
-          key={center.id}
+          key={node.id}
+          center={nodeWorldPos(node)}
+          scale={nodeRadius(node)}
+          tag={`(${node.id})`}
+        />
+      ))}
+      {/* Selected-sphere poles (additional feature) — the center(s) of the sphere(s) the
+          SELECTED node sits on, drawn at SPHERE scale. Independent of the per-node poles. */}
+      {selSpherePolesVisible !== false && sphereCenters.map((center) => (
+        <PolarFrame
+          key={`sel-${center.id}`}
           center={nodeWorldPos(center)}
-          scale={nodeRadius(center)}
+          scale={geoms[center.id]?.sphereR ?? nodeRadius(center)}
           tag={`(${center.id})`}
         />
       ))}

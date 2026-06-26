@@ -249,6 +249,42 @@ export function AngleLabelsToggle() {
   );
 }
 
+/** SEL SPHERE POLES TOGGLE: top-right button to show/hide selection-sphere pole axis markers. Fire-and-forget to Go. */
+export function SelSpherePolesToggle() {
+  const visible = useCameraStore((s) => s.selSpherePolesVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via sel-sphere-poles.
+    vscode.postMessage({ type: "edit", op: "sel-sphere-poles" });
+  }, []);
+  return (
+    <div
+      onClick={onClick}
+      title={visible ? "Hide sel-sphere poles" : "Show sel-sphere poles"}
+      style={{
+        position: "absolute",
+        top: 188,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: visible ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      sel ⬡
+    </div>
+  );
+}
+
 /** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels. */
 export function GlobalLabelsToggle({
   hidden,

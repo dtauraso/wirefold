@@ -62,6 +62,8 @@ export type ViewerState = {
   nodePolesVisible?: boolean;
   // angleLabelsVisible: whether the θ/φ angle arcs+labels are shown. undefined = shown (default true).
   angleLabelsVisible?: boolean;
+  // selSpherePolesVisible: whether the selection-sphere pole axis markers are shown. undefined = shown (default true).
+  selSpherePolesVisible?: boolean;
 };
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};

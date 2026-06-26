@@ -203,6 +203,12 @@ export function handleTraceEvent(event: TraceEvent): void {
       patchViewerState((v) => { v.angleLabelsVisible = e.visible; });
       return;
     }
+    case "sel-sphere-poles": {
+      const e = event as Extract<TraceEvent, { kind: "sel-sphere-poles" }>;
+      useCameraStore.getState().setSelSpherePolesVisible(e.visible);
+      patchViewerState((v) => { v.selSpherePolesVisible = e.visible; });
+      return;
+    }
     default:
       assertNever(k);
   }

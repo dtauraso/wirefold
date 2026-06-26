@@ -398,5 +398,12 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleAngleLabels(tr)
+	case msg.Op == "sel-sphere-poles":
+		// Toggle the selection-sphere pole axis visibility and emit a sel-sphere-poles event.
+		// Fire-and-forget from TS; no payload needed.
+		if md == nil {
+			return
+		}
+		md.ToggleSelSpherePoles(tr)
 	}
 }

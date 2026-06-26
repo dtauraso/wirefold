@@ -366,6 +366,9 @@ type MoveDispatch struct {
 	// angleLabelsVisible is the current θ/φ angle arc+label visibility. true by default.
 	// Toggled by ToggleAngleLabels; emitted via EmitAngleLabels.
 	angleLabelsVisible bool
+	// selSpherePolesVisible is the current selection-sphere pole axis visibility. true by default.
+	// Toggled by ToggleSelSpherePoles; emitted via EmitSelSpherePoles.
+	selSpherePolesVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -382,10 +385,11 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		edgeMovers:       map[string]*edgeMover{},
 		edgeOut:          map[string]*Out{},
 		tr:               tr,
-		sceneToriVisible:   true,
-		scenePolesVisible:  true,
-		nodePolesVisible:   true,
-		angleLabelsVisible: true,
+		sceneToriVisible:      true,
+		scenePolesVisible:     true,
+		nodePolesVisible:      true,
+		angleLabelsVisible:    true,
+		selSpherePolesVisible: true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -798,5 +802,17 @@ func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace) {
 // AngleLabels returns the current angle arc+label visibility.
 func (md *MoveDispatch) AngleLabels() bool {
 	return md.angleLabelsVisible
+}
+
+// ToggleSelSpherePoles flips the selection-sphere pole axis visibility and emits a sel-sphere-poles event.
+// Called from applyEdit on op="sel-sphere-poles"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) {
+	md.selSpherePolesVisible = !md.selSpherePolesVisible
+	tr.SelSpherePoles(md.selSpherePolesVisible)
+}
+
+// EmitSelSpherePoles emits the current selection-sphere pole axis visibility without toggling it.
+func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace) {
+	tr.SelSpherePoles(md.selSpherePolesVisible)
 }
 
