@@ -5,7 +5,7 @@
 
 import React, { useMemo, useState, useEffect } from "react";
 import * as THREE from "three";
-import type { RFNode, RFEdge, NodeData } from "../types";
+import type { RFNode, NodeData } from "../types";
 import { nodeRadius, nodeWorldPos } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
@@ -174,7 +174,7 @@ function PhiArc({ center, sample, color, tube }: {
   );
 }
 
-function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; edges: RFEdge[]; selectedId?: string | null }) {
+function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
   const geoms = useNodeGeometryStore((s) => s.geoms);
   const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
@@ -248,17 +248,11 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
   // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
-  // independent of the per-node poles below). The LATCHED selection decides which sphere(s)
-  // to frame (persists through deselect), then we draw the pole frame of that sphere's
-  // CENTER at full SPHERE scale (the center's Go-streamed sphereR). If the latched node
-  // centers its own sphere (has an outgoing edge) the center is ITSELF; otherwise the
-  // centers are the sources of its incoming edges (the sphere(s) it sits on — a node can be
-  // on several). Never selected ⇒ no frame.
-  const sphereCenters = !latchedSel
-    ? []
-    : edges.some((e) => e.source === latchedSel)
-      ? nodes.filter((n) => n.id === latchedSel)
-      : nodes.filter((n) => edges.some((e) => e.target === latchedSel && e.source === n.id));
+  // independent of the per-node poles below). The LATCHED selection decides which node's
+  // sphere to frame (persists through deselect), and we draw THAT node's own sphere pole
+  // frame at full SPHERE scale (its Go-streamed sphereR). Every node has a sphere, so this
+  // works for leaf nodes (3, 5) too — no parent remapping. Never selected ⇒ no frame.
+  const sphereCenters = latchedSel ? nodes.filter((n) => n.id === latchedSel) : [];
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
@@ -324,10 +318,10 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
 // NavGuides — combined export
 // ---------------------------------------------------------------------------
 
-export function NavGuides({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; edges: RFEdge[]; selectedId?: string | null }) {
+export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
   return (
     <>
-      <PolarSphere nodes={nodes} edges={edges} selectedId={selectedId} />
+      <PolarSphere nodes={nodes} selectedId={selectedId} />
     </>
   );
 }
