@@ -237,13 +237,16 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
   const node7 = nodes.find((n) => n.id === "7");
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
-  // Node pole frame: the SELECTED node picks which sphere(s) to frame — show the pole
-  // frame of each CENTER whose sphere the selected node sits on (the sources of the
-  // selected node's incoming edges, like scene-content's "surface" sphereOwners). A node
-  // can be on several spheres. Nothing selected ⇒ no node-pole frame.
-  const sphereCenters = selectedId
-    ? nodes.filter((n) => edges.some((e) => e.target === selectedId && e.source === n.id))
-    : [];
+  // Node pole frame: the SELECTED node decides which sphere(s) to frame, then we show the
+  // pole frame of that sphere's CENTER. If the selected node centers its own sphere (has an
+  // outgoing edge to a surface child) the center is ITSELF; otherwise the centers are the
+  // sources of its incoming edges (the sphere(s) it sits on — a node can be on several).
+  // Nothing selected ⇒ no node-pole frame.
+  const sphereCenters = !selectedId
+    ? []
+    : edges.some((e) => e.source === selectedId)
+      ? nodes.filter((n) => n.id === selectedId)
+      : nodes.filter((n) => edges.some((e) => e.target === selectedId && e.source === n.id));
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
