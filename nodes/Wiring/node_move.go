@@ -594,8 +594,9 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
 	md.applyLocks(nodeID)
-	md.logPairPhi(nodeID) // DIAGNOSTIC: φ3/φ7 mirror consistency (sum≈0)
-	md.logPair26(nodeID)  // DIAGNOSTIC: node 2/6 about node 1 (θ2 jump check)
+	// Per-frame mirror/2-6 diagnostics removed: they flooded the Go→TS trace stream
+	// during a node-2 drag (4 nodes re-emit + 2 breadcrumbs/frame) and lagged the
+	// drag. Locks confirmed consistent (dth=0, φ sum=0). Functions kept for re-enable.
 	return true
 }
 
