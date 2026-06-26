@@ -3,7 +3,7 @@
 //     radius scaled to ARCBALL_FILL * camera-to-focus distance, updated each frame.
 // Purely decorative: raycast disabled, depthWrite false, transparent.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData } from "../types";
 import { nodeRadius, nodeWorldPos } from "./geometry-helpers";
@@ -183,6 +183,15 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
   const selSpherePolesVisible = useCameraStore((s) => s.selSpherePolesVisible);
   const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
 
+  // Latch the last node the user selected. Selection only DECIDES which sphere the
+  // sel-highlight frames; it does not have to stay selected to keep the frame shown.
+  // So DEselecting the node (clicking empty space) leaves the latched sphere framed —
+  // only selecting a different node replaces it. The sel toggle still gates visibility.
+  const [latchedSel, setLatchedSel] = useState<string | null>(selectedId ?? null);
+  useEffect(() => {
+    if (selectedId) setLatchedSel(selectedId);
+  }, [selectedId]);
+
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori
   // (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
@@ -239,17 +248,17 @@ function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; 
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
   // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
-  // independent of the per-node poles below). The SELECTED node decides which sphere(s) to
-  // frame, then we draw the pole frame of that sphere's CENTER at full SPHERE scale (the
-  // center's Go-streamed sphereR). If the selected node centers its own sphere (has an
-  // outgoing edge) the center is ITSELF; otherwise the centers are the sources of its
-  // incoming edges (the sphere(s) it sits on — a node can be on several). Nothing selected
-  // ⇒ no frame.
-  const sphereCenters = !selectedId
+  // independent of the per-node poles below). The LATCHED selection decides which sphere(s)
+  // to frame (persists through deselect), then we draw the pole frame of that sphere's
+  // CENTER at full SPHERE scale (the center's Go-streamed sphereR). If the latched node
+  // centers its own sphere (has an outgoing edge) the center is ITSELF; otherwise the
+  // centers are the sources of its incoming edges (the sphere(s) it sits on — a node can be
+  // on several). Never selected ⇒ no frame.
+  const sphereCenters = !latchedSel
     ? []
-    : edges.some((e) => e.source === selectedId)
-      ? nodes.filter((n) => n.id === selectedId)
-      : nodes.filter((n) => edges.some((e) => e.target === selectedId && e.source === n.id));
+    : edges.some((e) => e.source === latchedSel)
+      ? nodes.filter((n) => n.id === latchedSel)
+      : nodes.filter((n) => edges.some((e) => e.target === latchedSel && e.source === n.id));
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
