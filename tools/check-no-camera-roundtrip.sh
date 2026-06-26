@@ -12,7 +12,16 @@
 
 set -euo pipefail
 
-DIR="tools/topology-vscode/src/webview/three"
+# Resolve relative to the repo root (script lives in tools/) so a standalone
+# invocation from any cwd scans the real tree instead of silently finding
+# nothing and reporting a false clean.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DIR="$REPO_ROOT/tools/topology-vscode/src/webview/three"
+if [ ! -d "$DIR" ]; then
+  echo "✗ no-camera-roundtrip: MISCONFIGURED — scan dir not found: $DIR" >&2
+  exit 1
+fi
 # Files allowed to use the input/pick edges.
 EXCLUDE='polar\.ts|PanPolarOverlay\.tsx'
 

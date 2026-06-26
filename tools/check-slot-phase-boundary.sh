@@ -4,7 +4,7 @@ set -euo pipefail
 # Verifies that slot-phase transition logic (writing { phase: "filled" } or
 # { phase: "empty" } into a SlotEntry) does not appear outside its canonical
 # homes:
-#   TS: tools/topology-vscode/src/webview/rf/pump.ts
+#   TS: tools/topology-vscode/src/webview/three/pump.ts
 #   Go: nodes/Wiring/paced_wire.go  (uses hasSend bool; no string phase literals)
 #
 # Read-only render checks (.phase === "filled") and type-definition files
@@ -15,8 +15,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-RF_DIR="$REPO_ROOT/tools/topology-vscode/src/webview/rf"
+RF_DIR="$REPO_ROOT/tools/topology-vscode/src/webview/three"
 PUMP_FILE="$RF_DIR/pump.ts"
+
+# Fail loud if the scanned tree moved — a silently-missing dir would make this
+# guard a no-op (the exact failure that left it dead when rendering moved
+# rf/ -> three/). Never let the scan target vanish unnoticed.
+if [[ ! -d "$RF_DIR" ]]; then
+  echo "slot-phase-boundary: MISCONFIGURED — scan dir not found: $RF_DIR" >&2
+  echo "  (renderer files moved? update RF_DIR in $(basename "${BASH_SOURCE[0]}"))" >&2
+  exit 1
+fi
+if [[ ! -f "$PUMP_FILE" ]]; then
+  echo "slot-phase-boundary: MISCONFIGURED — canonical home not found: $PUMP_FILE" >&2
+  exit 1
+fi
 
 HITS=0
 
@@ -24,7 +37,7 @@ HITS=0
 # object property value (comma-separated, runtime form). Exclude pump.ts (the
 # canonical home). The type-definition form uses a semicolon: { phase: "filled"; … }
 # so limiting the match to the comma form avoids flagging messages.ts.
-# We scan only the rf/ subtree (renderer files outside rf/ are not Go).
+# We scan the three/ renderer subtree (pump.ts is the canonical home).
 ts_scan() {
   local pattern="$1"
   local hit
