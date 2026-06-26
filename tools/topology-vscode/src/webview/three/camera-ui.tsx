@@ -114,6 +114,7 @@ export function GuidelinesToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const next = active === false;
+    postLog("guide-btn-click", { op: "guidelines", wasActive: active !== false, nextActive: next });
     setActive(next);
     patchViewerState((v) => { v.guidelinesActive = next ? undefined : false; });
     scheduleViewSave();
@@ -151,8 +152,9 @@ export function RingsToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via scene-tori.
+    postLog("guide-btn-click", { op: "tori-vis", was: visible });
     vscode.postMessage({ type: "edit", op: "tori-vis" });
-  }, []);
+  }, [visible]);
   return (
     <div
       onClick={onClick}
@@ -187,7 +189,7 @@ export function ScenePolesToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via scene-poles.
-    postLog("pole-toggle-click", { op: "scene-poles", wasVisible: visible });
+    postLog("guide-btn-click", { op: "scene-poles", was: visible });
     vscode.postMessage({ type: "edit", op: "scene-poles" });
   }, [visible]);
   return (
@@ -224,7 +226,7 @@ export function NodePolesToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via node-poles.
-    postLog("pole-toggle-click", { op: "node-poles", wasVisible: visible });
+    postLog("guide-btn-click", { op: "node-poles", was: visible });
     vscode.postMessage({ type: "edit", op: "node-poles" });
   }, [visible]);
   return (
@@ -261,8 +263,9 @@ export function AngleLabelsToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via angle-labels.
+    postLog("guide-btn-click", { op: "angle-labels", was: visible });
     vscode.postMessage({ type: "edit", op: "angle-labels" });
-  }, []);
+  }, [visible]);
   return (
     <div
       onClick={onClick}
@@ -297,8 +300,9 @@ export function SelSpherePolesToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via sel-sphere-poles.
+    postLog("guide-btn-click", { op: "sel-sphere-poles", was: visible });
     vscode.postMessage({ type: "edit", op: "sel-sphere-poles" });
-  }, []);
+  }, [visible]);
   return (
     <div
       onClick={onClick}

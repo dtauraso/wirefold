@@ -95,12 +95,19 @@ window.addEventListener("message", (e) => {
     // Re-seed the guidelines master toggle from persisted state, then push all 5
     // Go-owned guide visibilities so Go's authoritative state survives a window reload.
     useCameraStore.getState().setGuidelinesActive(viewerState.guidelinesActive !== false);
-    vscode.postMessage({ type: "edit", op: "guide-vis",
+    const guidePush = {
       tori: viewerState.sceneToriVisible !== false,
       scenePoles: viewerState.scenePolesVisible !== false,
       nodePoles: viewerState.nodePolesVisible !== false,
       angleLabels: viewerState.angleLabelsVisible !== false,
-      selSpherePoles: viewerState.selSpherePolesVisible !== false });
+      selSpherePoles: viewerState.selSpherePolesVisible !== false,
+    };
+    postLog("guide-load-push", { persisted: {
+      sceneTori: viewerState.sceneToriVisible, scenePoles: viewerState.scenePolesVisible,
+      nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
+      selSpherePoles: viewerState.selSpherePolesVisible, guidelinesActive: viewerState.guidelinesActive,
+    }, pushed: guidePush });
+    vscode.postMessage({ type: "edit", op: "guide-vis", ...guidePush });
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
   }
