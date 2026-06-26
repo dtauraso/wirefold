@@ -324,7 +324,7 @@ type MoveDispatch struct {
 	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
 	// runs in a single goroutine).
 	vp viewpoint
-	// tr is the trace sink; used for diagnostic breadcrumbs (e.g. theta_lock).
+	// tr is the trace sink (retained for trace emission; diagnostic breadcrumbs removed).
 	tr *T.Trace
 	// sceneToriVisible is the current polar-guide tori visibility. true by default
 	// (tori shown on startup). Toggled by ToggleSceneTori; emitted via EmitSceneTori.
@@ -594,6 +594,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
 	md.applyLocks(nodeID)
+	md.logPairPhi(nodeID) // DIAGNOSTIC: φ3/φ7 mirror consistency (sum≈0)
 	return true
 }
 

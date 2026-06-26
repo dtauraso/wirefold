@@ -10,33 +10,43 @@ import "fmt"
 // the center (same angle-from-pole), at their own longitudes.
 
 // thetaLock binds Follower to share Leader's θ about Center (pole = +y), keeping
-// the Follower's own φ and r. Equalizes the angle-from-the-up-pole for the pair.
+// the Follower's own r. By default it keeps the Follower's own φ (same latitude
+// ring, own longitude). When MirrorPhi is set it instead gives the Follower
+// φ = −Leaderφ — a reflection across the φ=0 (+x) meridian, so the pair has
+// equal-magnitude, opposite-sign longitude (same θ, mirrored φ).
 type thetaLock struct {
-	Center   string
-	Leader   string
-	Follower string
+	Center    string
+	Leader    string
+	Follower  string
+	MirrorPhi bool
 }
 
-// addThetaLock registers a theta lock.
+// addThetaLock registers a theta lock (shared θ, follower keeps its own φ).
 func (md *MoveDispatch) addThetaLock(center, leader, follower string) {
 	md.locks = append(md.locks, thetaLock{Center: center, Leader: leader, Follower: follower})
 }
 
-// logPairTheta (diagnostic) emits θ of nodes 3 and 7 about node 2 after a move —
-// for EVERY RootMove, whether or not a lock fired. Unlike the per-lock breadcrumb
-// (which is tautological), this catches a follower-drag that never fires the lock
-// (you'd see moved=7 with th3≠th7) and any real divergence in the roots.
-func (md *MoveDispatch) logPairTheta(movedID string) {
+// addMirrorLock registers a theta lock that also mirrors φ: the follower shares the
+// leader's θ and takes φ = −leaderφ (opposite-sign, equal-magnitude longitude).
+func (md *MoveDispatch) addMirrorLock(center, leader, follower string) {
+	md.locks = append(md.locks, thetaLock{Center: center, Leader: leader, Follower: follower, MirrorPhi: true})
+}
+
+// logPairPhi (diagnostic) emits φ of nodes 3 and 7 about node 2 after a move. For a
+// consistent mirror lock φ7 = −φ3, so sum = φ3+φ7 should stay ≈0; a drifting sum
+// flags the inconsistency. Logged for EVERY RootMove, whether or not a lock fired.
+func (md *MoveDispatch) logPairPhi(movedID string) {
 	if md.tr == nil {
 		return
 	}
-	t3, ok3 := md.roots.surfaceCoord("2", "3")
-	t7, ok7 := md.roots.surfaceCoord("2", "7")
+	p3, ok3 := md.roots.surfaceCoord("2", "3")
+	p7, ok7 := md.roots.surfaceCoord("2", "7")
 	if !ok3 || !ok7 {
 		return
 	}
-	md.tr.Breadcrumb("pair_theta", movedID, "",
-		fmt.Sprintf("moved=%s th3=%.4f th7=%.4f d=%.4f", movedID, t3.Theta, t7.Theta, t3.Theta-t7.Theta))
+	md.tr.Breadcrumb("pair_phi", movedID, "",
+		fmt.Sprintf("moved=%s phi3=%.4f phi7=%.4f sum=%.4f th3=%.4f th7=%.4f",
+			movedID, p3.Phi, p7.Phi, p3.Phi+p7.Phi, p3.Theta, p7.Theta))
 }
 
 // applyLocks re-derives any follower whose lock references the moved node
@@ -60,10 +70,15 @@ func (md *MoveDispatch) applyLocks(movedID string) {
 		if !ok {
 			continue
 		}
-		// Lock: the follower adopts the leader's θ (angle from the +y up-pole) and
-		// keeps its OWN azimuth φ and radius. Both then sit at the same angle-from-pole
-		// (same latitude ring) on opposite/own longitudes — not mirrored across a disk.
-		locked := polar{R: fp.R, Theta: lp.Theta, Phi: fp.Phi}
+		// Lock: the follower adopts the leader's θ (angle from the +y up-pole) and keeps
+		// its own radius. φ is either the follower's OWN (same latitude ring, own
+		// longitude) or, for a mirror lock, −leaderφ (opposite-sign, equal-magnitude
+		// longitude — reflected across the φ=0 meridian).
+		phi := fp.Phi
+		if lk.MirrorPhi {
+			phi = -lp.Phi
+		}
+		locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
 		fw := polar2cart(locked).add(cw) // follower world position
 		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
 
@@ -73,16 +88,5 @@ func (md *MoveDispatch) applyLocks(movedID string) {
 		centers[lk.Follower] = fw
 		reach := reachRFromCenters(centers, md.heldEdges())
 		md.fanCenters(map[string]vec3{lk.Follower: fw}, reach)
-
-		// DIAGNOSTIC (task/theta-lock-diag): record what the lock did. leadTh is the
-		// θ we copied; follAfter is the follower's θ re-derived from its new position.
-		// If follAfter != leadTh the lock didn't stick; if no theta_lock breadcrumbs
-		// appear during a drag, applyLocks isn't firing for that move.
-		if md.tr != nil {
-			af, _ := md.roots.surfaceCoord(lk.Center, lk.Follower)
-			md.tr.Breadcrumb("theta_lock", lk.Follower, lk.Leader,
-				fmt.Sprintf("moved=%s leadTh=%.4f follBefore=%.4f follAfter=%.4f",
-					movedID, lp.Theta, fp.Theta, af.Theta))
-		}
 	}
 }

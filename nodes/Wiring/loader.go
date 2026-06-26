@@ -368,17 +368,20 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			md.installAimedPorts(aimedPorts)
 		}
 
-		// Couple nodes 3 and 7 on node 2's sphere via a bidirectional theta lock
+		// Couple nodes 3 and 7 on node 2's sphere via a bidirectional MIRROR lock
 		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
-		// makes the other share its θ (angle from node 2's +y up-pole), so the two
-		// stay on the same latitude ring around node 2 while keeping their own
-		// longitudes. Stopgap registration by id (no spec-level lock declaration
-		// yet); only wired when all three nodes exist.
+		// makes the other share its θ (angle from node 2's +y up-pole) AND take the
+		// opposite-sign φ (φ7 = −φ3), so the two stay on the same latitude ring around
+		// node 2, mirrored across the φ=0 meridian. Stopgap registration by id (no
+		// spec-level lock declaration yet); only wired when all three nodes exist.
 		_, has3 := centers["3"]
 		_, has7 := centers["7"]
 		if has2 && has3 && has7 {
-			md.addThetaLock("2", "3", "7")
-			md.addThetaLock("2", "7", "3")
+			md.addMirrorLock("2", "3", "7")
+			md.addMirrorLock("2", "7", "3")
+			// Apply once at load so 3 and 7 start mirrored (φ7 = −φ3, shared θ) rather
+			// than only after the first drag. Node 3 is the leader; node 7 is reflected.
+			md.applyLocks("3")
 		}
 	}
 
