@@ -5,7 +5,7 @@
 
 import React, { useMemo } from "react";
 import * as THREE from "three";
-import type { RFNode, NodeData } from "../types";
+import type { RFNode, RFEdge, NodeData } from "../types";
 import { nodeRadius, nodeWorldPos } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
@@ -174,7 +174,7 @@ function PhiArc({ center, sample, color, tube }: {
   );
 }
 
-function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
+function PolarSphere({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; edges: RFEdge[]; selectedId?: string | null }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
   useNodeGeometryStore((s) => s.geoms);
   const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
@@ -237,6 +237,14 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const node7 = nodes.find((n) => n.id === "7");
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
+  // Per-node pole frame: show ONLY when the SELECTED node is a sphere CENTER, and only
+  // that node's own frame (not every node). A node centers a sphere iff it has an
+  // outgoing edge to a surface child. Selecting a pure surface node shows no frame.
+  const selectedCenter =
+    selectedId && edges.some((e) => e.source === selectedId)
+      ? nodes.find((n) => n.id === selectedId) ?? null
+      : null;
+
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
   // diagram, not the camera.
@@ -260,15 +268,14 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
       </group>
       {/* Scene pole frame at the content-sphere center. */}
       {scenePolesVisible !== false && <PolarFrame center={cs.center} scale={radiusKey} />}
-      {/* Per-node pole frames — one PolarFrame per node, gated behind nodePolesVisible. */}
-      {nodePolesVisible !== false && nodes.map((node) => (
+      {/* Node pole frame — only the SELECTED sphere-center node's frame (see selectedCenter). */}
+      {nodePolesVisible !== false && selectedCenter && (
         <PolarFrame
-          key={node.id}
-          center={nodeWorldPos(node)}
-          scale={nodeRadius(node)}
-          tag={`(${node.id})`}
+          center={nodeWorldPos(selectedCenter)}
+          scale={nodeRadius(selectedCenter)}
+          tag={`(${selectedCenter.id})`}
         />
-      ))}
+      )}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
       {angleLabelsVisible !== false && node2Center && node3 && (
         <ThetaArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
@@ -291,10 +298,10 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
 // NavGuides — combined export
 // ---------------------------------------------------------------------------
 
-export function NavGuides({ nodes }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
+export function NavGuides({ nodes, edges, selectedId }: { nodes: RFNode<NodeData>[]; edges: RFEdge[]; selectedId?: string | null }) {
   return (
     <>
-      <PolarSphere nodes={nodes} />
+      <PolarSphere nodes={nodes} edges={edges} selectedId={selectedId} />
     </>
   );
 }

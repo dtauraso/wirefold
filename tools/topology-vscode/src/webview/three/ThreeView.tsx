@@ -235,7 +235,7 @@ export function ThreeView() {
             onNearestN={onNearestN}
             onCameraSettle={onCameraSettle}
           />
-          <NavGuides nodes={nodes} selectedId={selectedId} />
+          <NavGuides nodes={nodes} edges={edges} selectedId={selectedId} />
         </Canvas>
       </div>
 
