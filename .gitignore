@@ -106,3 +106,6 @@ tools/topology-vscode/gen-node-defs
 
 # Agent worktrees (temporary, per-agent scratch checkouts)
 .claude/worktrees/
+
+# Human worktrees container (one branch per subfolder, shares this .git)
+/worktrees/
