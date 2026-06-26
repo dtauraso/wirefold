@@ -36,10 +36,11 @@ import (
 
 // moveMsgKind discriminates moveMsg payloads.
 const (
-	moveMsgKindMove   = "move" // default (zero-value "" is also treated as move)
-	moveMsgKindFade   = "fade"
-	moveMsgKindAnchor = "anchor" // per-port anchor update (drag along the ring)
-	moveMsgKindCenter = "center" // polar-layout re-propagated world center for a node
+	moveMsgKindMove    = "move" // default (zero-value "" is also treated as move)
+	moveMsgKindFade    = "fade"
+	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
+	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
+	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
 )
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
@@ -63,6 +64,11 @@ type moveMsg struct {
 	// and re-emits its own geometry. RootMove updates one node centrally and
 	// fans the fresh centers out — the one centralized step (sphere_layout.go).
 	Center *vec3
+	// Centers (Kind == "centers"): batched per-edge re-propagation. Maps node id → new
+	// world center for every moved endpoint of THIS edge in a single frame, so an edge
+	// whose BOTH endpoints moved updates both and recomputes/emits its segment ONCE
+	// instead of once per endpoint message (the node-2 drag duplicate-emit fix).
+	Centers map[string]vec3
 	// ReachR (Kind == "center"): the re-propagated sphere REACH radius for NodeID (max
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
 	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
@@ -242,6 +248,27 @@ func (m *edgeMover) handle(msg moveMsg) {
 			return
 		}
 		m.recomputeGeometry()
+		return
+	}
+	if msg.Kind == moveMsgKindCenters {
+		// Batched polar re-propagation: apply every moved endpoint this edge owns,
+		// then recompute ONCE. An edge whose both endpoints moved in one frame would
+		// otherwise recompute (and emit) twice — the duplicate-emit source on a node-2
+		// drag, where the dragged node and its sphere center both move.
+		moved := false
+		if c, ok := msg.Centers[m.srcID]; ok {
+			cc := c
+			m.srcGeom.Center = &cc
+			moved = true
+		}
+		if c, ok := msg.Centers[m.dstID]; ok {
+			cc := c
+			m.dstGeom.Center = &cc
+			moved = true
+		}
+		if moved {
+			m.recomputeGeometry()
+		}
 		return
 	}
 	// Plain "move" messages have no effect under the polar layout;
@@ -490,18 +517,11 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	// in newCenters (they will re-emit from their own center message).
 	aimedReemit := map[string]bool{}
 
+	// Per-node center messages (carry ReachR for sphereR streaming). One per moved node.
 	for id, c := range newCenters {
 		cc := c
-		rr := reach[id]
 		if ch, ok := md.dispatch[id]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: rr}
-		}
-		for edgeID, em := range md.edgeMovers {
-			if em.srcID == id || em.dstID == id {
-				if ch, ok := md.dispatch[edgeID]; ok {
-					ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: rr}
-				}
-			}
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: reach[id]}
 		}
 		// If an aimed registry is installed, trigger re-emit for any node whose
 		// port aims at the node that just moved (reverse-lookup the registry).
@@ -516,6 +536,24 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 					aimedReemit[key.NodeID] = true
 				}
 			}
+		}
+	}
+
+	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
+	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
+	for edgeID, em := range md.edgeMovers {
+		eps := map[string]vec3{}
+		if c, ok := newCenters[em.srcID]; ok {
+			eps[em.srcID] = c
+		}
+		if c, ok := newCenters[em.dstID]; ok {
+			eps[em.dstID] = c
+		}
+		if len(eps) == 0 {
+			continue
+		}
+		if ch, ok := md.dispatch[edgeID]; ok {
+			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: eps}
 		}
 	}
 
@@ -586,17 +624,23 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		emit[e.Source] = cw // re-emit the center so its ring re-sizes
 	}
 
-	// Recompute every center's reach over the updated positions and fan all movers.
+	// Derive any locked followers of the moved node (roots updated in place, fan
+	// deferred) and merge them into the SINGLE per-frame center set, so the whole drag
+	// frame fans once. Previously applyLocks fanned each follower separately, and each
+	// fan re-sent center messages to edges already fanned by RootMove — overlapping
+	// edges recomputed and re-emitted their identical segment up to 6×/frame, which was
+	// the node-2 drag lag (node 2 is uniquely both a lock participant and a lock center).
+	for id, w := range md.applyLocks(nodeID) {
+		emit[id] = w
+	}
+
+	// Recompute every center's reach over the updated positions and fan all movers ONCE.
 	centers := md.heldCenters()
 	for id, w := range emit {
 		centers[id] = w
 	}
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
-	md.applyLocks(nodeID)
-	// Per-frame mirror/2-6 diagnostics removed: they flooded the Go→TS trace stream
-	// during a node-2 drag (4 nodes re-emit + 2 breadcrumbs/frame) and lagged the
-	// drag. Locks confirmed consistent (dth=0, φ sum=0). Functions kept for re-enable.
 	return true
 }
 
