@@ -104,6 +104,45 @@ export function HomeButton({
 }
 
 /** RINGS TOGGLE: top-right button to show/hide the polar-guide tori. Fire-and-forget to Go. */
+/** GUIDELINES MASTER: TS-only toggle that activates/deactivates the whole polar-guideline
+ * group (rings/tori, scene poles, node poles, angle labels, sel-sphere poles). When inactive
+ * it hides those 5 buttons (gated in ThreeView) and NavGuides suppresses every guide; each
+ * guide's own Go-owned state is left untouched, so reactivating restores the prior states. */
+export function GuidelinesToggle() {
+  const active = useCameraStore((s) => s.guidelinesActive);
+  const setActive = useCameraStore((s) => s.setGuidelinesActive);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActive(active === false);
+  }, [active, setActive]);
+  return (
+    <div
+      onClick={onClick}
+      title={active !== false ? "Hide polar guidelines" : "Show polar guidelines"}
+      style={{
+        position: "absolute",
+        top: 76,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: active !== false ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ▦ guidelines
+    </div>
+  );
+}
+
 export function RingsToggle() {
   const visible = useCameraStore((s) => s.sceneToriVisible);
   const onClick = useCallback((e: React.MouseEvent) => {
@@ -117,7 +156,7 @@ export function RingsToggle() {
       title={visible ? "Hide polar rings" : "Show polar rings"}
       style={{
         position: "absolute",
-        top: 76,
+        top: 104,
         right: 12,
         background: "rgba(0,0,0,0.55)",
         borderRadius: 6,
@@ -154,7 +193,7 @@ export function ScenePolesToggle() {
       title={visible ? "Hide scene pole frame" : "Show scene pole frame"}
       style={{
         position: "absolute",
-        top: 104,
+        top: 132,
         right: 12,
         background: "rgba(0,0,0,0.55)",
         borderRadius: 6,
@@ -191,7 +230,7 @@ export function NodePolesToggle() {
       title={visible ? "Hide node pole frames" : "Show node pole frames"}
       style={{
         position: "absolute",
-        top: 132,
+        top: 160,
         right: 12,
         background: "rgba(0,0,0,0.55)",
         borderRadius: 6,
@@ -227,7 +266,7 @@ export function AngleLabelsToggle() {
       title={visible ? "Hide angle arcs+labels" : "Show angle arcs+labels"}
       style={{
         position: "absolute",
-        top: 160,
+        top: 188,
         right: 12,
         background: "rgba(0,0,0,0.55)",
         borderRadius: 6,
@@ -263,7 +302,7 @@ export function SelSpherePolesToggle() {
       title={visible ? "Hide sel-sphere poles" : "Show sel-sphere poles"}
       style={{
         position: "absolute",
-        top: 188,
+        top: 216,
         right: 12,
         background: "rgba(0,0,0,0.55)",
         borderRadius: 6,

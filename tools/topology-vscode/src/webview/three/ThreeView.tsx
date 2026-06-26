@@ -12,7 +12,8 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { GlobalLabelsToggle, HomeButton, RingsToggle, ScenePolesToggle, NodePolesToggle, AngleLabelsToggle, SelSpherePolesToggle } from "./camera-ui";
+import { GlobalLabelsToggle, HomeButton, GuidelinesToggle, RingsToggle, ScenePolesToggle, NodePolesToggle, AngleLabelsToggle, SelSpherePolesToggle } from "./camera-ui";
+import { useCameraStore } from "./camera-store";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene } from "./scene-content";
@@ -33,6 +34,8 @@ export function ThreeView() {
   const storeDeleteEdge = useThreeStore((s) => s.deleteEdge);
   const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Master gate for the polar-guideline button group (the master button itself always shows).
+  const guidelinesActive = useCameraStore((s) => s.guidelinesActive);
   // Which spheres to show on selection: "surface" (single click) = the spheres the
   // node sits on the surface of; "own" (two-finger click) = the node's own sphere.
   const [sphereMode, setSphereMode] = useState<"surface" | "own">("surface");
@@ -315,11 +318,16 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
-      <RingsToggle />
-      <ScenePolesToggle />
-      <NodePolesToggle />
-      <AngleLabelsToggle />
-      <SelSpherePolesToggle />
+      <GuidelinesToggle />
+      {guidelinesActive !== false && (
+        <>
+          <RingsToggle />
+          <ScenePolesToggle />
+          <NodePolesToggle />
+          <AngleLabelsToggle />
+          <SelSpherePolesToggle />
+        </>
+      )}
 
       {/* Polar pan overlay — "mouse as polar" construction during a wheel-pan burst */}
       <PanPolarOverlay />
