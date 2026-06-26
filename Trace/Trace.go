@@ -666,13 +666,14 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
-	case KindSceneTori:
-		type sceneTori struct {
+	case KindSceneTori, KindScenePoles, KindNodePoles:
+		// Visibility toggles: all carry just the Visible flag.
+		type visToggle struct {
 			Step    int    `json:"step"`
 			Kind    string `json:"kind"`
 			Visible bool   `json:"visible"`
 		}
-		return json.Marshal(sceneTori{Step: e.Step, Kind: e.Kind, Visible: e.Visible})
+		return json.Marshal(visToggle{Step: e.Step, Kind: e.Kind, Visible: e.Visible})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

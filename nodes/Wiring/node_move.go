@@ -30,6 +30,7 @@ package Wiring
 
 import (
 	"context"
+	"fmt"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -709,6 +710,7 @@ func (md *MoveDispatch) EmitSceneTori(tr *T.Trace) {
 // Called from applyEdit on op="scene-poles"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace) {
 	md.scenePolesVisible = !md.scenePolesVisible
+	tr.Breadcrumb("pole-toggle-go", "scene", "", fmt.Sprintf("visible=%v", md.scenePolesVisible))
 	tr.ScenePoles(md.scenePolesVisible)
 }
 
@@ -721,6 +723,7 @@ func (md *MoveDispatch) EmitScenePoles(tr *T.Trace) {
 // Called from applyEdit on op="node-poles"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace) {
 	md.nodePolesVisible = !md.nodePolesVisible
+	tr.Breadcrumb("pole-toggle-go", "nodes", "", fmt.Sprintf("visible=%v", md.nodePolesVisible))
 	tr.NodePoles(md.nodePolesVisible)
 }
 

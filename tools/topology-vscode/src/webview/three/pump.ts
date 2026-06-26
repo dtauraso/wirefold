@@ -185,12 +185,14 @@ export function handleTraceEvent(event: TraceEvent): void {
     }
     case "scene-poles": {
       const e = event as Extract<TraceEvent, { kind: "scene-poles" }>;
+      postLog("pole-toggle-recv", { kind: "scene-poles", visible: e.visible });
       useCameraStore.getState().setScenePolesVisible(e.visible);
       patchViewerState((v) => { v.scenePolesVisible = e.visible; });
       return;
     }
     case "node-poles": {
       const e = event as Extract<TraceEvent, { kind: "node-poles" }>;
+      postLog("pole-toggle-recv", { kind: "node-poles", visible: e.visible });
       useCameraStore.getState().setNodePolesVisible(e.visible);
       patchViewerState((v) => { v.nodePolesVisible = e.visible; });
       return;

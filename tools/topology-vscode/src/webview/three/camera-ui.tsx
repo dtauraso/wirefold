@@ -9,6 +9,7 @@ import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { vscode } from "../vscode-api";
 import { useCameraStore } from "./camera-store";
+import { postLog } from "../log/post";
 
 /** Write current camera position + quaternion to viewerState and schedule a save. */
 function commitCamera(cam: THREE.PerspectiveCamera) {
@@ -143,8 +144,9 @@ export function ScenePolesToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via scene-poles.
+    postLog("pole-toggle-click", { op: "scene-poles", wasVisible: visible });
     vscode.postMessage({ type: "edit", op: "scene-poles" });
-  }, []);
+  }, [visible]);
   return (
     <div
       onClick={onClick}
@@ -179,8 +181,9 @@ export function NodePolesToggle() {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     // Fire-and-forget: Go owns the toggle state and echoes back via node-poles.
+    postLog("pole-toggle-click", { op: "node-poles", wasVisible: visible });
     vscode.postMessage({ type: "edit", op: "node-poles" });
-  }, []);
+  }, [visible]);
   return (
     <div
       onClick={onClick}
