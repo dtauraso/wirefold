@@ -131,8 +131,8 @@
     <div><div class="t">Recompute geometry + emit trace</div><div class="loc">node_move.go:152/:154 (emit) + :303 (edge seg) → Trace.go:242 (Emit → stdout)</div></div>
     <div class="role">compute positions</div></div>
   <div class="hop cross"><div class="num">9</div><div class="tag"></div>
-    <div><div class="t">Read stdout + parse trace &nbsp;<b>(B ←)</b></div><div class="loc">runCommand.ts:227/:252/:267</div></div>
-    <div class="role">crossing + decode</div></div>
+    <div><div class="t">Read stdout + classify line &nbsp;<b>(B ←)</b><br><span style="font-weight:400;color:var(--muted);font-size:11.5px">3-way: <code>tryParseSpecLine</code> → <code>tryParseBreadcrumb</code> → <code>tryParseTraceEvent</code>; only trace events reach the pump</span></div><div class="loc">runCommand.ts:227 / :235 / :246 / :252 / :267</div></div>
+    <div class="role">crossing + 3-way decode</div></div>
   <div class="hop cross"><div class="num">10</div><div class="tag"></div>
     <div><div class="t">Wrap + postMessage → webview &nbsp;<b>(A ←)</b></div><div class="loc">extension.ts:86/:67</div></div>
     <div class="role">crossing</div></div>
