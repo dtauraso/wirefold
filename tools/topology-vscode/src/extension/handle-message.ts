@@ -130,6 +130,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "viewpoint") {
         // Polar camera nav: forward the viewpoint payload verbatim. Fire-and-forget.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "viewpoint", viewpoint: msg.viewpoint }));
+      } else if (msg.op === "tori-vis") {
+        // Toggle polar-guide tori visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "tori-vis" }));
       }
       return;
   }

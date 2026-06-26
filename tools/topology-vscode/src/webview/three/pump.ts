@@ -177,6 +177,12 @@ export function handleTraceEvent(event: TraceEvent): void {
       scheduleViewSave();
       return;
     }
+    case "scene-tori": {
+      const e = event as Extract<TraceEvent, { kind: "scene-tori" }>;
+      useCameraStore.getState().setSceneToriVisible(e.visible);
+      patchViewerState((v) => { v.sceneToriVisible = e.visible; });
+      return;
+    }
     default:
       assertNever(k);
   }

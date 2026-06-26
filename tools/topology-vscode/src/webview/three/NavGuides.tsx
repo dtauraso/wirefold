@@ -9,15 +9,40 @@ import type { RFNode, NodeData } from "../types";
 import { nodeRadius } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
+import { useCameraStore } from "./camera-store";
 
 // ---------------------------------------------------------------------------
 // PolarSphere — two perpendicular tori tracking the polar rotation-sphere center.
 // Major radius = ARCBALL_FILL * camera-to-focus distance; updated every frame.
 // ---------------------------------------------------------------------------
 
+// AxisLabel — canvas-texture Sprite billboard; always faces the camera, no font asset needed.
+function AxisLabel({ text, color, position, size }: {
+  text: string; color: string; position: [number, number, number]; size: number;
+}) {
+  const texture = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    const ctx = c.getContext("2d")!;
+    ctx.font = "bold 44px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(text, 128, 32);
+    const t = new THREE.CanvasTexture(c);
+    t.needsUpdate = true;
+    return t;
+  }, [text, color]);
+  return (
+    <sprite position={position} scale={[size * 4, size, 1]} raycast={() => null}>
+      <spriteMaterial map={texture} transparent depthWrite={false} depthTest={false} />
+    </sprite>
+  );
+}
+
 function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
   useNodeGeometryStore((s) => s.geoms);
+  const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
 
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori
@@ -57,6 +82,15 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
     </group>
   );
 
+  // Polar frame axis markers: pole (+y, green) and the two equatorial references
+  // (+x = φ0, red; +z = φ90, blue), three.js X=red/Y=green/Z=blue. Camera-independent,
+  // anchored at cs.center, decorative (not pickable). They show the layout's true frame
+  // regardless of camera, and do NOT toggle with the scene tori.
+  const poleLen = radiusKey * 1.3;
+  const poleRadius = Math.max(radiusKey * 0.01, 1);
+  const coneH = radiusKey * 0.12;
+  const coneBaseR = radiusKey * 0.05;
+
   if (nodes.length < 1) return null;
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
@@ -65,15 +99,50 @@ function PolarSphere({ nodes }: { nodes: RFNode<NodeData>[] }) {
   const pos: [number, number, number] = [cs.center.x, cs.center.y, cs.center.z];
   return (
     <group position={pos}>
-      <mesh geometry={geoA} raycast={() => null}>
-        <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
-      </mesh>
-      <mesh geometry={geoB} rotation={rotB} raycast={() => null}>
-        <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
-      </mesh>
+      {sceneToriVisible !== false && (
+        <>
+          <mesh geometry={geoA} raycast={() => null}>
+            <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
+          </mesh>
+          <mesh geometry={geoB} rotation={rotB} raycast={() => null}>
+            <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
+          </mesh>
+        </>
+      )}
       {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. */}
       {handholds()}
       {handholds(rotB)}
+      {/* +Y pole (green): cylinder + cone arrowhead pointing world +y. */}
+      <mesh position={[0, poleLen / 2, 0]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#22dd55" depthWrite={false} />
+      </mesh>
+      <mesh position={[0, poleLen + coneH / 2, 0]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#22dd55" depthWrite={false} />
+      </mesh>
+      {/* +X equatorial reference (φ=0, red): rotation [0,0,-π/2] turns +Y→+X. */}
+      <mesh position={[poleLen / 2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#dd3333" depthWrite={false} />
+      </mesh>
+      <mesh position={[poleLen + coneH / 2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#dd3333" depthWrite={false} />
+      </mesh>
+      {/* +Z equatorial reference (φ=90°, blue): rotation [π/2,0,0] turns +Y→+Z. */}
+      <mesh position={[0, 0, poleLen / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+        <meshBasicMaterial color="#3366dd" depthWrite={false} />
+      </mesh>
+      <mesh position={[0, 0, poleLen + coneH / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        <coneGeometry args={[coneBaseR, coneH, 12]} />
+        <meshBasicMaterial color="#3366dd" depthWrite={false} />
+      </mesh>
+      {/* Axis labels — billboard sprites, always face the camera, outside the tori toggle. */}
+      <AxisLabel text="+Y pole" color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
+      <AxisLabel text="+X φ0" color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
+      <AxisLabel text="+Z φ90" color="#3366dd" position={[0, 0, poleLen + coneH * 2]} size={poleLen * 0.12} />
     </group>
   );
 }

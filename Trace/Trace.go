@@ -76,13 +76,17 @@ const (
 	// px/py/pz = pivot world position; r = orbit radius; posTheta/posPhi = pivot→camera
 	// direction (spherical); upTheta/upPhi = up-hint direction (spherical).
 	KindCamera = "camera"
+	// KindSceneTori carries the polar-guide tori visibility state. Go emits it when
+	// the tori visibility is toggled (op="tori-vis"), so the renderer shows or hides
+	// the two polar tori in NavGuides without computing any geometry.
+	KindSceneTori = "scene-tori"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -171,6 +175,9 @@ type Event struct {
 	// slots, Present=false for empty (popped) slots so TS can clear them.
 	Row, Col int
 	Present  bool
+	// Visible carries the tori visibility state on scene-tori events (KindSceneTori).
+	// true = tori shown; false = tori hidden. Set on scene-tori events only.
+	Visible bool `json:"visible"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -332,6 +339,13 @@ func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x
 // (upTheta,upPhi). Go emits this whenever the camera is set, orbited, zoomed, or panned.
 func (t *Trace) Camera(px, py, pz, r, posTheta, posPhi, upTheta, upPhi float64) {
 	t.emit(Event{Kind: KindCamera, PX: px, PY: py, PZ: pz, R: r, PosTheta: posTheta, PosPhi: posPhi, UpTheta: upTheta, UpPhi: upPhi})
+}
+
+// SceneTori emits the polar-guide tori visibility state. visible=true = tori shown;
+// visible=false = tori hidden. Go emits this on op="tori-vis" so the renderer
+// shows/hides the two polar tori in NavGuides without computing any geometry.
+func (t *Trace) SceneTori(visible bool) {
+	t.emit(Event{Kind: KindSceneTori, Visible: visible})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -632,6 +646,13 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
+	case KindSceneTori:
+		type sceneTori struct {
+			Step    int    `json:"step"`
+			Kind    string `json:"kind"`
+			Visible bool   `json:"visible"`
+		}
+		return json.Marshal(sceneTori{Step: e.Step, Kind: e.Kind, Visible: e.Visible})
 	default:
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}

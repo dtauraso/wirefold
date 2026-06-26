@@ -54,6 +54,8 @@ export type ViewerState = {
   // Faded-edge ids in fade order (oldest → newest). Drives reverse-playback unfade.
   fadeEdgeOrder?: string[];
   labelsGlobalHidden?: boolean;
+  // sceneToriVisible: whether the polar-guide tori are shown. undefined = shown (default true).
+  sceneToriVisible?: boolean;
 };
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};
