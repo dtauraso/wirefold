@@ -381,7 +381,15 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			md.addMirrorLock("2", "7", "3")
 			// Apply once at load so 3 and 7 start mirrored (φ7 = −φ3, shared θ) rather
 			// than only after the first drag. Node 3 is the leader; node 7 is reflected.
-			md.applyLocks("3")
+			// applyLocks updates roots in place but defers fanning (drag-path dedup), so
+			// fan the followers here to seed their movers' held centers before Start.
+			if followers := md.applyLocks("3"); len(followers) > 0 {
+				centers := md.heldCenters()
+				for id, w := range followers {
+					centers[id] = w
+				}
+				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
+			}
 		}
 	}
 

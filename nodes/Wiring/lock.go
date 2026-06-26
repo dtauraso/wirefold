@@ -67,10 +67,13 @@ func (md *MoveDispatch) logPair26(movedID string) {
 			movedID, p2.Theta, p6.Theta, p2.Theta-p6.Theta, p2.Phi, p6.Phi, p2.R, p6.R))
 }
 
-// applyLocks re-derives any follower whose lock references the moved node
-// (as leader or center), updating the follower's root + center and fanning it.
-// Soft membership is preserved: only locked followers move, derived from roots.
-func (md *MoveDispatch) applyLocks(movedID string) {
+// applyLocks re-derives any follower whose lock references the moved node (as leader
+// or center) and updates the follower's root in place. It does NOT fan: it returns the
+// followers' new world centers so the caller (RootMove) folds them into the single
+// per-frame fan. Fanning here would re-emit edges already fanned by RootMove (the
+// duplicate-emit drag lag). Soft membership is preserved: only locked followers move.
+func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
+	moved := map[string]vec3{}
 	for _, lk := range md.locks {
 		if lk.Leader != movedID && lk.Center != movedID {
 			continue
@@ -99,12 +102,7 @@ func (md *MoveDispatch) applyLocks(movedID string) {
 		locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
 		fw := polar2cart(locked).add(cw) // follower world position
 		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
-
-		// Fan the follower (new center) + recompute reach so any sphere it sits on
-		// re-emits its grown ring.
-		centers := md.heldCenters()
-		centers[lk.Follower] = fw
-		reach := reachRFromCenters(centers, md.heldEdges())
-		md.fanCenters(map[string]vec3{lk.Follower: fw}, reach)
+		moved[lk.Follower] = fw
 	}
+	return moved
 }
