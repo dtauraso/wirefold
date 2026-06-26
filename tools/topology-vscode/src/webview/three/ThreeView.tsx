@@ -12,7 +12,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { GlobalLabelsToggle, HomeButton, RingsToggle } from "./camera-ui";
+import { GlobalLabelsToggle, HomeButton, RingsToggle, ScenePolesToggle, NodePolesToggle } from "./camera-ui";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene } from "./scene-content";
@@ -316,6 +316,8 @@ export function ThreeView() {
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
       <RingsToggle />
+      <ScenePolesToggle />
+      <NodePolesToggle />
 
       {/* Polar pan overlay — "mouse as polar" construction during a wheel-pan burst */}
       <PanPolarOverlay />

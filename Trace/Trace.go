@@ -79,14 +79,22 @@ const (
 	// KindSceneTori carries the polar-guide tori visibility state. Go emits it when
 	// the tori visibility is toggled (op="tori-vis"), so the renderer shows or hides
 	// the two polar tori in NavGuides without computing any geometry.
-	KindSceneTori = "scene-tori"
+	KindSceneTori  = "scene-tori"
+	// KindScenePoles carries the scene-center pole frame visibility state. Go emits it
+	// when the visibility is toggled (op="scene-poles"), so the renderer shows or hides
+	// the scene-center PolarFrame without computing any geometry.
+	KindScenePoles = "scene-poles"
+	// KindNodePoles carries the per-node pole frame visibility state. Go emits it when
+	// the visibility is toggled (op="node-poles"), so the renderer shows or hides
+	// PolarFrames drawn at every node sphere.
+	KindNodePoles = "node-poles"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -346,6 +354,18 @@ func (t *Trace) Camera(px, py, pz, r, posTheta, posPhi, upTheta, upPhi float64) 
 // shows/hides the two polar tori in NavGuides without computing any geometry.
 func (t *Trace) SceneTori(visible bool) {
 	t.emit(Event{Kind: KindSceneTori, Visible: visible})
+}
+
+// ScenePoles emits the scene-center pole frame visibility state. visible=true = shown;
+// visible=false = hidden. Go emits this on op="scene-poles".
+func (t *Trace) ScenePoles(visible bool) {
+	t.emit(Event{Kind: KindScenePoles, Visible: visible})
+}
+
+// NodePoles emits the per-node pole frame visibility state. visible=true = shown;
+// visible=false = hidden. Go emits this on op="node-poles".
+func (t *Trace) NodePoles(visible bool) {
+	t.emit(Event{Kind: KindNodePoles, Visible: visible})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),

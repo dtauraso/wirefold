@@ -329,6 +329,12 @@ type MoveDispatch struct {
 	// sceneToriVisible is the current polar-guide tori visibility. true by default
 	// (tori shown on startup). Toggled by ToggleSceneTori; emitted via EmitSceneTori.
 	sceneToriVisible bool
+	// scenePolesVisible is the current scene-center pole frame visibility. true by default.
+	// Toggled by ToggleScenePoles; emitted via EmitScenePoles.
+	scenePolesVisible bool
+	// nodePolesVisible is the current per-node pole frame visibility. true by default.
+	// Toggled by ToggleNodePoles; emitted via EmitNodePoles.
+	nodePolesVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -346,6 +352,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		edgeOut:          map[string]*Out{},
 		tr:               tr,
 		sceneToriVisible: true,
+		scenePolesVisible: true,
+		nodePolesVisible:  true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -695,5 +703,29 @@ func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace) {
 // startup or geometry-resend to seed the renderer's initial state.
 func (md *MoveDispatch) EmitSceneTori(tr *T.Trace) {
 	tr.SceneTori(md.sceneToriVisible)
+}
+
+// ToggleScenePoles flips the scene-center pole frame visibility and emits a scene-poles event.
+// Called from applyEdit on op="scene-poles"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace) {
+	md.scenePolesVisible = !md.scenePolesVisible
+	tr.ScenePoles(md.scenePolesVisible)
+}
+
+// EmitScenePoles emits the current scene pole frame visibility without toggling it.
+func (md *MoveDispatch) EmitScenePoles(tr *T.Trace) {
+	tr.ScenePoles(md.scenePolesVisible)
+}
+
+// ToggleNodePoles flips the per-node pole frame visibility and emits a node-poles event.
+// Called from applyEdit on op="node-poles"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace) {
+	md.nodePolesVisible = !md.nodePolesVisible
+	tr.NodePoles(md.nodePolesVisible)
+}
+
+// EmitNodePoles emits the current per-node pole frame visibility without toggling it.
+func (md *MoveDispatch) EmitNodePoles(tr *T.Trace) {
+	tr.NodePoles(md.nodePolesVisible)
 }
 

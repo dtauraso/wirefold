@@ -137,6 +137,78 @@ export function RingsToggle() {
   );
 }
 
+/** SCENE POLES TOGGLE: top-right button to show/hide the scene-center pole frame. Fire-and-forget to Go. */
+export function ScenePolesToggle() {
+  const visible = useCameraStore((s) => s.scenePolesVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via scene-poles.
+    vscode.postMessage({ type: "edit", op: "scene-poles" });
+  }, []);
+  return (
+    <div
+      onClick={onClick}
+      title={visible ? "Hide scene pole frame" : "Show scene pole frame"}
+      style={{
+        position: "absolute",
+        top: 104,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: visible ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ⊹ scene poles
+    </div>
+  );
+}
+
+/** NODE POLES TOGGLE: top-right button to show/hide per-node pole frames. Fire-and-forget to Go. */
+export function NodePolesToggle() {
+  const visible = useCameraStore((s) => s.nodePolesVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via node-poles.
+    vscode.postMessage({ type: "edit", op: "node-poles" });
+  }, []);
+  return (
+    <div
+      onClick={onClick}
+      title={visible ? "Hide node pole frames" : "Show node pole frames"}
+      style={{
+        position: "absolute",
+        top: 132,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: visible ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ⊹ node poles
+    </div>
+  );
+}
+
 /** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels. */
 export function GlobalLabelsToggle({
   hidden,

@@ -183,6 +183,18 @@ export function handleTraceEvent(event: TraceEvent): void {
       patchViewerState((v) => { v.sceneToriVisible = e.visible; });
       return;
     }
+    case "scene-poles": {
+      const e = event as Extract<TraceEvent, { kind: "scene-poles" }>;
+      useCameraStore.getState().setScenePolesVisible(e.visible);
+      patchViewerState((v) => { v.scenePolesVisible = e.visible; });
+      return;
+    }
+    case "node-poles": {
+      const e = event as Extract<TraceEvent, { kind: "node-poles" }>;
+      useCameraStore.getState().setNodePolesVisible(e.visible);
+      patchViewerState((v) => { v.nodePolesVisible = e.visible; });
+      return;
+    }
     default:
       assertNever(k);
   }

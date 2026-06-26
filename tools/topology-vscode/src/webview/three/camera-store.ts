@@ -13,15 +13,23 @@ export type PolarCamera = {
 interface CameraState {
   camera: PolarCamera | null;
   sceneToriVisible: boolean;
+  scenePolesVisible: boolean;
+  nodePolesVisible: boolean;
   set: (c: PolarCamera) => void;
   setSceneToriVisible: (v: boolean) => void;
+  setScenePolesVisible: (v: boolean) => void;
+  setNodePolesVisible: (v: boolean) => void;
 }
 
 export const useCameraStore = create<CameraState>((set) => ({
   camera: null,
   sceneToriVisible: true,
+  scenePolesVisible: true,
+  nodePolesVisible: true,
   set: (c) => set({ camera: c }),
   setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
+  setScenePolesVisible: (v) => set({ scenePolesVisible: v }),
+  setNodePolesVisible: (v) => set({ nodePolesVisible: v }),
 }));
 
 export function getCameraState(): CameraState {

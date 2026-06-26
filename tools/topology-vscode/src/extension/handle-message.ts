@@ -133,6 +133,12 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "tori-vis") {
         // Toggle polar-guide tori visibility. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "tori-vis" }));
+      } else if (msg.op === "scene-poles") {
+        // Toggle scene-center pole frame visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "scene-poles" }));
+      } else if (msg.op === "node-poles") {
+        // Toggle per-node pole frame visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "node-poles" }));
       }
       return;
   }

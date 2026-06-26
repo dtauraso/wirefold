@@ -205,8 +205,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 //     echoing pulse-cancelled (PacedWire.Delete owns both, atomically).
 //   - update: mail-sort the node-move entries to the owning node/edge inboxes; each
 //     owning goroutine recomputes its own geometry (no central recompute here).
-//   - fade:   mail-sort each (edgeId,faded) entry to the owning edgeMover via
+//   - fade:       mail-sort each (edgeId,faded) entry to the owning edgeMover via
 //     md.dispatch; each wire sets its own flag.
+//   - scene-poles: toggle the scene-center pole frame visibility.
+//   - node-poles:  toggle per-node pole frame visibility.
 //
 // Unknown ops are ignored (forward-compat).
 func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
@@ -375,5 +377,19 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleSceneTori(tr)
+	case msg.Op == "scene-poles":
+		// Toggle the scene-center pole frame visibility and emit a scene-poles event.
+		// Fire-and-forget from TS; no payload needed.
+		if md == nil {
+			return
+		}
+		md.ToggleScenePoles(tr)
+	case msg.Op == "node-poles":
+		// Toggle per-node pole frame visibility and emit a node-poles event.
+		// Fire-and-forget from TS; no payload needed.
+		if md == nil {
+			return
+		}
+		md.ToggleNodePoles(tr)
 	}
 }

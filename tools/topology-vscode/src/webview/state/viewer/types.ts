@@ -56,6 +56,10 @@ export type ViewerState = {
   labelsGlobalHidden?: boolean;
   // sceneToriVisible: whether the polar-guide tori are shown. undefined = shown (default true).
   sceneToriVisible?: boolean;
+  // scenePolesVisible: whether the scene-center pole frame is shown. undefined = shown (default true).
+  scenePolesVisible?: boolean;
+  // nodePolesVisible: whether per-node pole frames are shown. undefined = shown (default true).
+  nodePolesVisible?: boolean;
 };
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};

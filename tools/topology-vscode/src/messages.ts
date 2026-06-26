@@ -43,6 +43,8 @@ export type EditMsg =
   | { type: "edit"; op: "scene"; scene: unknown }
   | { type: "edit"; op: "set-origin"; x: number; y: number; z: number }
   | { type: "edit"; op: "tori-vis" }
+  | { type: "edit"; op: "scene-poles" }
+  | { type: "edit"; op: "node-poles" }
   | {
       type: "edit";
       op: "viewpoint";
@@ -100,7 +102,9 @@ export type TraceEvent =
   | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
   | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
   | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
-  | { step: number; kind: "scene-tori"; visible: boolean };
+  | { step: number; kind: "scene-tori"; visible: boolean }
+  | { step: number; kind: "scene-poles"; visible: boolean }
+  | { step: number; kind: "node-poles"; visible: boolean };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -192,6 +196,8 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       return (m as unknown as WebviewToHostMsg);
     }
     case "tori-vis":
+    case "scene-poles":
+    case "node-poles":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     default:
