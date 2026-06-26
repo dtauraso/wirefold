@@ -47,6 +47,7 @@ export type EditMsg =
   | { type: "edit"; op: "node-poles" }
   | { type: "edit"; op: "angle-labels" }
   | { type: "edit"; op: "sel-sphere-poles" }
+  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean }
   | {
       type: "edit";
       op: "viewpoint";

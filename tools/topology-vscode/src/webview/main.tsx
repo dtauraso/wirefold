@@ -42,6 +42,8 @@ import { RunButton } from "./three/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { useThreeStore } from "./three/store";
 import { handleTraceEvent } from "./three/pump";
+import { viewerState } from "./state/viewer-state";
+import { useCameraStore } from "./three/camera-store";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -90,6 +92,15 @@ window.addEventListener("message", (e) => {
     // Feed the R3F store; topology.json text carries spec + diagram view;
     // sceneText (optional) carries camera/camera3d/labelsGlobalHidden from topology.scene.json.
     useThreeStore.getState().load(msg.text, msg.sceneText);
+    // Re-seed the guidelines master toggle from persisted state, then push all 5
+    // Go-owned guide visibilities so Go's authoritative state survives a window reload.
+    useCameraStore.getState().setGuidelinesActive(viewerState.guidelinesActive !== false);
+    vscode.postMessage({ type: "edit", op: "guide-vis",
+      tori: viewerState.sceneToriVisible !== false,
+      scenePoles: viewerState.scenePolesVisible !== false,
+      nodePoles: viewerState.nodePolesVisible !== false,
+      angleLabels: viewerState.angleLabelsVisible !== false,
+      selSpherePoles: viewerState.selSpherePolesVisible !== false });
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
   }

@@ -816,3 +816,19 @@ func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace) {
 	tr.SelSpherePoles(md.selSpherePolesVisible)
 }
 
+// SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
+// push so settings survive a Go respawn on window reload) and emits each so the renderer
+// reflects them. Set-to-value, unlike the flip-style Toggle* methods.
+func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles bool, tr *T.Trace) {
+	md.sceneToriVisible = tori
+	md.scenePolesVisible = scenePoles
+	md.nodePolesVisible = nodePoles
+	md.angleLabelsVisible = angleLabels
+	md.selSpherePolesVisible = selSpherePoles
+	md.EmitSceneTori(tr)
+	md.EmitScenePoles(tr)
+	md.EmitNodePoles(tr)
+	md.EmitAngleLabels(tr)
+	md.EmitSelSpherePoles(tr)
+}
+

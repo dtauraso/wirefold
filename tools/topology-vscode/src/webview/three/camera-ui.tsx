@@ -113,7 +113,10 @@ export function GuidelinesToggle() {
   const setActive = useCameraStore((s) => s.setGuidelinesActive);
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setActive(active === false);
+    const next = active === false;
+    setActive(next);
+    patchViewerState((v) => { v.guidelinesActive = next ? undefined : false; });
+    scheduleViewSave();
   }, [active, setActive]);
   return (
     <div
