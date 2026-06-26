@@ -3,190 +3,176 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Edit round-trip: 12-hop audit</title>
+<title>Edit round-trip: what's removable</title>
 <style>
   :root{
-    --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e;
-    --ts:#58a6ff; --go:#3fb950; --ipc:#d29922; --mech:#f85149; --real:#7ee787;
-    --line:#30363d;
+    --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#30363d;
+    --real:#3fb950;   /* real work — FIXED */
+    --cross:#d29922;  /* process crossing — FIXED */
+    --glue:#f85149;   /* mechanical glue — REMOVABLE */
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
-    font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:32px}
-  h1{font-size:22px;margin:0 0 4px}
-  .sub{color:var(--muted);margin:0 0 24px}
-  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 28px;font-size:12px}
-  .legend span{display:inline-flex;align-items:center;gap:6px}
-  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
-  .cols{display:flex;gap:0;align-items:stretch}
-  .lane{flex:1;min-width:0}
-  .lanehead{text-align:center;font-weight:600;padding:6px;border-radius:6px 6px 0 0;
-    font-size:12px;letter-spacing:.5px}
-  .lane.ts .lanehead{background:rgba(88,166,255,.15);color:var(--ts)}
-  .lane.host .lanehead{background:rgba(210,153,34,.15);color:var(--ipc)}
-  .lane.go .lanehead{background:rgba(63,185,80,.15);color:var(--go)}
-  .lane .body{border:1px solid var(--line);border-top:none;min-height:100%;padding:10px}
-  .lane.ts .body{border-right:none}
-  .lane.host .body{border-right:none}
-  .hop{position:relative;background:var(--panel);border:1px solid var(--line);
-    border-left:4px solid var(--muted);border-radius:6px;padding:8px 10px;margin:10px 0}
-  .hop.mech{border-left-color:var(--mech)}
-  .hop.real{border-left-color:var(--real)}
-  .hop .n{position:absolute;top:-9px;left:-9px;width:22px;height:22px;border-radius:50%;
-    background:var(--bg);border:2px solid var(--muted);display:flex;align-items:center;
-    justify-content:center;font-size:11px;font-weight:700}
-  .hop.mech .n{border-color:var(--mech);color:var(--mech)}
-  .hop.real .n{border-color:var(--real);color:var(--real)}
-  .hop .t{font-weight:600;font-size:13px}
-  .hop .loc{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:11px;margin-top:2px;word-break:break-all}
-  .hop .note{font-size:12px;color:var(--ink);margin-top:4px}
-  .ipcbar{text-align:center;color:var(--ipc);font-size:11px;font-weight:700;
-    border-top:1px dashed var(--ipc);border-bottom:1px dashed var(--ipc);
-    padding:3px;margin:14px 0;letter-spacing:.5px}
-  .arrow{text-align:center;color:var(--muted);font-size:16px;margin:-4px 0}
-  section.collapse{margin-top:40px;background:var(--panel);border:1px solid var(--line);
-    border-radius:8px;padding:20px}
-  section.collapse h2{margin:0 0 12px;font-size:17px}
-  .merge{display:flex;align-items:center;gap:14px;padding:12px;border:1px solid var(--line);
-    border-radius:6px;margin:10px 0;background:var(--bg)}
-  .merge .badge{flex:0 0 auto;background:rgba(248,81,73,.12);color:var(--mech);
-    border:1px solid var(--mech);border-radius:20px;padding:4px 12px;font-weight:700;font-size:12px}
-  .merge .txt{font-size:13px}
-  .merge .txt b{color:var(--real)}
-  .savings{margin-top:18px;font-size:15px}
-  .savings b{color:var(--real);font-size:20px}
+    font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;padding:32px;max-width:1100px}
+  h1{font-size:23px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 26px}
   code{background:var(--bg);border:1px solid var(--line);border-radius:4px;
     padding:1px 5px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
-  .caveat{color:var(--muted);font-size:12px;margin-top:8px;font-style:italic}
+
+  /* ---- the model: three buckets ---- */
+  h2{font-size:17px;margin:34px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .buckets{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  .bk{border:1px solid var(--line);border-top:4px solid;border-radius:8px;padding:14px;background:var(--panel)}
+  .bk.real{border-top-color:var(--real)}
+  .bk.cross{border-top-color:var(--cross)}
+  .bk.glue{border-top-color:var(--glue)}
+  .bk h3{margin:0 0 2px;font-size:14px}
+  .bk .verdict{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+  .bk.real .verdict,.bk.real h3{color:var(--real)}
+  .bk.cross .verdict,.bk.cross h3{color:var(--cross)}
+  .bk.glue .verdict,.bk.glue h3{color:var(--glue)}
+  .bk p{font-size:12.5px;color:var(--ink);margin:8px 0 0}
+  .bk .why{color:var(--muted);font-size:12px;margin-top:8px}
+  .count{font-size:30px;font-weight:800;float:right;line-height:1;opacity:.85}
+
+  /* ---- the 12-hop strip ---- */
+  .strip{margin-top:6px}
+  .hop{display:grid;grid-template-columns:30px 14px 1fr 120px;align-items:center;
+    gap:12px;border:1px solid var(--line);border-radius:7px;margin:7px 0;
+    padding:9px 12px;background:var(--panel)}
+  .hop .num{font-weight:700;font-size:13px;color:var(--muted);text-align:center}
+  .hop .tag{width:14px;height:14px;border-radius:4px}
+  .hop.real .tag{background:var(--real)}
+  .hop.cross .tag{background:var(--cross)}
+  .hop.glue .tag{background:var(--glue)}
+  .hop .t{font-weight:600;font-size:13px}
+  .hop .loc{color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .hop .verdict{text-align:right;font-size:11px;font-weight:700;letter-spacing:.4px}
+  .hop.real .verdict,.hop.cross .verdict{color:var(--muted)}
+  .hop.glue .verdict{color:var(--glue)}
+  .phase{font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;
+    margin:18px 0 4px;font-weight:700}
+
+  /* ---- minimization math ---- */
+  .math{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px;margin-top:14px}
+  .bar{display:flex;height:34px;border-radius:6px;overflow:hidden;margin:14px 0 6px;font-size:12px;font-weight:700}
+  .bar div{display:flex;align-items:center;justify-content:center;color:#0e1116}
+  .bar .r{background:var(--real)}
+  .bar .c{background:var(--cross)}
+  .bar .g{background:var(--glue)}
+  .bar .g.gone{background:repeating-linear-gradient(45deg,#f85149,#f85149 6px,#b62324 6px,#b62324 12px)}
+  .barlbl{font-size:12px;color:var(--muted);margin-bottom:2px}
+  .floor{font-size:15px;margin-top:16px}
+  .floor b{color:var(--real)}
+  ul.shave{margin:10px 0 0;padding-left:0;list-style:none}
+  ul.shave li{border-left:3px solid var(--glue);padding:6px 0 6px 12px;margin:8px 0;font-size:13px}
+  ul.shave li b{color:var(--ink)}
+  .keep{border-left-color:var(--cross)!important}
+  .keep b{color:var(--cross)}
+  .caveat{color:var(--muted);font-size:12px;margin-top:16px;font-style:italic;
+    border-top:1px solid var(--line);padding-top:12px}
 </style>
 </head>
 <body>
-<h1>Geometry <code>edit</code> round-trip — 12-hop audit</h1>
-<p class="sub">User drags/edits geometry in the webview → Go applies it → trace streams back to render. Each hop is a function/module handoff. Red = mechanical pass-through (re-wrap &amp; forward, no real work); green = does real work.</p>
+<h1>The <code>edit</code> round-trip — what can be minimized</h1>
+<p class="sub">A geometry edit makes 12 hops: webview → host → Go → host → webview. The key fact: <b>every hop is exactly one of three kinds</b>, and only one kind is removable. The 12 split evenly — <b>4 / 4 / 4</b>.</p>
 
-<div class="legend">
-  <span><i class="dot" style="background:var(--ts)"></i> Webview (TS)</span>
-  <span><i class="dot" style="background:var(--ipc)"></i> Extension host (TS)</span>
-  <span><i class="dot" style="background:var(--go)"></i> Go network</span>
-  <span><i class="dot" style="background:var(--mech)"></i> mechanical pass-through</span>
-  <span><i class="dot" style="background:var(--real)"></i> real work</span>
-  <span style="color:var(--ipc)">⎯ ⎯ process / IPC boundary</span>
-</div>
-
-<div class="cols">
-  <!-- WEBVIEW LANE -->
-  <div class="lane ts">
-    <div class="lanehead">WEBVIEW (TS)</div>
-    <div class="body">
-      <div class="hop real"><div class="n">1</div>
-        <div class="t">Gesture → world target</div>
-        <div class="loc">interaction-handlers.ts:372 / :450</div>
-        <div class="note">Pointer event raycast to world-space node position. <b>Real work.</b></div></div>
-      <div class="arrow">↓</div>
-      <div class="hop mech"><div class="n">2</div>
-        <div class="t">RAF batch → flushNodeMove</div>
-        <div class="loc">interaction-controls.ts:153 → :161</div>
-        <div class="note">Per-frame throttle, build entries map (node id + incident edge ids).</div></div>
-      <div class="arrow">↓</div>
-      <div class="hop mech"><div class="n">3</div>
-        <div class="t">postMessage(EditMsg)</div>
-        <div class="loc">interaction-controls.ts:150</div>
-        <div class="note">Serialize EditMsg → JSON, hand to extension.</div></div>
-      <div class="ipcbar">⎯⎯ IPC 1 · webview → host ⎯⎯</div>
-    </div>
+<h2>The three kinds of hop</h2>
+<div class="buckets">
+  <div class="bk real">
+    <span class="count">4</span>
+    <div class="verdict">Fixed</div>
+    <h3>Real-work anchors</h3>
+    <p>Hops that actually <b>do</b> something: compute a position, mutate the graph, recompute geometry, draw.</p>
+    <div class="why">This is <b>why the path exists</b>. Remove one and the edit stops working. Not on the table.</div>
   </div>
-
-  <!-- HOST LANE -->
-  <div class="lane host">
-    <div class="lanehead">EXTENSION HOST (TS)</div>
-    <div class="body">
-      <div class="hop mech"><div class="n">4</div>
-        <div class="t">onDidReceiveMessage</div>
-        <div class="loc">extension.ts:177 → handleMessage :185</div>
-        <div class="note">Receive, wrap in MessageCtx.</div></div>
-      <div class="arrow">↓</div>
-      <div class="hop mech"><div class="n">5</div>
-        <div class="t">parse + dispatch "edit"</div>
-        <div class="loc">handle-message.ts:25 / :58 / :103</div>
-        <div class="note">Re-validate JSON against union, switch on type.</div></div>
-      <div class="arrow">↓</div>
-      <div class="hop mech"><div class="n">6</div>
-        <div class="t">writeStdin → proc.stdin</div>
-        <div class="loc">handle-message.ts:115 → runCommand.ts:335</div>
-        <div class="note">Re-serialize same EditMsg → JSON line to Go pipe.</div></div>
-      <div class="ipcbar">⎯⎯ IPC 2 · host → Go stdin ⎯⎯</div>
-    </div>
+  <div class="bk cross">
+    <span class="count">4</span>
+    <div class="verdict">Fixed</div>
+    <h3>Process crossings</h3>
+    <p>The path spans 3 processes, so it crosses <b>2 boundaries — each twice</b> (out + back): webview↔host, host↔Go.</p>
+    <div class="why">This is <b>where it must cross</b>. Irreducible unless you merge processes (you can't — Go owns the clock).</div>
   </div>
-
-  <!-- GO LANE -->
-  <div class="lane go">
-    <div class="lanehead">GO NETWORK</div>
-    <div class="body">
-      <div class="hop mech"><div class="n">7</div>
-        <div class="t">stdin scan + unmarshal</div>
-        <div class="loc">stdin_reader.go:145 / :169</div>
-        <div class="note">Buffer line, json.Unmarshal, discriminate "edit".</div></div>
-      <div class="arrow">↓</div>
-      <div class="hop real"><div class="n">8</div>
-        <div class="t">applyEdit → RootMove</div>
-        <div class="loc">stdin_reader.go:179 / :246</div>
-        <div class="note">Mail-sort entries to node + edge inboxes; mutate graph. <b>Real work.</b></div></div>
-      <div class="arrow">↓</div>
-      <div class="hop real"><div class="n">9</div>
-        <div class="t">goroutines emit trace</div>
-        <div class="loc">node/edge goroutines → stdout</div>
-        <div class="note">Recompute geometry, serialize TraceEvent JSON. <b>Real work (Go owns positions).</b></div></div>
-      <div class="ipcbar">⎯⎯ IPC 3 · Go stdout → host ⎯⎯</div>
-    </div>
+  <div class="bk glue">
+    <span class="count">4</span>
+    <div class="verdict">Removable</div>
+    <h3>Mechanical glue</h3>
+    <p>Hops that only <b>re-wrap and forward</b> a payload they didn't change: receive, re-validate, re-serialize, relay.</p>
+    <div class="why">This is the <b>entire minimization budget</b>. Nothing else can shrink. Every saved hop comes from here.</div>
   </div>
 </div>
 
-<!-- RETURN PATH -->
-<div class="cols" style="margin-top:4px">
-  <div class="lane go"><div class="body" style="border-radius:0 0 0 8px">
-    <div class="hop mech"><div class="n">10</div>
-      <div class="t">handleStdout + parse</div>
-      <div class="loc">runCommand.ts:227 / :252 / :267</div>
-      <div class="note">Read stdout lines, validate TraceEvent, fire onTraceEvent.</div></div>
-  </div></div>
-  <div class="lane host"><div class="body">
-    <div class="hop mech"><div class="n">11</div>
-      <div class="t">post trace-event → webview</div>
-      <div class="loc">extension.ts:86 / :67</div>
-      <div class="note">Wrap TraceEvent in HostToWebviewMsg, postMessage. <b>IPC 3 cont.</b></div></div>
-  </div></div>
-  <div class="lane ts"><div class="body" style="border-radius:0 0 8px 0">
-    <div class="hop real"><div class="n">12</div>
-      <div class="t">pump → render store</div>
-      <div class="loc">main.tsx:78/:94 → pump.ts:45/:113</div>
-      <div class="note">Parse, route by kind, write Zustand store → re-render. <b>Real work (the plot).</b></div></div>
-  </div></div>
+<h2>All 12 hops, tagged by kind</h2>
+<p class="barlbl">Read the colored square: <span style="color:var(--real)">green = real work</span>, <span style="color:var(--cross)">amber = process crossing</span>, <span style="color:var(--glue)">red = removable glue</span>.</p>
+<div class="strip">
+
+  <div class="phase">Outbound · TS → Go</div>
+  <div class="hop real"><div class="num">1</div><div class="tag"></div>
+    <div><div class="t">Raycast gesture → world position</div><div class="loc">interaction-handlers.ts:372 / :450</div></div>
+    <div class="verdict">keep</div></div>
+  <div class="hop glue"><div class="num">2</div><div class="tag"></div>
+    <div><div class="t">RAF batch + build EditMsg</div><div class="loc">interaction-controls.ts:153 → :161</div></div>
+    <div class="verdict">removable</div></div>
+  <div class="hop cross"><div class="num">3</div><div class="tag"></div>
+    <div><div class="t">postMessage → host &nbsp;<b>(cross A →)</b></div><div class="loc">interaction-controls.ts:150</div></div>
+    <div class="verdict">keep</div></div>
+  <div class="hop glue"><div class="num">4</div><div class="tag"></div>
+    <div><div class="t">Host receive + re-validate + dispatch</div><div class="loc">extension.ts:177 → handle-message.ts:25/:103</div></div>
+    <div class="verdict">removable</div></div>
+  <div class="hop cross"><div class="num">5</div><div class="tag"></div>
+    <div><div class="t">writeStdin → Go pipe &nbsp;<b>(cross B →)</b></div><div class="loc">handle-message.ts:115 → runCommand.ts:335</div></div>
+    <div class="verdict">keep</div></div>
+  <div class="hop glue"><div class="num">6</div><div class="tag"></div>
+    <div><div class="t">Go read line + unmarshal + route</div><div class="loc">stdin_reader.go:145/:169/:179</div></div>
+    <div class="verdict">removable</div></div>
+  <div class="hop real"><div class="num">7</div><div class="tag"></div>
+    <div><div class="t">applyEdit → RootMove (mutate graph)</div><div class="loc">stdin_reader.go:246</div></div>
+    <div class="verdict">keep</div></div>
+
+  <div class="phase">Return · Go → TS</div>
+  <div class="hop real"><div class="num">8</div><div class="tag"></div>
+    <div><div class="t">Recompute geometry + emit trace</div><div class="loc">node/edge goroutines → stdout</div></div>
+    <div class="verdict">keep</div></div>
+  <div class="hop cross"><div class="num">9</div><div class="tag"></div>
+    <div><div class="t">Host read stdout + parse &nbsp;<b>(cross B ←)</b></div><div class="loc">runCommand.ts:227/:252/:267</div></div>
+    <div class="verdict">keep</div></div>
+  <div class="hop cross"><div class="num">10</div><div class="tag"></div>
+    <div><div class="t">Host wrap + postMessage → webview &nbsp;<b>(cross A ←)</b></div><div class="loc">extension.ts:86/:67</div></div>
+    <div class="verdict">keep</div></div>
+  <div class="hop glue"><div class="num">11</div><div class="tag"></div>
+    <div><div class="t">Webview receive + re-validate + route</div><div class="loc">main.tsx:77/:78/:94</div></div>
+    <div class="verdict">removable</div></div>
+  <div class="hop real"><div class="num">12</div><div class="tag"></div>
+    <div><div class="t">pump → store → render</div><div class="loc">pump.ts:45/:113</div></div>
+    <div class="verdict">keep</div></div>
 </div>
 
-<!-- WHERE IT COLLAPSES -->
-<section class="collapse">
-  <h2>Where the hop count can be minimized</h2>
-  <p style="color:var(--muted);margin-top:0">Of 12 hops, <b style="color:var(--mech)">7 are mechanical pass-through</b> (2,3,4,5,6,7,10,11 — re-wrapping the same payload across a boundary). The 3 IPC crossings are structural and stay. The savings are in the <i>re-validate / re-serialize</i> redundancy <b>within each process</b>.</p>
-
-  <div class="merge">
-    <div class="badge">−1</div>
-    <div class="txt"><b>Hops 4 + 5</b> → one. The host re-parses and re-validates the EditMsg against the discriminated union (<code>handle-message.ts:25</code>) only to forward it. The webview already produced a typed EditMsg. Collapse <code>onDidReceiveMessage</code> → <code>dispatch</code> → <code>case "edit"</code> into a single typed handoff; skip the re-validate on a message this process just typed.</div>
+<h2>The minimization, in one picture</h2>
+<div class="math">
+  <div class="barlbl">Today — 12 hops</div>
+  <div class="bar">
+    <div class="r" style="flex:4">4 real</div>
+    <div class="c" style="flex:4">4 crossings</div>
+    <div class="g" style="flex:4">4 glue</div>
   </div>
 
-  <div class="merge">
-    <div class="badge">−1</div>
-    <div class="txt"><b>Hops 2 + 3</b> → one. <code>flushNodeMove</code> builds the entries map and <i>then</i> serializes — but the RAF callback, the build, and the post are three sites for one logical "emit this frame's edit." Inline to a single per-frame send (already half-done; the batch boundary is the only real seam).</div>
+  <div class="barlbl" style="margin-top:18px">Floor — glue driven out, 8 hops</div>
+  <div class="bar">
+    <div class="r" style="flex:4">4 real</div>
+    <div class="c" style="flex:4">4 crossings</div>
+    <div class="g gone" style="flex:4">— removed —</div>
   </div>
 
-  <div class="merge">
-    <div class="badge">−1</div>
-    <div class="txt"><b>Hops 10 + 11</b> → one. Stdout read → parse → <code>onTraceEvent</code> closure → <code>post</code> → <code>postMessage</code> is a 4-call relay that only re-wraps a TraceEvent in an envelope. The closure at <code>extension.ts:86</code> adds nothing but the wrapper; the parse at <code>runCommand.ts:252</code> and the validate at the webview (<code>main.tsx:78</code>) double-cover the same payload — drop one validation.</div>
-  </div>
+  <p class="floor">The <b>floor is 8</b>: 4 real-work anchors + 4 process crossings. Those <u>cannot</u> be removed — they're <i>why</i> and <i>where</i>. The only question for every minimization idea is: <b style="color:var(--glue)">does it cut a red glue hop, yes or no?</b> If it touches green or amber, it's not minimizing the path — it's changing the model.</p>
 
-  <p class="savings">Realistic floor: <b>12 → ~9 hops</b> by collapsing the three double-validate / re-serialize seams above. The <b style="color:var(--ipc)">3 IPC crossings</b> (webview↔host, host↔Go-stdin, Go-stdout↔host) and the <b style="color:var(--real)">3 real-work hops</b> (1 raycast, 8 graph-mutate, 9 trace-emit, 12 plot) are irreducible — they're the actual model boundaries.</p>
+  <p style="margin-top:18px;font-weight:600">Of the 4 glue hops, realistically removable: <span style="color:var(--glue)">2</span> → lands at <b>10 hops</b>.</p>
+  <ul class="shave">
+    <li><b>Hop 4 (host re-validate)</b> — the host re-parses the EditMsg against the discriminated union (<code>handle-message.ts:25</code>) only to forward it to Go. The webview already produced it typed. Drop the re-validate; pass straight to <code>writeStdin</code>. <b style="color:var(--glue)">−1</b></li>
+    <li><b>Hop 11 (webview re-validate)</b> — the webview re-validates the TraceEvent (<code>main.tsx:78</code>) that the host already parsed at hop 9. One of the two validations is redundant on a payload that never left trusted code. Drop it. <b style="color:var(--glue)">−1</b></li>
+    <li class="keep"><b>Hop 2 &amp; Hop 6 stay.</b> Hop 2 is the RAF batch boundary — it throttles drags to one send per frame, real load-shedding, not pure glue. Hop 6 is Go's unmarshal — the only place the wire bytes become a struct. Removing either changes behavior, not just hop count.</li>
+  </ul>
 
-  <p class="caveat">Caveat (per CLAUDE.md): the TS→Go send must stay fire-and-forget and the bridge surface stays two channels. These collapses are <i>intra-process</i> call-chain shortening, not new bridge messages — they don't touch the bridge contract. Don't fold any Go-side timing/position logic up into the host to "save a hop"; that's the drift the model forbids.</p>
-</section>
+  <p class="caveat">Bridge contract (CLAUDE.md / MODEL.md): the 2 crossings stay <b>fire-and-forget</b> — these cuts are intra-process call-chain shortening, never new bridge messages, never an <code>await</code> on the TS→Go send. And never fold Go's geometry/timing (hops 7–8) up into the host to "save a crossing": that's the drift the model forbids. The crossings are load-bearing because Go owns the one clock.</p>
+</div>
 </body>
 </html>
