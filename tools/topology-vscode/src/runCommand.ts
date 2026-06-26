@@ -175,6 +175,11 @@ export class BuildAndRunRunner {
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
     this.proc = cp.spawn(binPath, [...topArgs], { cwd: repoRoot, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    // Flush any stdin lines that were buffered before this spawn (writeStdin queued them).
+    if (this.pendingStdin.length > 0) {
+      for (const l of this.pendingStdin) this.proc.stdin?.write(l + "\n");
+      this.pendingStdin = [];
+    }
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
@@ -331,9 +336,20 @@ export class BuildAndRunRunner {
     });
   }
 
-  /** Write a JSON line to the running process's stdin (no-op if not running). */
+  /** Lines written before Go's stdin exists, flushed on spawn (see writeStdin/run). */
+  private pendingStdin: string[] = [];
+
+  /**
+   * Write a JSON line to Go's stdin. If the process is not yet spawned, BUFFER the line
+   * and flush it once stdin exists (in run()). Previously this silently dropped early
+   * writes, which lost the load-time guide-vis settings push (it races the spawn) — so
+   * restored guideline visibilities never reached Go on a window reload.
+   */
   writeStdin(line: string): void {
-    if (!this.proc?.stdin) return;
+    if (!this.proc?.stdin) {
+      this.pendingStdin.push(line);
+      return;
+    }
     this.proc.stdin.write(line + "\n");
   }
 
