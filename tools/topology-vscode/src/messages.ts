@@ -47,6 +47,7 @@ export type EditMsg =
   | { type: "edit"; op: "node-poles" }
   | { type: "edit"; op: "angle-labels" }
   | { type: "edit"; op: "sel-sphere-poles" }
+  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean }
   | {
       type: "edit";
       op: "viewpoint";
@@ -205,6 +206,15 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "angle-labels":
     case "sel-sphere-poles":
       // No payload needed — toggle is stateless from the TS side.
+      return (m as unknown as WebviewToHostMsg);
+    case "guide-vis":
+      // Batched explicit visibilities pushed on load to restore persisted state.
+      // All five must be booleans, else drop as malformed.
+      if (
+        typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
+        typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
+        typeof m.selSpherePoles !== "boolean"
+      ) return undefined;
       return (m as unknown as WebviewToHostMsg);
     default:
       return undefined;

@@ -1,6 +1,20 @@
 import { viewerState } from "./state/viewer-state";
 import { serializeSceneState } from "./state/viewer/types";
 import { vscode } from "./vscode-api";
+import { postLog } from "./log/post";
+
+// guideSnapshot — the 6 guideline settings currently held in viewerState, for diagnostic
+// logging of the save path (undefined = default true/active).
+function guideSnapshot() {
+  return {
+    sceneTori: viewerState.sceneToriVisible,
+    scenePoles: viewerState.scenePolesVisible,
+    nodePoles: viewerState.nodePolesVisible,
+    angleLabels: viewerState.angleLabelsVisible,
+    selSpherePoles: viewerState.selSpherePolesVisible,
+    guidelinesActive: viewerState.guidelinesActive,
+  };
+}
 
 const status = document.getElementById("status")!;
 
@@ -20,16 +34,24 @@ export function setStatusError(msg: string) {
 }
 
 function _sendScene() {
-  if (lastViewSyncedText === undefined) return;
+  if (lastViewSyncedText === undefined) {
+    postLog("scene-save-send", { skipped: "not-synced-yet", guides: guideSnapshot() });
+    return;
+  }
   const sceneText = serializeSceneState(viewerState);
-  if (sceneText === lastViewSyncedText) return;
+  if (sceneText === lastViewSyncedText) {
+    postLog("scene-save-send", { skipped: "unchanged", guides: guideSnapshot() });
+    return;
+  }
   lastViewSyncedText = sceneText;
   let scene: unknown;
   try { scene = JSON.parse(sceneText); } catch { return; }
+  postLog("scene-save-send", { posted: true, guides: guideSnapshot(), sceneText });
   vscode.postMessage({ type: "edit", op: "scene", scene });
 }
 
 export function scheduleViewSave() {
+  postLog("scene-save-schedule", { gated: lastViewSyncedText === undefined, guides: guideSnapshot() });
   if (lastViewSyncedText === undefined) return;
   if (_sceneTimer !== null) clearTimeout(_sceneTimer);
   _sceneTimer = setTimeout(() => {

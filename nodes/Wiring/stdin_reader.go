@@ -89,6 +89,12 @@ type stdinMsg struct {
 	Z float64 `json:"z"`
 	// Viewpoint is the payload for op=="viewpoint"; nil when the op is anything else.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
+	// guide-vis payload: explicit visibility for all 5 polar-guide groups.
+	Tori          bool `json:"tori"`
+	ScenePoles    bool `json:"scenePoles"`
+	NodePoles     bool `json:"nodePoles"`
+	AngleLabels   bool `json:"angleLabels"`
+	SelSpherePoles bool `json:"selSpherePoles"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -405,5 +411,12 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleSelSpherePoles(tr)
+	case msg.Op == "guide-vis":
+		// Set all 5 polar-guide visibilities to explicit values. Sent by TS on window reload
+		// so Go's authoritative state matches persisted scene settings.
+		if md == nil {
+			return
+		}
+		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, tr)
 	}
 }

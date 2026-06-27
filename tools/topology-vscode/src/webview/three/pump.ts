@@ -179,34 +179,42 @@ export function handleTraceEvent(event: TraceEvent): void {
     }
     case "scene-tori": {
       const e = event as Extract<TraceEvent, { kind: "scene-tori" }>;
+      postLog("guide-recv", { kind: "scene-tori", visible: e.visible });
       useCameraStore.getState().setSceneToriVisible(e.visible);
-      patchViewerState((v) => { v.sceneToriVisible = e.visible; });
+      patchViewerState((v) => { v.sceneToriVisible = e.visible === false ? false : undefined; });
+      scheduleViewSave();
       return;
     }
     case "scene-poles": {
       const e = event as Extract<TraceEvent, { kind: "scene-poles" }>;
-      postLog("pole-toggle-recv", { kind: "scene-poles", visible: e.visible });
+      postLog("guide-recv", { kind: "scene-poles", visible: e.visible });
       useCameraStore.getState().setScenePolesVisible(e.visible);
-      patchViewerState((v) => { v.scenePolesVisible = e.visible; });
+      patchViewerState((v) => { v.scenePolesVisible = e.visible === false ? false : undefined; });
+      scheduleViewSave();
       return;
     }
     case "node-poles": {
       const e = event as Extract<TraceEvent, { kind: "node-poles" }>;
-      postLog("pole-toggle-recv", { kind: "node-poles", visible: e.visible });
+      postLog("guide-recv", { kind: "node-poles", visible: e.visible });
       useCameraStore.getState().setNodePolesVisible(e.visible);
-      patchViewerState((v) => { v.nodePolesVisible = e.visible; });
+      patchViewerState((v) => { v.nodePolesVisible = e.visible === false ? false : undefined; });
+      scheduleViewSave();
       return;
     }
     case "angle-labels": {
       const e = event as Extract<TraceEvent, { kind: "angle-labels" }>;
+      postLog("guide-recv", { kind: "angle-labels", visible: e.visible });
       useCameraStore.getState().setAngleLabelsVisible(e.visible);
-      patchViewerState((v) => { v.angleLabelsVisible = e.visible; });
+      patchViewerState((v) => { v.angleLabelsVisible = e.visible === false ? false : undefined; });
+      scheduleViewSave();
       return;
     }
     case "sel-sphere-poles": {
       const e = event as Extract<TraceEvent, { kind: "sel-sphere-poles" }>;
+      postLog("guide-recv", { kind: "sel-sphere-poles", visible: e.visible });
       useCameraStore.getState().setSelSpherePolesVisible(e.visible);
-      patchViewerState((v) => { v.selSpherePolesVisible = e.visible; });
+      patchViewerState((v) => { v.selSpherePolesVisible = e.visible === false ? false : undefined; });
+      scheduleViewSave();
       return;
     }
     default:

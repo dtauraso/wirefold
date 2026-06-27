@@ -182,6 +182,18 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   const nodePolesVisible = useCameraStore((s) => s.nodePolesVisible);
   const selSpherePolesVisible = useCameraStore((s) => s.selSpherePolesVisible);
   const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
+  const guidelinesActive = useCameraStore((s) => s.guidelinesActive);
+
+  // "Guidelines" master gate: when inactive, ALL polar guides are suppressed (the toolbar
+  // also hides their individual buttons). It does NOT touch each guide's own Go-owned
+  // visibility, so reactivating restores every guide to its prior on/off state. Handholds
+  // (the rotation grab points) are interaction, not a guide, so they stay regardless.
+  const g = guidelinesActive !== false;
+  const showTori = g && sceneToriVisible !== false;
+  const showScenePoles = g && scenePolesVisible !== false;
+  const showNodePoles = g && nodePolesVisible !== false;
+  const showSelPoles = g && selSpherePolesVisible !== false;
+  const showAngles = g && angleLabelsVisible !== false;
 
   // Latch the last node the user selected. Selection only DECIDES which sphere the
   // sel-highlight frames; it does not have to stay selected to keep the frame shown.
@@ -261,7 +273,7 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   return (
     <>
       <group position={pos}>
-        {sceneToriVisible !== false && (
+        {showTori && (
           <>
             <mesh geometry={geoA} raycast={() => null}>
               <meshBasicMaterial color="#cc8844" transparent opacity={0.4} depthWrite={false} />
@@ -276,9 +288,9 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
         {handholds(rotB)}
       </group>
       {/* Scene pole frame at the content-sphere center. */}
-      {scenePolesVisible !== false && <PolarFrame center={cs.center} scale={radiusKey} />}
+      {showScenePoles && <PolarFrame center={cs.center} scale={radiusKey} />}
       {/* Per-node pole frames — one PolarFrame per node, gated behind nodePolesVisible. */}
-      {nodePolesVisible !== false && nodes.map((node) => (
+      {showNodePoles && nodes.map((node) => (
         <PolarFrame
           key={node.id}
           center={nodeWorldPos(node)}
@@ -288,7 +300,7 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
       ))}
       {/* Selected-sphere poles (additional feature) — the center(s) of the sphere(s) the
           SELECTED node sits on, drawn at SPHERE scale. Independent of the per-node poles. */}
-      {selSpherePolesVisible !== false && sphereCenters.map((center) => (
+      {showSelPoles && sphereCenters.map((center) => (
         <PolarFrame
           key={`sel-${center.id}`}
           center={nodeWorldPos(center)}
@@ -297,17 +309,17 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
-      {angleLabelsVisible !== false && node2Center && node3 && (
+      {showAngles && node2Center && node3 && (
         <ThetaArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
       )}
-      {angleLabelsVisible !== false && node2Center && node7 && (
+      {showAngles && node2Center && node7 && (
         <ThetaArc center={node2Center} sample={nodeWorldPos(node7)} color="#00ccff" tube={thetaTube} />
       )}
       {/* Horizontal φ arcs from +x reference to node 3 (orange) and node 7 (cyan). */}
-      {angleLabelsVisible !== false && node2Center && node3 && (
+      {showAngles && node2Center && node3 && (
         <PhiArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
       )}
-      {angleLabelsVisible !== false && node2Center && node7 && (
+      {showAngles && node2Center && node7 && (
         <PhiArc center={node2Center} sample={nodeWorldPos(node7)} color="#00ccff" tube={thetaTube} />
       )}
     </>
