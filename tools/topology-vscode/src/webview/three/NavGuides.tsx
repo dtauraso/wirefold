@@ -183,13 +183,12 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   const selSpherePolesVisible = useCameraStore((s) => s.selSpherePolesVisible);
   const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
   const handholdsVisible = useCameraStore((s) => s.handholdsVisible);
-  const guidelinesActive = useCameraStore((s) => s.guidelinesActive);
+  const overlaysVisible = useCameraStore((s) => s.overlaysVisible);
 
-  // "Guidelines" master gate: when inactive, ALL polar guides are suppressed (the toolbar
-  // also hides their individual buttons). It does NOT touch each guide's own Go-owned
-  // visibility, so reactivating restores every guide to its prior on/off state. Handholds
-  // (the rotation grab points) are interaction, not a guide, so they stay regardless.
-  const g = guidelinesActive !== false;
+  // "Overlays" master gate (Go-owned): when false, ALL polar guides are suppressed (the
+  // toolbar also hides their individual buttons). It does NOT touch each guide's own
+  // Go-owned visibility, so reactivating restores every guide to its prior on/off state.
+  const g = overlaysVisible;
   const showTori = g && sceneToriVisible !== false;
   const showScenePoles = g && scenePolesVisible !== false;
   const showNodePoles = g && nodePolesVisible !== false;
@@ -284,9 +283,9 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
             </mesh>
           </>
         )}
-        {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. Gated by handholdsVisible (independent of guidelinesActive). */}
-        {handholdsVisible !== false && handholds()}
-        {handholdsVisible !== false && handholds(rotB)}
+        {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. Gated by both overlaysVisible (master) and handholdsVisible (per-overlay). */}
+        {g && handholdsVisible !== false && handholds()}
+        {g && handholdsVisible !== false && handholds(rotB)}
       </group>
       {/* Scene pole frame at the content-sphere center. */}
       {showScenePoles && <PolarFrame center={cs.center} scale={radiusKey} />}

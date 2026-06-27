@@ -243,6 +243,14 @@ export function handleTraceEvent(event: TraceEvent): void {
       scheduleViewSave();
       return;
     }
+    case "overlays-vis": {
+      const e = event as Extract<TraceEvent, { kind: "overlays-vis" }>;
+      postLog("guide-recv", { kind: "overlays-vis", visible: e.visible });
+      useCameraStore.getState().setOverlaysVisible(e.visible);
+      patchViewerState((v) => { v.overlaysActive = e.visible === false ? false : undefined; });
+      scheduleViewSave();
+      return;
+    }
     default:
       assertNever(k);
   }

@@ -92,9 +92,9 @@ window.addEventListener("message", (e) => {
     // Feed the R3F store; topology.json text carries spec + diagram view;
     // sceneText (optional) carries camera/camera3d/labelsGlobalHidden from topology.scene.json.
     useThreeStore.getState().load(msg.text, msg.sceneText);
-    // Re-seed the guidelines master toggle from persisted state, then push all 5
-    // Go-owned guide visibilities so Go's authoritative state survives a window reload.
-    useCameraStore.getState().setGuidelinesActive(viewerState.guidelinesActive !== false);
+    // Push all Go-owned guide visibilities (including the master overlays toggle) so Go's
+    // authoritative state survives a window reload.
+    useCameraStore.getState().setOverlaysVisible(viewerState.overlaysActive !== false);
     const guidePush = {
       tori: viewerState.sceneToriVisible !== false,
       scenePoles: viewerState.scenePolesVisible !== false,
@@ -106,11 +106,12 @@ window.addEventListener("message", (e) => {
       labelsGlobal: viewerState.labelsGlobalHidden !== true,
       // badgesHidden is hidden sense (true=hidden); badgesGlobal is visible sense.
       badgesGlobal: viewerState.badgesHidden !== true,
+      overlays: viewerState.overlaysActive !== false,
     };
     postLog("guide-load-push", { persisted: {
       sceneTori: viewerState.sceneToriVisible, scenePoles: viewerState.scenePolesVisible,
       nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
-      selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, guidelinesActive: viewerState.guidelinesActive,
+      selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, overlaysActive: viewerState.overlaysActive,
     }, pushed: guidePush });
     vscode.postMessage({ type: "edit", op: "guide-vis", ...guidePush });
   } else if (msg.type === "trace-event") {

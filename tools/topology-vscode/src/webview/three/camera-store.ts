@@ -24,11 +24,11 @@ interface CameraState {
   // badgesHidden is true when global occlusion-badge visibility is off. Default false (badges shown).
   // Written by pump on "badges-global" trace events; read by ThreeView's badge render gate.
   badgesHidden: boolean;
-  // guidelinesActive is the TS-only master gate for the whole polar-guideline group
-  // (tori + all pole frames + angle labels). When false the toolbar hides their individual
-  // buttons and NavGuides suppresses every guide; each guide's own visibility above is
-  // left untouched, so reactivating restores the prior states. Not Go-owned.
-  guidelinesActive: boolean;
+  // overlaysVisible is the Go-owned master gate for all 8 overlays. When false the toolbar
+  // hides the individual sub-buttons and NavGuides/ThreeView suppress every overlay;
+  // each overlay's own Go-owned visibility is left untouched, so reactivating restores
+  // the prior per-overlay states. Written by pump on "overlays-vis" trace events.
+  overlaysVisible: boolean;
   set: (c: PolarCamera) => void;
   setSceneToriVisible: (v: boolean) => void;
   setScenePolesVisible: (v: boolean) => void;
@@ -38,7 +38,7 @@ interface CameraState {
   setHandholdsVisible: (v: boolean) => void;
   setLabelsGlobalHidden: (v: boolean) => void;
   setBadgesHidden: (v: boolean) => void;
-  setGuidelinesActive: (v: boolean) => void;
+  setOverlaysVisible: (v: boolean) => void;
 }
 
 export const useCameraStore = create<CameraState>((set) => ({
@@ -51,7 +51,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   handholdsVisible: true,
   labelsGlobalHidden: false,
   badgesHidden: false,
-  guidelinesActive: true,
+  overlaysVisible: true,
   set: (c) => set({ camera: c }),
   setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
   setScenePolesVisible: (v) => set({ scenePolesVisible: v }),
@@ -61,7 +61,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   setHandholdsVisible: (v) => set({ handholdsVisible: v }),
   setLabelsGlobalHidden: (v) => set({ labelsGlobalHidden: v }),
   setBadgesHidden: (v) => set({ badgesHidden: v }),
-  setGuidelinesActive: (v) => set({ guidelinesActive: v }),
+  setOverlaysVisible: (v) => set({ overlaysVisible: v }),
 }));
 
 export function getCameraState(): CameraState {

@@ -103,26 +103,23 @@ export function HomeButton({
   );
 }
 
-/** RINGS TOGGLE: top-right button to show/hide the polar-guide tori. Fire-and-forget to Go. */
-/** GUIDELINES MASTER: TS-only toggle that activates/deactivates the whole polar-guideline
- * group (rings/tori, scene poles, node poles, angle labels, sel-sphere poles). When inactive
- * it hides those 5 buttons (gated in ThreeView) and NavGuides suppresses every guide; each
- * guide's own Go-owned state is left untouched, so reactivating restores the prior states. */
+/** OVERLAYS MASTER: Go-owned toggle that shows/hides all 8 overlays at once.
+ * When hidden it hides all 8 sub-buttons (gated in ThreeView) and NavGuides suppresses
+ * every overlay; each overlay's own Go-owned state is left untouched, so reactivating
+ * restores the prior per-overlay states. Fire-and-forget to Go; Go echoes back via
+ * overlays-vis trace event. */
 export function GuidelinesToggle() {
-  const active = useCameraStore((s) => s.guidelinesActive);
-  const setActive = useCameraStore((s) => s.setGuidelinesActive);
+  const active = useCameraStore((s) => s.overlaysVisible);
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    const next = active === false;
-    postLog("guide-btn-click", { op: "guidelines", wasActive: active !== false, nextActive: next });
-    setActive(next);
-    patchViewerState((v) => { v.guidelinesActive = next ? undefined : false; });
-    scheduleViewSave();
-  }, [active, setActive]);
+    // Fire-and-forget: Go owns the toggle state and echoes back via overlays-vis.
+    postLog("guide-btn-click", { op: "overlays-vis", was: active });
+    vscode.postMessage({ type: "edit", op: "overlays-vis" });
+  }, [active]);
   return (
     <div
       onClick={onClick}
-      title={active !== false ? "Hide polar guidelines" : "Show polar guidelines"}
+      title={active ? "Hide overlays" : "Show overlays"}
       style={{
         position: "absolute",
         top: 76,
@@ -133,7 +130,7 @@ export function GuidelinesToggle() {
         cursor: "pointer",
         pointerEvents: "auto",
         zIndex: 20,
-        color: active !== false ? "#ddd" : "#888",
+        color: active ? "#ddd" : "#888",
         fontSize: 11,
         fontFamily: "monospace",
         userSelect: "none",
@@ -142,7 +139,7 @@ export function GuidelinesToggle() {
         gap: 4,
       }}
     >
-      ▦ guidelines
+      ▦ overlays
     </div>
   );
 }

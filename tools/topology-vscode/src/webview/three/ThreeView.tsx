@@ -34,8 +34,9 @@ export function ThreeView() {
   const storeDeleteEdge = useThreeStore((s) => s.deleteEdge);
   const toggleFade = useThreeStore((s) => s.toggleFade);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Master gate for the polar-guideline button group (the master button itself always shows).
-  const guidelinesActive = useCameraStore((s) => s.guidelinesActive);
+  // Master gate for all 8 overlay sub-buttons (the master button itself always shows).
+  // Go-owned: written by pump on overlays-vis trace events.
+  const overlaysVisible = useCameraStore((s) => s.overlaysVisible);
   // Which spheres to show on selection: "surface" (single click) = the spheres the
   // node sits on the surface of; "own" (two-finger click) = the node's own sphere.
   const [sphereMode, setSphereMode] = useState<"surface" | "own">("surface");
@@ -307,19 +308,19 @@ export function ThreeView() {
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
-      <GlobalLabelsToggle />
-      <BadgesToggle />
       <GuidelinesToggle />
-      {guidelinesActive !== false && (
+      {overlaysVisible && (
         <>
+          <GlobalLabelsToggle />
+          <BadgesToggle />
           <RingsToggle />
           <ScenePolesToggle />
           <NodePolesToggle />
           <AngleLabelsToggle />
           <SelSpherePolesToggle />
+          <HandholdsToggle />
         </>
       )}
-      <HandholdsToggle />
 
       {/* Polar pan overlay — "mouse as polar" construction during a wheel-pan burst */}
       <PanPolarOverlay />
