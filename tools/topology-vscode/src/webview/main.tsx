@@ -102,6 +102,8 @@ window.addEventListener("message", (e) => {
       angleLabels: viewerState.angleLabelsVisible !== false,
       selSpherePoles: viewerState.selSpherePolesVisible !== false,
       handholds: viewerState.handholdsVisible !== false,
+      // labelsGlobalHidden is hidden sense (true=hidden); labelsGlobal is visible sense.
+      labelsGlobal: viewerState.labelsGlobalHidden !== true,
     };
     postLog("guide-load-push", { persisted: {
       sceneTori: viewerState.sceneToriVisible, scenePoles: viewerState.scenePolesVisible,

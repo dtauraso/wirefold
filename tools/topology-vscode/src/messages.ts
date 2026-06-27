@@ -49,7 +49,7 @@ export type EditMsg =
   | { type: "edit"; op: "sel-sphere-poles" }
   | { type: "edit"; op: "handholds-vis" }
   | { type: "edit"; op: "labels-vis" }
-  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean }
+  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; labelsGlobal: boolean }
   | {
       type: "edit";
       op: "viewpoint";
@@ -219,7 +219,8 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       if (
         typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
         typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
-        typeof m.selSpherePoles !== "boolean" || typeof m.handholds !== "boolean"
+        typeof m.selSpherePoles !== "boolean" || typeof m.handholds !== "boolean" ||
+        typeof m.labelsGlobal !== "boolean"
       ) return undefined;
       return (m as unknown as WebviewToHostMsg);
     default:
