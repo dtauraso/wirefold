@@ -30,6 +30,7 @@
 | Name | Direction | EdgeKind | Optional | Notes |
 |------|-----------|----------|----------|-------|
 | ToHoldNewSendOld | out | chain |  | forwards Init values to the chain holdnewsendold |
+| ToExcitatory | out | chain | yes | fans the emitted value out to a Pulse node (sample-and-hold); active when wired |
 | ToPacer | out | chain | yes | fans the emitted value out to a Pacer node (change-step feedback); active when wired |
 | FeedbackIn | in | chain | yes | receives step (1=advance, 0=hold index) from HoldNewSendOld; enables feedback-ring mode when wired |
 
