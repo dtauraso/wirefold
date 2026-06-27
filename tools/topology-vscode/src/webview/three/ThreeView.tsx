@@ -42,10 +42,10 @@ export function ThreeView() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
-  const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
-    () => viewerState.labelsGlobalHidden ?? false,
-  );
-  const [badgesHidden, setBadgesHidden] = useState<boolean>(() => viewerState.badgesHidden ?? false);
+  // globalLabelsHidden is Go-owned: written by pump on labels-global trace events.
+  const globalLabelsHidden = useCameraStore((s) => s.labelsGlobalHidden);
+  // badgesHidden is Go-owned: written by pump on badges-global trace events.
+  const badgesHidden = useCameraStore((s) => s.badgesHidden);
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
   // Ref mirror of edges — read in interaction-controls to compute incident edges
@@ -195,29 +195,6 @@ export function ThreeView() {
 
   const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
 
-  const toggleGlobalLabels = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setGlobalLabelsHidden((prev) => {
-      const next = !prev;
-      patchViewerState((v) => {
-        v.labelsGlobalHidden = next || undefined;
-      });
-      scheduleViewSave();
-      return next;
-    });
-  }, []);
-
-  const toggleBadges = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setBadgesHidden((prev) => {
-      const next = !prev;
-      patchViewerState((v) => {
-        v.badgesHidden = next || undefined;
-      });
-      scheduleViewSave();
-      return next;
-    });
-  }, []);
 
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
@@ -330,8 +307,8 @@ export function ThreeView() {
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
-      <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
-      <BadgesToggle hidden={badgesHidden} onClick={toggleBadges} />
+      <GlobalLabelsToggle />
+      <BadgesToggle />
       <GuidelinesToggle />
       {guidelinesActive !== false && (
         <>

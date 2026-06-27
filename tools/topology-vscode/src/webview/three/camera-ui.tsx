@@ -368,14 +368,18 @@ export function HandholdsToggle() {
   );
 }
 
-/** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels. */
-export function GlobalLabelsToggle({
-  hidden,
-  onClick,
-}: {
-  hidden: boolean;
-  onClick: (e: React.MouseEvent) => void;
-}) {
+/** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels.
+ *  Reads labelsGlobalHidden from camera-store (Go-owned via labels-global trace events).
+ *  Click dispatches fire-and-forget "labels-vis" to Go; Go echoes back the new state.
+ */
+export function GlobalLabelsToggle() {
+  const hidden = useCameraStore((s) => s.labelsGlobalHidden);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via labels-global.
+    postLog("guide-btn-click", { op: "labels-vis", wasHidden: hidden });
+    vscode.postMessage({ type: "edit", op: "labels-vis" });
+  }, [hidden]);
   return (
     <div
       onClick={onClick}
@@ -404,14 +408,18 @@ export function GlobalLabelsToggle({
   );
 }
 
-/** BADGES TOGGLE: top-right button to show/hide occlusion +N badges. */
-export function BadgesToggle({
-  hidden,
-  onClick,
-}: {
-  hidden: boolean;
-  onClick: (e: React.MouseEvent) => void;
-}) {
+/** BADGES TOGGLE: top-right button to show/hide occlusion +N badges.
+ *  Reads badgesHidden from camera-store (Go-owned via badges-global trace events).
+ *  Click dispatches fire-and-forget "badges-vis" to Go; Go echoes back the new state.
+ */
+export function BadgesToggle() {
+  const hidden = useCameraStore((s) => s.badgesHidden);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via badges-global.
+    postLog("guide-btn-click", { op: "badges-vis", wasHidden: hidden });
+    vscode.postMessage({ type: "edit", op: "badges-vis" });
+  }, [hidden]);
   return (
     <div
       onClick={onClick}

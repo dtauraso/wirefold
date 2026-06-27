@@ -96,6 +96,8 @@ type stdinMsg struct {
 	AngleLabels   bool `json:"angleLabels"`
 	SelSpherePoles bool `json:"selSpherePoles"`
 	Handholds     bool `json:"handholds"`
+	LabelsGlobal  bool `json:"labelsGlobal"`
+	BadgesGlobal  bool `json:"badgesGlobal"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -419,12 +421,26 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleHandholds(tr)
+	case msg.Op == "labels-vis":
+		// Toggle the global node-label visibility and emit a labels-global event.
+		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).
+		if md == nil {
+			return
+		}
+		md.ToggleLabelsGlobal(tr)
+	case msg.Op == "badges-vis":
+		// Toggle the global occlusion-badge visibility and emit a badges-global event.
+		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).
+		if md == nil {
+			return
+		}
+		md.ToggleBadgesGlobal(tr)
 	case msg.Op == "guide-vis":
 		// Set all 6 polar-guide visibilities to explicit values. Sent by TS on window reload
 		// so Go's authoritative state matches persisted scene settings.
 		if md == nil {
 			return
 		}
-		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, tr)
+		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.LabelsGlobal, msg.BadgesGlobal, tr)
 	}
 }

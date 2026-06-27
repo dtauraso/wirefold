@@ -372,6 +372,12 @@ type MoveDispatch struct {
 	// handholdsVisible is the current rotation-handhold grab-sphere visibility. true by default.
 	// Toggled by ToggleHandholds; emitted via EmitHandholds.
 	handholdsVisible bool
+	// labelsGlobalVisible is the current global node-label visibility. true by default.
+	// Toggled by ToggleLabelsGlobal; emitted via EmitLabelsGlobal.
+	labelsGlobalVisible bool
+	// badgesGlobalVisible is the current global occlusion-badge visibility. true by default.
+	// Toggled by ToggleBadgesGlobal; emitted via EmitBadgesGlobal.
+	badgesGlobalVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -394,6 +400,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		angleLabelsVisible:    true,
 		selSpherePolesVisible: true,
 		handholdsVisible:      true,
+		labelsGlobalVisible:   true,
+		badgesGlobalVisible:   true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -832,21 +840,49 @@ func (md *MoveDispatch) EmitHandholds(tr *T.Trace) {
 	tr.Handholds(md.handholdsVisible)
 }
 
+// ToggleLabelsGlobal flips the global node-label visibility and emits a labels-global event.
+// Called from applyEdit on op="labels-vis"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace) {
+	md.labelsGlobalVisible = !md.labelsGlobalVisible
+	tr.LabelsGlobal(md.labelsGlobalVisible)
+}
+
+// EmitLabelsGlobal emits the current global label visibility without toggling it.
+func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace) {
+	tr.LabelsGlobal(md.labelsGlobalVisible)
+}
+
+// ToggleBadgesGlobal flips the global occlusion-badge visibility and emits a badges-global event.
+// Called from applyEdit on op="badges-vis"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace) {
+	md.badgesGlobalVisible = !md.badgesGlobalVisible
+	tr.BadgesGlobal(md.badgesGlobalVisible)
+}
+
+// EmitBadgesGlobal emits the current global badge visibility without toggling it.
+func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace) {
+	tr.BadgesGlobal(md.badgesGlobalVisible)
+}
+
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
 // push so settings survive a Go respawn on window reload) and emits each so the renderer
 // reflects them. Set-to-value, unlike the flip-style Toggle* methods.
-func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds bool, tr *T.Trace) {
+func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds, labelsGlobal, badgesGlobal bool, tr *T.Trace) {
 	md.sceneToriVisible = tori
 	md.scenePolesVisible = scenePoles
 	md.nodePolesVisible = nodePoles
 	md.angleLabelsVisible = angleLabels
 	md.selSpherePolesVisible = selSpherePoles
 	md.handholdsVisible = handholds
+	md.labelsGlobalVisible = labelsGlobal
+	md.badgesGlobalVisible = badgesGlobal
 	md.EmitSceneTori(tr)
 	md.EmitScenePoles(tr)
 	md.EmitNodePoles(tr)
 	md.EmitAngleLabels(tr)
 	md.EmitSelSpherePoles(tr)
 	md.EmitHandholds(tr)
+	md.EmitLabelsGlobal(tr)
+	md.EmitBadgesGlobal(tr)
 }
 

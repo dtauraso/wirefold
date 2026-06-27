@@ -225,6 +225,24 @@ export function handleTraceEvent(event: TraceEvent): void {
       scheduleViewSave();
       return;
     }
+    case "labels-global": {
+      // Note: visible sense → hidden sense flip at the render boundary.
+      // Go emits visible=true when labels should show; store holds hidden=false.
+      const e = event as Extract<TraceEvent, { kind: "labels-global" }>;
+      useCameraStore.getState().setLabelsGlobalHidden(!e.visible);
+      patchViewerState((v) => { v.labelsGlobalHidden = !e.visible || undefined; });
+      scheduleViewSave();
+      return;
+    }
+    case "badges-global": {
+      // Note: visible sense → hidden sense flip at the render boundary.
+      // Go emits visible=true when badges should show; store holds badgesHidden=false.
+      const e = event as Extract<TraceEvent, { kind: "badges-global" }>;
+      useCameraStore.getState().setBadgesHidden(!e.visible);
+      patchViewerState((v) => { v.badgesHidden = !e.visible || undefined; });
+      scheduleViewSave();
+      return;
+    }
     default:
       assertNever(k);
   }
