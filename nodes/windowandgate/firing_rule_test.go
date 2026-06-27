@@ -63,23 +63,23 @@ func run(left, right int) (int, error) {
 	}
 }
 
-// AND(1,1)=1.
+// Gate is left AND (NOT right). left=1, right=1 → 1 AND ¬1 = 1 AND 0 = 0.
 func TestAndBothActive(t *testing.T) {
 	got, _ := run(1, 1)
-	if got != 1 {
-		t.Fatalf("expected 1, got %d", got)
-	}
-}
-
-// AND(1,0)=0.
-func TestAndLeftOnly(t *testing.T) {
-	got, _ := run(1, 0)
 	if got != 0 {
 		t.Fatalf("expected 0, got %d", got)
 	}
 }
 
-// AND(0,1)=0.
+// left=1, right=0 → 1 AND ¬0 = 1 AND 1 = 1.
+func TestAndLeftOnly(t *testing.T) {
+	got, _ := run(1, 0)
+	if got != 1 {
+		t.Fatalf("expected 1, got %d", got)
+	}
+}
+
+// left=0, right=1 → 0 AND ¬1 = 0 AND 0 = 0.
 func TestAndRightOnly(t *testing.T) {
 	got, _ := run(0, 1)
 	if got != 0 {
@@ -87,7 +87,7 @@ func TestAndRightOnly(t *testing.T) {
 	}
 }
 
-// AND(0,0)=0.
+// left=0, right=0 → 0 AND ¬0 = 0 AND 1 = 0.
 func TestAndNeitherActive(t *testing.T) {
 	got, _ := run(0, 0)
 	if got != 0 {
@@ -265,8 +265,11 @@ func TestSkipMinusOnePlaceholder(t *testing.T) {
 
 	select {
 	case v := <-out:
-		if v != 1 {
-			t.Fatalf("AND after discarding -1 placeholders: got %d, want 1 (right should hold 1, not -1)", v)
+		// Right holds real 1 (the -1 placeholders are discarded); the gate NOTs it,
+		// so 1 AND ¬1 = 0. The node firing AT ALL proves right held a real value
+		// (a leaked -1 would leave HasRight false and the node would never fire).
+		if v != 0 {
+			t.Fatalf("AND after discarding -1 placeholders: got %d, want 0 (right holds real 1 → ¬1=0)", v)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("node did not fire after -1 placeholders discarded + real value held")
@@ -274,7 +277,8 @@ func TestSkipMinusOnePlaceholder(t *testing.T) {
 }
 
 // TestLatestPerSide: a side tracks the MOST-RECENT real bead. Right gets 1 then 0;
-// the slot must hold 0 (the latest), so AND(1,0)=0. (Holding the first, 1, → AND(1,1)=1.)
+// the slot must hold 0 (the latest). The gate NOTs right, so 1 AND ¬0 = 1 AND 1 = 1.
+// (Holding the first, 1, would give 1 AND ¬1 = 0.)
 func TestLatestPerSide(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
@@ -301,8 +305,8 @@ func TestLatestPerSide(t *testing.T) {
 
 	select {
 	case v := <-out:
-		if v != 0 {
-			t.Fatalf("latest-per-side: got AND=%d, want 0 (right should hold latest 0, not first 1)", v)
+		if v != 1 {
+			t.Fatalf("latest-per-side: got AND=%d, want 1 (right holds latest 0 → ¬0=1, AND(1,1)=1)", v)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("node did not fire")

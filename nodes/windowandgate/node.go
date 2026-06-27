@@ -146,10 +146,16 @@ func (g *Node) Update(ctx context.Context) {
 			emitInputs()
 		}
 
-		if v, got := drainLatestReal(g.FromRight); got && (!g.HasRight || g.Right != v) {
-			g.Right = v
-			g.HasRight = true
-			emitInputs()
+		// NOT the right input number (1→0, 0→1) as it is captured, so the held/displayed
+		// right value and the gate use the inverted input. (Replaces the upstream HoldFlip
+		// that used to invert before this node; node 7 now feeds FromRight directly.)
+		if v, got := drainLatestReal(g.FromRight); got {
+			nv := 1 - v
+			if !g.HasRight || g.Right != nv {
+				g.Right = nv
+				g.HasRight = true
+				emitInputs()
+			}
 		}
 
 		// Window opens on the first input that arrives.
@@ -167,7 +173,8 @@ func (g *Node) Update(ctx context.Context) {
 				dwellSet = true
 			}
 			if now()-dwellStart >= fireDwellMs*time.Millisecond {
-				// AND gate: fires 1 when both inputs are 1, else 0.
+				// AND gate over the held values; the right input was NOT'd on capture
+				// (1→0, 0→1), so this fires 1 iff left==1 AND right-input==0.
 				result := 0
 				if g.Left == 1 && g.Right == 1 {
 					result = 1
