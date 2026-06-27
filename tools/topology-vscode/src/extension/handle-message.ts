@@ -151,6 +151,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "labels-vis") {
         // Toggle the global node-label visibility. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "labels-vis" }));
+      } else if (msg.op === "badges-vis") {
+        // Toggle the global occlusion-badge visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "badges-vis" }));
       } else if (msg.op === "guide-vis") {
         // Push all 6 polar-guide visibilities to Go on reload so Go's authoritative state
         // matches persisted scene settings. Explicit values — not a toggle.
