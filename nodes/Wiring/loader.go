@@ -237,6 +237,17 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				initialAimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
 				initialAimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
 			}
+			// Node 5 sits on the spheres centered at 6 (6→5, FromLeft) and 7 (7→5,
+			// FromRight): aim each center's Out at 5 and 5's matching input back, so
+			// both edges render as radial spokes like the others.
+			if _, has5 := centers["5"]; has5 {
+				initialAimedPorts[AimedPortKey{NodeID: "6", PortName: "Out", IsInput: false}] = "5"
+				initialAimedPorts[AimedPortKey{NodeID: "5", PortName: "FromLeft", IsInput: true}] = "6"
+				if _, has7 := centers["7"]; has7 {
+					initialAimedPorts[AimedPortKey{NodeID: "7", PortName: "Out", IsInput: false}] = "5"
+					initialAimedPorts[AimedPortKey{NodeID: "5", PortName: "FromRight", IsInput: true}] = "7"
+				}
+			}
 		}
 	}
 
@@ -364,6 +375,17 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			if _, has7 := centers["7"]; has7 {
 				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
 				aimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
+			}
+			// Edges 6→5 and 7→5: node 5 sits on the spheres centered at 6 (FromLeft) and
+			// 7 (FromRight); aim each center's Out at 5 and 5's matching input back, so
+			// both render as radial spokes.
+			if _, has5 := centers["5"]; has5 {
+				aimedPorts[AimedPortKey{NodeID: "6", PortName: "Out", IsInput: false}] = "5"
+				aimedPorts[AimedPortKey{NodeID: "5", PortName: "FromLeft", IsInput: true}] = "6"
+				if _, has7 := centers["7"]; has7 {
+					aimedPorts[AimedPortKey{NodeID: "7", PortName: "Out", IsInput: false}] = "5"
+					aimedPorts[AimedPortKey{NodeID: "5", PortName: "FromRight", IsInput: true}] = "7"
+				}
 			}
 			md.installAimedPorts(aimedPorts)
 		}
