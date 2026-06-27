@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edit round-trip: why 12 hops</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#30363d;
+    --work:#3fb950;   /* does work — FIXED */
+    --cross:#d29922;  /* process crossing — FIXED */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;padding:32px;max-width:1100px}
+  h1{font-size:23px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 26px}
+  code{background:var(--bg);border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  h2{font-size:17px;margin:34px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  b.work{color:var(--work)} b.cross{color:var(--cross)}
+
+  /* correction banner */
+  .correction{background:rgba(248,81,73,.08);border:1px solid #f85149;border-radius:8px;
+    padding:14px 16px;margin:0 0 24px;font-size:13px}
+  .correction b{color:#f85149}
+
+  /* runtimes */
+  .runtimes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:6px}
+  .rt{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--panel)}
+  .rt h3{margin:0 0 6px;font-size:14px}
+  .rt .tagline{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+  .rt p{font-size:12.5px;margin:8px 0 0}
+  .rt .forced{margin-top:10px;font-size:12px;color:var(--work);font-weight:600}
+  .arrowrow{display:flex;justify-content:space-around;color:var(--cross);font-size:12px;
+    font-weight:700;margin:6px 0 0}
+
+  /* hop strip */
+  .strip{margin-top:6px}
+  .hop{display:grid;grid-template-columns:30px 14px 1fr 150px;align-items:center;
+    gap:12px;border:1px solid var(--line);border-radius:7px;margin:7px 0;
+    padding:9px 12px;background:var(--panel)}
+  .hop .num{font-weight:700;font-size:13px;color:var(--muted);text-align:center}
+  .hop .tag{width:14px;height:14px;border-radius:4px}
+  .hop.work .tag{background:var(--work)}
+  .hop.cross .tag{background:var(--cross)}
+  .hop .t{font-weight:600;font-size:13px}
+  .hop .loc{color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .hop .role{text-align:right;font-size:11px;font-weight:700;letter-spacing:.3px;color:var(--muted)}
+  .phase{font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;
+    margin:18px 0 4px;font-weight:700}
+
+  .math{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px;margin-top:14px}
+  .bar{display:flex;height:34px;border-radius:6px;overflow:hidden;margin:14px 0 6px;font-size:12px;font-weight:700}
+  .bar div{display:flex;align-items:center;justify-content:center;color:#0e1116}
+  .bar .w{background:var(--work)} .bar .c{background:var(--cross)}
+  .barlbl{font-size:12px;color:var(--muted);margin-bottom:2px}
+  .floor{font-size:15px;margin-top:16px}
+  ul.note{margin:10px 0 0;padding-left:0;list-style:none}
+  ul.note li{border-left:3px solid var(--line);padding:6px 0 6px 12px;margin:8px 0;font-size:13px}
+  .caveat{color:var(--muted);font-size:12px;margin-top:16px;font-style:italic;
+    border-top:1px solid var(--line);padding-top:12px}
+</style>
+</head>
+<body>
+<h1>The <code>edit</code> round-trip — why 12 hops are needed</h1>
+<p class="sub">A geometry edit makes 12 hops: webview → host → Go → host → webview. After reading the actual code: <b>all 12 are load-bearing. Nothing is removable. The floor is 12.</b></p>
+
+<div class="correction">
+  <b>Correction.</b> Earlier drafts of this audit claimed 2–4 removable hops (a re-validate at the host, hop 4, and at the webview, hop 11). Reading the code refuted it twice over:
+  <br>• <b>Hop 4 isn't a verbatim forward.</b> The host's <code>switch(msg.op)</code> destructures per op (<code>msg.entries</code>, <code>msg.target</code>, <code>msg.edges</code>…) and <b>re-serializes a different shape</b> for Go. The parse is what gives typed field access; remove it and routing + field extraction both die.
+  <br>• <b>Hop 11 doesn't duplicate hop 9.</b> Hop 9 parses <i>Go's stdout line</i>; hop 11 is an O(1) <i>envelope</i> type-guard on the <i>postMessage</i>. Different payloads, different boundaries. Both <code>parse*</code> functions are tag-checks, not deep re-validation — there was no fat to cut.
+</div>
+
+<h2>Why three runtimes — the root of the count</h2>
+<p style="color:var(--muted);margin-top:0">12 follows from one fact: the path spans <b>3 separate runtimes</b>, and they exist for <b>two unrelated reasons</b> — neither negotiable.</p>
+<div class="runtimes">
+  <div class="rt">
+    <div class="tagline">Runtime 1</div>
+    <h3>Webview (sandboxed iframe)</h3>
+    <p>React + Three.js. Origin of the gesture and the final render target.</p>
+    <div class="forced">Forced apart by VS Code: a webview is a sandboxed iframe — <b>no Node, no <code>child_process</code>, no stdio.</b> It physically cannot reach Go.</div>
+  </div>
+  <div class="rt">
+    <div class="tagline">Runtime 2</div>
+    <h3>Extension host (Node)</h3>
+    <p>The only runtime that can both talk to the webview (<code>postMessage</code>) and <code>cp.spawn</code> the Go binary with stdio pipes (<code>runCommand.ts:177</code>).</p>
+    <div class="forced">Exists purely as the bridge between the two boundaries below — the webview can't span them itself.</div>
+  </div>
+  <div class="rt">
+    <div class="tagline">Runtime 3</div>
+    <h3>Go network</h3>
+    <p>Owns the one clock, runs the node/wire goroutines, computes every position.</p>
+    <div class="forced">Forced apart by the model: Go owns time. It must be its own process — that's substance, not plumbing.</div>
+  </div>
+</div>
+<div class="arrowrow">
+  <span>↑↓ boundary A · postMessage (VS Code sandbox)</span>
+  <span>↑↓ boundary B · stdio pipe (Go owns clock)</span>
+</div>
+<p style="color:var(--muted);margin-top:14px">A round trip <b>transits each boundary twice</b> (out + back) = <b class="cross">4 crossings</b>. And every runtime it passes through must <b>decode what arrived, act, and encode what leaves</b> — that's the <b class="work">8 work hops</b>. 4 + 8 = 12. None of the 8 repeats another: each is a distinct decode / mutate / compute / route / render step.</p>
+
+<h2>All 12 hops — each one's job</h2>
+<p class="barlbl"><span style="color:var(--work)">green = does work (decode / act / encode / route)</span> &nbsp;·&nbsp; <span style="color:var(--cross)">amber = process crossing</span></p>
+<div class="strip">
+  <div class="phase">Outbound · TS → Go</div>
+  <div class="hop work"><div class="num">1</div><div class="tag"></div>
+    <div><div class="t">Raycast gesture → world position</div><div class="loc">interaction-handlers.ts:372 / :450</div></div>
+    <div class="role">compute intent</div></div>
+  <div class="hop work"><div class="num">2</div><div class="tag"></div>
+    <div><div class="t">RAF batch + build EditMsg</div><div class="loc">interaction-controls.ts:153 → :161</div></div>
+    <div class="role">throttle + encode</div></div>
+  <div class="hop cross"><div class="num">3</div><div class="tag"></div>
+    <div><div class="t">postMessage → host &nbsp;<b>(A →)</b></div><div class="loc">interaction-controls.ts:150</div></div>
+    <div class="role">crossing</div></div>
+  <div class="hop work"><div class="num">4</div><div class="tag"></div>
+    <div><div class="t">Discriminate op + reshape + writeStdin</div><div class="loc">handle-message.ts:25/:103</div></div>
+    <div class="role">route + re-encode</div></div>
+  <div class="hop cross"><div class="num">5</div><div class="tag"></div>
+    <div><div class="t">Pipe write → Go stdin &nbsp;<b>(B →)</b></div><div class="loc">runCommand.ts:335</div></div>
+    <div class="role">crossing</div></div>
+  <div class="hop work"><div class="num">6</div><div class="tag"></div>
+    <div><div class="t">Read line + unmarshal + route</div><div class="loc">stdin_reader.go:145/:169/:179</div></div>
+    <div class="role">bytes → struct</div></div>
+  <div class="hop work"><div class="num">7</div><div class="tag"></div>
+    <div><div class="t">applyEdit → RootMove</div><div class="loc">stdin_reader.go:246</div></div>
+    <div class="role">mutate graph</div></div>
+
+  <div class="phase">Return · Go → TS</div>
+  <div class="hop work"><div class="num">8</div><div class="tag"></div>
+    <div><div class="t">Recompute geometry + emit trace</div><div class="loc">node_move.go:152/:154 (emit) + :303 (edge seg) → Trace.go:242 (Emit → stdout)</div></div>
+    <div class="role">compute positions</div></div>
+  <div class="hop cross"><div class="num">9</div><div class="tag"></div>
+    <div><div class="t">Read stdout + classify line &nbsp;<b>(B ←)</b><br><span style="font-weight:400;color:var(--muted);font-size:11.5px">3-way: <code>tryParseSpecLine</code> → <code>tryParseBreadcrumb</code> → <code>tryParseTraceEvent</code>; only trace events reach the pump</span></div><div class="loc">runCommand.ts:227 / :235 / :246 / :252 / :267</div></div>
+    <div class="role">crossing + 3-way decode</div></div>
+  <div class="hop cross"><div class="num">10</div><div class="tag"></div>
+    <div><div class="t">Wrap + postMessage → webview &nbsp;<b>(A ←)</b></div><div class="loc">extension.ts:86/:67</div></div>
+    <div class="role">crossing</div></div>
+  <div class="hop work"><div class="num">11</div><div class="tag"></div>
+    <div><div class="t">Envelope type-guard + route</div><div class="loc">main.tsx:77/:78/:94</div></div>
+    <div class="role">route to pump</div></div>
+  <div class="hop work"><div class="num">12</div><div class="tag"></div>
+    <div><div class="t">pump → store → render</div><div class="loc">pump.ts:45/:113</div></div>
+    <div class="role">draw</div></div>
+</div>
+
+<h2>The count, settled</h2>
+<div class="math">
+  <div class="barlbl">12 hops — all fixed</div>
+  <div class="bar">
+    <div class="w" style="flex:8">8 work</div>
+    <div class="c" style="flex:4">4 crossings</div>
+  </div>
+  <p class="floor"><b>Floor = 12. Removable = 0.</b> Every hop either does irreplaceable work or transits a process boundary that can't be wished away.</p>
+
+  <p style="margin-top:16px;font-weight:600">The only structural lever is eliminating a runtime — and both are nailed down:</p>
+  <ul class="note">
+    <li><b>Merge webview + host?</b> Can't. VS Code sandboxes the webview; only the Node host can <code>cp.spawn</code> Go. Boundary A and the host relay (hops 4, 9, 10) are the <b>sandbox tax</b> — imposed by the editor medium, not chosen. (Outside VS Code — say an Electron renderer with node integration — this boundary could vanish. Inside VS Code it's fixed.)</li>
+    <li><b>Merge host + Go?</b> Can't, and shouldn't. Go is a separate runtime <i>because it owns the one clock</i> and computes all geometry. That's the model's substance; folding it into Node is exactly the drift MODEL.md forbids.</li>
+  </ul>
+
+  <p style="margin-top:14px">So 12 isn't bloat — it's <b class="cross">2 boundaries × 2 directions</b> plus <b class="work">decode/act/encode at each runtime the data passes through</b>. The honest minimization budget is <b>zero hops</b>. (Micro-tidying is still possible — e.g. hops 4→5 and 9→10 are each one logical act split across two modules — but that shortens call chains, not the hop count, and changes nothing structural.)</p>
+
+  <p class="caveat">Bridge contract (CLAUDE.md / MODEL.md): the 2 crossings stay <b>fire-and-forget</b>; never add an <code>await</code> on the TS→Go send, never a new bridge message, and never fold Go's geometry/timing up into the host to "save a crossing." The crossings are load-bearing precisely because Go owns the one clock.</p>
+</div>
+</body>
+</html>

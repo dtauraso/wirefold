@@ -11,6 +11,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
+import { PROBE_DIR, PROBE_FILES } from "../probe-files";
 
 const ERROR_LABELS = new Set([
   "window-error", "unhandled-rejection", "render-error",
@@ -29,10 +30,10 @@ export async function appendWebviewLog(
   try { parsed = JSON.parse(entry); } catch { /* malformed — route to ts.jsonl */ }
   const isError = parsed?.label !== undefined && ERROR_LABELS.has(parsed.label);
   if (isError) {
-    pendingTsErrors = pendingTsErrors.then(() => doAppend(entry, documentUri, "ts-errors.jsonl"));
+    pendingTsErrors = pendingTsErrors.then(() => doAppend(entry, documentUri, PROBE_FILES.tsErrors));
     return pendingTsErrors;
   } else {
-    pendingTs = pendingTs.then(() => doAppend(entry, documentUri, "ts.jsonl"));
+    pendingTs = pendingTs.then(() => doAppend(entry, documentUri, PROBE_FILES.ts));
     return pendingTs;
   }
 }
@@ -40,7 +41,7 @@ export async function appendWebviewLog(
 async function doAppend(entry: string, documentUri: vscode.Uri, filename: string): Promise<void> {
   const folder = vscode.workspace.getWorkspaceFolder(documentUri);
   const baseDir = folder ? folder.uri.fsPath : path.dirname(documentUri.fsPath);
-  const dir = path.join(baseDir, ".probe");
+  const dir = path.join(baseDir, PROBE_DIR);
   const file = path.join(dir, filename);
   try {
     await fs.mkdir(dir, { recursive: true });
@@ -50,7 +51,7 @@ async function doAppend(entry: string, documentUri: vscode.Uri, filename: string
     // Mirror to ts-errors.jsonl (best-effort; if dir creation failed this may also fail)
     try {
       const fsSync = await import("fs");
-      const errFile = path.join(dir, "ts-errors.jsonl");
+      const errFile = path.join(dir, PROBE_FILES.tsErrors);
       fsSync.appendFileSync(errFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.webview-log-append-failed", message: String(err) }) + "\n", "utf8");
     } catch { /* swallow */ }
   }

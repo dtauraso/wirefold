@@ -17,11 +17,21 @@ set -euo pipefail
 
 # Only check the nav handler file(s) — NOT polar.ts (it is the quarantine).
 # The hook lives in interaction-controls.ts; the handler bodies live in
-# interaction-handlers.ts. Both must stay polar-only.
-NAV_FILES=(
-  "tools/topology-vscode/src/webview/three/interaction-controls.ts"
-  "tools/topology-vscode/src/webview/three/interaction-handlers.ts"
-)
+# interaction-handlers.ts. ALL interaction-*.ts files must stay polar-only —
+# glob the family so a future split (e.g. interaction-gestures.ts) is covered
+# automatically instead of silently escaping the guard.
+NAV_DIR="tools/topology-vscode/src/webview/three"
+# Nullglob so a no-match expands to empty (caught by the count check below)
+# rather than leaving the literal pattern in the array.
+shopt -s nullglob
+NAV_FILES=( "$NAV_DIR"/interaction-*.ts )
+shopt -u nullglob
+
+if [ ${#NAV_FILES[@]} -eq 0 ]; then
+  echo "✗ polar-only nav: MISCONFIGURED — no interaction-*.ts files under $NAV_DIR" >&2
+  echo "  (nav handlers moved/renamed? update NAV_DIR in $(basename "$0"))" >&2
+  exit 1
+fi
 
 # Banned symbols: Cartesian rotation/axis math that belongs in polar.ts.
 PATTERN='setFromUnitVectors|\.cross\(|new THREE\.Raycaster|\.unproject\(|setFromAxisAngle|setFromMatrixColumn|new THREE\.Spherical'
