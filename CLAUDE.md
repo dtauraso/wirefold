@@ -85,6 +85,7 @@ docs, and the auto-memory dir, costing tokens and time.
 
 - **Commit and push freely on task branches.** Per-commit sign-off is no longer required (relaxed post-v0; editing or reverting committed code is cheap). Sign-off IS still required for: merging a task branch into `main`, force-pushes, branch deletion, dependency removal, and any other destructive or shared-state action called out in the system prompt's "Executing actions with care" section.
 - Build and run before reporting a change as ready; verify output matches previous run. If verification fails, fix forward or revert — don't leave broken state on the branch. **`tsc --noEmit` alone does not refresh `out/webview.js`** — if a TS change needs to be exercised in the live editor, run `npm run build` (the Stop hook does this automatically; manual subagent verifications do not).
+  - **Verify recipe (NEVER run the sim in the foreground):** `go build ./... && go test ./...`; then `cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js && npm run build`; then from repo root `bash scripts/stop-checks.sh` (must exit 0 — runs the guard suite incl. message-kind-parity, polar-only-nav, no-camera-roundtrip). An extension-host change needs VS Code "Developer: Reload Window" (reopening a file only reloads the webview).
 - One logical change per commit.
 - Push each commit to the current task branch.
 - **Cost markers:** only record a `($N.NN)` cost marker on a commit (or bundle of commits) when the work was sized at **≥$5 expected** beforehand. Sub-$5 work lands without a marker. Bundle small commits into ≥$5 chunks for marker purposes. Pre-v0 sub-$5 markers stay as historical record but are no longer the convention.
@@ -94,8 +95,7 @@ docs, and the auto-memory dir, costing tokens and time.
 
 ## Planning docs are branch-local
 
-Planning docs (anything under `docs/planning/` except `handoff.md`, `session-log.md`,
-and `continuation-prompt-template.md`) are authored on the
+Planning docs (anything under `docs/planning/` except `session-log.md`) are authored on the
 task branch where the work happens and do not ride the merge to main. Each new planning
 doc starts with frontmatter naming its originating branch:
 
@@ -113,21 +113,24 @@ This rule is forward-only. Existing untagged docs stay until individually judged
 
 ## Session handoff
 
-Live state of the active task branch lives at
-[docs/planning/visual-editor/handoff.md](docs/planning/visual-editor/handoff.md).
-Read it first — it names the branch, contract status, open options,
-and the ALWAYS clause that keeps the loop self-perpetuating. Schema
-is in
-[docs/planning/visual-editor/continuation-prompt-template.md](docs/planning/visual-editor/continuation-prompt-template.md).
-Do not rely on chat history for handoff context; the next session may
-be a fresh model with no transcript.
+Live task state is NOT stored in a hand-maintained doc (that kept drifting — it was a
+cache of state whose authoritative source is git/memory/MODEL.md). Instead it is DERIVED:
 
-Handoff updates RIDE THE TASK BRANCH — they merge to main with the work. Avoid
-standalone handoff/doc commits directly to main; main advances only through merges.
-This follows the Workflow rule "if on the default branch, branch first" — branch first,
-fold the handoff update into that task branch.
+- **Open work** = the `task/*` branches, each carrying a one-line description set with
+  `git config branch.<name>.description "..."`. Merging + deleting a branch removes its
+  item automatically — nothing to hand-sync. (Descriptions are local git config, not
+  pushed; this is a solo repo so that is fine.)
+- **`tools/next.sh`** prints the live view: current branch, every `task/*` branch with
+  its description, recent merges to main, and pointers to the durable docs. Run it first
+  in a fresh session.
+- **Durable doctrine** lives in MODEL.md, this file, and `memory/` — read MEMORY.md.
+- **History / friction** lives in `git log` and
+  [session-log.md](docs/planning/visual-editor/session-log.md).
 
-**Write before compacting.** Save important context to a file/memory/handoff before
+Do not recreate a handoff.md or a continuation-prompt template; if state needs a home,
+it belongs on a branch description, in memory, or in MODEL.md — not in a synced snapshot.
+
+**Write before compacting.** Save important context to a file/memory before
 `/compact` — compaction keeps the things on the left and loses the things on the right
 (borrowed, ECC strategic-compact):
 
@@ -137,7 +140,7 @@ fold the handoff update into that task branch.
 | `memory/` files | File contents you previously read |
 | Git state (commits, branches) | Multi-step conversation context |
 | Files on disk | Tool call history and counts |
-| Planning docs / handoff.md | Preferences stated only verbally (not in a file) |
+| Planning docs | Preferences stated only verbally (not in a file) |
 
 ## Drift checklist
 

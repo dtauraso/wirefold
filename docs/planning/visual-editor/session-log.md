@@ -18,6 +18,39 @@ Append-only log of friction surfaced while driving the visual editor. Newest fir
 
 ---
 
+## 2026-06-27 — Shipped summary (folded from the retired handoff.md "What shipped")
+
+Durable record of work that reached `main`, relocated when `handoff.md` was retired in
+favor of git-derived state (`tools/next.sh` + branch descriptions):
+
+- **Viewpoint nav math moved TS → Go; camera is Go-owned and POLAR.** Go holds
+  `(pivot, r, pos, up)` (`nodes/Wiring/viewpoint.go`) and does angle-only spherical trig
+  (`spherical.go`: `dir{θ,φ}`, `rot{axis,angle}`, `rotateDir`/`arcBetween`/`angleAboutAxis`).
+  Trig is **epsilon-free** (great-circle bearing form, `atan2` of two unnormalized terms —
+  no `/sinθ`, no pole special-case). Four gestures route through Go: `edit` op `viewpoint`
+  (`kind` = set/orbit/orbit-locked/zoom/pan) in, `camera` trace event out. TS does only the
+  two edge conversions (pointer px→angles; polar→three.js, quaternion at draw) —
+  `viewpoint-bridge.ts`, `CameraFromStore.tsx`. Persists as `cameraPolar` in scene.json.
+  Only Cartesian in Go is `pivot` (translated, never rotated). Zoom-to-cursor is a dolly = pan.
+- **Pick resolution** by `userData.nodeId`/`body` across all pick paths; z-blind proximity
+  fallback gone; handholds excluded from node picks.
+- **Port-move** projects pointer onto the node's own ring plane (`z = nodeCenter.z`), not `z=0`.
+- **Dynamic port auto-aim** (`AimedPortRegistry`, `aimed_ports.go` + loader.go): edges 1→2,
+  1→6, 1→8, 2→3, 2→7 aim source port at child and child input back — radial spokes from LOAD.
+  Node 8 `FeedbackOut` (8→1) stays ring-anchored and manually movable.
+- **θ-lock** (`thetaLock`, lock.go): nodes 2 & 6 on 1, and 3 & 7 on 2, share θ, each keeps its
+  own φ. Registered by id in loader.go (stopgap, like the chord lock).
+- **Node kind `Excitatory` → `Pulse`** (pure rename; package `nodes/pulse`; nodes 6,7 `Pulse`).
+- **HoldFlip (node 4)** mirrors Pulse: main loop drains input to LATEST + updates interior bead
+  immediately; drive goroutine continuously pulses the flip (`1-held`). Continuous-drive output;
+  before any input it drives the `-1` placeholder.
+- **WindowAndGate (node 5)** discards `-1` placeholders, re-samples each side to most-recent real bead.
+- **Trace** serializes stdout writes (`drain()` holds the mutex across the sink write).
+- **Polar frame markers + scene-tori "rings" toggle** (theta-lock-diag keepers): camera-
+  independent +y/+x/+z axis markers + labels in NavGuides.tsx; Go-owned scene-tori show/hide.
+
+---
+
 ## 2026-06-12 — post-redesign follow-ups: prebuilt-binary runner + zombie-bead reset (2 branches)
 
 **Observation:** After the persistence redesign merged, two friction points surfaced
