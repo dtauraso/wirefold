@@ -48,6 +48,7 @@ export type EditMsg =
   | { type: "edit"; op: "angle-labels" }
   | { type: "edit"; op: "sel-sphere-poles" }
   | { type: "edit"; op: "handholds-vis" }
+  | { type: "edit"; op: "labels-vis" }
   | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean }
   | {
       type: "edit";
@@ -209,6 +210,7 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "angle-labels":
     case "sel-sphere-poles":
     case "handholds-vis":
+    case "labels-vis":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     case "guide-vis":

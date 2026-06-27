@@ -148,6 +148,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "handholds-vis") {
         // Toggle the rotation-handhold grab-sphere visibility. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "handholds-vis" }));
+      } else if (msg.op === "labels-vis") {
+        // Toggle the global node-label visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "labels-vis" }));
       } else if (msg.op === "guide-vis") {
         // Push all 6 polar-guide visibilities to Go on reload so Go's authoritative state
         // matches persisted scene settings. Explicit values — not a toggle.

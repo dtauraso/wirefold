@@ -419,6 +419,13 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleHandholds(tr)
+	case msg.Op == "labels-vis":
+		// Toggle the global node-label visibility and emit a labels-global event.
+		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).
+		if md == nil {
+			return
+		}
+		md.ToggleLabelsGlobal(tr)
 	case msg.Op == "guide-vis":
 		// Set all 6 polar-guide visibilities to explicit values. Sent by TS on window reload
 		// so Go's authoritative state matches persisted scene settings.
