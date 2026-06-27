@@ -157,7 +157,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "guide-vis") {
         // Push all 6 polar-guide visibilities to Go on reload so Go's authoritative state
         // matches persisted scene settings. Explicit values — not a toggle.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles, handholds: msg.handholds, labelsGlobal: msg.labelsGlobal }));
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles, handholds: msg.handholds, labelsGlobal: msg.labelsGlobal, badgesGlobal: msg.badgesGlobal }));
       }
       return;
   }

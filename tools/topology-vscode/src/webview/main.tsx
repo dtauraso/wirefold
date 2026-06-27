@@ -104,6 +104,8 @@ window.addEventListener("message", (e) => {
       handholds: viewerState.handholdsVisible !== false,
       // labelsGlobalHidden is hidden sense (true=hidden); labelsGlobal is visible sense.
       labelsGlobal: viewerState.labelsGlobalHidden !== true,
+      // badgesHidden is hidden sense (true=hidden); badgesGlobal is visible sense.
+      badgesGlobal: viewerState.badgesHidden !== true,
     };
     postLog("guide-load-push", { persisted: {
       sceneTori: viewerState.sceneToriVisible, scenePoles: viewerState.scenePolesVisible,

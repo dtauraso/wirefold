@@ -97,6 +97,7 @@ type stdinMsg struct {
 	SelSpherePoles bool `json:"selSpherePoles"`
 	Handholds     bool `json:"handholds"`
 	LabelsGlobal  bool `json:"labelsGlobal"`
+	BadgesGlobal  bool `json:"badgesGlobal"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -440,6 +441,6 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil {
 			return
 		}
-		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.LabelsGlobal, tr)
+		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.LabelsGlobal, msg.BadgesGlobal, tr)
 	}
 }
