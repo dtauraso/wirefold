@@ -29,7 +29,7 @@ export type Node = {
   data?: unknown;
   // Per-instance port override. When present, supersedes
   // NODE_TYPES[type].inputs/outputs. Used for variable-arity kinds
-  // (e.g. WindowAndGate, an AND over N input slots).
+  // (e.g. WindowAndInhibitRightGate, an AND over N input slots).
   inputs?: Port[];
   outputs?: Port[];
   // Struct field values injected before the first tick (wire:"data.state").

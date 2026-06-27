@@ -9,5 +9,5 @@ import (
 	_ "github.com/dtauraso/wirefold/nodes/input"
 	_ "github.com/dtauraso/wirefold/nodes/pacer"
 	_ "github.com/dtauraso/wirefold/nodes/pulse"
-	_ "github.com/dtauraso/wirefold/nodes/windowandgate"
+	_ "github.com/dtauraso/wirefold/nodes/windowandinhibitrightgate"
 )

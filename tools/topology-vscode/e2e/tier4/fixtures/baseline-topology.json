@@ -50,7 +50,7 @@
     },
     {
       "id": "inhibitRight0",
-      "type": "WindowAndGate",
+      "type": "WindowAndInhibitRightGate",
       "role": "inhibit-right-gate",
       "x": 573,
       "y": 210,
@@ -230,7 +230,7 @@
     {
       "kind": "inhibit-in",
       "name": "Inhibit in",
-      "desc": "Input to WindowAndGate (left=1 AND right=1 → fires)"
+      "desc": "Input to WindowAndInhibitRightGate (left=1 AND right=1 → fires)"
     }
   ],
   "notes": [

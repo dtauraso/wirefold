@@ -1,4 +1,4 @@
-package windowandgate
+package windowandinhibitrightgate
 
 import (
 	"context"

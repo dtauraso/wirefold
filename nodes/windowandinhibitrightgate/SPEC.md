@@ -1,17 +1,17 @@
-# WindowAndGateNode
+# WindowAndInhibitRightGateNode
 
 ## View
 
 | Field | Value |
 |-------|-------|
-| kind | windowAndGate |
+| kind | windowAndInhibitRightGate |
 | bg | #fce4ec |
 | border | #880e4f |
 | text | #880e4f |
 | accent | #880e4f |
 | minWidth | 110 |
-| defaultLabel | windowAndGate |
-| role | window-and-gate |
+| defaultLabel | windowAndInhibitRightGate |
+| role | window-and-inhibit-right-gate |
 | shape | rect |
 | fill | #fce4ec |
 | stroke | #880e4f |

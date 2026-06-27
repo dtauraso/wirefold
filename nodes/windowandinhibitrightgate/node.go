@@ -1,4 +1,4 @@
-package windowandgate
+package windowandinhibitrightgate
 
 import (
 	"context"
@@ -209,5 +209,5 @@ func (g *Node) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("WindowAndGate", func() any { return &Node{} })
+	Wiring.Register("WindowAndInhibitRightGate", func() any { return &Node{} })
 }

@@ -14,7 +14,7 @@ interface NodeMeta {
 }
 
 // Only STATEFUL nodes carry a data.json (e.g. Input, Hold, HoldNewSendOld, Pacer);
-// stateless kinds (HoldFlip, WindowAndGate, Pulse) have none. Skip the latter
+// stateless kinds (HoldFlip, WindowAndInhibitRightGate, Pulse) have none. Skip the latter
 // rather than asserting every node has a data.json — absence is correct, not a failure.
 const nodes = readdirSync(TREE_NODES_DIR)
   .map((idDir) => {
