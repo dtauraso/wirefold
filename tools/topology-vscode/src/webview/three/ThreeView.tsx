@@ -12,7 +12,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { GlobalLabelsToggle, HomeButton, GuidelinesToggle, RingsToggle, ScenePolesToggle, NodePolesToggle, AngleLabelsToggle, SelSpherePolesToggle, HandholdsToggle } from "./camera-ui";
+import { GlobalLabelsToggle, BadgesToggle, HomeButton, GuidelinesToggle, RingsToggle, ScenePolesToggle, NodePolesToggle, AngleLabelsToggle, SelSpherePolesToggle, HandholdsToggle } from "./camera-ui";
 import { useCameraStore } from "./camera-store";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
@@ -45,6 +45,7 @@ export function ThreeView() {
   const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
     () => viewerState.labelsGlobalHidden ?? false,
   );
+  const [badgesHidden, setBadgesHidden] = useState<boolean>(() => viewerState.badgesHidden ?? false);
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
   // Ref mirror of edges — read in interaction-controls to compute incident edges
@@ -206,6 +207,18 @@ export function ThreeView() {
     });
   }, []);
 
+  const toggleBadges = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBadgesHidden((prev) => {
+      const next = !prev;
+      patchViewerState((v) => {
+        v.badgesHidden = next || undefined;
+      });
+      scheduleViewSave();
+      return next;
+    });
+  }, []);
+
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
       {/* Canvas + gesture capture layer */}
@@ -284,7 +297,7 @@ export function ThreeView() {
           Only shown when N >= 1. Recomputed on camera settle (not per-frame).
           Full occlusion is allowed — layout never moves (honesty preserved).
           TODO(3d): large-count cap/format deferred */}
-      {nodes.map((n) => {
+      {!badgesHidden && nodes.map((n) => {
         const count = occlusionCounts.get(n.id);
         if (!count || count < 1) return null;
         const pos = labelMap.get(n.id);
@@ -318,6 +331,7 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
+      <BadgesToggle hidden={badgesHidden} onClick={toggleBadges} />
       <GuidelinesToggle />
       {guidelinesActive !== false && (
         <>

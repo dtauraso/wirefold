@@ -1,5 +1,5 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// GlobalLabelsToggle, HomeButton, RingsToggle, ScenePolesToggle, NodePolesToggle,
+// GlobalLabelsToggle, BadgesToggle, HomeButton, RingsToggle, ScenePolesToggle, NodePolesToggle,
 // AngleLabelsToggle — no scene/Go logic.
 
 import React, { useCallback } from "react";
@@ -400,6 +400,42 @@ export function GlobalLabelsToggle({
       }}
     >
       {hidden ? "▴" : "▾"} labels
+    </div>
+  );
+}
+
+/** BADGES TOGGLE: top-right button to show/hide occlusion +N badges. */
+export function BadgesToggle({
+  hidden,
+  onClick,
+}: {
+  hidden: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      title={hidden ? "Show +N badges" : "Hide +N badges"}
+      style={{
+        position: "absolute",
+        top: 280,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: hidden ? "#888" : "#ddd",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      {hidden ? "▴" : "▾"} +N badges
     </div>
   );
 }

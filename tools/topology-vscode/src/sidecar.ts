@@ -5,10 +5,10 @@
 //   topology.json#view  → diagram fields: nodes (positions), directlyFadedNodes,
 //                          directlyFadedEdges, fadeEdgeOrder. Go reads view.nodes.
 //   topology.scene.json → scene fields (flat top-level): camera, camera3d,
-//                          labelsGlobalHidden. Gitignored; absent on fresh clone.
+//                          labelsGlobalHidden, badgesHidden. Gitignored; absent on fresh clone.
 
 // The scene-owned keys (stored flat in topology.scene.json).
-const SCENE_KEYS = new Set(["camera", "camera3d", "labelsGlobalHidden"]);
+const SCENE_KEYS = new Set(["camera", "camera3d", "labelsGlobalHidden", "badgesHidden"]);
 
 // Extract the `view` key from topology.json text, with scene keys removed.
 // Returns undefined when absent / not parseable.

@@ -54,6 +54,7 @@ export type ViewerState = {
   // Faded-edge ids in fade order (oldest → newest). Drives reverse-playback unfade.
   fadeEdgeOrder?: string[];
   labelsGlobalHidden?: boolean;
+  badgesHidden?: boolean;
   // sceneToriVisible: whether the polar-guide tori are shown. undefined = shown (default true).
   sceneToriVisible?: boolean;
   // scenePolesVisible: whether the scene-center pole frame is shown. undefined = shown (default true).
@@ -128,6 +129,7 @@ export function parseViewerState(text: string | undefined): ViewerState {
     else console.warn("topology.view.json: fadeEdgeOrder is not a string[], dropping");
   }
   if (raw.labelsGlobalHidden === true) out.labelsGlobalHidden = true;
+  if (raw.badgesHidden === true) out.badgesHidden = true;
   if (raw.sceneToriVisible === false) out.sceneToriVisible = false;
   if (raw.scenePolesVisible === false) out.scenePolesVisible = false;
   if (raw.nodePolesVisible === false) out.nodePolesVisible = false;
@@ -161,7 +163,7 @@ export function serializeViewerState(s: ViewerState): string {
 }
 
 // Scene-only fields (camera, camera3d, cameraPolar, labelsGlobalHidden, guideline visibilities) — for topology.scene.json.
-export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "guidelinesActive">;
+export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "guidelinesActive">;
 
 export function serializeSceneState(s: ViewerState): string {
   const scene: SceneState = {};
@@ -169,6 +171,7 @@ export function serializeSceneState(s: ViewerState): string {
   if (s.camera3d !== undefined) scene.camera3d = s.camera3d;
   if (s.cameraPolar !== undefined) scene.cameraPolar = s.cameraPolar;
   if (s.labelsGlobalHidden !== undefined) scene.labelsGlobalHidden = s.labelsGlobalHidden;
+  if (s.badgesHidden !== undefined) scene.badgesHidden = s.badgesHidden;
   if (s.sceneToriVisible === false) scene.sceneToriVisible = false;
   if (s.scenePolesVisible === false) scene.scenePolesVisible = false;
   if (s.nodePolesVisible === false) scene.nodePolesVisible = false;
@@ -188,6 +191,8 @@ export function mergeSceneIntoViewerState(base: ViewerState, sceneParsed: Viewer
   if (sceneParsed.cameraPolar !== undefined) out.cameraPolar = sceneParsed.cameraPolar;
   if (sceneParsed.labelsGlobalHidden !== undefined) out.labelsGlobalHidden = sceneParsed.labelsGlobalHidden;
   else delete out.labelsGlobalHidden; // absent = false (labels shown)
+  if (sceneParsed.badgesHidden !== undefined) out.badgesHidden = sceneParsed.badgesHidden;
+  else delete out.badgesHidden; // absent = false (badges shown)
   if (sceneParsed.sceneToriVisible !== undefined) out.sceneToriVisible = sceneParsed.sceneToriVisible;
   else delete out.sceneToriVisible; // absent = true (visible)
   if (sceneParsed.scenePolesVisible !== undefined) out.scenePolesVisible = sceneParsed.scenePolesVisible;
