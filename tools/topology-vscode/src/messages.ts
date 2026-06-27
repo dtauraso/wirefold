@@ -50,7 +50,8 @@ export type EditMsg =
   | { type: "edit"; op: "handholds-vis" }
   | { type: "edit"; op: "labels-vis" }
   | { type: "edit"; op: "badges-vis" }
-  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; labelsGlobal: boolean; badgesGlobal: boolean }
+  | { type: "edit"; op: "overlays-vis" }
+  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean }
   | {
       type: "edit";
       op: "viewpoint";
@@ -115,7 +116,8 @@ export type TraceEvent =
   | { step: number; kind: "sel-sphere-poles"; visible: boolean }
   | { step: number; kind: "handholds"; visible: boolean }
   | { step: number; kind: "labels-global"; visible: boolean }
-  | { step: number; kind: "badges-global"; visible: boolean };
+  | { step: number; kind: "badges-global"; visible: boolean }
+  | { step: number; kind: "overlays-vis"; visible: boolean };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -214,16 +216,18 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "handholds-vis":
     case "labels-vis":
     case "badges-vis":
+    case "overlays-vis":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     case "guide-vis":
       // Batched explicit visibilities pushed on load to restore persisted state.
-      // All six must be booleans, else drop as malformed.
+      // All must be booleans, else drop as malformed.
       if (
         typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
         typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
         typeof m.selSpherePoles !== "boolean" || typeof m.handholds !== "boolean" ||
-        typeof m.labelsGlobal !== "boolean" || typeof m.badgesGlobal !== "boolean"
+        typeof m.labelsGlobal !== "boolean" || typeof m.badgesGlobal !== "boolean" ||
+        typeof m.overlays !== "boolean"
       ) return undefined;
       return (m as unknown as WebviewToHostMsg);
     default:

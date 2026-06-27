@@ -89,7 +89,7 @@ type stdinMsg struct {
 	Z float64 `json:"z"`
 	// Viewpoint is the payload for op=="viewpoint"; nil when the op is anything else.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
-	// guide-vis payload: explicit visibility for all 6 polar-guide groups.
+	// guide-vis payload: explicit visibility for all polar-guide groups plus master.
 	Tori          bool `json:"tori"`
 	ScenePoles    bool `json:"scenePoles"`
 	NodePoles     bool `json:"nodePoles"`
@@ -98,6 +98,7 @@ type stdinMsg struct {
 	Handholds     bool `json:"handholds"`
 	LabelsGlobal  bool `json:"labelsGlobal"`
 	BadgesGlobal  bool `json:"badgesGlobal"`
+	Overlays      bool `json:"overlays"`
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
@@ -435,12 +436,19 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleBadgesGlobal(tr)
-	case msg.Op == "guide-vis":
-		// Set all 6 polar-guide visibilities to explicit values. Sent by TS on window reload
-		// so Go's authoritative state matches persisted scene settings.
+	case msg.Op == "overlays-vis":
+		// Toggle the master overlays visibility and emit an overlays-vis event.
+		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).
 		if md == nil {
 			return
 		}
-		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.LabelsGlobal, msg.BadgesGlobal, tr)
+		md.ToggleOverlaysVis(tr)
+	case msg.Op == "guide-vis":
+		// Set all polar-guide visibilities plus master to explicit values. Sent by TS on window
+		// reload so Go's authoritative state matches persisted scene settings.
+		if md == nil {
+			return
+		}
+		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.LabelsGlobal, msg.BadgesGlobal, msg.Overlays, tr)
 	}
 }

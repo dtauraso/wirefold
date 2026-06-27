@@ -378,6 +378,9 @@ type MoveDispatch struct {
 	// badgesGlobalVisible is the current global occlusion-badge visibility. true by default.
 	// Toggled by ToggleBadgesGlobal; emitted via EmitBadgesGlobal.
 	badgesGlobalVisible bool
+	// overlaysVisible is the master overlays visibility. true by default (all overlays shown).
+	// Toggled by ToggleOverlaysVis; emitted via EmitOverlaysVis.
+	overlaysVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -402,6 +405,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		handholdsVisible:      true,
 		labelsGlobalVisible:   true,
 		badgesGlobalVisible:   true,
+		overlaysVisible:       true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -864,10 +868,22 @@ func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace) {
 	tr.BadgesGlobal(md.badgesGlobalVisible)
 }
 
+// ToggleOverlaysVis flips the master overlays visibility and emits an overlays-vis event.
+// Called from applyEdit on op="overlays-vis"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace) {
+	md.overlaysVisible = !md.overlaysVisible
+	tr.OverlaysVis(md.overlaysVisible)
+}
+
+// EmitOverlaysVis emits the current master overlays visibility without toggling it.
+func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace) {
+	tr.OverlaysVis(md.overlaysVisible)
+}
+
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
 // push so settings survive a Go respawn on window reload) and emits each so the renderer
 // reflects them. Set-to-value, unlike the flip-style Toggle* methods.
-func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds, labelsGlobal, badgesGlobal bool, tr *T.Trace) {
+func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds, labelsGlobal, badgesGlobal, overlays bool, tr *T.Trace) {
 	md.sceneToriVisible = tori
 	md.scenePolesVisible = scenePoles
 	md.nodePolesVisible = nodePoles
@@ -876,6 +892,7 @@ func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLab
 	md.handholdsVisible = handholds
 	md.labelsGlobalVisible = labelsGlobal
 	md.badgesGlobalVisible = badgesGlobal
+	md.overlaysVisible = overlays
 	md.EmitSceneTori(tr)
 	md.EmitScenePoles(tr)
 	md.EmitNodePoles(tr)
@@ -884,5 +901,6 @@ func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLab
 	md.EmitHandholds(tr)
 	md.EmitLabelsGlobal(tr)
 	md.EmitBadgesGlobal(tr)
+	md.EmitOverlaysVis(tr)
 }
 

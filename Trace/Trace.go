@@ -108,13 +108,17 @@ const (
 	// the visibility is toggled (op="badges-vis"), so the renderer shows or hides
 	// all occlusion +N badges in ThreeView without computing any geometry.
 	KindBadgesGlobal = "badges-global"
+	// KindOverlaysVis carries the master overlays visibility state. Go emits it when
+	// the master toggle is triggered (op="overlays-vis"), so the renderer shows or hides
+	// all 8 overlays at once without mutating individual overlay bools.
+	KindOverlaysVis = "overlays-vis"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -420,6 +424,13 @@ func (t *Trace) BadgesGlobal(visible bool) {
 	t.emit(Event{Kind: KindBadgesGlobal, Visible: visible})
 }
 
+// OverlaysVis emits the master overlays visibility state. visible=true = all overlays shown;
+// visible=false = all overlays hidden. Go emits this on op="overlays-vis" so the renderer
+// shows/hides all 8 overlays at once without mutating individual overlay bools.
+func (t *Trace) OverlaysVis(visible bool) {
+	t.emit(Event{Kind: KindOverlaysVis, Visible: visible})
+}
+
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
 // keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
 // emits it when a wire drops a bead mid-flight (edge deleted during traversal).
@@ -718,7 +729,7 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

@@ -12,7 +12,7 @@ function guideSnapshot() {
     nodePoles: viewerState.nodePolesVisible,
     angleLabels: viewerState.angleLabelsVisible,
     selSpherePoles: viewerState.selSpherePolesVisible,
-    guidelinesActive: viewerState.guidelinesActive,
+    overlaysActive: viewerState.overlaysActive,
   };
 }
 

@@ -154,10 +154,13 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "badges-vis") {
         // Toggle the global occlusion-badge visibility. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "badges-vis" }));
+      } else if (msg.op === "overlays-vis") {
+        // Toggle the master overlays visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "overlays-vis" }));
       } else if (msg.op === "guide-vis") {
-        // Push all 6 polar-guide visibilities to Go on reload so Go's authoritative state
-        // matches persisted scene settings. Explicit values — not a toggle.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles, handholds: msg.handholds, labelsGlobal: msg.labelsGlobal, badgesGlobal: msg.badgesGlobal }));
+        // Push all polar-guide visibilities plus master overlays to Go on reload so Go's
+        // authoritative state matches persisted scene settings. Explicit values — not a toggle.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles, handholds: msg.handholds, labelsGlobal: msg.labelsGlobal, badgesGlobal: msg.badgesGlobal, overlays: msg.overlays }));
       }
       return;
   }
