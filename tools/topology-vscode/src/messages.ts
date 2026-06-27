@@ -113,7 +113,8 @@ export type TraceEvent =
   | { step: number; kind: "angle-labels"; visible: boolean }
   | { step: number; kind: "sel-sphere-poles"; visible: boolean }
   | { step: number; kind: "handholds"; visible: boolean }
-  | { step: number; kind: "labels-global"; visible: boolean };
+  | { step: number; kind: "labels-global"; visible: boolean }
+  | { step: number; kind: "badges-global"; visible: boolean };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
