@@ -8,45 +8,20 @@ needed) and proceed.
 
 ---
 
-## Active branch: `task/theta-lock-diag` (in flight) — else `main` is current
+## Active branch: `main` is current
 
-This branch now carries BOTH keepers and a throwaway diagnostic. **Before merging, split
-the keepers out and drop the diagnostic logging** (it has served its purpose — see below).
+The `task/theta-lock-diag` keepers landed on `main` (polar frame markers + labels in
+NavGuides.tsx; Go-owned scene-tori "rings" toggle) and the throwaway diagnostic was
+dropped. **FINDING (kept for context):** the reported "persistent θ mismatch between 3
+and 7" was NOT a θ bug — nodes 3 & 7 share θ exactly and differ only in φ; the apparent
+mismatch is the φ separation seen through a TILTED camera (screen-up ≠ world +y), hence
+the pole markers. Still untested: dragging the FOLLOWER (node 7) — every captured drag
+was the leader only. Open question for David: do 3/7 want a φ relationship (mirror φ for
+symmetry vs current free φ)?
 
-**KEEPERS (NavGuides.tsx + a Go-owned toggle):**
-- **Polar frame markers + labels.** Three camera-independent colored axes at the
-  content-sphere center showing the layout's WORLD frame: **+y pole (green)**, **+x =
-  refX/φ0 (red)**, **+z = φ90 (blue)** (three.js X=red/Y=green/Z=blue), each with a
-  billboard sprite label ("+Y pole" / "+X φ0" / "+Z φ90", canvas-texture via `AxisLabel`,
-  always faces camera). Decorative (raycast off). They exist because "up" in the layout is
-  world +y, NOT the screen's up — see the finding below.
-- **Go-owned scene-tori show/hide toggle.** Toolbar **"rings"** button. Go owns the bool
-  (`MoveDispatch.sceneToriVisible`, default true); a `tori-vis` edit op toggles it
-  (stdin_reader.go → `ToggleSceneTori`) and Go streams it via a new `scene-tori` trace
-  event (Trace.go). TS only ASKS Go to toggle and reflects Go's streamed value (in the
-  EXISTING camera-store — see "no store" rule). Hides ONLY the two tori; handholds and the
-  +y/+x/+z markers stay visible.
+Start new work from `main`.
 
-**THROWAWAY DIAGNOSTIC (lock.go + node_move.go — REMOVE before merge):**
-- `theta_lock` breadcrumb in `applyLocks` (tautological — re-reads what it just set).
-- `pair_theta` breadcrumb after EVERY `RootMove` (`logPairTheta`): `moved=<n> th3=… th7=…
-  d=…`. NOTE: keep the `tr *T.Trace` field on `MoveDispatch` (the toggle keeper needs it);
-  remove only the breadcrumb calls + `logPairTheta`.
-
-**FINDING — the reported "persistent θ mismatch between 3 and 7" is NOT a θ bug.**
-Measured three independent ways on fresh logs — the θ-lock roots (`pair_theta` d=0.0000
-over all moves), the emitted node-geometry (final θ3=θ7), and node 2's port directions
-(`ToNext0`/`ToNext1` both θ=67.8°). **Nodes 3 & 7 (and edges 2→3 / 2→7) share θ exactly;
-they differ only in φ (azimuth, ~171° apart).** The apparent "different θ" in the editor
-is the φ separation seen through a TILTED camera (screen-up ≠ world +y) — hence the pole
-markers. Also: every captured drag was `moved=3` only — **node 7 (the follower) was never
-dragged**, so "does dragging the follower fire the lock?" is still UNTESTED (any real bug
-would live there). The θ-lock holds when the leader is dragged. Open question for David:
-do 3/7 want a φ relationship too (mirror φ for symmetry vs current free φ)?
-
-All other work this session is **merged to `main`**. Start unrelated new work from `main`.
-
-## What shipped (this session, all on `main`)
+## What shipped (recent, all on `main`)
 
 **Viewpoint nav math moved TS → Go.** The camera is now Go-owned and POLAR. Go holds the
 state `(pivot, r, pos, up)` (`nodes/Wiring/viewpoint.go`) and does angle-only spherical
@@ -126,20 +101,17 @@ leaking into the VS Code "topology run" Output channel).
 
 ## Open / next (friction-driven)
 
-1. **Land `task/theta-lock-diag`** — the θ "mismatch" was diagnosed as φ-through-tilted-
-   camera, NOT a θ bug (see Active branch FINDING). Next: split the keepers (markers/labels
-   + scene-tori toggle) into a clean branch, DROP the diagnostic logging, merge. Still
-   untested: does dragging the FOLLOWER (node 7) fire the lock? And does David want a φ
-   relationship on 3/7 (mirror vs free)?
-2. **Pre-existing `MoveDispatch` data race** (under `-race`): `heldCenters`/`applyLocks`
+1. **Pre-existing `MoveDispatch` data race** (under `-race`): `heldCenters`/`applyLocks`
    (node_move.go:~455, lock.go) reads `centers` concurrently with a `nodeMover.handle`
    write (node_move.go:~129). Not caught by stop-checks (no `-race`). Its own fix branch.
-3. **Stop emitting `-1` placeholders at the source** — Pulse + HoldFlip drive only when
+2. **Stop emitting `-1` placeholders at the source** — Pulse + HoldFlip drive only when
    `held != -1`, so wires carry only real beads (cleans the whole chain).
-4. **node 4 continuous-pulse → event-driven output** (optional; the flood to node 5 is
+3. **node 4 continuous-pulse → event-driven output** (optional; the flood to node 5 is
    why node 5 needed the `-1`/latest fixes).
-5. **Layout pole singularity** (φ blow-up near +y) — apply the epsilon-free bearing form to
+4. **Layout pole singularity** (φ blow-up near +y) — apply the epsilon-free bearing form to
    the θ-lock if the pole behavior needs to be stable.
+5. **Test θ-lock follower drag** — does dragging node 7 (the follower) fire the lock?
+   Untested; any real θ-lock bug would live there.
 
 ### Verify (NEVER run the sim)
 `go build ./... && go test ./...`, then
