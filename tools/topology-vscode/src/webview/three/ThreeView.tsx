@@ -42,9 +42,8 @@ export function ThreeView() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
-  const [globalLabelsHidden, setGlobalLabelsHidden] = useState<boolean>(
-    () => viewerState.labelsGlobalHidden ?? false,
-  );
+  // globalLabelsHidden is Go-owned: written by pump on labels-global trace events.
+  const globalLabelsHidden = useCameraStore((s) => s.labelsGlobalHidden);
   const [badgesHidden, setBadgesHidden] = useState<boolean>(() => viewerState.badgesHidden ?? false);
   // Ref mirror of nodes — read in dolly/wheel to avoid stale closure.
   const nodesRef = useRef<RFNode<NodeData>[]>(nodes);
@@ -195,17 +194,6 @@ export function ThreeView() {
 
   const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
 
-  const toggleGlobalLabels = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setGlobalLabelsHidden((prev) => {
-      const next = !prev;
-      patchViewerState((v) => {
-        v.labelsGlobalHidden = next || undefined;
-      });
-      scheduleViewSave();
-      return next;
-    });
-  }, []);
 
   const toggleBadges = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -330,7 +318,7 @@ export function ThreeView() {
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
-      <GlobalLabelsToggle hidden={globalLabelsHidden} onClick={toggleGlobalLabels} />
+      <GlobalLabelsToggle />
       <BadgesToggle hidden={badgesHidden} onClick={toggleBadges} />
       <GuidelinesToggle />
       {guidelinesActive !== false && (
