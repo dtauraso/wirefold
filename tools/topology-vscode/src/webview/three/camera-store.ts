@@ -18,6 +18,9 @@ interface CameraState {
   angleLabelsVisible: boolean;
   selSpherePolesVisible: boolean;
   handholdsVisible: boolean;
+  // labelsGlobalHidden is true when global node-label visibility is off. Default false (labels shown).
+  // Written by pump on "labels-global" trace events; read by ThreeView's label overlay gate.
+  labelsGlobalHidden: boolean;
   // guidelinesActive is the TS-only master gate for the whole polar-guideline group
   // (tori + all pole frames + angle labels). When false the toolbar hides their individual
   // buttons and NavGuides suppresses every guide; each guide's own visibility above is
@@ -30,6 +33,7 @@ interface CameraState {
   setAngleLabelsVisible: (v: boolean) => void;
   setSelSpherePolesVisible: (v: boolean) => void;
   setHandholdsVisible: (v: boolean) => void;
+  setLabelsGlobalHidden: (v: boolean) => void;
   setGuidelinesActive: (v: boolean) => void;
 }
 
@@ -41,6 +45,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   angleLabelsVisible: true,
   selSpherePolesVisible: true,
   handholdsVisible: true,
+  labelsGlobalHidden: false,
   guidelinesActive: true,
   set: (c) => set({ camera: c }),
   setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
@@ -49,6 +54,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   setAngleLabelsVisible: (v) => set({ angleLabelsVisible: v }),
   setSelSpherePolesVisible: (v) => set({ selSpherePolesVisible: v }),
   setHandholdsVisible: (v) => set({ handholdsVisible: v }),
+  setLabelsGlobalHidden: (v) => set({ labelsGlobalHidden: v }),
   setGuidelinesActive: (v) => set({ guidelinesActive: v }),
 }));
 

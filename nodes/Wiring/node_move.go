@@ -372,6 +372,9 @@ type MoveDispatch struct {
 	// handholdsVisible is the current rotation-handhold grab-sphere visibility. true by default.
 	// Toggled by ToggleHandholds; emitted via EmitHandholds.
 	handholdsVisible bool
+	// labelsGlobalVisible is the current global node-label visibility. true by default.
+	// Toggled by ToggleLabelsGlobal; emitted via EmitLabelsGlobal.
+	labelsGlobalVisible bool
 }
 
 // setRoots installs the polar layout built at load (buildRoots).
@@ -394,6 +397,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		angleLabelsVisible:    true,
 		selSpherePolesVisible: true,
 		handholdsVisible:      true,
+		labelsGlobalVisible:   true,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -830,6 +834,18 @@ func (md *MoveDispatch) ToggleHandholds(tr *T.Trace) {
 // EmitHandholds emits the current handhold visibility without toggling it.
 func (md *MoveDispatch) EmitHandholds(tr *T.Trace) {
 	tr.Handholds(md.handholdsVisible)
+}
+
+// ToggleLabelsGlobal flips the global node-label visibility and emits a labels-global event.
+// Called from applyEdit on op="labels-vis"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace) {
+	md.labelsGlobalVisible = !md.labelsGlobalVisible
+	tr.LabelsGlobal(md.labelsGlobalVisible)
+}
+
+// EmitLabelsGlobal emits the current global label visibility without toggling it.
+func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace) {
+	tr.LabelsGlobal(md.labelsGlobalVisible)
 }
 
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
