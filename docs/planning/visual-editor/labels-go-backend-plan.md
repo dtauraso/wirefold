@@ -15,6 +15,30 @@ branch: task/labels-go-backend
 > conflict with main's badges-toggle was resolved by keeping `badgesHidden` and
 > taking the Go-owned `globalLabelsHidden` camera-store read.
 
+## Follow-on: badges folded into Go too (8th family member)
+
+After labels landed, `badgesHidden` (the occlusion-count badge toggle) was the last
+remaining TS-decided visibility flag, so it was converted the same way — making it the
+8th member of the Go-backed visibility-toggle family. Same 4-phase structure, mirroring
+the labels commits member-for-member.
+
+| thing | value |
+|-------|-------|
+| trace kind | `badges-global` (`KindBadgesGlobal`) |
+| Go state | `badgesGlobalVisible` (true = shown); `ToggleBadgesGlobal` / `EmitBadgesGlobal` |
+| toggle op | `badges-vis` |
+| guide-vis field | `badgesGlobal` (visible sense); `stdinMsg.BadgesGlobal` |
+| camera-store / persisted | `badgesHidden` (hidden sense, kept) |
+
+Commits: `f5b99679` (A), `d87dbc06` (B), `4376ce85` (C), `2b72b50f` (D).
+Verified independently: commits reachable from HEAD, `go build ./...` clean,
+`tsc --noEmit` clean, `scripts/stop-checks.sh` exit 0, `npm run build` clean, tree clean.
+
+With this, **every visibility flag is Go-owned** — TS holds no display decisions, only
+rendering. (Note: the implementing subagent for badges reported honestly; the labels
+subagent did not — see the recovery note above. Both were verified against `git log`
+regardless.)
+
 ## Principle (from the user)
 
 > TS is for rendering, not deciding what to render.
