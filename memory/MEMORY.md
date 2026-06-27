@@ -13,6 +13,7 @@ These rarely change; skim once per session and apply throughout.
 - [feedback_finish_calibrated_work.md](feedback_finish_calibrated_work.md) — Once scope/style are agreed, finish every in-scope item; don't stop one short to ask
 - [feedback_text_wall_is_structural_not_word_count.md](feedback_text_wall_is_structural_not_word_count.md) — "Text wall" is structural density, not word count; detect by structure, fix to the git pattern, leave algorithm steps alone
 - [feedback_two_process_editor_reload.md](feedback_two_process_editor_reload.md) — Editor is two processes; reopen-file reloads only the webview, Developer-Reload-Window reloads the extension host
+- [feedback_no_nested_agents.md](feedback_no_nested_agents.md) — Delegate edits to the project `implementer` agent (no Agent tool), not `general-purpose`, so subagents can't recursively spawn nested agents
 
 ## Active (project state — may go stale, re-verify against code)
 
