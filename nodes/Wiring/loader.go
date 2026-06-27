@@ -203,11 +203,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		}
 	}
 
-	// Build the aimed-port registry early so the initial edge-geometry loop can use
-	// aimed port directions (radial toward connected node) rather than ring-anchor
-	// directions. Same guard logic as the theta-lock block below; nil registry
-	// falls back to non-aimed for all ports.
-	var initialAimedPorts AimedPortRegistry
+	// Build the aimed-port registry ONCE here — the single source of truth. It is used
+	// both by the initial edge-geometry loop below (aimed port directions, radial toward
+	// the connected node, rather than ring-anchor directions) AND installed on the
+	// dispatch for drag-time aiming (md.installAimedPorts), so the two can never drift.
+	// Guard mirrors the theta-lock block; a nil registry falls back to non-aimed ports.
+	var aimedPorts AimedPortRegistry
 	{
 		centers := map[string]vec3{}
 		for id, g := range nodeGeoms {
@@ -219,33 +220,33 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		_, has2 := centers["2"]
 		_, has6 := centers["6"]
 		if has1 && has2 && has6 {
-			initialAimedPorts = AimedPortRegistry{
+			aimedPorts = AimedPortRegistry{
 				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
 				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
 				{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
 				{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
 			}
 			if _, has8 := centers["8"]; has8 {
-				initialAimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
-				initialAimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
+				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
+				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
 			}
 			if _, has3 := centers["3"]; has3 {
-				initialAimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
-				initialAimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
+				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
+				aimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
 			}
 			if _, has7 := centers["7"]; has7 {
-				initialAimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
-				initialAimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
+				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
+				aimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
 			}
 			// Node 5 sits on the spheres centered at 6 (6→5, FromLeft) and 7 (7→5,
 			// FromRight): aim each center's Out at 5 and 5's matching input back, so
 			// both edges render as radial spokes like the others.
 			if _, has5 := centers["5"]; has5 {
-				initialAimedPorts[AimedPortKey{NodeID: "6", PortName: "Out", IsInput: false}] = "5"
-				initialAimedPorts[AimedPortKey{NodeID: "5", PortName: "FromLeft", IsInput: true}] = "6"
+				aimedPorts[AimedPortKey{NodeID: "6", PortName: "Out", IsInput: false}] = "5"
+				aimedPorts[AimedPortKey{NodeID: "5", PortName: "FromLeft", IsInput: true}] = "6"
 				if _, has7 := centers["7"]; has7 {
-					initialAimedPorts[AimedPortKey{NodeID: "7", PortName: "Out", IsInput: false}] = "5"
-					initialAimedPorts[AimedPortKey{NodeID: "5", PortName: "FromRight", IsInput: true}] = "7"
+					aimedPorts[AimedPortKey{NodeID: "7", PortName: "Out", IsInput: false}] = "5"
+					aimedPorts[AimedPortKey{NodeID: "5", PortName: "FromRight", IsInput: true}] = "7"
 				}
 			}
 		}
@@ -284,7 +285,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		seg := segmentBetweenPortsAimed(
 			nodeGeoms[e.Source], e.SourceHandle, e.Source,
 			nodeGeoms[e.Target], e.TargetHandle, e.Target,
-			initialAimedPorts, centerOf,
+			aimedPorts, centerOf,
 		)
 		arcLength := chordLength(seg.Start, seg.End)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
@@ -345,48 +346,10 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			md.addThetaLock("1", "2", "6")
 			md.addThetaLock("1", "6", "2")
 
-			// Dynamic port auto-aim for edges 1→2 and 1→6 (and 1→8 below): the ports
-			// on these edges point toward their connected node's current center
-			// rather than using a fixed ring-anchor direction. Handle names are
-			// read from topology/edges/1To2.json, 1To6.json, 1To8.json.
-			aimedPorts := AimedPortRegistry{
-				// Edge 1→2: node 1's output port ToHoldNewSendOld aims at node 2
-				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
-				// Edge 1→2: node 2's input port FromPrevHoldNewSendOldNode aims at node 1
-				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
-				// Edge 1→6: node 1's output port ToExcitatory aims at node 6
-				{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
-				// Edge 1→6: node 6's input port FromInput aims at node 1
-				{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
-			}
-			// Edge 1→8: node 1's output port ToPacer aims at node 8, and node 8's
-			// input port FromInput aims back at node 1 (node 8's FeedbackOut, the 8→1
-			// edge, is NOT aimed — it stays a manually movable ring-anchored port).
-			if _, has8 := centers["8"]; has8 {
-				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
-				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
-			}
-			// Edge 2→3: node 2's output ToNext0 aims at node 3, node 3's input In back at 2.
-			if _, has3 := centers["3"]; has3 {
-				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
-				aimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
-			}
-			// Edge 2→7: node 2's output ToNext1 aims at node 7, node 7's input FromInput back at 2.
-			if _, has7 := centers["7"]; has7 {
-				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext1", IsInput: false}] = "7"
-				aimedPorts[AimedPortKey{NodeID: "7", PortName: "FromInput", IsInput: true}] = "2"
-			}
-			// Edges 6→5 and 7→5: node 5 sits on the spheres centered at 6 (FromLeft) and
-			// 7 (FromRight); aim each center's Out at 5 and 5's matching input back, so
-			// both render as radial spokes.
-			if _, has5 := centers["5"]; has5 {
-				aimedPorts[AimedPortKey{NodeID: "6", PortName: "Out", IsInput: false}] = "5"
-				aimedPorts[AimedPortKey{NodeID: "5", PortName: "FromLeft", IsInput: true}] = "6"
-				if _, has7 := centers["7"]; has7 {
-					aimedPorts[AimedPortKey{NodeID: "7", PortName: "Out", IsInput: false}] = "5"
-					aimedPorts[AimedPortKey{NodeID: "5", PortName: "FromRight", IsInput: true}] = "7"
-				}
-			}
+			// Install the SAME aimed-port registry built once above (aimedPorts):
+			// it was constructed earlier under the identical guard/entries so the initial
+			// edge geometry could use aimed directions, and the drag-time aiming must
+			// match it exactly. One source of truth — no second copy to keep in sync.
 			md.installAimedPorts(aimedPorts)
 		}
 
