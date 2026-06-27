@@ -207,6 +207,15 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "sel-sphere-poles":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
+    case "guide-vis":
+      // Batched explicit visibilities pushed on load to restore persisted state.
+      // All five must be booleans, else drop as malformed.
+      if (
+        typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
+        typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
+        typeof m.selSpherePoles !== "boolean"
+      ) return undefined;
+      return (m as unknown as WebviewToHostMsg);
     default:
       return undefined;
   }
