@@ -96,13 +96,17 @@ const (
 	// the visibility is toggled (op="sel-sphere-poles"), so the renderer shows or hides the
 	// selection sphere pole markers in NavGuides.
 	KindSelSpherePoles = "sel-sphere-poles"
+	// KindHandholds carries the rotation-handhold grab-sphere visibility state. Go emits it
+	// when the visibility is toggled (op="handholds-vis"), so the renderer shows or hides
+	// the 4 grab spheres per torus in NavGuides without computing any geometry.
+	KindHandholds = "handholds"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -386,6 +390,12 @@ func (t *Trace) AngleLabels(visible bool) {
 // visible=false = hidden. Go emits this on op="sel-sphere-poles".
 func (t *Trace) SelSpherePoles(visible bool) {
 	t.emit(Event{Kind: KindSelSpherePoles, Visible: visible})
+}
+
+// Handholds emits the rotation-handhold grab-sphere visibility state. visible=true = shown;
+// visible=false = hidden. Go emits this on op="handholds-vis".
+func (t *Trace) Handholds(visible bool) {
+	t.emit(Event{Kind: KindHandholds, Visible: visible})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -686,7 +696,7 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

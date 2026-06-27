@@ -17,6 +17,7 @@ interface CameraState {
   nodePolesVisible: boolean;
   angleLabelsVisible: boolean;
   selSpherePolesVisible: boolean;
+  handholdsVisible: boolean;
   // guidelinesActive is the TS-only master gate for the whole polar-guideline group
   // (tori + all pole frames + angle labels). When false the toolbar hides their individual
   // buttons and NavGuides suppresses every guide; each guide's own visibility above is
@@ -28,6 +29,7 @@ interface CameraState {
   setNodePolesVisible: (v: boolean) => void;
   setAngleLabelsVisible: (v: boolean) => void;
   setSelSpherePolesVisible: (v: boolean) => void;
+  setHandholdsVisible: (v: boolean) => void;
   setGuidelinesActive: (v: boolean) => void;
 }
 
@@ -38,6 +40,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   nodePolesVisible: true,
   angleLabelsVisible: true,
   selSpherePolesVisible: true,
+  handholdsVisible: true,
   guidelinesActive: true,
   set: (c) => set({ camera: c }),
   setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
@@ -45,6 +48,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   setNodePolesVisible: (v) => set({ nodePolesVisible: v }),
   setAngleLabelsVisible: (v) => set({ angleLabelsVisible: v }),
   setSelSpherePolesVisible: (v) => set({ selSpherePolesVisible: v }),
+  setHandholdsVisible: (v) => set({ handholdsVisible: v }),
   setGuidelinesActive: (v) => set({ guidelinesActive: v }),
 }));
 

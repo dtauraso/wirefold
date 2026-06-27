@@ -64,6 +64,8 @@ export type ViewerState = {
   angleLabelsVisible?: boolean;
   // selSpherePolesVisible: whether the selection-sphere pole axis markers are shown. undefined = shown (default true).
   selSpherePolesVisible?: boolean;
+  // handholdsVisible: whether the rotation-handhold grab spheres are shown. undefined = shown (default true).
+  handholdsVisible?: boolean;
   // guidelinesActive: whether the guidelines master toggle is on. undefined = active (default true).
   guidelinesActive?: boolean;
 };
@@ -131,6 +133,7 @@ export function parseViewerState(text: string | undefined): ViewerState {
   if (raw.nodePolesVisible === false) out.nodePolesVisible = false;
   if (raw.angleLabelsVisible === false) out.angleLabelsVisible = false;
   if (raw.selSpherePolesVisible === false) out.selSpherePolesVisible = false;
+  if (raw.handholdsVisible === false) out.handholdsVisible = false;
   if (raw.guidelinesActive === false) out.guidelinesActive = false;
   return out;
 }
@@ -158,7 +161,7 @@ export function serializeViewerState(s: ViewerState): string {
 }
 
 // Scene-only fields (camera, camera3d, cameraPolar, labelsGlobalHidden, guideline visibilities) — for topology.scene.json.
-export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "guidelinesActive">;
+export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "guidelinesActive">;
 
 export function serializeSceneState(s: ViewerState): string {
   const scene: SceneState = {};
@@ -171,6 +174,7 @@ export function serializeSceneState(s: ViewerState): string {
   if (s.nodePolesVisible === false) scene.nodePolesVisible = false;
   if (s.angleLabelsVisible === false) scene.angleLabelsVisible = false;
   if (s.selSpherePolesVisible === false) scene.selSpherePolesVisible = false;
+  if (s.handholdsVisible === false) scene.handholdsVisible = false;
   if (s.guidelinesActive === false) scene.guidelinesActive = false;
   return JSON.stringify(scene, null, 2) + "\n";
 }
@@ -194,6 +198,8 @@ export function mergeSceneIntoViewerState(base: ViewerState, sceneParsed: Viewer
   else delete out.angleLabelsVisible; // absent = true (visible)
   if (sceneParsed.selSpherePolesVisible !== undefined) out.selSpherePolesVisible = sceneParsed.selSpherePolesVisible;
   else delete out.selSpherePolesVisible; // absent = true (visible)
+  if (sceneParsed.handholdsVisible !== undefined) out.handholdsVisible = sceneParsed.handholdsVisible;
+  else delete out.handholdsVisible; // absent = true (visible)
   if (sceneParsed.guidelinesActive !== undefined) out.guidelinesActive = sceneParsed.guidelinesActive;
   else delete out.guidelinesActive; // absent = true (active)
   return out;

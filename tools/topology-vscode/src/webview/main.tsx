@@ -101,11 +101,12 @@ window.addEventListener("message", (e) => {
       nodePoles: viewerState.nodePolesVisible !== false,
       angleLabels: viewerState.angleLabelsVisible !== false,
       selSpherePoles: viewerState.selSpherePolesVisible !== false,
+      handholds: viewerState.handholdsVisible !== false,
     };
     postLog("guide-load-push", { persisted: {
       sceneTori: viewerState.sceneToriVisible, scenePoles: viewerState.scenePolesVisible,
       nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
-      selSpherePoles: viewerState.selSpherePolesVisible, guidelinesActive: viewerState.guidelinesActive,
+      selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, guidelinesActive: viewerState.guidelinesActive,
     }, pushed: guidePush });
     vscode.postMessage({ type: "edit", op: "guide-vis", ...guidePush });
   } else if (msg.type === "trace-event") {

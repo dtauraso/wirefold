@@ -331,6 +331,43 @@ export function SelSpherePolesToggle() {
   );
 }
 
+/** HANDHOLDS TOGGLE: top-right button to show/hide the rotation grab spheres. Standalone — NOT gated by guidelinesActive. Fire-and-forget to Go. */
+export function HandholdsToggle() {
+  const visible = useCameraStore((s) => s.handholdsVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via handholds.
+    postLog("guide-btn-click", { op: "handholds-vis", was: visible });
+    vscode.postMessage({ type: "edit", op: "handholds-vis" });
+  }, [visible]);
+  return (
+    <div
+      onClick={onClick}
+      title={visible !== false ? "Hide rotation grips" : "Show rotation grips"}
+      style={{
+        position: "absolute",
+        top: 248,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: visible !== false ? "#ddd" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ⊙ grips
+    </div>
+  );
+}
+
 /** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels. */
 export function GlobalLabelsToggle({
   hidden,

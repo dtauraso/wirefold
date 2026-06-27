@@ -47,7 +47,8 @@ export type EditMsg =
   | { type: "edit"; op: "node-poles" }
   | { type: "edit"; op: "angle-labels" }
   | { type: "edit"; op: "sel-sphere-poles" }
-  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean }
+  | { type: "edit"; op: "handholds-vis" }
+  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean }
   | {
       type: "edit";
       op: "viewpoint";
@@ -109,7 +110,8 @@ export type TraceEvent =
   | { step: number; kind: "scene-poles"; visible: boolean }
   | { step: number; kind: "node-poles"; visible: boolean }
   | { step: number; kind: "angle-labels"; visible: boolean }
-  | { step: number; kind: "sel-sphere-poles"; visible: boolean };
+  | { step: number; kind: "sel-sphere-poles"; visible: boolean }
+  | { step: number; kind: "handholds"; visible: boolean };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -205,15 +207,16 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "node-poles":
     case "angle-labels":
     case "sel-sphere-poles":
+    case "handholds-vis":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     case "guide-vis":
       // Batched explicit visibilities pushed on load to restore persisted state.
-      // All five must be booleans, else drop as malformed.
+      // All six must be booleans, else drop as malformed.
       if (
         typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
         typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
-        typeof m.selSpherePoles !== "boolean"
+        typeof m.selSpherePoles !== "boolean" || typeof m.handholds !== "boolean"
       ) return undefined;
       return (m as unknown as WebviewToHostMsg);
     default:

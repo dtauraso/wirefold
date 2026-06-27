@@ -217,6 +217,14 @@ export function handleTraceEvent(event: TraceEvent): void {
       scheduleViewSave();
       return;
     }
+    case "handholds": {
+      const e = event as Extract<TraceEvent, { kind: "handholds" }>;
+      postLog("guide-recv", { kind: "handholds", visible: e.visible });
+      useCameraStore.getState().setHandholdsVisible(e.visible);
+      patchViewerState((v) => { v.handholdsVisible = e.visible === false ? false : undefined; });
+      scheduleViewSave();
+      return;
+    }
     default:
       assertNever(k);
   }

@@ -145,10 +145,13 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "sel-sphere-poles") {
         // Toggle the selection-sphere pole axis markers. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "sel-sphere-poles" }));
+      } else if (msg.op === "handholds-vis") {
+        // Toggle the rotation-handhold grab-sphere visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "handholds-vis" }));
       } else if (msg.op === "guide-vis") {
-        // Push all 5 polar-guide visibilities to Go on reload so Go's authoritative state
+        // Push all 6 polar-guide visibilities to Go on reload so Go's authoritative state
         // matches persisted scene settings. Explicit values — not a toggle.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles }));
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles, handholds: msg.handholds }));
       }
       return;
   }

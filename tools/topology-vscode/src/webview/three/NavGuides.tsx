@@ -182,6 +182,7 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   const nodePolesVisible = useCameraStore((s) => s.nodePolesVisible);
   const selSpherePolesVisible = useCameraStore((s) => s.selSpherePolesVisible);
   const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
+  const handholdsVisible = useCameraStore((s) => s.handholdsVisible);
   const guidelinesActive = useCameraStore((s) => s.guidelinesActive);
 
   // "Guidelines" master gate: when inactive, ALL polar guides are suppressed (the toolbar
@@ -283,9 +284,9 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
             </mesh>
           </>
         )}
-        {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. */}
-        {handholds()}
-        {handholds(rotB)}
+        {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. Gated by handholdsVisible (independent of guidelinesActive). */}
+        {handholdsVisible !== false && handholds()}
+        {handholdsVisible !== false && handholds(rotB)}
       </group>
       {/* Scene pole frame at the content-sphere center. */}
       {showScenePoles && <PolarFrame center={cs.center} scale={radiusKey} />}
