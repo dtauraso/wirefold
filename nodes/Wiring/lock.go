@@ -1,6 +1,9 @@
 package Wiring
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // lock.go — polar layout locks (docs/planning/visual-editor/polar-coordinate-model.md
 // §4, §7). A lock is a RELATIONSHIP between roots, applied after a RootMove —
@@ -123,20 +126,33 @@ func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 	// keeps its R and θ about the center, zeroing only φ — moving it onto the
 	// center's φ=0 (+x) meridian, all polar and local to the center.
 	for _, lk := range md.phiZeroLocks {
-		if lk.Center != movedID && lk.Follower != movedID {
+		// Symmetric re-pin: the DRAGGED node stays put; the OTHER node is re-pinned
+		// onto the dragged node's meridian, keeping its R and θ measured from the
+		// dragged node. Direction sets the target φ: dragging the Center re-pins the
+		// Follower at φ=0; dragging the Follower re-pins the Center at φ=π, because
+		// measuring the edge from the follower reverses its direction (φ=0 there would
+		// rotate the other node a half-circle around the pole — the snapping bug).
+		var center, follower string
+		var targetPhi float64
+		switch movedID {
+		case lk.Center:
+			center, follower, targetPhi = lk.Center, lk.Follower, 0
+		case lk.Follower:
+			center, follower, targetPhi = lk.Follower, lk.Center, math.Pi
+		default:
 			continue
 		}
-		p, ok := md.roots.surfaceCoord(lk.Center, lk.Follower)
+		p, ok := md.roots.surfaceCoord(center, follower)
 		if !ok {
 			continue
 		}
-		cw, ok := md.roots.world(lk.Center)
+		cw, ok := md.roots.world(center)
 		if !ok {
 			continue
 		}
-		fw := cw.add(polar2cart(polar{R: p.R, Theta: p.Theta, Phi: 0}))
-		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
-		moved[lk.Follower] = fw
+		fw := cw.add(polar2cart(polar{R: p.R, Theta: p.Theta, Phi: targetPhi}))
+		md.roots.roots[follower] = rootFromCartesian(fw, md.roots.origin)
+		moved[follower] = fw
 	}
 	return moved
 }
