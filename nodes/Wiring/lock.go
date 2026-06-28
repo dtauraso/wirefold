@@ -92,70 +92,88 @@ func (md *MoveDispatch) logPair26(movedID string) {
 // duplicate-emit drag lag). Soft membership is preserved: only locked followers move.
 func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 	moved := map[string]vec3{}
-	for _, lk := range md.locks {
-		if lk.Leader != movedID && lk.Center != movedID {
-			continue
+	// BFS fixpoint: locks chain. When a lock moves a follower, locks that reference
+	// THAT follower must fire too (e.g. drag 6 → phiZeroLock(6,5) moves 5 → phiZeroLock(7,5)
+	// moves 7 → mirror(2,7,3) moves 3). A node is processed at most once: the `processed`
+	// guard makes each node move at most once per call, which prevents oscillation between
+	// bidirectional locks and guarantees termination (each node enqueued/processed once).
+	processed := map[string]bool{movedID: true}
+	queue := []string{movedID}
+
+	// place records a follower's new world position: skip if already processed (the
+	// move-at-most-once guard), otherwise write the root, record it, and enqueue it.
+	place := func(id string, nw vec3) {
+		if processed[id] {
+			return
 		}
-		cw, ok := md.roots.world(lk.Center)
-		if !ok {
-			continue
-		}
-		// Leader and follower in the center's local frame (pole +y).
-		lp, ok := md.roots.surfaceCoord(lk.Center, lk.Leader)
-		if !ok {
-			continue
-		}
-		fp, ok := md.roots.surfaceCoord(lk.Center, lk.Follower)
-		if !ok {
-			continue
-		}
-		// Lock: the follower adopts the leader's θ (angle from the +y up-pole) and keeps
-		// its own radius. φ is either the follower's OWN (same latitude ring, own
-		// longitude) or, for a mirror lock, −leaderφ (opposite-sign, equal-magnitude
-		// longitude — reflected across the φ=0 meridian).
-		phi := fp.Phi
-		if lk.MirrorPhi {
-			phi = -lp.Phi
-		}
-		locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
-		fw := polar2cart(locked).add(cw) // follower world position
-		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
-		moved[lk.Follower] = fw
+		md.roots.roots[id] = rootFromCartesian(nw, md.roots.origin)
+		moved[id] = nw
+		processed[id] = true
+		queue = append(queue, id)
 	}
-	// φ=0 meridian locks: fire when the center or follower moved. The follower
-	// keeps its R and θ about the center, zeroing only φ — moving it onto the
-	// center's φ=0 (+x) meridian, all polar and local to the center.
-	for _, lk := range md.phiZeroLocks {
-		// Symmetric re-pin with NO φ and NO atan2 — defined everywhere, including the
-		// pole. The DRAGGED node stays put; the OTHER node is projected onto the dragged
-		// node's φ=0 meridian PLANE by dropping ONLY the off-plane component (the
-		// component along the φ-perpendicular axis of the polar frame). Dropping that
-		// component preserves whichever side each node is already on, so no 0-vs-π
-		// branch is needed and there is no singular point.
-		var dragged, other string
-		switch movedID {
-		case lk.Center:
-			dragged, other = lk.Center, lk.Follower
-		case lk.Follower:
-			dragged, other = lk.Follower, lk.Center
-		default:
-			continue
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		// θ locks: fire when `current` is the leader or center. The follower adopts the
+		// leader's θ (angle from the +y up-pole) and keeps its own radius. φ is either the
+		// follower's OWN (same latitude ring, own longitude) or, for a mirror lock, −leaderφ.
+		for _, lk := range md.locks {
+			if lk.Leader != current && lk.Center != current {
+				continue
+			}
+			cw, ok := md.roots.world(lk.Center)
+			if !ok {
+				continue
+			}
+			lp, ok := md.roots.surfaceCoord(lk.Center, lk.Leader)
+			if !ok {
+				continue
+			}
+			fp, ok := md.roots.surfaceCoord(lk.Center, lk.Follower)
+			if !ok {
+				continue
+			}
+			phi := fp.Phi
+			if lk.MirrorPhi {
+				phi = -lp.Phi
+			}
+			locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
+			fw := polar2cart(locked).add(cw) // follower world position
+			place(lk.Follower, fw)
 		}
-		dw, ok := md.roots.world(dragged)
-		if !ok {
-			continue
+
+		// φ=0 meridian locks: fire when `current` is the center or follower. The DRAGGED
+		// node (current) stays put; the OTHER node is projected onto the dragged node's φ=0
+		// meridian PLANE by dropping ONLY the off-plane component (the component along the
+		// φ-perpendicular axis of the polar frame). No φ, no atan2 — defined everywhere,
+		// including the pole; preserves whichever side each node is already on.
+		for _, lk := range md.phiZeroLocks {
+			var dragged, other string
+			switch current {
+			case lk.Center:
+				dragged, other = lk.Center, lk.Follower
+			case lk.Follower:
+				dragged, other = lk.Follower, lk.Center
+			default:
+				continue
+			}
+			dw, ok := md.roots.world(dragged)
+			if !ok {
+				continue
+			}
+			ow, ok := md.roots.world(other)
+			if !ok {
+				continue
+			}
+			// φ=90° axis of the polar frame: the normal of the φ=0 meridian plane.
+			perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
+			v := ow.sub(dw)
+			v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
+			nw := dw.add(v)
+			place(other, nw)
 		}
-		ow, ok := md.roots.world(other)
-		if !ok {
-			continue
-		}
-		// φ=90° axis of the polar frame: the normal of the φ=0 meridian plane.
-		perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
-		v := ow.sub(dw)
-		v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
-		nw := dw.add(v)
-		md.roots.roots[other] = rootFromCartesian(nw, md.roots.origin)
-		moved[other] = nw
 	}
 	return moved
 }

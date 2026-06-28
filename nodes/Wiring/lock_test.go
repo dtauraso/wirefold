@@ -250,6 +250,66 @@ func TestPhiZeroLock75Symmetric(t *testing.T) {
 	}
 }
 
+// buildChainFixture wires phiZeroLock(6,5)+phiZeroLock(7,5) plus a mirror lock
+// (center 2, leader 7, follower 3). This is the {5,6,7} chain coupled into node 3 via
+// the existing 2↔7↔3 mirror. applyLocks must BFS-chain so a drag on any of 5/6/7
+// propagates to the others and to 3.
+func buildChainFixture() *MoveDispatch {
+	centers := map[string]vec3{
+		"2": {5, 5, 5},
+		"3": {12, 8, 9}, // nonzero φ about 2
+		"5": {0, 10, 0.5},
+		"6": {0, 0, 0},
+		"7": {3, 0, 0},
+	}
+	md := &MoveDispatch{}
+	md.roots = buildRoots(centers)
+	md.addPhiZeroLock("6", "5")
+	md.addPhiZeroLock("7", "5")
+	md.addMirrorLock("2", "7", "3")
+	return md
+}
+
+// Chaining: dragging node 6 must move 5 (direct), 7 (via 6→5→7) and 3 (via 7→3 mirror).
+// 7 moving proves the chain reached past the directly-referenced follower.
+func TestChainDrag6MovesAll(t *testing.T) {
+	md := buildChainFixture()
+	moved := md.applyLocks("6")
+	for _, id := range []string{"5", "7", "3"} {
+		if _, ok := moved[id]; !ok {
+			t.Errorf("drag 6: node %s did not move (chain broken); moved=%v", id, moved)
+		}
+	}
+	// Move-at-most-once guard: dragged node 6 is never in the moved set.
+	if _, ok := moved["6"]; ok {
+		t.Errorf("dragged node 6 should not appear in moved set")
+	}
+}
+
+// Chaining the other way: dragging node 7 must move 5 (direct), 6 (via 7→5→6) and 3
+// (via the 7→3 mirror). Termination: the test returning at all proves no infinite loop.
+func TestChainDrag7MovesAll(t *testing.T) {
+	md := buildChainFixture()
+	moved := md.applyLocks("7")
+	for _, id := range []string{"5", "6", "3"} {
+		if _, ok := moved[id]; !ok {
+			t.Errorf("drag 7: node %s did not move (chain broken); moved=%v", id, moved)
+		}
+	}
+}
+
+// Drag 5 (the shared follower) propagates to both meridian centers 6 and 7, and 7's
+// move pulls node 3 via the mirror.
+func TestChainDrag5MovesAll(t *testing.T) {
+	md := buildChainFixture()
+	moved := md.applyLocks("5")
+	for _, id := range []string{"6", "7", "3"} {
+		if _, ok := moved[id]; !ok {
+			t.Errorf("drag 5: node %s did not move (chain broken); moved=%v", id, moved)
+		}
+	}
+}
+
 // 7↔5 mirror of TestPhiZeroLockEdgeInMeridianPlane: after the re-pin the 7→5 edge
 // lies in the φ=0 meridian plane.
 func TestPhiZeroLock75EdgeInMeridianPlane(t *testing.T) {
