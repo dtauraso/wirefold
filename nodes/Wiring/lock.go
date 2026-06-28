@@ -302,6 +302,17 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 			}
 			locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
 			fw := polar2cart(locked).add(cw) // follower world position
+			// Fold equal-radii: when the mirror moves the equalized side (B/node 7)
+			// — e.g. drag node 3 → mirror(2,3,7) writes node 7 — re-derive node 7's
+			// radius about Mid (node 5) from A's (node 6) radius, so |7→5| := |6→5|.
+			// Otherwise the equal-radii claim would fire only for 5/6/7-originated
+			// drags and silently lapse when the drive originates at node 3. The φ=0
+			// lock below cannot do this here: place()'s move-once guard skips node 7
+			// once the mirror has written it. Reuses equalRadiiAdjust (rescale R about
+			// Mid, keep θ/φ); a no-op for the non-equalized follower (node 3).
+			if adj, ok := md.equalRadiiAdjust(lk.Follower, fw); ok {
+				fw = adj
+			}
 			place(lk.Follower, fw)
 		}
 

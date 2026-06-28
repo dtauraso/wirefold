@@ -439,6 +439,51 @@ func TestFullDrag5MovesSevenCarriesSixNotTwo(t *testing.T) {
 	}
 }
 
+// Equal-radii holds when node 3 drives node 7: dragging node 3 moves node 7 via the
+// mirror, and node 7's distance from node 5 must re-derive from node 6's (the radius
+// authority) — |7→5| == |6→5| — with node 6 and node 5 unchanged and node 7 moved.
+// Before the fix the mirror moved node 7 but its radius re-equalization was suppressed
+// by the move-once guard, so |7→5| drifted off |6→5| on a node-3-originated drag.
+func TestFullDrag3EqualizesSevenRadius(t *testing.T) {
+	md := buildFullFixture()
+	md.addEqualRadiiLock("5", "6", "7")
+	// Seed like the loader so |6→5| == |7→5| holds before the drag under test.
+	md.applyLocks("3", false)
+	md.applyLocks("6", false)
+
+	pre5, _ := md.roots.world("5")
+	pre6, _ := md.roots.world("6")
+	pre7, _ := md.roots.world("7")
+	if d := dist3(pre6, pre5) - dist3(pre7, pre5); d < -1e-6 || d > 1e-6 {
+		t.Fatalf("seed not equal-radii: |6→5|=%v |7→5|=%v", dist3(pre6, pre5), dist3(pre7, pre5))
+	}
+
+	// Drag node 3.
+	w3, _ := md.roots.world("3")
+	md.roots.roots["3"] = rootFromCartesian(w3.add(vec3{8, 5, 6}), md.roots.origin)
+	moved := md.applyLocks("3", true)
+
+	post5, _ := md.roots.world("5")
+	post6, _ := md.roots.world("6")
+	post7, _ := md.roots.world("7")
+
+	// Equal-radii re-established by the node-3 chain.
+	if d := dist3(post6, post5) - dist3(post7, post5); d < -1e-6 || d > 1e-6 {
+		t.Errorf("drag 3: |6→5|=%v != |7→5|=%v (equal-radii lapsed)", dist3(post6, post5), dist3(post7, post5))
+	}
+	// Radius authority (node 6) and Mid (node 5) untouched.
+	if d := dist3(pre6, post6); d > 1e-9 {
+		t.Errorf("drag 3: node 6 moved by %v (authority must not move)", d)
+	}
+	if d := dist3(pre5, post5); d > 1e-9 {
+		t.Errorf("drag 3: node 5 moved by %v (Mid must not move)", d)
+	}
+	// Node 7 actually moved (mirror + radius).
+	if m := movedMag(pre7, moved, "7"); m < 1e-3 {
+		t.Errorf("drag 3: node 7 moved by %v (want sizable); moved=%v", m, moved)
+	}
+}
+
 // Center-only move (isolated): node 2 is the CENTER of mirror(2,3,7)/(2,7,3) but the
 // LEADER of neither. With ONLY the mirror locks present (no θ-lock/meridian chain to
 // reach 3/7 by another path), moving 2 alone must NOT drag 3 or 7 — the spurious
