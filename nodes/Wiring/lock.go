@@ -50,6 +50,78 @@ func (md *MoveDispatch) addPhiZeroLock(center, follower string) {
 	md.phiZeroLocks = append(md.phiZeroLocks, phiZeroLock{Center: center, Follower: follower})
 }
 
+// equalRadiiLock keeps the two edge radii into Mid equal: r(A about Mid) ==
+// r(B about Mid), measured in Mid's local frame (pole = +y). It is a pure-polar
+// radius equalization: the equalized node keeps its θ and φ about Mid and only
+// its R changes. The authority is the dragged source — the non-dragged source is
+// rescaled to match it. When neither source is dragged (Mid itself moved), B is
+// rescaled to A's radius so the pair stays equal.
+//
+// This lock does NOT introduce a separate place(): nodes A and B are already
+// moved by the φ=0 meridian locks (both have follower Mid; dragging any of
+// Mid/A/B projects the other source onto Mid's meridian plane). The move-once
+// guard would block a second place() on the same node, so the radius
+// equalization is FOLDED into that φ=0 projection — one combined move per node
+// (project onto the meridian plane, then scale to the sibling's radius about
+// Mid). Scaling about Mid preserves direction, so the in-plane (z=Mid.z)
+// projection is retained; the two locks touch different polar components (φ-plane
+// vs R) and compose cleanly in a single place().
+type equalRadiiLock struct {
+	Mid string
+	A   string
+	B   string
+}
+
+// addEqualRadiiLock registers an equal-radii lock (r(A about Mid) == r(B about Mid)).
+func (md *MoveDispatch) addEqualRadiiLock(mid, a, b string) {
+	md.equalRadiiLocks = append(md.equalRadiiLocks, equalRadiiLock{Mid: mid, A: a, B: b})
+}
+
+// equalRadiiAdjust, given that the φ=0 lock is about to move `other` to world
+// position nw (already projected onto Mid's meridian plane), returns the adjusted
+// world position that also makes r(other about Mid) equal to the authoritative
+// sibling's radius about Mid. movedID is the originally dragged node. It returns
+// (nw, false) when no equal-radii lock applies to `other` for this drag.
+//
+// Authority: if movedID is one of the two sources, that source is the reference
+// and the OTHER source is the one equalized. If movedID is Mid (neither source
+// dragged), B is equalized to A. So the equalized node is whichever of {A,B} is
+// NOT the reference, and `other` must be that equalized node.
+func (md *MoveDispatch) equalRadiiAdjust(other, movedID string, nw vec3) (vec3, bool) {
+	for _, lk := range md.equalRadiiLocks {
+		var reference, equalized string
+		switch movedID {
+		case lk.A:
+			reference, equalized = lk.A, lk.B
+		case lk.B:
+			reference, equalized = lk.B, lk.A
+		case lk.Mid:
+			reference, equalized = lk.A, lk.B
+		default:
+			continue
+		}
+		if other != equalized {
+			continue
+		}
+		mw, ok := md.roots.world(lk.Mid)
+		if !ok {
+			continue
+		}
+		rp, ok := md.roots.surfaceCoord(lk.Mid, reference)
+		if !ok {
+			continue
+		}
+		// Direction from Mid to the already-projected position; scale to the
+		// reference radius. Pure-polar: keeps θ/φ about Mid (in-plane), sets R.
+		dir := nw.sub(mw)
+		if dir.length() == 0 {
+			continue
+		}
+		return mw.add(dir.normalize().scale(rp.R)), true
+	}
+	return nw, false
+}
+
 // logPairPhi (diagnostic) emits φ of nodes 3 and 7 about node 2 after a move. For a
 // consistent mirror lock φ7 = −φ3, so sum = φ3+φ7 should stay ≈0; a drifting sum
 // flags the inconsistency. Logged for EVERY RootMove, whether or not a lock fired.
@@ -176,6 +248,12 @@ func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 			v := ow.sub(dw)
 			v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
 			nw := dw.add(v)
+			// Fold equal-radii: if `other` is the node whose radius about Mid must
+			// match its sibling, rescale the projected position about Mid. One
+			// combined move (meridian plane + equal radius) in a single place().
+			if adj, ok := md.equalRadiiAdjust(other, movedID, nw); ok {
+				nw = adj
+			}
 			place(other, nw)
 		}
 	}

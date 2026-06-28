@@ -406,6 +406,13 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			if has7 {
 				md.addPhiZeroLock("7", "5")
 			}
+			// Equalize the two edge radii into node 5: |6→5| == |7→5|, measured in
+			// node 5's local frame. Folded into the φ=0 projection of the non-dragged
+			// source (composes with the meridian locks above; see lock.go
+			// equalRadiiLock). Only when all three exist.
+			if has6 && has7 {
+				md.addEqualRadiiLock("5", "6", "7")
+			}
 			if followers := md.applyLocks("5"); len(followers) > 0 {
 				centers := md.heldCenters()
 				for id, w := range followers {

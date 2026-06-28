@@ -441,3 +441,59 @@ func TestPhiZeroLock75EdgeInMeridianPlane(t *testing.T) {
 		t.Errorf("φ not in meridian plane: got %v (want ≈0)", after.Phi)
 	}
 }
+
+// radius5 is the radius of node id measured about node 5 (5's local frame).
+func radius5(md *MoveDispatch, id string) float64 {
+	p, _ := md.roots.surfaceCoord("5", id)
+	return p.R
+}
+
+// buildEqualRadiiFixture is the full topology fixture plus the equal-radii lock,
+// seeded once at load (applyLocks("5")) exactly like the loader does.
+func buildEqualRadiiFixture() *MoveDispatch {
+	md := buildFullFixture()
+	md.addEqualRadiiLock("5", "6", "7")
+	md.applyLocks("5")
+	return md
+}
+
+// At load the two edge radii into node 5 are equalized: |6→5| == |7→5|.
+func TestEqualRadiiLockLoadEqual(t *testing.T) {
+	md := buildEqualRadiiFixture()
+	r6, r7 := radius5(md, "6"), radius5(md, "7")
+	if math.Abs(r6-r7) > 1e-6 {
+		t.Errorf("load: radii not equal: |6->5|=%v |7->5|=%v", r6, r7)
+	}
+}
+
+// Dragging any of 5/6/7 keeps the two radii into node 5 equal, and does not
+// regress the existing group motion (the φ=0/θ/mirror chain still fires).
+func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
+	type expect struct {
+		drag  string
+		moves []string
+	}
+	cases := []expect{
+		{"6", []string{"5", "7", "3"}},
+		{"5", []string{"6", "7"}},
+		{"7", []string{"6", "3"}},
+	}
+	for _, c := range cases {
+		md := buildEqualRadiiFixture()
+		w, _ := md.roots.world(c.drag)
+		md.roots.roots[c.drag] = rootFromCartesian(w.add(vec3{8, 5, 6}), md.roots.origin)
+		moved := md.applyLocks(c.drag)
+		r6, r7 := radius5(md, "6"), radius5(md, "7")
+		if math.Abs(r6-r7) > 1e-6 {
+			t.Errorf("drag %s: radii not equal: |6->5|=%v |7->5|=%v", c.drag, r6, r7)
+		}
+		if math.IsNaN(r6) || math.IsNaN(r7) {
+			t.Errorf("drag %s: NaN radius", c.drag)
+		}
+		for _, id := range c.moves {
+			if _, ok := moved[id]; !ok {
+				t.Errorf("drag %s: expected node %s to move (regression); moved=%v", c.drag, id, moved)
+			}
+		}
+	}
+}

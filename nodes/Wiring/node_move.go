@@ -345,6 +345,9 @@ type MoveDispatch struct {
 	locks []thetaLock
 	// phiZeroLocks pin a follower onto the center's φ=0 meridian (lock.go).
 	phiZeroLocks []phiZeroLock
+	// equalRadiiLocks keep two edge radii into a mid node equal (lock.go), folded
+	// into the φ=0 projection of the equalized source.
+	equalRadiiLocks []equalRadiiLock
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
