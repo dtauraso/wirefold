@@ -333,10 +333,11 @@ func TestChainDrag5MovesSevenCarriesSix(t *testing.T) {
 	}
 }
 
-// buildFullFixture replicates the real loaded topology's locks: the θ-lock (1,2,6)
-// [leader 2; the 1,6,2 direction is dropped so node 6's group never drags node 2],
-// the mirror pair (2,3,7)/(2,7,3), and the DIRECTIONAL meridian chain
-// phiZeroFollower(6,5) [6 anchors 5] + phiZeroCenter(7,5) [5 drags 7].
+// buildFullFixture replicates the real loaded topology's locks: the θ-lock pair
+// (1,2,6) [leader 2] and (1,6,2) [leader 6; node 6 LEADING carries node 2 — fires
+// only when node 6 itself is placed, e.g. the node-3 authority flip], the mirror
+// pair (2,3,7)/(2,7,3), and the DIRECTIONAL meridian chain phiZeroFollower(6,5)
+// [6 anchors 5] + phiZeroCenter(7,5) [5 drags 7].
 func buildFullFixture() *MoveDispatch {
 	centers := map[string]vec3{
 		"1": {0, 0, 0},
@@ -349,6 +350,7 @@ func buildFullFixture() *MoveDispatch {
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
 	md.addThetaLock("1", "2", "6")
+	md.addThetaLock("1", "6", "2")
 	md.addMirrorLock("2", "3", "7")
 	md.addMirrorLock("2", "7", "3")
 	md.addPhiZeroFollowerLock("6", "5")
@@ -366,12 +368,13 @@ func movedMag(pre vec3, moved map[string]vec3, id string) float64 {
 }
 
 // Drag 6 (anchor): the meridian chain 6→5→7 moves both 5 and 7, and 7 (mirror leader)
-// then moves 3. Node 2 stays (no 6→2 θ direction).
-func TestFullDrag6MovesFiveSevenThreeNotTwo(t *testing.T) {
+// then moves 3. Node 2 FOLLOWS node 6 via the restored θ-lock(1,6,2) (node 6 leading).
+func TestFullDrag6MovesFiveSevenThreeAndTwo(t *testing.T) {
 	md := buildFullFixture()
 	pre5, _ := md.roots.world("5")
 	pre7, _ := md.roots.world("7")
 	pre3, _ := md.roots.world("3")
+	pre2, _ := md.roots.world("2")
 	moved := md.applyLocks("6", true)
 	if m := movedMag(pre5, moved, "5"); m < 1e-3 {
 		t.Errorf("drag 6: node 5 moved by %v (want sizable); moved=%v", m, moved)
@@ -382,8 +385,8 @@ func TestFullDrag6MovesFiveSevenThreeNotTwo(t *testing.T) {
 	if m := movedMag(pre3, moved, "3"); m < 1e-3 {
 		t.Errorf("drag 6: node 3 moved by %v (want sizable); moved=%v", m, moved)
 	}
-	if _, ok := moved["2"]; ok {
-		t.Errorf("drag 6: node 2 must NOT move (anchored); moved=%v", moved)
+	if m := movedMag(pre2, moved, "2"); m < 1e-3 {
+		t.Errorf("drag 6: node 2 must FOLLOW node 6 by %v (want sizable); moved=%v", m, moved)
 	}
 }
 
@@ -436,6 +439,70 @@ func TestFullDrag5MovesSevenCarriesSixNotTwo(t *testing.T) {
 			t.Errorf("drag 5: node %s perp=%v != node 5 perp=%v (not carried onto 5's meridian)",
 				id, w.dot(meridianPerp), five.dot(meridianPerp))
 		}
+	}
+}
+
+// Authority FLIP when node 3 is the driver: dragging node 3 moves node 7 via the
+// mirror (node 7 KEEPS its mirror radius), and node 6 FOLLOWS — rescaled about node 5
+// so |6→5| == |7→5|. Node 6 moving carries node 2 (θ-lock(1,6,2)). Node 5 (Mid) stays.
+// This is the opposite of the default direction (node 6 authority, node 7 follows).
+func TestFullDrag3FlipsAuthorityNodeSixFollows(t *testing.T) {
+	md := buildEqualRadiiFixture() // seeded equal-radii from the anchor (node 6)
+
+	pre2, _ := md.roots.world("2")
+	pre5, _ := md.roots.world("5")
+	pre6, _ := md.roots.world("6")
+	pre7, _ := md.roots.world("7")
+	if d := dist3(pre6, pre5) - dist3(pre7, pre5); d < -1e-6 || d > 1e-6 {
+		t.Fatalf("seed not equal-radii: |6→5|=%v |7→5|=%v", dist3(pre6, pre5), dist3(pre7, pre5))
+	}
+
+	// Drag node 3.
+	w3, _ := md.roots.world("3")
+	md.roots.roots["3"] = rootFromCartesian(w3.add(vec3{8, 5, 6}), md.roots.origin)
+	moved := md.applyLocks("3", true)
+
+	post5, _ := md.roots.world("5")
+	post6, _ := md.roots.world("6")
+	post7, _ := md.roots.world("7")
+
+	// Equal-radii re-established with node 7 as the authority.
+	if d := dist3(post6, post5) - dist3(post7, post5); d < -1e-6 || d > 1e-6 {
+		t.Errorf("drag 3: |6→5|=%v != |7→5|=%v (equal-radii lapsed)", dist3(post6, post5), dist3(post7, post5))
+	}
+	// Node 6 FOLLOWED node 7's radius (it moved).
+	if m := movedMag(pre6, moved, "6"); m < 1e-3 {
+		t.Errorf("drag 3: node 6 must FOLLOW node 7 by %v (want sizable); moved=%v", m, moved)
+	}
+	// Node 2 FOLLOWED node 6.
+	if m := movedMag(pre2, moved, "2"); m < 1e-3 {
+		t.Errorf("drag 3: node 2 must FOLLOW node 6 by %v (want sizable); moved=%v", m, moved)
+	}
+	// Mid (node 5) stays.
+	if d := dist3(pre5, post5); d > 1e-9 {
+		t.Errorf("drag 3: node 5 moved by %v (Mid must not move)", d)
+	}
+	// Node 7 actually moved (mirror).
+	if m := movedMag(pre7, moved, "7"); m < 1e-3 {
+		t.Errorf("drag 3: node 7 moved by %v (want sizable); moved=%v", m, moved)
+	}
+}
+
+// Lift node 7 leaves node 6 and node 2 put: dragging node 7 carries 5/6 onto its
+// meridian via the perpendicular pre-pass (direct write, NOT placed), so node 6 is
+// never enqueued and the directional θ-lock(1,6,2) never fires — node 2 stays.
+func TestFullDrag7LeavesSixAndTwoPut(t *testing.T) {
+	md := buildEqualRadiiFixture()
+	pre2, _ := md.roots.world("2")
+	w7, _ := md.roots.world("7")
+	md.roots.roots["7"] = rootFromCartesian(w7.add(vec3{8, 5, 6}), md.roots.origin)
+	moved := md.applyLocks("7", true)
+	if _, ok := moved["2"]; ok {
+		t.Errorf("lift 7: node 2 must NOT move; moved=%v", moved)
+	}
+	post2, _ := md.roots.world("2")
+	if d := dist3(pre2, post2); d > 1e-9 {
+		t.Errorf("lift 7: node 2 moved by %v (want 0)", d)
 	}
 }
 
@@ -519,9 +586,9 @@ func TestEqualRadiiLockLoadEqual(t *testing.T) {
 
 // Dragging any of 5/6/7 keeps the two radii into node 5 equal (the in-plane equal-radii
 // claim, UNCHANGED) while the perpendicular-carry claim is layered on top:
-//   - drag 6 → 5,7,3 move (chain down, existing carry); node 2 stays.
+//   - drag 6 → 5,7,3 move (chain down); node 2 FOLLOWS node 6 via θ-lock(1,6,2).
 //   - drag 5 → 7,3 move; node 6 is CARRIED onto 5's meridian; node 2 stays.
-//   - drag 7 → 3 moves (mirror); nodes 5,6 are CARRIED onto 7's meridian.
+//   - drag 7 → 3 moves (mirror); nodes 5,6 are CARRIED onto 7's meridian; node 2 stays.
 // In every case the two edge radii into node 5 stay equal and finite (no NaN).
 func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 	type expect struct {
@@ -531,9 +598,9 @@ func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 		stays   []string // nodes that must not move at all
 	}
 	cases := []expect{
-		{"6", []string{"5", "7", "3"}, nil, []string{"2"}},
+		{"6", []string{"5", "7", "3", "2"}, nil, nil},
 		{"5", []string{"7", "3"}, []string{"6", "7"}, []string{"2"}},
-		{"7", []string{"3"}, []string{"5", "6"}, nil},
+		{"7", []string{"3"}, []string{"5", "6"}, []string{"2"}},
 	}
 	for _, c := range cases {
 		md := buildEqualRadiiFixture()
