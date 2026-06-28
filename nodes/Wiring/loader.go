@@ -350,7 +350,8 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		_, has6 := centers["6"]
 		if has1 && has2 && has6 {
 			md.addThetaLock("1", "2", "6")
-			md.addThetaLock("1", "6", "2")
+			// 6→2 direction intentionally dropped: node 6 moving (and the 5/6/7
+			// group with it) must NOT drag node 2. Keep only 2→6 (node 2 leads 6).
 
 			// Install the SAME aimed-port registry built once above (aimedPorts):
 			// it was constructed earlier under the identical guard/entries so the initial
