@@ -389,10 +389,24 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		// node 6, only its azimuth φ is zeroed. The 6→5 aimed port ("Out"→"5")
 		// installed above then aims along φ=0. Apply once at load so node 5 starts
 		// on the meridian; fan the follower to seed its mover's held center.
+		// Pin node 5 onto both node 6's and node 7's φ=0 meridians (the 6→5 and 7→5
+		// edges sit on φ=0). Node 5 is the follower in BOTH phiZeroLocks (6,5) and
+		// (7,5) — it connects to both 6 and 7. The two meridian planes share the same
+		// off-plane normal (the polar frame's φ=90° axis), so node 5 cannot lie on both
+		// planes at once unless 6 and 7 already share that coordinate. Seed by DRAGGING
+		// node 5 once: that fires both locks and projects 6 AND 7 onto node 5's plane
+		// (the symmetric, pole-stable, φ-free off-plane projection), leaving both edges
+		// in-plane at load. (Matches the runtime behavior: dragging 5 re-pins both 6 and
+		// 7.) The aimed ports 6.Out→5 and 7.Out→5 installed above then aim along φ=0.
 		_, has5 := centers["5"]
-		if has6 && has5 {
-			md.addPhiZeroLock("6", "5")
-			if followers := md.applyLocks("6"); len(followers) > 0 {
+		if has5 && (has6 || has7) {
+			if has6 {
+				md.addPhiZeroLock("6", "5")
+			}
+			if has7 {
+				md.addPhiZeroLock("7", "5")
+			}
+			if followers := md.applyLocks("5"); len(followers) > 0 {
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w
