@@ -333,6 +333,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		}
 		md.setRoots(buildRoots(centers))
 
+		// Union of every node a load-time lock seed moved (across all seeds below).
+		// Their new world positions must be synced back into nodeGeoms before node
+		// build/emission so the emitted node geometry and the initial edge geometry
+		// reflect the locked positions (polar layer is the source of truth).
+		movedByLocks := map[string]bool{}
+
 		// Couple nodes 2 and 6 on node 1's sphere via a bidirectional theta lock
 		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
 		// makes the other share its θ (angle from node 1's +y up-pole), so the two
@@ -372,6 +378,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w
+					movedByLocks[id] = true
 				}
 				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
 			}
@@ -389,8 +396,46 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w
+					movedByLocks[id] = true
 				}
 				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
+			}
+		}
+
+		// Sync every lock-moved node's new world position from the polar layer back
+		// into nodeGeoms[id].Center BEFORE node build/emission. emitNodeGeometry and
+		// the per-node port geometry read nodeGeoms[id].Center, so without this the
+		// emitted/displayed node stays at its saved (pre-lock) position even though
+		// md.roots moved it.
+		for id := range movedByLocks {
+			if w, ok := md.roots.world(id); ok {
+				wc := w
+				g := nodeGeoms[id]
+				g.Center = &wc
+				nodeGeoms[id] = g
+			}
+		}
+
+		// The initial edge segments (edgeArc/edgeLatency/edgeSegments) were computed
+		// above from the pre-lock centers. Recompute every edge touching a moved node
+		// from the now-synced centers (centerOf reads nodeGeoms), so the endpoint at the
+		// moved node — and the bead position stream consuming edgeSegments at bind time —
+		// follows the lock. (Distance-preserving locks leave arc length unchanged; aimed
+		// port directions still shift, so the segment is recomputed in full.)
+		if len(movedByLocks) > 0 {
+			for _, e := range spec.Edges {
+				if !movedByLocks[e.Source] && !movedByLocks[e.Target] {
+					continue
+				}
+				seg := segmentBetweenPortsAimed(
+					nodeGeoms[e.Source], e.SourceHandle, e.Source,
+					nodeGeoms[e.Target], e.TargetHandle, e.Target,
+					aimedPorts, centerOf,
+				)
+				arcLength := chordLength(seg.Start, seg.End)
+				edgeArc[e.Label] = arcLength
+				edgeLatency[e.Label] = arcLength / PulseSpeedWuPerMs
+				edgeSegments[e.Label] = seg
 			}
 		}
 	}
