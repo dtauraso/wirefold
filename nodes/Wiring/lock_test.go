@@ -75,31 +75,37 @@ func dist3(a, b vec3) float64 {
 // along this axis is zero, so the off-plane component of any edge is v·perp.
 var meridianPerp = polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
 
-// moveFollower(6,5) anchors node 6: dragging node 5 RE-PROJECTS node 5 onto node 6's
-// meridian; node 6 (the anchor) NEVER moves. Pole-safety: node 5 sits straight above
-// node 6 with a small off-plane wobble; the re-projection drops only the off-plane
-// component, so node 5 moves a SMALL amount and the edge ends in the meridian plane.
-func TestPhiZeroFollowerLockDrag5ReprojectsFiveNotSix(t *testing.T) {
+// moveFollower(6,5): dragging node 5 perpendicular to the meridian CARRIES node 6
+// onto node 5's new meridian (5 moves perpendicular like 6 does; the perpendicular
+// component is NOT dropped). Node 5 keeps its full dragged position; node 6 adopts
+// node 5's perpendicular coordinate, so the edge ends in the (shared) meridian plane.
+func TestPhiZeroFollowerLockDrag5CarriesSix(t *testing.T) {
 	centers := map[string]vec3{
 		"6": {0, 0, 0},
-		"5": {0, 10, 0.5}, // straight above 6 plus a small off-plane (z) wobble
+		"5": {0, 10, 0.5}, // straight above 6 plus a small off-plane (z) component
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
 	md.addPhiZeroFollowerLock("6", "5")
 
-	sixPre, _ := md.roots.world("6")
+	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("5", true) // drag node 5 → node 5 re-projects onto 6's meridian
+	md.applyLocks("5", true) // drag node 5 perpendicular → node 6 carried onto 5's meridian
 
-	// Anchor node 6 never moves.
-	sixPost, _ := md.roots.world("6")
-	if d := dist3(sixPre, sixPost); d > 1e-9 {
-		t.Errorf("anchor node 6 moved by %v (want 0)", d)
+	// Node 5 keeps its full dragged position (its perpendicular component is NOT dropped).
+	fivePost, _ := md.roots.world("5")
+	if d := dist3(fivePre, fivePost); d > 1e-9 {
+		t.Errorf("dragged node 5 moved by %v (want 0 — full position kept)", d)
 	}
 
-	// Resulting edge (5−6) lies in the meridian plane: off-plane component ≈ 0.
-	fivePost, _ := md.roots.world("5")
+	// Node 6 adopts node 5's perpendicular coordinate (came onto 5's meridian).
+	sixPost, _ := md.roots.world("6")
+	if d := sixPost.dot(meridianPerp) - fivePost.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+		t.Errorf("node 6 perp=%v != node 5 perp=%v (did not come onto 5's meridian)",
+			sixPost.dot(meridianPerp), fivePost.dot(meridianPerp))
+	}
+
+	// Resulting edge (5−6) lies in the (shared) meridian plane: off-plane component ≈ 0.
 	edge := fivePost.sub(sixPost)
 	if off := edge.dot(meridianPerp); off < -1e-9 || off > 1e-9 {
 		t.Errorf("edge off-plane component %v (want ≈0)", off)
@@ -209,9 +215,11 @@ func TestPhiZeroCenterLockDrag5MovesSeven(t *testing.T) {
 	}
 }
 
-// moveCenter(7,5): dragging node 7 (the center) RE-PROJECTS node 7 itself; node 5
-// (the follower) NEVER moves. The edge still ends in the meridian plane.
-func TestPhiZeroCenterLockDrag7ReprojectsSevenNotFive(t *testing.T) {
+// moveCenter(7,5): dragging node 7 perpendicular to the meridian CARRIES node 5 onto
+// node 7's new meridian (7 moves perpendicular like 6 does; the perpendicular
+// component is NOT dropped). Node 7 keeps its full dragged position; node 5 adopts
+// node 7's perpendicular coordinate, so the edge ends in the (shared) meridian plane.
+func TestPhiZeroCenterLockDrag7CarriesFive(t *testing.T) {
 	centers := map[string]vec3{
 		"7": {0, 0, 0.5}, // dragged with a small off-plane (z) component
 		"5": {0, 10, 0},
@@ -220,18 +228,24 @@ func TestPhiZeroCenterLockDrag7ReprojectsSevenNotFive(t *testing.T) {
 	md.roots = buildRoots(centers)
 	md.addPhiZeroCenterLock("7", "5")
 
-	fivePre, _ := md.roots.world("5")
+	sevenPre, _ := md.roots.world("7")
 
-	md.applyLocks("7", true) // drag node 7 → node 7 re-projects; node 5 stays
+	md.applyLocks("7", true) // drag node 7 perpendicular → node 5 carried onto 7's meridian
 
-	// Follower node 5 never moves.
-	fivePost, _ := md.roots.world("5")
-	if d := dist3(fivePre, fivePost); d > 1e-9 {
-		t.Errorf("follower node 5 moved by %v (want 0)", d)
+	// Node 7 keeps its full dragged position (its perpendicular component is NOT dropped).
+	sevenPost, _ := md.roots.world("7")
+	if d := dist3(sevenPre, sevenPost); d > 1e-9 {
+		t.Errorf("dragged node 7 moved by %v (want 0 — full position kept)", d)
 	}
 
-	// Edge lies in the meridian plane.
-	sevenPost, _ := md.roots.world("7")
+	// Node 5 adopts node 7's perpendicular coordinate (came onto 7's meridian).
+	fivePost, _ := md.roots.world("5")
+	if d := fivePost.dot(meridianPerp) - sevenPost.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+		t.Errorf("node 5 perp=%v != node 7 perp=%v (did not come onto 7's meridian)",
+			fivePost.dot(meridianPerp), sevenPost.dot(meridianPerp))
+	}
+
+	// Edge lies in the (shared) meridian plane.
 	edge := fivePost.sub(sevenPost)
 	if off := edge.dot(meridianPerp); off < -1e-9 || off > 1e-9 {
 		t.Errorf("edge off-plane component %v (want ≈0)", off)
@@ -273,33 +287,49 @@ func TestChainDrag6MovesAll(t *testing.T) {
 	}
 }
 
-// Drag the tail (node 7): NEITHER the anchor 6 NOR the mid 5 moves (no back-coupling);
-// only node 3 follows via the 7→3 mirror.
-func TestChainDrag7MovesOnlyThree(t *testing.T) {
+// Drag the tail (node 7) perpendicular to the meridian: the trio members 5 and 6 are
+// CARRIED onto node 7's new meridian (perpendicular-carry — the distinct claim), and
+// node 3 follows via the 7→3 mirror. In-plane, 5/6 keep their φ-plane positions; only
+// their perpendicular coordinate adopts node 7's.
+func TestChainDrag7CarriesFiveSixAndMirrorThree(t *testing.T) {
 	md := buildChainFixture()
+	// Drag node 7 to a position with a clear perpendicular (z) component.
+	w7, _ := md.roots.world("7")
+	md.roots.roots["7"] = rootFromCartesian(w7.add(vec3{2, 1, 6}), md.roots.origin)
 	moved := md.applyLocks("7", true)
 	if _, ok := moved["3"]; !ok {
 		t.Errorf("drag 7: node 3 did not follow (mirror broken); moved=%v", moved)
 	}
+	seven, _ := md.roots.world("7")
 	for _, id := range []string{"5", "6"} {
-		if _, ok := moved[id]; ok {
-			t.Errorf("drag 7: node %s must NOT move (no back-coupling); moved=%v", id, moved)
+		w, _ := md.roots.world(id)
+		if d := w.dot(meridianPerp) - seven.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+			t.Errorf("drag 7: node %s perp=%v != node 7 perp=%v (not carried onto 7's meridian)",
+				id, w.dot(meridianPerp), seven.dot(meridianPerp))
 		}
 	}
 }
 
-// Drag the mid (node 5): node 7 follows (5 drags 7) and 3 follows via the mirror;
-// the anchor node 6 NEVER moves.
-func TestChainDrag5MovesSevenNotSix(t *testing.T) {
+// Drag the mid (node 5) perpendicular to the meridian: node 7 follows (5 drags 7) and
+// 3 follows via the mirror; node 6 is now CARRIED onto node 5's new meridian
+// (perpendicular-carry — the distinct claim). The in-plane chain is unchanged.
+func TestChainDrag5MovesSevenCarriesSix(t *testing.T) {
 	md := buildChainFixture()
+	w5, _ := md.roots.world("5")
+	md.roots.roots["5"] = rootFromCartesian(w5.add(vec3{2, 1, 6}), md.roots.origin)
 	moved := md.applyLocks("5", true)
 	for _, id := range []string{"7", "3"} {
 		if _, ok := moved[id]; !ok {
 			t.Errorf("drag 5: node %s did not move (chain broken); moved=%v", id, moved)
 		}
 	}
-	if _, ok := moved["6"]; ok {
-		t.Errorf("drag 5: anchor node 6 must NOT move; moved=%v", moved)
+	five, _ := md.roots.world("5")
+	for _, id := range []string{"6", "7"} {
+		w, _ := md.roots.world(id)
+		if d := w.dot(meridianPerp) - five.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+			t.Errorf("drag 5: node %s perp=%v != node 5 perp=%v (not carried onto 5's meridian)",
+				id, w.dot(meridianPerp), five.dot(meridianPerp))
+		}
 	}
 }
 
@@ -366,30 +396,45 @@ func TestFullDrag3MovesSeven(t *testing.T) {
 	}
 }
 
-// Drag 7 (tail): node 3 follows via the mirror; NEITHER node 5 nor node 6 moves.
-func TestFullDrag7MovesThreeNotFiveSix(t *testing.T) {
+// Drag 7 (tail) perpendicular: node 3 follows via the mirror; nodes 5 and 6 are
+// CARRIED onto node 7's new meridian (perpendicular-carry).
+func TestFullDrag7MovesThreeCarriesFiveSix(t *testing.T) {
 	md := buildFullFixture()
+	w7, _ := md.roots.world("7")
+	md.roots.roots["7"] = rootFromCartesian(w7.add(vec3{2, 1, 6}), md.roots.origin)
 	moved := md.applyLocks("7", true)
 	if _, ok := moved["3"]; !ok {
 		t.Errorf("drag 7: node 3 did not follow (mirror leader 7); moved=%v", moved)
 	}
+	seven, _ := md.roots.world("7")
 	for _, id := range []string{"5", "6"} {
-		if _, ok := moved[id]; ok {
-			t.Errorf("drag 7: node %s must NOT move (no back-coupling); moved=%v", id, moved)
+		w, _ := md.roots.world(id)
+		if d := w.dot(meridianPerp) - seven.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+			t.Errorf("drag 7: node %s perp=%v != node 7 perp=%v (not carried onto 7's meridian)",
+				id, w.dot(meridianPerp), seven.dot(meridianPerp))
 		}
 	}
 }
 
-// Drag 5 (mid): node 7 follows (5 drags 7); the anchor node 6 stays, node 2 stays.
-func TestFullDrag5MovesSevenNotSixNotTwo(t *testing.T) {
+// Drag 5 (mid) perpendicular: node 7 follows (5 drags 7); node 6 is CARRIED onto node
+// 5's new meridian (perpendicular-carry); node 2 stays (no back-coupling to node 2).
+func TestFullDrag5MovesSevenCarriesSixNotTwo(t *testing.T) {
 	md := buildFullFixture()
+	w5, _ := md.roots.world("5")
+	md.roots.roots["5"] = rootFromCartesian(w5.add(vec3{2, 1, 6}), md.roots.origin)
 	moved := md.applyLocks("5", true)
 	if _, ok := moved["7"]; !ok {
 		t.Errorf("drag 5: node 7 did not follow; moved=%v", moved)
 	}
-	for _, id := range []string{"6", "2"} {
-		if _, ok := moved[id]; ok {
-			t.Errorf("drag 5: node %s must NOT move; moved=%v", id, moved)
+	if _, ok := moved["2"]; ok {
+		t.Errorf("drag 5: node 2 must NOT move; moved=%v", moved)
+	}
+	five, _ := md.roots.world("5")
+	for _, id := range []string{"6", "7"} {
+		w, _ := md.roots.world(id)
+		if d := w.dot(meridianPerp) - five.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+			t.Errorf("drag 5: node %s perp=%v != node 5 perp=%v (not carried onto 5's meridian)",
+				id, w.dot(meridianPerp), five.dot(meridianPerp))
 		}
 	}
 }
@@ -472,21 +517,23 @@ func TestEqualRadiiLockLoadEqual(t *testing.T) {
 	}
 }
 
-// Dragging any of 5/6/7 keeps the two radii into node 5 equal under the DIRECTIONAL
-// chain, moving exactly the downstream nodes and never the upstream anchor:
-//   - drag 6 → 5,7,3 move (chain down); node 2 stays.
-//   - drag 5 → 7,3 move; the anchor node 6 stays.
-//   - drag 7 → 3 moves (mirror); neither node 5 nor node 6 moves.
+// Dragging any of 5/6/7 keeps the two radii into node 5 equal (the in-plane equal-radii
+// claim, UNCHANGED) while the perpendicular-carry claim is layered on top:
+//   - drag 6 → 5,7,3 move (chain down, existing carry); node 2 stays.
+//   - drag 5 → 7,3 move; node 6 is CARRIED onto 5's meridian; node 2 stays.
+//   - drag 7 → 3 moves (mirror); nodes 5,6 are CARRIED onto 7's meridian.
+// In every case the two edge radii into node 5 stay equal and finite (no NaN).
 func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 	type expect struct {
-		drag   string
-		moves  []string
-		stays  []string
+		drag    string
+		moves   []string // followers that must move via the chain/mirror
+		carried []string // trio members that must land on the dragged node's meridian
+		stays   []string // nodes that must not move at all
 	}
 	cases := []expect{
-		{"6", []string{"5", "7", "3"}, []string{"2"}},
-		{"5", []string{"7", "3"}, []string{"6"}},
-		{"7", []string{"3"}, []string{"5", "6"}},
+		{"6", []string{"5", "7", "3"}, nil, []string{"2"}},
+		{"5", []string{"7", "3"}, []string{"6", "7"}, []string{"2"}},
+		{"7", []string{"3"}, []string{"5", "6"}, nil},
 	}
 	for _, c := range cases {
 		md := buildEqualRadiiFixture()
@@ -505,10 +552,106 @@ func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 				t.Errorf("drag %s: expected node %s to move (regression); moved=%v", c.drag, id, moved)
 			}
 		}
-		for _, id := range c.stays {
-			if _, ok := moved[id]; ok {
-				t.Errorf("drag %s: node %s must NOT move (directional chain); moved=%v", c.drag, id, moved)
+		dw, _ := md.roots.world(c.drag)
+		for _, id := range c.carried {
+			w, _ := md.roots.world(id)
+			if d := w.dot(meridianPerp) - dw.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+				t.Errorf("drag %s: node %s perp=%v != dragged perp=%v (not carried)",
+					c.drag, id, w.dot(meridianPerp), dw.dot(meridianPerp))
 			}
 		}
+		for _, id := range c.stays {
+			if _, ok := moved[id]; ok {
+				t.Errorf("drag %s: node %s must NOT move; moved=%v", c.drag, id, moved)
+			}
+		}
+	}
+}
+
+// Perpendicular-carry, node 5 dragged (the distinct claim): dragging node 5 with a
+// clear perpendicular-to-meridian component lets node 5 ACTUALLY move perpendicular
+// (its off-plane component changes — it is NOT dropped/pinned), and nodes 6 and 7 adopt
+// node 5's new meridian (their perpendicular coordinates match node 5's — they came
+// along), exactly like node 6 carries the trio.
+func TestPerpendicularCarryDrag5(t *testing.T) {
+	md := buildEqualRadiiFixture()
+	pre5, _ := md.roots.world("5")
+	// Drag node 5 with a sizable perpendicular (z) component.
+	md.roots.roots["5"] = rootFromCartesian(pre5.add(vec3{1, 2, 7}), md.roots.origin)
+	md.applyLocks("5", true)
+
+	five, _ := md.roots.world("5")
+	// Node 5 actually moved perpendicular (off-plane component changed; NOT dropped).
+	if d := five.dot(meridianPerp) - pre5.dot(meridianPerp); d > -1 && d < 1 {
+		t.Errorf("node 5 perpendicular component barely changed (%v); the drop was not removed", d)
+	}
+	// Nodes 6 and 7 adopted node 5's new meridian.
+	for _, id := range []string{"6", "7"} {
+		w, _ := md.roots.world(id)
+		if d := w.dot(meridianPerp) - five.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+			t.Errorf("node %s perp=%v != node 5 perp=%v (did not come onto 5's meridian)",
+				id, w.dot(meridianPerp), five.dot(meridianPerp))
+		}
+	}
+	// In-plane equal-radii preserved.
+	r6, r7 := radius5(md, "6"), radius5(md, "7")
+	if math.Abs(r6-r7) > 1e-6 || math.IsNaN(r6) || math.IsNaN(r7) {
+		t.Errorf("drag 5: radii not equal/finite: |6->5|=%v |7->5|=%v", r6, r7)
+	}
+}
+
+// Perpendicular-carry, node 7 dragged (the distinct claim, 7↔5 mirror of the drag-5
+// case): node 7 moves perpendicular; nodes 5 and 6 come onto node 7's new meridian.
+func TestPerpendicularCarryDrag7(t *testing.T) {
+	md := buildEqualRadiiFixture()
+	pre7, _ := md.roots.world("7")
+	md.roots.roots["7"] = rootFromCartesian(pre7.add(vec3{1, 2, 7}), md.roots.origin)
+	md.applyLocks("7", true)
+
+	seven, _ := md.roots.world("7")
+	// Node 7 actually moved perpendicular.
+	if d := seven.dot(meridianPerp) - pre7.dot(meridianPerp); d > -1 && d < 1 {
+		t.Errorf("node 7 perpendicular component barely changed (%v); the drop was not removed", d)
+	}
+	// Nodes 5 and 6 adopted node 7's new meridian.
+	for _, id := range []string{"5", "6"} {
+		w, _ := md.roots.world(id)
+		if d := w.dot(meridianPerp) - seven.dot(meridianPerp); d < -1e-9 || d > 1e-9 {
+			t.Errorf("node %s perp=%v != node 7 perp=%v (did not come onto 7's meridian)",
+				id, w.dot(meridianPerp), seven.dot(meridianPerp))
+		}
+	}
+	// In-plane equal-radii preserved.
+	r6, r7 := radius5(md, "6"), radius5(md, "7")
+	if math.Abs(r6-r7) > 1e-6 || math.IsNaN(r6) || math.IsNaN(r7) {
+		t.Errorf("drag 7: radii not equal/finite: |6->5|=%v |7->5|=%v", r6, r7)
+	}
+}
+
+// In-plane drag (no perpendicular component) is UNCHANGED by the carry: dragging node 5
+// within the meridian (after the co-planar load seed) leaves node 6's perpendicular
+// coordinate alone and does not enter node 6 into the moved set — only the in-plane
+// chain (5 drags 7, mirror to 3) fires.
+func TestInPlaneDrag5DoesNotCarrySix(t *testing.T) {
+	md := buildEqualRadiiFixture()
+	pre6, _ := md.roots.world("6")
+	w5, _ := md.roots.world("5")
+	// In-plane delta: zero perpendicular (z) component.
+	md.roots.roots["5"] = rootFromCartesian(w5.add(vec3{6, 4, 0}), md.roots.origin)
+	moved := md.applyLocks("5", true)
+
+	if _, ok := moved["6"]; ok {
+		t.Errorf("in-plane drag 5: node 6 must NOT move (no perpendicular carry); moved=%v", moved)
+	}
+	post6, _ := md.roots.world("6")
+	if d := dist3(pre6, post6); d > 1e-9 {
+		t.Errorf("in-plane drag 5: node 6 moved by %v (want 0)", d)
+	}
+	if _, ok := moved["7"]; !ok {
+		t.Errorf("in-plane drag 5: node 7 did not follow the chain; moved=%v", moved)
+	}
+	r6, r7 := radius5(md, "6"), radius5(md, "7")
+	if math.Abs(r6-r7) > 1e-6 {
+		t.Errorf("in-plane drag 5: radii not equal: |6->5|=%v |7->5|=%v", r6, r7)
 	}
 }

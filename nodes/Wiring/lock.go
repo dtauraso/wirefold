@@ -193,45 +193,79 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 		queue = append(queue, id)
 	}
 
-	// Dragged-node self-projection (DIRECTIONAL): the node the user dragged may be
-	// the WRITTEN node of one of its own φ=0 locks, which the loop's move-once guard
-	// skips. Re-project it here, BEFORE the BFS, so downstream locks read the
-	// corrected position:
-	//   - moveFollower.Follower (node 5): snap it onto the anchor Center's φ=0
-	//     meridian (node 5 stays on node 6's meridian). Writes only the dragged 5.
-	//   - moveCenter.Center (node 7): re-project it onto its own φ=0 meridian about
-	//     the Follower (keeps the Follower on its meridian) and fold equal-radii so
-	//     it lands at the anchor's radius about Mid. Writes only the dragged 7; the
-	//     Follower and the anchor stay put.
+	// Dragged-node meridian carry (DISTINCT CLAIM, separate from the in-plane chain):
+	// when the user drags the WRITTEN node of one of its own φ=0 locks — node 5
+	// (moveFollower.Follower) or node 7 (moveCenter.Center) — that node may move
+	// PERPENDICULAR to the meridian, carrying the rest of the {5,6,7} trio with it,
+	// exactly like node 6 already does. (Node 6 is a Center/kept of its lock, never a
+	// written node, so this pre-pass never fires for it; its carry is the existing BFS
+	// path and is unchanged.)
+	//
+	// Old behavior DROPPED the dragged node's off-plane component (`v -= perp·(v·perp)`),
+	// pinning 5/7 to the existing meridian. We now INVERT which side gets projected: the
+	// dragged node KEEPS its full perpendicular component (it is NOT projected), and the
+	// OTHER two trio members adopt the dragged node's perpendicular coordinate — they
+	// shift along perp onto the dragged node's new meridian, keeping their in-plane
+	// (φ-plane) positions. The in-plane chain (6 anchors 5, 5 drags 7), equal-radii, and
+	// the 3↔7 mirror are untouched and still run in the BFS below.
+	//
+	// In-plane drags are unaffected: a drag that stays in the meridian leaves the
+	// dragged node's perpendicular coordinate equal to the others', so the shift is zero.
 	// Gated by fromDrag so the load-time seed never constrains the seed node.
 	if fromDrag {
+		// perp is the φ=90° axis of the polar frame: the normal of the φ=0 meridian
+		// plane (pole-safe — projection only, no atan2).
 		perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
+
+		// Is the dragged node the WRITTEN node of a φ=0 lock (node 5 or 7)? Collect the
+		// trio members referenced by the φ=0 locks while checking.
+		isWrittenDrag := false
+		trio := map[string]bool{}
 		for _, lk := range md.phiZeroLocks {
-			var written, kept string
-			switch {
-			case lk.Drive == moveFollower && movedID == lk.Follower:
-				written, kept = lk.Follower, lk.Center
-			case lk.Drive == moveCenter && movedID == lk.Center:
-				written, kept = lk.Center, lk.Follower
-			default:
-				continue
+			trio[lk.Center] = true
+			trio[lk.Follower] = true
+			if (lk.Drive == moveFollower && movedID == lk.Follower) ||
+				(lk.Drive == moveCenter && movedID == lk.Center) {
+				isWrittenDrag = true
 			}
-			ww, ok := md.roots.world(written)
-			if !ok {
-				continue
+		}
+
+		if dw, ok := md.roots.world(movedID); isWrittenDrag && ok {
+			// targetPerp: the dragged node's perpendicular coordinate — its new
+			// meridian. The dragged node KEEPS this (not dropped).
+			targetPerp := dw.dot(perp)
+
+			// Carry the meridian: every OTHER trio member adopts targetPerp (shifts
+			// along perp onto the dragged node's meridian), keeping its in-plane
+			// position. This is the inversion: the OTHERS get projected, not the
+			// dragged node.
+			for other := range trio {
+				if other == movedID || processed[other] {
+					continue
+				}
+				ow, ok := md.roots.world(other)
+				if !ok {
+					continue
+				}
+				shift := perp.scale(targetPerp - ow.dot(perp))
+				if shift.length() < 1e-9 { // already on the dragged node's meridian (in-plane drag)
+					continue
+				}
+				no := ow.add(shift)
+				md.roots.roots[other] = rootFromCartesian(no, md.roots.origin)
+				moved[other] = no
 			}
-			kw, ok := md.roots.world(kept)
-			if !ok {
-				continue
+
+			// In-plane (UNCHANGED claim): keep the dragged node's full position,
+			// folding equal-radii if it is the equalized side (B/node 7). With every
+			// trio member now on the common meridian (relative perp = 0), the radius
+			// equalization measured about Mid is purely in-plane; scaling about Mid
+			// preserves the perpendicular coordinate. equalRadiiAdjust is a no-op for
+			// the non-equalized side (node 5).
+			if adj, ok := md.equalRadiiAdjust(movedID, dw); ok {
+				md.roots.roots[movedID] = rootFromCartesian(adj, md.roots.origin)
+				moved[movedID] = adj
 			}
-			v := ww.sub(kw)
-			v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
-			nw := kw.add(v)
-			if adj, ok := md.equalRadiiAdjust(written, nw); ok {
-				nw = adj
-			}
-			md.roots.roots[written] = rootFromCartesian(nw, md.roots.origin)
-			moved[written] = nw
 		}
 	}
 
