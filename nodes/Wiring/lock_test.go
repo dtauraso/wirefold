@@ -92,7 +92,7 @@ func TestPhiZeroLockPoleSafe(t *testing.T) {
 	sixPre, _ := md.roots.world("6")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("5") // drag node 5 (follower) → node 6 (other) is re-pinned
+	md.applyLocks("5", true) // drag node 5 (follower) → node 6 (other) is re-pinned
 
 	// Dragged node 5 does not move.
 	fivePost, _ := md.roots.world("5")
@@ -128,7 +128,7 @@ func TestPhiZeroLockSymmetric(t *testing.T) {
 	sixPre, _ := md.roots.world("6")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("6") // drag node 6 (center) → node 5 (other) is re-pinned
+	md.applyLocks("6", true) // drag node 6 (center) → node 5 (other) is re-pinned
 
 	// Dragged node 6 does not move.
 	sixPost, _ := md.roots.world("6")
@@ -168,7 +168,7 @@ func TestPhiZeroLockEdgeInMeridianPlane(t *testing.T) {
 		t.Fatalf("fixture invalid: φ should be clearly nonzero, got %v", before.Phi)
 	}
 
-	md.applyLocks("6") // drag center 6 → follower 5 projected onto the meridian plane
+	md.applyLocks("6", true) // drag center 6 → follower 5 projected onto the meridian plane
 
 	after, ok := md.roots.surfaceCoord("6", "5")
 	if !ok {
@@ -195,7 +195,7 @@ func TestPhiZeroLock75PoleSafe(t *testing.T) {
 	sevenPre, _ := md.roots.world("7")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("5") // drag node 5 (follower) → node 7 (other) is re-pinned
+	md.applyLocks("5", true) // drag node 5 (follower) → node 7 (other) is re-pinned
 
 	// Dragged node 5 does not move.
 	fivePost, _ := md.roots.world("5")
@@ -229,7 +229,7 @@ func TestPhiZeroLock75Symmetric(t *testing.T) {
 	sevenPre, _ := md.roots.world("7")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("7") // drag node 7 (center) → node 5 (other) is re-pinned
+	md.applyLocks("7", true) // drag node 7 (center) → node 5 (other) is re-pinned
 
 	// Dragged node 7 does not move.
 	sevenPost, _ := md.roots.world("7")
@@ -274,7 +274,7 @@ func buildChainFixture() *MoveDispatch {
 // 7 moving proves the chain reached past the directly-referenced follower.
 func TestChainDrag6MovesAll(t *testing.T) {
 	md := buildChainFixture()
-	moved := md.applyLocks("6")
+	moved := md.applyLocks("6", true)
 	for _, id := range []string{"5", "7", "3"} {
 		if _, ok := moved[id]; !ok {
 			t.Errorf("drag 6: node %s did not move (chain broken); moved=%v", id, moved)
@@ -290,7 +290,7 @@ func TestChainDrag6MovesAll(t *testing.T) {
 // (via the 7→3 mirror). Termination: the test returning at all proves no infinite loop.
 func TestChainDrag7MovesAll(t *testing.T) {
 	md := buildChainFixture()
-	moved := md.applyLocks("7")
+	moved := md.applyLocks("7", true)
 	for _, id := range []string{"5", "6", "3"} {
 		if _, ok := moved[id]; !ok {
 			t.Errorf("drag 7: node %s did not move (chain broken); moved=%v", id, moved)
@@ -302,7 +302,7 @@ func TestChainDrag7MovesAll(t *testing.T) {
 // move pulls node 3 via the mirror.
 func TestChainDrag5MovesAll(t *testing.T) {
 	md := buildChainFixture()
-	moved := md.applyLocks("5")
+	moved := md.applyLocks("5", true)
 	for _, id := range []string{"6", "7", "3"} {
 		if _, ok := moved[id]; !ok {
 			t.Errorf("drag 5: node %s did not move (chain broken); moved=%v", id, moved)
@@ -351,7 +351,7 @@ func TestFullDrag6MovesSevenAndThree(t *testing.T) {
 	md := buildFullFixture()
 	pre7, _ := md.roots.world("7")
 	pre3, _ := md.roots.world("3")
-	moved := md.applyLocks("6")
+	moved := md.applyLocks("6", true)
 	if m := movedMag(pre7, moved, "7"); m < 1e-3 {
 		t.Errorf("drag 6: node 7 moved by %v (want sizable); moved=%v", m, moved)
 	}
@@ -363,7 +363,7 @@ func TestFullDrag6MovesSevenAndThree(t *testing.T) {
 // Mirror leader 3 drives follower 7.
 func TestFullDrag3MovesSeven(t *testing.T) {
 	md := buildFullFixture()
-	moved := md.applyLocks("3")
+	moved := md.applyLocks("3", true)
 	if _, ok := moved["7"]; !ok {
 		t.Errorf("drag 3: node 7 did not follow (mirror leader 3); moved=%v", moved)
 	}
@@ -372,7 +372,7 @@ func TestFullDrag3MovesSeven(t *testing.T) {
 // Mirror leader 7 drives follower 3.
 func TestFullDrag7MovesThree(t *testing.T) {
 	md := buildFullFixture()
-	moved := md.applyLocks("7")
+	moved := md.applyLocks("7", true)
 	if _, ok := moved["3"]; !ok {
 		t.Errorf("drag 7: node 3 did not follow (mirror leader 7); moved=%v", moved)
 	}
@@ -381,7 +381,7 @@ func TestFullDrag7MovesThree(t *testing.T) {
 // Drag 5 still propagates to both meridian centers 6 and 7 (unchanged behavior).
 func TestFullDrag5MovesSixAndSeven(t *testing.T) {
 	md := buildFullFixture()
-	moved := md.applyLocks("5")
+	moved := md.applyLocks("5", true)
 	for _, id := range []string{"6", "7"} {
 		if _, ok := moved[id]; !ok {
 			t.Errorf("drag 5: node %s did not move; moved=%v", id, moved)
@@ -404,7 +404,7 @@ func TestCenterTwoDoesNotDragMirror(t *testing.T) {
 	md.roots = buildRoots(centers)
 	md.addMirrorLock("2", "3", "7")
 	md.addMirrorLock("2", "7", "3")
-	moved := md.applyLocks("2")
+	moved := md.applyLocks("2", true)
 	for _, id := range []string{"3", "7"} {
 		if _, ok := moved[id]; ok {
 			t.Errorf("center 2 moved: node %s should NOT be dragged by the mirror (leader-only rule); moved=%v", id, moved)
@@ -431,7 +431,7 @@ func TestPhiZeroLock75EdgeInMeridianPlane(t *testing.T) {
 		t.Fatalf("fixture invalid: φ should be clearly nonzero, got %v", before.Phi)
 	}
 
-	md.applyLocks("7") // drag center 7 → follower 5 projected onto the meridian plane
+	md.applyLocks("7", true) // drag center 7 → follower 5 projected onto the meridian plane
 
 	after, ok := md.roots.surfaceCoord("7", "5")
 	if !ok {
@@ -453,7 +453,7 @@ func radius5(md *MoveDispatch, id string) float64 {
 func buildEqualRadiiFixture() *MoveDispatch {
 	md := buildFullFixture()
 	md.addEqualRadiiLock("5", "6", "7")
-	md.applyLocks("5")
+	md.applyLocks("5", false) // load seed, not a drag
 	return md
 }
 
@@ -482,7 +482,7 @@ func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 		md := buildEqualRadiiFixture()
 		w, _ := md.roots.world(c.drag)
 		md.roots.roots[c.drag] = rootFromCartesian(w.add(vec3{8, 5, 6}), md.roots.origin)
-		moved := md.applyLocks(c.drag)
+		moved := md.applyLocks(c.drag, true)
 		r6, r7 := radius5(md, "6"), radius5(md, "7")
 		if math.Abs(r6-r7) > 1e-6 {
 			t.Errorf("drag %s: radii not equal: |6->5|=%v |7->5|=%v", c.drag, r6, r7)

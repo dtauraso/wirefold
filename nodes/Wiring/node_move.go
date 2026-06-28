@@ -668,7 +668,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// fan re-sent center messages to edges already fanned by RootMove — overlapping
 	// edges recomputed and re-emitted their identical segment up to 6×/frame, which was
 	// the node-2 drag lag (node 2 is uniquely both a lock participant and a lock center).
-	for id, w := range md.applyLocks(nodeID) {
+	for id, w := range md.applyLocks(nodeID, true) {
 		emit[id] = w
 	}
 

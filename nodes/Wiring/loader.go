@@ -374,7 +374,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			// than only after the first drag. Node 3 is the leader; node 7 is reflected.
 			// applyLocks updates roots in place but defers fanning (drag-path dedup), so
 			// fan the followers here to seed their movers' held centers before Start.
-			if followers := md.applyLocks("3"); len(followers) > 0 {
+			if followers := md.applyLocks("3", false); len(followers) > 0 {
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w
@@ -413,7 +413,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			if has6 && has7 {
 				md.addEqualRadiiLock("5", "6", "7")
 			}
-			if followers := md.applyLocks("5"); len(followers) > 0 {
+			if followers := md.applyLocks("5", false); len(followers) > 0 {
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w

@@ -84,10 +84,14 @@ func (md *MoveDispatch) addEqualRadiiLock(mid, a, b string) {
 // (nw, false) when no equal-radii lock applies to `other` for this drag.
 //
 // Authority: if movedID is one of the two sources, that source is the reference
-// and the OTHER source is the one equalized. If movedID is Mid (neither source
-// dragged), B is equalized to A. So the equalized node is whichever of {A,B} is
-// NOT the reference, and `other` must be that equalized node.
-func (md *MoveDispatch) equalRadiiAdjust(other, movedID string, nw vec3) (vec3, bool) {
+// and the OTHER source is the one equalized. When Mid itself is moved, the handling
+// splits on fromDrag: at LOAD (fromDrag=false) B is equalized to A here (node 5
+// stays put, the sibling's radius is matched — the load seed), but on an interactive
+// DRAG (fromDrag=true) neither source is radius-pulled — applyLocks instead moves
+// Mid to the perpendicular bisector of (A,B) so A and B stay equidistant via their
+// own meridian follow. So the equalized node is whichever of {A,B} is NOT the
+// reference, and `other` must be that equalized node.
+func (md *MoveDispatch) equalRadiiAdjust(other, movedID string, fromDrag bool, nw vec3) (vec3, bool) {
 	for _, lk := range md.equalRadiiLocks {
 		var reference, equalized string
 		switch movedID {
@@ -96,6 +100,11 @@ func (md *MoveDispatch) equalRadiiAdjust(other, movedID string, nw vec3) (vec3, 
 		case lk.B:
 			reference, equalized = lk.B, lk.A
 		case lk.Mid:
+			// Drag uses the bisector (see applyLocks); only the load seed
+			// radius-equalizes the sibling here.
+			if fromDrag {
+				continue
+			}
 			reference, equalized = lk.A, lk.B
 		default:
 			continue
@@ -162,7 +171,7 @@ func (md *MoveDispatch) logPair26(movedID string) {
 // followers' new world centers so the caller (RootMove) folds them into the single
 // per-frame fan. Fanning here would re-emit edges already fanned by RootMove (the
 // duplicate-emit drag lag). Soft membership is preserved: only locked followers move.
-func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
+func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec3 {
 	moved := map[string]vec3{}
 	// BFS fixpoint: locks chain. When a lock moves a follower, locks that reference
 	// THAT follower must fire too (e.g. drag 6 → phiZeroLock(6,5) moves 5 → phiZeroLock(7,5)
@@ -251,11 +260,41 @@ func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 			// Fold equal-radii: if `other` is the node whose radius about Mid must
 			// match its sibling, rescale the projected position about Mid. One
 			// combined move (meridian plane + equal radius) in a single place().
-			if adj, ok := md.equalRadiiAdjust(other, movedID, nw); ok {
+			if adj, ok := md.equalRadiiAdjust(other, movedID, fromDrag, nw); ok {
 				nw = adj
 			}
 			place(other, nw)
 		}
 	}
+
+	// Drag-5 symmetric move: when Mid itself is dragged on an interactive drag,
+	// move Mid onto the perpendicular bisector of (A,B) so |A→Mid| == |B→Mid| and
+	// A/B are affected equally (only their normal meridian follow, no radius yank).
+	// Gated by fromDrag so the load-time seed (which reuses applyLocks) never runs
+	// this — the loaded layout is unchanged. M=(A+B)/2; n=(B−A)/|B−A|;
+	// proj = P − ((P−M)·n)·n where P is Mid's current world.
+	if fromDrag {
+		for _, lk := range md.equalRadiiLocks {
+			if movedID != lk.Mid {
+				continue
+			}
+			aw, oka := md.roots.world(lk.A)
+			bw, okb := md.roots.world(lk.B)
+			pw, okp := md.roots.world(lk.Mid)
+			if !oka || !okb || !okp {
+				continue
+			}
+			d := bw.sub(aw)
+			if d.length() == 0 {
+				continue
+			}
+			n := d.normalize()
+			m := aw.add(bw).scale(0.5)
+			proj := pw.sub(n.scale(pw.sub(m).dot(n)))
+			md.roots.roots[lk.Mid] = rootFromCartesian(proj, md.roots.origin)
+			moved[lk.Mid] = proj
+		}
+	}
+
 	return moved
 }
