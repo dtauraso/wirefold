@@ -350,8 +350,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		_, has6 := centers["6"]
 		if has1 && has2 && has6 {
 			md.addThetaLock("1", "2", "6")
-			// 6→2 direction intentionally dropped: node 6 moving (and the 5/6/7
-			// group with it) must NOT drag node 2. Keep only 2→6 (node 2 leads 6).
+			// 6→2 direction restored: node 6 LEADING (it is written by the node-3
+			// authority flip, where node 6 follows node 7's radius) must carry node 2.
+			// With leader-only θ-lock firing this is directional — dragging/lifting
+			// node 7 does not move node 6, so a 7-lift still leaves node 2 put; only a
+			// node-6 move fires this lock.
+			md.addThetaLock("1", "6", "2")
 
 			// Install the SAME aimed-port registry built once above (aimedPorts):
 			// it was constructed earlier under the identical guard/entries so the initial

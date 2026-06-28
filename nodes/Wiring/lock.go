@@ -102,11 +102,27 @@ func (md *MoveDispatch) addEqualRadiiLock(mid, a, b string) {
 	md.equalRadiiLocks = append(md.equalRadiiLocks, equalRadiiLock{Mid: mid, A: a, B: b})
 }
 
+// rescaleAboutMid returns nw rescaled about mw so |result→mw| == refR, keeping
+// nw's direction from mw (pure-polar: keeps θ/φ about Mid, sets R). Returns
+// (nw, false) when nw coincides with mw (no direction to keep).
+func rescaleAboutMid(mw, nw vec3, refR float64) (vec3, bool) {
+	dir := nw.sub(mw)
+	if dir.length() == 0 {
+		return nw, false
+	}
+	return mw.add(dir.normalize().scale(refR)), true
+}
+
 // equalRadiiAdjust, given that the φ=0 lock is about to write `other` to world
 // position nw (already projected onto Mid's meridian plane), returns the adjusted
 // world position that also makes r(other about Mid) equal to A's radius about Mid.
 // It only fires when `other` is B (the equalized side); A (the authority/anchor)
 // is never rescaled. Returns (nw, false) when no equal-radii lock applies.
+//
+// This is the DEFAULT authority direction (A=anchor is the reference, B follows),
+// used for every driver except the node-3 case. The node-3 driver flips the
+// authority — node 7 (B) keeps its mirror radius and node 6 (A) follows — which
+// is handled inline in applyLocks via rescaleAboutMid, not here.
 func (md *MoveDispatch) equalRadiiAdjust(other string, nw vec3) (vec3, bool) {
 	for _, lk := range md.equalRadiiLocks {
 		if other != lk.B {
@@ -120,13 +136,7 @@ func (md *MoveDispatch) equalRadiiAdjust(other string, nw vec3) (vec3, bool) {
 		if !ok {
 			continue
 		}
-		// Direction from Mid to the already-projected position; scale to A's
-		// radius. Pure-polar: keeps θ/φ about Mid (in-plane), sets R.
-		dir := nw.sub(mw)
-		if dir.length() == 0 {
-			continue
-		}
-		return mw.add(dir.normalize().scale(rp.R)), true
+		return rescaleAboutMid(mw, nw, rp.R)
 	}
 	return nw, false
 }
@@ -302,14 +312,44 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 			}
 			locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
 			fw := polar2cart(locked).add(cw) // follower world position
-			// Fold equal-radii: when the mirror moves the equalized side (B/node 7)
-			// — e.g. drag node 3 → mirror(2,3,7) writes node 7 — re-derive node 7's
-			// radius about Mid (node 5) from A's (node 6) radius, so |7→5| := |6→5|.
-			// Otherwise the equal-radii claim would fire only for 5/6/7-originated
-			// drags and silently lapse when the drive originates at node 3. The φ=0
-			// lock below cannot do this here: place()'s move-once guard skips node 7
-			// once the mirror has written it. Reuses equalRadiiAdjust (rescale R about
-			// Mid, keep θ/φ); a no-op for the non-equalized follower (node 3).
+
+			// Authority FLIP for the node-3 driver. When node 3 is dragged it drives
+			// node 7's radius: the mirror(2,3,7) writes node 7 to fw, and node 7 KEEPS
+			// that mirror radius (it is NOT rescaled). Instead the anchor node 6 (A)
+			// FOLLOWS — rescaled about Mid (node 5) so |6→5| := |7→5|, keeping node 6's
+			// θ/φ about node 5. Node 6 is then placed, so the BFS fires θ-lock(1,6,2)
+			// and node 2 follows node 6. Node 5 (Mid) must stay, so it is guarded from
+			// the 6-anchors-5 φ=0 lock. This is the opposite of the default direction
+			// (where node 6 is authority and node 7 follows), and applies ONLY here.
+			if movedID == "3" {
+				placedFollow := false
+				for _, er := range md.equalRadiiLocks {
+					if er.B != lk.Follower {
+						continue // only the lock whose B node this mirror just wrote
+					}
+					place(lk.Follower, fw) // node 7 keeps its mirror radius
+					mw, okm := md.roots.world(er.Mid)
+					bw, okb := md.roots.world(er.B)
+					aw, oka := md.roots.world(er.A)
+					if okm && okb && oka {
+						rB := bw.sub(mw).length()
+						if na, ok := rescaleAboutMid(mw, aw, rB); ok {
+							processed[er.Mid] = true // node 5 stays (block 6-anchors-5)
+							place(er.A, na)          // node 6 follows; carries node 2
+						}
+					}
+					placedFollow = true
+				}
+				if placedFollow {
+					continue
+				}
+			}
+
+			// Default fold: the mirror moves the equalized side (B/node 7) for a 5/6/7
+			// driver — re-derive node 7's radius about Mid (node 5) from A's (node 6)
+			// radius, so |7→5| := |6→5|. The φ=0 lock below cannot do this here:
+			// place()'s move-once guard skips node 7 once the mirror has written it.
+			// Reuses equalRadiiAdjust; a no-op for the non-equalized follower (node 3).
 			if adj, ok := md.equalRadiiAdjust(lk.Follower, fw); ok {
 				fw = adj
 			}
