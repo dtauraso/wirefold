@@ -32,6 +32,21 @@ func (md *MoveDispatch) addMirrorLock(center, leader, follower string) {
 	md.locks = append(md.locks, thetaLock{Center: center, Leader: leader, Follower: follower, MirrorPhi: true})
 }
 
+// phiZeroLock pins Follower onto Center's φ=0 meridian (Center's local frame,
+// pole = +y). The follower keeps its distance R and latitude θ from the center;
+// only the azimuth φ is zeroed. So the follower is moved onto the +x meridian of
+// the center's frame, and any edge aimed from the center to the follower lies on
+// φ=0.
+type phiZeroLock struct {
+	Center   string
+	Follower string
+}
+
+// addPhiZeroLock registers a φ=0 meridian lock (follower keeps R and θ, φ→0).
+func (md *MoveDispatch) addPhiZeroLock(center, follower string) {
+	md.phiZeroLocks = append(md.phiZeroLocks, phiZeroLock{Center: center, Follower: follower})
+}
+
 // logPairPhi (diagnostic) emits φ of nodes 3 and 7 about node 2 after a move. For a
 // consistent mirror lock φ7 = −φ3, so sum = φ3+φ7 should stay ≈0; a drifting sum
 // flags the inconsistency. Logged for EVERY RootMove, whether or not a lock fired.
@@ -101,6 +116,25 @@ func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 		}
 		locked := polar{R: fp.R, Theta: lp.Theta, Phi: phi}
 		fw := polar2cart(locked).add(cw) // follower world position
+		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
+		moved[lk.Follower] = fw
+	}
+	// φ=0 meridian locks: fire when the center or follower moved. The follower
+	// keeps its R and θ about the center, zeroing only φ — moving it onto the
+	// center's φ=0 (+x) meridian, all polar and local to the center.
+	for _, lk := range md.phiZeroLocks {
+		if lk.Center != movedID && lk.Follower != movedID {
+			continue
+		}
+		p, ok := md.roots.surfaceCoord(lk.Center, lk.Follower)
+		if !ok {
+			continue
+		}
+		cw, ok := md.roots.world(lk.Center)
+		if !ok {
+			continue
+		}
+		fw := cw.add(polar2cart(polar{R: p.R, Theta: p.Theta, Phi: 0}))
 		md.roots.roots[lk.Follower] = rootFromCartesian(fw, md.roots.origin)
 		moved[lk.Follower] = fw
 	}

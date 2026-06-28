@@ -62,3 +62,41 @@ func TestThetaLockEqualizesAngleFromPole(t *testing.T) {
 		t.Errorf("6 radius %v != 2 radius %v (not on the same sphere)", p6.R, p2.R)
 	}
 }
+
+// φ=0 meridian lock: node 5 is pinned onto node 6's φ=0 (+x) meridian about node 6.
+// Node 5 starts at a clearly nonzero φ; after the lock fires it keeps its distance R
+// and latitude θ from node 6, with only its azimuth φ zeroed.
+func TestPhiZeroLockMovesFollowerToMeridian(t *testing.T) {
+	const eps = 1e-9
+	centers := map[string]vec3{
+		"6": {3, 2, 1},   // center, off-origin
+		"5": {3 + 8, 2 + 4, 1 + 6}, // offset has nonzero φ about node 6 (z and x both nonzero)
+	}
+	md := &MoveDispatch{}
+	md.roots = buildRoots(centers)
+	md.addPhiZeroLock("6", "5")
+
+	before, ok := md.roots.surfaceCoord("6", "5")
+	if !ok {
+		t.Fatal("surfaceCoord(6,5) not resolvable before lock")
+	}
+	if before.Phi > -eps && before.Phi < eps {
+		t.Fatalf("fixture invalid: φ should be clearly nonzero, got %v", before.Phi)
+	}
+
+	md.applyLocks("6")
+
+	after, ok := md.roots.surfaceCoord("6", "5")
+	if !ok {
+		t.Fatal("surfaceCoord(6,5) not resolvable after lock")
+	}
+	if after.Phi < -1e-6 || after.Phi > 1e-6 {
+		t.Errorf("φ not zeroed: got %v (want ≈0)", after.Phi)
+	}
+	if d := after.R - before.R; d < -1e-6 || d > 1e-6 {
+		t.Errorf("R changed: %v != %v (distance not preserved)", after.R, before.R)
+	}
+	if d := after.Theta - before.Theta; d < -1e-6 || d > 1e-6 {
+		t.Errorf("θ changed: %v != %v (latitude not preserved)", after.Theta, before.Theta)
+	}
+}

@@ -376,6 +376,23 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
 			}
 		}
+
+		// Pin node 5 onto node 6's φ=0 meridian (the 6→5 edge sits on φ=0). Single
+		// polar lock, local to node 6: node 5 keeps its distance and latitude from
+		// node 6, only its azimuth φ is zeroed. The 6→5 aimed port ("Out"→"5")
+		// installed above then aims along φ=0. Apply once at load so node 5 starts
+		// on the meridian; fan the follower to seed its mover's held center.
+		_, has5 := centers["5"]
+		if has6 && has5 {
+			md.addPhiZeroLock("6", "5")
+			if followers := md.applyLocks("6"); len(followers) > 0 {
+				centers := md.heldCenters()
+				for id, w := range followers {
+					centers[id] = w
+				}
+				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
+			}
+		}
 	}
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).

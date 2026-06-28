@@ -343,6 +343,8 @@ type MoveDispatch struct {
 	roots rootSet
 	// locks are polar relationships re-derived after a RootMove (lock.go).
 	locks []thetaLock
+	// phiZeroLocks pin a follower onto the center's φ=0 meridian (lock.go).
+	phiZeroLocks []phiZeroLock
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
