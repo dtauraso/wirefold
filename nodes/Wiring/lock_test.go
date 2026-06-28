@@ -64,14 +64,97 @@ func TestThetaLockEqualizesAngleFromPole(t *testing.T) {
 	}
 }
 
-// φ=0 meridian lock: node 5 is pinned onto node 6's φ=0 (+x) meridian about node 6.
-// Node 5 starts at a clearly nonzero φ; after the lock fires it keeps its distance R
-// and latitude θ from node 6, with only its azimuth φ zeroed.
-func TestPhiZeroLockMovesFollowerToMeridian(t *testing.T) {
-	const eps = 1e-9
+// dist3 is the Euclidean distance between two world points.
+func dist3(a, b vec3) float64 {
+	dx, dy, dz := a.X-b.X, a.Y-b.Y, a.Z-b.Z
+	return math.Sqrt(dx*dx + dy*dy + dz*dz)
+}
+
+// meridianPerp is the off-meridian-plane normal: the φ=90° axis of the polar
+// frame (pole = +y). The φ=0 meridian plane is the set of points whose component
+// along this axis is zero, so the off-plane component of any edge is v·perp.
+var meridianPerp = polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
+
+// Pole-safety: the re-pin must NOT lurch even when the dragged node sits straight
+// above the other (the old φ=atan2 re-pin was singular/snapping there). Node 6 at
+// the origin, node 5 dragged straight above 6 with a small off-plane wobble. The
+// re-pin drops only the off-plane component, so node 6 moves a SMALL amount and the
+// resulting edge lies in the meridian plane (off-plane component ≈ 0).
+func TestPhiZeroLockPoleSafe(t *testing.T) {
 	centers := map[string]vec3{
-		"6": {3, 2, 1},   // center, off-origin
-		"5": {3 + 8, 2 + 4, 1 + 6}, // offset has nonzero φ about node 6 (z and x both nonzero)
+		"6": {0, 0, 0},
+		"5": {0, 10, 0.5}, // straight above 6 plus a small off-plane (z) wobble
+	}
+	md := &MoveDispatch{}
+	md.roots = buildRoots(centers)
+	md.addPhiZeroLock("6", "5")
+
+	sixPre, _ := md.roots.world("6")
+	fivePre, _ := md.roots.world("5")
+
+	md.applyLocks("5") // drag node 5 (follower) → node 6 (other) is re-pinned
+
+	// Dragged node 5 does not move.
+	fivePost, _ := md.roots.world("5")
+	if d := dist3(fivePre, fivePost); d > 1e-9 {
+		t.Errorf("dragged node 5 moved by %v (want 0)", d)
+	}
+
+	// Node 6 moved only a small amount (the off-plane drop), NOT a half-circle lurch.
+	sixPost, _ := md.roots.world("6")
+	if d := dist3(sixPre, sixPost); d >= 1 {
+		t.Errorf("node 6 lurched by %v (want small, < 1)", d)
+	}
+
+	// Resulting edge (5−6) lies in the meridian plane: off-plane component ≈ 0.
+	edge := fivePost.sub(sixPost)
+	if off := edge.dot(meridianPerp); off < -1e-9 || off > 1e-9 {
+		t.Errorf("edge off-plane component %v (want ≈0)", off)
+	}
+}
+
+// Symmetry: same setup but dragging node 6 instead re-pins node 5. The dragged node
+// stays put, the other moves only a small off-plane drop, and the edge lies in the
+// meridian plane. No 0-vs-π branch: dropping the off-plane component is symmetric.
+func TestPhiZeroLockSymmetric(t *testing.T) {
+	centers := map[string]vec3{
+		"6": {0, 0, 0},
+		"5": {0, 10, 0.5},
+	}
+	md := &MoveDispatch{}
+	md.roots = buildRoots(centers)
+	md.addPhiZeroLock("6", "5")
+
+	sixPre, _ := md.roots.world("6")
+	fivePre, _ := md.roots.world("5")
+
+	md.applyLocks("6") // drag node 6 (center) → node 5 (other) is re-pinned
+
+	// Dragged node 6 does not move.
+	sixPost, _ := md.roots.world("6")
+	if d := dist3(sixPre, sixPost); d > 1e-9 {
+		t.Errorf("dragged node 6 moved by %v (want 0)", d)
+	}
+
+	// Node 5 moved only a small amount.
+	fivePost, _ := md.roots.world("5")
+	if d := dist3(fivePre, fivePost); d >= 1 {
+		t.Errorf("node 5 lurched by %v (want small, < 1)", d)
+	}
+
+	// Edge lies in the meridian plane.
+	edge := fivePost.sub(sixPost)
+	if off := edge.dot(meridianPerp); off < -1e-9 || off > 1e-9 {
+		t.Errorf("edge off-plane component %v (want ≈0)", off)
+	}
+}
+
+// After the re-pin the edge lies in the φ=0 meridian plane: φ(5 about 6) ≈ 0. This
+// is the load-time expectation (the edge is in-plane) expressed in polar terms.
+func TestPhiZeroLockEdgeInMeridianPlane(t *testing.T) {
+	centers := map[string]vec3{
+		"6": {3, 2, 1},            // center, off-origin
+		"5": {3 + 8, 2 + 4, 1 + 6}, // nonzero off-plane (z) component about node 6
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
@@ -81,96 +164,17 @@ func TestPhiZeroLockMovesFollowerToMeridian(t *testing.T) {
 	if !ok {
 		t.Fatal("surfaceCoord(6,5) not resolvable before lock")
 	}
-	if before.Phi > -eps && before.Phi < eps {
+	if before.Phi > -1e-9 && before.Phi < 1e-9 {
 		t.Fatalf("fixture invalid: φ should be clearly nonzero, got %v", before.Phi)
 	}
 
-	md.applyLocks("6")
+	md.applyLocks("6") // drag center 6 → follower 5 projected onto the meridian plane
 
 	after, ok := md.roots.surfaceCoord("6", "5")
 	if !ok {
 		t.Fatal("surfaceCoord(6,5) not resolvable after lock")
 	}
 	if after.Phi < -1e-6 || after.Phi > 1e-6 {
-		t.Errorf("φ not zeroed: got %v (want ≈0)", after.Phi)
-	}
-	if d := after.R - before.R; d < -1e-6 || d > 1e-6 {
-		t.Errorf("R changed: %v != %v (distance not preserved)", after.R, before.R)
-	}
-	if d := after.Theta - before.Theta; d < -1e-6 || d > 1e-6 {
-		t.Errorf("θ changed: %v != %v (latitude not preserved)", after.Theta, before.Theta)
-	}
-}
-
-// dist3 is the Euclidean distance between two world points.
-func dist3(a, b vec3) float64 {
-	dx, dy, dz := a.X-b.X, a.Y-b.Y, a.Z-b.Z
-	return math.Sqrt(dx*dx + dy*dy + dz*dz)
-}
-
-// Symmetric phi lock, drag the FOLLOWER (node 5): the dragged node stays put and
-// the OTHER node (Center 6) is re-pinned onto node 5's meridian with φ=π. Mirrors
-// the hand example: 6 near origin, 5 offset in +x with a small z perturbation.
-// The π target must keep node 6's move SMALL (edge in the meridian plane), whereas
-// the φ=0 target would fling node 6 a half-circle around the pole.
-func TestPhiZeroLockDragFollowerStable(t *testing.T) {
-	preDrag6 := vec3{0, 0, 0}
-	// "after drag" state: 5 dragged to (12,6,1); 6 still at its pre-drag origin.
-	centers := map[string]vec3{
-		"6": preDrag6,
-		"5": {12, 6, 1},
-	}
-	md := &MoveDispatch{}
-	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("6", "5")
-
-	// Pre-drag world position of node 5 (must be unchanged by the lock).
-	fivePre, _ := md.roots.world("5")
-
-	// Compute both candidate re-pins of node 6 about node 5 (φ=π is what the lock
-	// must pick; φ=0 is the buggy half-circle target).
-	p, ok := md.roots.surfaceCoord("5", "6")
-	if !ok {
-		t.Fatal("surfaceCoord(5,6) not resolvable")
-	}
-	fiveW, _ := md.roots.world("5")
-	sixPi := fiveW.add(polar2cart(polar{R: p.R, Theta: p.Theta, Phi: math.Pi}))
-	sixZero := fiveW.add(polar2cart(polar{R: p.R, Theta: p.Theta, Phi: 0}))
-
-	md.applyLocks("5")
-
-	// Node 5 (the dragged node) must not move.
-	fivePost, _ := md.roots.world("5")
-	if d := dist3(fivePre, fivePost); d > 1e-9 {
-		t.Errorf("dragged node 5 moved by %v (want 0)", d)
-	}
-
-	// Node 6 re-pinned to the π target.
-	sixPost, _ := md.roots.world("6")
-	if d := dist3(sixPost, sixPi); d > 1e-6 {
-		t.Errorf("node 6 not at π target: got %v want %v", sixPost, sixPi)
-	}
-
-	// Stability: π-target move must be MUCH smaller than the φ=0-target move.
-	movePi := dist3(sixPost, preDrag6)
-	moveZero := dist3(sixZero, preDrag6)
-	if movePi >= moveZero {
-		t.Errorf("π-target move %v not smaller than φ=0-target move %v", movePi, moveZero)
-	}
-	if movePi > 2 {
-		t.Errorf("π-target move %v too large for a small drag (expected ≈1)", movePi)
-	}
-	if moveZero < 10 {
-		t.Errorf("fixture invalid: φ=0-target move %v should be a large half-circle", moveZero)
-	}
-	t.Logf("node 6 move: π-target=%.4f φ=0-target=%.4f", movePi, moveZero)
-
-	// Edge now lies in the meridian plane: φ(5 about 6) ≈ 0.
-	after, ok := md.roots.surfaceCoord("6", "5")
-	if !ok {
-		t.Fatal("surfaceCoord(6,5) not resolvable after lock")
-	}
-	if after.Phi < -1e-6 || after.Phi > 1e-6 {
-		t.Errorf("edge off-plane: φ(5 about 6)=%v (want ≈0)", after.Phi)
+		t.Errorf("φ not in meridian plane: got %v (want ≈0)", after.Phi)
 	}
 }

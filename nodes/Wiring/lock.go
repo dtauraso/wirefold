@@ -126,33 +126,36 @@ func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 	// keeps its R and θ about the center, zeroing only φ — moving it onto the
 	// center's φ=0 (+x) meridian, all polar and local to the center.
 	for _, lk := range md.phiZeroLocks {
-		// Symmetric re-pin: the DRAGGED node stays put; the OTHER node is re-pinned
-		// onto the dragged node's meridian, keeping its R and θ measured from the
-		// dragged node. Direction sets the target φ: dragging the Center re-pins the
-		// Follower at φ=0; dragging the Follower re-pins the Center at φ=π, because
-		// measuring the edge from the follower reverses its direction (φ=0 there would
-		// rotate the other node a half-circle around the pole — the snapping bug).
-		var center, follower string
-		var targetPhi float64
+		// Symmetric re-pin with NO φ and NO atan2 — defined everywhere, including the
+		// pole. The DRAGGED node stays put; the OTHER node is projected onto the dragged
+		// node's φ=0 meridian PLANE by dropping ONLY the off-plane component (the
+		// component along the φ-perpendicular axis of the polar frame). Dropping that
+		// component preserves whichever side each node is already on, so no 0-vs-π
+		// branch is needed and there is no singular point.
+		var dragged, other string
 		switch movedID {
 		case lk.Center:
-			center, follower, targetPhi = lk.Center, lk.Follower, 0
+			dragged, other = lk.Center, lk.Follower
 		case lk.Follower:
-			center, follower, targetPhi = lk.Follower, lk.Center, math.Pi
+			dragged, other = lk.Follower, lk.Center
 		default:
 			continue
 		}
-		p, ok := md.roots.surfaceCoord(center, follower)
+		dw, ok := md.roots.world(dragged)
 		if !ok {
 			continue
 		}
-		cw, ok := md.roots.world(center)
+		ow, ok := md.roots.world(other)
 		if !ok {
 			continue
 		}
-		fw := cw.add(polar2cart(polar{R: p.R, Theta: p.Theta, Phi: targetPhi}))
-		md.roots.roots[follower] = rootFromCartesian(fw, md.roots.origin)
-		moved[follower] = fw
+		// φ=90° axis of the polar frame: the normal of the φ=0 meridian plane.
+		perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
+		v := ow.sub(dw)
+		v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
+		nw := dw.add(v)
+		md.roots.roots[other] = rootFromCartesian(nw, md.roots.origin)
+		moved[other] = nw
 	}
 	return moved
 }
