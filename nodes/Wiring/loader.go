@@ -333,6 +333,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		}
 		md.setRoots(buildRoots(centers))
 
+		// Union of every node a load-time lock seed moved (across all seeds below).
+		// Their new world positions must be synced back into nodeGeoms before node
+		// build/emission so the emitted node geometry and the initial edge geometry
+		// reflect the locked positions (polar layer is the source of truth).
+		movedByLocks := map[string]bool{}
+
 		// Couple nodes 2 and 6 on node 1's sphere via a bidirectional theta lock
 		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
 		// makes the other share its θ (angle from node 1's +y up-pole), so the two
@@ -344,7 +350,8 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		_, has6 := centers["6"]
 		if has1 && has2 && has6 {
 			md.addThetaLock("1", "2", "6")
-			md.addThetaLock("1", "6", "2")
+			// 6→2 direction intentionally dropped: node 6 moving (and the 5/6/7
+			// group with it) must NOT drag node 2. Keep only 2→6 (node 2 leads 6).
 
 			// Install the SAME aimed-port registry built once above (aimedPorts):
 			// it was constructed earlier under the identical guard/entries so the initial
@@ -368,12 +375,91 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			// than only after the first drag. Node 3 is the leader; node 7 is reflected.
 			// applyLocks updates roots in place but defers fanning (drag-path dedup), so
 			// fan the followers here to seed their movers' held centers before Start.
-			if followers := md.applyLocks("3"); len(followers) > 0 {
+			if followers := md.applyLocks("3", false); len(followers) > 0 {
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w
+					movedByLocks[id] = true
 				}
 				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
+			}
+		}
+
+		// DIRECTIONAL meridian chain 6 → 5 → 7 (see lock.go phiDrive):
+		//   - phiZeroFollower(6,5): node 6 ANCHORS node 5. The lock writes only node 5
+		//     (project 5 onto 6's φ=0 meridian); node 6 is never moved by it. So
+		//     dragging 6 pulls 5 along, dragging 5 re-projects 5 onto 6's meridian.
+		//   - phiZeroCenter(7,5): node 5 DRAGS node 7. The lock writes only node 7
+		//     (move 7 to keep 5 on 7's φ=0 meridian); node 5 is never moved by it. So
+		//     dragging 5 pulls 7 along; dragging 7 re-projects 7 (5 stays put).
+		// Net chain: drag 6 → 5 follows → 7 follows; drag 5 → 7 follows (6 stays);
+		// drag 7 → neither 5 nor 6 moves (3 mirrors via 2↔7↔3). The aimed ports
+		// 6.Out→5 and 7.Out→5 installed above then aim each edge along φ=0.
+		_, has5 := centers["5"]
+		if has5 && (has6 || has7) {
+			if has6 {
+				md.addPhiZeroFollowerLock("6", "5") // 6 anchors 5
+			}
+			if has7 {
+				md.addPhiZeroCenterLock("7", "5") // 5 drags 7
+			}
+			// Equalize the two edge radii into node 5: |6→5| == |7→5|. Node 6 is the
+			// radius authority (anchor); node 7 is rescaled to it. Folded into node 7's
+			// φ=0 projection (see lock.go equalRadiiLock). Only when all three exist.
+			if has6 && has7 {
+				md.addEqualRadiiLock("5", "6", "7")
+			}
+			// Seed from the anchor (node 6) so node 5 is projected onto 6's meridian
+			// and node 7 then follows node 5 at the equalized radius. If node 6 is
+			// absent, seed by dragging node 5 (only the moveCenter lock is present).
+			seedID := "6"
+			if !has6 {
+				seedID = "5"
+			}
+			if followers := md.applyLocks(seedID, false); len(followers) > 0 {
+				centers := md.heldCenters()
+				for id, w := range followers {
+					centers[id] = w
+					movedByLocks[id] = true
+				}
+				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
+			}
+		}
+
+		// Sync every lock-moved node's new world position from the polar layer back
+		// into nodeGeoms[id].Center BEFORE node build/emission. emitNodeGeometry and
+		// the per-node port geometry read nodeGeoms[id].Center, so without this the
+		// emitted/displayed node stays at its saved (pre-lock) position even though
+		// md.roots moved it.
+		for id := range movedByLocks {
+			if w, ok := md.roots.world(id); ok {
+				wc := w
+				g := nodeGeoms[id]
+				g.Center = &wc
+				nodeGeoms[id] = g
+			}
+		}
+
+		// The initial edge segments (edgeArc/edgeLatency/edgeSegments) were computed
+		// above from the pre-lock centers. Recompute every edge touching a moved node
+		// from the now-synced centers (centerOf reads nodeGeoms), so the endpoint at the
+		// moved node — and the bead position stream consuming edgeSegments at bind time —
+		// follows the lock. (Distance-preserving locks leave arc length unchanged; aimed
+		// port directions still shift, so the segment is recomputed in full.)
+		if len(movedByLocks) > 0 {
+			for _, e := range spec.Edges {
+				if !movedByLocks[e.Source] && !movedByLocks[e.Target] {
+					continue
+				}
+				seg := segmentBetweenPortsAimed(
+					nodeGeoms[e.Source], e.SourceHandle, e.Source,
+					nodeGeoms[e.Target], e.TargetHandle, e.Target,
+					aimedPorts, centerOf,
+				)
+				arcLength := chordLength(seg.Start, seg.End)
+				edgeArc[e.Label] = arcLength
+				edgeLatency[e.Label] = arcLength / PulseSpeedWuPerMs
+				edgeSegments[e.Label] = seg
 			}
 		}
 	}

@@ -343,6 +343,11 @@ type MoveDispatch struct {
 	roots rootSet
 	// locks are polar relationships re-derived after a RootMove (lock.go).
 	locks []thetaLock
+	// phiZeroLocks pin a follower onto the center's φ=0 meridian (lock.go).
+	phiZeroLocks []phiZeroLock
+	// equalRadiiLocks keep two edge radii into a mid node equal (lock.go), folded
+	// into the φ=0 projection of the equalized source.
+	equalRadiiLocks []equalRadiiLock
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
@@ -663,7 +668,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// fan re-sent center messages to edges already fanned by RootMove — overlapping
 	// edges recomputed and re-emitted their identical segment up to 6×/frame, which was
 	// the node-2 drag lag (node 2 is uniquely both a lock participant and a lock center).
-	for id, w := range md.applyLocks(nodeID) {
+	for id, w := range md.applyLocks(nodeID, true) {
 		emit[id] = w
 	}
 
