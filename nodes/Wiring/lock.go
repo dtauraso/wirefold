@@ -35,37 +35,61 @@ func (md *MoveDispatch) addMirrorLock(center, leader, follower string) {
 	md.locks = append(md.locks, thetaLock{Center: center, Leader: leader, Follower: follower, MirrorPhi: true})
 }
 
-// phiZeroLock pins Follower onto Center's φ=0 meridian (Center's local frame,
-// pole = +y). The follower keeps its distance R and latitude θ from the center;
-// only the azimuth φ is zeroed. So the follower is moved onto the +x meridian of
-// the center's frame, and any edge aimed from the center to the follower lies on
-// φ=0.
+// phiDrive selects which of the two coupled nodes a φ=0 lock is allowed to WRITE,
+// giving the meridian coupling a DIRECTION (no symmetric back-coupling):
+//
+//   - moveFollower: anchor the Center. The lock only ever writes the Follower —
+//     when the Center moves, project the Follower onto the Center's φ=0 meridian;
+//     when the Follower itself moves, re-project it onto the Center's meridian.
+//     The Center is NEVER written by this lock. (Used for 6→5: node 6 anchors 5.)
+//   - moveCenter: the Follower drives the Center. The lock only ever writes the
+//     Center — when the Follower moves, move the Center to keep the Follower on the
+//     Center's φ=0 meridian; when the Center itself is dragged, re-project the
+//     Center (the dragged node) onto its own meridian about the Follower. The
+//     Follower is NEVER written by this lock. (Used for 5→7: node 5 drags 7.)
+type phiDrive int
+
+const (
+	moveFollower phiDrive = iota
+	moveCenter
+)
+
+// phiZeroLock couples Follower and Center on a φ=0 meridian (Center's local frame,
+// pole = +y): the coupled edge lies in the meridian plane (off-plane component = 0).
+// Drive selects which single node the lock may write (see phiDrive) so the coupling
+// is directional — only one side moves per lock, never both.
 type phiZeroLock struct {
 	Center   string
 	Follower string
+	Drive    phiDrive
 }
 
-// addPhiZeroLock registers a φ=0 meridian lock (follower keeps R and θ, φ→0).
-func (md *MoveDispatch) addPhiZeroLock(center, follower string) {
-	md.phiZeroLocks = append(md.phiZeroLocks, phiZeroLock{Center: center, Follower: follower})
+// addPhiZeroFollowerLock registers a meridian lock that anchors the Center and
+// writes only the Follower (moveFollower). Used for 6→5: node 6 anchors node 5.
+func (md *MoveDispatch) addPhiZeroFollowerLock(center, follower string) {
+	md.phiZeroLocks = append(md.phiZeroLocks, phiZeroLock{Center: center, Follower: follower, Drive: moveFollower})
+}
+
+// addPhiZeroCenterLock registers a meridian lock where the Follower drives the
+// Center and writes only the Center (moveCenter). Used for 5→7: node 5 drags node 7.
+func (md *MoveDispatch) addPhiZeroCenterLock(center, follower string) {
+	md.phiZeroLocks = append(md.phiZeroLocks, phiZeroLock{Center: center, Follower: follower, Drive: moveCenter})
 }
 
 // equalRadiiLock keeps the two edge radii into Mid equal: r(A about Mid) ==
 // r(B about Mid), measured in Mid's local frame (pole = +y). It is a pure-polar
-// radius equalization: the equalized node keeps its θ and φ about Mid and only
-// its R changes. The authority is the dragged source — the non-dragged source is
-// rescaled to match it. When neither source is dragged (Mid itself moved), B is
-// rescaled to A's radius so the pair stays equal.
+// radius equalization: only B's R changes. In the DIRECTIONAL chain (6 anchors 5
+// drags 7) A is the permanent radius AUTHORITY (the anchor, node 6) and B is always
+// the equalized node (node 7); the authority never flips to the dragged node, since
+// flipping would let a drag move the anchor. So A's radius about Mid is the
+// reference, and B is rescaled to it on every drag (6, 5, or 7).
 //
-// This lock does NOT introduce a separate place(): nodes A and B are already
-// moved by the φ=0 meridian locks (both have follower Mid; dragging any of
-// Mid/A/B projects the other source onto Mid's meridian plane). The move-once
-// guard would block a second place() on the same node, so the radius
-// equalization is FOLDED into that φ=0 projection — one combined move per node
-// (project onto the meridian plane, then scale to the sibling's radius about
-// Mid). Scaling about Mid preserves direction, so the in-plane (z=Mid.z)
-// projection is retained; the two locks touch different polar components (φ-plane
-// vs R) and compose cleanly in a single place().
+// This lock does NOT introduce a separate place(): node B (7) is already written by
+// the moveCenter φ=0 lock (5 drives 7) and projected onto the meridian plane. The
+// radius equalization is FOLDED into that projection — one combined move (project
+// onto the meridian plane, then scale to A's radius about Mid). Scaling about Mid
+// preserves direction, so the in-plane projection is retained; the two locks touch
+// different polar components (φ-plane vs R) and compose cleanly in a single write.
 type equalRadiiLock struct {
 	Mid string
 	A   string
@@ -73,55 +97,31 @@ type equalRadiiLock struct {
 }
 
 // addEqualRadiiLock registers an equal-radii lock (r(A about Mid) == r(B about Mid)).
+// A is the radius authority (anchor side); B is the equalized side.
 func (md *MoveDispatch) addEqualRadiiLock(mid, a, b string) {
 	md.equalRadiiLocks = append(md.equalRadiiLocks, equalRadiiLock{Mid: mid, A: a, B: b})
 }
 
-// equalRadiiAdjust, given that the φ=0 lock is about to move `other` to world
+// equalRadiiAdjust, given that the φ=0 lock is about to write `other` to world
 // position nw (already projected onto Mid's meridian plane), returns the adjusted
-// world position that also makes r(other about Mid) equal to the authoritative
-// sibling's radius about Mid. movedID is the originally dragged node. It returns
-// (nw, false) when no equal-radii lock applies to `other` for this drag.
-//
-// Authority: if movedID is one of the two sources, that source is the reference
-// and the OTHER source is the one equalized. When Mid itself is moved, the handling
-// splits on fromDrag: at LOAD (fromDrag=false) B is equalized to A here (node 5
-// stays put, the sibling's radius is matched — the load seed), but on an interactive
-// DRAG (fromDrag=true) neither source is radius-pulled — applyLocks instead moves
-// Mid to the perpendicular bisector of (A,B) so A and B stay equidistant via their
-// own meridian follow. So the equalized node is whichever of {A,B} is NOT the
-// reference, and `other` must be that equalized node.
-func (md *MoveDispatch) equalRadiiAdjust(other, movedID string, fromDrag bool, nw vec3) (vec3, bool) {
+// world position that also makes r(other about Mid) equal to A's radius about Mid.
+// It only fires when `other` is B (the equalized side); A (the authority/anchor)
+// is never rescaled. Returns (nw, false) when no equal-radii lock applies.
+func (md *MoveDispatch) equalRadiiAdjust(other string, nw vec3) (vec3, bool) {
 	for _, lk := range md.equalRadiiLocks {
-		var reference, equalized string
-		switch movedID {
-		case lk.A:
-			reference, equalized = lk.A, lk.B
-		case lk.B:
-			reference, equalized = lk.B, lk.A
-		case lk.Mid:
-			// Drag uses the bisector (see applyLocks); only the load seed
-			// radius-equalizes the sibling here.
-			if fromDrag {
-				continue
-			}
-			reference, equalized = lk.A, lk.B
-		default:
-			continue
-		}
-		if other != equalized {
+		if other != lk.B {
 			continue
 		}
 		mw, ok := md.roots.world(lk.Mid)
 		if !ok {
 			continue
 		}
-		rp, ok := md.roots.surfaceCoord(lk.Mid, reference)
+		rp, ok := md.roots.surfaceCoord(lk.Mid, lk.A)
 		if !ok {
 			continue
 		}
-		// Direction from Mid to the already-projected position; scale to the
-		// reference radius. Pure-polar: keeps θ/φ about Mid (in-plane), sets R.
+		// Direction from Mid to the already-projected position; scale to A's
+		// radius. Pure-polar: keeps θ/φ about Mid (in-plane), sets R.
 		dir := nw.sub(mw)
 		if dir.length() == 0 {
 			continue
@@ -193,6 +193,48 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 		queue = append(queue, id)
 	}
 
+	// Dragged-node self-projection (DIRECTIONAL): the node the user dragged may be
+	// the WRITTEN node of one of its own φ=0 locks, which the loop's move-once guard
+	// skips. Re-project it here, BEFORE the BFS, so downstream locks read the
+	// corrected position:
+	//   - moveFollower.Follower (node 5): snap it onto the anchor Center's φ=0
+	//     meridian (node 5 stays on node 6's meridian). Writes only the dragged 5.
+	//   - moveCenter.Center (node 7): re-project it onto its own φ=0 meridian about
+	//     the Follower (keeps the Follower on its meridian) and fold equal-radii so
+	//     it lands at the anchor's radius about Mid. Writes only the dragged 7; the
+	//     Follower and the anchor stay put.
+	// Gated by fromDrag so the load-time seed never constrains the seed node.
+	if fromDrag {
+		perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
+		for _, lk := range md.phiZeroLocks {
+			var written, kept string
+			switch {
+			case lk.Drive == moveFollower && movedID == lk.Follower:
+				written, kept = lk.Follower, lk.Center
+			case lk.Drive == moveCenter && movedID == lk.Center:
+				written, kept = lk.Center, lk.Follower
+			default:
+				continue
+			}
+			ww, ok := md.roots.world(written)
+			if !ok {
+				continue
+			}
+			kw, ok := md.roots.world(kept)
+			if !ok {
+				continue
+			}
+			v := ww.sub(kw)
+			v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
+			nw := kw.add(v)
+			if adj, ok := md.equalRadiiAdjust(written, nw); ok {
+				nw = adj
+			}
+			md.roots.roots[written] = rootFromCartesian(nw, md.roots.origin)
+			moved[written] = nw
+		}
+	}
+
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -229,70 +271,48 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 			place(lk.Follower, fw)
 		}
 
-		// φ=0 meridian locks: fire when `current` is the center or follower. The DRAGGED
-		// node (current) stays put; the OTHER node is projected onto the dragged node's φ=0
-		// meridian PLANE by dropping ONLY the off-plane component (the component along the
-		// φ-perpendicular axis of the polar frame). No φ, no atan2 — defined everywhere,
-		// including the pole; preserves whichever side each node is already on.
+		// φ=0 meridian locks (DIRECTIONAL): fire when `current` is the center or
+		// follower. Drive picks the single WRITTEN node and the KEPT node (whose
+		// meridian plane defines the projection); the lock never writes the other:
+		//   - moveFollower: write the Follower, keep the Center (6 anchors 5).
+		//   - moveCenter:   write the Center,   keep the Follower (5 drags 7).
+		// The written node is projected onto the kept node's φ=0 meridian PLANE by
+		// dropping ONLY the off-plane component (the component along the φ-perpendicular
+		// axis of the polar frame). No φ, no atan2 — defined everywhere, including the
+		// pole. If the written node is the dragged node (e.g. dragging the Center of a
+		// moveCenter lock), place()'s move-once guard skips it here and the post-pass
+		// below re-projects the dragged node itself.
 		for _, lk := range md.phiZeroLocks {
-			var dragged, other string
-			switch current {
-			case lk.Center:
-				dragged, other = lk.Center, lk.Follower
-			case lk.Follower:
-				dragged, other = lk.Follower, lk.Center
-			default:
+			if current != lk.Center && current != lk.Follower {
 				continue
 			}
-			dw, ok := md.roots.world(dragged)
+			var written, kept string
+			switch lk.Drive {
+			case moveFollower:
+				written, kept = lk.Follower, lk.Center
+			case moveCenter:
+				written, kept = lk.Center, lk.Follower
+			}
+			ww, ok := md.roots.world(written)
 			if !ok {
 				continue
 			}
-			ow, ok := md.roots.world(other)
+			kw, ok := md.roots.world(kept)
 			if !ok {
 				continue
 			}
 			// φ=90° axis of the polar frame: the normal of the φ=0 meridian plane.
 			perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
-			v := ow.sub(dw)
+			v := ww.sub(kw)
 			v = v.sub(perp.scale(v.dot(perp))) // drop the off-plane component
-			nw := dw.add(v)
-			// Fold equal-radii: if `other` is the node whose radius about Mid must
-			// match its sibling, rescale the projected position about Mid. One
+			nw := kw.add(v)
+			// Fold equal-radii: if `written` is the equalized side (B/node 7),
+			// rescale the projected position about Mid to A's (anchor) radius. One
 			// combined move (meridian plane + equal radius) in a single place().
-			if adj, ok := md.equalRadiiAdjust(other, movedID, fromDrag, nw); ok {
+			if adj, ok := md.equalRadiiAdjust(written, nw); ok {
 				nw = adj
 			}
-			place(other, nw)
-		}
-	}
-
-	// Drag-5 symmetric move: when Mid itself is dragged on an interactive drag,
-	// move Mid onto the perpendicular bisector of (A,B) so |A→Mid| == |B→Mid| and
-	// A/B are affected equally (only their normal meridian follow, no radius yank).
-	// Gated by fromDrag so the load-time seed (which reuses applyLocks) never runs
-	// this — the loaded layout is unchanged. M=(A+B)/2; n=(B−A)/|B−A|;
-	// proj = P − ((P−M)·n)·n where P is Mid's current world.
-	if fromDrag {
-		for _, lk := range md.equalRadiiLocks {
-			if movedID != lk.Mid {
-				continue
-			}
-			aw, oka := md.roots.world(lk.A)
-			bw, okb := md.roots.world(lk.B)
-			pw, okp := md.roots.world(lk.Mid)
-			if !oka || !okb || !okp {
-				continue
-			}
-			d := bw.sub(aw)
-			if d.length() == 0 {
-				continue
-			}
-			n := d.normalize()
-			m := aw.add(bw).scale(0.5)
-			proj := pw.sub(n.scale(pw.sub(m).dot(n)))
-			md.roots.roots[lk.Mid] = rootFromCartesian(proj, md.roots.origin)
-			moved[lk.Mid] = proj
+			place(written, nw)
 		}
 	}
 

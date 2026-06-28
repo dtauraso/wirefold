@@ -75,60 +75,53 @@ func dist3(a, b vec3) float64 {
 // along this axis is zero, so the off-plane component of any edge is v·perp.
 var meridianPerp = polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
 
-// Pole-safety: the re-pin must NOT lurch even when the dragged node sits straight
-// above the other (the old φ=atan2 re-pin was singular/snapping there). Node 6 at
-// the origin, node 5 dragged straight above 6 with a small off-plane wobble. The
-// re-pin drops only the off-plane component, so node 6 moves a SMALL amount and the
-// resulting edge lies in the meridian plane (off-plane component ≈ 0).
-func TestPhiZeroLockPoleSafe(t *testing.T) {
+// moveFollower(6,5) anchors node 6: dragging node 5 RE-PROJECTS node 5 onto node 6's
+// meridian; node 6 (the anchor) NEVER moves. Pole-safety: node 5 sits straight above
+// node 6 with a small off-plane wobble; the re-projection drops only the off-plane
+// component, so node 5 moves a SMALL amount and the edge ends in the meridian plane.
+func TestPhiZeroFollowerLockDrag5ReprojectsFiveNotSix(t *testing.T) {
 	centers := map[string]vec3{
 		"6": {0, 0, 0},
 		"5": {0, 10, 0.5}, // straight above 6 plus a small off-plane (z) wobble
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("6", "5")
+	md.addPhiZeroFollowerLock("6", "5")
 
 	sixPre, _ := md.roots.world("6")
-	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("5", true) // drag node 5 (follower) → node 6 (other) is re-pinned
+	md.applyLocks("5", true) // drag node 5 → node 5 re-projects onto 6's meridian
 
-	// Dragged node 5 does not move.
-	fivePost, _ := md.roots.world("5")
-	if d := dist3(fivePre, fivePost); d > 1e-9 {
-		t.Errorf("dragged node 5 moved by %v (want 0)", d)
-	}
-
-	// Node 6 moved only a small amount (the off-plane drop), NOT a half-circle lurch.
+	// Anchor node 6 never moves.
 	sixPost, _ := md.roots.world("6")
-	if d := dist3(sixPre, sixPost); d >= 1 {
-		t.Errorf("node 6 lurched by %v (want small, < 1)", d)
+	if d := dist3(sixPre, sixPost); d > 1e-9 {
+		t.Errorf("anchor node 6 moved by %v (want 0)", d)
 	}
 
 	// Resulting edge (5−6) lies in the meridian plane: off-plane component ≈ 0.
+	fivePost, _ := md.roots.world("5")
 	edge := fivePost.sub(sixPost)
 	if off := edge.dot(meridianPerp); off < -1e-9 || off > 1e-9 {
 		t.Errorf("edge off-plane component %v (want ≈0)", off)
 	}
 }
 
-// Symmetry: same setup but dragging node 6 instead re-pins node 5. The dragged node
-// stays put, the other moves only a small off-plane drop, and the edge lies in the
-// meridian plane. No 0-vs-π branch: dropping the off-plane component is symmetric.
-func TestPhiZeroLockSymmetric(t *testing.T) {
+// moveFollower(6,5): dragging node 6 (the anchor) re-pins the FOLLOWER node 5. The
+// dragged anchor stays put (it is the move source), node 5 moves only a small
+// off-plane drop, and the edge lies in the meridian plane.
+func TestPhiZeroFollowerLockDrag6MovesFive(t *testing.T) {
 	centers := map[string]vec3{
 		"6": {0, 0, 0},
 		"5": {0, 10, 0.5},
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("6", "5")
+	md.addPhiZeroFollowerLock("6", "5")
 
 	sixPre, _ := md.roots.world("6")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("6", true) // drag node 6 (center) → node 5 (other) is re-pinned
+	md.applyLocks("6", true) // drag node 6 (anchor) → node 5 (follower) re-pinned
 
 	// Dragged node 6 does not move.
 	sixPost, _ := md.roots.world("6")
@@ -158,7 +151,7 @@ func TestPhiZeroLockEdgeInMeridianPlane(t *testing.T) {
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("6", "5")
+	md.addPhiZeroFollowerLock("6", "5")
 
 	before, ok := md.roots.surfaceCoord("6", "5")
 	if !ok {
@@ -179,23 +172,23 @@ func TestPhiZeroLockEdgeInMeridianPlane(t *testing.T) {
 	}
 }
 
-// 7↔5 mirror of TestPhiZeroLockPoleSafe: the 7→5 edge is coupled identically to 6→5.
-// Node 7 at the origin, node 5 dragged straight above 7 with a small off-plane wobble;
-// the re-pin drops only the off-plane component, so node 7 moves a SMALL amount and the
-// resulting edge lies in the meridian plane.
-func TestPhiZeroLock75PoleSafe(t *testing.T) {
+// moveCenter(7,5): node 5 DRAGS node 7. Dragging node 5 moves the CENTER node 7 to
+// keep node 5 on node 7's meridian. Node 7 at the origin, node 5 above with a small
+// off-plane wobble; the projection drops only the off-plane component, so node 7
+// moves a SMALL amount and the edge lies in the meridian plane.
+func TestPhiZeroCenterLockDrag5MovesSeven(t *testing.T) {
 	centers := map[string]vec3{
 		"7": {0, 0, 0},
 		"5": {0, 10, 0.5}, // straight above 7 plus a small off-plane (z) wobble
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("7", "5")
+	md.addPhiZeroCenterLock("7", "5")
 
 	sevenPre, _ := md.roots.world("7")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("5", true) // drag node 5 (follower) → node 7 (other) is re-pinned
+	md.applyLocks("5", true) // drag node 5 → node 7 (center) follows
 
 	// Dragged node 5 does not move.
 	fivePost, _ := md.roots.world("5")
@@ -216,44 +209,38 @@ func TestPhiZeroLock75PoleSafe(t *testing.T) {
 	}
 }
 
-// 7↔5 mirror of TestPhiZeroLockSymmetric: dragging node 7 re-pins node 5.
-func TestPhiZeroLock75Symmetric(t *testing.T) {
+// moveCenter(7,5): dragging node 7 (the center) RE-PROJECTS node 7 itself; node 5
+// (the follower) NEVER moves. The edge still ends in the meridian plane.
+func TestPhiZeroCenterLockDrag7ReprojectsSevenNotFive(t *testing.T) {
 	centers := map[string]vec3{
-		"7": {0, 0, 0},
-		"5": {0, 10, 0.5},
+		"7": {0, 0, 0.5}, // dragged with a small off-plane (z) component
+		"5": {0, 10, 0},
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("7", "5")
+	md.addPhiZeroCenterLock("7", "5")
 
-	sevenPre, _ := md.roots.world("7")
 	fivePre, _ := md.roots.world("5")
 
-	md.applyLocks("7", true) // drag node 7 (center) → node 5 (other) is re-pinned
+	md.applyLocks("7", true) // drag node 7 → node 7 re-projects; node 5 stays
 
-	// Dragged node 7 does not move.
-	sevenPost, _ := md.roots.world("7")
-	if d := dist3(sevenPre, sevenPost); d > 1e-9 {
-		t.Errorf("dragged node 7 moved by %v (want 0)", d)
-	}
-
-	// Node 5 moved only a small amount.
+	// Follower node 5 never moves.
 	fivePost, _ := md.roots.world("5")
-	if d := dist3(fivePre, fivePost); d >= 1 {
-		t.Errorf("node 5 lurched by %v (want small, < 1)", d)
+	if d := dist3(fivePre, fivePost); d > 1e-9 {
+		t.Errorf("follower node 5 moved by %v (want 0)", d)
 	}
 
 	// Edge lies in the meridian plane.
+	sevenPost, _ := md.roots.world("7")
 	edge := fivePost.sub(sevenPost)
 	if off := edge.dot(meridianPerp); off < -1e-9 || off > 1e-9 {
 		t.Errorf("edge off-plane component %v (want ≈0)", off)
 	}
 }
 
-// buildChainFixture wires phiZeroLock(6,5)+phiZeroLock(7,5) plus a mirror lock
-// (center 2, leader 7, follower 3). This is the {5,6,7} chain coupled into node 3 via
-// the existing 2↔7↔3 mirror. applyLocks must BFS-chain so a drag on any of 5/6/7
-// propagates to the others and to 3.
+// buildChainFixture wires the DIRECTIONAL chain phiZeroFollower(6,5) [6 anchors 5]
+// + phiZeroCenter(7,5) [5 drags 7] plus a mirror lock (center 2, leader 7, follower
+// 3). This is the {6→5→7} chain coupled into node 3 via the existing 2↔7↔3 mirror.
 func buildChainFixture() *MoveDispatch {
 	centers := map[string]vec3{
 		"2": {5, 5, 5},
@@ -264,13 +251,13 @@ func buildChainFixture() *MoveDispatch {
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("6", "5")
-	md.addPhiZeroLock("7", "5")
+	md.addPhiZeroFollowerLock("6", "5")
+	md.addPhiZeroCenterLock("7", "5")
 	md.addMirrorLock("2", "7", "3")
 	return md
 }
 
-// Chaining: dragging node 6 must move 5 (direct), 7 (via 6→5→7) and 3 (via 7→3 mirror).
+// Chaining down: dragging node 6 (anchor) moves 5 (6→5), 7 (5→7) and 3 (7→3 mirror).
 // 7 moving proves the chain reached past the directly-referenced follower.
 func TestChainDrag6MovesAll(t *testing.T) {
 	md := buildChainFixture()
@@ -286,35 +273,40 @@ func TestChainDrag6MovesAll(t *testing.T) {
 	}
 }
 
-// Chaining the other way: dragging node 7 must move 5 (direct), 6 (via 7→5→6) and 3
-// (via the 7→3 mirror). Termination: the test returning at all proves no infinite loop.
-func TestChainDrag7MovesAll(t *testing.T) {
+// Drag the tail (node 7): NEITHER the anchor 6 NOR the mid 5 moves (no back-coupling);
+// only node 3 follows via the 7→3 mirror.
+func TestChainDrag7MovesOnlyThree(t *testing.T) {
 	md := buildChainFixture()
 	moved := md.applyLocks("7", true)
-	for _, id := range []string{"5", "6", "3"} {
-		if _, ok := moved[id]; !ok {
-			t.Errorf("drag 7: node %s did not move (chain broken); moved=%v", id, moved)
+	if _, ok := moved["3"]; !ok {
+		t.Errorf("drag 7: node 3 did not follow (mirror broken); moved=%v", moved)
+	}
+	for _, id := range []string{"5", "6"} {
+		if _, ok := moved[id]; ok {
+			t.Errorf("drag 7: node %s must NOT move (no back-coupling); moved=%v", id, moved)
 		}
 	}
 }
 
-// Drag 5 (the shared follower) propagates to both meridian centers 6 and 7, and 7's
-// move pulls node 3 via the mirror.
-func TestChainDrag5MovesAll(t *testing.T) {
+// Drag the mid (node 5): node 7 follows (5 drags 7) and 3 follows via the mirror;
+// the anchor node 6 NEVER moves.
+func TestChainDrag5MovesSevenNotSix(t *testing.T) {
 	md := buildChainFixture()
 	moved := md.applyLocks("5", true)
-	for _, id := range []string{"6", "7", "3"} {
+	for _, id := range []string{"7", "3"} {
 		if _, ok := moved[id]; !ok {
 			t.Errorf("drag 5: node %s did not move (chain broken); moved=%v", id, moved)
 		}
 	}
+	if _, ok := moved["6"]; ok {
+		t.Errorf("drag 5: anchor node 6 must NOT move; moved=%v", moved)
+	}
 }
 
-// buildFullFixture replicates the real loaded topology's locks: the θ-lock pair
-// (1,2,6)/(1,6,2), the mirror pair (2,3,7)/(2,7,3), and the meridian locks
-// (6,5)/(7,5). It exercises the leader-only firing rule end to end: dragging a
-// θ-lock leader (2 or 6) drives its partner, the meridian chain reaches 5/7, and
-// 7 (mirror leader) drives 3 — without the spurious center-2-triggered mirror.
+// buildFullFixture replicates the real loaded topology's locks: the θ-lock (1,2,6)
+// [leader 2; the 1,6,2 direction is dropped so node 6's group never drags node 2],
+// the mirror pair (2,3,7)/(2,7,3), and the DIRECTIONAL meridian chain
+// phiZeroFollower(6,5) [6 anchors 5] + phiZeroCenter(7,5) [5 drags 7].
 func buildFullFixture() *MoveDispatch {
 	centers := map[string]vec3{
 		"1": {0, 0, 0},
@@ -327,11 +319,10 @@ func buildFullFixture() *MoveDispatch {
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
 	md.addThetaLock("1", "2", "6")
-	md.addThetaLock("1", "6", "2")
 	md.addMirrorLock("2", "3", "7")
 	md.addMirrorLock("2", "7", "3")
-	md.addPhiZeroLock("6", "5")
-	md.addPhiZeroLock("7", "5")
+	md.addPhiZeroFollowerLock("6", "5")
+	md.addPhiZeroCenterLock("7", "5")
 	return md
 }
 
@@ -344,19 +335,25 @@ func movedMag(pre vec3, moved map[string]vec3, id string) float64 {
 	return dist3(pre, nw)
 }
 
-// Leader-only firing, drag 6: θ-lock(1,6,2) [leader 6] moves 2; the meridian chain
-// 6→5→7 moves 7 FULLY (no longer frozen by a center-2-triggered mirror); 7 [mirror
-// leader] then moves 3. So both 7 and 3 move by a sizable amount.
-func TestFullDrag6MovesSevenAndThree(t *testing.T) {
+// Drag 6 (anchor): the meridian chain 6→5→7 moves both 5 and 7, and 7 (mirror leader)
+// then moves 3. Node 2 stays (no 6→2 θ direction).
+func TestFullDrag6MovesFiveSevenThreeNotTwo(t *testing.T) {
 	md := buildFullFixture()
+	pre5, _ := md.roots.world("5")
 	pre7, _ := md.roots.world("7")
 	pre3, _ := md.roots.world("3")
 	moved := md.applyLocks("6", true)
+	if m := movedMag(pre5, moved, "5"); m < 1e-3 {
+		t.Errorf("drag 6: node 5 moved by %v (want sizable); moved=%v", m, moved)
+	}
 	if m := movedMag(pre7, moved, "7"); m < 1e-3 {
 		t.Errorf("drag 6: node 7 moved by %v (want sizable); moved=%v", m, moved)
 	}
 	if m := movedMag(pre3, moved, "3"); m < 1e-3 {
 		t.Errorf("drag 6: node 3 moved by %v (want sizable); moved=%v", m, moved)
+	}
+	if _, ok := moved["2"]; ok {
+		t.Errorf("drag 6: node 2 must NOT move (anchored); moved=%v", moved)
 	}
 }
 
@@ -369,22 +366,30 @@ func TestFullDrag3MovesSeven(t *testing.T) {
 	}
 }
 
-// Mirror leader 7 drives follower 3.
-func TestFullDrag7MovesThree(t *testing.T) {
+// Drag 7 (tail): node 3 follows via the mirror; NEITHER node 5 nor node 6 moves.
+func TestFullDrag7MovesThreeNotFiveSix(t *testing.T) {
 	md := buildFullFixture()
 	moved := md.applyLocks("7", true)
 	if _, ok := moved["3"]; !ok {
 		t.Errorf("drag 7: node 3 did not follow (mirror leader 7); moved=%v", moved)
 	}
+	for _, id := range []string{"5", "6"} {
+		if _, ok := moved[id]; ok {
+			t.Errorf("drag 7: node %s must NOT move (no back-coupling); moved=%v", id, moved)
+		}
+	}
 }
 
-// Drag 5 still propagates to both meridian centers 6 and 7 (unchanged behavior).
-func TestFullDrag5MovesSixAndSeven(t *testing.T) {
+// Drag 5 (mid): node 7 follows (5 drags 7); the anchor node 6 stays, node 2 stays.
+func TestFullDrag5MovesSevenNotSixNotTwo(t *testing.T) {
 	md := buildFullFixture()
 	moved := md.applyLocks("5", true)
-	for _, id := range []string{"6", "7"} {
-		if _, ok := moved[id]; !ok {
-			t.Errorf("drag 5: node %s did not move; moved=%v", id, moved)
+	if _, ok := moved["7"]; !ok {
+		t.Errorf("drag 5: node 7 did not follow; moved=%v", moved)
+	}
+	for _, id := range []string{"6", "2"} {
+		if _, ok := moved[id]; ok {
+			t.Errorf("drag 5: node %s must NOT move; moved=%v", id, moved)
 		}
 	}
 }
@@ -421,7 +426,7 @@ func TestPhiZeroLock75EdgeInMeridianPlane(t *testing.T) {
 	}
 	md := &MoveDispatch{}
 	md.roots = buildRoots(centers)
-	md.addPhiZeroLock("7", "5")
+	md.addPhiZeroCenterLock("7", "5")
 
 	before, ok := md.roots.surfaceCoord("7", "5")
 	if !ok {
@@ -431,7 +436,7 @@ func TestPhiZeroLock75EdgeInMeridianPlane(t *testing.T) {
 		t.Fatalf("fixture invalid: φ should be clearly nonzero, got %v", before.Phi)
 	}
 
-	md.applyLocks("7", true) // drag center 7 → follower 5 projected onto the meridian plane
+	md.applyLocks("7", true) // drag center 7 → node 7 re-projects onto its meridian (5 stays)
 
 	after, ok := md.roots.surfaceCoord("7", "5")
 	if !ok {
@@ -448,12 +453,13 @@ func radius5(md *MoveDispatch, id string) float64 {
 	return p.R
 }
 
-// buildEqualRadiiFixture is the full topology fixture plus the equal-radii lock,
-// seeded once at load (applyLocks("5")) exactly like the loader does.
+// buildEqualRadiiFixture is the full topology fixture plus the equal-radii lock
+// (A=6 anchor radius authority, B=7 equalized), seeded once at load from the anchor
+// (applyLocks("6")) exactly like the loader does.
 func buildEqualRadiiFixture() *MoveDispatch {
 	md := buildFullFixture()
 	md.addEqualRadiiLock("5", "6", "7")
-	md.applyLocks("5", false) // load seed, not a drag
+	md.applyLocks("6", false) // load seed from the anchor, not a drag
 	return md
 }
 
@@ -466,17 +472,21 @@ func TestEqualRadiiLockLoadEqual(t *testing.T) {
 	}
 }
 
-// Dragging any of 5/6/7 keeps the two radii into node 5 equal, and does not
-// regress the existing group motion (the φ=0/θ/mirror chain still fires).
+// Dragging any of 5/6/7 keeps the two radii into node 5 equal under the DIRECTIONAL
+// chain, moving exactly the downstream nodes and never the upstream anchor:
+//   - drag 6 → 5,7,3 move (chain down); node 2 stays.
+//   - drag 5 → 7,3 move; the anchor node 6 stays.
+//   - drag 7 → 3 moves (mirror); neither node 5 nor node 6 moves.
 func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 	type expect struct {
-		drag  string
-		moves []string
+		drag   string
+		moves  []string
+		stays  []string
 	}
 	cases := []expect{
-		{"6", []string{"5", "7", "3"}},
-		{"5", []string{"6", "7"}},
-		{"7", []string{"6", "3"}},
+		{"6", []string{"5", "7", "3"}, []string{"2"}},
+		{"5", []string{"7", "3"}, []string{"6"}},
+		{"7", []string{"3"}, []string{"5", "6"}},
 	}
 	for _, c := range cases {
 		md := buildEqualRadiiFixture()
@@ -493,6 +503,11 @@ func TestEqualRadiiLockDragKeepsEqualNoRegression(t *testing.T) {
 		for _, id := range c.moves {
 			if _, ok := moved[id]; !ok {
 				t.Errorf("drag %s: expected node %s to move (regression); moved=%v", c.drag, id, moved)
+			}
+		}
+		for _, id := range c.stays {
+			if _, ok := moved[id]; ok {
+				t.Errorf("drag %s: node %s must NOT move (directional chain); moved=%v", c.drag, id, moved)
 			}
 		}
 	}

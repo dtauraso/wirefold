@@ -385,36 +385,38 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			}
 		}
 
-		// Pin node 5 onto node 6's φ=0 meridian (the 6→5 edge sits on φ=0). Single
-		// polar lock, local to node 6: node 5 keeps its distance and latitude from
-		// node 6, only its azimuth φ is zeroed. The 6→5 aimed port ("Out"→"5")
-		// installed above then aims along φ=0. Apply once at load so node 5 starts
-		// on the meridian; fan the follower to seed its mover's held center.
-		// Pin node 5 onto both node 6's and node 7's φ=0 meridians (the 6→5 and 7→5
-		// edges sit on φ=0). Node 5 is the follower in BOTH phiZeroLocks (6,5) and
-		// (7,5) — it connects to both 6 and 7. The two meridian planes share the same
-		// off-plane normal (the polar frame's φ=90° axis), so node 5 cannot lie on both
-		// planes at once unless 6 and 7 already share that coordinate. Seed by DRAGGING
-		// node 5 once: that fires both locks and projects 6 AND 7 onto node 5's plane
-		// (the symmetric, pole-stable, φ-free off-plane projection), leaving both edges
-		// in-plane at load. (Matches the runtime behavior: dragging 5 re-pins both 6 and
-		// 7.) The aimed ports 6.Out→5 and 7.Out→5 installed above then aim along φ=0.
+		// DIRECTIONAL meridian chain 6 → 5 → 7 (see lock.go phiDrive):
+		//   - phiZeroFollower(6,5): node 6 ANCHORS node 5. The lock writes only node 5
+		//     (project 5 onto 6's φ=0 meridian); node 6 is never moved by it. So
+		//     dragging 6 pulls 5 along, dragging 5 re-projects 5 onto 6's meridian.
+		//   - phiZeroCenter(7,5): node 5 DRAGS node 7. The lock writes only node 7
+		//     (move 7 to keep 5 on 7's φ=0 meridian); node 5 is never moved by it. So
+		//     dragging 5 pulls 7 along; dragging 7 re-projects 7 (5 stays put).
+		// Net chain: drag 6 → 5 follows → 7 follows; drag 5 → 7 follows (6 stays);
+		// drag 7 → neither 5 nor 6 moves (3 mirrors via 2↔7↔3). The aimed ports
+		// 6.Out→5 and 7.Out→5 installed above then aim each edge along φ=0.
 		_, has5 := centers["5"]
 		if has5 && (has6 || has7) {
 			if has6 {
-				md.addPhiZeroLock("6", "5")
+				md.addPhiZeroFollowerLock("6", "5") // 6 anchors 5
 			}
 			if has7 {
-				md.addPhiZeroLock("7", "5")
+				md.addPhiZeroCenterLock("7", "5") // 5 drags 7
 			}
-			// Equalize the two edge radii into node 5: |6→5| == |7→5|, measured in
-			// node 5's local frame. Folded into the φ=0 projection of the non-dragged
-			// source (composes with the meridian locks above; see lock.go
-			// equalRadiiLock). Only when all three exist.
+			// Equalize the two edge radii into node 5: |6→5| == |7→5|. Node 6 is the
+			// radius authority (anchor); node 7 is rescaled to it. Folded into node 7's
+			// φ=0 projection (see lock.go equalRadiiLock). Only when all three exist.
 			if has6 && has7 {
 				md.addEqualRadiiLock("5", "6", "7")
 			}
-			if followers := md.applyLocks("5", false); len(followers) > 0 {
+			// Seed from the anchor (node 6) so node 5 is projected onto 6's meridian
+			// and node 7 then follows node 5 at the equalized radius. If node 6 is
+			// absent, seed by dragging node 5 (only the moveCenter lock is present).
+			seedID := "6"
+			if !has6 {
+				seedID = "5"
+			}
+			if followers := md.applyLocks(seedID, false); len(followers) > 0 {
 				centers := md.heldCenters()
 				for id, w := range followers {
 					centers[id] = w
