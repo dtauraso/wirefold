@@ -310,6 +310,108 @@ func TestChainDrag5MovesAll(t *testing.T) {
 	}
 }
 
+// buildFullFixture replicates the real loaded topology's locks: the θ-lock pair
+// (1,2,6)/(1,6,2), the mirror pair (2,3,7)/(2,7,3), and the meridian locks
+// (6,5)/(7,5). It exercises the leader-only firing rule end to end: dragging a
+// θ-lock leader (2 or 6) drives its partner, the meridian chain reaches 5/7, and
+// 7 (mirror leader) drives 3 — without the spurious center-2-triggered mirror.
+func buildFullFixture() *MoveDispatch {
+	centers := map[string]vec3{
+		"1": {0, 0, 0},
+		"2": {10, 2, 5},
+		"6": {9, -1, -4},
+		"3": {12, 8, 9},
+		"7": {8, 7, -3},
+		"5": {6, 15, 1},
+	}
+	md := &MoveDispatch{}
+	md.roots = buildRoots(centers)
+	md.addThetaLock("1", "2", "6")
+	md.addThetaLock("1", "6", "2")
+	md.addMirrorLock("2", "3", "7")
+	md.addMirrorLock("2", "7", "3")
+	md.addPhiZeroLock("6", "5")
+	md.addPhiZeroLock("7", "5")
+	return md
+}
+
+// movedMag returns the world-distance node id moved from its pre-drag position, or 0.
+func movedMag(pre vec3, moved map[string]vec3, id string) float64 {
+	nw, ok := moved[id]
+	if !ok {
+		return 0
+	}
+	return dist3(pre, nw)
+}
+
+// Leader-only firing, drag 6: θ-lock(1,6,2) [leader 6] moves 2; the meridian chain
+// 6→5→7 moves 7 FULLY (no longer frozen by a center-2-triggered mirror); 7 [mirror
+// leader] then moves 3. So both 7 and 3 move by a sizable amount.
+func TestFullDrag6MovesSevenAndThree(t *testing.T) {
+	md := buildFullFixture()
+	pre7, _ := md.roots.world("7")
+	pre3, _ := md.roots.world("3")
+	moved := md.applyLocks("6")
+	if m := movedMag(pre7, moved, "7"); m < 1e-3 {
+		t.Errorf("drag 6: node 7 moved by %v (want sizable); moved=%v", m, moved)
+	}
+	if m := movedMag(pre3, moved, "3"); m < 1e-3 {
+		t.Errorf("drag 6: node 3 moved by %v (want sizable); moved=%v", m, moved)
+	}
+}
+
+// Mirror leader 3 drives follower 7.
+func TestFullDrag3MovesSeven(t *testing.T) {
+	md := buildFullFixture()
+	moved := md.applyLocks("3")
+	if _, ok := moved["7"]; !ok {
+		t.Errorf("drag 3: node 7 did not follow (mirror leader 3); moved=%v", moved)
+	}
+}
+
+// Mirror leader 7 drives follower 3.
+func TestFullDrag7MovesThree(t *testing.T) {
+	md := buildFullFixture()
+	moved := md.applyLocks("7")
+	if _, ok := moved["3"]; !ok {
+		t.Errorf("drag 7: node 3 did not follow (mirror leader 7); moved=%v", moved)
+	}
+}
+
+// Drag 5 still propagates to both meridian centers 6 and 7 (unchanged behavior).
+func TestFullDrag5MovesSixAndSeven(t *testing.T) {
+	md := buildFullFixture()
+	moved := md.applyLocks("5")
+	for _, id := range []string{"6", "7"} {
+		if _, ok := moved[id]; !ok {
+			t.Errorf("drag 5: node %s did not move; moved=%v", id, moved)
+		}
+	}
+}
+
+// Center-only move (isolated): node 2 is the CENTER of mirror(2,3,7)/(2,7,3) but the
+// LEADER of neither. With ONLY the mirror locks present (no θ-lock/meridian chain to
+// reach 3/7 by another path), moving 2 alone must NOT drag 3 or 7 — the spurious
+// center-triggered mirror fire that this fix removes. (Under the old leader-OR-center
+// rule this moved both 3 and 7.)
+func TestCenterTwoDoesNotDragMirror(t *testing.T) {
+	centers := map[string]vec3{
+		"2": {10, 2, 5},
+		"3": {12, 8, 9},
+		"7": {8, 7, -3},
+	}
+	md := &MoveDispatch{}
+	md.roots = buildRoots(centers)
+	md.addMirrorLock("2", "3", "7")
+	md.addMirrorLock("2", "7", "3")
+	moved := md.applyLocks("2")
+	for _, id := range []string{"3", "7"} {
+		if _, ok := moved[id]; ok {
+			t.Errorf("center 2 moved: node %s should NOT be dragged by the mirror (leader-only rule); moved=%v", id, moved)
+		}
+	}
+}
+
 // 7↔5 mirror of TestPhiZeroLockEdgeInMeridianPlane: after the re-pin the 7→5 edge
 // lies in the φ=0 meridian plane.
 func TestPhiZeroLock75EdgeInMeridianPlane(t *testing.T) {

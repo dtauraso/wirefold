@@ -116,11 +116,15 @@ func (md *MoveDispatch) applyLocks(movedID string) map[string]vec3 {
 		current := queue[0]
 		queue = queue[1:]
 
-		// θ locks: fire when `current` is the leader or center. The follower adopts the
-		// leader's θ (angle from the +y up-pole) and keeps its own radius. φ is either the
-		// follower's OWN (same latitude ring, own longitude) or, for a mirror lock, −leaderφ.
+		// θ locks: fire ONLY when `current` is the leader. A center moving is just the
+		// frame origin shifting; the follower must not be independently dragged by it
+		// (that spurious center-triggered path made node 6's drag nudge center 2, fire
+		// the mirror on 2, and freeze node 7 via the move-once guard). The follower
+		// adopts the leader's θ (angle from the +y up-pole) and keeps its own radius. φ
+		// is either the follower's OWN (same latitude ring, own longitude) or, for a
+		// mirror lock, −leaderφ.
 		for _, lk := range md.locks {
-			if lk.Leader != current && lk.Center != current {
+			if lk.Leader != current {
 				continue
 			}
 			cw, ok := md.roots.world(lk.Center)
