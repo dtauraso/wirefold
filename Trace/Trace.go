@@ -112,13 +112,17 @@ const (
 	// the master toggle is triggered (op="overlays-vis"), so the renderer shows or hides
 	// all 8 overlays at once without mutating individual overlay bools.
 	KindOverlaysVis = "overlays-vis"
+	// KindDoubleLinks carries the double-link overlay visibility state. Go emits it when
+	// the toggle is triggered (op="double-links"), so the renderer draws bidirectional
+	// arrow overlays on edges and dims the edge tubes.
+	KindDoubleLinks = "double-links"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -422,6 +426,12 @@ func (t *Trace) LabelsGlobal(visible bool) {
 // shows/hides all +N badges in ThreeView without computing any geometry.
 func (t *Trace) BadgesGlobal(visible bool) {
 	t.emit(Event{Kind: KindBadgesGlobal, Visible: visible})
+}
+
+// DoubleLinks emits the double-link overlay visibility state. visible=true = overlay shown;
+// visible=false = overlay hidden. Written by pump to useCameraStore.doubleLinksVisible.
+func (t *Trace) DoubleLinks(visible bool) {
+	t.emit(Event{Kind: KindDoubleLinks, Visible: visible})
 }
 
 // OverlaysVis emits the master overlays visibility state. visible=true = all overlays shown;
@@ -729,7 +739,7 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

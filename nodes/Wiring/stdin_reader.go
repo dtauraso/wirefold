@@ -441,6 +441,13 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		md.ToggleOverlaysVis(tr)
+	case msg.Op == "double-links":
+		// Toggle the double-link overlay visibility and emit a double-links event.
+		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).
+		if md == nil {
+			return
+		}
+		md.ToggleDoubleLinks(tr)
 	case msg.Op == "guide-vis":
 		// Set all polar-guide visibilities plus master to explicit values. Sent by TS on window
 		// reload so Go's authoritative state matches persisted scene settings.

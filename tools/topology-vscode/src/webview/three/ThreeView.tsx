@@ -12,7 +12,7 @@ import type { RFNode, NodeData, EdgeData } from "../types";
 import type { RFEdge } from "../types";
 import { useThreeStore } from "./store";
 import { pixelToNDC } from "./geometry-helpers";
-import { GlobalLabelsToggle, BadgesToggle, HomeButton, GuidelinesToggle, RingsToggle, ScenePolesToggle, NodePolesToggle, AngleLabelsToggle, SelSpherePolesToggle, HandholdsToggle } from "./camera-ui";
+import { GlobalLabelsToggle, BadgesToggle, HomeButton, GuidelinesToggle, RingsToggle, ScenePolesToggle, NodePolesToggle, AngleLabelsToggle, SelSpherePolesToggle, HandholdsToggle, DoubleLinksToggle } from "./camera-ui";
 import { useCameraStore } from "./camera-store";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
@@ -299,6 +299,7 @@ export function ThreeView() {
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} nodesRef={nodesRef} targetRef={targetRef} aspect={canvasSize.w / canvasSize.h} />
       <GuidelinesToggle />
+      <DoubleLinksToggle />
       {overlaysVisible && (
         <>
           <GlobalLabelsToggle />

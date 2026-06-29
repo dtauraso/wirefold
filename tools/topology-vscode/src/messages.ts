@@ -51,6 +51,7 @@ export type EditMsg =
   | { type: "edit"; op: "labels-vis" }
   | { type: "edit"; op: "badges-vis" }
   | { type: "edit"; op: "overlays-vis" }
+  | { type: "edit"; op: "double-links" }
   | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean }
   | {
       type: "edit";
@@ -117,7 +118,8 @@ export type TraceEvent =
   | { step: number; kind: "handholds"; visible: boolean }
   | { step: number; kind: "labels-global"; visible: boolean }
   | { step: number; kind: "badges-global"; visible: boolean }
-  | { step: number; kind: "overlays-vis"; visible: boolean };
+  | { step: number; kind: "overlays-vis"; visible: boolean }
+  | { step: number; kind: "double-links"; visible: boolean };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -217,6 +219,7 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     case "labels-vis":
     case "badges-vis":
     case "overlays-vis":
+    case "double-links":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     case "guide-vis":

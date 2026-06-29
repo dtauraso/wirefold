@@ -29,6 +29,10 @@ interface CameraState {
   // each overlay's own Go-owned visibility is left untouched, so reactivating restores
   // the prior per-overlay states. Written by pump on "overlays-vis" trace events.
   overlaysVisible: boolean;
+  // doubleLinksVisible is the Go-owned toggle for the double-link overlay. When true,
+  // edge tubes are dimmed and each edge shows a cyan bidirectional arrow line at port endpoints.
+  // Written by pump on "double-links" trace events.
+  doubleLinksVisible: boolean;
   set: (c: PolarCamera) => void;
   setSceneToriVisible: (v: boolean) => void;
   setScenePolesVisible: (v: boolean) => void;
@@ -39,6 +43,7 @@ interface CameraState {
   setLabelsGlobalHidden: (v: boolean) => void;
   setBadgesHidden: (v: boolean) => void;
   setOverlaysVisible: (v: boolean) => void;
+  setDoubleLinksVisible: (v: boolean) => void;
 }
 
 export const useCameraStore = create<CameraState>((set) => ({
@@ -52,6 +57,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   labelsGlobalHidden: false,
   badgesHidden: false,
   overlaysVisible: true,
+  doubleLinksVisible: false,
   set: (c) => set({ camera: c }),
   setSceneToriVisible: (v) => set({ sceneToriVisible: v }),
   setScenePolesVisible: (v) => set({ scenePolesVisible: v }),
@@ -62,6 +68,7 @@ export const useCameraStore = create<CameraState>((set) => ({
   setLabelsGlobalHidden: (v) => set({ labelsGlobalHidden: v }),
   setBadgesHidden: (v) => set({ badgesHidden: v }),
   setOverlaysVisible: (v) => set({ overlaysVisible: v }),
+  setDoubleLinksVisible: (v) => set({ doubleLinksVisible: v }),
 }));
 
 export function getCameraState(): CameraState {

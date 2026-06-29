@@ -251,6 +251,11 @@ export function handleTraceEvent(event: TraceEvent): void {
       scheduleViewSave();
       return;
     }
+    case "double-links": {
+      const e = event as Extract<TraceEvent, { kind: "double-links" }>;
+      useCameraStore.getState().setDoubleLinksVisible(e.visible);
+      return;
+    }
     default:
       assertNever(k);
   }
