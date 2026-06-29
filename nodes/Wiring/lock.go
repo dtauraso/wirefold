@@ -102,6 +102,39 @@ func (md *MoveDispatch) addEqualRadiiLock(mid, a, b string) {
 	md.equalRadiiLocks = append(md.equalRadiiLocks, equalRadiiLock{Mid: mid, A: a, B: b})
 }
 
+// bisectorMidLock constrains Mid to the perpendicular-bisector plane of its two
+// feeders A and B — the locus of points equidistant from A and B — so the two incoming
+// branch radii stay equal (|A→Mid| == |B→Mid|). The feeders are FREE (the user drags
+// them; they are never written by this lock); only Mid moves. When a feeder moves, Mid
+// re-projects onto the new bisector plane; when Mid itself is dragged it is projected
+// back onto the plane (kept on the bisector). This INVERTS the old φ=0 + equalRadii
+// chain, where the mid was the fixed frame and a feeder was rescaled: here the feeders
+// are the authorities and the mid follows.
+type bisectorMidLock struct {
+	Mid string
+	A   string
+	B   string
+}
+
+// addBisectorMidLock registers a bisector-mid lock (Mid equidistant from feeders A, B).
+func (md *MoveDispatch) addBisectorMidLock(mid, a, b string) {
+	md.bisectorMidLocks = append(md.bisectorMidLocks, bisectorMidLock{Mid: mid, A: a, B: b})
+}
+
+// bisectorProject returns mw projected onto the perpendicular-bisector plane of A,B
+// (the plane through the midpoint of A–B with normal along A→B). The result is
+// equidistant from aw and bw, so |result→aw| == |result→bw|. ok=false when A and B
+// coincide (no bisector defined).
+func bisectorProject(mw, aw, bw vec3) (vec3, bool) {
+	d := bw.sub(aw)
+	if d.length() == 0 {
+		return mw, false
+	}
+	n := d.normalize()
+	midpoint := aw.add(bw).scale(0.5)
+	return mw.sub(n.scale(mw.sub(midpoint).dot(n))), true
+}
+
 // rescaleAboutMid returns nw rescaled about mw so |result→mw| == refR, keeping
 // nw's direction from mw (pure-polar: keeps θ/φ about Mid, sets R). Returns
 // (nw, false) when nw coincides with mw (no direction to keep).
@@ -280,6 +313,28 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 		}
 	}
 
+	// Dragged-mid bisector constraint: when the user drags a bisectorMid Mid directly,
+	// keep it on the perpendicular-bisector plane of its (free) feeders so the two
+	// branch radii stay equal. The BFS bisector loop below would skip the dragged mid
+	// (place()'s move-once guard), so the drag is constrained here instead.
+	if fromDrag {
+		for _, lk := range md.bisectorMidLocks {
+			if movedID != lk.Mid {
+				continue
+			}
+			mw, okm := md.roots.world(lk.Mid)
+			aw, oka := md.roots.world(lk.A)
+			bw, okb := md.roots.world(lk.B)
+			if !okm || !oka || !okb {
+				continue
+			}
+			if proj, ok := bisectorProject(mw, aw, bw); ok {
+				md.roots.roots[lk.Mid] = rootFromCartesian(proj, md.roots.origin)
+				moved[lk.Mid] = proj
+			}
+		}
+	}
+
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -399,6 +454,25 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 				nw = adj
 			}
 			place(written, nw)
+		}
+
+		// Bisector-mid locks: when a FEEDER (A or B) moved, re-project its Mid onto the
+		// perpendicular-bisector plane of the two feeders so the incoming branch radii
+		// stay equal. The feeders are never written here; only the mid follows. (The
+		// dragged-mid case is handled by the pre-pass above.)
+		for _, lk := range md.bisectorMidLocks {
+			if current != lk.A && current != lk.B {
+				continue
+			}
+			mw, okm := md.roots.world(lk.Mid)
+			aw, oka := md.roots.world(lk.A)
+			bw, okb := md.roots.world(lk.B)
+			if !okm || !oka || !okb {
+				continue
+			}
+			if proj, ok := bisectorProject(mw, aw, bw); ok {
+				place(lk.Mid, proj)
+			}
 		}
 	}
 

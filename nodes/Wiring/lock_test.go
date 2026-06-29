@@ -70,6 +70,78 @@ func dist3(a, b vec3) float64 {
 	return math.Sqrt(dx*dx + dy*dy + dz*dz)
 }
 
+// buildBisectorFixture: mid node 5 constrained to the perpendicular-bisector plane of
+// its two FREE feeders 6 and 7 (edges 6→5, 7→5). The feeders are the authorities; the
+// mid follows so |6→5| == |7→5|.
+func buildBisectorFixture() (*MoveDispatch, context.CancelFunc) {
+	centers := map[string]vec3{
+		"5": {10, 0, 0},
+		"6": {0, 5, 0},
+		"7": {0, -5, 3},
+	}
+	geoms := map[string]nodeGeom{}
+	for id, c := range centers {
+		cc := c
+		geoms[id] = nodeGeom{Kind: "FanInSrc", Center: &cc}
+	}
+	edges := map[string]EdgeEndpoints{
+		"e65": {Source: "6", Target: "5", SourceHandle: "Out", TargetHandle: "FromLeft"},
+		"e75": {Source: "7", Target: "5", SourceHandle: "Out", TargetHandle: "FromRight"},
+	}
+	tr := T.New(256)
+	md := newMoveDispatch(geoms, edges, tr)
+	md.setRoots(buildRoots(centers))
+	md.addBisectorMidLock("5", "6", "7")
+	ctx, cancel := context.WithCancel(context.Background())
+	md.Start(ctx)
+	return md, cancel
+}
+
+// Dragging a FEEDER (node 6) re-projects the mid (node 5) so the two incoming branch
+// radii stay equal, and leaves the feeders exactly where they were dragged.
+func TestBisectorMidEqualizesRadiiOnFeederDrag(t *testing.T) {
+	md, cancel := buildBisectorFixture()
+	defer cancel()
+	const eps = 1e-6
+
+	target := vec3{X: 2, Y: 8, Z: -1}
+	md.RootMove("6", target) // drag feeder 6 freely
+
+	w5, _ := md.roots.world("5")
+	w6, _ := md.roots.world("6")
+	w7, _ := md.roots.world("7")
+
+	// Feeders are free: node 6 lands exactly where dragged, node 7 is untouched.
+	if dist3(w6, target) > eps {
+		t.Errorf("feeder 6 moved off its drag target: %v != %v", w6, target)
+	}
+	if dist3(w7, vec3{0, -5, 3}) > eps {
+		t.Errorf("feeder 7 should be free/unmoved, got %v", w7)
+	}
+	// Mid 5 followed onto the bisector: equal incoming radii.
+	if d := math.Abs(dist3(w6, w5) - dist3(w7, w5)); d > eps {
+		t.Errorf("radii not equal after feeder drag: |6→5|=%v |7→5|=%v (Δ=%v)",
+			dist3(w6, w5), dist3(w7, w5), d)
+	}
+}
+
+// Dragging the MID (node 5) keeps it on the bisector (equal radii); feeders unmoved.
+func TestBisectorMidConstrainedOnMidDrag(t *testing.T) {
+	md, cancel := buildBisectorFixture()
+	defer cancel()
+	const eps = 1e-6
+
+	md.RootMove("5", vec3{X: 20, Y: 3, Z: 6}) // drag the mid directly
+
+	w5, _ := md.roots.world("5")
+	w6, _ := md.roots.world("6")
+	w7, _ := md.roots.world("7")
+	if d := math.Abs(dist3(w6, w5) - dist3(w7, w5)); d > eps {
+		t.Errorf("mid drag left unequal radii: |6→5|=%v |7→5|=%v (Δ=%v)",
+			dist3(w6, w5), dist3(w7, w5), d)
+	}
+}
+
 // meridianPerp is the off-meridian-plane normal: the φ=90° axis of the polar
 // frame (pole = +y). The φ=0 meridian plane is the set of points whose component
 // along this axis is zero, so the off-plane component of any edge is v·perp.

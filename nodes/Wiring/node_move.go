@@ -348,6 +348,10 @@ type MoveDispatch struct {
 	// equalRadiiLocks keep two edge radii into a mid node equal (lock.go), folded
 	// into the φ=0 projection of the equalized source.
 	equalRadiiLocks []equalRadiiLock
+	// bisectorMidLocks constrain a mid node to the perpendicular-bisector plane of its
+	// two free feeders, so the two incoming branch radii stay equal (lock.go). The
+	// feeders are the authorities (freely dragged); the mid follows.
+	bisectorMidLocks []bisectorMidLock
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
