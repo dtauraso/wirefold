@@ -380,6 +380,9 @@ type MoveDispatch struct {
 	// overlaysVisible is the master overlays visibility. true by default (all overlays shown).
 	// Toggled by ToggleOverlaysVis; emitted via EmitOverlaysVis.
 	overlaysVisible bool
+	// doubleLinksVisible is the double-link overlay visibility. false by default (overlay hidden).
+	// Toggled by ToggleDoubleLinks; emitted via EmitDoubleLinks.
+	doubleLinksVisible bool
 }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
@@ -851,6 +854,18 @@ func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace) {
 // EmitOverlaysVis emits the current master overlays visibility without toggling it.
 func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace) {
 	tr.OverlaysVis(md.overlaysVisible)
+}
+
+// ToggleDoubleLinks flips the double-link overlay visibility and emits a double-links event.
+// Called from applyEdit on op="double-links"; fire-and-forget from TS.
+func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace) {
+	md.doubleLinksVisible = !md.doubleLinksVisible
+	tr.DoubleLinks(md.doubleLinksVisible)
+}
+
+// EmitDoubleLinks emits the current double-link overlay visibility without toggling it.
+func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace) {
+	tr.DoubleLinks(md.doubleLinksVisible)
 }
 
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup

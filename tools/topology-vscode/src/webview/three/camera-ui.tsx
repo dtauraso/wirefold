@@ -409,6 +409,45 @@ export function GlobalLabelsToggle() {
  *  Reads badgesHidden from camera-store (Go-owned via badges-global trace events).
  *  Click dispatches fire-and-forget "badges-vis" to Go; Go echoes back the new state.
  */
+/** DOUBLE-LINKS TOGGLE: Go-owned toggle for the bidirectional edge overlay.
+ * When active, edge tubes are dimmed and each edge shows a cyan bidirectional arrow line.
+ * Fire-and-forget to Go; Go echoes back via double-links trace event. */
+export function DoubleLinksToggle() {
+  const active = useCameraStore((s) => s.doubleLinksVisible);
+  const onClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Fire-and-forget: Go owns the toggle state and echoes back via double-links.
+    postLog("guide-btn-click", { op: "double-links", was: active });
+    vscode.postMessage({ type: "edit", op: "double-links" });
+  }, [active]);
+  return (
+    <div
+      onClick={onClick}
+      title={active ? "Hide double-link overlay" : "Show double-link overlay"}
+      style={{
+        position: "absolute",
+        top: 316,
+        right: 12,
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 6,
+        padding: "3px 7px",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        zIndex: 20,
+        color: active ? "#00e5ff" : "#888",
+        fontSize: 11,
+        fontFamily: "monospace",
+        userSelect: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      ⇄ double links
+    </div>
+  );
+}
+
 export function BadgesToggle() {
   const hidden = useCameraStore((s) => s.badgesHidden);
   const onClick = useCallback((e: React.MouseEvent) => {

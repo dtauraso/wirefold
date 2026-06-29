@@ -8,6 +8,7 @@ import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
 import { nodeRadius, nodeWorldPos, portDir } from "./geometry-helpers";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { PulseBead, InteriorBeads } from "./scene-beads";
+import { useCameraStore } from "./camera-store";
 import {
   SHADING_PARAM_NODE_TRANSMISSION,
   SHADING_PARAM_NODE_THICKNESS,
@@ -23,6 +24,9 @@ import {
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
   SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
+  SHADING_PARAM_DOUBLE_LINKS_COLOR,
+  SHADING_PARAM_DOUBLE_LINKS_EMISSIVE,
+  SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY,
 } from "../../schema/shading-params";
 
 // ---------------------------------------------------------------------------
@@ -276,7 +280,7 @@ function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.V
 const ARROW_HEIGHT = 6;
 const ARROW_RADIUS = 3;
 
-export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; faded: boolean; selected: boolean }) {
+export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: string; faded: boolean; selected: boolean; dimmed?: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
   // streams the endpoints (geometry trace) on load and on every node-move;
   // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's
@@ -329,12 +333,12 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
       {/* Always-lit base tube — emissive so it reads at any camera angle */}
       <mesh geometry={tubeGeo} userData={{ edgeId }}>
         <meshStandardMaterial
-          key={faded ? "faded" : "solid"}
+          key={faded ? "faded" : dimmed ? "dimmed" : "solid"}
           color={SHADING_PARAM_TUBE_COLOR}
           emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
           emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
-          transparent={faded}
-          opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1}
+          transparent={faded || !!dimmed}
+          opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1}
         />
       </mesh>
       {/* Selection halo doubles as the wide pick target. Always mounted so the raycaster
@@ -358,17 +362,104 @@ export function SingleEdgeTube({ edgeId, faded, selected }: { edgeId: string; fa
         >
           <coneGeometry args={[ARROW_RADIUS, ARROW_HEIGHT, 16]} />
           <meshStandardMaterial
-            key={faded ? "faded" : "solid"}
+            key={faded ? "faded" : dimmed ? "dimmed" : "solid"}
             color={SHADING_PARAM_TUBE_COLOR}
             emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
             emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
-            transparent={faded}
-            opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1}
+            transparent={faded || !!dimmed}
+            opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1}
           />
         </mesh>
       )}
       {/* Pulse bead: plotted at Go's streamed position (Phase 2). */}
       {!faded && <PulseBead edgeId={edgeId} />}
+    </>
+  );
+}
+
+// Arrowhead cone dims for the double-link overlay (slightly larger than the tube arrows).
+const DL_ARROW_HEIGHT = 7;
+const DL_ARROW_RADIUS = 3.5;
+
+
+/** Renders a single bidirectional cyan line overlay for one edge when double-links is ON.
+ * Reads the same segment from the edge-geometry store as SingleEdgeTube so it lines up
+ * exactly with the ports. Draws a thin tube line + two arrowheads pointing outward. */
+function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
+  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
+  const segKey = seg
+    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
+    : "";
+  const { lineGeo, arrowStart, arrowEnd } = useMemo(() => {
+    if (!seg)
+      return {
+        lineGeo: null as THREE.TubeGeometry | null,
+        arrowStart: null as { center: THREE.Vector3; q: THREE.Quaternion } | null,
+        arrowEnd: null as { center: THREE.Vector3; q: THREE.Quaternion } | null,
+      };
+    const start = new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z);
+    const end = new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z);
+    const lineCurve = new THREE.LineCurve3(start, end);
+    const _lineGeo = new THREE.TubeGeometry(lineCurve, 1, 1.0, 6, false);
+    const dir = end.clone().sub(start);
+    let _arrowStart: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    let _arrowEnd: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    if (dir.length() >= 1e-6) {
+      const dirNorm = dir.clone().normalize();
+      const dirNeg = dirNorm.clone().negate();
+      // Arrow at start: cone pointing toward start (apex at start, base inward).
+      // ConeGeometry apex at +Y; rotate +Y onto dirNeg (toward start).
+      const qStart = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNeg);
+      const centerStart = start.clone().addScaledVector(dirNeg, -DL_ARROW_HEIGHT / 2);
+      _arrowStart = { center: centerStart, q: qStart };
+      // Arrow at end: cone pointing toward end (apex at end, base inward).
+      const qEnd = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNorm);
+      const centerEnd = end.clone().addScaledVector(dirNorm, -DL_ARROW_HEIGHT / 2);
+      _arrowEnd = { center: centerEnd, q: qEnd };
+    }
+    return { lineGeo: _lineGeo, arrowStart: _arrowStart, arrowEnd: _arrowEnd };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segKey]);
+
+  if (!lineGeo) return null;
+  return (
+    <>
+      <mesh geometry={lineGeo} raycast={() => null}>
+        <meshStandardMaterial
+          color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
+          emissive={new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE)}
+          emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
+          transparent={false}
+        />
+      </mesh>
+      {arrowStart && (
+        <mesh
+          position={[arrowStart.center.x, arrowStart.center.y, arrowStart.center.z]}
+          quaternion={[arrowStart.q.x, arrowStart.q.y, arrowStart.q.z, arrowStart.q.w]}
+          raycast={() => null}
+        >
+          <coneGeometry args={[DL_ARROW_RADIUS, DL_ARROW_HEIGHT, 16]} />
+          <meshStandardMaterial
+            color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
+            emissive={new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE)}
+            emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
+          />
+        </mesh>
+      )}
+      {arrowEnd && (
+        <mesh
+          position={[arrowEnd.center.x, arrowEnd.center.y, arrowEnd.center.z]}
+          quaternion={[arrowEnd.q.x, arrowEnd.q.y, arrowEnd.q.z, arrowEnd.q.w]}
+          raycast={() => null}
+        >
+          <coneGeometry args={[DL_ARROW_RADIUS, DL_ARROW_HEIGHT, 16]} />
+          <meshStandardMaterial
+            color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
+            emissive={new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE)}
+            emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
+          />
+        </mesh>
+      )}
     </>
   );
 }
@@ -382,6 +473,7 @@ export function GraphEdges({
   nodeMap: Map<string, RFNode<NodeData>>;
   selectedId: string | null;
 }) {
+  const doubleLinksVisible = useCameraStore((s) => s.doubleLinksVisible);
   return (
     <>
       {edges.map((e) => {
@@ -391,7 +483,12 @@ export function GraphEdges({
         const s = nodeMap.get(e.source);
         const t = nodeMap.get(e.target);
         if (!s || !t) return null;
-        return <SingleEdgeTube key={e.id} edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} />;
+        return (
+          <React.Fragment key={e.id}>
+            <SingleEdgeTube edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} dimmed={doubleLinksVisible} />
+            {doubleLinksVisible && <DoubleEdgeOverlay edgeId={e.id} />}
+          </React.Fragment>
+        );
       })}
     </>
   );

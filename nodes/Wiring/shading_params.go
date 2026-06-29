@@ -140,3 +140,12 @@ const ShadingParamBeadEmissive = "#ffffff"
 
 // ShadingParamBeadEmissiveIntensity is the in-flight bead emissive intensity.
 const ShadingParamBeadEmissiveIntensity = 2.5
+
+// ShadingParamDoubleLinksColor is the double-link overlay line/arrowhead color (cyan accent).
+const ShadingParamDoubleLinksColor = "#00e5ff"
+
+// ShadingParamDoubleLinksEmissive is the double-link overlay emissive color.
+const ShadingParamDoubleLinksEmissive = "#00e5ff"
+
+// ShadingParamDoubleLinksEmissiveIntensity is the double-link overlay emissive intensity.
+const ShadingParamDoubleLinksEmissiveIntensity = 0.8
