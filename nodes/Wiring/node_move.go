@@ -337,21 +337,11 @@ type MoveDispatch struct {
 	// started is set by Start; the synchronous façade uses the goroutine path when
 	// true and direct handler calls otherwise (unit tests that never Start).
 	started bool
-	// roots is the polar layout (container prism/origin + per-node outer polar
-	// coordinate), built at load from the loaded world centers. Authoritative for
-	// the polar move/lock logic; world positions recover via roots.world(id).
-	roots rootSet
-	// locks are polar relationships re-derived after a RootMove (lock.go).
-	locks []thetaLock
-	// phiZeroLocks pin a follower onto the center's φ=0 meridian (lock.go).
-	phiZeroLocks []phiZeroLock
-	// equalRadiiLocks keep two edge radii into a mid node equal (lock.go), folded
-	// into the φ=0 projection of the equalized source.
-	equalRadiiLocks []equalRadiiLock
-	// bisectorMidLocks constrain a mid node to the perpendicular-bisector plane of its
-	// two free feeders, so the two incoming branch radii stay equal (lock.go). The
-	// feeders are the authorities (freely dragged); the mid follows.
-	bisectorMidLocks []bisectorMidLock
+	// links is the double-link movement graph (links.go). Polar locks ride on these;
+	// the graph is declared at load and is independent of the displayed data edges.
+	links []movementLink
+	// mirrorLocks are polar mirror locks rebuilt on the link graph (locks.go).
+	mirrorLocks []mirrorLock
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
@@ -391,9 +381,6 @@ type MoveDispatch struct {
 	// Toggled by ToggleOverlaysVis; emitted via EmitOverlaysVis.
 	overlaysVisible bool
 }
-
-// setRoots installs the polar layout built at load (buildRoots).
-func (md *MoveDispatch) setRoots(rs rootSet) { md.roots = rs }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
 // It creates one nodeMover per node and one edgeMover per edge, registering each in
@@ -626,65 +613,28 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
-	// Authority: update the dragged node's root. Center is the derived world value.
-	md.roots.roots[nodeID] = rootFromCartesian(target, md.roots.origin)
-
+	// Move ONLY the dragged node. There is no lock system and no central position store:
+	// node positions live in the movers' held geometry (geom.Center). Fan the new center
+	// so the node and the edges touching it re-emit their geometry. Movement constraints
+	// (the double-link locks) will be reintroduced here later.
 	edges := md.heldEdges()
 	emit := map[string]vec3{nodeID: target}
 
-	// CO-SPHERE RADIUS COUPLING: every surface node of a sphere is equidistant from
-	// the center (on the sphere). Dragging a surface node resizes the sphere — its
-	// new radius is the dragged node's distance to the center — and every OTHER
-	// surface node of that sphere moves RADIALLY to the new radius, keeping its own
-	// direction from the center. Applied once for the dragged node's centers (siblings
-	// are moved directly, not re-recursed), so the 8↔1 ring cannot cascade.
-	// A bisector mid's radius is governed by its OWN feeders (its bisectorMidLock), not
-	// by a shared sphere, so it must be excluded from co-sphere coupling on BOTH sides:
-	// dragging a mid must not resize a shared feeder's sphere, and a feeder's resize must
-	// not move a mid. Without this, node 11 (mid of {10,6}) and node 5 (mid of {6,7})
-	// share node 6's sphere and would drag each other.
-	isBisectorMid := map[string]bool{}
-	for _, lk := range md.bisectorMidLocks {
-		isBisectorMid[lk.Mid] = true
+	// pos reads the dragged node's TARGET (from emit) before falling back to the movers'
+	// held centers.
+	pos := func(id string) (vec3, bool) {
+		if w, ok := emit[id]; ok {
+			return w, true
+		}
+		return md.nodeCenter(id)
 	}
-	for _, e := range edges {
-		if e.Target != nodeID || e.Source == "" || isBisectorMid[nodeID] {
-			continue // only edges INTO the dragged node identify the spheres it sits on
-		}
-		cw, ok := md.roots.world(e.Source)
-		if !ok {
-			continue
-		}
-		newR := target.sub(cw).length()
-		for _, se := range edges {
-			if se.Source != e.Source || se.Target == "" || se.Target == nodeID {
-				continue // other surface nodes of this center
-			}
-			if isBisectorMid[se.Target] {
-				continue // its radius is set by its own bisector, not this shared sphere
-			}
-			yw, ok := md.roots.world(se.Target)
-			if !ok {
-				continue
-			}
-			dir := yw.sub(cw)
-			if dir.length() < 1e-9 {
-				continue
-			}
-			ny := cw.add(dir.normalize().scale(newR))
-			md.roots.roots[se.Target] = rootFromCartesian(ny, md.roots.origin)
-			emit[se.Target] = ny
-		}
-		emit[e.Source] = cw // re-emit the center so its ring re-sizes
-	}
-
-	// Derive any locked followers of the moved node (roots updated in place, fan
-	// deferred) and merge them into the SINGLE per-frame center set, so the whole drag
-	// frame fans once. Previously applyLocks fanned each follower separately, and each
-	// fan re-sent center messages to edges already fanned by RootMove — overlapping
-	// edges recomputed and re-emitted their identical segment up to 6×/frame, which was
-	// the node-2 drag lag (node 2 is uniquely both a lock participant and a lock center).
-	for id, w := range md.applyLocks(nodeID, true) {
+	// Drag edge: the mouse handed in a world point, so recompute the polar of every link
+	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
+	// read the stored link polar — no cart2polar in the lock equation.
+	md.refreshLinksTouching(nodeID, pos)
+	// Apply the polar locks riding on the link graph: each triggered follower is written
+	// (in polar, on its link) and its derived world is merged into the single per-frame fan.
+	for id, w := range md.applyMirrorLocks(nodeID, pos) {
 		emit[id] = w
 	}
 
@@ -734,7 +684,9 @@ func (md *MoveDispatch) NodeKind(nodeID string) string {
 // and jitters camera-derived geometry. tr is unused (kept for call-site stability).
 // Call from the stdin reader on op=="set-origin".
 func (md *MoveDispatch) SetOrigin(o vec3, _ *T.Trace) {
-	md.roots.reOrigin(o)
+	// No-op: the polar frame origin lived in the deleted position store. Node positions
+	// are the movers' world Centers, which a re-origin never changed anyway.
+	_ = o
 }
 
 // SetViewpoint installs a known camera state without emitting. Used by the "set"

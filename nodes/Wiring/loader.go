@@ -339,41 +339,45 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// below once node construction has populated them.
 	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
 
-	// Polar layout (docs/planning/visual-editor/polar-coordinate-model.md): build
-	// the container prism + per-node outer polar root from the loaded world centers.
-	// Held on the dispatch as the authoritative coordinate for polar move/lock logic;
-	// world positions recover via md.roots.world(id). Cartesian centers above remain
-	// for the existing port/edge geometry until the polar path replaces them.
+	// The lock system and the central polar position store have been removed. Node
+	// positions live in the movers' held geometry (geom.Center). Declare the double-link
+	// movement graph (links.go); polar locks ride on it in a later step.
 	{
-		centers := map[string]vec3{}
-		for id, g := range nodeGeoms {
-			if g.Center != nil {
-				centers[id] = *g.Center
+		loaded := map[string]bool{}
+		for _, n := range spec.Nodes {
+			loaded[n.ID] = true
+		}
+		md.registerMovementLinks(func(id string) bool { return loaded[id] })
+
+		// Fill each link's polar state from the loaded world centers (the one-time
+		// world→polar conversion at load; thereafter locks read the stored link polar).
+		md.initLinkPolar(func(id string) (vec3, bool) {
+			g, ok := nodeGeoms[id]
+			if !ok || g.Center == nil {
+				return vec3{}, false
 			}
+			return *g.Center, true
+		})
+
+		// Polar locks on the link graph, reintroduced one record at a time.
+		// #1 (record §2): node-2 mirror — nodes 3 and 7 mirror about node 2 (links
+		// 2↔3, 2↔7). Bidirectional: drag either and the other reflects.
+		if loaded["2"] && loaded["3"] && loaded["7"] {
+			md.addMirror("2", "3", "7")
+			md.addMirror("2", "7", "3")
 		}
-		md.setRoots(buildRoots(centers))
-
-		// has reports whether a node was loaded (its center is known). Lock
-		// registration is grouped per originating node in lock_registry.go; each
-		// register* method guards on the nodes it needs via this closure.
-		has := func(id string) bool { _, ok := centers[id]; return ok }
-
-		// Register the polar layout locks. Locks are NOT applied at load — there is no
-		// seeding. Saved node positions stand exactly as loaded; each lock engages only
-		// on a drag (applyLocks, via the per-node move handlers). Registration order
-		// keeps the node-2 mirror ahead of the 5/6/7 chain so node 7's equal-radii fold
-		// composes the same way it does on a live drag.
-		md.registerNode2MirrorLocks(has) // node 2 mirrors its children 3 and 7
-		md.registerBisector5Locks(has)   // node 5 stays equidistant from feeders 6 and 7
-		md.registerNode9MirrorLocks(has) // node 9 mirrors its children 2 and 6
-		md.registerBisector11Locks(has)  // node 11 stays equidistant from feeders 10 and 6
-		md.registerNode1MirrorLocks(has) // node 1 mirrors its children 9 and 10 (rotation)
-
-		// Install the aimed-port registry built once above (the single source of truth
-		// shared with the initial edge geometry) for drag-time aiming.
-		if aimedPorts != nil {
-			md.installAimedPorts(aimedPorts)
+		// #3 (record §2): node-9 mirror — nodes 6 and 2 mirror about node 9 (links
+		// 9↔6, 9↔2). Same engine as #1; bidirectional.
+		if loaded["9"] && loaded["6"] && loaded["2"] {
+			md.addMirror("9", "6", "2")
+			md.addMirror("9", "2", "6")
 		}
+	}
+
+	// Install the aimed-port registry (built above) so edges still render aimed at their
+	// connected node during a drag.
+	if aimedPorts != nil {
+		md.installAimedPorts(aimedPorts)
 	}
 
 	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).

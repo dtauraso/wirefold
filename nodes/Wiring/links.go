@@ -1,0 +1,129 @@
+package Wiring
+
+// links.go — the double-link movement graph with LINK-CARRIED POLAR STATE
+// (docs/planning/visual-editor/double-link-polar-model.md). A movementLink is a double
+// link between two nodes; it holds the polar relationship between them — the radius and
+// the direction of each node on the OTHER's surface (pole = +y). This polar state is the
+// layout's working representation: locks read and write it directly, with NO cart2polar
+// reconstruction. World positions are DERIVED from it (polar2cart) for the render bridge;
+// the only world→polar conversion is at the drag edge (refresh), where the mouse hands in
+// a world point.
+
+// movementLink is one undirected double link. BfromA is B's polar coordinate in A's frame
+// (its radius-point on A's surface); AfromB is A's in B's frame. Both share R = |A−B|.
+type movementLink struct {
+	A      string
+	B      string
+	BfromA polar // B seen from A (pole +y)
+	AfromB polar // A seen from B
+}
+
+// addLink appends a double link A↔B (polar state filled in by refresh).
+func (md *MoveDispatch) addLink(a, b string) {
+	md.links = append(md.links, movementLink{A: a, B: b})
+}
+
+// polarOf returns `node`'s polar in `frame`'s frame for this link, where {frame,node}
+// are the link's two endpoints. ok=false if the pair doesn't match the link.
+func (lk movementLink) polarOf(frame, node string) (polar, bool) {
+	switch {
+	case lk.A == frame && lk.B == node:
+		return lk.BfromA, true
+	case lk.B == frame && lk.A == node:
+		return lk.AfromB, true
+	}
+	return polar{}, false
+}
+
+// setPolar writes `node`'s polar in `frame`'s frame on this link (and leaves the reverse
+// direction's R consistent — callers refresh the reverse separately when needed).
+func (lk *movementLink) setPolar(frame, node string, p polar) {
+	switch {
+	case lk.A == frame && lk.B == node:
+		lk.BfromA = p
+	case lk.B == frame && lk.A == node:
+		lk.AfromB = p
+	}
+}
+
+// touches reports whether node id is an endpoint of this link.
+func (lk movementLink) touches(id string) bool { return lk.A == id || lk.B == id }
+
+// other returns the endpoint that is not id (empty if id is not an endpoint).
+func (lk movementLink) other(id string) string {
+	switch id {
+	case lk.A:
+		return lk.B
+	case lk.B:
+		return lk.A
+	}
+	return ""
+}
+
+// refreshLink recomputes a link's polar state from the two endpoints' world positions.
+// This is the ONE world→polar conversion (cart2polar), used at load and at the drag edge.
+func refreshLink(lk *movementLink, posA, posB vec3) {
+	lk.BfromA = cart2polar(posB.sub(posA))
+	lk.AfromB = cart2polar(posA.sub(posB))
+}
+
+// refreshLinksTouching recomputes the polar of every link incident to nodeID from current
+// world positions (pos resolves a node's world; the dragged node resolves to its target).
+// This is the drag-edge cart2polar: a mouse-driven world move enters the polar model here.
+func (md *MoveDispatch) refreshLinksTouching(nodeID string, pos func(string) (vec3, bool)) {
+	for i := range md.links {
+		lk := &md.links[i]
+		if !lk.touches(nodeID) {
+			continue
+		}
+		a, okA := pos(lk.A)
+		b, okB := pos(lk.B)
+		if !okA || !okB {
+			continue
+		}
+		refreshLink(lk, a, b)
+	}
+}
+
+// linkBetween returns a pointer to the link connecting a and b (either orientation),
+// or nil if there is none.
+func (md *MoveDispatch) linkBetween(a, b string) *movementLink {
+	for i := range md.links {
+		lk := &md.links[i]
+		if (lk.A == a && lk.B == b) || (lk.A == b && lk.B == a) {
+			return lk
+		}
+	}
+	return nil
+}
+
+// initLinkPolar fills every link's polar state from the current node world positions
+// (called once at load). pos resolves a node's world center.
+func (md *MoveDispatch) initLinkPolar(pos func(string) (vec3, bool)) {
+	for i := range md.links {
+		lk := &md.links[i]
+		a, okA := pos(lk.A)
+		b, okB := pos(lk.B)
+		if !okA || !okB {
+			continue
+		}
+		refreshLink(lk, a, b)
+	}
+}
+
+// registerMovementLinks declares the double-link graph for the current topology. The
+// initial set mirrors the data edges; restriction-only links (e.g. 5↔11) are added
+// later. Each pair is registered only when both nodes are loaded.
+func (md *MoveDispatch) registerMovementLinks(has func(string) bool) {
+	pairs := [][2]string{
+		{"1", "8"}, {"1", "10"}, {"1", "9"},
+		{"9", "6"}, {"9", "2"},
+		{"2", "7"}, {"2", "3"},
+		{"10", "11"}, {"6", "11"}, {"6", "5"}, {"7", "5"},
+	}
+	for _, p := range pairs {
+		if has(p[0]) && has(p[1]) {
+			md.addLink(p[0], p[1])
+		}
+	}
+}
