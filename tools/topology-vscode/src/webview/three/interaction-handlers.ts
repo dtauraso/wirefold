@@ -74,6 +74,9 @@ export function constrainInsideLargeSphere(cam: THREE.PerspectiveCamera, R: numb
 const CLICK_MAX_MS = 150;
 /** Pixel movement threshold between CLICK and DRAG. */
 const MOVE_SLOP_PX = 6;
+/** Generous slop for a SECONDARY (two-finger trackpad) tap-select; two fingers don't
+ *  land precisely and the first tap drifts more than a mouse click would. */
+const SECONDARY_SLOP_PX = 24;
 
 // ---------------------------------------------------------------------------
 // InteractionCtx — stable bundle of refs + stable callbacks
@@ -285,6 +288,7 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
   s.phase = "pending";
   s.emptyDown = false;
   s.handholdDown = false;
+  s.secondaryDown = e.button === 2; // two-finger trackpad tap → always a tap-select
   s.rotAxis = null;
 
   // Clear previous drag/wiring state.
@@ -378,7 +382,9 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
   const dy = e.clientY - s.downY;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
-  if (s.phase === "pending" && dist > MOVE_SLOP_PX) {
+  // A secondary (two-finger) press never becomes a drag/rotate — it is a tap-select,
+  // so it stays "pending" through any finger drift and resolves on pointer-up.
+  if (s.phase === "pending" && dist > MOVE_SLOP_PX && !s.secondaryDown) {
     if (ctx.portMoveRef.current) {
       s.phase = "port-move";
     } else if (ctx.wiringRef.current) {
@@ -597,15 +603,21 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
     const ddx = e.clientX - s.downX;
     const ddy = e.clientY - s.downY;
     const clickDist = Math.sqrt(ddx * ddx + ddy * ddy);
-    if (elapsed < CLICK_MAX_MS && clickDist < MOVE_SLOP_PX) {
+    // Primary click: tight gate to distinguish a click from a drag. Secondary (two-finger)
+    // tap: lenient — generous slop, no time gate — because it never converts to a drag and
+    // the first tap (fingers settling) is often slow/sloppy. This is what makes the first
+    // two-finger click register consistently.
+    const isClick = s.secondaryDown
+      ? clickDist < SECONDARY_SLOP_PX
+      : elapsed < CLICK_MAX_MS && clickDist < MOVE_SLOP_PX;
+    if (isClick) {
       // CLICK → pick (selects node or deselects on empty space)
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const hitId = ctx.pickRequest.current?.(ndcX, ndcY) ?? null;
-      // Two-finger tap on a trackpad arrives as a secondary click (button 2) ->
-      // select with the node's OWN sphere. A single (primary) click selects with
-      // the spheres the node sits on the surface of.
-      ctx.onSelect(hitId, e.button === 2);
+      // A secondary (two-finger) tap selects with the node's OWN sphere; a primary click
+      // selects with the spheres the node sits on the surface of.
+      ctx.onSelect(hitId, s.secondaryDown);
     }
   }
 
