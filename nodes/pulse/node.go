@@ -35,6 +35,11 @@ type Node struct {
 	EmitHeldBead func(held int)
 	FromInput    *Wiring.In
 	Out          *Wiring.Out
+	// Out2 is an optional SECOND continuous output driving the same held value, so a
+	// Pulse can fan to two destinations (e.g. node 6 → node 5 via Out and → node 11
+	// via Out2). Optional: when unwired (Wired()==false, e.g. node 7) its drive
+	// goroutine is skipped, so single-output Pulse nodes are unaffected.
+	Out2 *Wiring.Out
 }
 
 func (g *Node) Update(ctx context.Context) {
@@ -65,6 +70,24 @@ func (g *Node) Update(ctx context.Context) {
 			}
 		}
 	}()
+
+	// Optional SECOND drive goroutine: when Out2 is wired, continuously pulse the
+	// same held value to the second destination. Skipped when unwired so single-output
+	// Pulse nodes (e.g. node 7) behave exactly as before.
+	if g.Out2 != nil && g.Out2.Wired() {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if !g.Out2.EmitOneDriven(ctx, int(held.Load())) {
+					return
+				}
+			}
+		}()
+	}
 
 	// MAIN loop: BLOCK on input. The instant a value arrives, show the bead and
 	// update held — the drive goroutine picks up the new held on its next pulse.

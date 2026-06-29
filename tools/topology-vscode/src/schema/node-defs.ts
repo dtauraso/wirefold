@@ -25,6 +25,7 @@ export const RUNTIME_IMPLEMENTED_KINDS: ReadonlySet<string> = new Set([
   "Input",
   "Pacer",
   "Pulse",
+  "WindowAndInhibitLeftGate",
   "WindowAndInhibitRightGate",
 ]);
 
@@ -34,6 +35,7 @@ export const NODE_DEFS: Record<string, NodeDef> = {
   HoldNewSendOld: { bg: "#fff3e0", border: "#e65100", text: "#bf360c", minWidth: 90, role: "holdnewsendold", shape: "rect", fill: "#fff3e0", stroke: "#e65100", width: 90, height: 60, inputs: [{ name: "FromPrevHoldNewSendOldNode", kind: "chain" }], outputs: [{ name: "ToNext", kind: "chain", isMulti: true }] },
   Input: { bg: "#e0e0e0", border: "#666", text: "#1a1a1a", minWidth: 90, role: "input", shape: "rect", fill: "#e0e0e0", stroke: "#666", width: 80, height: 60, inputs: [{ name: "FeedbackIn", kind: "chain" }], outputs: [{ name: "ToHoldNewSendOld", kind: "chain" }, { name: "ToExcitatory", kind: "chain" }, { name: "ToPacer", kind: "chain" }] },
   Pacer: { bg: "#e8f5e9", border: "#2e7d32", text: "#1b5e20", minWidth: 60, role: "pacer", shape: "rect", fill: "#e8f5e9", stroke: "#2e7d32", width: 60, height: 60, inputs: [{ name: "FromInput", kind: "chain" }], outputs: [{ name: "FeedbackOut", kind: "chain" }] },
-  Pulse: { bg: "#e1f5fe", border: "#01579b", text: "#01579b", minWidth: 90, role: "pulse", shape: "rect", fill: "#e1f5fe", stroke: "#01579b", width: 90, height: 60, inputs: [{ name: "FromInput", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }] },
+  Pulse: { bg: "#e1f5fe", border: "#01579b", text: "#01579b", minWidth: 90, role: "pulse", shape: "rect", fill: "#e1f5fe", stroke: "#01579b", width: 90, height: 60, inputs: [{ name: "FromInput", kind: "chain" }], outputs: [{ name: "Out", kind: "chain" }, { name: "Out2", kind: "chain" }] },
+  WindowAndInhibitLeftGate: { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "window-and-inhibit-left-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
   WindowAndInhibitRightGate: { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "window-and-inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
 };
