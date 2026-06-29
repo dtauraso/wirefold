@@ -15,11 +15,11 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Fatalf("loadTree: %v", err)
 	}
 
-	if len(spec.Nodes) != 7 {
-		t.Fatalf("expected 7 nodes, got %d", len(spec.Nodes))
+	if len(spec.Nodes) != 8 {
+		t.Fatalf("expected 8 nodes, got %d", len(spec.Nodes))
 	}
-	if len(spec.Edges) != 8 {
-		t.Fatalf("expected 8 edges, got %d", len(spec.Edges))
+	if len(spec.Edges) != 9 {
+		t.Fatalf("expected 9 edges, got %d", len(spec.Edges))
 	}
 
 	nodeByID := map[string]specNode{}
@@ -81,15 +81,19 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		edgeByLabel[e.Label] = e
 	}
 
-	e1to2, ok := edgeByLabel["1To2"]
+	// Node 1 now feeds node 9 (the chain head); node 9 fans to its children 2 and 6.
+	e1to9, ok := edgeByLabel["1To9"]
 	if !ok {
-		t.Fatal("edge \"1To2\" not found")
+		t.Fatal("edge \"1To9\" not found")
 	}
-	if e1to2.SourceHandle != "ToHoldNewSendOld" {
-		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToHoldNewSendOld\"", e1to2.SourceHandle)
+	if e1to9.SourceHandle != "ToHoldNewSendOld" {
+		t.Errorf("edge 1To9 sourceHandle: got %q, want \"ToHoldNewSendOld\"", e1to9.SourceHandle)
 	}
-	if e1to2.TargetHandle != "FromPrevHoldNewSendOldNode" {
-		t.Errorf("edge 1To2 targetHandle: got %q, want \"FromPrevHoldNewSendOldNode\"", e1to2.TargetHandle)
+	if e1to9.TargetHandle != "FromPrevHoldNewSendOldNode" {
+		t.Errorf("edge 1To9 targetHandle: got %q, want \"FromPrevHoldNewSendOldNode\"", e1to9.TargetHandle)
+	}
+	if _, ok := edgeByLabel["9To2"]; !ok {
+		t.Fatal("edge \"9To2\" not found")
 	}
 
 	if _, ok := edgeByLabel["2To3"]; !ok {
@@ -128,15 +132,15 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Errorf("edge 8To1 targetHandle: got %q, want \"FeedbackIn\"", e8to1.TargetHandle)
 	}
 
-	e1to6, ok := edgeByLabel["1To6"]
+	e9to6, ok := edgeByLabel["9To6"]
 	if !ok {
-		t.Fatal("edge \"1To6\" not found")
+		t.Fatal("edge \"9To6\" not found")
 	}
-	if e1to6.SourceHandle != "ToExcitatory" {
-		t.Errorf("edge 1To6 sourceHandle: got %q, want \"ToExcitatory\"", e1to6.SourceHandle)
+	if e9to6.SourceHandle != "ToNext0" {
+		t.Errorf("edge 9To6 sourceHandle: got %q, want \"ToNext0\"", e9to6.SourceHandle)
 	}
-	if e1to6.TargetHandle != "FromInput" {
-		t.Errorf("edge 1To6 targetHandle: got %q, want \"FromInput\"", e1to6.TargetHandle)
+	if e9to6.TargetHandle != "FromInput" {
+		t.Errorf("edge 9To6 targetHandle: got %q, want \"FromInput\"", e9to6.TargetHandle)
 	}
 
 	e6to5, ok := edgeByLabel["6To5"]
