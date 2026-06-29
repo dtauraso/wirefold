@@ -272,10 +272,8 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 				seen[e.NodeId] = true
 				md.RootMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
 				if treeRoot != "" {
-					for id := range md.roots.roots {
-						if w, ok := md.roots.world(id); ok {
-							_ = writeMetaPos(treeRoot, id, w.X, w.Y, w.Z)
-						}
+					for id, w := range md.heldCenters() {
+						_ = writeMetaPos(treeRoot, id, w.X, w.Y, w.Z)
 					}
 				}
 			}
