@@ -41,7 +41,6 @@ export function ThreeView() {
   // node sits on the surface of; "own" (two-finger click) = the node's own sphere.
   const [sphereMode, setSphereMode] = useState<"surface" | "own">("surface");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [nearestNIds, setNearestNIds] = useState<Set<string>>(new Set());
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
   // globalLabelsHidden is Go-owned: written by pump on labels-global trace events.
   const globalLabelsHidden = useCameraStore((s) => s.labelsGlobalHidden);
@@ -179,10 +178,6 @@ export function ThreeView() {
     setHoveredId(null);
   }, []);
 
-  const onNearestN = useCallback((ids: Set<string>) => {
-    setNearestNIds(ids);
-  }, []);
-
   // Occlusion counts: recomputed only when the camera settles (not per-frame).
   // Map from frontNodeId → N (nodes hidden directly behind it from current viewpoint).
   const [occlusionCounts, setOcclusionCounts] = useState<Map<string, number>>(new Map());
@@ -226,7 +221,6 @@ export function ThreeView() {
             initialCameraPolar={viewerState.cameraPolar}
             onPickRequest={pickRequest}
             onPositions={onPositions}
-            onNearestN={onNearestN}
             onCameraSettle={onCameraSettle}
           />
           <NavGuides nodes={nodes} selectedId={selectedId} />
@@ -234,14 +228,10 @@ export function ThreeView() {
       </div>
 
       {/* Label overlay — real camera projection, updated every frame.
-          LOD: show only hovered | selected | nearest-N nodes to avoid forest. */}
+          All nodes with a projected position render their label (subject to the global toggle). */}
       {!globalLabelsHidden && nodes.map((n) => {
         const pos = labelMap.get(n.id);
         if (!pos) return null;
-        const isHovered = n.id === hoveredId;
-        const isSelected = n.id === selectedId;
-        const isNearest = nearestNIds.has(n.id);
-        if (!isHovered && !isSelected && !isNearest) return null;
         const pillStyle: React.CSSProperties = {
               background: "rgba(0,0,0,0.55)",
               border: "none",

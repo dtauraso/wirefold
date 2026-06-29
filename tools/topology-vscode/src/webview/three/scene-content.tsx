@@ -13,7 +13,7 @@ import {
   SHADING_PARAM_SCENE_DIR_INTENSITY,
 } from "../../schema/shading-params";
 import { ProceduralEnvProvider } from "./scene-env";
-import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker, PolarCameraRestorer } from "./scene-camera";
+import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, PolarCameraRestorer } from "./scene-camera";
 import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 
@@ -195,7 +195,6 @@ export function Scene({
   initialCameraPolar,
   onPickRequest,
   onPositions,
-  onNearestN,
   onCameraSettle,
 }: {
   nodes: RFNode<NodeData>[];
@@ -210,7 +209,6 @@ export function Scene({
     ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
   onPositions: (positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => void;
-  onNearestN: (ids: Set<string>) => void;
   onCameraSettle: () => void;
 }) {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
@@ -250,7 +248,6 @@ export function Scene({
       <CameraFromStore />
       <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
-      <NearestNTracker nodes={nodes} onNearestN={onNearestN} />
       <CameraSettleDetector onSettle={onCameraSettle} />
       <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
       <directionalLight position={[0, 0, 10]} intensity={SHADING_PARAM_SCENE_DIR_INTENSITY} />
