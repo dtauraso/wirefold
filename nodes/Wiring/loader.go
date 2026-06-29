@@ -366,6 +366,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			md.addMirror("2", "3", "7")
 			md.addMirror("2", "7", "3")
 		}
+		// #3 (record §2): node-9 mirror — nodes 6 and 2 mirror about node 9 (links
+		// 9↔6, 9↔2). Same engine as #1; bidirectional.
+		if loaded["9"] && loaded["6"] && loaded["2"] {
+			md.addMirror("9", "6", "2")
+			md.addMirror("9", "2", "6")
+		}
 	}
 
 	// Install the aimed-port registry (built above) so edges still render aimed at their
