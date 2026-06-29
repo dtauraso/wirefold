@@ -1,4 +1,4 @@
-// scene-camera.tsx — CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, NearestNTracker, PolarCameraRestorer.
+// scene-camera.tsx — CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, PolarCameraRestorer.
 import React, { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
@@ -8,11 +8,8 @@ import type { PolarCamera } from "./camera-store";
 import { sendViewpointSet } from "./viewpoint-bridge";
 import { useThreeStore } from "./store";
 import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
-import { boundingBox, nodeWorldPos, nodeTopWorldPos, ndcToPixel, nodeRadius } from "./geometry-helpers";
+import { boundingBox, nodeWorldPos, nodeTopWorldPos, ndcToPixel } from "./geometry-helpers";
 import { postLog } from "../log/post";
-
-/** Show label for the N nodes nearest to the camera, in addition to hovered/selected. */
-export const NEAREST_N = 8;
 
 // ---------------------------------------------------------------------------
 // Camera fitter: perspective camera framed head-on to show graph flat at z=0.
@@ -205,37 +202,3 @@ export function PolarCameraRestorer({ initialCameraPolar }: { initialCameraPolar
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// NearestNTracker: computes nearest-N nodes to camera each frame (throttled).
-// Notifies via callback so the outer React tree can re-render label visibility.
-// ---------------------------------------------------------------------------
-
-export function NearestNTracker({
-  nodes,
-  onNearestN,
-}: {
-  nodes: RFNode<NodeData>[];
-  onNearestN: (ids: Set<string>) => void;
-}) {
-  const { camera } = useThree();
-  const lastIds = useRef<string>("");
-  // useRef so frameCount persists across renders without resetting.
-  const frameCountRef = useRef(0);
-
-  useFrame(() => {
-    frameCountRef.current++;
-    if (frameCountRef.current % 6 !== 0) return; // throttle: recompute ~10fps
-    const sorted = nodes
-      .map((n) => ({ id: n.id, dist: nodeWorldPos(n).distanceTo(camera.position) }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, NEAREST_N)
-      .map((x) => x.id);
-    const key = sorted.join(",");
-    if (key !== lastIds.current) {
-      lastIds.current = key;
-      onNearestN(new Set(sorted));
-    }
-  });
-
-  return null;
-}
