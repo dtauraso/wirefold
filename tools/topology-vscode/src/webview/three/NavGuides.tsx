@@ -248,15 +248,18 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   // world center (pole = world +y, parallel to the scene's). This is the frame the
   // θ-lock actually measures in: 3 and 7 share θ ABOUT NODE 2, so equal-θ is only
   // visible against node 2's pole, not the scene's. Sized to ~half the scene radius.
-  const node2 = nodes.find((n) => n.id === "2");
+  // Node ids remapped by the node rename: the old node 2 (HoldNewSendOld) is now node
+  // 5, and its two children old 3/7 are now 7/8. The variable names keep the original
+  // meaning (the parent and its two children) under the new ids.
+  const node2 = nodes.find((n) => n.id === "5");
   const node2Center = node2 ? nodeWorldPos(node2) : null;
   const node2Scale = radiusKey * 0.5;
 
-  // θ-lock check: vertical θ meridian arcs from node 2's pole down to nodes 3 and 7,
-  // from LIVE positions. θ traces vertically; equal θ ⇒ equal arc sweep (rotated apart
-  // in φ), different θ ⇒ different sweep length. (See ThetaArc.)
-  const node3 = nodes.find((n) => n.id === "3");
-  const node7 = nodes.find((n) => n.id === "7");
+  // θ-lock check: vertical θ meridian arcs from the parent's pole down to its two
+  // children, from LIVE positions. θ traces vertically; equal θ ⇒ equal arc sweep
+  // (rotated apart in φ), different θ ⇒ different sweep length. (See ThetaArc.)
+  const node3 = nodes.find((n) => n.id === "7");
+  const node7 = nodes.find((n) => n.id === "8");
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
   // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
