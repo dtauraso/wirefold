@@ -207,7 +207,8 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// both by the initial edge-geometry loop below (aimed port directions, radial toward
 	// the connected node, rather than ring-anchor directions) AND installed on the
 	// dispatch for drag-time aiming (md.installAimedPorts), so the two can never drift.
-	// Guard mirrors the theta-lock block; a nil registry falls back to non-aimed ports.
+	// Guarded on the 1→9→{2,6} spine being present; a nil registry falls back to
+	// non-aimed ports.
 	var aimedPorts AimedPortRegistry
 	{
 		centers := map[string]vec3{}
@@ -219,12 +220,17 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		_, has1 := centers["1"]
 		_, has2 := centers["2"]
 		_, has6 := centers["6"]
-		if has1 && has2 && has6 {
+		_, has9 := centers["9"]
+		if has1 && has9 && has2 && has6 {
+			// Node 1 → 9 (chain head), then 9 → its two children 2 and 6. Node 9's
+			// ToNext0 feeds node 6, ToNext1 feeds node 2 (see edges 9To6/9To2).
 			aimedPorts = AimedPortRegistry{
-				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
-				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
-				{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
-				{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
+				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "9",
+				{NodeID: "9", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
+				{NodeID: "9", PortName: "ToNext0", IsInput: false}: "6",
+				{NodeID: "6", PortName: "FromInput", IsInput: true}: "9",
+				{NodeID: "9", PortName: "ToNext1", IsInput: false}: "2",
+				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "9",
 			}
 			if _, has8 := centers["8"]; has8 {
 				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
@@ -333,100 +339,24 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		}
 		md.setRoots(buildRoots(centers))
 
-		// Union of every node a load-time lock seed moved (across all seeds below).
-		// Their new world positions must be synced back into nodeGeoms before node
-		// build/emission so the emitted node geometry and the initial edge geometry
-		// reflect the locked positions (polar layer is the source of truth).
-		movedByLocks := map[string]bool{}
-
 		// has reports whether a node was loaded (its center is known). Lock
 		// registration is grouped per originating node in lock_registry.go; each
 		// register* method guards on the nodes it needs via this closure.
 		has := func(id string) bool { _, ok := centers[id]; return ok }
 
-		// seed applies the locks once at load by "dragging" id, fans the moved
-		// followers so their movers' held centers are set before Start, and records
-		// them in movedByLocks. applyLocks updates roots in place but defers fanning
-		// (drag-path dedup), so the fan is explicit here.
-		seed := func(id string) {
-			followers := md.applyLocks(id, false)
-			if len(followers) == 0 {
-				return
-			}
-			cs := md.heldCenters()
-			for fid, w := range followers {
-				cs[fid] = w
-				movedByLocks[fid] = true
-			}
-			md.fanCenters(followers, reachRFromCenters(cs, md.heldEdges()))
-		}
+		// Register the polar layout locks. Locks are NOT applied at load — there is no
+		// seeding. Saved node positions stand exactly as loaded; each lock engages only
+		// on a drag (applyLocks, via the per-node move handlers). Registration order
+		// keeps the node-2 mirror ahead of the 5/6/7 chain so node 7's equal-radii fold
+		// composes the same way it does on a live drag.
+		md.registerNode2MirrorLocks(has) // node 2 mirrors its children 3 and 7
+		md.registerChain567Locks(has)    // 5/6/7 meridian chain (return ignored: no seed)
+		md.registerNode9MirrorLocks(has) // node 9 mirrors its children 2 and 6
 
-		// Registration + seeding are INTERLEAVED on purpose (see lock_registry.go):
-		// the node-2 mirror is seeded before the 5/6/7 chain is registered, so seeding
-		// "3" cannot cascade into the chain. Keep this order.
-
-		// Node 1's frame: θ-couple nodes 2 and 6 (registerNode1ThetaLocks). When wired,
-		// install the SAME aimed-port registry built once above (aimedPorts) under the
-		// identical guard so the initial edge geometry and the drag-time aiming match —
-		// one source of truth, no second copy to keep in sync.
-		if md.registerNode1ThetaLocks(has) {
+		// Install the aimed-port registry built once above (the single source of truth
+		// shared with the initial edge geometry) for drag-time aiming.
+		if aimedPorts != nil {
 			md.installAimedPorts(aimedPorts)
-		}
-
-		// Node 2's frame: mirror-couple nodes 3 and 7 (registerNode2MirrorLocks), then
-		// seed with node 3 as leader so 3 and 7 start mirrored (φ7 = −φ3, shared θ).
-		if md.registerNode2MirrorLocks(has) {
-			seed("3")
-		}
-
-		// Nodes 5/6/7 meridian chain (registerChain567Locks), seeded from its returned
-		// anchor (node 6, or node 5 when 6 is absent).
-		if seedID, ok := md.registerChain567Locks(has); ok {
-			seed(seedID)
-		}
-
-		// Node 9's frame: mirror-couple nodes 6 and 2 (registerNode9MirrorLocks). NOT
-		// seeded at load: the node-1 theta lock on 6↔2 (registered first) shadows this
-		// mirror, so seeding here would not place 6/2 about node 9 anyway and would only
-		// re-run the existing chain. Node 9 is added + wired; resolving which lock owns
-		// the 6↔2 coupling is the pending authority decision (see lock_registry.go).
-		md.registerNode9MirrorLocks(has)
-
-		// Sync every lock-moved node's new world position from the polar layer back
-		// into nodeGeoms[id].Center BEFORE node build/emission. emitNodeGeometry and
-		// the per-node port geometry read nodeGeoms[id].Center, so without this the
-		// emitted/displayed node stays at its saved (pre-lock) position even though
-		// md.roots moved it.
-		for id := range movedByLocks {
-			if w, ok := md.roots.world(id); ok {
-				wc := w
-				g := nodeGeoms[id]
-				g.Center = &wc
-				nodeGeoms[id] = g
-			}
-		}
-
-		// The initial edge segments (edgeArc/edgeLatency/edgeSegments) were computed
-		// above from the pre-lock centers. Recompute every edge touching a moved node
-		// from the now-synced centers (centerOf reads nodeGeoms), so the endpoint at the
-		// moved node — and the bead position stream consuming edgeSegments at bind time —
-		// follows the lock. (Distance-preserving locks leave arc length unchanged; aimed
-		// port directions still shift, so the segment is recomputed in full.)
-		if len(movedByLocks) > 0 {
-			for _, e := range spec.Edges {
-				if !movedByLocks[e.Source] && !movedByLocks[e.Target] {
-					continue
-				}
-				seg := segmentBetweenPortsAimed(
-					nodeGeoms[e.Source], e.SourceHandle, e.Source,
-					nodeGeoms[e.Target], e.TargetHandle, e.Target,
-					aimedPorts, centerOf,
-				)
-				arcLength := chordLength(seg.Start, seg.End)
-				edgeArc[e.Label] = arcLength
-				edgeLatency[e.Label] = arcLength / PulseSpeedWuPerMs
-				edgeSegments[e.Label] = seg
-			}
 		}
 	}
 

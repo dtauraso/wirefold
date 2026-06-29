@@ -160,8 +160,9 @@ func (md *MoveDispatch) logPairPhi(movedID string) {
 
 // logPair26 (diagnostic) emits θ/φ/r of nodes 2 and 6 about node 1 after a move,
 // to localize the "node 2 jumps when dragged" report. dth = θ2−θ6 should stay ≈0
-// (theta lock); a jumping θ2 or r2 across a drag flags an unstable drag authority on
-// node 2 (which is uniquely also the center of the 3/7 mirror lock).
+// (nodes 2 and 6 are coupled via node 9's mirror); a jumping θ2 or r2 across a drag
+// flags an unstable drag authority on node 2 (which is uniquely also the center of
+// the 3/7 mirror lock).
 func (md *MoveDispatch) logPair26(movedID string) {
 	if md.tr == nil {
 		return
@@ -317,8 +318,8 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 			// node 7's radius: the mirror(2,3,7) writes node 7 to fw, and node 7 KEEPS
 			// that mirror radius (it is NOT rescaled). Instead the anchor node 6 (A)
 			// FOLLOWS — rescaled about Mid (node 5) so |6→5| := |7→5|, keeping node 6's
-			// θ/φ about node 5. Node 6 is then placed, so the BFS fires θ-lock(1,6,2)
-			// and node 2 follows node 6. Node 5 (Mid) must stay, so it is guarded from
+			// θ/φ about node 5. Node 6 is then placed, so the BFS fires mirror(9,6,2)
+			// (node 9's mirror) and node 2 follows node 6. Node 5 (Mid) must stay, so it is guarded from
 			// the 6-anchors-5 φ=0 lock. This is the opposite of the default direction
 			// (where node 6 is authority and node 7 follows), and applies ONLY here.
 			if movedID == "3" {

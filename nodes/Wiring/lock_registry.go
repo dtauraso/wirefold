@@ -7,40 +7,21 @@ package Wiring
 // read its register* method) rather than buried in loader.go's startup sequence.
 //
 // Discoverability convention: a lock is filed under the node whose LOCAL FRAME it is
-// defined on — the Center for θ/mirror locks, the meridian subject for the φ=0 chain.
+// defined on — the Center for mirror locks, the meridian subject for the φ=0 chain.
 // So "node 2's locks" = the locks centered on node 2's sphere (the 3/7 mirror).
 //
-// ORDER MATTERS and is preserved exactly: loader.go registers + seeds these in
-// sequence (node-1 θ, then node-2 mirror + seed, then the 5/6/7 chain + seed). The
-// node-2 seed runs BEFORE the chain locks are registered, so seeding "3" does NOT
-// cascade into the chain. Do not collapse registration ahead of all seeds — that
-// would let the mirror seed fire chain locks via the applyLocks BFS and change the
-// load-time layout. Each method only registers; loader owns the interleaved seeding.
-
-// registerNode1ThetaLocks couples nodes 2 and 6 on node 1's sphere via a bidirectional
-// theta lock: dragging either makes the other share its θ (angle from node 1's +y
-// up-pole), so the two stay on the same latitude ring around node 1 while keeping
-// their own longitudes. The 6→2 direction is required so node 6 (written by the
-// node-3 authority flip, where 6 follows node 7's radius) carries node 2; leader-only
-// θ-lock firing keeps it directional (a 7-lift leaves node 2 put). Returns true when
-// the lock was registered (all three nodes present), so the caller can install the
-// matching aimed-port registry under the same guard.
-func (md *MoveDispatch) registerNode1ThetaLocks(has func(string) bool) bool {
-	if !(has("1") && has("2") && has("6")) {
-		return false
-	}
-	md.addThetaLock("1", "2", "6")
-	md.addThetaLock("1", "6", "2")
-	return true
-}
+// Locks are REGISTERED here and applied only on a drag (applyLocks, via the per-node
+// move handlers). There is no load-time seeding: saved node positions stand as loaded.
+// Registration order still matters for the applyLocks BFS move-once guard, so loader.go
+// keeps the node-2 mirror ahead of the 5/6/7 chain (node 7's equal-radii fold composes
+// the same way it does on a live drag).
 
 // registerNode2MirrorLocks couples nodes 3 and 7 on node 2's sphere via a bidirectional
 // MIRROR lock: dragging either makes the other share its θ (angle from node 2's +y
 // up-pole) AND take the opposite-sign φ (φ7 = −φ3), so the two stay on the same
 // latitude ring around node 2, mirrored across the φ=0 meridian. Returns true when the
-// lock was registered (all three nodes present), so the caller seeds it once at load
-// (apply with node 3 as leader) to start 3 and 7 mirrored rather than only after the
-// first drag.
+// lock was registered (all three nodes present); the return is currently unused (no
+// load seeding) but kept for symmetry with the other registrars.
 func (md *MoveDispatch) registerNode2MirrorLocks(has func(string) bool) bool {
 	if !(has("2") && has("3") && has("7")) {
 		return false
@@ -51,18 +32,14 @@ func (md *MoveDispatch) registerNode2MirrorLocks(has func(string) bool) bool {
 }
 
 // registerNode9MirrorLocks couples nodes 6 and 2 on node 9's sphere via a bidirectional
-// MIRROR lock — node 9 is a structural clone of node 2 one level up: child of node 1
+// MIRROR lock. Node 9 is a structural clone of node 2 one level up: child of node 1
 // (1→9), parent of 6 and 2 (9→6, 9→2), mirroring its two children just as node 2
 // mirrors 3 and 7. Node 6 is the leader; node 2 takes shared θ (about node 9's +y
 // up-pole) and opposite-sign φ.
 //
-// AUTHORITY CONFLICT (read before relying on this): nodes 6 and 2 are ALSO θ-coupled
-// to each other about node 1 (registerNode1ThetaLocks), and those theta locks are
-// registered FIRST, so they write the same followers first and the applyLocks
-// move-once guard SHADOWS this mirror — dragging 6 or 2 fires the node-1 theta lock,
-// not this mirror. For node 9's mirror to actually govern the 6↔2 coupling, the node-1
-// theta lock must be retired or yield. Left registered (not seeded at load) so node 9
-// exists and is wired while that authority decision is made.
+// This mirror is the sole coupling between nodes 2 and 6. When the node-3 authority
+// flip places node 6 (following node 7's radius), the BFS fires mirror(9,6,2) so
+// node 2 follows node 6 — the same role the now-deleted node-1 theta lock used to play.
 func (md *MoveDispatch) registerNode9MirrorLocks(has func(string) bool) bool {
 	if !(has("9") && has("6") && has("2")) {
 		return false
@@ -85,10 +62,9 @@ func (md *MoveDispatch) registerNode9MirrorLocks(has func(string) bool) bool {
 //     node 7's φ=0 projection. Only when all three exist.
 //
 // Net chain: drag 6 → 5 follows → 7 follows; drag 5 → 7 follows (6 stays); drag 7 →
-// neither 5 nor 6 moves (3 mirrors via 2↔7↔3). Returns (seedID, true) when registered:
-// seed from the anchor (node 6) so node 5 is projected onto 6's meridian and node 7
-// follows at the equalized radius; if node 6 is absent, seed by dragging node 5 (only
-// the moveCenter lock is present).
+// neither 5 nor 6 moves (3 mirrors via 2↔7↔3). Returns (anchorID, true) when registered
+// — the anchor that WOULD seed the chain (node 6, or node 5 when 6 is absent). The
+// return is currently unused (no load seeding) but kept for when a seed origin is needed.
 func (md *MoveDispatch) registerChain567Locks(has func(string) bool) (string, bool) {
 	if !(has("5") && (has("6") || has("7"))) {
 		return "", false
