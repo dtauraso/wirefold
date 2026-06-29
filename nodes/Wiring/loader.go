@@ -339,95 +339,50 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		// reflect the locked positions (polar layer is the source of truth).
 		movedByLocks := map[string]bool{}
 
-		// Couple nodes 2 and 6 on node 1's sphere via a bidirectional theta lock
-		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
-		// makes the other share its θ (angle from node 1's +y up-pole), so the two
-		// stay on the same latitude ring around node 1 while keeping their own
-		// longitudes. Stopgap registration by id (no spec-level lock declaration
-		// yet); only wired when all three nodes exist.
-		_, has1 := centers["1"]
-		_, has2 := centers["2"]
-		_, has6 := centers["6"]
-		if has1 && has2 && has6 {
-			md.addThetaLock("1", "2", "6")
-			// 6→2 direction restored: node 6 LEADING (it is written by the node-3
-			// authority flip, where node 6 follows node 7's radius) must carry node 2.
-			// With leader-only θ-lock firing this is directional — dragging/lifting
-			// node 7 does not move node 6, so a 7-lift still leaves node 2 put; only a
-			// node-6 move fires this lock.
-			md.addThetaLock("1", "6", "2")
+		// has reports whether a node was loaded (its center is known). Lock
+		// registration is grouped per originating node in lock_registry.go; each
+		// register* method guards on the nodes it needs via this closure.
+		has := func(id string) bool { _, ok := centers[id]; return ok }
 
-			// Install the SAME aimed-port registry built once above (aimedPorts):
-			// it was constructed earlier under the identical guard/entries so the initial
-			// edge geometry could use aimed directions, and the drag-time aiming must
-			// match it exactly. One source of truth — no second copy to keep in sync.
+		// seed applies the locks once at load by "dragging" id, fans the moved
+		// followers so their movers' held centers are set before Start, and records
+		// them in movedByLocks. applyLocks updates roots in place but defers fanning
+		// (drag-path dedup), so the fan is explicit here.
+		seed := func(id string) {
+			followers := md.applyLocks(id, false)
+			if len(followers) == 0 {
+				return
+			}
+			cs := md.heldCenters()
+			for fid, w := range followers {
+				cs[fid] = w
+				movedByLocks[fid] = true
+			}
+			md.fanCenters(followers, reachRFromCenters(cs, md.heldEdges()))
+		}
+
+		// Registration + seeding are INTERLEAVED on purpose (see lock_registry.go):
+		// the node-2 mirror is seeded before the 5/6/7 chain is registered, so seeding
+		// "3" cannot cascade into the chain. Keep this order.
+
+		// Node 1's frame: θ-couple nodes 2 and 6 (registerNode1ThetaLocks). When wired,
+		// install the SAME aimed-port registry built once above (aimedPorts) under the
+		// identical guard so the initial edge geometry and the drag-time aiming match —
+		// one source of truth, no second copy to keep in sync.
+		if md.registerNode1ThetaLocks(has) {
 			md.installAimedPorts(aimedPorts)
 		}
 
-		// Couple nodes 3 and 7 on node 2's sphere via a bidirectional MIRROR lock
-		// (docs/planning/visual-editor/polar-coordinate-model.md §7): dragging either
-		// makes the other share its θ (angle from node 2's +y up-pole) AND take the
-		// opposite-sign φ (φ7 = −φ3), so the two stay on the same latitude ring around
-		// node 2, mirrored across the φ=0 meridian. Stopgap registration by id (no
-		// spec-level lock declaration yet); only wired when all three nodes exist.
-		_, has3 := centers["3"]
-		_, has7 := centers["7"]
-		if has2 && has3 && has7 {
-			md.addMirrorLock("2", "3", "7")
-			md.addMirrorLock("2", "7", "3")
-			// Apply once at load so 3 and 7 start mirrored (φ7 = −φ3, shared θ) rather
-			// than only after the first drag. Node 3 is the leader; node 7 is reflected.
-			// applyLocks updates roots in place but defers fanning (drag-path dedup), so
-			// fan the followers here to seed their movers' held centers before Start.
-			if followers := md.applyLocks("3", false); len(followers) > 0 {
-				centers := md.heldCenters()
-				for id, w := range followers {
-					centers[id] = w
-					movedByLocks[id] = true
-				}
-				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
-			}
+		// Node 2's frame: mirror-couple nodes 3 and 7 (registerNode2MirrorLocks), then
+		// seed with node 3 as leader so 3 and 7 start mirrored (φ7 = −φ3, shared θ).
+		if md.registerNode2MirrorLocks(has) {
+			seed("3")
 		}
 
-		// DIRECTIONAL meridian chain 6 → 5 → 7 (see lock.go phiDrive):
-		//   - phiZeroFollower(6,5): node 6 ANCHORS node 5. The lock writes only node 5
-		//     (project 5 onto 6's φ=0 meridian); node 6 is never moved by it. So
-		//     dragging 6 pulls 5 along, dragging 5 re-projects 5 onto 6's meridian.
-		//   - phiZeroCenter(7,5): node 5 DRAGS node 7. The lock writes only node 7
-		//     (move 7 to keep 5 on 7's φ=0 meridian); node 5 is never moved by it. So
-		//     dragging 5 pulls 7 along; dragging 7 re-projects 7 (5 stays put).
-		// Net chain: drag 6 → 5 follows → 7 follows; drag 5 → 7 follows (6 stays);
-		// drag 7 → neither 5 nor 6 moves (3 mirrors via 2↔7↔3). The aimed ports
-		// 6.Out→5 and 7.Out→5 installed above then aim each edge along φ=0.
-		_, has5 := centers["5"]
-		if has5 && (has6 || has7) {
-			if has6 {
-				md.addPhiZeroFollowerLock("6", "5") // 6 anchors 5
-			}
-			if has7 {
-				md.addPhiZeroCenterLock("7", "5") // 5 drags 7
-			}
-			// Equalize the two edge radii into node 5: |6→5| == |7→5|. Node 6 is the
-			// radius authority (anchor); node 7 is rescaled to it. Folded into node 7's
-			// φ=0 projection (see lock.go equalRadiiLock). Only when all three exist.
-			if has6 && has7 {
-				md.addEqualRadiiLock("5", "6", "7")
-			}
-			// Seed from the anchor (node 6) so node 5 is projected onto 6's meridian
-			// and node 7 then follows node 5 at the equalized radius. If node 6 is
-			// absent, seed by dragging node 5 (only the moveCenter lock is present).
-			seedID := "6"
-			if !has6 {
-				seedID = "5"
-			}
-			if followers := md.applyLocks(seedID, false); len(followers) > 0 {
-				centers := md.heldCenters()
-				for id, w := range followers {
-					centers[id] = w
-					movedByLocks[id] = true
-				}
-				md.fanCenters(followers, reachRFromCenters(centers, md.heldEdges()))
-			}
+		// Nodes 5/6/7 meridian chain (registerChain567Locks), seeded from its returned
+		// anchor (node 6, or node 5 when 6 is absent).
+		if seedID, ok := md.registerChain567Locks(has); ok {
+			seed(seedID)
 		}
 
 		// Sync every lock-moved node's new world position from the polar layer back
