@@ -6,10 +6,10 @@ branch: task/polar-double-link-model
 
 Goal: replace every bespoke lock (mirror, φ=0 meridian, equal-radii, bisector, the
 node-3 authority flip, the meridian-carry pre-pass, and the co-sphere coupling hidden
-in `RootMove`) with ONE uniform mechanism: an explicit graph of **movement links**, each
-carrying a **polar equation**, solved by ONE propagation pass. Locks become independent
-and chains compose, because there is no second mechanism doing geometry behind the
-solver's back.
+in `RootMove`) with a COMPLETE graph of **movement links**, each carrying a **polar
+equation**. It stays a lock system — a drag propagates along the links applying each
+lock — but because every constrained pair has a link, every equation is polar (R/θ/φ)
+and the locks chain, so the Cartesian special cases disappear. **There is no solver.**
 
 ## Why (the friction this fixes)
 
@@ -29,8 +29,8 @@ Two separate graphs over the same nodes:
 
 A **movement link** is a DOUBLE link: bidirectional, symmetric. It holds one polar
 equation `f(A, B [, ref]) = 0`. "Double" = the same constraint reads identically from
-either end; which node *moves to satisfy it* is decided by the solver from which node the
-user grabbed, not baked into the link as a direction.
+either end; which node *moves to satisfy it* is a fixed DIRECTION on the lock (which end
+it writes), exactly like today's locks — just now there is a link for every constraint.
 
 ### Link kinds (all "just polar equations" about a reference center)
 
@@ -46,43 +46,44 @@ user grabbed, not baked into the link as a direction.
 Each is a scalar polar equation; satisfying it is a projection (drop a component / rescale
 a radius / project onto a plane or line). No imperative special cases.
 
-## The three decisions (must answer before code)
+## How it runs (no solver — it stays a lock system)
 
-1. **Authority — who follows when both ends could move?**
-   A link carries a `freedom` tag per endpoint: `free` (never written by this link) or
-   `follows`. Drag a `free` node → the `follows` end solves. Drag a `follows` node → it is
-   projected to satisfy its own links (it is never "free"). This makes "feeders free, mids
-   follow" a property ON THE LINK, not code. (A symmetric link marks both `follows`.)
+A drag fires the locks on the links touching the moved node; each writes its directed end
+in polar; that end may fire its own links (the chain) — the same propagation as today. The
+ONLY difference from the current system is that the link graph is **complete**: every pair
+that must be constrained has a double link, so no constraint ever has to fall back to
+Cartesian, and no second mechanism (co-sphere in `RootMove`, the carry pre-pass) acts
+behind the locks. Each lock has a fixed direction (which end it writes); "feeders free,
+mids follow" is just that direction, on the lock.
 
-2. **Conflict — two links want the same node.**
-   Do NOT first-writer-win. A node with N links is moved to the point satisfying ALL of
-   them simultaneously: project onto the INTERSECTION of its constraints (e.g. φ=0 plane ∩
-   bisector plane = the bisector LINE — which is literally the 1-DOF line the user asked
-   for). Composition is the default, not an accident.
+## The movement-link graph (current topology — to confirm)
 
-3. **Convergence — propagation can oscillate.**
-   Solve to a fixpoint: iterate the link set, projecting each `follows` node onto the
-   intersection of its active links, until no node moves more than ε (cap iterations).
-   Replaces the move-once BFS guard (which only ever applied ONE constraint per node).
+Data edges are also movement links; restriction-only links (no bead) are ★.
+
+| link        | lock (polar)                                  |
+|-------------|-----------------------------------------------|
+| 1↔9, 1↔10   | θ(1→9) == θ(1→10), own φ (share latitude, no swap) |
+| 9↔6, 9↔2    | θ equal, φ opposite (mirror)                  |
+| 2↔3, 2↔7    | θ equal, φ opposite (mirror)                  |
+| 6↔5, 7↔5    | R(5→6) == R(5→7) (equal radii at 5)            |
+| 10↔11, 6↔11 | R(11→10) == R(11→6) (equal radii at 11)        |
+| **5↔11 ★**  | ties the two gate clusters in pure polar (coplanarity) |
+| 8↔1         | feedback; no lock for now                      |
 
 ## Migration path (incremental, each step verifiable)
 
-1. Add the link graph + the solver alongside the existing locks (no behavior change yet).
-2. Express ONE cluster (node 5: equidistant + coMeridian links) as movement links; switch
-   node 5 to the solver; verify bisector + coplanar both hold (the composition the current
-   code can't do). Keep the rest on the old path.
-3. Migrate node 11, then the mirrors (9/10, 9, 2), then fold the co-sphere coupling out of
-   `RootMove` into `coRadius` links.
-4. Delete the old lock types and the special cases once nothing registers them.
+1. Add the link graph as declarative data (no behavior change yet).
+2. Convert ONE cluster (node 5's radius lock) to fire off its links; verify against the
+   current bisector behavior.
+3. Convert node 11, the mirrors (9/10 → θ-only so they stop swapping; 9, 2), the
+   coplanarity via 5↔11, then fold the co-sphere coupling out of `RootMove` into links.
+4. Delete the old lock types + special cases once nothing registers them.
 
 ## Open questions for David
 
-- **Link declaration site** — where do movement links live? A `movement-links.go`
-  registry (like the current registrars), or declared in the topology spec
-  (`topology/links/`) so they're data, not code?
-- **Do feeders need co-meridian at all**, or is coplanarity enough from one anchor link
-  per mid? (Fewer links = simpler solver.)
-- **9/10 swapping** — is that a `mirrorPhi` link doing exactly what it says (φ flips sign,
-  so they cross the meridian), and you want a `shareTheta`-only link (same latitude, own
-  longitude, no crossing) instead?
-</content>
+- **Link declaration site** — a `movement-links.go` registry, or topology data
+  (`topology/links/`) so the links are data, not code?
+- **Coplanarity links** — is 5↔11 the only ★ link, or do the feeders also need restriction
+  links to each other to hold {5,6,7,10,11} coplanar by polar chaining alone?
+- **9/10 swapping** — confirmed it's the `mirror` (φ flips sign so they cross); switch that
+  pair to a θ-only (share latitude, own longitude) link so they stop swapping?
