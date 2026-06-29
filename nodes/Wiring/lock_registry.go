@@ -49,34 +49,35 @@ func (md *MoveDispatch) registerNode9MirrorLocks(has func(string) bool) bool {
 	return true
 }
 
-// registerNode10Locks gives node 10 (a Pulse, same type as node 6) the SAME lock
-// system node 6 has, with every partner renamed. Node 6 plays two roles, reproduced
-// here under the mapping {6→10, parent 9→1, mirror sibling 2→11, chain mid 5→12,
-// chain other 7→13}:
-//   - mirror child of its parent: node 6 is mirror-paired with node 2 about node 9
-//     → node 10 is mirror-paired with node 11 about node 1 (its feeder).
-//   - chain anchor via its OUTPUT: node 6 anchors node 5 (phiZeroFollower) and is the
-//     equal-radii authority for node 7 about node 5 → node 10 anchors node 12 and is
-//     the authority for node 13 about node 12.
+// registerChain10_11_6Locks is the SECOND meridian chain, isomorphic to the 5/6/7
+// chain (registerChain567Locks) under the mapping {6→10, 5→11, 7→6}: node 10 anchors
+// node 11, node 11 drags node 6, and node 10 is the equal-radii authority for node 6
+// about node 11. Together with node 9's mirror over {6,2} (which is the old node-2
+// mirror over {7,3} under the same mapping, already registered by
+// registerNode9MirrorLocks) this reproduces the whole {6,7,5,2,3} lock system for
+// {10,6,11,9,2}. Node 11 is a WindowAndInhibitLeftGate — the gate that sits where node
+// 5 sits, fed by 10→11 (FromLeft) and 6→11 (FromRight).
 //
-// Nodes 11/12/13 do not exist yet (node 10's Out port is unwired), so every call below
-// is guarded out by has() and the locks stay DORMANT — they activate name-for-name once
-// those partner nodes are added. This is the intended "a few locks won't exist yet".
-// Rename 11/12/13 here when the real partner nodes are created.
-func (md *MoveDispatch) registerNode10Locks(has func(string) bool) {
-	// Mirror: node 10 ↔ node 11 about node 1 (parallels mirror(9,6,2)/(9,2,6)).
-	if has("1") && has("10") && has("11") {
-		md.addMirrorLock("1", "10", "11")
-		md.addMirrorLock("1", "11", "10")
+// Node 6 plays the old node-7 role: it is BOTH the equalized side of this chain AND a
+// mirror follower of node 9 — the same dual role node 7 has (chain + node-2 mirror), so
+// the equal-radii fold composes through both paths exactly as it does for node 7.
+//
+// NOT replicated: the node-3 authority flip (lock.go, movedID=="3", node 3 drives node
+// 7's radius and node 6 follows). Its analog would be movedID=="2" driving node 6's
+// radius, but node 2 is already overloaded (mirror follower under node 9 and mirror
+// center over 3/7), so the flip stays specific to node 3.
+func (md *MoveDispatch) registerChain10_11_6Locks(has func(string) bool) {
+	if !(has("11") && (has("10") || has("6"))) {
+		return
 	}
-	// Chain anchor: node 10 anchors node 12 (parallels phiZeroFollower(6,5)).
-	if has("10") && has("12") {
-		md.addPhiZeroFollowerLock("10", "12")
+	if has("10") {
+		md.addPhiZeroFollowerLock("10", "11") // 10 anchors 11
 	}
-	// Equal radii: node 10 is the authority for node 13 about node 12
-	// (parallels equalRadii(5,6,7)).
-	if has("12") && has("10") && has("13") {
-		md.addEqualRadiiLock("12", "10", "13")
+	if has("6") {
+		md.addPhiZeroCenterLock("6", "11") // 11 drags 6
+	}
+	if has("10") && has("6") {
+		md.addEqualRadiiLock("11", "10", "6") // mid=11, authority=10, equalized=6
 	}
 }
 
