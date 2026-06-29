@@ -125,6 +125,65 @@ func TestBisectorMidEqualizesRadiiOnFeederDrag(t *testing.T) {
 	}
 }
 
+// Moving the second-layer mid (node 11) along its bisector must NOT ripple into the
+// first layer: node 6 is a shared feeder (node 5's left feeder AND node 11's right
+// feeder). Because node 11's φ=0 locks anchor (never write) node 6, moving node 11
+// leaves node 6 — and therefore node 5 — exactly where they were.
+func TestNode11MoveDoesNotAffectNode5(t *testing.T) {
+	centers := map[string]vec3{
+		"5":  {10, 0, 0},
+		"6":  {0, 5, 0},
+		"7":  {0, -5, 3},
+		"10": {-4, 8, 0},
+		"11": {-6, 1, 2},
+	}
+	geoms := map[string]nodeGeom{}
+	for id, c := range centers {
+		cc := c
+		geoms[id] = nodeGeom{Kind: "FanInSrc", Center: &cc}
+	}
+	edges := map[string]EdgeEndpoints{
+		"e65":  {Source: "6", Target: "5", SourceHandle: "Out", TargetHandle: "FromLeft"},
+		"e75":  {Source: "7", Target: "5", SourceHandle: "Out", TargetHandle: "FromRight"},
+		"e10":  {Source: "10", Target: "11", SourceHandle: "Out", TargetHandle: "FromLeft"},
+		"e611": {Source: "6", Target: "11", SourceHandle: "Out2", TargetHandle: "FromRight"},
+	}
+	tr := T.New(256)
+	md := newMoveDispatch(geoms, edges, tr)
+	md.setRoots(buildRoots(centers))
+	// Node 5 layer:
+	md.addBisectorMidLock("5", "6", "7")
+	md.addPhiZeroFollowerLock("6", "5")
+	md.addPhiZeroCenterLock("7", "5")
+	// Node 11 layer (the fix: both feeders anchored, neither written):
+	md.addBisectorMidLock("11", "10", "6")
+	md.addPhiZeroFollowerLock("10", "11")
+	md.addPhiZeroFollowerLock("6", "11")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+	const eps = 1e-9
+
+	w5, w6 := mustWorld(t, md, "5"), mustWorld(t, md, "6")
+	md.RootMove("11", vec3{X: -6, Y: 1, Z: 40}) // shove node 11 far along its bisector
+
+	if d := dist3(mustWorld(t, md, "6"), w6); d > eps {
+		t.Errorf("node 6 moved %vwu when node 11 moved (should be 0 — feeder anchored)", d)
+	}
+	if d := dist3(mustWorld(t, md, "5"), w5); d > eps {
+		t.Errorf("node 5 moved %vwu when node 11 moved (should be 0 — no cross-layer ripple)", d)
+	}
+}
+
+func mustWorld(t *testing.T, md *MoveDispatch, id string) vec3 {
+	t.Helper()
+	w, ok := md.roots.world(id)
+	if !ok {
+		t.Fatalf("no world for node %s", id)
+	}
+	return w
+}
+
 // Dragging the MID (node 5) keeps it on the bisector (equal radii); feeders unmoved.
 func TestBisectorMidConstrainedOnMidDrag(t *testing.T) {
 	md, cancel := buildBisectorFixture()

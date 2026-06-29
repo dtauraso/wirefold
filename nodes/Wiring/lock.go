@@ -256,7 +256,13 @@ func (md *MoveDispatch) applyLocks(movedID string, fromDrag bool) map[string]vec
 	// In-plane drags are unaffected: a drag that stays in the meridian leaves the
 	// dragged node's perpendicular coordinate equal to the others', so the shift is zero.
 	// Gated by fromDrag so the load-time seed never constrains the seed node.
-	if fromDrag {
+	//
+	// SUPERSEDED in the bisector model: this carry moves the whole φ=0 trio together,
+	// which (with two layers sharing node 6) would ripple a node-11 drag through node 6
+	// into node 5. When any bisectorMidLock is registered the mids are positioned by the
+	// bisector pre-pass below instead and feeders must stay put, so this old carry is
+	// disabled. Old-model topologies (no bisector locks) keep it unchanged.
+	if fromDrag && len(md.bisectorMidLocks) == 0 {
 		// perp is the φ=90° axis of the polar frame: the normal of the φ=0 meridian
 		// plane (pole-safe — projection only, no atan2).
 		perp := polar2cart(polar{R: 1, Theta: math.Pi / 2, Phi: math.Pi / 2})
