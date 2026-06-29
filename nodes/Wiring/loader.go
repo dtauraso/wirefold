@@ -241,12 +241,13 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				aimedPorts[AimedPortKey{NodeID: "10", PortName: "FromInput", IsInput: true}] = "1"
 			}
 			if _, has11 := centers["11"]; has11 {
-				// Node 11 (gate, sits where node 5 sits) fed by 10→11 (FromLeft) and
-				// 6→11 (FromRight). Aim node 10's Out and node 11's two inputs. Node 6's
-				// Out is already aimed at node 5 (it fans to both 5 and 11), so only node
-				// 11's FromRight is aimed back at 6 here.
+				// Node 11 (gate, sits where node 5 sits) fed by 10→11 (FromLeft, node 10's
+				// Out) and 6→11 (FromRight, node 6's second output Out2). Node 6's first
+				// Out stays aimed at node 5; Out2 aims at node 11, so both of node 6's
+				// edges render as radial spokes.
 				aimedPorts[AimedPortKey{NodeID: "10", PortName: "Out", IsInput: false}] = "11"
 				aimedPorts[AimedPortKey{NodeID: "11", PortName: "FromLeft", IsInput: true}] = "10"
+				aimedPorts[AimedPortKey{NodeID: "6", PortName: "Out2", IsInput: false}] = "11"
 				aimedPorts[AimedPortKey{NodeID: "11", PortName: "FromRight", IsInput: true}] = "6"
 			}
 			if _, has3 := centers["3"]; has3 {

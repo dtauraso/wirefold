@@ -24,6 +24,7 @@
 |------|-----------|----------|-------|
 | FromInput | in | chain | sampled input value; updates the held value |
 | Out | out | chain | continuously drives the held value (starts -1) |
+| Out2 | out | chain | optional second continuous output of the same held value (fan to a second destination); inert when unwired |
 
 ## Firing rule
 
