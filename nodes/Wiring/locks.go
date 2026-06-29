@@ -52,9 +52,12 @@ func (md *MoveDispatch) applyMirrorLocks(movedID string, pos func(string) (vec3,
 		if !okC || !okL || !okF {
 			continue
 		}
+		_ = fw                   // follower must exist; its old position is not used
 		l := surfaceCoord(c, lw) // leader's polar about center
-		f := surfaceCoord(c, fw) // follower's own radius about center
-		locked := polar{R: f.R, Theta: l.Theta, Phi: -l.Phi}
+		// True mirror: follower takes the LEADER's radius (so the two stay equidistant
+		// from Center), the leader's θ, and the opposite φ — a reflection across the
+		// Center's φ=0 meridian.
+		locked := polar{R: l.R, Theta: l.Theta, Phi: -l.Phi}
 		out[lk.Follower] = polar2cart(locked).add(c)
 	}
 	return out
