@@ -1,7 +1,3 @@
----
-branch: task/polar-double-link-model
----
-
 # Double-link polar movement model
 
 Goal: replace every bespoke lock (mirror, φ=0 meridian, equal-radii, bisector, the

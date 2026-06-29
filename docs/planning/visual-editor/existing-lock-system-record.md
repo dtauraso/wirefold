@@ -1,7 +1,3 @@
----
-branch: task/polar-double-link-model
----
-
 # Existing lock system — record before the double-link rewrite
 
 Snapshot of the lock system as it stands on `main` (commit ec3d7438), to capture exactly
