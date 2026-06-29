@@ -236,6 +236,10 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "8"
 				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "1"
 			}
+			if _, has10 := centers["10"]; has10 {
+				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToExcitatory", IsInput: false}] = "10"
+				aimedPorts[AimedPortKey{NodeID: "10", PortName: "FromInput", IsInput: true}] = "1"
+			}
 			if _, has3 := centers["3"]; has3 {
 				aimedPorts[AimedPortKey{NodeID: "2", PortName: "ToNext0", IsInput: false}] = "3"
 				aimedPorts[AimedPortKey{NodeID: "3", PortName: "In", IsInput: true}] = "2"
@@ -352,6 +356,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		md.registerNode2MirrorLocks(has) // node 2 mirrors its children 3 and 7
 		md.registerChain567Locks(has)    // 5/6/7 meridian chain (return ignored: no seed)
 		md.registerNode9MirrorLocks(has) // node 9 mirrors its children 2 and 6
+		md.registerNode10Locks(has)      // node 10 clones node 6's locks (partners dormant)
 
 		// Install the aimed-port registry built once above (the single source of truth
 		// shared with the initial edge geometry) for drag-time aiming.
