@@ -46,8 +46,8 @@ function AxisLabel({ text, color, position, size }: {
 // the scene frame and a node's frame are distinguishable. Decorative (raycast off),
 // not affected by the scene-tori toggle. Same drawing for every center, so node 2's
 // frame matches the scene's exactly.
-function PolarFrame({ center, scale, tag }: {
-  center: THREE.Vector3; scale: number; tag?: string;
+function PolarFrame({ center, scale, tag, octants }: {
+  center: THREE.Vector3; scale: number; tag?: string; octants?: boolean;
 }) {
   const radiusKey = Math.max(Math.round(scale), 1);
   const poleLen = radiusKey * 1.3;
@@ -97,6 +97,15 @@ function PolarFrame({ center, scale, tag }: {
         <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
         <meshBasicMaterial color="#dddd22" depthWrite={false} />
       </mesh>
+      {/* 8-octant division: three orthogonal great circles (XY = φ0 meridian, XZ =
+          equator about the +Y pole, YZ = φ90 meridian) at the sphere radius. Together
+          they partition the sphere into all 8 quadrants. */}
+      {octants && ([[0, 0, 0], [Math.PI / 2, 0, 0], [0, Math.PI / 2, 0]] as [number, number, number][]).map((rot, i) => (
+        <mesh key={`oct-${i}`} rotation={rot} raycast={() => null}>
+          <torusGeometry args={[radiusKey, arcTube * 0.7, 8, 72]} />
+          <meshBasicMaterial color="#aab4c2" transparent opacity={0.45} depthWrite={false} />
+        </mesh>
+      ))}
       {/* Labels — billboard sprites, always face the camera. */}
       <AxisLabel text={`+Y pole${sfx}`} color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+X φ0${sfx}`} color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
@@ -309,6 +318,7 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
           center={nodeWorldPos(center)}
           scale={geoms[center.id]?.sphereR ?? nodeRadius(center)}
           tag={`(${center.id})`}
+          octants
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
