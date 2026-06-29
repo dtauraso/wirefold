@@ -73,6 +73,11 @@ func (md *MoveDispatch) registerBisector11Locks(has func(string) bool) {
 		return
 	}
 	md.addBisectorMidLock("11", "10", "6")
+	// Revived polar φ=0 meridian registration (coplanarity) for the second layer: pin
+	// node 11 into node 10's φ=0 meridian plane and node 6 into node 11's, so 10/11/6
+	// stay coplanar. Composes with the bisector above.
+	md.addPhiZeroFollowerLock("10", "11") // 10 anchors 11 onto its meridian plane
+	md.addPhiZeroCenterLock("6", "11")    // 11 ↔ 6 share the meridian plane
 }
 
 // registerBisector5Locks constrains node 5 (the gate/mid) to the perpendicular-bisector
@@ -85,4 +90,10 @@ func (md *MoveDispatch) registerBisector5Locks(has func(string) bool) {
 		return
 	}
 	md.addBisectorMidLock("5", "6", "7")
+	// Revived polar φ=0 meridian registration (coplanarity): pin node 5 into node 6's
+	// φ=0 meridian plane and node 7 into node 5's, dropping only the off-plane
+	// component (the φ=90° axis) — the projection from commit 60d556f7. Keeps 5/6/7
+	// coplanar in the meridian plane; composes with the bisector above.
+	md.addPhiZeroFollowerLock("6", "5") // 6 anchors 5 onto its meridian plane
+	md.addPhiZeroCenterLock("7", "5")   // 5 ↔ 7 share the meridian plane
 }
