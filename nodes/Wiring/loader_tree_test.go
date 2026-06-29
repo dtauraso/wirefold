@@ -35,20 +35,20 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Errorf("node \"1\" type: got %q, want \"Input\"", n1.Type)
 	}
 
-	n2, ok := nodeByID["2"]
+	n5, ok := nodeByID["5"]
 	if !ok {
-		t.Fatal("node \"2\" not found")
+		t.Fatal("node \"5\" not found")
 	}
-	if n2.Type != "HoldNewSendOld" {
-		t.Errorf("node \"2\" type: got %q, want \"HoldNewSendOld\"", n2.Type)
+	if n5.Type != "HoldNewSendOld" {
+		t.Errorf("node \"5\" type: got %q, want \"HoldNewSendOld\"", n5.Type)
 	}
 
-	n3, ok := nodeByID["3"]
+	n7, ok := nodeByID["7"]
 	if !ok {
-		t.Fatal("node \"3\" not found")
+		t.Fatal("node \"7\" not found")
 	}
-	if n3.Type != "Hold" {
-		t.Errorf("node \"3\" type: got %q, want \"Hold\"", n3.Type)
+	if n7.Type != "Hold" {
+		t.Errorf("node \"7\" type: got %q, want \"Hold\"", n7.Type)
 	}
 
 	n6, ok := nodeByID["6"]
@@ -59,12 +59,12 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Errorf("node \"6\" type: got %q, want \"Pulse\"", n6.Type)
 	}
 
-	n7, ok := nodeByID["7"]
+	n8, ok := nodeByID["8"]
 	if !ok {
-		t.Fatal("node \"7\" not found")
+		t.Fatal("node \"8\" not found")
 	}
-	if n7.Type != "Pulse" {
-		t.Errorf("node \"7\" type: got %q, want \"Pulse\"", n7.Type)
+	if n8.Type != "Pulse" {
+		t.Errorf("node \"8\" type: got %q, want \"Pulse\"", n8.Type)
 	}
 
 	// View positions should be populated for all nodes (view.nodes is kept as
@@ -81,106 +81,106 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		edgeByLabel[e.Label] = e
 	}
 
-	// Node 1 now feeds node 9 (the chain head); node 9 fans to its children 2 and 6.
-	e1to9, ok := edgeByLabel["1To9"]
+	// Node 1 now feeds node 2 (the chain head); node 2 fans to its children 5 and 6.
+	e1to2, ok := edgeByLabel["1To2"]
 	if !ok {
-		t.Fatal("edge \"1To9\" not found")
+		t.Fatal("edge \"1To2\" not found")
 	}
-	if e1to9.SourceHandle != "ToHoldNewSendOld" {
-		t.Errorf("edge 1To9 sourceHandle: got %q, want \"ToHoldNewSendOld\"", e1to9.SourceHandle)
+	if e1to2.SourceHandle != "ToHoldNewSendOld" {
+		t.Errorf("edge 1To2 sourceHandle: got %q, want \"ToHoldNewSendOld\"", e1to2.SourceHandle)
 	}
-	if e1to9.TargetHandle != "FromPrevHoldNewSendOldNode" {
-		t.Errorf("edge 1To9 targetHandle: got %q, want \"FromPrevHoldNewSendOldNode\"", e1to9.TargetHandle)
+	if e1to2.TargetHandle != "FromPrevHoldNewSendOldNode" {
+		t.Errorf("edge 1To2 targetHandle: got %q, want \"FromPrevHoldNewSendOldNode\"", e1to2.TargetHandle)
 	}
-	if _, ok := edgeByLabel["9To2"]; !ok {
-		t.Fatal("edge \"9To2\" not found")
+	if _, ok := edgeByLabel["2To5"]; !ok {
+		t.Fatal("edge \"2To5\" not found")
 	}
 
-	if _, ok := edgeByLabel["2To3"]; !ok {
-		t.Fatal("edge \"2To3\" not found")
+	if _, ok := edgeByLabel["5To7"]; !ok {
+		t.Fatal("edge \"5To7\" not found")
 	}
-	if _, ok := edgeByLabel["2FeedbackTo1"]; ok {
-		t.Error("edge \"2FeedbackTo1\" should have been removed")
-	}
-
-	// Node 8 (Pacer) now feeds node 1's FeedbackIn: 1 -> 8 -> 1.
-	n8, ok := nodeByID["8"]
-	if !ok {
-		t.Fatal("node \"8\" not found")
-	}
-	if n8.Type != "Pacer" {
-		t.Errorf("node \"8\" type: got %q, want \"Pacer\"", n8.Type)
-	}
-	e1to8, ok := edgeByLabel["1To8"]
-	if !ok {
-		t.Fatal("edge \"1To8\" not found")
-	}
-	if e1to8.SourceHandle != "ToPacer" {
-		t.Errorf("edge 1To8 sourceHandle: got %q, want \"ToPacer\"", e1to8.SourceHandle)
-	}
-	if e1to8.TargetHandle != "FromInput" {
-		t.Errorf("edge 1To8 targetHandle: got %q, want \"FromInput\"", e1to8.TargetHandle)
-	}
-	e8to1, ok := edgeByLabel["8To1"]
-	if !ok {
-		t.Fatal("edge \"8To1\" not found")
-	}
-	if e8to1.SourceHandle != "FeedbackOut" {
-		t.Errorf("edge 8To1 sourceHandle: got %q, want \"FeedbackOut\"", e8to1.SourceHandle)
-	}
-	if e8to1.TargetHandle != "FeedbackIn" {
-		t.Errorf("edge 8To1 targetHandle: got %q, want \"FeedbackIn\"", e8to1.TargetHandle)
+	if _, ok := edgeByLabel["5FeedbackTo1"]; ok {
+		t.Error("edge \"5FeedbackTo1\" should have been removed")
 	}
 
-	e9to6, ok := edgeByLabel["9To6"]
+	// Node 4 (Pacer) now feeds node 1's FeedbackIn: 1 -> 4 -> 1.
+	n4, ok := nodeByID["4"]
 	if !ok {
-		t.Fatal("edge \"9To6\" not found")
+		t.Fatal("node \"4\" not found")
 	}
-	if e9to6.SourceHandle != "ToNext0" {
-		t.Errorf("edge 9To6 sourceHandle: got %q, want \"ToNext0\"", e9to6.SourceHandle)
+	if n4.Type != "Pacer" {
+		t.Errorf("node \"4\" type: got %q, want \"Pacer\"", n4.Type)
 	}
-	if e9to6.TargetHandle != "FromInput" {
-		t.Errorf("edge 9To6 targetHandle: got %q, want \"FromInput\"", e9to6.TargetHandle)
+	e1to4, ok := edgeByLabel["1To4"]
+	if !ok {
+		t.Fatal("edge \"1To4\" not found")
+	}
+	if e1to4.SourceHandle != "ToPacer" {
+		t.Errorf("edge 1To4 sourceHandle: got %q, want \"ToPacer\"", e1to4.SourceHandle)
+	}
+	if e1to4.TargetHandle != "FromInput" {
+		t.Errorf("edge 1To4 targetHandle: got %q, want \"FromInput\"", e1to4.TargetHandle)
+	}
+	e4to1, ok := edgeByLabel["4To1"]
+	if !ok {
+		t.Fatal("edge \"4To1\" not found")
+	}
+	if e4to1.SourceHandle != "FeedbackOut" {
+		t.Errorf("edge 4To1 sourceHandle: got %q, want \"FeedbackOut\"", e4to1.SourceHandle)
+	}
+	if e4to1.TargetHandle != "FeedbackIn" {
+		t.Errorf("edge 4To1 targetHandle: got %q, want \"FeedbackIn\"", e4to1.TargetHandle)
 	}
 
-	e6to5, ok := edgeByLabel["6To5"]
+	e2to6, ok := edgeByLabel["2To6"]
 	if !ok {
-		t.Fatal("edge \"6To5\" not found")
+		t.Fatal("edge \"2To6\" not found")
 	}
-	if e6to5.TargetHandle != "FromLeft" {
-		t.Errorf("edge 6To5 targetHandle: got %q, want \"FromLeft\"", e6to5.TargetHandle)
+	if e2to6.SourceHandle != "ToNext0" {
+		t.Errorf("edge 2To6 sourceHandle: got %q, want \"ToNext0\"", e2to6.SourceHandle)
 	}
-	if _, ok := edgeByLabel["2To5"]; ok {
-		t.Error("edge \"2To5\" should have been removed")
+	if e2to6.TargetHandle != "FromInput" {
+		t.Errorf("edge 2To6 targetHandle: got %q, want \"FromInput\"", e2to6.TargetHandle)
 	}
 
-	// Node 7 (Pulse) is wired 2 -> 7 -> 5; node 4 no longer exists.
-	e2to7, ok := edgeByLabel["2To7"]
+	e6to10, ok := edgeByLabel["6To10"]
 	if !ok {
-		t.Fatal("edge \"2To7\" not found")
+		t.Fatal("edge \"6To10\" not found")
 	}
-	if e2to7.SourceHandle != "ToNext1" {
-		t.Errorf("edge 2To7 sourceHandle: got %q, want \"ToNext1\"", e2to7.SourceHandle)
+	if e6to10.TargetHandle != "FromLeft" {
+		t.Errorf("edge 6To10 targetHandle: got %q, want \"FromLeft\"", e6to10.TargetHandle)
 	}
-	if e2to7.TargetHandle != "FromInput" {
-		t.Errorf("edge 2To7 targetHandle: got %q, want \"FromInput\"", e2to7.TargetHandle)
+	if _, ok := edgeByLabel["5To10"]; ok {
+		t.Error("edge \"5To10\" should have been removed")
 	}
 
-	e7to5, ok := edgeByLabel["7To5"]
+	// Node 8 (Pulse) is wired 5 -> 8 -> 10; node 4 no longer exists.
+	e5to8, ok := edgeByLabel["5To8"]
 	if !ok {
-		t.Fatal("edge \"7To5\" not found")
+		t.Fatal("edge \"5To8\" not found")
 	}
-	if e7to5.Source != "7" {
-		t.Errorf("edge 7To5 source: got %q, want \"7\"", e7to5.Source)
+	if e5to8.SourceHandle != "ToNext1" {
+		t.Errorf("edge 5To8 sourceHandle: got %q, want \"ToNext1\"", e5to8.SourceHandle)
 	}
-	if e7to5.SourceHandle != "Out" {
-		t.Errorf("edge 7To5 sourceHandle: got %q, want \"Out\"", e7to5.SourceHandle)
+	if e5to8.TargetHandle != "FromInput" {
+		t.Errorf("edge 5To8 targetHandle: got %q, want \"FromInput\"", e5to8.TargetHandle)
 	}
-	if e7to5.Target != "5" {
-		t.Errorf("edge 7To5 target: got %q, want \"5\"", e7to5.Target)
+
+	e8to10, ok := edgeByLabel["8To10"]
+	if !ok {
+		t.Fatal("edge \"8To10\" not found")
 	}
-	if e7to5.TargetHandle != "FromRight" {
-		t.Errorf("edge 7To5 targetHandle: got %q, want \"FromRight\"", e7to5.TargetHandle)
+	if e8to10.Source != "8" {
+		t.Errorf("edge 8To10 source: got %q, want \"8\"", e8to10.Source)
+	}
+	if e8to10.SourceHandle != "Out" {
+		t.Errorf("edge 8To10 sourceHandle: got %q, want \"Out\"", e8to10.SourceHandle)
+	}
+	if e8to10.Target != "10" {
+		t.Errorf("edge 8To10 target: got %q, want \"10\"", e8to10.Target)
+	}
+	if e8to10.TargetHandle != "FromRight" {
+		t.Errorf("edge 8To10 targetHandle: got %q, want \"FromRight\"", e8to10.TargetHandle)
 	}
 
 	// All nodes should have at least 1 input OR at least 1 output port

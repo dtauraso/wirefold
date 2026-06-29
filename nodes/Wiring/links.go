@@ -116,10 +116,10 @@ func (md *MoveDispatch) initLinkPolar(pos func(string) (vec3, bool)) {
 // later. Each pair is registered only when both nodes are loaded.
 func (md *MoveDispatch) registerMovementLinks(has func(string) bool) {
 	pairs := [][2]string{
-		{"1", "8"}, {"1", "10"}, {"1", "9"},
-		{"9", "6"}, {"9", "2"},
-		{"2", "7"}, {"2", "3"},
-		{"10", "11"}, {"6", "11"}, {"6", "5"}, {"7", "5"},
+		{"1", "4"}, {"1", "3"}, {"1", "2"},
+		{"2", "6"}, {"2", "5"},
+		{"5", "8"}, {"5", "7"},
+		{"3", "9"}, {"6", "9"}, {"6", "10"}, {"8", "10"},
 	}
 	for _, p := range pairs {
 		if has(p[0]) && has(p[1]) {
