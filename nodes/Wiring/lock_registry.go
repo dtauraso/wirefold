@@ -50,6 +50,28 @@ func (md *MoveDispatch) registerNode2MirrorLocks(has func(string) bool) bool {
 	return true
 }
 
+// registerNode9MirrorLocks couples nodes 6 and 2 on node 9's sphere via a bidirectional
+// MIRROR lock — node 9 is a structural clone of node 2 one level up: child of node 1
+// (1→9), parent of 6 and 2 (9→6, 9→2), mirroring its two children just as node 2
+// mirrors 3 and 7. Node 6 is the leader; node 2 takes shared θ (about node 9's +y
+// up-pole) and opposite-sign φ.
+//
+// AUTHORITY CONFLICT (read before relying on this): nodes 6 and 2 are ALSO θ-coupled
+// to each other about node 1 (registerNode1ThetaLocks), and those theta locks are
+// registered FIRST, so they write the same followers first and the applyLocks
+// move-once guard SHADOWS this mirror — dragging 6 or 2 fires the node-1 theta lock,
+// not this mirror. For node 9's mirror to actually govern the 6↔2 coupling, the node-1
+// theta lock must be retired or yield. Left registered (not seeded at load) so node 9
+// exists and is wired while that authority decision is made.
+func (md *MoveDispatch) registerNode9MirrorLocks(has func(string) bool) bool {
+	if !(has("9") && has("6") && has("2")) {
+		return false
+	}
+	md.addMirrorLock("9", "6", "2")
+	md.addMirrorLock("9", "2", "6")
+	return true
+}
+
 // registerChain567Locks registers the DIRECTIONAL meridian chain 6 → 5 → 7 (see
 // lock.go phiDrive):
 //   - phiZeroFollower(6,5): node 6 ANCHORS node 5. The lock writes only node 5

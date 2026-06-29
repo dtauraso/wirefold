@@ -385,6 +385,13 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			seed(seedID)
 		}
 
+		// Node 9's frame: mirror-couple nodes 6 and 2 (registerNode9MirrorLocks). NOT
+		// seeded at load: the node-1 theta lock on 6↔2 (registered first) shadows this
+		// mirror, so seeding here would not place 6/2 about node 9 anyway and would only
+		// re-run the existing chain. Node 9 is added + wired; resolving which lock owns
+		// the 6↔2 coupling is the pending authority decision (see lock_registry.go).
+		md.registerNode9MirrorLocks(has)
+
 		// Sync every lock-moved node's new world position from the polar layer back
 		// into nodeGeoms[id].Center BEFORE node build/emission. emitNodeGeometry and
 		// the per-node port geometry read nodeGeoms[id].Center, so without this the
