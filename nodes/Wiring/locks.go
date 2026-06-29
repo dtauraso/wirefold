@@ -1,25 +1,20 @@
 package Wiring
 
 // locks.go — the rebuilt lock engine: polar equations that ride on the double-link
-// movement graph (links.go). No central store — node world positions come from the
-// movers' held geometry; polar coordinates are derived on the fly with cart2polar /
-// polar2cart. Locks are reintroduced ONE record at a time (see
+// movement graph (links.go). Locks read and write LINK POLAR STATE directly — no
+// cart2polar reconstruction; the only world→polar conversion is refreshLink at load and
+// the drag edge. World is derived from the link polar (polar2cart) for the render bridge.
+// Locks are reintroduced ONE record at a time (see
 // docs/planning/visual-editor/existing-lock-system-record.md).
 
 // nodeCenter returns a node's current world position from its mover's held geometry.
+// Used only to anchor a derived follower position into world for the render bridge.
 func (md *MoveDispatch) nodeCenter(id string) (vec3, bool) {
 	m, ok := md.nodeMovers[id]
 	if !ok || m.geom.Center == nil {
 		return vec3{}, false
 	}
 	return *m.geom.Center, true
-}
-
-// surfaceCoord returns the polar coordinate (R, θ, φ) of surfacePos in the frame whose
-// origin is centerPos (pole = +y). This is the "radius-point" of one node on another's
-// surface — the double link expressed in polar.
-func surfaceCoord(centerPos, surfacePos vec3) polar {
-	return cart2polar(surfacePos.sub(centerPos))
 }
 
 // mirrorLock (record #1: registerNode2MirrorLocks). Follower shares Leader's θ about
@@ -38,27 +33,35 @@ func (md *MoveDispatch) addMirror(center, leader, follower string) {
 }
 
 // applyMirrorLocks returns the new world positions of any mirror followers whose Leader
-// is movedID. pos resolves a node's current world position (the caller seeds it with the
-// dragged node's target so the leader reads its NEW position).
+// is movedID. It reads the leader's polar from the STORED link state (refreshed at the
+// drag edge), writes the follower's polar on its link, and derives the follower's world
+// only for the render bridge. The lock equation is pure polar — no cart2polar.
 func (md *MoveDispatch) applyMirrorLocks(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
 	out := map[string]vec3{}
 	for _, lk := range md.mirrorLocks {
 		if lk.Leader != movedID {
 			continue
 		}
-		c, okC := pos(lk.Center)
-		lw, okL := pos(lk.Leader)
-		fw, okF := pos(lk.Follower)
-		if !okC || !okL || !okF {
+		leaderLink := md.linkBetween(lk.Center, lk.Leader)
+		followerLink := md.linkBetween(lk.Center, lk.Follower)
+		if leaderLink == nil || followerLink == nil {
 			continue
 		}
-		_ = fw                   // follower must exist; its old position is not used
-		l := surfaceCoord(c, lw) // leader's polar about center
-		// True mirror: follower takes the LEADER's radius (so the two stay equidistant
-		// from Center), the leader's θ, and the opposite φ — a reflection across the
-		// Center's φ=0 meridian.
-		locked := polar{R: l.R, Theta: l.Theta, Phi: -l.Phi}
-		out[lk.Follower] = polar2cart(locked).add(c)
+		lp, ok := leaderLink.polarOf(lk.Center, lk.Leader)
+		if !ok {
+			continue
+		}
+		// True mirror across the Center's φ=0 meridian: same R, same θ, opposite φ.
+		// Pure polar — written straight onto the follower link.
+		fp := polar{R: lp.R, Theta: lp.Theta, Phi: -lp.Phi}
+		followerLink.setPolar(lk.Center, lk.Follower, fp)
+		// Derive the follower's world for the movers (polar → world). The reverse link
+		// direction is recomputed by refreshLinksTouching on the next move.
+		c, ok := pos(lk.Center)
+		if !ok {
+			continue
+		}
+		out[lk.Follower] = polar2cart(fp).add(c)
 	}
 	return out
 }

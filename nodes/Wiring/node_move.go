@@ -620,15 +620,20 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	edges := md.heldEdges()
 	emit := map[string]vec3{nodeID: target}
 
-	// Apply the polar locks riding on the double-link graph: each follower the drag
-	// triggers is written and merged into the single per-frame fan. pos reads the
-	// dragged node's TARGET (from emit) before falling back to the movers' held centers.
+	// pos reads the dragged node's TARGET (from emit) before falling back to the movers'
+	// held centers.
 	pos := func(id string) (vec3, bool) {
 		if w, ok := emit[id]; ok {
 			return w, true
 		}
 		return md.nodeCenter(id)
 	}
+	// Drag edge: the mouse handed in a world point, so recompute the polar of every link
+	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
+	// read the stored link polar — no cart2polar in the lock equation.
+	md.refreshLinksTouching(nodeID, pos)
+	// Apply the polar locks riding on the link graph: each triggered follower is written
+	// (in polar, on its link) and its derived world is merged into the single per-frame fan.
 	for id, w := range md.applyMirrorLocks(nodeID, pos) {
 		emit[id] = w
 	}
