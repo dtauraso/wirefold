@@ -359,19 +359,9 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			return *g.Center, true
 		})
 
-		// Polar locks on the link graph, reintroduced one record at a time.
-		// #1 (record §2): node-2 mirror — nodes 3 and 7 mirror about node 2 (links
-		// 2↔3, 2↔7). Bidirectional: drag either and the other reflects.
-		if loaded["2"] && loaded["3"] && loaded["7"] {
-			md.addMirror("2", "3", "7")
-			md.addMirror("2", "7", "3")
-		}
-		// #3 (record §2): node-9 mirror — nodes 6 and 2 mirror about node 9 (links
-		// 9↔6, 9↔2). Same engine as #1; bidirectional.
-		if loaded["9"] && loaded["6"] && loaded["2"] {
-			md.addMirror("9", "6", "2")
-			md.addMirror("9", "2", "6")
-		}
+		// No polar locks are registered: every node is lock-free, so a drag moves only
+		// the dragged node. The link graph and its polar state stay (refreshed on drag);
+		// locks ride on it again when re-registered here.
 	}
 
 	// Install the aimed-port registry (built above) so edges still render aimed at their
