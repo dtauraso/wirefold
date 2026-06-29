@@ -364,9 +364,9 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		// keeps the node-2 mirror ahead of the 5/6/7 chain so node 7's equal-radii fold
 		// composes the same way it does on a live drag.
 		md.registerNode2MirrorLocks(has) // node 2 mirrors its children 3 and 7
-		md.registerChain567Locks(has)    // 5/6/7 meridian chain (return ignored: no seed)
+		md.registerBisector5Locks(has)   // node 5 stays equidistant from feeders 6 and 7
 		md.registerNode9MirrorLocks(has) // node 9 mirrors its children 2 and 6
-		md.registerChain10_11_6Locks(has) // 2nd chain: 10 anchors 11, 11 drags 6 (~5/6/7)
+		md.registerBisector11Locks(has)  // node 11 stays equidistant from feeders 10 and 6
 
 		// Install the aimed-port registry built once above (the single source of truth
 		// shared with the initial edge geometry) for drag-time aiming.
