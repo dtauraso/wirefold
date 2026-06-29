@@ -157,6 +157,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "overlays-vis") {
         // Toggle the master overlays visibility. No payload — Go owns the toggle state.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "overlays-vis" }));
+      } else if (msg.op === "double-links") {
+        // Toggle the double-link overlay visibility. No payload — Go owns the toggle state.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: "double-links" }));
       } else if (msg.op === "guide-vis") {
         // Push all polar-guide visibilities plus master overlays to Go on reload so Go's
         // authoritative state matches persisted scene settings. Explicit values — not a toggle.
