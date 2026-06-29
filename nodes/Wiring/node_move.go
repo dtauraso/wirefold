@@ -340,6 +340,8 @@ type MoveDispatch struct {
 	// links is the double-link movement graph (links.go). Polar locks ride on these;
 	// the graph is declared at load and is independent of the displayed data edges.
 	links []movementLink
+	// mirrorLocks are polar mirror locks rebuilt on the link graph (locks.go).
+	mirrorLocks []mirrorLock
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
@@ -617,6 +619,19 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// (the double-link locks) will be reintroduced here later.
 	edges := md.heldEdges()
 	emit := map[string]vec3{nodeID: target}
+
+	// Apply the polar locks riding on the double-link graph: each follower the drag
+	// triggers is written and merged into the single per-frame fan. pos reads the
+	// dragged node's TARGET (from emit) before falling back to the movers' held centers.
+	pos := func(id string) (vec3, bool) {
+		if w, ok := emit[id]; ok {
+			return w, true
+		}
+		return md.nodeCenter(id)
+	}
+	for id, w := range md.applyMirrorLocks(nodeID, pos) {
+		emit[id] = w
+	}
 
 	// Recompute every center's reach over the updated positions and fan all movers ONCE.
 	centers := md.heldCenters()

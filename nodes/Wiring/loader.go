@@ -348,6 +348,14 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			loaded[n.ID] = true
 		}
 		md.registerMovementLinks(func(id string) bool { return loaded[id] })
+
+		// Polar locks on the link graph, reintroduced one record at a time.
+		// #1 (record §2): node-2 mirror — nodes 3 and 7 mirror about node 2 (links
+		// 2↔3, 2↔7). Bidirectional: drag either and the other reflects.
+		if loaded["2"] && loaded["3"] && loaded["7"] {
+			md.addMirror("2", "3", "7")
+			md.addMirror("2", "7", "3")
+		}
 	}
 
 	// Install the aimed-port registry (built above) so edges still render aimed at their
