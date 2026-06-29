@@ -73,6 +73,15 @@ func (md *MoveDispatch) registerBisector11Locks(has func(string) bool) {
 		return
 	}
 	md.addBisectorMidLock("11", "10", "6")
+	// Revived polar φ=0 meridian registration (coplanarity) for the second layer: pin
+	// node 11 into BOTH feeders' φ=0 meridian planes (node 10 AND node 6). Both use
+	// FOLLOWER (anchor) form so node 11 is the only written node — neither feeder is
+	// moved by these locks. This matters because node 6 is SHARED with node 5's layer:
+	// if node 11 dragged node 6 (the old moveCenter form), moving node 11 would ripple
+	// through node 6 into node 5. As anchors, node 11 moving leaves node 6 — and node 5
+	// — untouched.
+	md.addPhiZeroFollowerLock("10", "11") // 10 anchors 11 onto its meridian plane
+	md.addPhiZeroFollowerLock("6", "11")  // 6 anchors 11 (never writes 6 → node 5 safe)
 }
 
 // registerBisector5Locks constrains node 5 (the gate/mid) to the perpendicular-bisector
@@ -85,4 +94,10 @@ func (md *MoveDispatch) registerBisector5Locks(has func(string) bool) {
 		return
 	}
 	md.addBisectorMidLock("5", "6", "7")
+	// Revived polar φ=0 meridian registration (coplanarity): pin node 5 into node 6's
+	// φ=0 meridian plane and node 7 into node 5's, dropping only the off-plane
+	// component (the φ=90° axis) — the projection from commit 60d556f7. Keeps 5/6/7
+	// coplanar in the meridian plane; composes with the bisector above.
+	md.addPhiZeroFollowerLock("6", "5") // 6 anchors 5 onto its meridian plane
+	md.addPhiZeroCenterLock("7", "5")   // 5 ↔ 7 share the meridian plane
 }

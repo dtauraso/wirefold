@@ -638,8 +638,17 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// surface node of that sphere moves RADIALLY to the new radius, keeping its own
 	// direction from the center. Applied once for the dragged node's centers (siblings
 	// are moved directly, not re-recursed), so the 8↔1 ring cannot cascade.
+	// A bisector mid's radius is governed by its OWN feeders (its bisectorMidLock), not
+	// by a shared sphere, so it must be excluded from co-sphere coupling on BOTH sides:
+	// dragging a mid must not resize a shared feeder's sphere, and a feeder's resize must
+	// not move a mid. Without this, node 11 (mid of {10,6}) and node 5 (mid of {6,7})
+	// share node 6's sphere and would drag each other.
+	isBisectorMid := map[string]bool{}
+	for _, lk := range md.bisectorMidLocks {
+		isBisectorMid[lk.Mid] = true
+	}
 	for _, e := range edges {
-		if e.Target != nodeID || e.Source == "" {
+		if e.Target != nodeID || e.Source == "" || isBisectorMid[nodeID] {
 			continue // only edges INTO the dragged node identify the spheres it sits on
 		}
 		cw, ok := md.roots.world(e.Source)
@@ -650,6 +659,9 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		for _, se := range edges {
 			if se.Source != e.Source || se.Target == "" || se.Target == nodeID {
 				continue // other surface nodes of this center
+			}
+			if isBisectorMid[se.Target] {
+				continue // its radius is set by its own bisector, not this shared sphere
 			}
 			yw, ok := md.roots.world(se.Target)
 			if !ok {
