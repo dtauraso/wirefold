@@ -49,6 +49,20 @@ func (md *MoveDispatch) registerNode9MirrorLocks(has func(string) bool) bool {
 	return true
 }
 
+// registerNode1MirrorLocks couples node 1's two chain-head children, node 9 and node
+// 10, via a bidirectional MIRROR (rotation) lock about node 1 — the same rotation
+// coupling node 9 gives its children 6 and 2, one level up. Dragging either of 9/10
+// makes the other share its θ about node 1's +y up-pole and take the opposite-sign φ,
+// so the pair rotates together about node 1.
+func (md *MoveDispatch) registerNode1MirrorLocks(has func(string) bool) bool {
+	if !(has("1") && has("9") && has("10")) {
+		return false
+	}
+	md.addMirrorLock("1", "9", "10")
+	md.addMirrorLock("1", "10", "9")
+	return true
+}
+
 // registerBisector11Locks constrains node 11 (the WindowAndInhibitLeftGate, the mid)
 // to the perpendicular-bisector plane of its two feeders, node 10 and node 6, so the
 // incoming branch radii stay equal (|10→11| == |6→11|). Node 10 and node 6 are FREE;

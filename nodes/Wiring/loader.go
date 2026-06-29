@@ -367,6 +367,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		md.registerBisector5Locks(has)   // node 5 stays equidistant from feeders 6 and 7
 		md.registerNode9MirrorLocks(has) // node 9 mirrors its children 2 and 6
 		md.registerBisector11Locks(has)  // node 11 stays equidistant from feeders 10 and 6
+		md.registerNode1MirrorLocks(has) // node 1 mirrors its children 9 and 10 (rotation)
 
 		// Install the aimed-port registry built once above (the single source of truth
 		// shared with the initial edge geometry) for drag-time aiming.
