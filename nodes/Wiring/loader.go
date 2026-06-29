@@ -340,9 +340,18 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
 
 	// The lock system and the central polar position store have been removed. Node
-	// positions live in the movers' held geometry (geom.Center); the double-link locks
-	// will be reintroduced here later. Install the aimed-port registry (built above) so
-	// edges still render aimed at their connected node during a drag.
+	// positions live in the movers' held geometry (geom.Center). Declare the double-link
+	// movement graph (links.go); polar locks ride on it in a later step.
+	{
+		loaded := map[string]bool{}
+		for _, n := range spec.Nodes {
+			loaded[n.ID] = true
+		}
+		md.registerMovementLinks(func(id string) bool { return loaded[id] })
+	}
+
+	// Install the aimed-port registry (built above) so edges still render aimed at their
+	// connected node during a drag.
 	if aimedPorts != nil {
 		md.installAimedPorts(aimedPorts)
 	}

@@ -337,6 +337,9 @@ type MoveDispatch struct {
 	// started is set by Start; the synchronous façade uses the goroutine path when
 	// true and direct handler calls otherwise (unit tests that never Start).
 	started bool
+	// links is the double-link movement graph (links.go). Polar locks ride on these;
+	// the graph is declared at load and is independent of the displayed data edges.
+	links []movementLink
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
