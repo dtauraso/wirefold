@@ -67,6 +67,9 @@ export type ViewerState = {
   selSpherePolesVisible?: boolean;
   // handholdsVisible: whether the rotation-handhold grab spheres are shown. undefined = shown (default true).
   handholdsVisible?: boolean;
+  // doubleLinksVisible: whether the double-link overlay is shown. undefined = hidden (default false).
+  // Go-owned; persisted so guide-vis push can restore it on reload.
+  doubleLinksVisible?: boolean;
   // overlaysActive: whether the master overlays toggle is on. undefined = active (default true).
   // Go-owned; persisted so guide-vis push can restore it on reload.
   overlaysActive?: boolean;
@@ -86,7 +89,7 @@ function assignStrArr(out: ViewerState, raw: Record<string, unknown>, key: keyof
 // Default = true (visible/active); only persist when false.
 export const VISIBLE_SENSE_SCENE_KEYS = [
   "sceneToriVisible", "scenePolesVisible", "nodePolesVisible",
-  "angleLabelsVisible", "selSpherePolesVisible", "handholdsVisible", "overlaysActive",
+  "angleLabelsVisible", "selSpherePolesVisible", "handholdsVisible", "doubleLinksVisible", "overlaysActive",
 ] as const satisfies readonly (keyof ViewerState)[];
 
 // Keys that use the if-present-assign-else-delete merge pattern in mergeSceneIntoViewerState.
@@ -179,7 +182,7 @@ export function serializeViewerState(s: ViewerState): string {
 }
 
 // Scene-only fields (camera, camera3d, cameraPolar, labelsGlobalHidden, guideline visibilities) — for topology.scene.json.
-export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "overlaysActive">;
+export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "doubleLinksVisible" | "overlaysActive">;
 
 export function serializeSceneState(s: ViewerState): string {
   const scene: SceneState = {};

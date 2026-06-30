@@ -57,6 +57,7 @@ type OverlayKind =
   | "angle-labels"
   | "sel-sphere-poles"
   | "handholds"
+  | "double-links"
   | "overlays-vis"
   | "labels-global"
   | "badges-global";
@@ -78,6 +79,7 @@ function getOverlayEntry(kind: OverlayKind): OverlayEntry {
     "angle-labels":     { setter: cs.setAngleLabelsVisible,    field: "angleLabelsVisible",    inverted: false, hasPostLog: true  },
     "sel-sphere-poles": { setter: cs.setSelSpherePolesVisible, field: "selSpherePolesVisible", inverted: false, hasPostLog: true  },
     "handholds":        { setter: cs.setHandholdsVisible,      field: "handholdsVisible",      inverted: false, hasPostLog: true  },
+    "double-links":     { setter: cs.setDoubleLinksVisible,    field: "doubleLinksVisible",    inverted: false, hasPostLog: true  },
     "overlays-vis":     { setter: cs.setOverlaysVisible,       field: "overlaysActive",        inverted: false, hasPostLog: true  },
     "labels-global":    { setter: cs.setLabelsGlobalHidden,    field: "labelsGlobalHidden",    inverted: true,  hasPostLog: false },
     "badges-global":    { setter: cs.setBadgesHidden,          field: "badgesHidden",          inverted: true,  hasPostLog: false },
@@ -291,7 +293,7 @@ export function handleTraceEvent(event: TraceEvent): void {
     }
     case "double-links": {
       const e = event as Extract<TraceEvent, { kind: "double-links" }>;
-      useCameraStore.getState().setDoubleLinksVisible(e.visible);
+      applyOverlay("double-links", e.visible);
       return;
     }
     default:

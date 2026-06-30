@@ -874,13 +874,14 @@ func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace) {
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
 // push so settings survive a Go respawn on window reload) and emits each so the renderer
 // reflects them. Set-to-value, unlike the flip-style Toggle* methods.
-func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds, labelsGlobal, badgesGlobal, overlays bool, tr *T.Trace) {
+func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds, doubleLinks, labelsGlobal, badgesGlobal, overlays bool, tr *T.Trace) {
 	md.sceneToriVisible = tori
 	md.scenePolesVisible = scenePoles
 	md.nodePolesVisible = nodePoles
 	md.angleLabelsVisible = angleLabels
 	md.selSpherePolesVisible = selSpherePoles
 	md.handholdsVisible = handholds
+	md.doubleLinksVisible = doubleLinks
 	md.labelsGlobalVisible = labelsGlobal
 	md.badgesGlobalVisible = badgesGlobal
 	md.overlaysVisible = overlays
@@ -890,6 +891,7 @@ func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLab
 	md.EmitAngleLabels(tr)
 	md.EmitSelSpherePoles(tr)
 	md.EmitHandholds(tr)
+	md.EmitDoubleLinks(tr)
 	md.EmitLabelsGlobal(tr)
 	md.EmitBadgesGlobal(tr)
 	md.EmitOverlaysVis(tr)
