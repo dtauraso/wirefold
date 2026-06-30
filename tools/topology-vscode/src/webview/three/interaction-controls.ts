@@ -220,11 +220,15 @@ export function useInteractionControls(
     [incidentEdgeIds],
   );
 
-  const schedulePortAnchor = useCallback(
+  const _rafPortAnchor = useRef(
     makeRafThrottle(pendingAnchor, anchorRafPending,
       (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) =>
         flushPortAnchor(p)),
-    [pendingAnchor, anchorRafPending, flushPortAnchor],
+  ).current;
+  const schedulePortAnchor = useCallback(
+    (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) =>
+      _rafPortAnchor(p),
+    [],
   );
 
 
