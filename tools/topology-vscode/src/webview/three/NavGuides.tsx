@@ -81,8 +81,8 @@ const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
 // ────────────────────────────────────────────────────────────────────────────
 
 // User-chosen single circle per region (1 per θ/φ). Each: sign pair, its number, color.
-// θ +x+y (#1 white / #2 orange) is intentionally unspecified for now — omitted.
 const THETA_CIRCLES: { sx: number; sy: number; n: number; c: string }[] = [
+  { sx: 1, sy: 1, n: 2, c: "#ff8c00" },
   { sx: 1, sy: -1, n: 4, c: "#9370db" },
   { sx: -1, sy: 1, n: 6, c: "#9acd32" },
   { sx: -1, sy: -1, n: 8, c: "#cd853f" },
