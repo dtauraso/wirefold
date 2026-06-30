@@ -1,10 +1,9 @@
 // polar.ts — polar/spherical primitives for navigation geometry.
 //
 // The model is POLAR: a direction on the sphere is an angle pair, not an (x,y,z) vector, and
-// operations are angle arithmetic. Cartesian is quarantined to two edge helpers — makeFrame
-// (builds the reference axes once) and toWorld (converts an angle pair to a world point for
-// rendering). Navigation logic imports only this file, so there is no cross product or world
-// vector in reach to "sneak in" — and no cross-product degeneracy (θ+90° is always defined).
+// operations are angle arithmetic. Cartesian is quarantined to cameraFrame/toWorld/planeSlide
+// (edge helpers). Navigation logic imports only this file, so there is no cross product or world
+// vector in reach to "sneak in" — and no cross-product degeneracy.
 
 import * as THREE from "three";
 
@@ -37,19 +36,8 @@ export function cameraFrame(camQuat: THREE.Quaternion, center: THREE.Vector3, ra
   return { center, radius, pole, refX, refY };
 }
 
-/** Build the frame from a center, radius and pole direction. The single contained cross
- *  product picks equatorial axes; it can't degenerate because the seed is chosen non-parallel
- *  to the pole. Logic above never sees it. */
-export function makeFrame(center: THREE.Vector3, radius: number, pole: THREE.Vector3): PolarFrame {
-  const p = pole.clone().normalize();
-  const seed = Math.abs(p.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-  const refX = new THREE.Vector3().crossVectors(seed, p).normalize();
-  const refY = new THREE.Vector3().crossVectors(p, refX).normalize();
-  return { center, radius, pole: p, refX, refY };
-}
-
 /** The equatorial unit direction at azimuth θ (cos θ·refX + sin θ·refY). A pure angle → axis.
- *  Internal to the toolkit (used by toWorld / arcAxisAngle). */
+ *  Internal to the toolkit (used by toWorld). */
 function equatorDir(f: PolarFrame, theta: number): THREE.Vector3 {
   return f.refX.clone().multiplyScalar(Math.cos(theta)).add(f.refY.clone().multiplyScalar(Math.sin(theta)));
 }
@@ -92,60 +80,6 @@ export function screenToPolar(dxFromCenter: number, dyFromCenter: number, scale:
   };
 }
 
-const _ORIGIN = new THREE.Vector3(0, 0, 0);
-
-/** The rotation carrying unit direction `from` to unit direction `to`, as an AXIS + arc ANGLE,
- *  with the axis from θ+90° — NO cross of the two points. Build a frame poled at `from`; `to`
- *  sits at azimuth θc and arc φc. The great-circle axis is the equatorial direction at θc+90°
- *  (perpendicular to the from→to arc — pure angle arithmetic), and the rotation angle is φc.
- *  The only Cartesian is the makeFrame/fromWorld edges that define the frame.
- *  Sign: θc+π/2 (not θc-π/2) — verified by Rodrigues: axis×from = equatorDir(θc) so
- *  rotateAboutAxis(from,axis,φc) = from·cos(φc)+equatorDir(θc)·sin(φc) = to. ✓ */
-export function arcAxisAngle(from: THREE.Vector3, to: THREE.Vector3): { axis: THREE.Vector3; angle: number } {
-  const f = makeFrame(_ORIGIN.clone(), 1, from);
-  const p = fromWorld(f, to);                          // (θc, φc) of `to` about `from`
-  const axis = equatorDir(f, p.theta + Math.PI / 2);   // θ+90°: axis ⟂ the from→to arc
-  return { axis, angle: p.phi };
-}
-
-/** The signed rotation about a FIXED `axis` that carries unit direction `from` to `to`,
- *  measured as the azimuth difference in a frame poled at the axis (θ_to − θ_from), wrapped
- *  to (−π, π]. This is the locked-disk quantity: the disk normal is `axis`, and the result is
- *  how far to spin about it so `from`'s in-plane bearing reaches `to`'s — pure angle arithmetic
- *  (the only Cartesian is the makeFrame/fromWorld edges). Used by handhold-constrained rotation
- *  where the axis is frozen at gesture start and only the angle tracks the cursor. */
-export function angleAboutAxis(from: THREE.Vector3, to: THREE.Vector3, axis: THREE.Vector3): number {
-  const f = makeFrame(_ORIGIN.clone(), 1, axis);
-  const a = fromWorld(f, from);
-  const b = fromWorld(f, to);
-  let d = b.theta - a.theta;
-  if (d > Math.PI) d -= 2 * Math.PI;
-  if (d < -Math.PI) d += 2 * Math.PI;
-  return d;
-}
-
-/** Rotate a unit direction `v` about a unit `axis` by `angle` radians — the rotation IS
- *  `θ += angle` in a frame poled at the axis. No quaternion, no Rodrigues. A point on the axis
- *  (φ≈0) is unmoved because the θ term is scaled by sin(φ)→0 — harmless. */
-export function rotateAboutAxis(v: THREE.Vector3, axis: THREE.Vector3, angle: number): THREE.Vector3 {
-  const f = makeFrame(_ORIGIN.clone(), 1, axis);
-  const p = fromWorld(f, v);
-  return toWorld(f, { theta: p.theta + angle, phi: p.phi });
-}
-
-/** Radial edge of the polar toolkit: move `point` to a new polar radius `r` about `center`,
- *  holding its angular direction. `r` (current) and `rNew` (floored at `minDist`) are explicit
- *  named coordinates — this is the zoom/dolly operation as pure radius. Direction is preserved
- *  WITHOUT decomposing to (θ, φ), so it has no pole singularity (a fromWorld→toWorld round-trip
- *  WOULD add one, since θ is undefined along the pole). The contained Cartesian is quarantined
- *  here like makeFrame/toWorld. Returns the new world position. */
-export function scaleRadius(center: THREE.Vector3, point: THREE.Vector3, factor: number, minDist: number): THREE.Vector3 {
-  const r = point.distanceTo(center); // explicit polar radius
-  if (!Number.isFinite(r) || r < 1e-9 || !Number.isFinite(factor)) return point.clone();
-  const rNew = Math.max(r * factor, minDist); // explicit new radius, floored
-  return center.clone().add(point.clone().sub(center).multiplyScalar(rNew / r));
-}
-
 /** Output edge for PAN: a polar in-screen-plane slide (r, angle) → a world translation along the
  *  camera's right/up basis, scaled by worldPerPixel. The basis is taken from the camera quaternion
  *  here (the only Cartesian, quarantined like cameraFrame's), so the handler passes pure polar
@@ -156,4 +90,33 @@ export function planeSlide(camQuat: THREE.Quaternion, r: number, angle: number, 
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camQuat);
   return right.multiplyScalar(r * Math.cos(angle) * worldPerPixel)
     .add(up.multiplyScalar(r * Math.sin(angle) * worldPerPixel));
+}
+
+// ---------------------------------------------------------------------------
+// World-direction → Go-convention polar angles
+// ---------------------------------------------------------------------------
+
+/** A canonical PolarFrame for the Go/world-Y-pole convention:
+ *  pole = +y, refX = +x, refY = +z.
+ *  theta (first return) = colatitude from +y (0 = north, π/2 = equator, π = south)
+ *  phi   (second return) = azimuth in the x-z plane, 0 at +x */
+export const Y_POLE_FRAME: PolarFrame = {
+  center: new THREE.Vector3(0, 0, 0),
+  radius: 1,
+  pole: new THREE.Vector3(0, 1, 0),
+  refX: new THREE.Vector3(1, 0, 0),
+  refY: new THREE.Vector3(0, 0, 1),
+};
+
+/** Convert a world direction (need not be unit length) to [theta, phi] using the
+ *  frame's pole/refX/refY.  This is the SINGLE authoritative world-dir→angles
+ *  conversion used by viewpoint-bridge and NavGuides.
+ *    theta = acos(d·pole)           — colatitude from pole (0…π)
+ *    phi   = atan2(d·refY, d·refX) — azimuth around pole  (-π…π)
+ *  Pass Y_POLE_FRAME for the Go/world-Y convention. */
+export function worldDirToFrameAngles(v: THREE.Vector3, f: PolarFrame): [number, number] {
+  const d = v.clone().normalize();
+  const theta = Math.acos(THREE.MathUtils.clamp(d.dot(f.pole), -1, 1));
+  const phi = Math.atan2(d.dot(f.refY), d.dot(f.refX));
+  return [theta, phi];
 }

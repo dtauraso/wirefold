@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -163,15 +162,6 @@ var (
 	tNowFunc            = reflect.TypeFor[func() time.Duration]()
 )
 
-// lowerFirst returns s with its first byte lowercased.
-// Used for wire:"data.state" key derivation (field Held → key "held").
-func lowerFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToLower(s[:1]) + s[1:]
-}
-
 // reflectStateKeys returns the data.state map keys required by sample's
 // wire:"data.state" struct tags.
 func reflectStateKeys(sample any) []string {
@@ -189,11 +179,27 @@ func reflectStateKeys(sample any) []string {
 // reflectPorts walks the exported fields of the struct pointed to by sample
 // and returns a PortSpec for each channel field that carries int.
 // Chan-of-chan fields and non-channel fields are silently skipped.
+// Anonymous (embedded) struct fields are recursed so port fields promoted
+// from an embedded struct (e.g. gatecommon.GateNode) are discovered.
 func reflectPorts(sample any) []PortSpec {
 	t := reflect.TypeOf(sample).Elem()
+	return collectPorts(t)
+}
+
+func collectPorts(t reflect.Type) []PortSpec {
 	var ports []PortSpec
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
+		if f.Anonymous {
+			ft := f.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				ports = append(ports, collectPorts(ft)...)
+			}
+			continue
+		}
 		switch f.Type {
 		case tInPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn, Required: true})
@@ -363,22 +369,18 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		const dataPrefix = "data."
 		const stateTag = "data.state"
 		if tag == stateTag {
-			// key is field name with first letter lowercased
+			// key is field name with first letter lowercased.
+			// validateSpec (Check 5) already verified data.State != nil and the key
+			// is present before LoadTopology calls reflectBuild, so no error check needed.
 			key := lowerFirst(f.Name)
-			if data.State == nil {
-				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
-			}
-			val, ok := data.State[key]
-			if !ok {
-				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
-			}
+			val := data.State[key]
 			fv.Set(reflect.ValueOf(val))
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
 			key := tag[len(dataPrefix):]
 			if len(key) == 0 {
 				continue
 			}
-			exportedKey := strings.ToUpper(key[:1]) + key[1:]
+			exportedKey := exportedFieldName(key)
 			src := reflect.ValueOf(data).Elem().FieldByName(exportedKey)
 			if !src.IsValid() || src.Type() != fv.Type() {
 				continue

@@ -25,6 +25,10 @@ export interface ThreeStoreState {
   selectedId: string | null;
   // Incremented each time content is (re)loaded; used to trigger camera re-fit.
   loadEpoch: number;
+  // Non-null when the last load() call threw (parse failure). Cleared on the next
+  // successful load. Surfaced as a user-visible overlay so a blank diagram is
+  // diagnosable without opening .probe/ts-errors.jsonl.
+  loadError: string | null;
 
   // --- Fade state ---
   directlyFadedNodes: Set<string>;
@@ -44,8 +48,6 @@ export interface ThreeStoreState {
     targetId: string,
     targetHandle: string | null,
   ) => string | null;
-  moveNode: (id: string, x: number, y: number) => void;
-  saveSpec: () => void;
   /** Toggle fade on a node or edge. Recomputes fixpoint and emits updated faded-edge set to host. */
   toggleFade: (target: { kind: "node" | "edge"; id: string }) => void;
   /** Remove an edge by id from the spec and persist. */
@@ -61,6 +63,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   edges: [],
   selectedId: null,
   loadEpoch: 0,
+  loadError: null,
   directlyFadedNodes: new Set<string>(),
   directlyFadedEdges: new Set<string>(),
   fadeEdgeOrder: [],
@@ -98,6 +101,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         nodes,
         edges,
         loadEpoch: get().loadEpoch + 1,
+        loadError: null,
         directlyFadedNodes: restoredFadedNodes,
         directlyFadedEdges: restoredFadedEdges,
         fadeEdgeOrder,
@@ -113,10 +117,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       // silent parse failure (blank diagram, no store:load) is observable.
       // "load-error" must stay in ERROR_LABELS (extension/webview-log.ts).
       const e = err as { message?: string; stack?: string };
+      const message = e?.message ?? String(err);
       postLog("load-error", {
-        message: e?.message ?? String(err),
+        message,
         stack: e?.stack ?? null,
       });
+      set({ loadError: message });
     }
   },
 
@@ -182,25 +188,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     useEdgeGeometryStore.getState().removeEdgeSegment(id);
   },
 
-  moveNode(id, x, y) {
-    const { nodes } = get();
-    const nextNodes = nodes.map((n) =>
-      n.id === id ? { ...n, position: { x, y } } : n,
-    );
-    set({ nodes: nextNodes });
-
-    // Phase 3: TS computes NO geometry. Updating the node position here only moves
-    // the node/port SPHERES + labels. The wire-tube curve is Go-authoritative: the
-    // node-move IPC (sent from interaction-controls) drives Go to re-derive every
-    // affected edge's control points and STREAM them back (geometry trace), and the
-    // in-flight bead's remaining travel re-derives on Go's one clock. SingleEdgeTube
-    // redraws the tube from that stream — no TS curve build, no per-bead patch.
-  },
-
-  saveSpec() {
-    /* no-op: Go persists topology from edit ops */
-  },
-
   toggleFade(target) {
     const { nodes, edges, directlyFadedNodes, directlyFadedEdges, fadeEdgeOrder } = get();
     const result = computeToggleFade(
@@ -236,6 +223,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     for (const e of edges) {
       edgeFadeMap[e.id] = result.fadedEdges.has(e.id);
     }
-    vscode.postMessage({ type: "edit", op: "fade", edges: edgeFadeMap });
+    vscode.postMessage({ type: "edit", op: "update", kind: "edge", attr: "faded", edges: edgeFadeMap });
   },
 }));

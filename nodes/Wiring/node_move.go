@@ -31,6 +31,7 @@ package Wiring
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -44,7 +45,16 @@ const (
 	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
+	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
 )
+
+// centerSnap is an immutable snapshot of a node's position published by the nodeMover
+// via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
+// the current center without touching the mover's live geom.
+type centerSnap struct {
+	c     vec3
+	reach float64
+}
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
@@ -110,10 +120,21 @@ type nodeMover struct {
 	aimed    AimedPortRegistry
 	// centerOf returns the current center for a node id — used only when aimed != nil.
 	centerOf func(string) (vec3, bool)
+	// snap is an atomically-published immutable snapshot of this node's current
+	// center+reachR. Written only by the mover's own goroutine after every center
+	// update; read by any goroutine (stdin reader) to observe the current position
+	// without crossing into the mover's live geom.
+	snap atomic.Pointer[centerSnap]
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
-	return &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	// Seed the atomic snapshot from the initial geometry so readers have a
+	// valid center before the first center message arrives.
+	if geom.Center != nil {
+		nm.snap.Store(&centerSnap{c: *geom.Center, reach: geom.ReachR})
+	}
+	return nm
 }
 
 // handle applies one move to this node: update held position, re-emit node-geometry.
@@ -137,6 +158,20 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// re-emit node-geometry.
 		m.geom.Center = msg.Center
 		m.geom.ReachR = msg.ReachR
+		// Publish the new center atomically so readers on other goroutines
+		// (stdin reader: centerOfNode, nodeCenter, heldCenters, fanCenters)
+		// observe it without touching our live geom.
+		if msg.Center != nil {
+			m.snap.Store(&centerSnap{c: *msg.Center, reach: msg.ReachR})
+		}
+		if m.tr != nil {
+			m.emitGeometry()
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindResend {
+		// Re-emit this node's geometry on our own goroutine — the inbox-routed
+		// path used by ResendGeometry when movers are running.
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -274,9 +309,29 @@ func (m *edgeMover) handle(msg moveMsg) {
 		}
 		return
 	}
+	if msg.Kind == moveMsgKindResend {
+		// Re-emit this edge's segment on our own goroutine — the inbox-routed
+		// path used by ResendGeometry when movers are running.
+		m.emitGeometry()
+		return
+	}
 	// Plain "move" messages have no effect under the polar layout;
 	// position updates arrive as "center" messages instead.
 	_ = msg
+}
+
+// emitGeometry re-emits this edge's segment from its held endpoint geoms without
+// touching the source Out, revising in-flight beads, or updating latency aggregates.
+// Used by the inbox-routed resend path (ResendGeometry when movers are running) so
+// the emit happens on the edge's own goroutine without races on held geom.
+func (m *edgeMover) emitGeometry() {
+	if m.tr == nil {
+		return
+	}
+	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf)
+	m.tr.Geometry(m.edgeID,
+		seg.Start.X, seg.Start.Y, seg.Start.Z,
+		seg.End.X, seg.End.Y, seg.End.Z)
 }
 
 // recomputeGeometry re-derives this edge's segment/arc/latency from its held endpoint
@@ -326,35 +381,10 @@ func (m *edgeMover) run(ctx context.Context) {
 	}
 }
 
-// MoveDispatch is the pure key→inbox dispatch registry built at load. Keys are BOTH
-// node ids AND edge ids; the stdin reader mail-sorts each move entry to channels[key].
-// It also retains the per-edge source Outs so out-of-package test/verifier callers can
-// read an edge's loaded geometry (EdgeOut) without going through a central coordinator.
-type MoveDispatch struct {
-	dispatch   map[string]chan moveMsg
-	nodeMovers map[string]*nodeMover
-	edgeMovers map[string]*edgeMover
-	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
-	edgeOut map[string]*Out
-	// started is set by Start; the synchronous façade uses the goroutine path when
-	// true and direct handler calls otherwise (unit tests that never Start).
-	started bool
-	// links is the double-link movement graph (links.go). Polar locks ride on these;
-	// the graph is declared at load and is independent of the displayed data edges.
-	links []movementLink
-	// mirrorLocks are polar mirror locks rebuilt on the link graph (locks.go).
-	mirrorLocks []mirrorLock
-	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
-	// direction should dynamically point toward their connected node's current center.
-	// nil when no aimed ports are registered.
-	AimedPorts AimedPortRegistry
-	// vp is the polar camera viewpoint state. Mutated by SetViewpoint/OrbitViewpoint/
-	// ZoomViewpoint/PanViewpoint; emitted via EmitViewpoint. Owned entirely by
-	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
-	// runs in a single goroutine).
-	vp viewpoint
-	// tr is the trace sink (retained for trace emission; diagnostic breadcrumbs removed).
-	tr *T.Trace
+// overlayVisibility groups the 10 per-toggle visibility booleans so MoveDispatch
+// keeps its overlay state in one named slot. The zero value has all bools false;
+// newMoveDispatch initializes it with 9 true defaults (doubleLinksVisible stays false).
+type overlayVisibility struct {
 	// sceneToriVisible is the current polar-guide tori visibility. true by default
 	// (tori shown on startup). Toggled by ToggleSceneTori; emitted via EmitSceneTori.
 	sceneToriVisible bool
@@ -387,6 +417,40 @@ type MoveDispatch struct {
 	doubleLinksVisible bool
 }
 
+// MoveDispatch is the pure key→inbox dispatch registry built at load. Keys are BOTH
+// node ids AND edge ids; the stdin reader mail-sorts each move entry to channels[key].
+// It also retains the per-edge source Outs so out-of-package test/verifier callers can
+// read an edge's loaded geometry (EdgeOut) without going through a central coordinator.
+type MoveDispatch struct {
+	dispatch   map[string]chan moveMsg
+	nodeMovers map[string]*nodeMover
+	edgeMovers map[string]*edgeMover
+	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
+	edgeOut map[string]*Out
+	// started is set by Start; the synchronous façade uses the goroutine path when
+	// true and direct handler calls otherwise (unit tests that never Start).
+	started bool
+	// links is the double-link movement graph (links.go). Polar locks ride on these;
+	// the graph is declared at load and is independent of the displayed data edges.
+	links []movementLink
+	// mirrorLocks are polar mirror locks rebuilt on the link graph (locks.go).
+	mirrorLocks []mirrorLock
+	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
+	// direction should dynamically point toward their connected node's current center.
+	// nil when no aimed ports are registered.
+	AimedPorts AimedPortRegistry
+	// vp is the polar camera viewpoint state. Mutated by SetViewpoint/OrbitViewpoint/
+	// ZoomViewpoint/PanViewpoint; emitted via EmitViewpoint. Owned entirely by
+	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
+	// runs in a single goroutine).
+	vp viewpoint
+	// tr is the trace sink (retained for trace emission; diagnostic breadcrumbs removed).
+	tr *T.Trace
+	// ov groups the 10 overlay-toggle visibility booleans. Initialized to defaults
+	// by newMoveDispatch (9 true, doubleLinksVisible false).
+	ov overlayVisibility
+}
+
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
 // It creates one nodeMover per node and one edgeMover per edge, registering each in
 // the dispatch map under its key (node id / edge id). Outs and dest wires are bound
@@ -397,16 +461,18 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nodeMovers:       map[string]*nodeMover{},
 		edgeMovers:       map[string]*edgeMover{},
 		edgeOut:          map[string]*Out{},
-		tr:               tr,
-		sceneToriVisible:      true,
-		scenePolesVisible:     true,
-		nodePolesVisible:      true,
-		angleLabelsVisible:    true,
-		selSpherePolesVisible: true,
-		handholdsVisible:      true,
-		labelsGlobalVisible:   true,
-		badgesGlobalVisible:   true,
-		overlaysVisible:       true,
+		tr: tr,
+		ov: overlayVisibility{
+			sceneToriVisible:      true,
+			scenePolesVisible:     true,
+			nodePolesVisible:      true,
+			angleLabelsVisible:    true,
+			selSpherePolesVisible: true,
+			handholdsVisible:      true,
+			labelsGlobalVisible:   true,
+			badgesGlobalVisible:   true,
+			overlaysVisible:       true,
+		},
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -457,25 +523,56 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 // segment (tr.Geometry), recomputed from the edge's held endpoint geoms/handles. This
 // reproduces exactly what a fresh load streams on startup, so a freshly-(re)mounted
 // webview that lost its module-level edge-geometry store can rebuild it without
-// restarting Go. Safe to call repeatedly and while running: it only reads each mover's
-// held geom and emits — no inbox writes, no recompute side effects on Outs/wires.
+// restarting Go.
+//
+// When movers are running (md.started), each mover emits its own geometry on its own
+// goroutine via a synchronous moveMsgKindResend inbox message (ack-gated), removing
+// all cross-goroutine reads of mover geom. When movers are not started (test setup
+// that never calls Start), the direct read path is safe — no concurrent goroutines
+// own the geom yet.
 func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
 	if tr == nil {
 		return
 	}
-	centerOf := md.centerOfNode
-	for _, nm := range md.nodeMovers {
-		if nm.aimed != nil {
-			emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf)
-		} else {
-			emitNodeGeometry(tr, nm.id, nm.geom)
+	if !md.started {
+		// Movers not running — direct read is safe (no concurrent goroutines own geom).
+		centerOf := md.centerOfNode
+		for _, nm := range md.nodeMovers {
+			if nm.aimed != nil {
+				emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf)
+			} else {
+				emitNodeGeometry(tr, nm.id, nm.geom)
+			}
 		}
+		for _, em := range md.edgeMovers {
+			emCenterOf := centerOf
+			if em.centerOf != nil {
+				emCenterOf = em.centerOf
+			}
+			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, emCenterOf)
+			tr.Geometry(em.edgeID,
+				seg.Start.X, seg.Start.Y, seg.Start.Z,
+				seg.End.X, seg.End.Y, seg.End.Z)
+		}
+		return
+	}
+	// Movers running — route resend through each mover's inbox so the emit happens
+	// on the owning goroutine (no cross-goroutine geom reads). Collect all acks
+	// before returning so the caller observes a complete geometry stream.
+	total := len(md.nodeMovers) + len(md.edgeMovers)
+	acks := make([]chan struct{}, 0, total)
+	for _, nm := range md.nodeMovers {
+		ack := make(chan struct{})
+		nm.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}
+		acks = append(acks, ack)
 	}
 	for _, em := range md.edgeMovers {
-		seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, centerOf)
-		tr.Geometry(em.edgeID,
-			seg.Start.X, seg.Start.Y, seg.Start.Z,
-			seg.End.X, seg.End.Y, seg.End.Z)
+		ack := make(chan struct{})
+		em.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}
+		acks = append(acks, ack)
+	}
+	for _, ack := range acks {
+		<-ack
 	}
 }
 
@@ -486,16 +583,15 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
 }
 
-// centerOfNode returns the current world center for a node id, reading directly
-// from the holding nodeMover. Used as the centerOf closure for portDirAimed.
-// Safe to call from any goroutine that already serializes with the mover
-// (e.g. during a fanCenters dispatch where the mover hasn't yet received the
-// new center — that is fine: the slightly-stale aim is corrected by the
-// subsequent re-emit of the aimed node's own geometry once it processes its
-// center message).
+// centerOfNode returns the current world center for a node id by loading the
+// nodeMover's atomically-published snapshot. Safe to call from any goroutine
+// without synchronization — the snap is published via atomic.Pointer after each
+// center update so this never races with the mover's live geom writes.
 func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
-	if nm, ok := md.nodeMovers[id]; ok && nm.geom.Center != nil {
-		return *nm.geom.Center, true
+	if nm, ok := md.nodeMovers[id]; ok {
+		if s := nm.snap.Load(); s != nil {
+			return s.c, true
+		}
 	}
 	return vec3{}, false
 }
@@ -512,16 +608,40 @@ func (md *MoveDispatch) installAimedPorts(registry AimedPortRegistry) {
 	}
 	for _, em := range md.edgeMovers {
 		em.aimed = registry
-		em.centerOf = centerOf
+		// An edge owns BOTH its endpoint geoms and updates them synchronously on its
+		// own goroutine before recomputing (handle → recomputeGeometry). For aiming,
+		// read those held centers directly rather than the node mover's published
+		// snapshot: on an endpoint move the edge has the fresh center in hand, but the
+		// moved node's snapshot may not be published yet (the node and edge movers run
+		// concurrently with no happens-before between the node's snap-write and the
+		// edge's snap-read). Reading the snapshot produced an order-dependent stale
+		// center → degenerate aim → ring-anchor fallback. The held-geom read is the
+		// local source of truth and is race-free (same goroutine writes and reads it).
+		e := em
+		e.centerOf = func(id string) (vec3, bool) {
+			switch id {
+			case e.srcID:
+				if e.srcGeom.Center != nil {
+					return *e.srcGeom.Center, true
+				}
+			case e.dstID:
+				if e.dstGeom.Center != nil {
+					return *e.dstGeom.Center, true
+				}
+			}
+			return centerOf(id)
+		}
 	}
 }
 
 // heldCenters / heldEdges snapshot the movers' current geometry.
+// heldCenters reads the atomically-published snap (not the live geom) so it is
+// safe to call from the stdin goroutine while mover goroutines write their centers.
 func (md *MoveDispatch) heldCenters() map[string]vec3 {
 	centers := make(map[string]vec3, len(md.nodeMovers))
 	for id, m := range md.nodeMovers {
-		if m.geom.Center != nil {
-			centers[id] = *m.geom.Center
+		if s := m.snap.Load(); s != nil {
+			centers[id] = s.c
 		}
 	}
 	return centers
@@ -593,15 +713,20 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 
 	// Send a center message to each aimer so it re-emits with the fresh aim.
 	// The aimer's own center hasn't changed — we preserve its current Center and
-	// ReachR so the nodeMover just re-emits its geometry with the updated aim dir.
+	// ReachR (read from the atomic snap, safe from the stdin goroutine) so the
+	// nodeMover just re-emits its geometry with the updated aim dir.
 	for id := range aimedReemit {
 		nm, exists := md.nodeMovers[id]
-		if !exists || nm.geom.Center == nil {
+		if !exists {
+			continue
+		}
+		s := nm.snap.Load()
+		if s == nil {
 			continue
 		}
 		if ch, ok := md.dispatch[id]; ok {
-			cc := *nm.geom.Center
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: nm.geom.ReachR}
+			cc := s.c
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: s.reach}
 		}
 	}
 }
@@ -655,7 +780,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 
 // reachRFromCenters computes each node's sphere REACH radius (max distance from a
 // node's center to any node it outputs to) under the given centers and edge set.
-// Mirrors loader.go buildFromSpec; used by RootMove so the fanned "center" message
+// Called by loader.go buildFromSpec and by RootMove so the fanned "center" message
 // carries the new reach radius and the ring stays sized during a drag.
 func reachRFromCenters(centers map[string]vec3, edges []sphereEdge) map[string]float64 {
 	reachR := map[string]float64{}
@@ -682,17 +807,6 @@ func (md *MoveDispatch) NodeKind(nodeID string) string {
 	return ""
 }
 
-// SetOrigin re-bases the polar frame to newOrigin (camera pan focus), preserving
-// every node's world position. It does NOT re-emit node-geometry: reOrigin leaves
-// each mover's world Center unchanged, so the renderer already holds correct
-// positions — re-emitting identical geometry is pure churn that thrashes the editor
-// and jitters camera-derived geometry. tr is unused (kept for call-site stability).
-// Call from the stdin reader on op=="set-origin".
-func (md *MoveDispatch) SetOrigin(o vec3, _ *T.Trace) {
-	// No-op: the polar frame origin lived in the deleted position store. Node positions
-	// are the movers' world Centers, which a re-origin never changed anyway.
-	_ = o
-}
 
 // SetViewpoint installs a known camera state without emitting. Used by the "set"
 // viewpoint op to seed the viewpoint from persisted or initial values, followed by
@@ -754,137 +868,137 @@ func (md *MoveDispatch) setFlag(field *bool, emit func(bool)) {
 // ToggleSceneTori flips the polar-guide tori visibility and emits a scene-tori event.
 // Called from applyEdit on op="tori-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace) {
-	md.setFlag(&md.sceneToriVisible, tr.SceneTori)
+	md.setFlag(&md.ov.sceneToriVisible, tr.SceneTori)
 }
 
 // EmitSceneTori emits the current tori visibility without toggling it. Use this on
 // startup or geometry-resend to seed the renderer's initial state.
 func (md *MoveDispatch) EmitSceneTori(tr *T.Trace) {
-	tr.SceneTori(md.sceneToriVisible)
+	tr.SceneTori(md.ov.sceneToriVisible)
 }
 
 // ToggleScenePoles flips the scene-center pole frame visibility and emits a scene-poles event.
 // Called from applyEdit on op="scene-poles"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace) {
-	md.scenePolesVisible = !md.scenePolesVisible
-	tr.Breadcrumb("pole-toggle-go", "scene", "", fmt.Sprintf("visible=%v", md.scenePolesVisible))
-	tr.ScenePoles(md.scenePolesVisible)
+	md.ov.scenePolesVisible = !md.ov.scenePolesVisible
+	tr.Breadcrumb("pole-toggle-go", "scene", "", fmt.Sprintf("visible=%v", md.ov.scenePolesVisible))
+	tr.ScenePoles(md.ov.scenePolesVisible)
 }
 
 // EmitScenePoles emits the current scene pole frame visibility without toggling it.
 func (md *MoveDispatch) EmitScenePoles(tr *T.Trace) {
-	tr.ScenePoles(md.scenePolesVisible)
+	tr.ScenePoles(md.ov.scenePolesVisible)
 }
 
 // ToggleNodePoles flips the per-node pole frame visibility and emits a node-poles event.
 // Called from applyEdit on op="node-poles"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace) {
-	md.nodePolesVisible = !md.nodePolesVisible
-	tr.Breadcrumb("pole-toggle-go", "nodes", "", fmt.Sprintf("visible=%v", md.nodePolesVisible))
-	tr.NodePoles(md.nodePolesVisible)
+	md.ov.nodePolesVisible = !md.ov.nodePolesVisible
+	tr.Breadcrumb("pole-toggle-go", "nodes", "", fmt.Sprintf("visible=%v", md.ov.nodePolesVisible))
+	tr.NodePoles(md.ov.nodePolesVisible)
 }
 
 // EmitNodePoles emits the current per-node pole frame visibility without toggling it.
 func (md *MoveDispatch) EmitNodePoles(tr *T.Trace) {
-	tr.NodePoles(md.nodePolesVisible)
+	tr.NodePoles(md.ov.nodePolesVisible)
 }
 
 // ToggleAngleLabels flips the θ/φ angle arc+label visibility and emits an angle-labels event.
 // Called from applyEdit on op="angle-labels"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace) {
-	md.setFlag(&md.angleLabelsVisible, tr.AngleLabels)
+	md.setFlag(&md.ov.angleLabelsVisible, tr.AngleLabels)
 }
 
 // EmitAngleLabels emits the current angle arc+label visibility without toggling it.
 func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace) {
-	tr.AngleLabels(md.angleLabelsVisible)
+	tr.AngleLabels(md.ov.angleLabelsVisible)
 }
 
 // AngleLabels returns the current angle arc+label visibility.
 func (md *MoveDispatch) AngleLabels() bool {
-	return md.angleLabelsVisible
+	return md.ov.angleLabelsVisible
 }
 
 // ToggleSelSpherePoles flips the selection-sphere pole axis visibility and emits a sel-sphere-poles event.
 // Called from applyEdit on op="sel-sphere-poles"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) {
-	md.setFlag(&md.selSpherePolesVisible, tr.SelSpherePoles)
+	md.setFlag(&md.ov.selSpherePolesVisible, tr.SelSpherePoles)
 }
 
 // EmitSelSpherePoles emits the current selection-sphere pole axis visibility without toggling it.
 func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace) {
-	tr.SelSpherePoles(md.selSpherePolesVisible)
+	tr.SelSpherePoles(md.ov.selSpherePolesVisible)
 }
 
 // ToggleHandholds flips the rotation-handhold grab-sphere visibility and emits a handholds event.
 // Called from applyEdit on op="handholds-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleHandholds(tr *T.Trace) {
-	md.setFlag(&md.handholdsVisible, tr.Handholds)
+	md.setFlag(&md.ov.handholdsVisible, tr.Handholds)
 }
 
 // EmitHandholds emits the current handhold visibility without toggling it.
 func (md *MoveDispatch) EmitHandholds(tr *T.Trace) {
-	tr.Handholds(md.handholdsVisible)
+	tr.Handholds(md.ov.handholdsVisible)
 }
 
 // ToggleLabelsGlobal flips the global node-label visibility and emits a labels-global event.
 // Called from applyEdit on op="labels-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace) {
-	md.setFlag(&md.labelsGlobalVisible, tr.LabelsGlobal)
+	md.setFlag(&md.ov.labelsGlobalVisible, tr.LabelsGlobal)
 }
 
 // EmitLabelsGlobal emits the current global label visibility without toggling it.
 func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace) {
-	tr.LabelsGlobal(md.labelsGlobalVisible)
+	tr.LabelsGlobal(md.ov.labelsGlobalVisible)
 }
 
 // ToggleBadgesGlobal flips the global occlusion-badge visibility and emits a badges-global event.
 // Called from applyEdit on op="badges-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace) {
-	md.setFlag(&md.badgesGlobalVisible, tr.BadgesGlobal)
+	md.setFlag(&md.ov.badgesGlobalVisible, tr.BadgesGlobal)
 }
 
 // EmitBadgesGlobal emits the current global badge visibility without toggling it.
 func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace) {
-	tr.BadgesGlobal(md.badgesGlobalVisible)
+	tr.BadgesGlobal(md.ov.badgesGlobalVisible)
 }
 
 // ToggleOverlaysVis flips the master overlays visibility and emits an overlays-vis event.
 // Called from applyEdit on op="overlays-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace) {
-	md.setFlag(&md.overlaysVisible, tr.OverlaysVis)
+	md.setFlag(&md.ov.overlaysVisible, tr.OverlaysVis)
 }
 
 // EmitOverlaysVis emits the current master overlays visibility without toggling it.
 func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace) {
-	tr.OverlaysVis(md.overlaysVisible)
+	tr.OverlaysVis(md.ov.overlaysVisible)
 }
 
 // ToggleDoubleLinks flips the double-link overlay visibility and emits a double-links event.
 // Called from applyEdit on op="double-links"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace) {
-	md.setFlag(&md.doubleLinksVisible, tr.DoubleLinks)
+	md.setFlag(&md.ov.doubleLinksVisible, tr.DoubleLinks)
 }
 
 // EmitDoubleLinks emits the current double-link overlay visibility without toggling it.
 func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace) {
-	tr.DoubleLinks(md.doubleLinksVisible)
+	tr.DoubleLinks(md.ov.doubleLinksVisible)
 }
 
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
 // push so settings survive a Go respawn on window reload) and emits each so the renderer
 // reflects them. Set-to-value, unlike the flip-style Toggle* methods.
 func (md *MoveDispatch) SetGuideVisibility(tori, scenePoles, nodePoles, angleLabels, selSpherePoles, handholds, doubleLinks, labelsGlobal, badgesGlobal, overlays bool, tr *T.Trace) {
-	md.sceneToriVisible = tori
-	md.scenePolesVisible = scenePoles
-	md.nodePolesVisible = nodePoles
-	md.angleLabelsVisible = angleLabels
-	md.selSpherePolesVisible = selSpherePoles
-	md.handholdsVisible = handholds
-	md.doubleLinksVisible = doubleLinks
-	md.labelsGlobalVisible = labelsGlobal
-	md.badgesGlobalVisible = badgesGlobal
-	md.overlaysVisible = overlays
+	md.ov.sceneToriVisible = tori
+	md.ov.scenePolesVisible = scenePoles
+	md.ov.nodePolesVisible = nodePoles
+	md.ov.angleLabelsVisible = angleLabels
+	md.ov.selSpherePolesVisible = selSpherePoles
+	md.ov.handholdsVisible = handholds
+	md.ov.doubleLinksVisible = doubleLinks
+	md.ov.labelsGlobalVisible = labelsGlobal
+	md.ov.badgesGlobalVisible = badgesGlobal
+	md.ov.overlaysVisible = overlays
 	md.EmitSceneTori(tr)
 	md.EmitScenePoles(tr)
 	md.EmitNodePoles(tr)

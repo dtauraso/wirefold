@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // noValue is the sentinel meaning "no value seen yet". Real values are
 // non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = -1
+const noValue = gatecommon.NoValue
 
 // occupiedPollInterval is the park duration between output-occupied checks to
 // avoid a busy-spin while waiting for the output wire to clear.
@@ -22,12 +23,6 @@ type Node struct {
 	Held                       int `wire:"data.state"`
 	FromPrevHoldNewSendOldNode *Wiring.In
 	ToNext                     Wiring.OutMulti
-}
-
-func (in *Node) tryEmitGeometry() {
-	if in.EmitGeometry != nil {
-		in.EmitGeometry()
-	}
 }
 
 // placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving
@@ -45,7 +40,7 @@ func placeHeld(outs Wiring.OutMulti, held int, items []Wiring.DriveItem) []Wirin
 }
 
 func (in *Node) Update(ctx context.Context) {
-	in.tryEmitGeometry()
+	Wiring.TryEmit(in.EmitGeometry)
 
 	// -1 is the sentinel meaning "no value seen yet"; real values are non-negative
 	// indices, so noValue never collides with a legitimate Init index.
@@ -75,13 +70,19 @@ func (in *Node) Update(ctx context.Context) {
 			}
 		}
 		if anyOccupied {
-			time.Sleep(occupiedPollInterval)
+			// Park briefly before re-checking, but honor cancellation so a
+			// cancelled ctx with a permanently-occupied output cannot spin
+			// forever and block wg.Wait at shutdown.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(occupiedPollInterval):
+			}
 			continue
 		}
 
 		if value, ok := in.FromPrevHoldNewSendOldNode.TryRecv(); ok {
 			in.Fire()
-			in.FromPrevHoldNewSendOldNode.Done()
 
 			// Interior held-value bead: emit only when the held value changes
 			// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the

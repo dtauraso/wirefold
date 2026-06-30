@@ -9,6 +9,9 @@ import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 
 export type { RunStatus };
 
+// Set to true locally to log every Go trace event to the extension console (~60Hz/wire).
+const DEBUG_TRACE = false;
+
 // Set of every trace-event kind Go can emit, sourced from the GENERATED
 // TRACE_EVENT_KINDS (Trace/Trace.go is the single source of truth). Using it here
 // keeps the stdout filter from drifting when a kind is added — a new kind flows to
@@ -266,7 +269,7 @@ export class BuildAndRunRunner {
       if (ev && this.onTraceEvent) {
         const _evNode = 'node' in ev ? ev.node : undefined;
         const _evPort = 'port' in ev ? (ev as { port?: string }).port : undefined;
-        console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${_evNode} port=${_evPort ?? "-"}`);
+        if (DEBUG_TRACE) console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${_evNode} port=${_evPort ?? "-"}`);
         if (this.tsFile) {
           try {
             fs.appendFileSync(this.tsFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.trace-event", kind: ev.kind, node: _evNode, port: _evPort ?? null }) + "\n", "utf8");

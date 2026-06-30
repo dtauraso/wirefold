@@ -4,8 +4,8 @@
 package gatetesthelper
 
 import (
+	"bytes"
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,8 +21,10 @@ type ClearSink struct {
 	n  int
 }
 
+var windowClearBytes = []byte("window_clear")
+
 func (s *ClearSink) Write(p []byte) (int, error) {
-	if strings.Contains(string(p), "window_clear") {
+	if bytes.Contains(p, windowClearBytes) {
 		s.mu.Lock()
 		s.n++
 		s.mu.Unlock()

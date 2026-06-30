@@ -13,6 +13,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,11 +94,19 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	deliver(md, "src", nx, ny, nz)
 
 	// Expected recompute from the moved geometry: src center is the world target.
+	// Use aimed computation to match the edge mover (all edge-connected ports are aimed).
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
+	dstCenter := vec3{X: 0, Y: 0, Z: 0}
 	srcGeom := nodeGeom{Kind: "FanInSrc", Center: &srcCenter, Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", Inputs: []portGeom{{Name: "In"}}}
-	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
-	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")
+	dstGeom := nodeGeom{Kind: "FanInSink", Center: &dstCenter, Inputs: []portGeom{{Name: "In"}}}
+	wantReg := AimedPortRegistry{
+		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
+		{NodeID: "dst", PortName: "In", IsInput: true}:  "src",
+	}
+	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
+	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
+	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantReg, wantCenterOf)
+	wantArc := wantSeg.Start.sub(wantSeg.End).length()
 
 	// Edge mover wrote the new segment/arc onto the source Out.
 	if !approxEq(out.ArcLength, wantArc) || !approxEq(out.SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
@@ -209,4 +218,58 @@ func TestResendGeometry(t *testing.T) {
 	if !edgeGeoms["e0"] {
 		t.Fatal("ResendGeometry did not re-emit edge-geometry for 'e0'")
 	}
+}
+
+// TestMoverCenterRace is a -race regression for the data race between the mover
+// goroutines writing geom.Center/ReachR and the stdin goroutine reading those fields
+// via centerOfNode/nodeCenter/heldCenters/fanCenters/ResendGeometry. It hammers
+// RootMove (which triggers fanCenters and heldCenters) and ResendGeometry from one
+// goroutine while center messages flow concurrently through the mover goroutines.
+// Must pass cleanly under `go test -race`.
+func TestMoverCenterRace(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(4096)
+	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx) // launch mover goroutines
+
+	// Hammer concurrently: center messages via RootMove (fanCenters + heldCenters)
+	// and ResendGeometry from the "stdin goroutine" side, while the mover goroutines
+	// are writing geom.Center/ReachR on the other side.
+	const iters = 200
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			x := float64(i) * 0.5
+			md.RootMove("src", vec3{X: x, Y: 0, Z: 0})
+			md.ResendGeometry(tr)
+		}
+	}()
+	wg.Wait()
+	tr.Close()
 }

@@ -4,6 +4,7 @@
 
 import * as THREE from "three";
 import { vscode } from "../vscode-api";
+import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
 
 // ---------------------------------------------------------------------------
 // Frame-convention helpers (Go uses pole = +y)
@@ -13,11 +14,10 @@ import { vscode } from "../vscode-api";
  * Convert a world unit direction vector to Go polar angles.
  * theta = acos(clamp(y, -1, 1))  (angle from +y pole)
  * phi   = atan2(z, x)            (longitude, x=0 axis)
+ * Delegates to polar.worldDirToFrameAngles with Y_POLE_FRAME.
  */
 export function worldDirToAngles(v: THREE.Vector3): [number, number] {
-  const theta = Math.acos(Math.max(-1, Math.min(1, v.y)));
-  const phi = Math.atan2(v.z, v.x);
-  return [theta, phi];
+  return worldDirToFrameAngles(v, Y_POLE_FRAME);
 }
 
 /**
@@ -47,7 +47,8 @@ export function sendViewpointSet(
   const [upTheta, upPhi] = up;
   vscode.postMessage({
     type: "edit",
-    op: "viewpoint",
+    op: "update",
+    kind: "camera",
     viewpoint: { kind: "set", pivotX, pivotY, pivotZ, r, posTheta, posPhi, upTheta, upPhi },
   });
 }
@@ -63,7 +64,8 @@ function sendViewpointOrbitKind(
   const [toTheta, toPhi] = to;
   vscode.postMessage({
     type: "edit",
-    op: "viewpoint",
+    op: "update",
+    kind: "camera",
     viewpoint: { kind, fromTheta, fromPhi, toTheta, toPhi },
   });
 }
@@ -84,20 +86,12 @@ export function sendViewpointOrbitLocked(
   sendViewpointOrbitKind("orbit-locked", from, to);
 }
 
-/** Tell Go to zoom by a multiplicative factor. */
-export function sendViewpointZoom(factor: number): void {
-  vscode.postMessage({
-    type: "edit",
-    op: "viewpoint",
-    viewpoint: { kind: "zoom", factor },
-  });
-}
-
 /** Tell Go to pan the pivot point by a world-space delta. */
 export function sendViewpointPan(dx: number, dy: number, dz: number): void {
   vscode.postMessage({
     type: "edit",
-    op: "viewpoint",
+    op: "update",
+    kind: "camera",
     viewpoint: { kind: "pan", dx, dy, dz },
   });
 }

@@ -1,8 +1,13 @@
 package Wiring
 
 import (
+	"context"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // approxEqual returns true when two floats are within eps of each other.
@@ -166,5 +171,94 @@ func TestPortDirAimed_NonRegisteredPort(t *testing.T) {
 	}
 	if dirAimed.length() == 0 {
 		t.Error("portDirAimed fallback returned zero direction for a non-registered node")
+	}
+}
+
+// aimedSrc / aimedSink / aimedPacer are minimal node kinds registered once for
+// TestAimedPortRegistry_DerivedFromEdges.
+type aimedSrc struct {
+	Out        *Out
+	FeedbackIn *In
+}
+
+func (n *aimedSrc) Update(_ context.Context) {}
+
+type aimedSink struct{ In *In }
+
+func (n *aimedSink) Update(_ context.Context) {}
+
+type aimedPacer struct {
+	FromSrc  *In
+	Feedback *Out
+}
+
+func (n *aimedPacer) Update(_ context.Context) {}
+
+func init() {
+	Register("AimedSrc", func() any { return &aimedSrc{} })
+	Register("AimedSink", func() any { return &aimedSink{} })
+	Register("AimedPacer", func() any { return &aimedPacer{} })
+}
+
+// TestAimedPortRegistry_DerivedFromEdges verifies that the aimed-port registry is
+// derived purely from the loaded edge list: every edge contributes 2 entries
+// (source output + target input), including feedback edges. This test uses an
+// inline topology with a feedback loop (Pacer→Src) to confirm that loop
+// is NOT excluded from the registry.
+func TestAimedPortRegistry_DerivedFromEdges(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src",   "type":"AimedSrc",   "x":0,  "y":0,  "z":0,  "outputs":[{"name":"Out"}], "inputs":[{"name":"FeedbackIn"}]},
+	    {"id":"sink",  "type":"AimedSink",  "x":5,  "y":0,  "z":0,  "inputs":[{"name":"In"}]},
+	    {"id":"pacer", "type":"AimedPacer", "x":0,  "y":5,  "z":0,  "inputs":[{"name":"FromSrc"}], "outputs":[{"name":"Feedback"}]}
+	  ],
+	  "edges": [
+	    {"label":"e1","kind":"chain","source":"src",   "sourceHandle":"Out",      "target":"sink",  "targetHandle":"In"},
+	    {"label":"e2","kind":"chain","source":"src",   "sourceHandle":"Out",      "target":"pacer", "targetHandle":"FromSrc"},
+	    {"label":"e3","kind":"chain","source":"pacer", "sourceHandle":"Feedback", "target":"src",   "targetHandle":"FeedbackIn"}
+	  ]
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(64)
+	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+
+	reg := md.AimedPorts
+	// 3 edges × 2 ports each = 6 entries.
+	// Note: e2 and e1 share the same source port (src.Out→sink and src.Out→pacer);
+	// the registry is a map so duplicate keys from multiple edges on the same port
+	// overwrite — count may be ≤6. We care that the feedback pair IS present.
+	if len(reg) == 0 {
+		t.Fatal("aimed-port registry is empty; want edge-derived entries")
+	}
+
+	// Feedback edge (pacer→src): must be registered just like forward edges.
+	feedbackOut := AimedPortKey{NodeID: "pacer", PortName: "Feedback", IsInput: false}
+	if got, ok := reg[feedbackOut]; !ok || got != "src" {
+		t.Errorf("feedback aimed port {pacer,Feedback,false}: got %q,%v; want \"src\",true", got, ok)
+	}
+	feedbackIn := AimedPortKey{NodeID: "src", PortName: "FeedbackIn", IsInput: true}
+	if got, ok := reg[feedbackIn]; !ok || got != "pacer" {
+		t.Errorf("feedback aimed port {src,FeedbackIn,true}: got %q,%v; want \"pacer\",true", got, ok)
+	}
+
+	// Forward edge: src.Out → sink.In.
+	fwdOut := AimedPortKey{NodeID: "src", PortName: "Out", IsInput: false}
+	if got, ok := reg[fwdOut]; !ok {
+		t.Errorf("forward aimed port {src,Out,false}: not registered (got %q,%v)", got, ok)
+	}
+	fwdIn := AimedPortKey{NodeID: "sink", PortName: "In", IsInput: true}
+	if got, ok := reg[fwdIn]; !ok || got != "src" {
+		t.Errorf("forward aimed port {sink,In,true}: got %q,%v; want \"src\",true", got, ok)
 	}
 }

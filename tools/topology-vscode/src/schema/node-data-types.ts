@@ -37,6 +37,8 @@ export function parseNodeData(kind: string, data: unknown, path: string): unknow
     { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.state.held: expected number"); }
       return data;
     }
+    case "HoldFlip":
+      return data; // no wire:"data.*" fields on the Go struct
     case "HoldNewSendOld": {
       if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
       const d = data as Record<string, unknown>;
@@ -56,6 +58,12 @@ export function parseNodeData(kind: string, data: unknown, path: string): unknow
     { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.state.held: expected number"); }
       return data;
     }
+    case "Pulse":
+      return data; // no wire:"data.*" fields on the Go struct
+    case "WindowAndInhibitLeftGate":
+      return data; // no wire:"data.*" fields on the Go struct
+    case "WindowAndInhibitRightGate":
+      return data; // no wire:"data.*" fields on the Go struct
     default:
       return data;
   }

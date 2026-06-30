@@ -1,6 +1,7 @@
 // Port anchorId persistence: a Port.anchorId set on a node's input/output must
-// survive parseSpec (validator). Also validates the messages.ts "port-anchor"
-// edit op (IPC message for dragging port positions) is unaffected.
+// survive parseSpec (validator). Also validates the messages.ts port-anchor edit
+// (op="update", kind="node", attr="anchor" — IPC message for dragging port
+// positions) is unaffected.
 
 import { describe, it, expect } from "vitest";
 import { parseSpec } from "../src/schema";
@@ -48,11 +49,13 @@ describe("Port.anchorId persistence", () => {
   });
 });
 
-describe("port-anchor IPC edit op", () => {
-  it("parseWebviewToHost validates the port-anchor edit op", () => {
+describe("port-anchor IPC edit (op=update kind=node attr=anchor)", () => {
+  it("parseWebviewToHost validates the port-anchor edit", () => {
     const msg = {
       type: "edit",
-      op: "port-anchor",
+      op: "update",
+      kind: "node",
+      attr: "anchor",
       node: "n",
       port: "in",
       isInput: true,
@@ -65,7 +68,9 @@ describe("port-anchor IPC edit op", () => {
   it("rejects a port-anchor edit with a malformed anchor", () => {
     const msg = {
       type: "edit",
-      op: "port-anchor",
+      op: "update",
+      kind: "node",
+      attr: "anchor",
       node: "n",
       port: "in",
       isInput: true,
@@ -78,7 +83,9 @@ describe("port-anchor IPC edit op", () => {
   it("rejects a port-anchor edit with empty keys", () => {
     const msg = {
       type: "edit",
-      op: "port-anchor",
+      op: "update",
+      kind: "node",
+      attr: "anchor",
       node: "n",
       port: "in",
       isInput: true,

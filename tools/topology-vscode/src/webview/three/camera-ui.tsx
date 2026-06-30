@@ -4,8 +4,9 @@
 import React, { useCallback, useState } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
+import { boundingBox3D, fitDistance } from "./geometry-helpers";
 import { vscode } from "../vscode-api";
+import type { OverlayFlag } from "../../messages";
 import { useCameraStore } from "./camera-store";
 import { postLog } from "../log/post";
 import { commitCamera } from "./interaction-handlers";
@@ -14,21 +15,8 @@ import { commitCamera } from "./interaction-handlers";
 // Shared Toggle component
 // ---------------------------------------------------------------------------
 
-/** The bare-payload toggle `op`s — `edit` messages that carry only `{ type, op }`. */
-type EditOp =
-  | "overlays-vis"
-  | "tori-vis"
-  | "scene-poles"
-  | "node-poles"
-  | "angle-labels"
-  | "sel-sphere-poles"
-  | "handholds-vis"
-  | "labels-vis"
-  | "badges-vis"
-  | "double-links";
-
 type ToggleCfg = {
-  op: EditOp;
+  flag: OverlayFlag;
   /** Returns the store boolean value needed by active/label/title. */
   selector: (s: Parameters<Parameters<typeof useCameraStore>[0]>[0]) => boolean;
   /** Compute active (highlight) from the raw store value. */
@@ -43,7 +31,7 @@ type ToggleCfg = {
 
 function fireToggle(cfg: ToggleCfg, val: boolean) {
   postLog("guide-btn-click", cfg.payload(val));
-  vscode.postMessage({ type: "edit", op: cfg.op } as Parameters<typeof vscode.postMessage>[0]);
+  vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "toggle", flag: cfg.flag });
 }
 
 // ---------------------------------------------------------------------------
@@ -51,93 +39,93 @@ function fireToggle(cfg: ToggleCfg, val: boolean) {
 // ---------------------------------------------------------------------------
 
 const guidelinesCfg: ToggleCfg = {
-  op: "overlays-vis",
+  flag: "overlays",
   selector: (s) => s.overlaysVisible,
   active: (v) => v,
   label: "▦ overlays",
   title: (a) => (a ? "Hide overlays" : "Show overlays"),
-  payload: (v) => ({ op: "overlays-vis", was: v }),
+  payload: (v) => ({ flag: "overlays", was: v }),
 };
 
 const ringsCfg: ToggleCfg = {
-  op: "tori-vis",
+  flag: "tori",
   selector: (s) => s.sceneToriVisible,
   active: (v) => v,
   label: "◎ rings",
   title: (a) => (a ? "Hide polar rings" : "Show polar rings"),
-  payload: (v) => ({ op: "tori-vis", was: v }),
+  payload: (v) => ({ flag: "tori", was: v }),
 };
 
 const scenePolesCfg: ToggleCfg = {
-  op: "scene-poles",
+  flag: "scenePoles",
   selector: (s) => s.scenePolesVisible,
   active: (v) => v,
   label: "⊹ scene poles",
   title: (a) => (a ? "Hide scene pole frame" : "Show scene pole frame"),
-  payload: (v) => ({ op: "scene-poles", was: v }),
+  payload: (v) => ({ flag: "scenePoles", was: v }),
 };
 
 const nodePolesCfg: ToggleCfg = {
-  op: "node-poles",
+  flag: "nodePoles",
   selector: (s) => s.nodePolesVisible,
   active: (v) => v,
   label: "⊹ node poles",
   title: (a) => (a ? "Hide node pole frames" : "Show node pole frames"),
-  payload: (v) => ({ op: "node-poles", was: v }),
+  payload: (v) => ({ flag: "nodePoles", was: v }),
 };
 
 const angleLabelsCfg: ToggleCfg = {
-  op: "angle-labels",
+  flag: "angleLabels",
   selector: (s) => s.angleLabelsVisible,
   active: (v) => v,
   label: "θφ 2→3/7",
   title: (a) => (a ? "Hide angle arcs+labels" : "Show angle arcs+labels"),
-  payload: (v) => ({ op: "angle-labels", was: v }),
+  payload: (v) => ({ flag: "angleLabels", was: v }),
 };
 
 const selSpherePolesCfg: ToggleCfg = {
-  op: "sel-sphere-poles",
+  flag: "selSpherePoles",
   selector: (s) => s.selSpherePolesVisible,
   active: (v) => v,
   label: "sel ⬡",
   title: (a) => (a ? "Hide sel-sphere poles" : "Show sel-sphere poles"),
-  payload: (v) => ({ op: "sel-sphere-poles", was: v }),
+  payload: (v) => ({ flag: "selSpherePoles", was: v }),
 };
 
 const handholdsCfg: ToggleCfg = {
-  op: "handholds-vis",
+  flag: "handholds",
   selector: (s) => s.handholdsVisible,
   active: (v) => v !== false,
   label: "⊙ grips",
   title: (a) => (a ? "Hide rotation grips" : "Show rotation grips"),
-  payload: (v) => ({ op: "handholds-vis", was: v }),
+  payload: (v) => ({ flag: "handholds", was: v }),
 };
 
 const globalLabelsCfg: ToggleCfg = {
-  op: "labels-vis",
+  flag: "labelsGlobal",
   selector: (s) => s.labelsGlobalHidden,
   active: (v) => !v,
   label: (v) => `${v ? "▴" : "▾"} labels`,
   title: (a) => (a ? "Hide labels" : "Show labels"),
-  payload: (v) => ({ op: "labels-vis", wasHidden: v }),
+  payload: (v) => ({ flag: "labelsGlobal", wasHidden: v }),
 };
 
 const badgesCfg: ToggleCfg = {
-  op: "badges-vis",
+  flag: "badgesGlobal",
   selector: (s) => s.badgesHidden,
   active: (v) => !v,
   label: (v) => `${v ? "▴" : "▾"} +N badges`,
   title: (a) => (a ? "Hide +N badges" : "Show +N badges"),
-  payload: (v) => ({ op: "badges-vis", wasHidden: v }),
+  payload: (v) => ({ flag: "badgesGlobal", wasHidden: v }),
 };
 
 const doubleLinksCfg: ToggleCfg = {
-  op: "double-links",
+  flag: "doubleLinks",
   selector: (s) => s.doubleLinksVisible,
   active: (v) => v,
   label: "⇄ double links",
   title: (a) => (a ? "Hide double-link overlay" : "Show double-link overlay"),
-  payload: (v) => ({ op: "double-links", was: v }),
+  payload: (v) => ({ flag: "doubleLinks", was: v }),
 };
 
 // ---------------------------------------------------------------------------
@@ -316,7 +304,7 @@ export function OverlaysControl() {
                   {group.heading}
                 </div>
                 {group.cfgs.map((cfg) => (
-                  <OverlayRow key={cfg.op} cfg={cfg} disabled={!active} />
+                  <OverlayRow key={cfg.flag} cfg={cfg} disabled={!active} />
                 ))}
               </div>
             ))}
@@ -349,21 +337,8 @@ export function HomeButton({
     const nodes = nodesRef.current;
     if (!cam || nodes.length === 0) return;
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const n of nodes) {
-      const p = nodeWorldPos(n);
-      const r = nodeRadius(n);
-      minX = Math.min(minX, p.x - r); maxX = Math.max(maxX, p.x + r);
-      minY = Math.min(minY, p.y - r); maxY = Math.max(maxY, p.y + r);
-      minZ = Math.min(minZ, p.z - r); maxZ = Math.max(maxZ, p.z + r);
-    }
-
-    const center = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-    const sizeX = maxX - minX;
-    const sizeY = maxY - minY;
-    const sizeZ = maxZ - minZ;
-    const fovRad = (cam.fov * Math.PI) / 180;
-    const dist = (Math.max(sizeX / aspect, sizeY) / 2) / Math.tan(fovRad / 2) + sizeZ / 2;
+    const { center, sizeX, sizeY, sizeZ } = boundingBox3D(nodes);
+    const dist = fitDistance(cam.fov, aspect, sizeX, sizeY) + sizeZ / 2;
     const paddedDist = dist * 1.2;
 
     // Reset to a square-on view: place the camera straight in front of the

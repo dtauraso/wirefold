@@ -13,3 +13,11 @@ import "context"
 type Node interface {
 	Update(ctx context.Context)
 }
+
+// TryEmit calls fn if fn is non-nil. It is the shared nil-guard used by every
+// node that has an optional EmitGeometry callback.
+func TryEmit(fn func()) {
+	if fn != nil {
+		fn()
+	}
+}

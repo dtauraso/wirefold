@@ -9,66 +9,84 @@ export type RunStatus =
   | { state: "error"; message: string }
   | { state: "cancelled" };
 
-// Geometry-CRUD / animation edit sent webview → host → Go. ONE message kind
-// ("edit") with an `op` discriminator, mirroring the single Go stdin "edit" shape
-// (nodes/Wiring/stdin_reader.go applyEdit). Go owns the clock; this seam carries no
-// delivery signal. ops: create/delete a wire (edge add/remove), update node
-// geometry (node-move), fade an edge set.
+// Geometry-CRUD edit sent webview → host → Go. ONE message kind ("edit") with
+// EXACTLY THREE ops: create / update / delete (mirroring nodes/Wiring/stdin_reader.go
+// applyEdit). Go owns the clock; this seam carries no delivery signal.
 //
-// For op="update" (node-move): the decentralized Go path mail-sorts the move to the
-// owning node + each incident edge goroutine, so the entries map is keyed by the
-// moved node id AND each incident edge id (source===moved || target===moved). Every
-// entry carries the same moved node id + new position. The webview computes the
-// incident edges from its React Flow graph (TS owns the graph; Go owns the recompute).
+//   - create / delete: add or remove an edge by its destination slot (target + targetHandle).
+//   - update: set an ATTRIBUTE on a typed entity. `kind` names the entity
+//     (node / edge / camera / overlays / scene); there is NO per-feature op — fading
+//     an edge, moving a port anchor, orbiting the camera and toggling an overlay are
+//     all attribute updates on their entity.
+//
+// For op="update" kind="node" attr="move" (node-move): the decentralized Go path
+// mail-sorts the move to the owning node + each incident edge goroutine, so the
+// entries map is keyed by the moved node id AND each incident edge id
+// (source===moved || target===moved). Every entry carries the same moved node id +
+// new position. The webview computes the incident edges from its React Flow graph
+// (TS owns the graph; Go owns the recompute).
 export type MoveEntry = { nodeId: string; x: number; y: number; z: number };
+
+// OverlayFlag is the wire vocabulary of named boolean overlay attributes, shared
+// with Go's overlayToggles map (stdin_reader.go). Guarded by check-edit-op-parity.sh.
+// OVERLAY_FLAGS_START
+export type OverlayFlag =
+  | "tori"
+  | "scenePoles"
+  | "nodePoles"
+  | "angleLabels"
+  | "selSpherePoles"
+  | "handholds"
+  | "labelsGlobal"
+  | "badgesGlobal"
+  | "overlays"
+  | "doubleLinks";
+// OVERLAY_FLAGS_END
+
+// OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
+export type OverlayState = {
+  tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean;
+  selSpherePoles: boolean; handholds: boolean; doubleLinks: boolean;
+  labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean;
+};
+
+// VP_KINDS_START
+export type ViewpointPayload =
+  | {
+      kind: "set";
+      pivotX?: number; pivotY?: number; pivotZ?: number;
+      r?: number;
+      posTheta?: number; posPhi?: number;
+      upTheta?: number; upPhi?: number;
+    }
+  | { kind: "orbit"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
+  | { kind: "orbit-locked"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
+  | { kind: "zoom"; factor: number }
+  | { kind: "pan"; dx: number; dy: number; dz: number };
+// VP_KINDS_END
+
+// EDIT_MSG_START
 export type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
-  | { type: "edit"; op: "update"; entries: Record<string, MoveEntry> }
-  | { type: "edit"; op: "fade"; edges: Record<string, boolean> }
-  // Port-anchor (phase 1): move a port along its node's ring. node/port identify the
-  // port, isInput selects the input vs output list, anchor is the new direction offset
-  // from the node center. keys lists the routing keys Go mail-sorts the update to — the
-  // node id AND each incident edge id (source===node || target===node), same fan-out
-  // shape as op="update". The webview computes the incident edges from its RF graph.
+  // op="update" — set an attribute on a typed entity (kind discriminator).
+  | { type: "edit"; op: "update"; kind: "node"; attr: "move"; entries: Record<string, MoveEntry> }
+  // Port-anchor: move a port along its node's ring. node/port identify the port,
+  // isInput selects the input vs output list, anchor is the new direction offset from
+  // the node center. keys lists the routing keys Go mail-sorts to — the node id AND
+  // each incident edge id (same fan-out shape as attr="move").
   | {
-      type: "edit";
-      op: "port-anchor";
-      node: string;
-      port: string;
-      isInput: boolean;
+      type: "edit"; op: "update"; kind: "node"; attr: "anchor";
+      node: string; port: string; isInput: boolean;
       anchor: { x: number; y: number; z: number };
       keys: string[];
     }
-  | { type: "edit"; op: "scene"; scene: unknown }
-  | { type: "edit"; op: "set-origin"; x: number; y: number; z: number }
-  | { type: "edit"; op: "tori-vis" }
-  | { type: "edit"; op: "scene-poles" }
-  | { type: "edit"; op: "node-poles" }
-  | { type: "edit"; op: "angle-labels" }
-  | { type: "edit"; op: "sel-sphere-poles" }
-  | { type: "edit"; op: "handholds-vis" }
-  | { type: "edit"; op: "labels-vis" }
-  | { type: "edit"; op: "badges-vis" }
-  | { type: "edit"; op: "overlays-vis" }
-  | { type: "edit"; op: "double-links" }
-  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; doubleLinks: boolean; labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean }
-  | {
-      type: "edit";
-      op: "viewpoint";
-      viewpoint:
-        | {
-            kind: "set";
-            pivotX?: number; pivotY?: number; pivotZ?: number;
-            r?: number;
-            posTheta?: number; posPhi?: number;
-            upTheta?: number; upPhi?: number;
-          }
-        | { kind: "orbit"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
-        | { kind: "orbit-locked"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
-        | { kind: "zoom"; factor: number }
-        | { kind: "pan"; dx: number; dy: number; dz: number };
-    };
+  | { type: "edit"; op: "update"; kind: "edge"; attr: "faded"; edges: Record<string, boolean> }
+  | { type: "edit"; op: "update"; kind: "camera"; viewpoint: ViewpointPayload }
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "set"; state: OverlayState }
+  | { type: "edit"; op: "update"; kind: "scene"; scene: unknown };
+// EDIT_MSG_END
 
 export type WebviewToHostMsg =
   | { type: "ready" }
@@ -139,54 +157,69 @@ export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new 
 // parseEdit validates an "edit" message by its op, mirroring the per-op payloads
 // in EditMsg (and Go's applyEdit). Returns undefined for an unknown op or a payload
 // missing required fields, so a malformed edit is dropped rather than forwarded.
-function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
-  switch (m.op) {
-    case "create":
-    case "delete":
-      return typeof m.target === "string" && typeof m.targetHandle === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
-    case "update": {
-      // Entries-shaped node-move (decentralized): a non-empty map of routing key →
-      // MoveEntry{nodeId,x,y,z}. Validate the map and at least one well-formed entry.
-      const entries = m.entries;
-      if (!entries || typeof entries !== "object") return undefined;
-      const vals = Object.values(entries as Record<string, unknown>);
-      if (vals.length === 0) return undefined;
-      const ok = vals.every((v) => {
-        if (!v || typeof v !== "object") return false;
-        const e = v as Record<string, unknown>;
-        return (
-          typeof e.nodeId === "string" &&
-          typeof e.x === "number" && Number.isFinite(e.x) &&
-          typeof e.y === "number" && Number.isFinite(e.y) &&
-          typeof e.z === "number" && Number.isFinite(e.z)
-        );
-      });
-      return ok ? (m as unknown as WebviewToHostMsg) : undefined;
+const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>([
+  "tori", "scenePoles", "nodePoles", "angleLabels", "selSpherePoles",
+  "handholds", "labelsGlobal", "badgesGlobal", "overlays", "doubleLinks",
+]);
+
+// Validates that v is a full OverlayState (every flag a boolean).
+function isOverlayState(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  for (const flag of OVERLAY_FLAGS) {
+    if (typeof s[flag] !== "boolean") return false;
+  }
+  return true;
+}
+
+// Validates the op="update" payload by entity kind (and attr where present).
+function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
+  switch (m.kind) {
+    case "node": {
+      if (m.attr === "move") {
+        // Entries-shaped node-move (decentralized): a non-empty map of routing key →
+        // MoveEntry{nodeId,x,y,z}. Validate the map and every entry.
+        const entries = m.entries;
+        if (!entries || typeof entries !== "object") return undefined;
+        const vals = Object.values(entries as Record<string, unknown>);
+        if (vals.length === 0) return undefined;
+        const ok = vals.every((v) => {
+          if (!v || typeof v !== "object") return false;
+          const e = v as Record<string, unknown>;
+          return (
+            typeof e.nodeId === "string" &&
+            typeof e.x === "number" && Number.isFinite(e.x) &&
+            typeof e.y === "number" && Number.isFinite(e.y) &&
+            typeof e.z === "number" && Number.isFinite(e.z)
+          );
+        });
+        return ok ? (m as unknown as WebviewToHostMsg) : undefined;
+      }
+      if (m.attr === "anchor") {
+        // node/port strings, isInput boolean, anchor {x,y,z} numbers, keys non-empty string[].
+        const a = m.anchor;
+        const okAnchor =
+          !!a &&
+          typeof a === "object" &&
+          typeof (a as Record<string, unknown>).x === "number" &&
+          typeof (a as Record<string, unknown>).y === "number" &&
+          typeof (a as Record<string, unknown>).z === "number";
+        const keys = m.keys;
+        const okKeys =
+          Array.isArray(keys) && keys.length > 0 && keys.every((k) => typeof k === "string");
+        return typeof m.node === "string" &&
+          typeof m.port === "string" &&
+          typeof m.isInput === "boolean" &&
+          okAnchor &&
+          okKeys
+          ? (m as unknown as WebviewToHostMsg)
+          : undefined;
+      }
+      return undefined;
     }
-    case "port-anchor": {
-      // node/port strings, isInput boolean, anchor {x,y,z} numbers, keys non-empty string[].
-      const a = m.anchor;
-      const okAnchor =
-        !!a &&
-        typeof a === "object" &&
-        typeof (a as Record<string, unknown>).x === "number" &&
-        typeof (a as Record<string, unknown>).y === "number" &&
-        typeof (a as Record<string, unknown>).z === "number";
-      const keys = m.keys;
-      const okKeys =
-        Array.isArray(keys) && keys.length > 0 && keys.every((k) => typeof k === "string");
-      return typeof m.node === "string" &&
-        typeof m.port === "string" &&
-        typeof m.isInput === "boolean" &&
-        okAnchor &&
-        okKeys
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
-    }
-    case "fade": {
-      // edges is Record<string, boolean>: edgeId → desired faded state.
+    case "edge": {
+      // attr="faded": edges is Record<string, boolean>: edgeId → desired faded state.
+      if (m.attr !== "faded") return undefined;
       const edgesMap = m.edges;
       if (!edgesMap || typeof edgesMap !== "object" || Array.isArray(edgesMap)) return undefined;
       const ok = Object.entries(edgesMap as Record<string, unknown>).every(
@@ -194,39 +227,40 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       );
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }
-    case "scene":
-      return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "set-origin":
-      return typeof m.x === "number" && Number.isFinite(m.x) &&
-        typeof m.y === "number" && Number.isFinite(m.y) &&
-        typeof m.z === "number" && Number.isFinite(m.z)
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
-    case "viewpoint": {
-      // viewpoint must have a nested object with a string kind discriminator.
+    case "camera": {
+      // viewpoint must be a nested object with a string kind discriminator.
       const vp = m.viewpoint;
       if (!vp || typeof vp !== "object") return undefined;
-      const v = vp as Record<string, unknown>;
-      if (typeof v.kind !== "string") return undefined;
+      if (typeof (vp as Record<string, unknown>).kind !== "string") return undefined;
       return (m as unknown as WebviewToHostMsg);
     }
-    case "tori-vis": case "scene-poles": case "node-poles": case "angle-labels":
-    case "sel-sphere-poles": case "handholds-vis": case "labels-vis":
-    case "badges-vis": case "overlays-vis": case "double-links":
-      // No payload needed — toggle is stateless from the TS side.
-      return (m as unknown as WebviewToHostMsg);
-    case "guide-vis":
-      // Batched explicit visibilities pushed on load to restore persisted state.
-      // All must be booleans, else drop as malformed.
-      if (
-        typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
-        typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
-        typeof m.selSpherePoles !== "boolean" || typeof m.handholds !== "boolean" ||
-        typeof m.doubleLinks !== "boolean" ||
-        typeof m.labelsGlobal !== "boolean" || typeof m.badgesGlobal !== "boolean" ||
-        typeof m.overlays !== "boolean"
-      ) return undefined;
-      return (m as unknown as WebviewToHostMsg);
+    case "overlays": {
+      if (m.attr === "toggle") {
+        return typeof m.flag === "string" && OVERLAY_FLAGS.has(m.flag)
+          ? (m as unknown as WebviewToHostMsg)
+          : undefined;
+      }
+      if (m.attr === "set") {
+        return isOverlayState(m.state) ? (m as unknown as WebviewToHostMsg) : undefined;
+      }
+      return undefined;
+    }
+    case "scene":
+      return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
+  switch (m.op) {
+    case "create":
+    case "delete":
+      return typeof m.target === "string" && typeof m.targetHandle === "string"
+        ? (m as unknown as WebviewToHostMsg)
+        : undefined;
+    case "update":
+      return parseUpdate(m);
     default:
       return undefined;
   }

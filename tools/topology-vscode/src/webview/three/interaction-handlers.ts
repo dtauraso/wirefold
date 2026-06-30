@@ -6,7 +6,7 @@
 
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
-import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, pointerRingAnchor, contentSphere } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
@@ -31,42 +31,6 @@ export function commitCamera(cam: THREE.PerspectiveCamera) {
 }
 
 // ---------------------------------------------------------------------------
-// P7.5 — Large sphere constraint helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the radius of the large container sphere from the node set.
- * Mirrors the Go formula: max distance from origin to any node center + that
- * node's own radius, plus a 20% padding. Falls back to a minimum of 500 so
- * the camera is never clamped out of a scene with no nodes.
- */
-export function computeLargeSphereRadius(nodes: RFNode<NodeData>[]): number {
-  const MIN_R = 500;
-  if (!nodes || nodes.length === 0) return MIN_R;
-  let maxR = 0;
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    const dist = p.length() + nodeRadius(n);
-    if (dist > maxR) maxR = dist;
-  }
-  return Math.max(maxR * 1.2, MIN_R);
-}
-
-/**
- * P7.5: Clamp the camera position so it stays on or inside the large
- * container sphere of radius R. If the camera is outside, project it back
- * to the surface (same direction, length = R). No-op when inside.
- */
-export function constrainInsideLargeSphere(cam: THREE.PerspectiveCamera, R: number): void {
-  const len = cam.position.length();
-  if (Number.isFinite(len) && len > R) {
-    cam.position.multiplyScalar(R / len);
-    cam.updateMatrixWorld(true);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Gesture discrimination constants
 // ---------------------------------------------------------------------------
 
@@ -77,6 +41,14 @@ const MOVE_SLOP_PX = 6;
 /** Generous slop for a SECONDARY (two-finger trackpad) tap-select; two fingers don't
  *  land precisely and the first tap drifts more than a mouse click would. */
 const SECONDARY_SLOP_PX = 24;
+/** Minimum forward depth so the ensureTarget pivot never sits on the camera. */
+const TARGET_MIN = 10;
+/** Keep the regionFocus pivot off the camera even if the slab is behind it. */
+const FOCUS_MIN = 10;
+/** Base factor per scroll delta unit for zoom-to-cursor (ctrl+wheel dolly). */
+const ZOOM_BASE = 1.01;
+/** Minimum eye-to-pivot distance — never allow the camera to reach the target. */
+const MIN_DIST = 5;
 
 // ---------------------------------------------------------------------------
 // InteractionCtx — stable bundle of refs + stable callbacks
@@ -117,7 +89,6 @@ export interface InteractionCtx {
   flushNodeMove: (nodeId: string, x: number, y: number, z: number) => void;
   schedulePortAnchor: (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => void;
   flushPortAnchor: (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => void;
-  scheduleOrigin: (x: number, y: number, z: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,22 +130,11 @@ export function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: 
  * Bounding-box center of all node world positions. Bounded scene-focus point
  * used as a fallback anchor when the z=0 plane hit diverges (grazing view).
  * Returns (0,0,0) when there are no nodes.
+ * Delegates to geometry-helpers.contentSphere (the single source).
  */
 export function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
   const nodes = ctx.nodesRef.current;
-  if (!nodes || nodes.length === 0) return new THREE.Vector3(0, 0, 0);
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  let any = false;
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    min.min(p);
-    max.max(p);
-    any = true;
-  }
-  if (!any) return new THREE.Vector3(0, 0, 0);
-  return min.add(max).multiplyScalar(0.5);
+  return contentSphere(nodes).center;
 }
 
 /**
@@ -187,7 +147,6 @@ export function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
 export function ensureTarget(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): THREE.Vector3 {
   const t = ctx.targetRef.current;
   if (Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z)) return t;
-  const TARGET_MIN = 10; // minimum forward depth so target never sits on the camera
   cam.updateMatrixWorld(true);
   const forward = new THREE.Vector3();
   cam.getWorldDirection(forward); // unit vector
@@ -233,7 +192,6 @@ export function regionFocus(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): 
     }
   }
   if (zNear === Infinity || zFar === -Infinity) return ensureTarget(ctx, cam);
-  const FOCUS_MIN = 10; // keep the pivot off the camera even if the slab is behind it
   const midDepth = Math.max((zNear + zFar) / 2, FOCUS_MIN);
   return cam.position.clone().add(forward.multiplyScalar(midDepth));
 }
@@ -639,8 +597,6 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
     // under the cursor stays put. delta = (1-factor)(P - eye) steps the eye a `factor`
     // amount along eye→P; floored so a zoom-in never reaches P. We seed Go with the
     // current camera (covers any local drift), then send the pan — Go owns the dolly.
-    const ZOOM_BASE = 1.01;
-    const MIN_DIST = 5;
     const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
     const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
@@ -681,9 +637,5 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
     sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
     sendViewpointPan(delta.x, delta.y, delta.z);
 
-    // Re-base the polar layout origin at the new screen-center (throttled per frame).
-    if (Number.isFinite(pivot.x) && Number.isFinite(pivot.y) && Number.isFinite(pivot.z)) {
-      ctx.scheduleOrigin(pivot.x, pivot.y, pivot.z);
-    }
   }
 }

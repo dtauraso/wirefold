@@ -10,8 +10,34 @@
 // that need a node kind without a Go runtime.
 
 import type { NodeTypeDef } from "./types-graph";
-import { NODE_DEFS } from "./node-defs";
+import { NODE_DEFS, type NodeDef } from "./node-defs";
 import { NODE_DIM_FALLBACK } from "./node-dims";
+
+// --- Adapter coverage guard (compile-time) ---------------------------------
+// NodeDef (generated) and NodeTypeDef (hand-authored) are parallel type defs
+// bridged by defToTypeDef below. If the generator adds a field to NodeDef that
+// this adapter neither consumes nor explicitly ignores, the field is silently
+// dropped. The assertion below fails `tsc` in that case: every NodeDef key must
+// be classified as either consumed by defToTypeDef or intentionally not lifted.
+//
+// When tsc points here, add the new field to one of the two unions — and, if it
+// belongs in NodeTypeDef, also thread it through defToTypeDef.
+type ConsumedNodeDefKeys =
+  | "role"
+  | "shape"
+  | "fill"
+  | "stroke"
+  | "width"
+  | "height"
+  | "inputs"
+  | "outputs";
+// Raw style/source fields used by GraphNode (which reads NODE_DEFS directly) or
+// folded into a NodeTypeDef field as a fallback — intentionally not lifted 1:1.
+type IgnoredNodeDefKeys = "bg" | "border" | "text" | "minWidth";
+type UnmappedNodeDefKeys = Exclude<keyof NodeDef, ConsumedNodeDefKeys | IgnoredNodeDefKeys>;
+type AssertNodeDefCoverage = [UnmappedNodeDefKeys] extends [never] ? true : never;
+const _nodeDefCoverage: AssertNodeDefCoverage = true;
+void _nodeDefCoverage;
 
 // Re-export RUNTIME_IMPLEMENTED_KINDS from generated source.
 export { RUNTIME_IMPLEMENTED_KINDS } from "./node-defs";

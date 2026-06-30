@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // noValue is the sentinel meaning "no value seen yet" → empty interior.
 // Real values are non-negative indices so noValue (-1) never collides.
-const noValue = -1
+const noValue = gatecommon.NoValue
 
 // Node is a terminal "Hold" kind: it receives a value on its single input,
 // holds/displays it, and produces NO output. On each received value it fires,
@@ -21,14 +22,8 @@ type Node struct {
 	In           *Wiring.In
 }
 
-func (h *Node) tryEmitGeometry() {
-	if h.EmitGeometry != nil {
-		h.EmitGeometry()
-	}
-}
-
 func (h *Node) Update(ctx context.Context) {
-	h.tryEmitGeometry()
+	Wiring.TryEmit(h.EmitGeometry)
 
 	held := noValue
 	if h.EmitHeldBead != nil {
@@ -44,7 +39,6 @@ func (h *Node) Update(ctx context.Context) {
 
 		if value, ok := h.In.TryRecv(); ok {
 			h.Fire()
-			h.In.Done()
 			if value != held && h.EmitHeldBead != nil {
 				h.EmitHeldBead(value)
 			}

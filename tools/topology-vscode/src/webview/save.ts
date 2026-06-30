@@ -50,7 +50,7 @@ function _sendScene() {
   let scene: unknown;
   try { scene = JSON.parse(sceneText); } catch { return; }
   postLog("scene-save-send", { posted: true, guides: guideSnapshot(), sceneText });
-  vscode.postMessage({ type: "edit", op: "scene", scene });
+  vscode.postMessage({ type: "edit", op: "update", kind: "scene", scene });
 }
 
 export function scheduleViewSave() {

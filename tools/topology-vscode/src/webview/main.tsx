@@ -94,7 +94,7 @@ window.addEventListener("message", (e) => {
       nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
       selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, overlaysActive: viewerState.overlaysActive,
     }, pushed: guidePush });
-    vscode.postMessage({ type: "edit", op: "guide-vis", ...guidePush });
+    vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "set", state: guidePush });
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
   }

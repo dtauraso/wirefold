@@ -110,13 +110,21 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 
 	// Build the expected segment + arc independently from the moved geometry:
 	// src center is the world target (sphere-chain; no lattice snap).
+	// Use aimed computation to match the edge mover (all edge-connected ports are aimed).
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
+	dstCenter := vec3{X: 0, Y: 0, Z: 0}
 	srcGeom := nodeGeom{Kind: "FanInSrc", Center: &srcCenter,
 		Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink",
+	dstGeom := nodeGeom{Kind: "FanInSink", Center: &dstCenter,
 		Inputs: []portGeom{{Name: "In"}}}
-	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
-	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")
+	wantRegistry := AimedPortRegistry{
+		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
+		{NodeID: "dst", PortName: "In", IsInput: true}:  "src",
+	}
+	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
+	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
+	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantRegistry, wantCenterOf)
+	wantArc := wantSeg.Start.sub(wantSeg.End).length()
 
 	// Segment endpoints on the source Out must match exactly.
 	if !approxEq(out.Start.X, wantSeg.Start.X) || !approxEq(out.Start.Y, wantSeg.Start.Y) || !approxEq(out.Start.Z, wantSeg.Start.Z) {
@@ -443,8 +451,6 @@ func TestDeleteAfterDeliveryNoCancel(t *testing.T) {
 	if _, ok := pw.PollRecv(); !ok {
 		t.Fatal("bead did not deliver")
 	}
-	pw.Done() // consume
-
 	pw.Delete()
 	tr.Close()
 	if cs := cancelEvents(tr.Events()); len(cs) != 0 {

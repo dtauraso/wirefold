@@ -36,15 +36,6 @@ type In struct {
 	trace *T.Trace
 }
 
-// Done signals to the underlying PacedWire that the receiver is finished
-// using the value returned by the last TryRecv. No-op in chan mode.
-// Emits a "done" trace event so the webview can clear the held pulse.
-func (i *In) Done() {
-	if i != nil && i.pw != nil {
-		i.trace.Done(i.node, i.port)
-		i.pw.Done()
-	}
-}
 
 // TryRecv in chan mode: non-blocking select. In paced mode: blocks until
 // a value is placed or ctx is cancelled.
@@ -142,10 +133,12 @@ func (i *In) Breadcrumb(event, detail string) {
 type SendRule string
 
 const (
-	// RuleConsumeGated: after sending, the node waits for the destination to
-	// consume the value (WaitConsumed). This is the default behavior.
+	// RuleConsumeGated: default send rule. Kept for compatibility with persisted
+	// topology JSON; the consume gate was removed (PacedWire.Done/WaitConsumed
+	// are no-ops). The only meaningful distinction is Gated() which gates
+	// optional feedback ports.
 	RuleConsumeGated SendRule = "consumeGated"
-	// RuleFireAndForget: the node sends and does NOT wait for consumption.
+	// RuleFireAndForget: the node sends and does not wait for consumption.
 	RuleFireAndForget SendRule = "fireAndForget"
 )
 
@@ -282,20 +275,6 @@ func (o *Out) Occupied() bool {
 	return o.pw.Occupied()
 }
 
-// WaitConsumed blocks until the consumer calls Done on the value placed by the
-// most recent TrySend, or until the port's context is canceled. Returns true on
-// consumption, false on cancel or error. In chan mode (unit tests), returns true
-// immediately (no consume-gate concept).
-func (o *Out) WaitConsumed() bool {
-	if o == nil {
-		return false
-	}
-	if o.pw != nil {
-		return o.pw.WaitConsumed(o.ctx) == nil
-	}
-	// chan mode: no consume-gate; caller may proceed.
-	return true
-}
 
 // DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
 // that drives several outbound edges on its OWN goroutine accumulates a set of

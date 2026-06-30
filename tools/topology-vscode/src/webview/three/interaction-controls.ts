@@ -6,7 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
-import { nodeWorldPos } from "./geometry-helpers";
+import { contentSphere } from "./geometry-helpers";
 import { vscode } from "../vscode-api";
 import type { InteractionCtx } from "./interaction-handlers";
 import { handlePointerDown, handlePointerMove, handlePointerUp, handleWheelNative } from "./interaction-handlers";
@@ -16,31 +16,11 @@ import { handlePointerDown, handlePointerMove, handlePointerUp, handleWheelNativ
  * world positions, radius = farthest node from that center (+10% margin). This is the
  * arcball — fixed in world space, so it zooms WITH the diagram (both grow as you dolly
  * in) instead of staying screen-size. Exported shape used by the visible sphere too.
+ * Delegates to geometry-helpers.contentSphere (the single source).
  */
 export function computeContentSphere(nodes: RFNode<NodeData>[]): { center: THREE.Vector3; radius: number } {
-  const center = new THREE.Vector3();
-  if (!nodes || nodes.length === 0) return { center, radius: 100 };
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    min.min(p); max.max(p);
-  }
-  center.addVectors(min, max).multiplyScalar(0.5);
-  let r = 0;
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    r = Math.max(r, p.distanceTo(center));
-  }
-  return { center, radius: Math.max(r * 1.1, 1) };
+  return contentSphere(nodes);
 }
-
-/** Arcball sphere radius as a fraction of camera→pivot distance (<1 ⇒ camera outside
- *  the ball; large enough that the ball fills the view so there is no on-screen dead
- *  zone). Exported so the visible arcball sphere matches the grab sphere. */
-export const ARCBALL_FILL = 0.4;
 
 // ---------------------------------------------------------------------------
 // ControlState
@@ -184,7 +164,7 @@ export function useInteractionControls(
         entries[e.id] = entry;
       }
     }
-    vscode.postMessage({ type: "edit", op: "update", entries });
+    vscode.postMessage({ type: "edit", op: "update", kind: "node", attr: "move", entries });
   }, [edgesRef]);
 
   const _rafNodeMove = useRef(
@@ -213,23 +193,6 @@ export function useInteractionControls(
     [edgesRef],
   );
 
-  // Throttle set-origin IPC: one message per animation frame during pan.
-  const pendingOrigin = useRef<{ x: number; y: number; z: number } | null>(null);
-  const originRafPending = useRef(false);
-
-  const flushOrigin = useCallback((x: number, y: number, z: number) => {
-    vscode.postMessage({ type: "edit", op: "set-origin", x, y, z });
-  }, []);
-
-  const _rafOrigin = useRef(
-    makeRafThrottle(pendingOrigin, originRafPending, (p: { x: number; y: number; z: number }) =>
-      flushOrigin(p.x, p.y, p.z)),
-  ).current;
-  const scheduleOrigin = useCallback(
-    (x: number, y: number, z: number) => _rafOrigin({ x, y, z }),
-    [],
-  );
-
   // Throttle port-anchor IPC: one message per animation frame during a port drag.
   const pendingAnchor = useRef<{
     nodeId: string;
@@ -246,7 +209,9 @@ export function useInteractionControls(
       const keys = [p.nodeId, ...incidentEdgeIds(p.nodeId, p.portName, p.isInput)];
       vscode.postMessage({
         type: "edit",
-        op: "port-anchor",
+        op: "update",
+        kind: "node",
+        attr: "anchor",
         node: p.nodeId,
         port: p.portName,
         isInput: p.isInput,
@@ -257,11 +222,15 @@ export function useInteractionControls(
     [incidentEdgeIds],
   );
 
-  const schedulePortAnchor = useCallback(
+  const _rafPortAnchor = useRef(
     makeRafThrottle(pendingAnchor, anchorRafPending,
       (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) =>
         flushPortAnchor(p)),
-    [pendingAnchor, anchorRafPending, flushPortAnchor],
+  ).current;
+  const schedulePortAnchor = useCallback(
+    (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) =>
+      _rafPortAnchor(p),
+    [],
   );
 
 
@@ -280,7 +249,7 @@ export function useInteractionControls(
     pendingNodeMove, rafPending, pendingAnchor, anchorRafPending,
     cameraRef, nodesRef, edgesRef, targetRef, pickRequest,
     onSelect, storeCreateEdge, incidentEdgeIds,
-    scheduleNodeMove, flushNodeMove, schedulePortAnchor, flushPortAnchor, scheduleOrigin,
+    scheduleNodeMove, flushNodeMove, schedulePortAnchor, flushPortAnchor,
   };
   if (ctxRef.current === null) {
     ctxRef.current = freshCtx;

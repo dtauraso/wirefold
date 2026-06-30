@@ -1,65 +1,88 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verifies that every "edit" op declared in the EditMsg union in messages.ts
-# (the TS→Go geometry-CRUD axis) is handled by applyEdit in stdin_reader.go,
-# and vice versa. The top-level message-TYPE parity is covered by
-# check-message-kind-parity.sh; this guards the internal op axis, which that
-# check is blind to. An op added on one side and forgotten on the other
-# silently no-ops at runtime (CLAUDE.md "Bridge surface": a new TS→Go message
-# kind is one top-level `edit` op, kept in message-kind parity with the Go
-# stdin reader).
-# Exit 0 if clean; exit 1 with a report if they diverge.
+# Verifies the editor->Go geometry-CRUD "edit" bridge stays in parity across every
+# axis below the top-level msg.Type (which check-message-kind-parity.sh covers).
+# The bridge has EXACTLY THREE ops (create/update/delete); op="update" sets an
+# attribute on a typed ENTITY (kind: node/edge/camera/overlays/scene). Overlay
+# visibility is one named-boolean FLAG attribute per overlay. A value added on one
+# side and forgotten on another silently no-ops at runtime (CLAUDE.md "Bridge
+# surface"). Three axes are checked:
+#
+#   1. ops          — messages.ts EditMsg  vs  stdin_reader.go applyEdit op switch.
+#   2. update kinds — messages.ts EditMsg  vs  stdin_reader.go applyUpdate kind switch
+#                     vs  handle-message.ts update-dispatch switch (3-way).
+#   3. overlay flags— messages.ts OverlayFlag union  vs  stdin_reader.go overlayToggles map.
+#
+# Sentinel comments (X_START / X_END) bound each region so the greps cannot sweep in
+# unrelated literals (viewpoint sub-kinds, attr labels, trace kinds).
+# Exit 0 if clean; exit 1 with a report otherwise.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
+HANDLE_MSG="$REPO_ROOT/tools/topology-vscode/src/extension/handle-message.ts"
 
-# Ops from the TS EditMsg union: `op: "..."` literals in messages.ts.
-ops_from_ts() {
-  grep -oE 'op: "[^"]+"' "$MESSAGES_TS" \
-    | grep -oE '"[^"]+"' \
-    | tr -d '"' \
-    | sort -u
+for f in "$STDIN_READER" "$MESSAGES_TS" "$HANDLE_MSG"; do
+  if [[ ! -f "$f" ]]; then
+    echo "edit-op-parity: MISCONFIGURED — file not found: $f" >&2
+    exit 1
+  fi
+done
+
+# Extract the lines of FILE between sentinel comments START and END (exclusive of
+# neither matters — the literals live strictly inside).
+between() { # file start end
+  awk -v s="$1" -v e="$2" 'index($0,s){p=1;next} index($0,e){p=0} p' "$3"
 }
 
-# Ops handled by applyEdit in stdin_reader.go: `msg.Op == "..."` case literals.
-ops_from_go() {
-  grep -oE 'msg\.Op == "[^"]+"' "$STDIN_READER" \
-    | grep -oE '"[^"]+"' \
-    | tr -d '"' \
-    | sort -u
-}
+# Double-quoted literal values from a stream.
+quoted() { grep -oE '"[^"]+"' | tr -d '"' | sort -u; }
 
-TS_OPS=$(ops_from_ts)
-GO_OPS=$(ops_from_go)
-
-MISSING_IN_GO=$(comm -23 <(echo "$TS_OPS") <(echo "$GO_OPS"))
-MISSING_IN_TS=$(comm -13 <(echo "$TS_OPS") <(echo "$GO_OPS"))
+# Top-level Go `case "..."` labels: exactly one leading tab (nested cases have two
+# or more, so they are excluded). BSD grep lacks -P, so match with awk (\t = tab).
+toplevel_case() { awk '/^\tcase "/'; }
 
 HITS=0
-if [[ -n "$MISSING_IN_GO" ]]; then
-  echo "edit-op-parity: ops in messages.ts EditMsg but not handled by applyEdit in stdin_reader.go:"
-  while IFS= read -r o; do
-    echo "  unhandled in Go: \"$o\""
-    HITS=$((HITS + 1))
-  done <<< "$MISSING_IN_GO"
-fi
-if [[ -n "$MISSING_IN_TS" ]]; then
-  echo "edit-op-parity: ops handled by applyEdit in stdin_reader.go but not declared in messages.ts EditMsg:"
-  while IFS= read -r o; do
-    echo "  undeclared in TS: \"$o\""
-    HITS=$((HITS + 1))
-  done <<< "$MISSING_IN_TS"
-fi
+report_diff() { # label missing_in_a a_name missing_in_b b_name
+  local missing_a="$1" a_name="$2" missing_b="$3" b_name="$4"
+  if [[ -n "$missing_a" ]]; then
+    while IFS= read -r v; do [[ -z "$v" ]] && continue
+      echo "  $v: present in $b_name but missing in $a_name"; HITS=$((HITS+1)); done <<< "$missing_a"
+  fi
+  if [[ -n "$missing_b" ]]; then
+    while IFS= read -r v; do [[ -z "$v" ]] && continue
+      echo "  $v: present in $a_name but missing in $b_name"; HITS=$((HITS+1)); done <<< "$missing_b"
+  fi
+}
+
+# --- Axis 1: ops ------------------------------------------------------------
+TS_OPS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -oE 'op: "[^"]+"' | quoted)
+GO_OPS=$(between EDIT_OPS_START EDIT_OPS_END "$STDIN_READER" | toplevel_case | quoted)
+report_diff "$(comm -13 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "stdin_reader.go ops" \
+            "$(comm -23 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "messages.ts ops"
+
+# --- Axis 2: update entity kinds (3-way) ------------------------------------
+TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -oE 'kind: "[^"]+"' | quoted)
+GO_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$STDIN_READER" | toplevel_case | quoted)
+HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | grep -oE 'case "[^"]+"' | quoted)
+report_diff "$(comm -13 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))" "stdin_reader.go kinds" \
+            "$(comm -23 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))" "messages.ts kinds"
+report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-message.ts kinds" \
+            "$(comm -23 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "messages.ts kinds"
+
+# --- Axis 3: overlay flags --------------------------------------------------
+TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted)
+GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$STDIN_READER" | grep -oE '"[^"]+":' | tr -d '":' | sort -u)
+report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.go overlay flags" \
+            "$(comm -23 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "messages.ts overlay flags"
 
 if [[ $HITS -eq 0 ]]; then
-  echo "edit-op-parity: clean"
+  echo "edit-op-parity: clean (ops + update kinds + overlay flags in parity)"
   exit 0
 fi
-
 echo ""
 echo "edit-op-parity: $HITS divergence(s) found"
 exit 1

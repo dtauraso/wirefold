@@ -8,7 +8,7 @@ import type { PolarCamera } from "./camera-store";
 import { sendViewpointSet } from "./viewpoint-bridge";
 import { useThreeStore } from "./store";
 import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
-import { boundingBox, nodeWorldPos, nodeTopWorldPos, ndcToPixel } from "./geometry-helpers";
+import { boundingBox, nodeWorldPos, nodeTopWorldPos, ndcToPixel, fitDistance } from "./geometry-helpers";
 import { postLog } from "../log/post";
 
 // ---------------------------------------------------------------------------
@@ -57,10 +57,7 @@ export function CameraFitter({ nodes, hasRestoredCamera }: { nodes: RFNode<NodeD
     postLog("lifecycle", { phase: "camera-fit", nodeCount: nodes.length, cx, cy, minX, maxX, minY, maxY });
     const aspect = size.width / size.height;
     // Choose z so the graph fills the view.
-    const fovRad = (persp.fov * Math.PI) / 180;
-    const zForH = gh / 2 / Math.tan(fovRad / 2);
-    const zForW = gw / 2 / aspect / Math.tan(fovRad / 2);
-    const z = Math.max(zForH, zForW) + 50;
+    const z = fitDistance(persp.fov, aspect, gw, gh) + 50;
     persp.position.set(cx, cy, z);
     persp.up.set(0, 1, 0);
     persp.lookAt(cx, cy, 0);

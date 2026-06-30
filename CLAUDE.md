@@ -43,12 +43,16 @@ same commit it is used; otherwise the editor path is silently incomplete.
 **Bridge surface:** the editor ↔ Go bridge is two channels and nothing else.
 **Go → TS** is the trace stream (bead positions, node events, edge curves, shading
 params) — Go reporting what it does. **TS → Go** is spec save/load plus a single
-geometry-CRUD `edit` message (`op` = create / update / delete / fade) and the
-play/pause control signal (see `nodes/Wiring/stdin_reader.go` `applyEdit` and
-`src/messages.ts` `EditMsg`). The TS → Go send is **fire-and-forget** — no `await`,
-no Promise chain, no request/response, no delivery signal (guard:
-`tools/check-no-await-on-bridge.sh`). Adding a TS → Go message kind means one
-top-level `edit` op, kept in message-kind parity with the Go stdin reader.
+geometry-CRUD `edit` message with **exactly three ops** (create / update / delete)
+and the play/pause control signal (see `nodes/Wiring/stdin_reader.go` `applyEdit` and
+`src/messages.ts` `EditMsg`). create/delete add or remove an edge; **`update` sets an
+ATTRIBUTE on a typed entity** (`kind` = node / edge / camera / overlays / scene) —
+there is no per-feature op. Fading an edge, moving a port anchor, orbiting the camera,
+and toggling an overlay are all `update`s on their entity. New editor→Go capability
+is a new entity kind or attribute, NOT a new op; keep it in parity across messages.ts,
+stdin_reader.go, and handle-message.ts (guard: `tools/check-edit-op-parity.sh`). The
+TS → Go send is **fire-and-forget** — no `await`, no Promise chain, no request/response,
+no delivery signal (guard: `tools/check-no-await-on-bridge.sh`).
 
 **Drift rule:** if TS code outside `pump.ts` starts accumulating
 traversal-timing, firing-rule, position, or geometry logic — or starts awaiting Go
