@@ -2,7 +2,6 @@ package input
 
 import (
 	"context"
-	"sync"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -36,22 +35,17 @@ type Node struct {
 	FeedbackIn  *Wiring.In
 }
 
-// fanOut emits value concurrently to all wired outputs and blocks until all
-// traversals complete. It is the shared fan-out helper used by both the
-// feedback-ring path and the plain-emit path.
+// fanOut places beads on all wired outputs and drives them concurrently via
+// DriveAll, so every traversal animates in lockstep on this goroutine.
 func (n *Node) fanOut(ctx context.Context, v int) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); n.ToHoldNewSendOld.EmitOneDriven(ctx, v) }()
+	items := []Wiring.DriveItem{n.ToHoldNewSendOld.PlaceDriven(v)}
 	if n.ToExcitatory.Wired() {
-		wg.Add(1)
-		go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
+		items = append(items, n.ToExcitatory.PlaceDriven(v))
 	}
 	if n.ToPacer.Wired() {
-		wg.Add(1)
-		go func() { defer wg.Done(); n.ToPacer.EmitOneDriven(ctx, v) }()
+		items = append(items, n.ToPacer.PlaceDriven(v))
 	}
-	wg.Wait()
+	Wiring.DriveAll(ctx, items)
 }
 
 // popEnd reads and removes the END element of working, refilling from backup
