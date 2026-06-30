@@ -5,7 +5,7 @@
 //  1. Geometry-CRUD edits (type=="edit") — op discriminates the operation:
 //     {"type":"edit","op":"create","target":"<node-id>","targetHandle":"<port>"}
 //     {"type":"edit","op":"delete","target":"<node-id>","targetHandle":"<port>"}
-//     {"type":"edit","op":"update","nodeId":"<id>","x":<f64>,"y":<f64>,"z":<f64>}
+//     {"type":"edit","op":"update","entries":{...}}
 //     {"type":"edit","op":"fade","edges":{"<edge-id>":true|false,...}}
 //
 //  2. Play/pause control (type=="play" / type=="pause") — routes directly to the
@@ -81,12 +81,8 @@ type stdinMsg struct {
 	Anchor  *anchorVec      `json:"anchor"`
 	Keys    []string        `json:"keys"`
 	Scene   json.RawMessage `json:"scene"`
-	NodeId  string          `json:"nodeId"`
-	R       float64         `json:"r"`
-	// set-origin payload: new polar frame origin (camera pan focus).
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-	Z float64 `json:"z"`
+	NodeId  string  `json:"nodeId"`
+	R       float64 `json:"r"`
 	// Viewpoint is the payload for op=="viewpoint"; nil when the op is anything else.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
 	// guide-vis payload: explicit visibility for all polar-guide groups plus master.
@@ -370,15 +366,6 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		case "pan":
 			md.PanViewpoint(vec3{X: vp.Dx, Y: vp.Dy, Z: vp.Dz}, tr)
 		}
-	case msg.Op == "set-origin":
-		// Re-base the polar frame to the camera's new pan focus. World positions are
-		// preserved by construction (reOrigin recovers each node's world from the old
-		// root and re-encodes it relative to newOrigin). Fire-and-forget from TS;
-		// throttled to one per animation frame on the sender side.
-		if md == nil || math.IsNaN(msg.X) || math.IsNaN(msg.Y) || math.IsNaN(msg.Z) {
-			return
-		}
-		md.SetOrigin(vec3{X: msg.X, Y: msg.Y, Z: msg.Z}, tr)
 	case msg.Op == "tori-vis":
 		// Toggle the polar-guide tori visibility and emit a scene-tori event.
 		// Fire-and-forget from TS; no payload needed (toggle is stateless from TS side).

@@ -117,7 +117,6 @@ export interface InteractionCtx {
   flushNodeMove: (nodeId: string, x: number, y: number, z: number) => void;
   schedulePortAnchor: (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => void;
   flushPortAnchor: (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => void;
-  scheduleOrigin: (x: number, y: number, z: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -681,9 +680,5 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
     sendViewpointSet([pivot.x, pivot.y, pivot.z], r, pos, up);
     sendViewpointPan(delta.x, delta.y, delta.z);
 
-    // Re-base the polar layout origin at the new screen-center (throttled per frame).
-    if (Number.isFinite(pivot.x) && Number.isFinite(pivot.y) && Number.isFinite(pivot.z)) {
-      ctx.scheduleOrigin(pivot.x, pivot.y, pivot.z);
-    }
   }
 }

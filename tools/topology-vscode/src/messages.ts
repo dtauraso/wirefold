@@ -41,7 +41,6 @@ export type EditMsg =
       keys: string[];
     }
   | { type: "edit"; op: "scene"; scene: unknown }
-  | { type: "edit"; op: "set-origin"; x: number; y: number; z: number }
   | { type: "edit"; op: "tori-vis" }
   | { type: "edit"; op: "scene-poles" }
   | { type: "edit"; op: "node-poles" }
@@ -196,12 +195,6 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
     }
     case "scene":
       return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "set-origin":
-      return typeof m.x === "number" && Number.isFinite(m.x) &&
-        typeof m.y === "number" && Number.isFinite(m.y) &&
-        typeof m.z === "number" && Number.isFinite(m.z)
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
     case "viewpoint": {
       // viewpoint must have a nested object with a string kind discriminator.
       const vp = m.viewpoint;

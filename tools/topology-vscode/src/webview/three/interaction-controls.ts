@@ -213,23 +213,6 @@ export function useInteractionControls(
     [edgesRef],
   );
 
-  // Throttle set-origin IPC: one message per animation frame during pan.
-  const pendingOrigin = useRef<{ x: number; y: number; z: number } | null>(null);
-  const originRafPending = useRef(false);
-
-  const flushOrigin = useCallback((x: number, y: number, z: number) => {
-    vscode.postMessage({ type: "edit", op: "set-origin", x, y, z });
-  }, []);
-
-  const _rafOrigin = useRef(
-    makeRafThrottle(pendingOrigin, originRafPending, (p: { x: number; y: number; z: number }) =>
-      flushOrigin(p.x, p.y, p.z)),
-  ).current;
-  const scheduleOrigin = useCallback(
-    (x: number, y: number, z: number) => _rafOrigin({ x, y, z }),
-    [],
-  );
-
   // Throttle port-anchor IPC: one message per animation frame during a port drag.
   const pendingAnchor = useRef<{
     nodeId: string;
@@ -280,7 +263,7 @@ export function useInteractionControls(
     pendingNodeMove, rafPending, pendingAnchor, anchorRafPending,
     cameraRef, nodesRef, edgesRef, targetRef, pickRequest,
     onSelect, storeCreateEdge, incidentEdgeIds,
-    scheduleNodeMove, flushNodeMove, schedulePortAnchor, flushPortAnchor, scheduleOrigin,
+    scheduleNodeMove, flushNodeMove, schedulePortAnchor, flushPortAnchor,
   };
   if (ctxRef.current === null) {
     ctxRef.current = freshCtx;
