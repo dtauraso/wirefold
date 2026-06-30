@@ -6,7 +6,7 @@ import { useRef, useCallback } from "react";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
 import type { MoveEntry } from "../../messages";
-import { nodeWorldPos } from "./geometry-helpers";
+import { contentSphere } from "./geometry-helpers";
 import { vscode } from "../vscode-api";
 import type { InteractionCtx } from "./interaction-handlers";
 import { handlePointerDown, handlePointerMove, handlePointerUp, handleWheelNative } from "./interaction-handlers";
@@ -16,25 +16,10 @@ import { handlePointerDown, handlePointerMove, handlePointerUp, handleWheelNativ
  * world positions, radius = farthest node from that center (+10% margin). This is the
  * arcball — fixed in world space, so it zooms WITH the diagram (both grow as you dolly
  * in) instead of staying screen-size. Exported shape used by the visible sphere too.
+ * Delegates to geometry-helpers.contentSphere (the single source).
  */
 export function computeContentSphere(nodes: RFNode<NodeData>[]): { center: THREE.Vector3; radius: number } {
-  const center = new THREE.Vector3();
-  if (!nodes || nodes.length === 0) return { center, radius: 100 };
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    min.min(p); max.max(p);
-  }
-  center.addVectors(min, max).multiplyScalar(0.5);
-  let r = 0;
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    r = Math.max(r, p.distanceTo(center));
-  }
-  return { center, radius: Math.max(r * 1.1, 1) };
+  return contentSphere(nodes);
 }
 
 // ---------------------------------------------------------------------------

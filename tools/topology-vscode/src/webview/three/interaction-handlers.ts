@@ -6,7 +6,7 @@
 
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
-import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, pointerRingAnchor, contentSphere } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
@@ -122,22 +122,11 @@ export function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: 
  * Bounding-box center of all node world positions. Bounded scene-focus point
  * used as a fallback anchor when the z=0 plane hit diverges (grazing view).
  * Returns (0,0,0) when there are no nodes.
+ * Delegates to geometry-helpers.contentSphere (the single source).
  */
 export function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
   const nodes = ctx.nodesRef.current;
-  if (!nodes || nodes.length === 0) return new THREE.Vector3(0, 0, 0);
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  let any = false;
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    min.min(p);
-    max.max(p);
-    any = true;
-  }
-  if (!any) return new THREE.Vector3(0, 0, 0);
-  return min.add(max).multiplyScalar(0.5);
+  return contentSphere(nodes).center;
 }
 
 /**
