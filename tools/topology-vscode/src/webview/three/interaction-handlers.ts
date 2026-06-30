@@ -6,7 +6,7 @@
 
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
-import { nodeWorldPos, nodeRadius, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
+import { nodeWorldPos, pixelToNDC, pointerRingAnchor } from "./geometry-helpers";
 import { patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
 import { useCursorStore } from "./cursor-store";
@@ -28,42 +28,6 @@ export function commitCamera(cam: THREE.PerspectiveCamera) {
     };
   });
   scheduleViewSave();
-}
-
-// ---------------------------------------------------------------------------
-// P7.5 — Large sphere constraint helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the radius of the large container sphere from the node set.
- * Mirrors the Go formula: max distance from origin to any node center + that
- * node's own radius, plus a 20% padding. Falls back to a minimum of 500 so
- * the camera is never clamped out of a scene with no nodes.
- */
-export function computeLargeSphereRadius(nodes: RFNode<NodeData>[]): number {
-  const MIN_R = 500;
-  if (!nodes || nodes.length === 0) return MIN_R;
-  let maxR = 0;
-  for (const n of nodes) {
-    const p = nodeWorldPos(n);
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    const dist = p.length() + nodeRadius(n);
-    if (dist > maxR) maxR = dist;
-  }
-  return Math.max(maxR * 1.2, MIN_R);
-}
-
-/**
- * P7.5: Clamp the camera position so it stays on or inside the large
- * container sphere of radius R. If the camera is outside, project it back
- * to the surface (same direction, length = R). No-op when inside.
- */
-export function constrainInsideLargeSphere(cam: THREE.PerspectiveCamera, R: number): void {
-  const len = cam.position.length();
-  if (Number.isFinite(len) && len > R) {
-    cam.position.multiplyScalar(R / len);
-    cam.updateMatrixWorld(true);
-  }
 }
 
 // ---------------------------------------------------------------------------
