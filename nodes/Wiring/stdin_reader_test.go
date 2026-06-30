@@ -1,7 +1,7 @@
 // stdin_reader_test.go — contract test for RunStdinReader.
 //
 // Contract: Go's clock drives delivery; the editor→Go bridge is the single "edit"
-// CRUD shape (op = create/update/delete/fade) and carries NO delivery signal. This
+// CRUD shape (exactly three ops: create/update/delete) and carries NO delivery signal. This
 // test verifies (a) feeding bridge "edit" lines does not crash or hang the reader,
 // and (b) delivery is driven by the clock advance, never by a stdin message.
 
@@ -37,7 +37,7 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 
 	// Feed a benign "edit" fade line. No bridge message delivers a bead — the
 	// clock owns delivery — so the bead must stay in flight.
-	io.WriteString(w, `{"type":"edit","op":"fade","edges":[]}`+"\n")
+	io.WriteString(w, `{"type":"edit","op":"update","kind":"edge","attr":"faded","edges":{}}`+"\n")
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatal("bead delivered by a stdin edit message; clock should own delivery")
