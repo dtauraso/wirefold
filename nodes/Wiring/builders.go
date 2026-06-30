@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -162,15 +161,6 @@ var (
 	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
 	tNowFunc            = reflect.TypeFor[func() time.Duration]()
 )
-
-// lowerFirst returns s with its first byte lowercased.
-// Used for wire:"data.state" key derivation (field Held → key "held").
-func lowerFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToLower(s[:1]) + s[1:]
-}
 
 // reflectStateKeys returns the data.state map keys required by sample's
 // wire:"data.state" struct tags.
@@ -390,7 +380,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			if len(key) == 0 {
 				continue
 			}
-			exportedKey := strings.ToUpper(key[:1]) + key[1:]
+			exportedKey := exportedFieldName(key)
 			src := reflect.ValueOf(data).Elem().FieldByName(exportedKey)
 			if !src.IsValid() || src.Type() != fv.Type() {
 				continue

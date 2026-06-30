@@ -24,6 +24,15 @@ func exportedFieldName(key string) string {
 	return strings.ToUpper(key[:1]) + key[1:]
 }
 
+// lowerFirst returns s with its first byte lowercased.
+// Used for wire:"data.state" key derivation (field Held → key "held").
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
 // validateSpec checks the parsed topoSpec for shape errors that are
 // decidable without constructing any Go objects.  It returns a
 // combined error listing every problem found, or nil if the spec is valid.
