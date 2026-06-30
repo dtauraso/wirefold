@@ -18,12 +18,12 @@ func run(left, right int) (int, error) {
 	fromLeft := make(chan int, 1)
 	fromRight := make(chan int, 1)
 	toPassed := make(chan int, 1)
-	node := &Node{
+	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { tr.Fire("ilg") },
 		FromLeft:  Wiring.NewIn(fromLeft, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewIn(fromRight, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(toPassed, "ilg", "ToPassed", tr),
-	}
+	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -93,13 +93,13 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	simClk := Wiring.NewFakeClock()
 
 	fired := make(chan struct{}, 4)
-	node := &Node{
+	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { fired <- struct{}{} },
 		Now:       func() time.Duration { return simClk.Now() },
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg", "ToPassed", tr),
-	}
+	}}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
@@ -137,13 +137,13 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	dLeft := gatetesthelper.NewInputWire(8, tr, "ilg2", "FromLeft")
 	dRight := gatetesthelper.NewInputWire(8, tr, "ilg2", "FromRight")
 	dFired := make(chan struct{}, 4)
-	dNode := &Node{
+	dNode := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { dFired <- struct{}{} },
 		Now:       func() time.Duration { return dClk.Now() },
 		FromLeft:  Wiring.NewInPaced(dLeft, dctx, "ilg2", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(dRight, dctx, "ilg2", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg2", "ToPassed", tr),
-	}
+	}}
 	var dwg sync.WaitGroup
 	dwg.Add(1)
 	go func() { defer dwg.Done(); dNode.Update(dctx) }()
@@ -181,12 +181,12 @@ func TestSkipMinusOnePlaceholder(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	out := make(chan int, 4)
-	node := &Node{
+	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() {},
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(out, "ilg", "ToPassed", tr),
-	}
+	}}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
@@ -219,12 +219,12 @@ func TestLatestPerSide(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	out := make(chan int, 4)
-	node := &Node{
+	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() {},
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(out, "ilg", "ToPassed", tr),
-	}
+	}}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
@@ -254,12 +254,12 @@ func TestWindowFire(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	fired := make(chan struct{}, 4)
-	node := &Node{
+	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { fired <- struct{}{} },
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg", "ToPassed", tr),
-	}
+	}}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
@@ -301,13 +301,13 @@ func TestWindowClear(t *testing.T) {
 	simClk := Wiring.NewFakeClock()
 
 	fired := make(chan struct{}, 4)
-	node := &Node{
+	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { fired <- struct{}{} },
 		Now:       func() time.Duration { return simClk.Now() },
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg", "ToPassed", tr),
-	}
+	}}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
