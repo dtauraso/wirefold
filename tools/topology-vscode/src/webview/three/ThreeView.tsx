@@ -27,6 +27,15 @@ import { scheduleViewSave } from "../save";
 // ThreeView: Canvas wrapper + interaction + label overlay + widgets
 // ---------------------------------------------------------------------------
 
+// Static label-pill style — no per-node data, so it is hoisted to module scope
+// rather than reallocated per node per render.
+const PILL_STYLE: React.CSSProperties = {
+  background: "rgba(0,0,0,0.55)",
+  border: "none",
+  borderRadius: 4,
+  padding: "3px 6px",
+};
+
 export function ThreeView() {
   const nodes = useThreeStore((s) => s.nodes);
   const edges = useThreeStore((s) => s.edges);
@@ -237,12 +246,6 @@ export function ThreeView() {
       {!globalLabelsHidden && nodes.map((n) => {
         const pos = labelMap.get(n.id);
         if (!pos) return null;
-        const pillStyle: React.CSSProperties = {
-              background: "rgba(0,0,0,0.55)",
-              border: "none",
-              borderRadius: 4,
-              padding: "3px 6px",
-            };
         return (
           <div
             key={n.id}
@@ -258,7 +261,7 @@ export function ThreeView() {
               lineHeight: 1.25,
               textAlign: "center",
               zIndex: 10,
-              ...pillStyle,
+              ...PILL_STYLE,
             }}
           >
             <div style={{ whiteSpace: "nowrap" }}>{n.data?.label ?? n.id}</div>

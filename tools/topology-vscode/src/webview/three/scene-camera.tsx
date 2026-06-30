@@ -183,6 +183,12 @@ export function CameraSettleDetector({
     }
   });
 
+  // Clear any pending settle timer on unmount so it can't fire onSettle after the
+  // component is gone.
+  useEffect(() => () => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+  }, []);
+
   return null;
 }
 

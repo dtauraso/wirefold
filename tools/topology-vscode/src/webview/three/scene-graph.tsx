@@ -114,7 +114,6 @@ export function GraphNode({
   // Memoize THREE.Color objects to avoid allocating on every render.
   const fillColor = useMemo(() => new THREE.Color(fillHex), [fillHex]);
   const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
-  const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
   const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
   const torusThick = (selected || hovered || onSphereSurface) ? r * 0.14 : r * 0.08;
