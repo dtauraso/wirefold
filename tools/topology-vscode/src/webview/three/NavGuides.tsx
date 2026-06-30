@@ -73,9 +73,6 @@ function PolarFrame({ center, scale, tag, octants }: {
   const arcMid = arcR * 1.12 * Math.SQRT1_2;
   const hhR = Math.max(radiusKey * 0.04, 3);   // handhold sphere radius (matches the tori handholds)
   const arcHH = arcR * Math.SQRT1_2;           // a quarter-arc's midpoint radius (45° in its plane)
-  const arcOff = arcR * 0.05;                  // nudge each octant's arcs off the shared plane so
-                                               // they don't coincide (coincident transparent arcs
-                                               // sort by camera and flip colors on rotate/pan/zoom)
   const sfx = tag ? ` ${tag}` : "";
   return (
     <group position={[center.x, center.y, center.z]}>
@@ -148,17 +145,22 @@ function PolarFrame({ center, scale, tag, octants }: {
       </>)}
       {octants && OCTANTS.map((o) => (
         <group key={`oarc-${o.tag}`} scale={[o.s[0], o.s[1], o.s[2]]}>
-          {/* θ arc nudged off z=0, φ arc off y=0, into this octant — so adjacent octants'
-              arcs don't coincide. Opaque (not transparent) so the visible color is
-              render-order-stable, not camera-sorted. */}
-          <mesh position={[0, 0, arcOff]} raycast={() => null}>
-            <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-            <meshBasicMaterial color={o.color} depthWrite={false} />
-          </mesh>
-          <mesh position={[0, arcOff, 0]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
-            <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-            <meshBasicMaterial color={o.color} depthWrite={false} />
-          </mesh>
+          {/* Each θ/φ quarter-arc lies in a coordinate plane shared by two octants, so to
+              avoid drawing it twice only one of the pair renders it: the +z octant draws
+              the θ arc (X-Y plane), the +y octant draws the φ arc (X-Z plane). Opaque so
+              the color is render-order-stable. */}
+          {o.s[2] > 0 && (
+            <mesh raycast={() => null}>
+              <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
+              <meshBasicMaterial color={o.color} depthWrite={false} />
+            </mesh>
+          )}
+          {o.s[1] > 0 && (
+            <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+              <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
+              <meshBasicMaterial color={o.color} depthWrite={false} />
+            </mesh>
+          )}
         </group>
       ))}
       {/* Labels — billboard sprites, always face the camera. */}
@@ -178,9 +180,10 @@ function PolarFrame({ center, scale, tag, octants }: {
         <React.Fragment key={`olbl-${o.tag}`}>
           {/* θ label at this octant's θ-arc midpoint (X-Y plane), φ at its φ-arc midpoint
               (X-Z plane), reflected by the octant sign and colored per octant. */}
-          {/* Sign of θ = pole-axis (y) side; sign of φ = z side (φ measured from +X φ0). */}
-          <AxisLabel text={`${o.s[1] > 0 ? "+" : "−"}θ`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />
-          <AxisLabel text={`${o.s[2] > 0 ? "+" : "−"}φ`} color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />
+          {/* Labels follow the same one-of-each-pair rule as the arcs. Sign of θ = pole-axis
+              (y) side; sign of φ = z side (φ measured from +X φ0). */}
+          {o.s[2] > 0 && <AxisLabel text={`${o.s[1] > 0 ? "+" : "−"}θ`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />}
+          {o.s[1] > 0 && <AxisLabel text={`${o.s[2] > 0 ? "+" : "−"}φ`} color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />}
         </React.Fragment>
       ))}
       {octants && (<>
@@ -195,14 +198,18 @@ function PolarFrame({ center, scale, tag, octants }: {
         ))}
         {OCTANTS.map((o) => (
           <React.Fragment key={`hha-${o.tag}`}>
-            <mesh position={[o.s[0] * arcHH, o.s[1] * arcHH, 0]} raycast={() => null}>
-              <sphereGeometry args={[hhR, 12, 12]} />
-              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
-            </mesh>
-            <mesh position={[o.s[0] * arcHH, 0, o.s[2] * arcHH]} raycast={() => null}>
-              <sphereGeometry args={[hhR, 12, 12]} />
-              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
-            </mesh>
+            {o.s[2] > 0 && (
+              <mesh position={[o.s[0] * arcHH, o.s[1] * arcHH, 0]} raycast={() => null}>
+                <sphereGeometry args={[hhR, 12, 12]} />
+                <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+              </mesh>
+            )}
+            {o.s[1] > 0 && (
+              <mesh position={[o.s[0] * arcHH, 0, o.s[2] * arcHH]} raycast={() => null}>
+                <sphereGeometry args={[hhR, 12, 12]} />
+                <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+              </mesh>
+            )}
           </React.Fragment>
         ))}
       </>)}
