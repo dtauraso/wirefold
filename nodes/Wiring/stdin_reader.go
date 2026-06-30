@@ -337,7 +337,12 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				md.RootMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
 				if treeRoot != "" {
 					for id, w := range md.heldCenters() {
+						// meta.json is canonical for Go node geometry; view/nodes is the
+						// auxiliary position store the TS spec-emit reads. Write both so the
+						// two on-disk stores stay in sync across a drag (they diverged when
+						// only meta.json was written).
 						_ = writeMetaPos(treeRoot, id, w.X, w.Y, w.Z)
+						_ = writeViewNode(treeRoot, id, specPosition{X: w.X, Y: w.Y, Z: w.Z})
 					}
 				}
 			}

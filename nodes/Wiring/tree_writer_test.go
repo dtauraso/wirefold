@@ -2,11 +2,14 @@ package Wiring
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 func copyFixtureTree(t *testing.T) string {
@@ -55,6 +58,69 @@ func TestWriteViewNodeRoundTrip(t *testing.T) {
 	}
 	if got.X != want.X || got.Y != want.Y || got.Z != want.Z {
 		t.Errorf("position mismatch: got %+v want %+v", got, want)
+	}
+}
+
+// TestDragWritesBothPositionStores locks that a node-drag keeps the two on-disk
+// position stores consistent: meta.json (canonical for Go node geometry) and
+// view/nodes/<id>.json (the auxiliary store the TS spec-emit reads). They diverged
+// when applyUpdate wrote only meta.json; this asserts both reflect the same center.
+func TestDragWritesBothPositionStores(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	root := t.TempDir()
+	path := filepath.Join(root, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(256)
+	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx)
+
+	// A node-drag, delivered through the same applyUpdate path the live bridge uses,
+	// with treeRoot set so both position stores are persisted.
+	msg := stdinMsg{Op: "update", Kind: "node", Attr: "move"}
+	msg.Entries = map[string]moveEntry{
+		"src": {NodeId: "src", X: 400, Y: 250, Z: 30},
+	}
+	applyUpdate(msg, md, tr, root)
+
+	// Read the two on-disk stores directly and assert they agree for the dragged node.
+	readJSON := func(p string, v any) {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		if err := json.Unmarshal(raw, v); err != nil {
+			t.Fatalf("parse %s: %v", p, err)
+		}
+	}
+	var meta jsonMeta
+	readJSON(filepath.Join(root, "nodes", "src", "meta.json"), &meta)
+	var view specPosition
+	readJSON(filepath.Join(root, "view", "nodes", "src.json"), &view)
+
+	if meta.X != view.X || meta.Y != view.Y || meta.Z != view.Z {
+		t.Fatalf("position stores diverged after drag: meta=(%v,%v,%v) view=%+v",
+			meta.X, meta.Y, meta.Z, view)
 	}
 }
 
