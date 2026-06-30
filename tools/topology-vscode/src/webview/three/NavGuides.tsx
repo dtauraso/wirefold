@@ -170,8 +170,8 @@ function PolarFrame({ center, scale, tag, octants }: {
         <React.Fragment key={`olbl-${o.tag}`}>
           {/* θ label at this octant's θ-arc midpoint (X-Y plane), φ at its φ-arc midpoint
               (X-Z plane), reflected by the octant sign and colored per octant. */}
-          <AxisLabel text="θ" color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />
-          <AxisLabel text="φ" color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />
+          <AxisLabel text={`θ ${o.tag}`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />
+          <AxisLabel text={`φ ${o.tag}`} color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />
         </React.Fragment>
       ))}
     </group>
