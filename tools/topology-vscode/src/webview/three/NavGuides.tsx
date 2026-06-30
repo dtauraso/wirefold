@@ -101,6 +101,34 @@ function PolarFrame({ center, scale, tag, octants }: {
         <coneGeometry args={[coneBaseR, coneH, 12]} />
         <meshBasicMaterial color="#3366dd" depthWrite={false} />
       </mesh>
+      {/* Negative spokes (octant mode): the other halves of each axis (−Y/−X/−Z), so the
+          full ±X ±Y ±Z cross frames all 8 octants. Same colors as the positive halves. */}
+      {octants && (<>
+        <mesh position={[0, -poleLen / 2, 0]} raycast={() => null}>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+          <meshBasicMaterial color="#22dd55" depthWrite={false} />
+        </mesh>
+        <mesh position={[0, -(poleLen + coneH / 2), 0]} rotation={[Math.PI, 0, 0]} raycast={() => null}>
+          <coneGeometry args={[coneBaseR, coneH, 12]} />
+          <meshBasicMaterial color="#22dd55" depthWrite={false} />
+        </mesh>
+        <mesh position={[-poleLen / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]} raycast={() => null}>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+          <meshBasicMaterial color="#dd3333" depthWrite={false} />
+        </mesh>
+        <mesh position={[-(poleLen + coneH / 2), 0, 0]} rotation={[0, 0, Math.PI / 2]} raycast={() => null}>
+          <coneGeometry args={[coneBaseR, coneH, 12]} />
+          <meshBasicMaterial color="#dd3333" depthWrite={false} />
+        </mesh>
+        <mesh position={[0, 0, -poleLen / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+          <meshBasicMaterial color="#3366dd" depthWrite={false} />
+        </mesh>
+        <mesh position={[0, 0, -(poleLen + coneH / 2)]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+          <coneGeometry args={[coneBaseR, coneH, 12]} />
+          <meshBasicMaterial color="#3366dd" depthWrite={false} />
+        </mesh>
+      </>)}
       {!octants && (<>
       {/* θ angle arc (magenta): quarter-sweep from +Y pole to +X, X-Y meridian plane. */}
       <mesh raycast={() => null}>
@@ -129,13 +157,22 @@ function PolarFrame({ center, scale, tag, octants }: {
       <AxisLabel text={`+Y pole${sfx}`} color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+X φ0${sfx}`} color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+Z φ90${sfx}`} color="#3366dd" position={[0, 0, poleLen + coneH * 2]} size={poleLen * 0.12} />
+      {octants && (<>
+        <AxisLabel text={`−Y${sfx}`} color="#22dd55" position={[0, -(poleLen + coneH * 2), 0]} size={poleLen * 0.12} />
+        <AxisLabel text={`−X φ180${sfx}`} color="#dd3333" position={[-(poleLen + coneH * 2), 0, 0]} size={poleLen * 0.12} />
+        <AxisLabel text={`−Z φ270${sfx}`} color="#3366dd" position={[0, 0, -(poleLen + coneH * 2)]} size={poleLen * 0.12} />
+      </>)}
       {!octants && (<>
       <AxisLabel text="θ" color="#dd33cc" position={[arcMid, arcMid, 0]} size={poleLen * 0.14} />
       <AxisLabel text="φ" color="#dddd22" position={[arcMid, 0, arcMid]} size={poleLen * 0.14} />
       </>)}
       {octants && OCTANTS.map((o) => (
-        <AxisLabel key={`olbl-${o.tag}`} text={o.tag} color={o.color}
-          position={[o.s[0] * arcR * 0.62, o.s[1] * arcR * 0.62, o.s[2] * arcR * 0.62]} size={poleLen * 0.09} />
+        <React.Fragment key={`olbl-${o.tag}`}>
+          {/* θ label at this octant's θ-arc midpoint (X-Y plane), φ at its φ-arc midpoint
+              (X-Z plane), reflected by the octant sign and colored per octant. */}
+          <AxisLabel text="θ" color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />
+          <AxisLabel text="φ" color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />
+        </React.Fragment>
       ))}
     </group>
   );
