@@ -16,7 +16,7 @@ import { appendWebviewLog } from "./webview-log";
 import { PROBE_DIR, PROBE_FILES } from "../probe-files";
 
 export type MessageCtx = {
-  logUri: vscode.Uri;
+  logUri: vscode.Uri | undefined;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
 };

@@ -177,7 +177,9 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
       post({ type: "load", text: JSON.stringify(lastSpec), sceneText: readSceneText() });
     }
     const workspaceFolder = folderUri ? vscode.workspace.getWorkspaceFolder(folderUri) : undefined;
-    const logUri = workspaceFolder?.uri ?? (folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("."));
+    // Final fallback is undefined (no real workspace) — appendWebviewLog skips the
+    // write rather than misdirecting .probe/ logs to an arbitrary cwd.
+    const logUri = workspaceFolder?.uri ?? folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
     handleMessage(raw, { logUri, runner, post });
   });
 
