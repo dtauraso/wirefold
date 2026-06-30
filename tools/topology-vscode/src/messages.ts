@@ -153,7 +153,8 @@ export type TraceEvent =
   | { step: number; kind: "labels-global"; visible: boolean }
   | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
-  | { step: number; kind: "double-links"; visible: boolean };
+  | { step: number; kind: "double-links"; visible: boolean }
+  | { step: number; kind: "node-status"; node: string; torusRed: boolean; missedValue: number; x: number; y: number; z: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }

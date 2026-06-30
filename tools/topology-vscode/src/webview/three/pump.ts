@@ -298,6 +298,13 @@ export function handleTraceEvent(event: TraceEvent): void {
       scheduleViewSave();
       return;
     }
+    case "node-status": {
+      // Go REPORTS a node's processing-status (torus red on a missed different-color
+      // bead, or revert to normal). Rendering is NOT implemented yet — this is a
+      // type/passthrough stub so the closed-vocabulary exhaustiveness check compiles.
+      // When the renderer lands, read torusRed/missedValue/x/y/z here and write a store.
+      return;
+    }
     default:
       assertNever(k);
   }
