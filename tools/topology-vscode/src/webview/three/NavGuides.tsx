@@ -53,6 +53,14 @@ const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
   { s: [-1, -1, -1], color: "#cd853f", tag: "−x−y−z" },
 ];
 
+// Angle-arc colors by sign-type so the four categories read apart at a glance: θ in a
+// magenta family, φ in a blue family (hue = θ vs φ); + bright / − muted (brightness =
+// sign). +θ and +φ are the bright, clearly-visible ones.
+const COL_THETA_POS = "#f06ec0"; // +θ  bright magenta
+const COL_THETA_NEG = "#9a4f86"; // −θ  muted magenta
+const COL_PHI_POS = "#57c7e8";   // +φ  bright blue
+const COL_PHI_NEG = "#3a7d94";   // −φ  muted blue
+
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
 // (yellow) angle arcs, all anchored at `center` with the pole = world +y. `scale`
@@ -152,13 +160,13 @@ function PolarFrame({ center, scale, tag, octants }: {
           {o.s[2] > 0 && (
             <mesh raycast={() => null}>
               <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-              <meshBasicMaterial color={o.color} depthWrite={false} />
+              <meshBasicMaterial color={o.s[1] > 0 ? COL_THETA_POS : COL_THETA_NEG} depthWrite={false} />
             </mesh>
           )}
           {o.s[1] > 0 && (
             <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
               <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-              <meshBasicMaterial color={o.color} depthWrite={false} />
+              <meshBasicMaterial color={o.s[2] > 0 ? COL_PHI_POS : COL_PHI_NEG} depthWrite={false} />
             </mesh>
           )}
         </group>
@@ -182,15 +190,15 @@ function PolarFrame({ center, scale, tag, octants }: {
               (X-Z plane), reflected by the octant sign and colored per octant. */}
           {/* Labels follow the same one-of-each-pair rule as the arcs. Sign of θ = pole-axis
               (y) side; sign of φ = z side (φ measured from +X φ0). */}
-          {o.s[2] > 0 && <AxisLabel text={`${o.s[1] > 0 ? "+" : "−"}θ`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />}
-          {o.s[1] > 0 && <AxisLabel text={`${o.s[2] > 0 ? "+" : "−"}φ`} color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />}
+          {o.s[2] > 0 && <AxisLabel text={`${o.s[1] > 0 ? "+" : "−"}θ`} color={o.s[1] > 0 ? COL_THETA_POS : COL_THETA_NEG} position={[o.s[0] * arcMid, o.s[1] * arcMid, 0]} size={poleLen * 0.11} />}
+          {o.s[1] > 0 && <AxisLabel text={`${o.s[2] > 0 ? "+" : "−"}φ`} color={o.s[2] > 0 ? COL_PHI_POS : COL_PHI_NEG} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />}
         </React.Fragment>
       ))}
       {octants && (<>
-        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere at each
-            pole's MIDPOINT and each quarter-arc midpoint. raycast off, no
-            userData.handhold. Opaque so the color is render-order-stable on camera move. */}
-        {([[poleLen / 2, 0, 0], [-poleLen / 2, 0, 0], [0, poleLen / 2, 0], [0, -poleLen / 2, 0], [0, 0, poleLen / 2], [0, 0, -poleLen / 2]] as [number, number, number][]).map((p, i) => (
+        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere where each
+            pole crosses the arc circles (±arcR on each axis) and at each quarter-arc
+            midpoint. raycast off, no userData.handhold. Opaque so the color is stable. */}
+        {([[arcR, 0, 0], [-arcR, 0, 0], [0, arcR, 0], [0, -arcR, 0], [0, 0, arcR], [0, 0, -arcR]] as [number, number, number][]).map((p, i) => (
           <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
             <sphereGeometry args={[hhR, 12, 12]} />
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
