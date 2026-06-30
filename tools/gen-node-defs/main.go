@@ -102,6 +102,11 @@ func main() {
 		if err != nil {
 			fatalf("parse ports %s: %v", e.Name(), err)
 		}
+		// Fallback: if AST found no ports (e.g. all ports are in an embedded struct
+		// from another package), read them from the SPEC.md Ports table.
+		if len(ports) == 0 {
+			ports = parsePortsFromSpec(pkgDir)
+		}
 		dataFields, err := parseDataFieldsFromAST(pkgDir)
 		if err != nil {
 			fatalf("parse data fields %s: %v", e.Name(), err)
@@ -480,6 +485,95 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 	}
 
 	return view, accentOverrides, edgeKindOverrides, optionalPorts, nil
+}
+
+// parsePortsFromSpec reads nodes/<Kind>/SPEC.md and returns ports derived from
+// the Ports table (Name + Direction columns). Used as a fallback when AST
+// parsing discovers 0 ports — e.g. when all ports live in an embedded struct
+// from another package that the AST walker cannot follow.
+func parsePortsFromSpec(pkgDir string) []port {
+	data, err := os.ReadFile(filepath.Join(pkgDir, "SPEC.md"))
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	// Locate ## Ports section.
+	start := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "## Ports" {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return nil
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	tableLines := lines[start+1 : end]
+	// Parse the markdown table.
+	var rows []string
+	for _, l := range tableLines {
+		if strings.Contains(l, "|") {
+			rows = append(rows, l)
+		}
+	}
+	if len(rows) < 2 {
+		return nil
+	}
+	// Parse header row.
+	var headers []string
+	for _, p := range strings.Split(rows[0], "|") {
+		h := strings.TrimSpace(p)
+		if h != "" {
+			headers = append(headers, h)
+		}
+	}
+	nameIdx := indexOf(headers, "Name")
+	dirIdx := indexOf(headers, "Direction")
+	if nameIdx == -1 || dirIdx == -1 {
+		return nil
+	}
+	var ports []port
+	for _, row := range rows[1:] {
+		parts := strings.Split(row, "|")
+		var cells []string
+		for _, p := range parts {
+			cells = append(cells, strings.TrimSpace(p))
+		}
+		if len(cells) > 0 && cells[0] == "" {
+			cells = cells[1:]
+		}
+		if len(cells) > 0 && cells[len(cells)-1] == "" {
+			cells = cells[:len(cells)-1]
+		}
+		// Skip separator rows.
+		allSep := true
+		for _, c := range cells {
+			if !isSep(c) {
+				allSep = false
+				break
+			}
+		}
+		if allSep {
+			continue
+		}
+		if nameIdx >= len(cells) || dirIdx >= len(cells) {
+			continue
+		}
+		name := cells[nameIdx]
+		dir := cells[dirIdx]
+		if name == "" || (dir != "in" && dir != "out") {
+			continue
+		}
+		ports = append(ports, port{id: name, direction: dir})
+	}
+	return ports
 }
 
 // parseDefaultData reads nodes/<Kind>/SPEC.md and returns the JSON string from

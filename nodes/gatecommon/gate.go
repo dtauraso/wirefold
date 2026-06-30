@@ -11,15 +11,18 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// WindowWu is the fixed per-node coincidence window expressed as a distance in
-// world units. At the one pulseSpeed (0.04 wu/ms) this equals 3000 ms — enough
-// to exceed the same-cycle input skew (~69 ms measured) while staying under the
-// input cadence (~3104 ms). It is a property of the node, like a neuron's
-// membrane time constant, and does NOT depend on input-wire geometry.
-const WindowWu = 120
+// WindowMs is the target coincidence window expressed in milliseconds. This is a
+// design choice calibrated to exceed the same-cycle input skew (~69 ms measured)
+// while staying under the input cadence (~3104 ms).
+const WindowMs = 3000
 
-// PollInterval bounds the busy-spin of the window loop: between polls the loop
-// parks on a short timeout (or ctx cancel) instead of spinning.
+// WindowWu is derived from WindowMs and the one pulse speed so it stays correct
+// if PulseSpeedWuPerMs is retuned: WindowWu = WindowMs × PulseSpeedWuPerMs.
+const WindowWu = WindowMs * Wiring.PulseSpeedWuPerMs // = 120 wu at PulseSpeedWuPerMs=0.04
+
+// PollInterval bounds the busy-spin of the window loop. It is a free scheduling
+// choice (not derivable from pulse speed or fire-dwell) that trades CPU burn
+// against reaction latency between window polls.
 const PollInterval = 5 * time.Millisecond
 
 // FireDwellMs holds both inputs visible (interior beads present) for this long
@@ -53,10 +56,9 @@ type GateNode struct {
 	ToPassed  *Wiring.Out
 }
 
-// windowMs returns the fixed coincidence window as a duration by converting the
-// distance WindowWu to time via the one pulseSpeed.
+// windowMs returns the fixed coincidence window as a duration.
 func windowMs() time.Duration {
-	return time.Duration(WindowWu/Wiring.PulseSpeedWuPerMs) * time.Millisecond
+	return WindowMs * time.Millisecond
 }
 
 // RunGate runs the shared window-and-inhibit gate loop.
