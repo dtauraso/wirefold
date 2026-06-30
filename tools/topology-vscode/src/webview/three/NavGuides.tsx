@@ -381,30 +381,27 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
 
   if (nodes.length < 1) return null;
 
+  // Lock-arc demo decoration: θ/φ arcs from a "parent" node down to two "child" nodes.
+  // These are demo-specific node ids for the current topology. If any id is absent the
+  // arc is simply omitted (presence-guarded below). To update for a different topology,
+  // change these three constants — nowhere else needs editing.
+  const LOCK_ARC_PARENT_ID = "5";
+  const LOCK_ARC_CHILD_A_ID = "7";
+  const LOCK_ARC_CHILD_B_ID = "8";
+
   // Node 2's own pole frame — same drawing as the scene frame, anchored at node 2's
   // world center (pole = world +y, parallel to the scene's). This is the frame the
   // θ-lock actually measures in: 3 and 7 share θ ABOUT NODE 2, so equal-θ is only
   // visible against node 2's pole, not the scene's. Sized to ~half the scene radius.
-  // Node ids remapped by the node rename: the old node 2 (HoldNewSendOld) is now node
-  // 5, and its two children old 3/7 are now 7/8. The variable names keep the original
-  // meaning (the parent and its two children) under the new ids.
-  //
-  // TODO(fix5): IDs "5", "7", "8" are hardcoded to the current topology. They cannot
-  // be derived from node.data.type alone (multiple HoldNewSendOld nodes are possible)
-  // and the children cannot be identified without edge traversal (edges are not passed
-  // to PolarSphere). To make this generic, either: (a) pass edges to PolarSphere and
-  // find the HoldNewSendOld node + its ToNext output neighbours, or (b) add a semantic
-  // "role" marker to Spec.Node that the store carries through NodeData, then filter by
-  // role. Until then these three IDs must be kept in sync with the topology manually.
-  const node2 = nodes.find((n) => n.id === "5");
+  const node2 = nodes.find((n) => n.id === LOCK_ARC_PARENT_ID);
   const node2Center = node2 ? nodeWorldPos(node2) : null;
   const node2Scale = radiusKey * 0.5;
 
   // θ-lock check: vertical θ meridian arcs from the parent's pole down to its two
   // children, from LIVE positions. θ traces vertically; equal θ ⇒ equal arc sweep
   // (rotated apart in φ), different θ ⇒ different sweep length. (See ThetaArc.)
-  const node3 = nodes.find((n) => n.id === "7");
-  const node7 = nodes.find((n) => n.id === "8");
+  const node3 = nodes.find((n) => n.id === LOCK_ARC_CHILD_A_ID);
+  const node7 = nodes.find((n) => n.id === LOCK_ARC_CHILD_B_ID);
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
   // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
