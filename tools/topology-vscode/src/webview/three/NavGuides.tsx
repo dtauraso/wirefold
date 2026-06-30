@@ -71,6 +71,8 @@ function PolarFrame({ center, scale, tag, octants }: {
   const arcR = poleLen * 0.68;
   const arcTube = Math.max(radiusKey * 0.012, 1.2);
   const arcMid = arcR * 1.12 * Math.SQRT1_2;
+  const hhR = Math.max(radiusKey * 0.04, 3);   // handhold sphere radius (matches the tori handholds)
+  const arcHH = arcR * Math.SQRT1_2;           // a quarter-arc's midpoint radius (45° in its plane)
   const sfx = tag ? ` ${tag}` : "";
   return (
     <group position={[center.x, center.y, center.z]}>
@@ -175,6 +177,28 @@ function PolarFrame({ center, scale, tag, octants }: {
           <AxisLabel text={`${o.s[2] > 0 ? "+" : "−"}φ`} color={o.color} position={[o.s[0] * arcMid, 0, o.s[2] * arcMid]} size={poleLen * 0.11} />
         </React.Fragment>
       ))}
+      {octants && (<>
+        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere on each
+            pole tip and each quarter-arc midpoint. raycast off, no userData.handhold. */}
+        {([[poleLen, 0, 0], [-poleLen, 0, 0], [0, poleLen, 0], [0, -poleLen, 0], [0, 0, poleLen], [0, 0, -poleLen]] as [number, number, number][]).map((p, i) => (
+          <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
+            <sphereGeometry args={[hhR, 12, 12]} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+          </mesh>
+        ))}
+        {OCTANTS.map((o) => (
+          <React.Fragment key={`hha-${o.tag}`}>
+            <mesh position={[o.s[0] * arcHH, o.s[1] * arcHH, 0]} raycast={() => null}>
+              <sphereGeometry args={[hhR, 12, 12]} />
+              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+            </mesh>
+            <mesh position={[o.s[0] * arcHH, 0, o.s[2] * arcHH]} raycast={() => null}>
+              <sphereGeometry args={[hhR, 12, 12]} />
+              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+            </mesh>
+          </React.Fragment>
+        ))}
+      </>)}
     </group>
   );
 }
