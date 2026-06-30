@@ -12,14 +12,12 @@ export type RunStatusUI = RunStatus | { state: "idle" };
 type Setter = (next: RunStatusUI) => void;
 
 let _setter: Setter | null = null;
-let _current: RunStatusUI = { state: "idle" };
 
 export function registerRunStatusSetter(setter: Setter) {
   _setter = setter;
 }
 
 export function setRunStatusImperative(next: RunStatusUI) {
-  _current = next;
   _setter?.(next);
 }
 

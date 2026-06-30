@@ -4,30 +4,6 @@ import { vscode } from "./vscode-api";
 import { postLog } from "./log/post";
 postLog("lifecycle", { phase: "bundle-eval" });
 
-// Early crash listeners — fire BEFORE React mounts so blank-window crashes
-// are captured. These run synchronously here; CrashListeners (mounted inside
-// the React tree) duplicates coverage once the tree is up and removes these.
-{
-  const earlyOnError = (e: ErrorEvent) => {
-    postLog("early-window-error", {
-      message: e.message,
-      filename: e.filename,
-      lineno: e.lineno,
-      colno: e.colno,
-      stack: (e.error as Error | undefined)?.stack ?? "",
-    });
-  };
-  const earlyOnRejection = (e: PromiseRejectionEvent) => {
-    const reason = e.reason as { message?: string; stack?: string } | undefined;
-    postLog("early-unhandled-rejection", {
-      message: reason?.message ?? String(e.reason),
-      stack: reason?.stack ?? "",
-    });
-  };
-  window.addEventListener("error", earlyOnError);
-  window.addEventListener("unhandledrejection", earlyOnRejection);
-}
-
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "./webview.css";
@@ -81,9 +57,13 @@ window.addEventListener("message", (e) => {
   if (!msg) return;
   postLog("lifecycle", { phase: `msg:${msg.type}` });
   if (msg.type === "run-status") {
+    const RUN_STATES = ["running", "paused", "ok", "cancelled"] as const;
+    type NonErrorState = typeof RUN_STATES[number];
     setRunStatusImperative(msg.state === "error"
       ? { state: "error", message: msg.message ?? "" }
-      : { state: msg.state as "running" | "paused" | "ok" | "cancelled" });
+      : { state: (RUN_STATES as readonly string[]).includes(msg.state)
+            ? msg.state as NonErrorState
+            : "idle" });
   } else if (msg.type === "flush") {
     // Host requests immediate flush of any pending debounced saves (panel
     // becoming hidden / about to dispose).

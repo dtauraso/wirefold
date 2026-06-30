@@ -74,6 +74,37 @@ export type ViewerState = {
 
 export const DEFAULT_VIEWER_STATE: ViewerState = {};
 
+// Helper: check+warn+assign a string[] field from raw parsed JSON.
+function assignStrArr(out: ViewerState, raw: Record<string, unknown>, key: keyof ViewerState): void {
+  const val = raw[key];
+  if (val === undefined) return;
+  if (isStrArr(val)) (out as Record<string, unknown>)[key] = val;
+  else console.warn(`topology.view.json: ${key} is not a string[], dropping`);
+}
+
+// Keys whose semantics are "visible when present and true, hidden only when explicitly false".
+// Default = true (visible/active); only persist when false.
+export const VISIBLE_SENSE_SCENE_KEYS = [
+  "sceneToriVisible", "scenePolesVisible", "nodePolesVisible",
+  "angleLabelsVisible", "selSpherePolesVisible", "handholdsVisible", "overlaysActive",
+] as const satisfies readonly (keyof ViewerState)[];
+
+// Keys that use the if-present-assign-else-delete merge pattern in mergeSceneIntoViewerState.
+// Includes hidden-sense (labelsGlobalHidden, badgesHidden) and visible-sense keys.
+// NOTE: mixed polarity — labelsGlobalHidden/badgesHidden are hidden-sense (true = hidden),
+// while the remaining 7 are visible-sense (false = hidden). Renaming would require edits
+// in three/ (camera-store.ts, pump.ts, ThreeView.tsx, camera-ui.tsx) which are out of scope;
+// polarity is documented at each use site in main.tsx.
+const MERGE_OPT_KEYS = [
+  "labelsGlobalHidden", "badgesHidden",
+  ...VISIBLE_SENSE_SCENE_KEYS,
+] as const satisfies readonly (keyof ViewerState)[];
+
+function mergeOpt(out: ViewerState, src: ViewerState, key: keyof ViewerState): void {
+  if (src[key] !== undefined) (out as Record<string, unknown>)[key] = src[key];
+  else delete (out as Record<string, unknown>)[key];
+}
+
 export function parseViewerState(text: string | undefined): ViewerState {
   if (!text) return { ...DEFAULT_VIEWER_STATE };
   let raw: unknown;
@@ -103,10 +134,7 @@ export function parseViewerState(text: string | undefined): ViewerState {
     if (cp) out.cameraPolar = cp;
     else console.warn("topology.view.json: dropping malformed cameraPolar");
   }
-  if (raw.lastSelectionIds !== undefined) {
-    if (isStrArr(raw.lastSelectionIds)) out.lastSelectionIds = raw.lastSelectionIds;
-    else console.warn("topology.view.json: lastSelectionIds is not a string[], dropping");
-  }
+  assignStrArr(out, raw, "lastSelectionIds");
   if (raw.nodes !== undefined) {
     const nv = parseNodeViews(raw.nodes);
     if (nv) out.nodes = nv;
@@ -117,27 +145,14 @@ export function parseViewerState(text: string | undefined): ViewerState {
     if (ev) out.edges = ev;
     else console.warn("topology.view.json: edges is not a valid edge-view map, dropping");
   }
-  if (raw.directlyFadedNodes !== undefined) {
-    if (isStrArr(raw.directlyFadedNodes)) out.directlyFadedNodes = raw.directlyFadedNodes;
-    else console.warn("topology.view.json: directlyFadedNodes is not a string[], dropping");
-  }
-  if (raw.directlyFadedEdges !== undefined) {
-    if (isStrArr(raw.directlyFadedEdges)) out.directlyFadedEdges = raw.directlyFadedEdges;
-    else console.warn("topology.view.json: directlyFadedEdges is not a string[], dropping");
-  }
-  if (raw.fadeEdgeOrder !== undefined) {
-    if (isStrArr(raw.fadeEdgeOrder)) out.fadeEdgeOrder = raw.fadeEdgeOrder;
-    else console.warn("topology.view.json: fadeEdgeOrder is not a string[], dropping");
-  }
+  assignStrArr(out, raw, "directlyFadedNodes");
+  assignStrArr(out, raw, "directlyFadedEdges");
+  assignStrArr(out, raw, "fadeEdgeOrder");
   if (raw.labelsGlobalHidden === true) out.labelsGlobalHidden = true;
   if (raw.badgesHidden === true) out.badgesHidden = true;
-  if (raw.sceneToriVisible === false) out.sceneToriVisible = false;
-  if (raw.scenePolesVisible === false) out.scenePolesVisible = false;
-  if (raw.nodePolesVisible === false) out.nodePolesVisible = false;
-  if (raw.angleLabelsVisible === false) out.angleLabelsVisible = false;
-  if (raw.selSpherePolesVisible === false) out.selSpherePolesVisible = false;
-  if (raw.handholdsVisible === false) out.handholdsVisible = false;
-  if (raw.overlaysActive === false) out.overlaysActive = false;
+  for (const k of VISIBLE_SENSE_SCENE_KEYS) {
+    if ((raw as Record<string, unknown>)[k] === false) out[k] = false;
+  }
   return out;
 }
 
@@ -173,13 +188,9 @@ export function serializeSceneState(s: ViewerState): string {
   if (s.cameraPolar !== undefined) scene.cameraPolar = s.cameraPolar;
   if (s.labelsGlobalHidden !== undefined) scene.labelsGlobalHidden = s.labelsGlobalHidden;
   if (s.badgesHidden !== undefined) scene.badgesHidden = s.badgesHidden;
-  if (s.sceneToriVisible === false) scene.sceneToriVisible = false;
-  if (s.scenePolesVisible === false) scene.scenePolesVisible = false;
-  if (s.nodePolesVisible === false) scene.nodePolesVisible = false;
-  if (s.angleLabelsVisible === false) scene.angleLabelsVisible = false;
-  if (s.selSpherePolesVisible === false) scene.selSpherePolesVisible = false;
-  if (s.handholdsVisible === false) scene.handholdsVisible = false;
-  if (s.overlaysActive === false) scene.overlaysActive = false;
+  for (const k of VISIBLE_SENSE_SCENE_KEYS) {
+    if (s[k] === false) scene[k] = false;
+  }
   return JSON.stringify(scene, null, 2) + "\n";
 }
 
@@ -190,23 +201,6 @@ export function mergeSceneIntoViewerState(base: ViewerState, sceneParsed: Viewer
   if (sceneParsed.camera !== undefined) out.camera = sceneParsed.camera;
   if (sceneParsed.camera3d !== undefined) out.camera3d = sceneParsed.camera3d;
   if (sceneParsed.cameraPolar !== undefined) out.cameraPolar = sceneParsed.cameraPolar;
-  if (sceneParsed.labelsGlobalHidden !== undefined) out.labelsGlobalHidden = sceneParsed.labelsGlobalHidden;
-  else delete out.labelsGlobalHidden; // absent = false (labels shown)
-  if (sceneParsed.badgesHidden !== undefined) out.badgesHidden = sceneParsed.badgesHidden;
-  else delete out.badgesHidden; // absent = false (badges shown)
-  if (sceneParsed.sceneToriVisible !== undefined) out.sceneToriVisible = sceneParsed.sceneToriVisible;
-  else delete out.sceneToriVisible; // absent = true (visible)
-  if (sceneParsed.scenePolesVisible !== undefined) out.scenePolesVisible = sceneParsed.scenePolesVisible;
-  else delete out.scenePolesVisible; // absent = true (visible)
-  if (sceneParsed.nodePolesVisible !== undefined) out.nodePolesVisible = sceneParsed.nodePolesVisible;
-  else delete out.nodePolesVisible; // absent = true (visible)
-  if (sceneParsed.angleLabelsVisible !== undefined) out.angleLabelsVisible = sceneParsed.angleLabelsVisible;
-  else delete out.angleLabelsVisible; // absent = true (visible)
-  if (sceneParsed.selSpherePolesVisible !== undefined) out.selSpherePolesVisible = sceneParsed.selSpherePolesVisible;
-  else delete out.selSpherePolesVisible; // absent = true (visible)
-  if (sceneParsed.handholdsVisible !== undefined) out.handholdsVisible = sceneParsed.handholdsVisible;
-  else delete out.handholdsVisible; // absent = true (visible)
-  if (sceneParsed.overlaysActive !== undefined) out.overlaysActive = sceneParsed.overlaysActive;
-  else delete out.overlaysActive; // absent = true (active)
+  for (const k of MERGE_OPT_KEYS) mergeOpt(out, sceneParsed, k);
   return out;
 }
