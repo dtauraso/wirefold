@@ -41,6 +41,14 @@ const MOVE_SLOP_PX = 6;
 /** Generous slop for a SECONDARY (two-finger trackpad) tap-select; two fingers don't
  *  land precisely and the first tap drifts more than a mouse click would. */
 const SECONDARY_SLOP_PX = 24;
+/** Minimum forward depth so the ensureTarget pivot never sits on the camera. */
+const TARGET_MIN = 10;
+/** Keep the regionFocus pivot off the camera even if the slab is behind it. */
+const FOCUS_MIN = 10;
+/** Base factor per scroll delta unit for zoom-to-cursor (ctrl+wheel dolly). */
+const ZOOM_BASE = 1.01;
+/** Minimum eye-to-pivot distance — never allow the camera to reach the target. */
+const MIN_DIST = 5;
 
 // ---------------------------------------------------------------------------
 // InteractionCtx — stable bundle of refs + stable callbacks
@@ -139,7 +147,6 @@ export function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
 export function ensureTarget(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): THREE.Vector3 {
   const t = ctx.targetRef.current;
   if (Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z)) return t;
-  const TARGET_MIN = 10; // minimum forward depth so target never sits on the camera
   cam.updateMatrixWorld(true);
   const forward = new THREE.Vector3();
   cam.getWorldDirection(forward); // unit vector
@@ -185,7 +192,6 @@ export function regionFocus(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): 
     }
   }
   if (zNear === Infinity || zFar === -Infinity) return ensureTarget(ctx, cam);
-  const FOCUS_MIN = 10; // keep the pivot off the camera even if the slab is behind it
   const midDepth = Math.max((zNear + zFar) / 2, FOCUS_MIN);
   return cam.position.clone().add(forward.multiplyScalar(midDepth));
 }
@@ -591,8 +597,6 @@ export function handleWheelNative(ctx: InteractionCtx, e: WheelEvent) {
     // under the cursor stays put. delta = (1-factor)(P - eye) steps the eye a `factor`
     // amount along eye→P; floored so a zoom-in never reaches P. We seed Go with the
     // current camera (covers any local drift), then send the pan — Go owns the dolly.
-    const ZOOM_BASE = 1.01;
-    const MIN_DIST = 5;
     const wrect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const mouseNdcX = ((e.clientX - wrect.left) / wrect.width) * 2 - 1;
     const mouseNdcY = -(((e.clientY - wrect.top) / wrect.height) * 2 - 1);
