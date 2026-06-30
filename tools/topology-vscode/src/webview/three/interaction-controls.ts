@@ -37,11 +37,6 @@ export function computeContentSphere(nodes: RFNode<NodeData>[]): { center: THREE
   return { center, radius: Math.max(r * 1.1, 1) };
 }
 
-/** Arcball sphere radius as a fraction of camera→pivot distance (<1 ⇒ camera outside
- *  the ball; large enough that the ball fills the view so there is no on-screen dead
- *  zone). Exported so the visible arcball sphere matches the grab sphere. */
-export const ARCBALL_FILL = 0.4;
-
 // ---------------------------------------------------------------------------
 // ControlState
 // ---------------------------------------------------------------------------
