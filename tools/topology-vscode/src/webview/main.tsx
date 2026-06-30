@@ -82,6 +82,7 @@ window.addEventListener("message", (e) => {
       angleLabels: viewerState.angleLabelsVisible !== false,
       selSpherePoles: viewerState.selSpherePolesVisible !== false,
       handholds: viewerState.handholdsVisible !== false,
+      doubleLinks: viewerState.doubleLinksVisible === true,
       // labelsGlobalHidden is hidden sense (true=hidden); labelsGlobal is visible sense.
       labelsGlobal: viewerState.labelsGlobalHidden !== true,
       // badgesHidden is hidden sense (true=hidden); badgesGlobal is visible sense.

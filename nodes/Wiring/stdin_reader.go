@@ -96,6 +96,7 @@ type stdinMsg struct {
 	AngleLabels   bool `json:"angleLabels"`
 	SelSpherePoles bool `json:"selSpherePoles"`
 	Handholds     bool `json:"handholds"`
+	DoubleLinks   bool `json:"doubleLinks"`
 	LabelsGlobal  bool `json:"labelsGlobal"`
 	BadgesGlobal  bool `json:"badgesGlobal"`
 	Overlays      bool `json:"overlays"`
@@ -454,6 +455,6 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		if md == nil {
 			return
 		}
-		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.LabelsGlobal, msg.BadgesGlobal, msg.Overlays, tr)
+		md.SetGuideVisibility(msg.Tori, msg.ScenePoles, msg.NodePoles, msg.AngleLabels, msg.SelSpherePoles, msg.Handholds, msg.DoubleLinks, msg.LabelsGlobal, msg.BadgesGlobal, msg.Overlays, tr)
 	}
 }

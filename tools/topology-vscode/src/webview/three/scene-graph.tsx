@@ -499,6 +499,8 @@ export function GraphEdges({
   selectedId: string | null;
 }) {
   const doubleLinksVisible = useCameraStore((s) => s.doubleLinksVisible);
+  const overlaysVisible = useCameraStore((s) => s.overlaysVisible);
+  const showDoubleLinks = overlaysVisible && doubleLinksVisible;
   return (
     <>
       {edges.map((e) => {
@@ -510,8 +512,8 @@ export function GraphEdges({
         if (!s || !t) return null;
         return (
           <React.Fragment key={e.id}>
-            <SingleEdgeTube edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} dimmed={doubleLinksVisible} />
-            {doubleLinksVisible && <DoubleEdgeOverlay edgeId={e.id} />}
+            <SingleEdgeTube edgeId={e.id} faded={!!e.data?.faded} selected={e.id === selectedId} dimmed={showDoubleLinks} />
+            {showDoubleLinks && <DoubleEdgeOverlay edgeId={e.id} />}
           </React.Fragment>
         );
       })}

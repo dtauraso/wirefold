@@ -1,8 +1,7 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// GlobalLabelsToggle, BadgesToggle, HomeButton, RingsToggle, ScenePolesToggle, NodePolesToggle,
-// AngleLabelsToggle — no scene/Go logic.
+// OverlaysControl (split-button + popover), HomeButton — no scene/Go logic.
 
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
@@ -25,10 +24,10 @@ type EditOp =
   | "sel-sphere-poles"
   | "handholds-vis"
   | "labels-vis"
-  | "badges-vis";
+  | "badges-vis"
+  | "double-links";
 
 type ToggleCfg = {
-  top: number;
   op: EditOp;
   /** Returns the store boolean value needed by active/label/title. */
   selector: (s: Parameters<Parameters<typeof useCameraStore>[0]>[0]) => boolean;
@@ -42,46 +41,9 @@ type ToggleCfg = {
   payload: (val: boolean) => Record<string, unknown>;
 };
 
-function Toggle({ cfg }: { cfg: ToggleCfg }) {
-  const val = useCameraStore(cfg.selector);
-  const active = cfg.active(val);
-  const onClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      postLog("guide-btn-click", cfg.payload(val));
-      // op is one of the bare toggle ops, each a { type:"edit", op } variant of
-      // WebviewToHostMsg; the union->member assertion mirrors the original literals.
-      vscode.postMessage({ type: "edit", op: cfg.op } as Parameters<typeof vscode.postMessage>[0]);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [val]
-  );
-  return (
-    <div
-      onClick={onClick}
-      title={cfg.title(active)}
-      style={{
-        position: "absolute",
-        top: cfg.top,
-        right: 12,
-        background: "rgba(0,0,0,0.55)",
-        borderRadius: 6,
-        padding: "3px 7px",
-        cursor: "pointer",
-        pointerEvents: "auto",
-        zIndex: 20,
-        color: active ? "#ddd" : "#888",
-        fontSize: 11,
-        fontFamily: "monospace",
-        userSelect: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-      }}
-    >
-      {typeof cfg.label === "function" ? cfg.label(val) : cfg.label}
-    </div>
-  );
+function fireToggle(cfg: ToggleCfg, val: boolean) {
+  postLog("guide-btn-click", cfg.payload(val));
+  vscode.postMessage({ type: "edit", op: cfg.op } as Parameters<typeof vscode.postMessage>[0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +51,6 @@ function Toggle({ cfg }: { cfg: ToggleCfg }) {
 // ---------------------------------------------------------------------------
 
 const guidelinesCfg: ToggleCfg = {
-  top: 76,
   op: "overlays-vis",
   selector: (s) => s.overlaysVisible,
   active: (v) => v,
@@ -99,7 +60,6 @@ const guidelinesCfg: ToggleCfg = {
 };
 
 const ringsCfg: ToggleCfg = {
-  top: 104,
   op: "tori-vis",
   selector: (s) => s.sceneToriVisible,
   active: (v) => v,
@@ -109,7 +69,6 @@ const ringsCfg: ToggleCfg = {
 };
 
 const scenePolesCfg: ToggleCfg = {
-  top: 132,
   op: "scene-poles",
   selector: (s) => s.scenePolesVisible,
   active: (v) => v,
@@ -119,7 +78,6 @@ const scenePolesCfg: ToggleCfg = {
 };
 
 const nodePolesCfg: ToggleCfg = {
-  top: 160,
   op: "node-poles",
   selector: (s) => s.nodePolesVisible,
   active: (v) => v,
@@ -129,7 +87,6 @@ const nodePolesCfg: ToggleCfg = {
 };
 
 const angleLabelsCfg: ToggleCfg = {
-  top: 188,
   op: "angle-labels",
   selector: (s) => s.angleLabelsVisible,
   active: (v) => v,
@@ -139,7 +96,6 @@ const angleLabelsCfg: ToggleCfg = {
 };
 
 const selSpherePolesCfg: ToggleCfg = {
-  top: 216,
   op: "sel-sphere-poles",
   selector: (s) => s.selSpherePolesVisible,
   active: (v) => v,
@@ -149,7 +105,6 @@ const selSpherePolesCfg: ToggleCfg = {
 };
 
 const handholdsCfg: ToggleCfg = {
-  top: 248,
   op: "handholds-vis",
   selector: (s) => s.handholdsVisible,
   active: (v) => v !== false,
@@ -159,7 +114,6 @@ const handholdsCfg: ToggleCfg = {
 };
 
 const globalLabelsCfg: ToggleCfg = {
-  top: 12,
   op: "labels-vis",
   selector: (s) => s.labelsGlobalHidden,
   active: (v) => !v,
@@ -169,7 +123,6 @@ const globalLabelsCfg: ToggleCfg = {
 };
 
 const badgesCfg: ToggleCfg = {
-  top: 280,
   op: "badges-vis",
   selector: (s) => s.badgesHidden,
   active: (v) => !v,
@@ -178,8 +131,204 @@ const badgesCfg: ToggleCfg = {
   payload: (v) => ({ op: "badges-vis", wasHidden: v }),
 };
 
+const doubleLinksCfg: ToggleCfg = {
+  op: "double-links",
+  selector: (s) => s.doubleLinksVisible,
+  active: (v) => v,
+  label: "⇄ double links",
+  title: (a) => (a ? "Hide double-link overlay" : "Show double-link overlay"),
+  payload: (v) => ({ op: "double-links", was: v }),
+};
+
 // ---------------------------------------------------------------------------
-// Widgets: Home button, Global labels toggle
+// Grouped overlay rows for the popover
+// ---------------------------------------------------------------------------
+
+type OverlayGroup = { heading: string; cfgs: ToggleCfg[] };
+
+const OVERLAY_GROUPS: OverlayGroup[] = [
+  { heading: "GUIDES", cfgs: [angleLabelsCfg, ringsCfg, handholdsCfg] },
+  { heading: "POLES",  cfgs: [scenePolesCfg, nodePolesCfg, selSpherePolesCfg] },
+  { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
+  { heading: "EDGES",  cfgs: [doubleLinksCfg] },
+];
+
+/** A single row inside the popover: square checkbox + label, fires the row's op on click.
+ *  Styled to match the recommended mock (overlay-toggle-options.html): custom .cb checkbox
+ *  that fills accent + ✓ when checked, with a subtle row-hover background. */
+function OverlayRow({ cfg, disabled }: { cfg: ToggleCfg; disabled?: boolean }) {
+  const val = useCameraStore(cfg.selector);
+  const active = cfg.active(val);
+  const [hover, setHover] = useState(false);
+  const onClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (disabled) return;
+      fireToggle(cfg, val);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [val, disabled]
+  );
+  const labelText = typeof cfg.label === "function" ? cfg.label(val) : cfg.label;
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={cfg.title(active)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        padding: "4px 6px",
+        cursor: disabled ? "default" : "pointer",
+        color: "#e7e7ea",
+        borderRadius: 5,
+        background: !disabled && hover ? "rgba(255,255,255,0.05)" : "transparent",
+        userSelect: "none",
+        fontSize: 11.5,
+      }}
+    >
+      <span
+        style={{
+          width: 13,
+          height: 13,
+          flex: "0 0 auto",
+          borderRadius: 3,
+          border: `1.5px solid ${active ? "#4ea1ff" : "#9a9aa6"}`,
+          background: active ? "#4ea1ff" : "transparent",
+          display: "grid",
+          placeItems: "center",
+          color: "#04101f",
+          fontSize: 10,
+          fontWeight: 900,
+          lineHeight: "11px",
+        }}
+      >
+        {active ? "✓" : ""}
+      </span>
+      <span>{labelText}</span>
+    </div>
+  );
+}
+
+/** OVERLAYS CONTROL: split-button (body = master toggle, caret = popover) + popover checklist. */
+export function OverlaysControl() {
+  const [open, setOpen] = useState(false);
+  const val = useCameraStore(guidelinesCfg.selector);
+  const active = guidelinesCfg.active(val);
+
+  const onBodyClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      fireToggle(guidelinesCfg, val);
+    },
+    [val]
+  );
+
+  const onCaretClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpen((o) => !o);
+  }, []);
+
+  const fontStack = '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+
+  return (
+    <>
+      {/* Split button — labeled pill (body = master toggle, caret = popover). Accent fill
+          when the master is on, neutral chip when off (overlay-toggle-options.html mock). */}
+      <div
+        style={{
+          position: "absolute",
+          top: 76,
+          right: 12,
+          zIndex: 20,
+          pointerEvents: "auto",
+          display: "flex",
+          alignItems: "stretch",
+          borderRadius: 6,
+          overflow: "hidden",
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: fontStack,
+          background: active ? "#4ea1ff" : "#34343d",
+          border: `1px solid ${active ? "#4ea1ff" : "#3a3a44"}`,
+          color: active ? "#04101f" : "#9a9aa6",
+          userSelect: "none",
+        }}
+      >
+        {/* Body — master toggle */}
+        <div
+          onClick={onBodyClick}
+          title={guidelinesCfg.title(active)}
+          style={{ padding: "3px 9px", cursor: "pointer", display: "flex", alignItems: "center" }}
+        >
+          Overlays
+        </div>
+        {/* Caret — popover toggle */}
+        <div
+          onClick={onCaretClick}
+          title={open ? "Close overlay list" : "Open overlay list"}
+          style={{
+            padding: "3px 7px 3px 4px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            fontSize: 9,
+            opacity: 0.85,
+          }}
+        >
+          {open ? "▴" : "▾"}
+        </div>
+      </div>
+
+      {/* Popover — grouped checklist (.pop mock style: panel2 bg, border, shadow). */}
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: 104,
+            right: 12,
+            zIndex: 21,
+            pointerEvents: "auto",
+            width: 150,
+            background: "#2f2f37",
+            border: "1px solid #3a3a44",
+            borderRadius: 8,
+            padding: 6,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            fontFamily: fontStack,
+            userSelect: "none",
+          }}
+        >
+          <div style={{ opacity: active ? 1 : 0.4, transition: "opacity 0.12s ease" }}>
+            {OVERLAY_GROUPS.map((group) => (
+              <div key={group.heading}>
+                <div
+                  style={{
+                    fontSize: 9.5,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "#9a9aa6",
+                    padding: "6px 6px 2px",
+                  }}
+                >
+                  {group.heading}
+                </div>
+                {group.cfgs.map((cfg) => (
+                  <OverlayRow key={cfg.op} cfg={cfg} disabled={!active} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Widgets: Home button
 // ---------------------------------------------------------------------------
 
 /** HOME BUTTON: reframes the camera to fit all nodes in view. */
@@ -258,77 +407,4 @@ export function HomeButton({
   );
 }
 
-/** OVERLAYS MASTER: Go-owned toggle that shows/hides all 8 overlays at once.
- * When hidden it hides all 8 sub-buttons (gated in ThreeView) and NavGuides suppresses
- * every overlay; each overlay's own Go-owned state is left untouched, so reactivating
- * restores the prior per-overlay states. Fire-and-forget to Go; Go echoes back via
- * overlays-vis trace event. */
-export function GuidelinesToggle() { return <Toggle cfg={guidelinesCfg} />; }
 
-export function RingsToggle() { return <Toggle cfg={ringsCfg} />; }
-
-/** SCENE POLES TOGGLE: top-right button to show/hide the scene-center pole frame. Fire-and-forget to Go. */
-export function ScenePolesToggle() { return <Toggle cfg={scenePolesCfg} />; }
-
-/** NODE POLES TOGGLE: top-right button to show/hide per-node pole frames. Fire-and-forget to Go. */
-export function NodePolesToggle() { return <Toggle cfg={nodePolesCfg} />; }
-
-/** ANGLE LABELS TOGGLE: top-right button to show/hide θ/φ angle arcs+labels. Fire-and-forget to Go. */
-export function AngleLabelsToggle() { return <Toggle cfg={angleLabelsCfg} />; }
-
-/** SEL SPHERE POLES TOGGLE: top-right button to show/hide selection-sphere pole axis markers. Fire-and-forget to Go. */
-export function SelSpherePolesToggle() { return <Toggle cfg={selSpherePolesCfg} />; }
-
-/** HANDHOLDS TOGGLE: top-right button to show/hide the rotation grab spheres. Standalone — NOT gated by guidelinesActive. Fire-and-forget to Go. */
-export function HandholdsToggle() { return <Toggle cfg={handholdsCfg} />; }
-
-/** GLOBAL LABELS TOGGLE: top-right button to show/hide all labels.
- *  Reads labelsGlobalHidden from camera-store (Go-owned via labels-global trace events).
- *  Click dispatches fire-and-forget "labels-vis" to Go; Go echoes back the new state.
- */
-export function GlobalLabelsToggle() { return <Toggle cfg={globalLabelsCfg} />; }
-
-/** DOUBLE-LINKS TOGGLE: Go-owned toggle for the bidirectional edge overlay.
- * When active, edge tubes are dimmed and each edge shows a cyan bidirectional arrow line.
- * Fire-and-forget to Go; Go echoes back via double-links trace event. */
-export function DoubleLinksToggle() {
-  const active = useCameraStore((s) => s.doubleLinksVisible);
-  const onClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    // Fire-and-forget: Go owns the toggle state and echoes back via double-links.
-    postLog("guide-btn-click", { op: "double-links", was: active });
-    vscode.postMessage({ type: "edit", op: "double-links" });
-  }, [active]);
-  return (
-    <div
-      onClick={onClick}
-      title={active ? "Hide double-link overlay" : "Show double-link overlay"}
-      style={{
-        position: "absolute",
-        top: 316,
-        right: 12,
-        background: "rgba(0,0,0,0.55)",
-        borderRadius: 6,
-        padding: "3px 7px",
-        cursor: "pointer",
-        pointerEvents: "auto",
-        zIndex: 20,
-        color: active ? "#00e5ff" : "#888",
-        fontSize: 11,
-        fontFamily: "monospace",
-        userSelect: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-      }}
-    >
-      ⇄ double links
-    </div>
-  );
-}
-
-/** BADGES TOGGLE: top-right button to show/hide occlusion +N badges.
- *  Reads badgesHidden from camera-store (Go-owned via badges-global trace events).
- *  Click dispatches fire-and-forget "badges-vis" to Go; Go echoes back the new state.
- */
-export function BadgesToggle() { return <Toggle cfg={badgesCfg} />; }

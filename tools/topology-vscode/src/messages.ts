@@ -52,7 +52,7 @@ export type EditMsg =
   | { type: "edit"; op: "badges-vis" }
   | { type: "edit"; op: "overlays-vis" }
   | { type: "edit"; op: "double-links" }
-  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean }
+  | { type: "edit"; op: "guide-vis"; tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean; selSpherePoles: boolean; handholds: boolean; doubleLinks: boolean; labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean }
   | {
       type: "edit";
       op: "viewpoint";
@@ -222,6 +222,7 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
         typeof m.tori !== "boolean" || typeof m.scenePoles !== "boolean" ||
         typeof m.nodePoles !== "boolean" || typeof m.angleLabels !== "boolean" ||
         typeof m.selSpherePoles !== "boolean" || typeof m.handholds !== "boolean" ||
+        typeof m.doubleLinks !== "boolean" ||
         typeof m.labelsGlobal !== "boolean" || typeof m.badgesGlobal !== "boolean" ||
         typeof m.overlays !== "boolean"
       ) return undefined;

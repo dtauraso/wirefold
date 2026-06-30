@@ -292,6 +292,10 @@ export function handleTraceEvent(event: TraceEvent): void {
     case "double-links": {
       const e = event as Extract<TraceEvent, { kind: "double-links" }>;
       useCameraStore.getState().setDoubleLinksVisible(e.visible);
+      patchViewerState((v) => {
+        (v as Record<string, boolean | undefined>).doubleLinksVisible = e.visible;
+      });
+      scheduleViewSave();
       return;
     }
     default:
