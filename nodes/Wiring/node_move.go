@@ -545,7 +545,11 @@ func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
 			}
 		}
 		for _, em := range md.edgeMovers {
-			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, centerOf)
+			emCenterOf := centerOf
+			if em.centerOf != nil {
+				emCenterOf = em.centerOf
+			}
+			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, emCenterOf)
 			tr.Geometry(em.edgeID,
 				seg.Start.X, seg.Start.Y, seg.Start.Z,
 				seg.End.X, seg.End.Y, seg.End.Z)
@@ -604,7 +608,29 @@ func (md *MoveDispatch) installAimedPorts(registry AimedPortRegistry) {
 	}
 	for _, em := range md.edgeMovers {
 		em.aimed = registry
-		em.centerOf = centerOf
+		// An edge owns BOTH its endpoint geoms and updates them synchronously on its
+		// own goroutine before recomputing (handle → recomputeGeometry). For aiming,
+		// read those held centers directly rather than the node mover's published
+		// snapshot: on an endpoint move the edge has the fresh center in hand, but the
+		// moved node's snapshot may not be published yet (the node and edge movers run
+		// concurrently with no happens-before between the node's snap-write and the
+		// edge's snap-read). Reading the snapshot produced an order-dependent stale
+		// center → degenerate aim → ring-anchor fallback. The held-geom read is the
+		// local source of truth and is race-free (same goroutine writes and reads it).
+		e := em
+		e.centerOf = func(id string) (vec3, bool) {
+			switch id {
+			case e.srcID:
+				if e.srcGeom.Center != nil {
+					return *e.srcGeom.Center, true
+				}
+			case e.dstID:
+				if e.dstGeom.Center != nil {
+					return *e.dstGeom.Center, true
+				}
+			}
+			return centerOf(id)
+		}
 	}
 }
 
