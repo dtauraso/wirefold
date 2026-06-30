@@ -2,7 +2,7 @@
 # Guard against stale generated TS files.
 # Runs the generator and fails if any generated file differs from the committed version.
 # Generated files: src/schema/node-defs.ts, src/schema/node-data-types.ts,
-#                  src/schema/wire-defs.ts, src/webview/three/trace-kinds.ts,
+#                  src/schema/wire-defs.ts, src/schema/trace-kinds.ts,
 #                  src/schema/curve-params.ts, src/schema/shading-params.ts
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
@@ -16,7 +16,7 @@ stale=$(git status --porcelain \
   tools/topology-vscode/src/schema/node-defs.ts \
   tools/topology-vscode/src/schema/node-data-types.ts \
   tools/topology-vscode/src/schema/wire-defs.ts \
-  tools/topology-vscode/src/webview/three/trace-kinds.ts \
+  tools/topology-vscode/src/schema/trace-kinds.ts \
   tools/topology-vscode/src/schema/curve-params.ts \
   tools/topology-vscode/src/schema/shading-params.ts 2>/dev/null)
 

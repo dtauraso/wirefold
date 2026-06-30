@@ -172,7 +172,7 @@ func main() {
 	if err != nil {
 		fatalf("parse trace kinds: %v", err)
 	}
-	traceKindsPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "webview", "three", "trace-kinds.ts")
+	traceKindsPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "trace-kinds.ts")
 	if err := writeTraceKinds(traceKindsPath, traceKinds); err != nil {
 		fatalf("write %s: %v", traceKindsPath, err)
 	}

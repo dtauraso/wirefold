@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TraceEvent } from "../../src/messages";
-import { TRACE_EVENT_KINDS } from "../../src/webview/three/trace-kinds";
+import { TRACE_EVENT_KINDS } from "../../src/schema/trace-kinds";
 
 const FIXTURE = join(__dirname, "../fixtures/trace-events.jsonl");
 

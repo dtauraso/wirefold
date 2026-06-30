@@ -25,7 +25,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import type { TraceEvent } from "../../messages";
-import type { TraceEventKind } from "./trace-kinds";
+import type { TraceEventKind } from "../../schema/trace-kinds";
 import { useCameraStore } from "./camera-store";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
