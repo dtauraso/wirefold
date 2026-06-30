@@ -5,9 +5,9 @@
 // defines the registry and the portDirAimed helper that falls back to portDir
 // for non-registered ports.
 //
-// Scope: keyed by (nodeID, portName, isInput) — only the 4 ports on the
-// 1↔2 and 1↔6 edges are registered, and only when nodes 1+2+6 all exist
-// (same guard as the theta-lock).
+// Scope: keyed by (nodeID, portName, isInput) — every edge-connected port is
+// registered, derived from the loaded edge list. Both endpoint nodes must have
+// geometry (centers) for a registration to be created.
 
 package Wiring
 

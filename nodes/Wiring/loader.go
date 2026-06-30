@@ -238,58 +238,24 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 				centers[id] = *g.Center
 			}
 		}
-		_, has1 := centers["1"]
-		_, has2 := centers["5"]
-		_, has6 := centers["6"]
-		_, has9 := centers["2"]
-		if has1 && has9 && has2 && has6 {
-			// Node 1 → 2 (chain head), then 2 → its two children 5 and 6. Node 2's
-			// ToNext0 feeds node 6, ToNext1 feeds node 5 (see edges 2To6/2To5).
-			aimedPorts = AimedPortRegistry{
-				{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
-				{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
-				{NodeID: "2", PortName: "ToNext0", IsInput: false}: "6",
-				{NodeID: "6", PortName: "FromInput", IsInput: true}: "2",
-				{NodeID: "2", PortName: "ToNext1", IsInput: false}: "5",
-				{NodeID: "5", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "2",
+		// Derive the aimed-port registry from the loaded edge list: every edge-connected
+		// port aims toward the node on the other end. No node-ID hardcoding; any topology
+		// gets correct aimed ports automatically. Only register when BOTH endpoint nodes
+		// have geometry (centers), matching the original guard intent that aimed needs
+		// positions.
+		reg := AimedPortRegistry{}
+		for _, e := range spec.Edges {
+			if _, srcOK := centers[e.Source]; !srcOK {
+				continue
 			}
-			if _, has8 := centers["4"]; has8 {
-				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToPacer", IsInput: false}] = "4"
-				aimedPorts[AimedPortKey{NodeID: "4", PortName: "FromInput", IsInput: true}] = "1"
+			if _, tgtOK := centers[e.Target]; !tgtOK {
+				continue
 			}
-			if _, has10 := centers["3"]; has10 {
-				aimedPorts[AimedPortKey{NodeID: "1", PortName: "ToExcitatory", IsInput: false}] = "3"
-				aimedPorts[AimedPortKey{NodeID: "3", PortName: "FromInput", IsInput: true}] = "1"
-			}
-			if _, has11 := centers["9"]; has11 {
-				// Node 9 (gate, sits where node 10 sits) fed by 3→9 (FromLeft, node 3's
-				// Out) and 6→9 (FromRight, node 6's second output Out2). Node 6's first
-				// Out stays aimed at node 10; Out2 aims at node 9, so both of node 6's
-				// edges render as radial spokes.
-				aimedPorts[AimedPortKey{NodeID: "3", PortName: "Out", IsInput: false}] = "9"
-				aimedPorts[AimedPortKey{NodeID: "9", PortName: "FromLeft", IsInput: true}] = "3"
-				aimedPorts[AimedPortKey{NodeID: "6", PortName: "Out2", IsInput: false}] = "9"
-				aimedPorts[AimedPortKey{NodeID: "9", PortName: "FromRight", IsInput: true}] = "6"
-			}
-			if _, has3 := centers["7"]; has3 {
-				aimedPorts[AimedPortKey{NodeID: "5", PortName: "ToNext0", IsInput: false}] = "7"
-				aimedPorts[AimedPortKey{NodeID: "7", PortName: "In", IsInput: true}] = "5"
-			}
-			if _, has7 := centers["8"]; has7 {
-				aimedPorts[AimedPortKey{NodeID: "5", PortName: "ToNext1", IsInput: false}] = "8"
-				aimedPorts[AimedPortKey{NodeID: "8", PortName: "FromInput", IsInput: true}] = "5"
-			}
-			// Node 10 sits on the spheres centered at 6 (6→10, FromLeft) and 8 (8→10,
-			// FromRight): aim each center's Out at 10 and 10's matching input back, so
-			// both edges render as radial spokes like the others.
-			if _, has5 := centers["10"]; has5 {
-				aimedPorts[AimedPortKey{NodeID: "6", PortName: "Out", IsInput: false}] = "10"
-				aimedPorts[AimedPortKey{NodeID: "10", PortName: "FromLeft", IsInput: true}] = "6"
-				if _, has7 := centers["8"]; has7 {
-					aimedPorts[AimedPortKey{NodeID: "8", PortName: "Out", IsInput: false}] = "10"
-					aimedPorts[AimedPortKey{NodeID: "10", PortName: "FromRight", IsInput: true}] = "8"
-				}
-			}
+			reg[AimedPortKey{NodeID: e.Source, PortName: e.SourceHandle, IsInput: false}] = e.Target
+			reg[AimedPortKey{NodeID: e.Target, PortName: e.TargetHandle, IsInput: true}] = e.Source
+		}
+		if len(reg) > 0 {
+			aimedPorts = reg
 		}
 	}
 

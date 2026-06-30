@@ -94,11 +94,19 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	deliver(md, "src", nx, ny, nz)
 
 	// Expected recompute from the moved geometry: src center is the world target.
+	// Use aimed computation to match the edge mover (all edge-connected ports are aimed).
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
+	dstCenter := vec3{X: 0, Y: 0, Z: 0}
 	srcGeom := nodeGeom{Kind: "FanInSrc", Center: &srcCenter, Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", Inputs: []portGeom{{Name: "In"}}}
-	wantSeg := segmentBetweenPorts(srcGeom, "Out", dstGeom, "In")
-	wantArc := arcLengthBetweenPorts(srcGeom, "Out", dstGeom, "In")
+	dstGeom := nodeGeom{Kind: "FanInSink", Center: &dstCenter, Inputs: []portGeom{{Name: "In"}}}
+	wantReg := AimedPortRegistry{
+		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
+		{NodeID: "dst", PortName: "In", IsInput: true}:  "src",
+	}
+	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
+	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
+	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantReg, wantCenterOf)
+	wantArc := wantSeg.Start.sub(wantSeg.End).length()
 
 	// Edge mover wrote the new segment/arc onto the source Out.
 	if !approxEq(out.ArcLength, wantArc) || !approxEq(out.SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
