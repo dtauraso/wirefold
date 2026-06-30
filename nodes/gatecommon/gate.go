@@ -122,16 +122,9 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		return v, got
 	}
 
-	// clear discards both held inputs without firing: Done drains each upstream
-	// wire (so a consumeGated source's WaitConsumed returns) and the has-input
-	// flags reset. Breadcrumb on FromLeft (the consistent logging point).
+	// clear discards both held inputs without firing: resets the has-input
+	// flags. Breadcrumb on FromLeft (the consistent logging point).
 	clear := func() {
-		if g.HasLeft {
-			g.FromLeft.Done()
-		}
-		if g.HasRight {
-			g.FromRight.Done()
-		}
 		g.FromLeft.Breadcrumb("window_clear", "")
 		g.HasLeft = false
 		g.HasRight = false
@@ -198,8 +191,6 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 					result = 1
 				}
 				g.Fire()
-				g.FromLeft.Done()
-				g.FromRight.Done()
 				g.HasLeft = false
 				g.HasRight = false
 				t0Set = false

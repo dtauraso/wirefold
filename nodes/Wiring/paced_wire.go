@@ -593,15 +593,6 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool
 	return
 }
 
-// Done is a PHASE-1 SHIM: removed in phase 2 (gate strip). Recv/PollRecv now
-// consume on read, so there is no separate acknowledgment step. No-op.
-// Retained because tests outside this package still call it.
-func (pw *PacedWire) Done() {}
-
-// WaitConsumed is a PHASE-1 SHIM: removed in phase 2 (gate strip). The consume
-// gate is gone (a wire never waits on the destination), so this returns nil
-// immediately. Retained because tests outside this package still call it.
-func (pw *PacedWire) WaitConsumed(ctx context.Context) error { return nil }
 
 // teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
 // returns the per-bead source identities for any in-flight beads so the caller can

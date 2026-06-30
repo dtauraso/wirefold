@@ -88,7 +88,6 @@ func (in *Node) Update(ctx context.Context) {
 
 		if value, ok := in.FromPrevHoldNewSendOldNode.TryRecv(); ok {
 			in.Fire()
-			in.FromPrevHoldNewSendOldNode.Done()
 
 			// Interior held-value bead: emit only when the held value changes
 			// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the

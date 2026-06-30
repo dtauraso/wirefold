@@ -97,7 +97,6 @@ func (g *Node) Update(ctx context.Context) {
 			}
 			v = next
 		}
-		g.In.Done()
 		if g.Fire != nil {
 			g.Fire()
 		}

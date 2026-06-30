@@ -117,7 +117,6 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 		if !ok {
 			return
 		}
-		n.FeedbackIn.Done()
 		if step != 1 {
 			// Hold: buffer unchanged, send the same last bead next loop.
 			continue

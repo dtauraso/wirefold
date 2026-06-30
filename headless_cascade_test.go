@@ -255,7 +255,6 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 	if err != nil || v != 7 {
 		t.Fatalf("Recv at exact in-flight time: v=%v err=%v", v, err)
 	}
-	pw.Done()
 }
 
 // TestHaltedStartGeometryOnlyNoPositions asserts the halted-start contract:

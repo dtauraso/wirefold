@@ -42,7 +42,6 @@ func (p *Node) Update(ctx context.Context) {
 
 		if value, ok := p.FromInput.TryRecv(); ok {
 			p.Fire()
-			p.FromInput.Done()
 
 			heldChanged := value != held
 			held = value

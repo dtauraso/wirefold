@@ -50,7 +50,6 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	if err != nil || v != 42 {
 		t.Fatalf("Recv: v=%v err=%v", v, err)
 	}
-	pw.Done()
 	w.Close()
 }
 

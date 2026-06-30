@@ -443,8 +443,6 @@ func TestDeleteAfterDeliveryNoCancel(t *testing.T) {
 	if _, ok := pw.PollRecv(); !ok {
 		t.Fatal("bead did not deliver")
 	}
-	pw.Done() // consume
-
 	pw.Delete()
 	tr.Close()
 	if cs := cancelEvents(tr.Events()); len(cs) != 0 {

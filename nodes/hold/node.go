@@ -44,7 +44,6 @@ func (h *Node) Update(ctx context.Context) {
 
 		if value, ok := h.In.TryRecv(); ok {
 			h.Fire()
-			h.In.Done()
 			if value != held && h.EmitHeldBead != nil {
 				h.EmitHeldBead(value)
 			}

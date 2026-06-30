@@ -94,7 +94,6 @@ func (g *Node) Update(ctx context.Context) {
 		if !ok {
 			return // ctx cancelled or input closed
 		}
-		g.FromInput.Done()
 		if g.Fire != nil {
 			g.Fire()
 		}
