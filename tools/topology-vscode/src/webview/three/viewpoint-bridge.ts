@@ -84,15 +84,6 @@ export function sendViewpointOrbitLocked(
   sendViewpointOrbitKind("orbit-locked", from, to);
 }
 
-/** Tell Go to zoom by a multiplicative factor. */
-export function sendViewpointZoom(factor: number): void {
-  vscode.postMessage({
-    type: "edit",
-    op: "viewpoint",
-    viewpoint: { kind: "zoom", factor },
-  });
-}
-
 /** Tell Go to pan the pivot point by a world-space delta. */
 export function sendViewpointPan(dx: number, dy: number, dz: number): void {
   vscode.postMessage({
