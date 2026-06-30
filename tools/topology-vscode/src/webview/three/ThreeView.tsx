@@ -5,7 +5,7 @@
 //   - Two-finger scroll → pan; pinch → dolly along view axis
 //   - Roll slider widget (screen-plane camera roll)
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, NodeData, EdgeData } from "../types";
@@ -189,7 +189,7 @@ export function ThreeView() {
     setOcclusionCounts(counts);
   }, [nodes, cameraRef, canvasSize]);
 
-  const labelMap = new Map(labelPositions.map((p) => [p.id, p]));
+  const labelMap = useMemo(() => new Map(labelPositions.map((p) => [p.id, p])), [labelPositions]);
 
 
   return (

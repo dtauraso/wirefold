@@ -30,8 +30,54 @@ import {
 } from "../../schema/shading-params";
 
 // ---------------------------------------------------------------------------
+// Module-level color constants (hoisted from inline render paths).
+// ---------------------------------------------------------------------------
+
+const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
+const DOUBLE_LINKS_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE);
+
+// ---------------------------------------------------------------------------
 // Single node mesh: sphere + border ring
 // ---------------------------------------------------------------------------
+
+// Renders one port sphere (input or output) on a node's surface.
+function PortSphere({
+  node,
+  port,
+  isInput,
+  selectedId,
+  hoveredId,
+  strokeColor,
+  r,
+}: {
+  node: RFNode<NodeData>;
+  port: { name: string };
+  isInput: boolean;
+  selectedId?: string | null;
+  hoveredId?: string | null;
+  strokeColor: THREE.Color;
+  r: number;
+}) {
+  const dir = portDir(node, port.name, isInput);
+  if (!dir) return null;
+  const portId = `${node.id}:${isInput ? "in" : "out"}:${port.name}`;
+  const isSel = selectedId === portId;
+  const isHov = hoveredId === portId;
+  return (
+    <mesh
+      position={[dir.x * r, dir.y * r, dir.z * r]}
+      scale={isSel ? 1.5 : isHov ? 1.3 : 1}
+      userData={{ portId, nodeId: node.id, portName: port.name, isInput, port: true }}
+    >
+      <sphereGeometry args={[4, 8, 8]} />
+      <meshStandardMaterial
+        color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
+        emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
+        emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
+      />
+    </mesh>
+  );
+}
 
 export function GraphNode({
   node,
@@ -124,50 +170,30 @@ export function GraphNode({
       <InteriorBeads nodeId={node.id} />
 
       {/* Port spheres: one per input and output port, positioned on the node sphere surface */}
-      {(node.data?.inputs ?? []).map((port) => {
-        const dir = portDir(node, port.name, true);
-        if (!dir) return null;
-        const portId = `${node.id}:in:${port.name}`;
-        const isSel = selectedId === portId;
-        const isHov = hoveredId === portId;
-        return (
-          <mesh
-            key={`in:${port.name}`}
-            position={[dir.x * r, dir.y * r, dir.z * r]}
-            scale={isSel ? 1.5 : isHov ? 1.3 : 1}
-            userData={{ portId, nodeId: node.id, portName: port.name, isInput: true, port: true }}
-          >
-            <sphereGeometry args={[4, 8, 8]} />
-            <meshStandardMaterial
-              color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
-              emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
-              emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
-            />
-          </mesh>
-        );
-      })}
-      {(node.data?.outputs ?? []).map((port) => {
-        const dir = portDir(node, port.name, false);
-        if (!dir) return null;
-        const portId = `${node.id}:out:${port.name}`;
-        const isSel = selectedId === portId;
-        const isHov = hoveredId === portId;
-        return (
-          <mesh
-            key={`out:${port.name}`}
-            position={[dir.x * r, dir.y * r, dir.z * r]}
-            scale={isSel ? 1.5 : isHov ? 1.3 : 1}
-            userData={{ portId, nodeId: node.id, portName: port.name, isInput: false, port: true }}
-          >
-            <sphereGeometry args={[4, 8, 8]} />
-            <meshStandardMaterial
-              color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
-              emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
-              emissiveIntensity={isSel ? 0.7 : isHov ? 0.4 : 0}
-            />
-          </mesh>
-        );
-      })}
+      {(node.data?.inputs ?? []).map((port) => (
+        <PortSphere
+          key={`in:${port.name}`}
+          node={node}
+          port={port}
+          isInput={true}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
+          strokeColor={strokeColor}
+          r={r}
+        />
+      ))}
+      {(node.data?.outputs ?? []).map((port) => (
+        <PortSphere
+          key={`out:${port.name}`}
+          node={node}
+          port={port}
+          isInput={false}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
+          strokeColor={strokeColor}
+          r={r}
+        />
+      ))}
     </group>
   );
 }
@@ -268,17 +294,30 @@ export function SphereRing({
 // Exit/entry points: point on each node's sphere surface facing the other node.
 // ---------------------------------------------------------------------------
 
-/**
- * Returns the center of `node` in world space.
- * `other` is accepted but ignored — kept for API symmetry with geometry-helpers.ts (kept in sync).
- */
-function surfacePoint(node: RFNode<NodeData>, _other: RFNode<NodeData>): THREE.Vector3 {
-  return nodeWorldPos(node);
-}
-
 // Arrowhead cone dims — visibly larger than the 1.5 tube radius. Tunable.
-const ARROW_HEIGHT = 6;
-const ARROW_RADIUS = 3;
+const ARROWHEAD_LENGTH = 6;
+const ARROWHEAD_RADIUS = 3;
+
+// Arrowhead cone dims for the double-link overlay (slightly larger than the tube arrows).
+const DL_ARROWHEAD_LENGTH = 7;
+const DL_ARROWHEAD_RADIUS = 3.5;
+
+/**
+ * Builds an arrow descriptor: a cone whose apex sits at `apex`, pointing in `dir`
+ * (normalized, toward the apex). `height` is the cone length.
+ * ConeGeometry apex is at +Y; we rotate +Y onto `dir`.
+ * Returns { center, q } where center places the cone so its apex lands at `apex`.
+ */
+function buildArrow(
+  apex: THREE.Vector3,
+  dir: THREE.Vector3,
+  height: number,
+): { center: THREE.Vector3; q: THREE.Quaternion } {
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  // apex = center + dir*(height/2) → center = apex - dir*(height/2)
+  const center = apex.clone().addScaledVector(dir, -height / 2);
+  return { center, q };
+}
 
 export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: string; faded: boolean; selected: boolean; dimmed?: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
@@ -313,11 +352,7 @@ export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: st
     let _arrow: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
     if (dir.length() >= 1e-6) {
       dir.normalize();
-      // ConeGeometry's apex points +Y; rotate +Y onto the edge direction.
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      // Place center so apex (= center + dir*height/2) lands on seg.end.
-      const center = end.clone().addScaledVector(dir, -ARROW_HEIGHT / 2);
-      _arrow = { center, q };
+      _arrow = buildArrow(end, dir, ARROWHEAD_LENGTH);
     }
     return { tubeGeo: _tubeGeo, haloGeo: _haloGeo, arrow: _arrow };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,7 +370,7 @@ export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: st
         <meshStandardMaterial
           key={faded ? "faded" : dimmed ? "dimmed" : "solid"}
           color={SHADING_PARAM_TUBE_COLOR}
-          emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
+          emissive={TUBE_EMISSIVE_COLOR}
           emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
           transparent={faded || !!dimmed}
           opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1}
@@ -360,11 +395,11 @@ export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: st
           quaternion={[arrow.q.x, arrow.q.y, arrow.q.z, arrow.q.w]}
           raycast={() => null}
         >
-          <coneGeometry args={[ARROW_RADIUS, ARROW_HEIGHT, 16]} />
+          <coneGeometry args={[ARROWHEAD_RADIUS, ARROWHEAD_LENGTH, 16]} />
           <meshStandardMaterial
             key={faded ? "faded" : dimmed ? "dimmed" : "solid"}
             color={SHADING_PARAM_TUBE_COLOR}
-            emissive={new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE)}
+            emissive={TUBE_EMISSIVE_COLOR}
             emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
             transparent={faded || !!dimmed}
             opacity={faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1}
@@ -376,11 +411,6 @@ export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: st
     </>
   );
 }
-
-// Arrowhead cone dims for the double-link overlay (slightly larger than the tube arrows).
-const DL_ARROW_HEIGHT = 7;
-const DL_ARROW_RADIUS = 3.5;
-
 
 /** Renders a single bidirectional cyan line overlay for one edge when double-links is ON.
  * Reads the same segment from the edge-geometry store as SingleEdgeTube so it lines up
@@ -408,14 +438,9 @@ function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
       const dirNorm = dir.clone().normalize();
       const dirNeg = dirNorm.clone().negate();
       // Arrow at start: cone pointing toward start (apex at start, base inward).
-      // ConeGeometry apex at +Y; rotate +Y onto dirNeg (toward start).
-      const qStart = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNeg);
-      const centerStart = start.clone().addScaledVector(dirNeg, -DL_ARROW_HEIGHT / 2);
-      _arrowStart = { center: centerStart, q: qStart };
+      _arrowStart = buildArrow(start, dirNeg, DL_ARROWHEAD_LENGTH);
       // Arrow at end: cone pointing toward end (apex at end, base inward).
-      const qEnd = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirNorm);
-      const centerEnd = end.clone().addScaledVector(dirNorm, -DL_ARROW_HEIGHT / 2);
-      _arrowEnd = { center: centerEnd, q: qEnd };
+      _arrowEnd = buildArrow(end, dirNorm, DL_ARROWHEAD_LENGTH);
     }
     return { lineGeo: _lineGeo, arrowStart: _arrowStart, arrowEnd: _arrowEnd };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -427,7 +452,7 @@ function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
       <mesh geometry={lineGeo} raycast={() => null}>
         <meshStandardMaterial
           color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
-          emissive={new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE)}
+          emissive={DOUBLE_LINKS_EMISSIVE_COLOR}
           emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
           transparent={false}
         />
@@ -438,10 +463,10 @@ function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
           quaternion={[arrowStart.q.x, arrowStart.q.y, arrowStart.q.z, arrowStart.q.w]}
           raycast={() => null}
         >
-          <coneGeometry args={[DL_ARROW_RADIUS, DL_ARROW_HEIGHT, 16]} />
+          <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
           <meshStandardMaterial
             color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
-            emissive={new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE)}
+            emissive={DOUBLE_LINKS_EMISSIVE_COLOR}
             emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
           />
         </mesh>
@@ -452,10 +477,10 @@ function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
           quaternion={[arrowEnd.q.x, arrowEnd.q.y, arrowEnd.q.z, arrowEnd.q.w]}
           raycast={() => null}
         >
-          <coneGeometry args={[DL_ARROW_RADIUS, DL_ARROW_HEIGHT, 16]} />
+          <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
           <meshStandardMaterial
             color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
-            emissive={new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE)}
+            emissive={DOUBLE_LINKS_EMISSIVE_COLOR}
             emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
           />
         </mesh>
