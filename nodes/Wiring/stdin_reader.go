@@ -111,11 +111,11 @@ type stdinGuideVisPayload struct {
 //
 // Anonymous embedding preserves flat JSON field names so the wire format is unchanged.
 type stdinMsg struct {
-	Type string          `json:"type"`
-	Op   string          `json:"op"`
-	Kind string          `json:"kind"`
-	Attr string          `json:"attr"`
-	Flag string          `json:"flag"`
+	Type  string          `json:"type"`
+	Op    string          `json:"op"`
+	Kind  string          `json:"kind"`
+	Attr  string          `json:"attr"`
+	Flag  string          `json:"flag"`
 	Scene json.RawMessage `json:"scene"`
 	// Viewpoint is the payload for kind=="camera"; nil otherwise.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
@@ -257,16 +257,17 @@ var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){
 //   - delete: silence the wire AND cancel any in-flight bead's clock-delivery,
 //     echoing pulse-cancelled (PacedWire.Delete owns both, atomically).
 //   - update: set an ATTRIBUTE on a typed entity (msg.Kind). Routing per kind:
-//       node    + attr "move":   mail-sort node-move entries to owning node/edge inboxes.
-//       node    + attr "anchor": snap+mail-sort a ring-anchor update.
-//       edge    + attr "faded":  mail-sort each (edgeId,faded) to the owning edgeMover.
-//       camera:                  apply the viewpoint payload (set/orbit/zoom/pan).
-//       overlays+ attr "toggle": flip the named flag via overlayToggles.
-//       overlays+ attr "set":    set all overlay visibilities to explicit values.
-//       scene:                   persist the scene blob.
+//     node    + attr "move":   mail-sort node-move entries to owning node/edge inboxes.
+//     node    + attr "anchor": snap+mail-sort a ring-anchor update.
+//     edge    + attr "faded":  mail-sort each (edgeId,faded) to the owning edgeMover.
+//     camera:                  apply the viewpoint payload (set/orbit/zoom/pan).
+//     overlays+ attr "toggle": flip the named flag via overlayToggles.
+//     overlays+ attr "set":    set all overlay visibilities to explicit values.
+//     scene:                   persist the scene blob.
 //
 // Unknown ops/kinds/attrs are ignored (forward-compat).
 func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
+	// EDIT_OPS_START
 	switch msg.Op {
 	case "create":
 		if msg.Target == "" || msg.TargetHandle == "" {
@@ -301,11 +302,13 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 	case "update":
 		applyUpdate(msg, md, tr, treeRoot)
 	}
+	// EDIT_OPS_END
 }
 
 // applyUpdate routes an op=="update" edit to the entity named by msg.Kind, setting
 // the requested attribute. See applyEdit's doc for the kind/attr matrix.
 func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
+	// EDIT_UPDATE_KINDS_START
 	switch msg.Kind {
 	case "node":
 		switch msg.Attr {
@@ -445,4 +448,5 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			_ = writeScene(treeRoot, msg.Scene)
 		}
 	}
+	// EDIT_UPDATE_KINDS_END
 }

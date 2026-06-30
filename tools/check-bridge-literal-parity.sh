@@ -34,21 +34,19 @@ done
 HITS=0
 
 # --- Axis 1: viewpoint sub-kinds --------------------------------------------
-# Go: `case "..."` lines inside the `switch vp.Kind { ... }` block (bounded by
-# the next top-level `case msg.Op == "set-origin"`).
+# Go: `case "..."` lines inside the `switch vp.Kind { ... }` block, bounded by the
+# VP_KINDS_START / VP_KINDS_END sentinel comments around it in stdin_reader.go.
 vp_kinds_go() {
-  sed -n '/switch vp\.Kind/,/case msg\.Op == "set-origin"/p' "$STDIN_READER" \
+  awk '/VP_KINDS_START/{p=1;next} /VP_KINDS_END/{p=0} p' "$STDIN_READER" \
     | grep -oE 'case "[^"]+"' \
     | grep -oE '"[^"]+"' | tr -d '"' | sort -u
 }
-# TS: `kind: "..."` literals in the viewpoint union. The trace-event union also
-# uses `kind: "..."`, but every trace-event entry carries a `step:` field on the
-# same line, so excluding `step:` lines isolates the viewpoint sub-kinds cleanly
-# (a file-position range fails — the op:"tori-vis" sentinel sits after the trace
-# union, so a sed range would sweep the trace kinds in).
+# TS: `kind: "..."` literals inside the ViewpointPayload union, bounded by the
+# VP_KINDS_START / VP_KINDS_END sentinels in messages.ts. Sentinels (not a bare
+# grep) are required because the entity-kind discriminator and trace-event union
+# also use `kind: "..."`.
 vp_kinds_ts() {
-  grep 'kind: "' "$MESSAGES_TS" \
-    | grep -v 'step:' \
+  awk '/VP_KINDS_START/{p=1;next} /VP_KINDS_END/{p=0} p' "$MESSAGES_TS" \
     | grep -oE 'kind: "[^"]+"' \
     | grep -oE '"[^"]+"' | tr -d '"' | sort -u
 }

@@ -65,6 +65,7 @@ export type ViewpointPayload =
   | { kind: "pan"; dx: number; dy: number; dz: number };
 // VP_KINDS_END
 
+// EDIT_MSG_START
 export type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
@@ -85,6 +86,7 @@ export type EditMsg =
   | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
   | { type: "edit"; op: "update"; kind: "overlays"; attr: "set"; state: OverlayState }
   | { type: "edit"; op: "update"; kind: "scene"; scene: unknown };
+// EDIT_MSG_END
 
 export type WebviewToHostMsg =
   | { type: "ready" }
