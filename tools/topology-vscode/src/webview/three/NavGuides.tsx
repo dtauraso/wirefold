@@ -57,6 +57,29 @@ const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
   { s: [-1, -1, -1], color: "#cd853f", tag: "−x−y−z" },
 ];
 
+// ── ARC NUMBER ↔ COLOR LEGEND ───────────────────────────────────────────────
+// Each quarter-arc carries a unique number (θ arcs 1..8, φ arcs 9..16) drawn near
+// it, colored by its octant (OCTANTS[i].color). θ# = i+1, φ# = i+9.
+//
+// Per-octant (number → octant → color):
+//    #1 / #9   +x+y+z   white        #ffffff
+//    #2 / #10  +x+y−z   orange       #ff8c00
+//    #3 / #11  +x−y+z   teal         #00ced1
+//    #4 / #12  +x−y−z   purple       #9370db
+//    #5 / #13  −x+y+z   pink         #ff69b4
+//    #6 / #14  −x+y−z   yellow-green  #9acd32
+//    #7 / #15  −x−y+z   sky-blue     #00bfff
+//    #8 / #16  −x−y−z   peru/tan     #cd853f
+//
+// Grouped by shared-position REGION (the two offset circles you see together —
+// a→color1, b→color2 — so you can note just the numbers):
+//   θ regions (X-Y plane):        φ regions (X-Z plane):
+//     +x+y :  1 white  / 2 orange    +x+z :  9 white      / 11 teal
+//     +x−y :  3 teal   / 4 purple    +x−z : 10 orange     / 12 purple
+//     −x+y :  5 pink   / 6 yel-grn   −x+z : 13 pink       / 15 sky-blue
+//     −x−y :  7 sky-blu/ 8 peru      −x−z : 14 yel-grn    / 16 peru
+// ────────────────────────────────────────────────────────────────────────────
+
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
 // (yellow) angle arcs, all anchored at `center` with the pole = world +y. `scale`
