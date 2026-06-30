@@ -93,7 +93,9 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 
 		// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
 		v := (*working)[len(*working)-1]
-		n.Fire()
+		if n.Fire != nil {
+			n.Fire()
+		}
 		// Node 1 initiates a goroutine per wired output so node 2
 		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
 		// concurrently. wg.Wait keeps node 1 paced and preserves the
@@ -163,7 +165,9 @@ func (n *Node) Update(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		n.Fire()
+		if n.Fire != nil {
+			n.Fire()
+		}
 		v := popEnd(&working, &backup, init)
 		emitBeads() // array changed (pop, maybe refill) → restream interior
 		// Node 1 initiates a goroutine per wired output so node 2
