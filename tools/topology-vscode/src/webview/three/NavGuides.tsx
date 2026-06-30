@@ -73,6 +73,9 @@ function PolarFrame({ center, scale, tag, octants }: {
   const arcMid = arcR * 1.12 * Math.SQRT1_2;
   const hhR = Math.max(radiusKey * 0.04, 3);   // handhold sphere radius (matches the tori handholds)
   const arcHH = arcR * Math.SQRT1_2;           // a quarter-arc's midpoint radius (45° in its plane)
+  const arcOff = arcR * 0.05;                  // nudge each octant's arcs off the shared plane so
+                                               // they don't coincide (coincident transparent arcs
+                                               // sort by camera and flip colors on rotate/pan/zoom)
   const sfx = tag ? ` ${tag}` : "";
   return (
     <group position={[center.x, center.y, center.z]}>
@@ -145,13 +148,16 @@ function PolarFrame({ center, scale, tag, octants }: {
       </>)}
       {octants && OCTANTS.map((o) => (
         <group key={`oarc-${o.tag}`} scale={[o.s[0], o.s[1], o.s[2]]}>
-          <mesh raycast={() => null}>
+          {/* θ arc nudged off z=0, φ arc off y=0, into this octant — so adjacent octants'
+              arcs don't coincide. Opaque (not transparent) so the visible color is
+              render-order-stable, not camera-sorted. */}
+          <mesh position={[0, 0, arcOff]} raycast={() => null}>
             <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-            <meshBasicMaterial color={o.color} transparent opacity={0.75} depthWrite={false} />
+            <meshBasicMaterial color={o.color} depthWrite={false} />
           </mesh>
-          <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+          <mesh position={[0, arcOff, 0]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
             <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-            <meshBasicMaterial color={o.color} transparent opacity={0.75} depthWrite={false} />
+            <meshBasicMaterial color={o.color} depthWrite={false} />
           </mesh>
         </group>
       ))}
@@ -178,23 +184,24 @@ function PolarFrame({ center, scale, tag, octants }: {
         </React.Fragment>
       ))}
       {octants && (<>
-        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere on each
-            pole tip and each quarter-arc midpoint. raycast off, no userData.handhold. */}
-        {([[poleLen, 0, 0], [-poleLen, 0, 0], [0, poleLen, 0], [0, -poleLen, 0], [0, 0, poleLen], [0, 0, -poleLen]] as [number, number, number][]).map((p, i) => (
+        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere at each
+            pole's MIDPOINT and each quarter-arc midpoint. raycast off, no
+            userData.handhold. Opaque so the color is render-order-stable on camera move. */}
+        {([[poleLen / 2, 0, 0], [-poleLen / 2, 0, 0], [0, poleLen / 2, 0], [0, -poleLen / 2, 0], [0, 0, poleLen / 2], [0, 0, -poleLen / 2]] as [number, number, number][]).map((p, i) => (
           <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
             <sphereGeometry args={[hhR, 12, 12]} />
-            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
           </mesh>
         ))}
         {OCTANTS.map((o) => (
           <React.Fragment key={`hha-${o.tag}`}>
             <mesh position={[o.s[0] * arcHH, o.s[1] * arcHH, 0]} raycast={() => null}>
               <sphereGeometry args={[hhR, 12, 12]} />
-              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
             </mesh>
             <mesh position={[o.s[0] * arcHH, 0, o.s[2] * arcHH]} raycast={() => null}>
               <sphereGeometry args={[hhR, 12, 12]} />
-              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
+              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
             </mesh>
           </React.Fragment>
         ))}
