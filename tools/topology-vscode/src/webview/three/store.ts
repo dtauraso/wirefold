@@ -22,7 +22,6 @@ import { buildEdge } from "./edge-creation";
 export interface ThreeStoreState {
   nodes: RFNode<NodeData>[];
   edges: RFEdge<EdgeData>[];
-  selectedId: string | null;
   // Incremented each time content is (re)loaded; used to trigger camera re-fit.
   loadEpoch: number;
   // Non-null when the last load() call threw (parse failure). Cleared on the next
@@ -41,7 +40,6 @@ export interface ThreeStoreState {
   load: (text: string, sceneText?: string) => void;
   setNodes: (updater: RFNode<NodeData>[] | ((ns: RFNode<NodeData>[]) => RFNode<NodeData>[])) => void;
   setEdges: (updater: RFEdge<EdgeData>[] | ((es: RFEdge<EdgeData>[]) => RFEdge<EdgeData>[])) => void;
-  setSelected: (id: string | null) => void;
   createEdge: (
     sourceId: string,
     sourceHandle: string | null,
@@ -61,7 +59,6 @@ export interface ThreeStoreState {
 export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   nodes: [],
   edges: [],
-  selectedId: null,
   loadEpoch: 0,
   loadError: null,
   directlyFadedNodes: new Set<string>(),
@@ -134,10 +131,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   setEdges(updater) {
     const next = typeof updater === "function" ? updater(get().edges) : updater;
     set({ edges: next });
-  },
-
-  setSelected(id) {
-    set({ selectedId: id });
   },
 
   createEdge(sourceId, sourceHandleIn, targetId, targetHandleIn) {
