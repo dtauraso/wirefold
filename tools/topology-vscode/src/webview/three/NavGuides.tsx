@@ -9,6 +9,7 @@ import type { RFNode, NodeData } from "../types";
 import { nodeRadius, nodeWorldPos } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
 import { computeContentSphere } from "./interaction-controls";
+import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
 import { useCameraStore } from "./camera-store";
 
 // ---------------------------------------------------------------------------
@@ -255,13 +256,10 @@ function PolarFrame({ center, scale, tag, octants }: {
 function ThetaArc({ center, sample, color, tube }: {
   center: THREE.Vector3; sample: THREE.Vector3; color: string; tube: number;
 }) {
-  const dx = sample.x - center.x;
-  const dy = sample.y - center.y;
-  const dz = sample.z - center.z;
-  const r = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const delta = sample.clone().sub(center);
+  const r = delta.length();
   if (r < 1e-6) return null;
-  const theta = Math.acos(Math.max(-1, Math.min(1, dy / r)));
-  const phi = Math.atan2(dz, dx);
+  const [theta, phi] = worldDirToFrameAngles(delta, Y_POLE_FRAME);
   return (
     <group position={[center.x, center.y, center.z]} rotation={[0, -phi, 0]}>
       <group rotation={[0, 0, Math.PI / 2 - theta]}>
