@@ -80,6 +80,20 @@ const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
 //     −x−y :  7 sky-blu/ 8 peru      −x−z : 14 yel-grn    / 16 peru
 // ────────────────────────────────────────────────────────────────────────────
 
+// User-chosen single circle per region (1 per θ/φ). Each: sign pair, its number, color.
+// θ +x+y (#1 white / #2 orange) is intentionally unspecified for now — omitted.
+const THETA_CIRCLES: { sx: number; sy: number; n: number; c: string }[] = [
+  { sx: 1, sy: -1, n: 4, c: "#9370db" },
+  { sx: -1, sy: 1, n: 6, c: "#9acd32" },
+  { sx: -1, sy: -1, n: 8, c: "#cd853f" },
+];
+const PHI_CIRCLES: { sx: number; sz: number; n: number; c: string }[] = [
+  { sx: 1, sz: 1, n: 11, c: "#00ced1" },
+  { sx: 1, sz: -1, n: 12, c: "#9370db" },
+  { sx: -1, sz: 1, n: 13, c: "#ff69b4" },
+  { sx: -1, sz: -1, n: 14, c: "#9acd32" },
+];
+
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
 // (yellow) angle arcs, all anchored at `center` with the pole = world +y. `scale`
@@ -100,9 +114,6 @@ function PolarFrame({ center, scale, tag, octants }: {
   const arcMid = arcR * 1.12 * Math.SQRT1_2;
   const hhR = Math.max(radiusKey * 0.04, 3);   // handhold sphere radius (matches the tori handholds)
   const arcHH = arcR * Math.SQRT1_2;           // a quarter-arc's midpoint radius (45° in its plane)
-  const arcOff = arcR * 0.05;                  // nudge each octant's arcs off the shared plane so
-                                               // they don't coincide (coincident transparent arcs
-                                               // sort by camera and flip colors on rotate/pan/zoom)
   const sfx = tag ? ` ${tag}` : "";
   return (
     <group position={[center.x, center.y, center.z]}>
@@ -173,18 +184,19 @@ function PolarFrame({ center, scale, tag, octants }: {
         <meshBasicMaterial color="#dddd22" depthWrite={false} />
       </mesh>
       </>)}
-      {octants && OCTANTS.map((o) => (
-        <group key={`oarc-${o.tag}`} scale={[o.s[0], o.s[1], o.s[2]]}>
-          {/* θ arc nudged off z=0, φ arc off y=0, into this octant — so adjacent octants'
-              arcs don't coincide. Opaque (not transparent) so the visible color is
-              render-order-stable, not camera-sorted. */}
-          <mesh position={[0, 0, arcOff]} raycast={() => null}>
+      {octants && THETA_CIRCLES.map((t) => (
+        <group key={`tc-${t.n}`} scale={[t.sx, t.sy, 1]}>
+          <mesh raycast={() => null}>
             <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-            <meshBasicMaterial color={o.color} depthWrite={false} />
+            <meshBasicMaterial color={t.c} depthWrite={false} />
           </mesh>
-          <mesh position={[0, arcOff, 0]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+        </group>
+      ))}
+      {octants && PHI_CIRCLES.map((p) => (
+        <group key={`pc-${p.n}`} scale={[p.sx, 1, p.sz]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
             <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
-            <meshBasicMaterial color={o.color} depthWrite={false} />
+            <meshBasicMaterial color={p.c} depthWrite={false} />
           </mesh>
         </group>
       ))}
@@ -201,15 +213,11 @@ function PolarFrame({ center, scale, tag, octants }: {
       <AxisLabel text="θ" color="#dd33cc" position={[arcMid, arcMid, 0]} size={poleLen * 0.14} />
       <AxisLabel text="φ" color="#dddd22" position={[arcMid, 0, arcMid]} size={poleLen * 0.14} />
       </>)}
-      {octants && OCTANTS.map((o, i) => (
-        <React.Fragment key={`olbl-${o.tag}`}>
-          {/* A UNIQUE number per quarter-arc, shown near it: θ arcs are 1..8 (one per
-              octant), φ arcs are 9..16. Each label is offset onto ITS circle's plane
-              (matching arcOff) so the two circles sharing a position each carry their
-              own number nearby. Colored per octant. */}
-          <AxisLabel text={`${i + 1}`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, o.s[2] * arcOff]} size={poleLen * 0.11} />
-          <AxisLabel text={`${i + 9}`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcOff, o.s[2] * arcMid]} size={poleLen * 0.11} />
-        </React.Fragment>
+      {octants && THETA_CIRCLES.map((t) => (
+        <AxisLabel key={`tl-${t.n}`} text={`${t.n}`} color={t.c} position={[t.sx * arcMid, t.sy * arcMid, 0]} size={poleLen * 0.11} />
+      ))}
+      {octants && PHI_CIRCLES.map((p) => (
+        <AxisLabel key={`pl-${p.n}`} text={`${p.n}`} color={p.c} position={[p.sx * arcMid, 0, p.sz * arcMid]} size={poleLen * 0.11} />
       ))}
       {octants && (<>
         {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere at each
@@ -221,17 +229,17 @@ function PolarFrame({ center, scale, tag, octants }: {
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
           </mesh>
         ))}
-        {OCTANTS.map((o) => (
-          <React.Fragment key={`hha-${o.tag}`}>
-            <mesh position={[o.s[0] * arcHH, o.s[1] * arcHH, 0]} raycast={() => null}>
-              <sphereGeometry args={[hhR, 12, 12]} />
-              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
-            </mesh>
-            <mesh position={[o.s[0] * arcHH, 0, o.s[2] * arcHH]} raycast={() => null}>
-              <sphereGeometry args={[hhR, 12, 12]} />
-              <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
-            </mesh>
-          </React.Fragment>
+        {THETA_CIRCLES.map((t) => (
+          <mesh key={`th-${t.n}`} position={[t.sx * arcHH, t.sy * arcHH, 0]} raycast={() => null}>
+            <sphereGeometry args={[hhR, 12, 12]} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+          </mesh>
+        ))}
+        {PHI_CIRCLES.map((p) => (
+          <mesh key={`ph-${p.n}`} position={[p.sx * arcHH, 0, p.sz * arcHH]} raycast={() => null}>
+            <sphereGeometry args={[hhR, 12, 12]} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+          </mesh>
         ))}
       </>)}
     </group>
