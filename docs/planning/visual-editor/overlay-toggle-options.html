@@ -1,0 +1,307 @@
+<!-- branch: task/ui-overlays-popover -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overlay-Toggle UI Patterns — Wirefold editor</title>
+<style>
+  :root{
+    --bg:#1e1e22; --panel:#27272d; --panel2:#2f2f37; --ink:#e7e7ea; --mut:#9a9aa6;
+    --line:#3a3a44; --accent:#4ea1ff; --good:#3ec77a; --bad:#ff6b6b; --warn:#ffc14e;
+    --vp:#13131a; --chip:#34343d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:22px 28px 8px}
+  h1{margin:0;font-size:21px;font-weight:650}
+  .sub{color:var(--mut);margin-top:4px;font-size:13px}
+  .tabs{display:flex;gap:4px;padding:0 28px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .tab{padding:10px 16px;cursor:pointer;border:1px solid transparent;border-bottom:none;
+       border-radius:8px 8px 0 0;color:var(--mut);font-weight:550;position:relative;top:1px}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--ink);background:var(--panel);border-color:var(--line)}
+  .tab .star{color:var(--warn);margin-left:5px}
+  .wrap{padding:24px 28px 60px;max-width:1180px}
+  .panelview{display:none;animation:fade .2s ease}
+  .panelview.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  h2{font-size:17px;margin:0 0 2px}
+  .blurb{color:var(--mut);max-width:780px;margin:0 0 20px}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;
+         background:rgba(255,193,78,.16);color:var(--warn);vertical-align:middle;margin-left:8px}
+
+  /* click-through strip */
+  .flow{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;margin-bottom:26px}
+  .step{flex:1 1 240px;min-width:230px;background:var(--panel);border:1px solid var(--line);
+        border-radius:12px;padding:12px;display:flex;flex-direction:column}
+  .step .n{display:flex;align-items:center;gap:8px;font-weight:650;margin-bottom:10px;font-size:12.5px;color:var(--mut)}
+  .step .n b{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;
+             background:var(--accent);color:#04101f;font-size:12px}
+  .step .cap{margin-top:10px;font-size:12.5px;color:var(--mut)}
+  .arrow{align-self:center;color:var(--accent);font-size:20px;flex:0 0 auto}
+
+  /* mock viewport */
+  .vp{position:relative;background:var(--vp);border-radius:8px;height:150px;overflow:hidden;
+      border:1px solid #000}
+  .vp .scene{position:absolute;inset:0;opacity:.5;
+    background:radial-gradient(circle at 38% 58%,#2a3550 0 14px,transparent 15px),
+               radial-gradient(circle at 64% 44%,#3a2a50 0 12px,transparent 13px),
+               linear-gradient(120deg,transparent 46%,#26303f 47% 48%,transparent 49%)}
+  /* toolbar buttons */
+  .toolbar{position:absolute;top:8px;right:8px;display:flex;gap:4px}
+  .ic{width:22px;height:22px;border-radius:5px;background:var(--chip);border:1px solid var(--line);
+      display:grid;place-items:center;font-size:11px;color:var(--mut);cursor:default}
+  .ic.on{background:var(--accent);color:#04101f;border-color:var(--accent)}
+  .ic.lg{width:auto;padding:0 9px;gap:5px;display:inline-flex;align-items:center;height:22px;font-size:11px;font-weight:600}
+  .caret{font-size:9px;opacity:.8}
+  /* popover */
+  .pop{position:absolute;top:34px;right:8px;width:150px;background:var(--panel2);
+       border:1px solid var(--line);border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .pop .row{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:5px;font-size:11.5px}
+  .pop .row:hover{background:rgba(255,255,255,.05)}
+  .pop .grp{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);padding:6px 6px 2px}
+  .cb{width:13px;height:13px;border-radius:3px;border:1.5px solid var(--mut);flex:0 0 auto;position:relative}
+  .cb.ck{background:var(--accent);border-color:var(--accent)}
+  .cb.ck::after{content:"✓";position:absolute;inset:0;font-size:10px;color:#04101f;text-align:center;line-height:11px;font-weight:900}
+  .eye{font-size:12px;width:14px;text-align:center}
+  .eye.off{opacity:.3}
+  /* menubar */
+  .menubar{position:absolute;top:0;left:0;right:0;height:20px;background:#0e0e14;display:flex;
+           align-items:center;gap:14px;padding:0 10px;font-size:10.5px;color:var(--mut)}
+  .menubar .m.act{color:var(--ink);background:rgba(255,255,255,.08);height:100%;display:flex;align-items:center;padding:0 5px}
+  .dropdown{position:absolute;top:20px;left:64px;width:168px;background:var(--panel2);
+            border:1px solid var(--line);border-radius:0 0 6px 6px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .dropdown .row{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;font-size:11px}
+  .dropdown .row:hover{background:rgba(255,255,255,.05)}
+  .ck-mark{width:12px;text-align:center;color:var(--accent);font-weight:900}
+  /* layers panel */
+  .layers{position:absolute;top:8px;right:8px;width:140px;bottom:8px;background:var(--panel2);
+          border:1px solid var(--line);border-radius:8px;padding:6px;overflow:hidden}
+  .layers .row{display:flex;align-items:center;gap:7px;padding:3px 4px;font-size:11px}
+  .cursor{position:absolute;font-size:15px;filter:drop-shadow(0 1px 1px #000);pointer-events:none;transition:.2s}
+
+  /* pros/cons graphical */
+  .pc{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px}
+  .pc .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .pc h3{margin:0 0 12px;font-size:13px;display:flex;align-items:center;gap:7px}
+  .pc h3 .dot{width:10px;height:10px;border-radius:50%}
+  .pc .pro .dot{background:var(--good)} .pc .con .dot{background:var(--bad)}
+  .pc .item{margin-bottom:11px}
+  .pc .lbl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px}
+  .pc .lbl span:last-child{color:var(--mut);font-size:11px}
+  .bar{height:7px;border-radius:4px;background:#1a1a20;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:4px}
+  .pro .bar i{background:linear-gradient(90deg,#2c8d56,var(--good))}
+  .con .bar i{background:linear-gradient(90deg,#b94b4b,var(--bad))}
+
+  /* scorecard */
+  .score{display:flex;gap:18px;flex-wrap:wrap;margin:26px 0 4px;padding:14px 16px;
+         background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .score .met{flex:1 1 130px}
+  .score .met .t{font-size:11px;color:var(--mut);margin-bottom:6px}
+  .ring{--p:0;width:54px;height:54px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;
+        background:conic-gradient(var(--accent) calc(var(--p)*1%),#1a1a20 0)}
+  .ring span{width:42px;height:42px;border-radius:50%;background:var(--panel);display:grid;place-items:center}
+  .rec{margin-top:24px;padding:14px 16px;border-radius:12px;border:1px solid rgba(78,161,255,.4);
+       background:rgba(78,161,255,.08);font-size:13px}
+  .rec b{color:var(--accent)}
+  .foot{color:var(--mut);font-size:11.5px;margin-top:34px;border-top:1px solid var(--line);padding-top:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Overlay-toggle UI patterns</h1>
+  <div class="sub">Wirefold 3D editor — your 9 view-overlay show/hide toggles (<code>camera-ui.tsx</code>), measured against the industry conventions for this category.</div>
+</header>
+
+<div class="tabs" id="tabs"></div>
+<div class="wrap" id="wrap"></div>
+
+<script>
+const VP_SCENE = '<div class="scene"></div>';
+
+// reusable mock builders ------------------------------------------------
+function cursor(x,y){return `<div class="cursor" style="left:${x}px;top:${y}px">🖱️</div>`}
+
+const PATTERNS = [
+  {
+    id:"current",
+    name:"Current — persistent icon row",
+    star:false,
+    blurb:"What you have today: all ~9 overlay toggles live permanently in the top-right of the viewport. Each is an independent on/off icon, with a master gate over a subset.",
+    flow:[
+      {cap:"All 9 buttons always visible, competing with the scene for the top-right corner.",
+       vp:`<div class="toolbar">
+            <div class="ic on">θφ</div><div class="ic">L</div><div class="ic on">N</div>
+            <div class="ic">◎</div><div class="ic on">⊕</div><div class="ic">◴</div>
+            <div class="ic">R</div><div class="ic on">✋</div><div class="ic">⇄</div></div>`},
+      {cap:"To toggle 'labels' you hunt the right icon — no grouping, no text labels, tooltip-only meaning.",
+       vp:`<div class="toolbar">
+            <div class="ic on">θφ</div><div class="ic on">L</div><div class="ic on">N</div>
+            <div class="ic">◎</div><div class="ic on">⊕</div><div class="ic">◴</div>
+            <div class="ic">R</div><div class="ic on">✋</div><div class="ic">⇄</div></div>
+           ${cursor(60,8)}`},
+      {cap:"State is visible at a glance (lit = on) — the one real strength of this layout.",
+       vp:`<div class="toolbar">
+            <div class="ic on">θφ</div><div class="ic on">L</div><div class="ic on">N</div>
+            <div class="ic">◎</div><div class="ic on">⊕</div><div class="ic">◴</div>
+            <div class="ic">R</div><div class="ic on">✋</div><div class="ic">⇄</div></div>`},
+    ],
+    pros:[["Every state visible at once",90],["Zero clicks to toggle (1 tap)",100],["No menus to learn",70]],
+    cons:[["Eats viewport corner permanently",85],["No labels/grouping — icon soup",80],["Doesn't scale past ~6 items",90]],
+    scores:{discover:45,space:25,scale:20,glance:95}
+  },
+  {
+    id:"overlays",
+    name:"Overlays split-button + popover",
+    star:true,
+    blurb:"The dominant DCC/3D-viewport convention (Blender, Substance, many CAD tools). One labeled button is the master on/off; a caret opens a grouped checklist of the individual overlays.",
+    flow:[
+      {cap:"One tidy 'Overlays' button. Body = master toggle, caret = open list. Viewport stays clean.",
+       vp:`<div class="toolbar"><div class="ic lg on">Overlays <span class="caret">▾</span></div></div>`},
+      {cap:"Click the caret → grouped popover of every overlay with checkboxes.",
+       vp:`<div class="toolbar"><div class="ic lg on">Overlays <span class="caret">▾</span></div></div>
+           <div class="pop">
+             <div class="grp">Guides</div>
+             <div class="row"><span class="cb ck"></span>Angle arcs</div>
+             <div class="row"><span class="cb"></span>Rings</div>
+             <div class="row"><span class="cb ck"></span>Handholds</div>
+             <div class="grp">Poles</div>
+             <div class="row"><span class="cb ck"></span>Scene poles</div>
+             <div class="row"><span class="cb"></span>Node poles</div>
+           </div>${cursor(150,30)}`},
+      {cap:"Tick/untick any item — grouped + text-labeled, so meaning is obvious. State persists in the list.",
+       vp:`<div class="toolbar"><div class="ic lg on">Overlays <span class="caret">▾</span></div></div>
+           <div class="pop">
+             <div class="grp">Guides</div>
+             <div class="row"><span class="cb ck"></span>Angle arcs</div>
+             <div class="row"><span class="cb ck"></span>Rings</div>
+             <div class="row"><span class="cb ck"></span>Handholds</div>
+             <div class="grp">Poles</div>
+             <div class="row"><span class="cb ck"></span>Scene poles</div>
+             <div class="row"><span class="cb"></span>Node poles</div>
+           </div>${cursor(120,64)}`},
+      {cap:"Click body (not caret) → master off: kill all overlays for an unobstructed scene in one tap.",
+       vp:`<div class="toolbar"><div class="ic lg">Overlays <span class="caret">▾</span></div></div>${cursor(150,12)}`},
+    ],
+    pros:[["Frees the viewport corner",90],["Labels + grouping = discoverable",95],["Scales to any # of overlays",95],["Master 1-tap clear preserved",85]],
+    cons:[["Toggling is 2 clicks (open+tick)",55],["Per-item state hidden until opened",60]],
+    scores:{discover:90,space:90,scale:95,glance:55}
+  },
+  {
+    id:"menu",
+    name:"View menu with checkmarks",
+    star:false,
+    blurb:"The menubar equivalent — a 'View ▸ Overlays' menu where each overlay is a checkable item. Standard in Maya, CAD, and most desktop apps.",
+    flow:[
+      {cap:"Nothing in the viewport — overlays live under a top menubar 'View' entry.",
+       vp:`<div class="menubar"><span class="m">File</span><span class="m">Edit</span><span class="m">View</span><span class="m">Run</span></div>`},
+      {cap:"Click View → dropdown of checkmarked overlay items.",
+       vp:`<div class="menubar"><span class="m">File</span><span class="m">Edit</span><span class="m act">View</span><span class="m">Run</span></div>
+           <div class="dropdown">
+             <div class="row"><span class="ck-mark">✓</span>Angle arcs</div>
+             <div class="row"><span class="ck-mark"></span>Rings</div>
+             <div class="row"><span class="ck-mark">✓</span>Scene poles</div>
+             <div class="row"><span class="ck-mark"></span>Node poles</div>
+             <div class="row"><span class="ck-mark">✓</span>Handholds</div>
+           </div>${cursor(56,22)}`},
+      {cap:"Click an item → toggles + menu closes. Re-open to toggle the next one.",
+       vp:`<div class="menubar"><span class="m">File</span><span class="m">Edit</span><span class="m act">View</span><span class="m">Run</span></div>
+           <div class="dropdown">
+             <div class="row"><span class="ck-mark">✓</span>Angle arcs</div>
+             <div class="row"><span class="ck-mark">✓</span>Rings</div>
+             <div class="row"><span class="ck-mark">✓</span>Scene poles</div>
+             <div class="row"><span class="ck-mark"></span>Node poles</div>
+             <div class="row"><span class="ck-mark">✓</span>Handholds</div>
+           </div>${cursor(58,44)}`},
+    ],
+    pros:[["Zero viewport footprint",95],["Familiar desktop idiom",80],["Keyboard-shortcut friendly",75]],
+    cons:[["Menu closes each toggle — slow batch",80],["State invisible until opened",75],["No master 1-tap clear",65],["VS Code webview has no native menubar",90]],
+    scores:{discover:65,space:95,scale:80,glance:20}
+  },
+  {
+    id:"layers",
+    name:"Layers / outliner eye column",
+    star:false,
+    blurb:"A docked side panel with an eye-icon visibility column. This is the convention when visibility is PER-OBJECT (per node / per edge), not per-overlay-type — a different axis than what you have.",
+    flow:[
+      {cap:"Persistent docked panel listing entities, each with an eye toggle.",
+       vp:`<div class="layers">
+             <div class="row"><span class="eye">👁</span>Node A</div>
+             <div class="row"><span class="eye">👁</span>Node B</div>
+             <div class="row"><span class="eye off">👁</span>Wire A→B</div>
+             <div class="row"><span class="eye">👁</span>Overlays</div>
+           </div>`},
+      {cap:"Click an eye → that row hides. One column, always visible, scannable.",
+       vp:`<div class="layers">
+             <div class="row"><span class="eye">👁</span>Node A</div>
+             <div class="row"><span class="eye off">👁</span>Node B</div>
+             <div class="row"><span class="eye off">👁</span>Wire A→B</div>
+             <div class="row"><span class="eye">👁</span>Overlays</div>
+           </div>${cursor(118,48)}`},
+      {cap:"Great for object visibility — but overlays aren't objects, so it's an axis mismatch here.",
+       vp:`<div class="layers">
+             <div class="row"><span class="eye">👁</span>Node A</div>
+             <div class="row"><span class="eye off">👁</span>Node B</div>
+             <div class="row"><span class="eye off">👁</span>Wire A→B</div>
+             <div class="row"><span class="eye">👁</span>Overlays</div>
+           </div>`},
+    ],
+    pros:[["Per-object state all visible",90],["1-tap toggle, no menu",85],["Scales to many entities",90]],
+    cons:[["Wrong axis for overlay TYPES",90],["Permanent side-panel real estate",70],["Heavier to build/maintain",65]],
+    scores:{discover:80,space:40,scale:90,glance:85}
+  },
+];
+
+// render ----------------------------------------------------------------
+const tabs=document.getElementById('tabs'), wrap=document.getElementById('wrap');
+PATTERNS.forEach((p,i)=>{
+  const t=document.createElement('div');
+  t.className='tab'+(i===0?' active':''); t.dataset.i=i;
+  t.innerHTML=p.name+(p.star?'<span class="star">★ recommended</span>':'');
+  t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.panelview').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active'); document.getElementById('pv'+i).classList.add('active');
+    window.scrollTo({top:0,behavior:'smooth'});};
+  tabs.appendChild(t);
+
+  const v=document.createElement('div');
+  v.className='panelview'+(i===0?' active':''); v.id='pv'+i;
+
+  const flow=p.flow.map((s,n)=>`
+    <div class="step">
+      <div class="n"><b>${n+1}</b> Step ${n+1}</div>
+      <div class="vp">${VP_SCENE}${s.vp}</div>
+      <div class="cap">${s.cap}</div>
+    </div>${n<p.flow.length-1?'<div class="arrow">→</div>':''}`).join('');
+
+  const pros=p.pros.map(([l,w])=>`<div class="item"><div class="lbl"><span>${l}</span><span>${w}</span></div><div class="bar"><i style="width:${w}%"></i></div></div>`).join('');
+  const cons=p.cons.map(([l,w])=>`<div class="item"><div class="lbl"><span>${l}</span><span>${w}</span></div><div class="bar"><i style="width:${w}%"></i></div></div>`).join('');
+
+  const s=p.scores;
+  const ring=(t,val)=>`<div class="met"><div class="t">${t}</div><div class="ring" style="--p:${val}"><span>${val}</span></div></div>`;
+
+  v.innerHTML=`
+    <h2>${p.name}${p.star?'<span class="badge">★ recommended</span>':''}</h2>
+    <p class="blurb">${p.blurb}</p>
+    <div class="flow">${flow}</div>
+    <div class="pc">
+      <div class="col pro"><h3><span class="dot"></span>Pros</h3>${pros}</div>
+      <div class="col con"><h3><span class="dot"></span>Cons</h3>${cons}</div>
+    </div>
+    <div class="score">
+      ${ring('Discoverable',s.discover)}${ring('Saves space',s.space)}
+      ${ring('Scales',s.scale)}${ring('State at a glance',s.glance)}
+    </div>
+    ${p.star?`<div class="rec">★ <b>Recommended.</b> Your current design is already the right <i>substance</i> (a master gate over a set of overlay toggles). This pattern keeps that and fixes the <i>packaging</i>: collapse the 9-icon row into one labeled button + grouped popover, reclaiming the viewport corner while staying discoverable.</div>`:''}
+  `;
+  wrap.appendChild(v);
+});
+const foot=document.createElement('div');
+foot.className='foot';
+foot.textContent='Mockups are schematic (CSS/SVG), not pixel specs. Scores are relative judgments for this specific use case: frequently-toggled per-type viewport overlays in a VS Code webview.';
+wrap.appendChild(foot);
+</script>
+</body>
+</html>
