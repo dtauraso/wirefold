@@ -44,8 +44,6 @@ export interface ThreeStoreState {
     targetId: string,
     targetHandle: string | null,
   ) => string | null;
-  moveNode: (id: string, x: number, y: number) => void;
-  saveSpec: () => void;
   /** Toggle fade on a node or edge. Recomputes fixpoint and emits updated faded-edge set to host. */
   toggleFade: (target: { kind: "node" | "edge"; id: string }) => void;
   /** Remove an edge by id from the spec and persist. */
@@ -180,25 +178,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     clearPulsesForEdge(id);
     // Drop Go's streamed segment for this edge so no stale tube can draw.
     useEdgeGeometryStore.getState().removeEdgeSegment(id);
-  },
-
-  moveNode(id, x, y) {
-    const { nodes } = get();
-    const nextNodes = nodes.map((n) =>
-      n.id === id ? { ...n, position: { x, y } } : n,
-    );
-    set({ nodes: nextNodes });
-
-    // Phase 3: TS computes NO geometry. Updating the node position here only moves
-    // the node/port SPHERES + labels. The wire-tube curve is Go-authoritative: the
-    // node-move IPC (sent from interaction-controls) drives Go to re-derive every
-    // affected edge's control points and STREAM them back (geometry trace), and the
-    // in-flight bead's remaining travel re-derives on Go's one clock. SingleEdgeTube
-    // redraws the tube from that stream — no TS curve build, no per-bead patch.
-  },
-
-  saveSpec() {
-    /* no-op: Go persists topology from edit ops */
   },
 
   toggleFade(target) {
