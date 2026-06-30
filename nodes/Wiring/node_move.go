@@ -31,6 +31,7 @@ package Wiring
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -44,7 +45,16 @@ const (
 	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
+	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
 )
+
+// centerSnap is an immutable snapshot of a node's position published by the nodeMover
+// via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
+// the current center without touching the mover's live geom.
+type centerSnap struct {
+	c     vec3
+	reach float64
+}
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
@@ -110,10 +120,21 @@ type nodeMover struct {
 	aimed    AimedPortRegistry
 	// centerOf returns the current center for a node id — used only when aimed != nil.
 	centerOf func(string) (vec3, bool)
+	// snap is an atomically-published immutable snapshot of this node's current
+	// center+reachR. Written only by the mover's own goroutine after every center
+	// update; read by any goroutine (stdin reader) to observe the current position
+	// without crossing into the mover's live geom.
+	snap atomic.Pointer[centerSnap]
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
-	return &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	// Seed the atomic snapshot from the initial geometry so readers have a
+	// valid center before the first center message arrives.
+	if geom.Center != nil {
+		nm.snap.Store(&centerSnap{c: *geom.Center, reach: geom.ReachR})
+	}
+	return nm
 }
 
 // handle applies one move to this node: update held position, re-emit node-geometry.
@@ -137,6 +158,20 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// re-emit node-geometry.
 		m.geom.Center = msg.Center
 		m.geom.ReachR = msg.ReachR
+		// Publish the new center atomically so readers on other goroutines
+		// (stdin reader: centerOfNode, nodeCenter, heldCenters, fanCenters)
+		// observe it without touching our live geom.
+		if msg.Center != nil {
+			m.snap.Store(&centerSnap{c: *msg.Center, reach: msg.ReachR})
+		}
+		if m.tr != nil {
+			m.emitGeometry()
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindResend {
+		// Re-emit this node's geometry on our own goroutine — the inbox-routed
+		// path used by ResendGeometry when movers are running.
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -274,9 +309,29 @@ func (m *edgeMover) handle(msg moveMsg) {
 		}
 		return
 	}
+	if msg.Kind == moveMsgKindResend {
+		// Re-emit this edge's segment on our own goroutine — the inbox-routed
+		// path used by ResendGeometry when movers are running.
+		m.emitGeometry()
+		return
+	}
 	// Plain "move" messages have no effect under the polar layout;
 	// position updates arrive as "center" messages instead.
 	_ = msg
+}
+
+// emitGeometry re-emits this edge's segment from its held endpoint geoms without
+// touching the source Out, revising in-flight beads, or updating latency aggregates.
+// Used by the inbox-routed resend path (ResendGeometry when movers are running) so
+// the emit happens on the edge's own goroutine without races on held geom.
+func (m *edgeMover) emitGeometry() {
+	if m.tr == nil {
+		return
+	}
+	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf)
+	m.tr.Geometry(m.edgeID,
+		seg.Start.X, seg.Start.Y, seg.Start.Z,
+		seg.End.X, seg.End.Y, seg.End.Z)
 }
 
 // recomputeGeometry re-derives this edge's segment/arc/latency from its held endpoint
@@ -457,25 +512,52 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 // segment (tr.Geometry), recomputed from the edge's held endpoint geoms/handles. This
 // reproduces exactly what a fresh load streams on startup, so a freshly-(re)mounted
 // webview that lost its module-level edge-geometry store can rebuild it without
-// restarting Go. Safe to call repeatedly and while running: it only reads each mover's
-// held geom and emits — no inbox writes, no recompute side effects on Outs/wires.
+// restarting Go.
+//
+// When movers are running (md.started), each mover emits its own geometry on its own
+// goroutine via a synchronous moveMsgKindResend inbox message (ack-gated), removing
+// all cross-goroutine reads of mover geom. When movers are not started (test setup
+// that never calls Start), the direct read path is safe — no concurrent goroutines
+// own the geom yet.
 func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
 	if tr == nil {
 		return
 	}
-	centerOf := md.centerOfNode
-	for _, nm := range md.nodeMovers {
-		if nm.aimed != nil {
-			emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf)
-		} else {
-			emitNodeGeometry(tr, nm.id, nm.geom)
+	if !md.started {
+		// Movers not running — direct read is safe (no concurrent goroutines own geom).
+		centerOf := md.centerOfNode
+		for _, nm := range md.nodeMovers {
+			if nm.aimed != nil {
+				emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf)
+			} else {
+				emitNodeGeometry(tr, nm.id, nm.geom)
+			}
 		}
+		for _, em := range md.edgeMovers {
+			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, centerOf)
+			tr.Geometry(em.edgeID,
+				seg.Start.X, seg.Start.Y, seg.Start.Z,
+				seg.End.X, seg.End.Y, seg.End.Z)
+		}
+		return
+	}
+	// Movers running — route resend through each mover's inbox so the emit happens
+	// on the owning goroutine (no cross-goroutine geom reads). Collect all acks
+	// before returning so the caller observes a complete geometry stream.
+	total := len(md.nodeMovers) + len(md.edgeMovers)
+	acks := make([]chan struct{}, 0, total)
+	for _, nm := range md.nodeMovers {
+		ack := make(chan struct{})
+		nm.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}
+		acks = append(acks, ack)
 	}
 	for _, em := range md.edgeMovers {
-		seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, centerOf)
-		tr.Geometry(em.edgeID,
-			seg.Start.X, seg.Start.Y, seg.Start.Z,
-			seg.End.X, seg.End.Y, seg.End.Z)
+		ack := make(chan struct{})
+		em.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}
+		acks = append(acks, ack)
+	}
+	for _, ack := range acks {
+		<-ack
 	}
 }
 
@@ -486,16 +568,15 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
 }
 
-// centerOfNode returns the current world center for a node id, reading directly
-// from the holding nodeMover. Used as the centerOf closure for portDirAimed.
-// Safe to call from any goroutine that already serializes with the mover
-// (e.g. during a fanCenters dispatch where the mover hasn't yet received the
-// new center — that is fine: the slightly-stale aim is corrected by the
-// subsequent re-emit of the aimed node's own geometry once it processes its
-// center message).
+// centerOfNode returns the current world center for a node id by loading the
+// nodeMover's atomically-published snapshot. Safe to call from any goroutine
+// without synchronization — the snap is published via atomic.Pointer after each
+// center update so this never races with the mover's live geom writes.
 func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
-	if nm, ok := md.nodeMovers[id]; ok && nm.geom.Center != nil {
-		return *nm.geom.Center, true
+	if nm, ok := md.nodeMovers[id]; ok {
+		if s := nm.snap.Load(); s != nil {
+			return s.c, true
+		}
 	}
 	return vec3{}, false
 }
@@ -517,11 +598,13 @@ func (md *MoveDispatch) installAimedPorts(registry AimedPortRegistry) {
 }
 
 // heldCenters / heldEdges snapshot the movers' current geometry.
+// heldCenters reads the atomically-published snap (not the live geom) so it is
+// safe to call from the stdin goroutine while mover goroutines write their centers.
 func (md *MoveDispatch) heldCenters() map[string]vec3 {
 	centers := make(map[string]vec3, len(md.nodeMovers))
 	for id, m := range md.nodeMovers {
-		if m.geom.Center != nil {
-			centers[id] = *m.geom.Center
+		if s := m.snap.Load(); s != nil {
+			centers[id] = s.c
 		}
 	}
 	return centers
@@ -593,15 +676,20 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 
 	// Send a center message to each aimer so it re-emits with the fresh aim.
 	// The aimer's own center hasn't changed — we preserve its current Center and
-	// ReachR so the nodeMover just re-emits its geometry with the updated aim dir.
+	// ReachR (read from the atomic snap, safe from the stdin goroutine) so the
+	// nodeMover just re-emits its geometry with the updated aim dir.
 	for id := range aimedReemit {
 		nm, exists := md.nodeMovers[id]
-		if !exists || nm.geom.Center == nil {
+		if !exists {
+			continue
+		}
+		s := nm.snap.Load()
+		if s == nil {
 			continue
 		}
 		if ch, ok := md.dispatch[id]; ok {
-			cc := *nm.geom.Center
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: nm.geom.ReachR}
+			cc := s.c
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: s.reach}
 		}
 	}
 }

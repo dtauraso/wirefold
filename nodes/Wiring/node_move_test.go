@@ -13,6 +13,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,4 +210,58 @@ func TestResendGeometry(t *testing.T) {
 	if !edgeGeoms["e0"] {
 		t.Fatal("ResendGeometry did not re-emit edge-geometry for 'e0'")
 	}
+}
+
+// TestMoverCenterRace is a -race regression for the data race between the mover
+// goroutines writing geom.Center/ReachR and the stdin goroutine reading those fields
+// via centerOfNode/nodeCenter/heldCenters/fanCenters/ResendGeometry. It hammers
+// RootMove (which triggers fanCenters and heldCenters) and ResendGeometry from one
+// goroutine while center messages flow concurrently through the mover goroutines.
+// Must pass cleanly under `go test -race`.
+func TestMoverCenterRace(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(4096)
+	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx) // launch mover goroutines
+
+	// Hammer concurrently: center messages via RootMove (fanCenters + heldCenters)
+	// and ResendGeometry from the "stdin goroutine" side, while the mover goroutines
+	// are writing geom.Center/ReachR on the other side.
+	const iters = 200
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			x := float64(i) * 0.5
+			md.RootMove("src", vec3{X: x, Y: 0, Z: 0})
+			md.ResendGeometry(tr)
+		}
+	}()
+	wg.Wait()
+	tr.Close()
 }

@@ -7,14 +7,18 @@ package Wiring
 // Locks are reintroduced ONE record at a time (see
 // docs/planning/visual-editor/existing-lock-system-record.md).
 
-// nodeCenter returns a node's current world position from its mover's held geometry.
-// Used only to anchor a derived follower position into world for the render bridge.
+// nodeCenter returns a node's current world position from the nodeMover's atomically-
+// published snapshot. Safe to call from the stdin goroutine while mover goroutines
+// write their centers — the snap is updated via atomic.Pointer after each center message.
 func (md *MoveDispatch) nodeCenter(id string) (vec3, bool) {
 	m, ok := md.nodeMovers[id]
-	if !ok || m.geom.Center == nil {
+	if !ok {
 		return vec3{}, false
 	}
-	return *m.geom.Center, true
+	if s := m.snap.Load(); s != nil {
+		return s.c, true
+	}
+	return vec3{}, false
 }
 
 // mirrorLock (record #1: registerNode2MirrorLocks). Follower shares Leader's θ about
