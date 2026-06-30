@@ -47,12 +47,6 @@ type Node struct {
 	Out2 *Wiring.Out
 }
 
-func (g *Node) tryEmitGeometry() {
-	if g.EmitGeometry != nil {
-		g.EmitGeometry()
-	}
-}
-
 // driveOutput runs a continuous-drive goroutine on out, always emitting the
 // current value of held. Stops when ctx is cancelled or EmitOneDriven returns false.
 func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64) {
@@ -71,7 +65,7 @@ func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64) {
 }
 
 func (g *Node) Update(ctx context.Context) {
-	g.tryEmitGeometry()
+	Wiring.TryEmit(g.EmitGeometry)
 
 	// held is shared between the drive goroutine(s) and this main loop.
 	var held atomic.Int64

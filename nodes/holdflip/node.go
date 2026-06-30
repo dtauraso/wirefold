@@ -41,14 +41,8 @@ type Node struct {
 	Out          *Wiring.Out
 }
 
-func (g *Node) tryEmitGeometry() {
-	if g.EmitGeometry != nil {
-		g.EmitGeometry()
-	}
-}
-
 func (g *Node) Update(ctx context.Context) {
-	g.tryEmitGeometry()
+	Wiring.TryEmit(g.EmitGeometry)
 
 	// held is shared between the drive goroutine and this main loop.
 	var held atomic.Int64

@@ -20,14 +20,8 @@ type Node struct {
 	FeedbackOut  *Wiring.Out
 }
 
-func (p *Node) tryEmitGeometry() {
-	if p.EmitGeometry != nil {
-		p.EmitGeometry()
-	}
-}
-
 func (p *Node) Update(ctx context.Context) {
-	p.tryEmitGeometry()
+	Wiring.TryEmit(p.EmitGeometry)
 
 	held := noValue
 	if p.EmitHeldBead != nil {

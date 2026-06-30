@@ -36,12 +36,6 @@ type Node struct {
 	FeedbackIn  *Wiring.In
 }
 
-func (n *Node) tryEmitGeometry() {
-	if n.EmitGeometry != nil {
-		n.EmitGeometry()
-	}
-}
-
 // fanOut emits value concurrently to all wired outputs and blocks until all
 // traversals complete. It is the shared fan-out helper used by both the
 // feedback-ring path and the plain-emit path.
@@ -139,7 +133,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 }
 
 func (n *Node) Update(ctx context.Context) {
-	n.tryEmitGeometry()
+	Wiring.TryEmit(n.EmitGeometry)
 	if len(n.Init) == 0 {
 		return
 	}

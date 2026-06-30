@@ -25,12 +25,6 @@ type Node struct {
 	ToNext                     Wiring.OutMulti
 }
 
-func (in *Node) tryEmitGeometry() {
-	if in.EmitGeometry != nil {
-		in.EmitGeometry()
-	}
-}
-
 // placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving
 // them, returning the extended set. Invariant: noValue (the empty-Held sentinel) is
 // never sent on an output channel — a fire whose Held is noValue places nothing on
@@ -46,7 +40,7 @@ func placeHeld(outs Wiring.OutMulti, held int, items []Wiring.DriveItem) []Wirin
 }
 
 func (in *Node) Update(ctx context.Context) {
-	in.tryEmitGeometry()
+	Wiring.TryEmit(in.EmitGeometry)
 
 	// -1 is the sentinel meaning "no value seen yet"; real values are non-negative
 	// indices, so noValue never collides with a legitimate Init index.

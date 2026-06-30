@@ -22,14 +22,8 @@ type Node struct {
 	In           *Wiring.In
 }
 
-func (h *Node) tryEmitGeometry() {
-	if h.EmitGeometry != nil {
-		h.EmitGeometry()
-	}
-}
-
 func (h *Node) Update(ctx context.Context) {
-	h.tryEmitGeometry()
+	Wiring.TryEmit(h.EmitGeometry)
 
 	held := noValue
 	if h.EmitHeldBead != nil {
