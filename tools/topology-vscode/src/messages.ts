@@ -162,8 +162,11 @@ export type HostToWebviewMsg =
   | { type: "save-error"; message: string }
   | { type: "trace-event"; event: TraceEvent };
 
+// Note: "resend" is host-originated (runner.resend() writes it straight to Go's
+// stdin) and is never emitted by the webview, so it is intentionally absent here —
+// parseWebviewToHost must not accept "resend" from the webview.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "resend", "stop", "webview-log", "edit",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
