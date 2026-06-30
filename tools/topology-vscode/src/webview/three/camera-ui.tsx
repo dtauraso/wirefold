@@ -142,10 +142,13 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
   { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
 ];
 
-/** A single row inside the popover: checkbox glyph + label, fires the row's op on click. */
+/** A single row inside the popover: square checkbox + label, fires the row's op on click.
+ *  Styled to match the recommended mock (overlay-toggle-options.html): custom .cb checkbox
+ *  that fills accent + ✓ when checked, with a subtle row-hover background. */
 function OverlayRow({ cfg }: { cfg: ToggleCfg }) {
   const val = useCameraStore(cfg.selector);
   const active = cfg.active(val);
+  const [hover, setHover] = useState(false);
   const onClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -158,19 +161,40 @@ function OverlayRow({ cfg }: { cfg: ToggleCfg }) {
   return (
     <div
       onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       title={cfg.title(active)}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "3px 6px",
+        gap: 7,
+        padding: "4px 6px",
         cursor: "pointer",
-        color: active ? "#ddd" : "#888",
-        borderRadius: 4,
+        color: "#e7e7ea",
+        borderRadius: 5,
+        background: hover ? "rgba(255,255,255,0.05)" : "transparent",
         userSelect: "none",
+        fontSize: 11.5,
       }}
     >
-      <span style={{ width: 10, textAlign: "center" }}>{active ? "✓" : " "}</span>
+      <span
+        style={{
+          width: 13,
+          height: 13,
+          flex: "0 0 auto",
+          borderRadius: 3,
+          border: `1.5px solid ${active ? "#4ea1ff" : "#9a9aa6"}`,
+          background: active ? "#4ea1ff" : "transparent",
+          display: "grid",
+          placeItems: "center",
+          color: "#04101f",
+          fontSize: 10,
+          fontWeight: 900,
+          lineHeight: "11px",
+        }}
+      >
+        {active ? "✓" : ""}
+      </span>
       <span>{labelText}</span>
     </div>
   );
@@ -195,20 +219,14 @@ export function OverlaysControl() {
     setOpen((o) => !o);
   }, []);
 
-  const cornerStyle: React.CSSProperties = {
-    background: "rgba(0,0,0,0.55)",
-    borderRadius: 6,
-    fontSize: 11,
-    fontFamily: "monospace",
-    userSelect: "none",
-  };
+  const fontStack = '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
 
   return (
     <>
-      {/* Split button */}
+      {/* Split button — labeled pill (body = master toggle, caret = popover). Accent fill
+          when the master is on, neutral chip when off (overlay-toggle-options.html mock). */}
       <div
         style={{
-          ...cornerStyle,
           position: "absolute",
           top: 76,
           right: 12,
@@ -216,64 +234,70 @@ export function OverlaysControl() {
           pointerEvents: "auto",
           display: "flex",
           alignItems: "stretch",
+          borderRadius: 6,
+          overflow: "hidden",
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: fontStack,
+          background: active ? "#4ea1ff" : "#34343d",
+          border: `1px solid ${active ? "#4ea1ff" : "#3a3a44"}`,
+          color: active ? "#04101f" : "#9a9aa6",
+          userSelect: "none",
         }}
       >
         {/* Body — master toggle */}
         <div
           onClick={onBodyClick}
           title={guidelinesCfg.title(active)}
-          style={{
-            padding: "3px 7px",
-            cursor: "pointer",
-            color: active ? "#ddd" : "#888",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-          }}
+          style={{ padding: "3px 9px", cursor: "pointer", display: "flex", alignItems: "center" }}
         >
-          ▦ overlays
+          Overlays
         </div>
-        {/* Divider */}
-        <div style={{ width: 1, background: "rgba(255,255,255,0.15)", margin: "3px 0" }} />
         {/* Caret — popover toggle */}
         <div
           onClick={onCaretClick}
           title={open ? "Close overlay list" : "Open overlay list"}
           style={{
-            padding: "3px 6px",
+            padding: "3px 7px 3px 4px",
             cursor: "pointer",
-            color: open ? "#ddd" : "#888",
             display: "flex",
             alignItems: "center",
+            fontSize: 9,
+            opacity: 0.85,
           }}
         >
           {open ? "▴" : "▾"}
         </div>
       </div>
 
-      {/* Popover */}
+      {/* Popover — grouped checklist (.pop mock style: panel2 bg, border, shadow). */}
       {open && (
         <div
           style={{
-            ...cornerStyle,
             position: "absolute",
             top: 104,
             right: 12,
             zIndex: 21,
             pointerEvents: "auto",
-            minWidth: 140,
-            padding: "4px 0",
+            width: 150,
+            background: "#2f2f37",
+            border: "1px solid #3a3a44",
+            borderRadius: 8,
+            padding: 6,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            fontFamily: fontStack,
+            userSelect: "none",
           }}
         >
           {OVERLAY_GROUPS.map((group) => (
             <div key={group.heading}>
               <div
                 style={{
-                  padding: "4px 8px 2px",
-                  fontSize: 9,
-                  color: "#666",
-                  letterSpacing: "0.08em",
-                  userSelect: "none",
+                  fontSize: 9.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: "#9a9aa6",
+                  padding: "6px 6px 2px",
                 }}
               >
                 {group.heading}
