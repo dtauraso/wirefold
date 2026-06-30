@@ -106,6 +106,23 @@ func (c *captureSink) String() string {
 	return c.buf.String()
 }
 
+// stepUntilSeen advances clk by step up to maxSteps times, polling sink for want
+// between each advance. Returns true when want appears in sink, false if exhausted.
+func stepUntilSeen(clk *W.FakeClock, sink *captureSink, step time.Duration, want string) bool {
+	const maxSteps = 200
+	for i := 0; i < maxSteps; i++ {
+		clk.Advance(step)
+		deadline := time.Now().Add(50 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if sink.contains(want) {
+				return true
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	return false
+}
+
 func writeTopo(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -166,25 +183,8 @@ func TestHeadlessCascadeCompletes(t *testing.T) {
 	// i1 recv. The cascade is two hops, so a handful of steps suffices; the budget
 	// is generous to absorb goroutine scheduling between placement and delivery.
 	step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
-	const maxSteps = 200
 	want := `"kind":"recv","node":"i1"`
-	got := false
-	for i := 0; i < maxSteps; i++ {
-		clk.Advance(step)
-		// Let the woken delivery goroutines and node loops make progress before
-		// the next advance.
-		deadline := time.Now().Add(50 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			if sink.contains(want) {
-				got = true
-				break
-			}
-			time.Sleep(time.Millisecond)
-		}
-		if got {
-			break
-		}
-	}
+	got := stepUntilSeen(clk, sink, step, want)
 
 	cancel()
 	wg.Wait()
@@ -334,23 +334,8 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 	// flow through the cascade.
 	clk.Resume()
 	step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
-	const maxSteps = 200
 	want := `"kind":"recv","node":"i1"`
-	got := false
-	for i := 0; i < maxSteps; i++ {
-		clk.Advance(step)
-		deadline := time.Now().Add(50 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			if sink.contains(want) {
-				got = true
-				break
-			}
-			time.Sleep(time.Millisecond)
-		}
-		if got {
-			break
-		}
-	}
+	got := stepUntilSeen(clk, sink, step, want)
 
 	cancel()
 	wg.Wait()
@@ -408,24 +393,9 @@ func TestFeedbackRingAlternates(t *testing.T) {
 		}
 
 		step := time.Duration(hop1.SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
-		const maxSteps = 200
 		// activeNetTopo uses Init=[7]; just confirm i0 receives the value via the existing path.
 		want := `"kind":"recv","node":"i0"`
-		got := false
-		for i := 0; i < maxSteps; i++ {
-			clk.Advance(step)
-			deadline := time.Now().Add(50 * time.Millisecond)
-			for time.Now().Before(deadline) {
-				if sink.contains(want) {
-					got = true
-					break
-				}
-				time.Sleep(time.Millisecond)
-			}
-			if got {
-				break
-			}
-		}
+		got := stepUntilSeen(clk, sink, step, want)
 
 		cancel()
 		wg.Wait()
