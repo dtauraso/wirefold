@@ -300,24 +300,26 @@ export function OverlaysControl() {
             userSelect: "none",
           }}
         >
-          {OVERLAY_GROUPS.map((group) => (
-            <div key={group.heading}>
-              <div
-                style={{
-                  fontSize: 9.5,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                  color: "#9a9aa6",
-                  padding: "6px 6px 2px",
-                }}
-              >
-                {group.heading}
+          <div style={{ opacity: active ? 1 : 0.4, transition: "opacity 0.12s ease" }}>
+            {OVERLAY_GROUPS.map((group) => (
+              <div key={group.heading}>
+                <div
+                  style={{
+                    fontSize: 9.5,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "#9a9aa6",
+                    padding: "6px 6px 2px",
+                  }}
+                >
+                  {group.heading}
+                </div>
+                {group.cfgs.map((cfg) => (
+                  <OverlayRow key={cfg.op} cfg={cfg} />
+                ))}
               </div>
-              {group.cfgs.map((cfg) => (
-                <OverlayRow key={cfg.op} cfg={cfg} />
-              ))}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </>
