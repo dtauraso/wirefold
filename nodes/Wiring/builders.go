@@ -189,11 +189,27 @@ func reflectStateKeys(sample any) []string {
 // reflectPorts walks the exported fields of the struct pointed to by sample
 // and returns a PortSpec for each channel field that carries int.
 // Chan-of-chan fields and non-channel fields are silently skipped.
+// Anonymous (embedded) struct fields are recursed so port fields promoted
+// from an embedded struct (e.g. gatecommon.GateNode) are discovered.
 func reflectPorts(sample any) []PortSpec {
 	t := reflect.TypeOf(sample).Elem()
+	return collectPorts(t)
+}
+
+func collectPorts(t reflect.Type) []PortSpec {
 	var ports []PortSpec
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
+		if f.Anonymous {
+			ft := f.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				ports = append(ports, collectPorts(ft)...)
+			}
+			continue
+		}
 		switch f.Type {
 		case tInPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn, Required: true})

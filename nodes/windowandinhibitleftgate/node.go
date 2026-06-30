@@ -2,7 +2,6 @@ package windowandinhibitleftgate
 
 import (
 	"context"
-	"time"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -12,29 +11,14 @@ import (
 // (1→0, 0→1). The gate fires 1 iff (NOT left) AND right.
 // All shared loop logic lives in gatecommon.RunGate; this package owns the
 // struct layout (required for gen-node-defs port discovery) and the init call.
+// GateNode is embedded so its port fields (FromLeft, FromRight, ToPassed) are
+// promoted and discovered by reflectPorts (which recurses into anonymous fields).
 type Node struct {
-	Fire           func()
-	EmitGeometry   func()
-	EmitInputBeads func(left, right int)
-	// Now returns active-elapsed sim time (pause-aware); nil → wall-clock fallback.
-	Now       func() time.Duration
-	WaitUntil func(ctx context.Context, target time.Duration) error
-	FromLeft  *Wiring.In
-	FromRight *Wiring.In
-	ToPassed  *Wiring.Out
+	gatecommon.GateNode
 }
 
 func (g *Node) Update(ctx context.Context) {
-	gatecommon.RunGate(ctx, &gatecommon.GateNode{
-		Fire:           g.Fire,
-		EmitGeometry:   g.EmitGeometry,
-		EmitInputBeads: g.EmitInputBeads,
-		Now:            g.Now,
-		WaitUntil:      g.WaitUntil,
-		FromLeft:       g.FromLeft,
-		FromRight:      g.FromRight,
-		ToPassed:       g.ToPassed,
-	}, true /* invertLeft */)
+	gatecommon.RunGate(ctx, &g.GateNode, true /* invertLeft */)
 }
 
 func init() {
