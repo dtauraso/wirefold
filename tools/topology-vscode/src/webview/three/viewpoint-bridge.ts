@@ -47,7 +47,8 @@ export function sendViewpointSet(
   const [upTheta, upPhi] = up;
   vscode.postMessage({
     type: "edit",
-    op: "viewpoint",
+    op: "update",
+    kind: "camera",
     viewpoint: { kind: "set", pivotX, pivotY, pivotZ, r, posTheta, posPhi, upTheta, upPhi },
   });
 }
@@ -63,7 +64,8 @@ function sendViewpointOrbitKind(
   const [toTheta, toPhi] = to;
   vscode.postMessage({
     type: "edit",
-    op: "viewpoint",
+    op: "update",
+    kind: "camera",
     viewpoint: { kind, fromTheta, fromPhi, toTheta, toPhi },
   });
 }
@@ -88,7 +90,8 @@ export function sendViewpointOrbitLocked(
 export function sendViewpointPan(dx: number, dy: number, dz: number): void {
   vscode.postMessage({
     type: "edit",
-    op: "viewpoint",
+    op: "update",
+    kind: "camera",
     viewpoint: { kind: "pan", dx, dy, dz },
   });
 }

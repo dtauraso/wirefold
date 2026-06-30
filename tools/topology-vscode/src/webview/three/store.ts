@@ -223,6 +223,6 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
     for (const e of edges) {
       edgeFadeMap[e.id] = result.fadedEdges.has(e.id);
     }
-    vscode.postMessage({ type: "edit", op: "fade", edges: edgeFadeMap });
+    vscode.postMessage({ type: "edit", op: "update", kind: "edge", attr: "faded", edges: edgeFadeMap });
   },
 }));

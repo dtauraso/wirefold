@@ -21,12 +21,6 @@ export type MessageCtx = {
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
 };
 
-// No-payload toggle ops forwarded verbatim to Go's stdin. All share the same
-// handler: writeStdin({type:"edit", op}) with no additional fields.
-const NO_PAYLOAD_TOGGLE_OPS = new Set([
-  "tori-vis", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles",
-  "handholds-vis", "labels-vis", "badges-vis", "overlays-vis", "double-links",
-]);
 
 export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void> {
   const msg = parseWebviewToHost(raw);
@@ -106,42 +100,39 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "webview-log":
       await appendWebviewLog(msg.entry, logUri);
       return;
-    case "edit":
-      // Single geometry-CRUD bridge: forward the edit to Go's stdin verbatim by op.
-      // Fire-and-forget — Go owns the clock; we never await Go (no request/response).
-      // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
-      // only); the writeStdin send itself is non-blocking. z defaults to 0.
+    case "edit": {
+      // Geometry-CRUD bridge: forward the (already parseEdit-validated) edit to Go's
+      // stdin VERBATIM. Fire-and-forget — Go owns the clock; we never await Go (no
+      // request/response). Forwarding the validated message wholesale (rather than
+      // reconstructing it field-by-field per op) means a new attribute can never be
+      // silently dropped here. There are exactly three ops: create / update / delete.
       if (msg.op === "create" || msg.op === "delete") {
+        // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
+        // only); the writeStdin send itself is non-blocking.
         await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), logUri);
-        runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op, target: msg.target, targetHandle: msg.targetHandle }));
+        runner.writeStdin(JSON.stringify(msg));
       } else if (msg.op === "update") {
-        // Forward the node-move entries map verbatim (keyed by moved node id + each
-        // incident edge id); Go's stdin reader mail-sorts each entry to the owning
-        // node/edge goroutine. Fire-and-forget.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "update", entries: msg.entries }));
-      } else if (msg.op === "fade") {
-        // edges is Record<string, boolean>: edgeId → desired faded state. Forward verbatim.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "fade", edges: msg.edges }));
-      } else if (msg.op === "port-anchor") {
-        // Move a port along its node's ring. node/port identify the port, isInput
-        // selects input vs output list, anchor is the new direction offset, keys lists
-        // the routing keys (node id + each incident edge id) Go mail-sorts to. Forward
-        // verbatim, fire-and-forget — same fan-out shape as op="update".
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "port-anchor", node: msg.node, port: msg.port, isInput: msg.isInput, anchor: msg.anchor, keys: msg.keys }));
-      } else if (msg.op === "scene") {
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "scene", scene: msg.scene }));
-      } else if (msg.op === "viewpoint") {
-        // Polar camera nav: forward the viewpoint payload verbatim. Fire-and-forget.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "viewpoint", viewpoint: msg.viewpoint }));
-      } else if (NO_PAYLOAD_TOGGLE_OPS.has(msg.op)) {
-        // No-payload toggle — Go owns the state; TS just signals the flip.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op }));
-      } else if (msg.op === "guide-vis") {
-        // Push all polar-guide visibilities plus master overlays to Go on reload so Go's
-        // authoritative state matches persisted scene settings. Explicit values — not a toggle.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "guide-vis", tori: msg.tori, scenePoles: msg.scenePoles, nodePoles: msg.nodePoles, angleLabels: msg.angleLabels, selSpherePoles: msg.selSpherePoles, handholds: msg.handholds, doubleLinks: msg.doubleLinks, labelsGlobal: msg.labelsGlobal, badgesGlobal: msg.badgesGlobal, overlays: msg.overlays }));
+        // Route by entity kind. Every kind forwards verbatim; the switch exists so an
+        // unknown kind is LOGGED (exhaustive default) rather than silently no-op'd, and
+        // so tsc flags any new EditMsg update kind that is not handled here.
+        // EDIT_UPDATE_KINDS_START
+        switch (msg.kind) {
+          case "node":
+          case "edge":
+          case "camera":
+          case "overlays":
+          case "scene":
+            runner.writeStdin(JSON.stringify(msg));
+            break;
+          default: {
+            const unknown: never = msg;
+            console.warn("topology editor: edit update with unhandled entity kind", unknown);
+          }
+        }
+        // EDIT_UPDATE_KINDS_END
       }
       return;
+    }
   }
 }
 

@@ -164,7 +164,7 @@ export function useInteractionControls(
         entries[e.id] = entry;
       }
     }
-    vscode.postMessage({ type: "edit", op: "update", entries });
+    vscode.postMessage({ type: "edit", op: "update", kind: "node", attr: "move", entries });
   }, [edgesRef]);
 
   const _rafNodeMove = useRef(
@@ -209,7 +209,9 @@ export function useInteractionControls(
       const keys = [p.nodeId, ...incidentEdgeIds(p.nodeId, p.portName, p.isInput)];
       vscode.postMessage({
         type: "edit",
-        op: "port-anchor",
+        op: "update",
+        kind: "node",
+        attr: "anchor",
         node: p.nodeId,
         port: p.portName,
         isInput: p.isInput,
