@@ -5,7 +5,6 @@
 import type { Port, SendRule, StateValue } from "../schema/types";
 import type { NodeSpec } from "../schema/types-graph";
 import type { WireProps } from "../schema/wire-defs";
-import { ANIMATION_FIELDS } from "./three/animation-fields";
 
 // ---------------------------------------------------------------------------
 // Own Node / Edge type shapes (Phase 3 rf-retirement).
@@ -76,9 +75,6 @@ export interface NodeData {
 /** Viewer-only fade mask. Faded nodes render muted; their incident edges draw no pulse. */
   faded?: boolean;
 
-  // --- Runtime trace fields (Phase 4) ---
-  /** Last fire event step for this node (used for visual highlight). */
-  lastFire?: typeof ANIMATION_FIELDS["lastFire"]["type"];
   // --- Adapter convenience fields ---
   label: string;
   fill: string;
@@ -104,12 +100,6 @@ export interface EdgeData extends WireProps {
   /** Original targetHandle stored in data for round-trip. */
   targetHandle?: string;
 
-  // --- Runtime trace fields (Phase 4) ---
-  /** Set by pump on a "send" event: the value in flight on this edge. */
-  pulse?: typeof ANIMATION_FIELDS["pulse"]["type"];
   /** Viewer-only fade mask. Faded edges render muted and draw no pulse. */
   faded?: boolean;
 }
-
-// Runtime trace fields added to NodeData (Phase 4).
-// Declared as an augmentation here to keep the main NodeData block readable.
