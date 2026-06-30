@@ -93,7 +93,7 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(64)
-	_, _, _, nmr, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, nmr, err := LoadTopology(ctx, path, tr, NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

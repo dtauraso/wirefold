@@ -228,7 +228,7 @@ func TestAimedPortRegistry_DerivedFromEdges(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(64)
-	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

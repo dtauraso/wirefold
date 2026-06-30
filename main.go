@@ -31,7 +31,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()
 
-	nodes, slotReg, _, md, err := W.LoadTopology(ctx, topologyPath, tr, clk)
+	nodes, slotReg, md, err := W.LoadTopology(ctx, topologyPath, tr, clk)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)

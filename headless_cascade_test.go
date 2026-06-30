@@ -147,7 +147,7 @@ func TestHeadlessCascadeCompletes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nodes, _, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
+	nodes, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, slotReg, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
+	_, slotReg, nmr, err := W.LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 	// LoadTopology emits geometry (KindGeometry) synchronously during load.
 	// Because geometry emission does not wait on the clock, it must succeed
 	// even with the clock halted.
-	nodes, _, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
+	nodes, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestFeedbackRingAlternates(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		nodes, _, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
+		nodes, _, nmr, err := W.LoadTopology(ctx, path, tr, clk)
 		if err != nil {
 			t.Fatalf("LoadTopology: %v", err)
 		}
