@@ -309,11 +309,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			pw.Trace = tr
 			pw.SetClock(clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
-		} else if simLatencyMs > pw.MaxIncomingSimLatencyMs {
-			// Fan-in: raise the per-port window aggregate to the max over all
-			// edges feeding this destination port.
-			pw.MaxIncomingSimLatencyMs = simLatencyMs
 		}
+		// Fan-in MaxIncomingSimLatencyMs is NOT pre-written here. md.Bind (below) calls
+		// PacedWire.SetIncomingLatency for every feeding edge, which is the CANONICAL
+		// source: it records each edge's SimLatencyMs and recomputes the per-port
+		// aggregate as the max over all of them. A manual raise here would just be
+		// overwritten by that authoritative pass.
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
