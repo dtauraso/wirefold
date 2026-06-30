@@ -79,8 +79,18 @@ GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$STDIN_READER" | g
 report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.go overlay flags" \
             "$(comm -23 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "messages.ts overlay flags"
 
+# --- Axis 4: overlays attr="set" payload fields -----------------------------
+# The attr="set" full-visibility restore (OverlayState ↔ stdinGuideVisPayload) is a
+# DERIVED listing on the TS side (OverlayState = Record<OverlayFlag, boolean>), so its
+# field set IS the overlay flag set (TS_FLAGS). On the Go side it is the json tags of
+# stdinGuideVisPayload. Assert they agree so a flag added/removed in the set-path can't
+# silently no-op.
+GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$STDIN_READER" | grep -oE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
+report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuideVisPayload fields" \
+            "$(comm -23 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "messages.ts OverlayState/flags"
+
 if [[ $HITS -eq 0 ]]; then
-  echo "edit-op-parity: clean (ops + update kinds + overlay flags in parity)"
+  echo "edit-op-parity: clean (ops + update kinds + overlay flags + set-payload in parity)"
   exit 0
 fi
 echo ""
