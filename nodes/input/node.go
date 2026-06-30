@@ -36,6 +36,30 @@ type Node struct {
 	FeedbackIn  *Wiring.In
 }
 
+func (n *Node) tryEmitGeometry() {
+	if n.EmitGeometry != nil {
+		n.EmitGeometry()
+	}
+}
+
+// fanOut emits value concurrently to all wired outputs and blocks until all
+// traversals complete. It is the shared fan-out helper used by both the
+// feedback-ring path and the plain-emit path.
+func (n *Node) fanOut(ctx context.Context, v int) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); n.ToHoldNewSendOld.EmitOneDriven(ctx, v) }()
+	if n.ToExcitatory.Wired() {
+		wg.Add(1)
+		go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
+	}
+	if n.ToPacer.Wired() {
+		wg.Add(1)
+		go func() { defer wg.Done(); n.ToPacer.EmitOneDriven(ctx, v) }()
+	}
+	wg.Wait()
+}
+
 // popEnd reads and removes the END element of working, refilling from backup
 // when working empties. working/backup are the double-buffer: each is a fresh
 // copy of init, and end-popping [1,0] yields 0 then 1. Returns the popped value.
@@ -52,10 +76,71 @@ func popEnd(working, backup *[]int, init []int) int {
 	return v
 }
 
-func (n *Node) Update(ctx context.Context) {
-	if n.EmitGeometry != nil {
-		n.EmitGeometry()
+// updateFeedbackRing runs the feedback-ring emit path. It returns when ctx is
+// cancelled or FeedbackIn closes. Called only when FeedbackIn.Wired() is true.
+//
+// Feedback ring: PEEK+SEND then READ. Sending does NOT deplete the buffer —
+// each iteration peeks the END of working and launches that bead; the buffer
+// stays full (4) at rest. The FIRST send is just the normal loop body
+// (peek+send) running before any feedback is read, so the ring self-starts
+// with no special seed and no t=0 deadlock.
+//
+// After sending, READ node 2's feedback s on FeedbackIn:
+//
+//	s == 1 -> POP the end (the "change the bead" action); refill on empty.
+//	s == 0 -> hold: do nothing, keep sending the same last bead next loop.
+func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func()) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Guard: never peek an empty slice. Refill keeps working non-empty,
+		// but be safe.
+		if len(*working) == 0 {
+			*working = *backup
+			*backup = append([]int(nil), init...)
+			emitBeads()
+		}
+
+		// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
+		v := (*working)[len(*working)-1]
+		n.Fire()
+		// Node 1 initiates a goroutine per wired output so node 2
+		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
+		// concurrently. wg.Wait keeps node 1 paced and preserves the
+		// feedback-ring ordering (the TryRecv below still runs after).
+		n.fanOut(ctx, v)
+
+		// READ: block until HoldNewSendOld sends the step on FeedbackIn.
+		step, ok := n.FeedbackIn.TryRecv()
+		if !ok {
+			return
+		}
+		n.FeedbackIn.Done()
+		if step != 1 {
+			// Hold: buffer unchanged, send the same last bead next loop.
+			continue
+		}
+
+		// s == 1: POP the end (change the bead); refill when working empties.
+		*working = (*working)[:len(*working)-1]
+		if len(*working) == 0 {
+			// Animated refill: the top row (backup) SLIDES DOWN into the
+			// working row at human speed (clock-paced, pause-aware). After the
+			// slide lands, the new top row appears via the full emitBeads below.
+			if n.EmitRefillSlide != nil {
+				n.EmitRefillSlide(*backup)
+			}
+			*working = *backup
+			*backup = append([]int(nil), init...)
+		}
+		emitBeads() // array changed (pop, maybe refill) → restream interior
 	}
+}
+
+func (n *Node) Update(ctx context.Context) {
+	n.tryEmitGeometry()
 	if len(n.Init) == 0 {
 		return
 	}
@@ -79,73 +164,8 @@ func (n *Node) Update(ctx context.Context) {
 	emitBeads() // initial full(4) state
 
 	if n.FeedbackIn.Wired() {
-		// Feedback ring: PEEK+SEND then READ. Sending does NOT deplete the
-		// buffer — each iteration peeks the END of action (working) and launches
-		// that bead; the buffer stays full (4) at rest. The FIRST send is just the
-		// normal loop body (peek+send) running before any feedback is read, so the
-		// ring self-starts with no special seed and no t=0 deadlock.
-		//
-		// After sending, READ node 2's feedback s on FeedbackIn:
-		//   s == 1 -> POP the end (the "change the bead" action); refill on empty.
-		//   s == 0 -> hold: do nothing, keep sending the same last bead next loop.
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-
-			// Guard: never peek an empty slice. Refill keeps action non-empty,
-			// but be safe.
-			if len(working) == 0 {
-				working = backup
-				backup = append([]int(nil), init...)
-				emitBeads()
-			}
-
-			// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
-			v := working[len(working)-1]
-			n.Fire()
-			// Node 1 initiates a goroutine per wired output so node 2
-			// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
-			// concurrently. wg.Wait keeps node 1 paced and preserves the
-			// feedback-ring ordering (the TryRecv below still runs after).
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() { defer wg.Done(); n.ToHoldNewSendOld.EmitOneDriven(ctx, v) }()
-			if n.ToExcitatory.Wired() {
-				wg.Add(1)
-				go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
-			}
-			if n.ToPacer.Wired() {
-				wg.Add(1)
-				go func() { defer wg.Done(); n.ToPacer.EmitOneDriven(ctx, v) }()
-			}
-			wg.Wait()
-
-			// READ: block until HoldNewSendOld sends the step on FeedbackIn.
-			step, ok := n.FeedbackIn.TryRecv()
-			if !ok {
-				return
-			}
-			n.FeedbackIn.Done()
-			if step != 1 {
-				// Hold: buffer unchanged, send the same last bead next loop.
-				continue
-			}
-
-			// s == 1: POP the end (change the bead); refill when action empties.
-			working = working[:len(working)-1]
-			if len(working) == 0 {
-				// Animated refill: the top row (backup) SLIDES DOWN into the
-				// working row at human speed (clock-paced, pause-aware). After the
-				// slide lands, the new top row appears via the full emitBeads below.
-				if n.EmitRefillSlide != nil {
-					n.EmitRefillSlide(backup)
-				}
-				working = backup
-				backup = append([]int(nil), init...)
-			}
-			emitBeads() // array changed (pop, maybe refill) → restream interior
-		}
+		n.updateFeedbackRing(ctx, &working, &backup, init, emitBeads)
+		return
 	}
 
 	// Plain emit path (FeedbackIn not wired): pop the end every iteration,
@@ -162,18 +182,7 @@ func (n *Node) Update(ctx context.Context) {
 		// Node 1 initiates a goroutine per wired output so node 2
 		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
 		// concurrently; wg.Wait keeps node 1 paced before the next pop.
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() { defer wg.Done(); n.ToHoldNewSendOld.EmitOneDriven(ctx, v) }()
-		if n.ToExcitatory.Wired() {
-			wg.Add(1)
-			go func() { defer wg.Done(); n.ToExcitatory.EmitOneDriven(ctx, v) }()
-		}
-		if n.ToPacer.Wired() {
-			wg.Add(1)
-			go func() { defer wg.Done(); n.ToPacer.EmitOneDriven(ctx, v) }()
-		}
-		wg.Wait()
+		n.fanOut(ctx, v)
 		emitted++
 	}
 }
