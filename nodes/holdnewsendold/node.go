@@ -75,7 +75,14 @@ func (in *Node) Update(ctx context.Context) {
 			}
 		}
 		if anyOccupied {
-			time.Sleep(occupiedPollInterval)
+			// Park briefly before re-checking, but honor cancellation so a
+			// cancelled ctx with a permanently-occupied output cannot spin
+			// forever and block wg.Wait at shutdown.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(occupiedPollInterval):
+			}
 			continue
 		}
 
