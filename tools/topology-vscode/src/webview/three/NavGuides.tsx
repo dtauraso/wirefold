@@ -39,20 +39,6 @@ function AxisLabel({ text, color, position, size }: {
   );
 }
 
-// The 8 octants of the polar sphere — each a sign triple (±x,±y,±z), a distinct color,
-// and a compact label. Drawn (when octants={true}) as colored diagonal sticks like the
-// reference poles, one per octant.
-const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
-  { s: [1, 1, 1], color: "#ffffff", tag: "+x+y+z" },
-  { s: [1, 1, -1], color: "#ff8c00", tag: "+x+y−z" },
-  { s: [1, -1, 1], color: "#00ced1", tag: "+x−y+z" },
-  { s: [1, -1, -1], color: "#9370db", tag: "+x−y−z" },
-  { s: [-1, 1, 1], color: "#ff69b4", tag: "−x+y+z" },
-  { s: [-1, 1, -1], color: "#9acd32", tag: "−x+y−z" },
-  { s: [-1, -1, 1], color: "#00bfff", tag: "−x−y+z" },
-  { s: [-1, -1, -1], color: "#cd853f", tag: "−x−y−z" },
-];
-
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
 // (yellow) angle arcs, all anchored at `center` with the pole = world +y. `scale`
@@ -60,8 +46,8 @@ const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
 // the scene frame and a node's frame are distinguishable. Decorative (raycast off),
 // not affected by the scene-tori toggle. Same drawing for every center, so node 2's
 // frame matches the scene's exactly.
-function PolarFrame({ center, scale, tag, octants }: {
-  center: THREE.Vector3; scale: number; tag?: string; octants?: boolean;
+function PolarFrame({ center, scale, tag }: {
+  center: THREE.Vector3; scale: number; tag?: string;
 }) {
   const radiusKey = Math.max(Math.round(scale), 1);
   const poleLen = radiusKey * 1.3;
@@ -111,28 +97,6 @@ function PolarFrame({ center, scale, tag, octants }: {
         <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
         <meshBasicMaterial color="#dddd22" depthWrite={false} />
       </mesh>
-      {/* All 8 octants, each drawn like the reference poles: a colored diagonal stick +
-          cone pointing to the octant center (±x,±y,±z), with a matching colored label. */}
-      {octants && OCTANTS.map((o) => {
-        const dir = new THREE.Vector3(o.s[0], o.s[1], o.s[2]).normalize();
-        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-        const mid = dir.clone().multiplyScalar(poleLen / 2);
-        const tip = dir.clone().multiplyScalar(poleLen + coneH / 2);
-        const lbl = dir.clone().multiplyScalar(poleLen + coneH * 2);
-        return (
-          <group key={`oct-${o.tag}`}>
-            <mesh position={[mid.x, mid.y, mid.z]} quaternion={q} raycast={() => null}>
-              <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
-              <meshBasicMaterial color={o.color} depthWrite={false} />
-            </mesh>
-            <mesh position={[tip.x, tip.y, tip.z]} quaternion={q} raycast={() => null}>
-              <coneGeometry args={[coneBaseR, coneH, 12]} />
-              <meshBasicMaterial color={o.color} depthWrite={false} />
-            </mesh>
-            <AxisLabel text={`${o.tag}${sfx}`} color={o.color} position={[lbl.x, lbl.y, lbl.z]} size={poleLen * 0.1} />
-          </group>
-        );
-      })}
       {/* Labels — billboard sprites, always face the camera. */}
       <AxisLabel text={`+Y pole${sfx}`} color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+X φ0${sfx}`} color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
@@ -345,7 +309,6 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
           center={nodeWorldPos(center)}
           scale={geoms[center.id]?.sphereR ?? nodeRadius(center)}
           tag={`(${center.id})`}
-          octants
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
