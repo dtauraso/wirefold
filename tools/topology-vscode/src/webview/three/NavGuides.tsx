@@ -381,27 +381,42 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
 
   if (nodes.length < 1) return null;
 
-  // Lock-arc demo decoration: θ/φ arcs from a "parent" node down to two "child" nodes.
-  // These are demo-specific node ids for the current topology. If any id is absent the
-  // arc is simply omitted (presence-guarded below). To update for a different topology,
-  // change these three constants — nowhere else needs editing.
-  const LOCK_ARC_PARENT_ID = "5";
-  const LOCK_ARC_CHILD_A_ID = "7";
-  const LOCK_ARC_CHILD_B_ID = "8";
+  // Lock-arc demo decoration: θ/φ arcs from a "parent" node down to two children that
+  // sit on the parent's sphere — a visual aid showing two siblings sharing equal θ/φ
+  // about the parent's own pole frame (the frame the θ-lock actually measures in;
+  // equal-θ is only visible against the parent's pole, not the scene's).
+  //
+  // Derived STRUCTURALLY from the loaded graph, never literal node ids: the parent is
+  // the first node that has at least two OTHER nodes sitting on its sphere (world
+  // distance ≈ the parent's Go-streamed sphereR), and the children are the first two
+  // such nodes. This works on any polar topology instead of silently no-op'ing on
+  // every topology but the old demo. If no such parent+2-children triple exists the
+  // arcs are omitted (presence-guarded below, same as before).
+  const lockArc = (() => {
+    for (const parent of nodes) {
+      const pr = geoms[parent.id]?.sphereR;
+      if (!pr) continue;
+      const pc = nodeWorldPos(parent);
+      const tol = pr * 0.25;
+      const children = nodes.filter(
+        (n) => n.id !== parent.id && Math.abs(nodeWorldPos(n).distanceTo(pc) - pr) <= tol,
+      );
+      if (children.length >= 2) return { parent, childA: children[0], childB: children[1] };
+    }
+    return null;
+  })();
 
-  // Node 2's own pole frame — same drawing as the scene frame, anchored at node 2's
-  // world center (pole = world +y, parallel to the scene's). This is the frame the
-  // θ-lock actually measures in: 3 and 7 share θ ABOUT NODE 2, so equal-θ is only
-  // visible against node 2's pole, not the scene's. Sized to ~half the scene radius.
-  const node2 = nodes.find((n) => n.id === LOCK_ARC_PARENT_ID);
+  // Parent's own pole frame center — pole = world +y, parallel to the scene's. Sized
+  // to ~half the scene radius.
+  const node2 = lockArc?.parent;
   const node2Center = node2 ? nodeWorldPos(node2) : null;
   const node2Scale = radiusKey * 0.5;
 
   // θ-lock check: vertical θ meridian arcs from the parent's pole down to its two
   // children, from LIVE positions. θ traces vertically; equal θ ⇒ equal arc sweep
   // (rotated apart in φ), different θ ⇒ different sweep length. (See ThetaArc.)
-  const node3 = nodes.find((n) => n.id === LOCK_ARC_CHILD_A_ID);
-  const node7 = nodes.find((n) => n.id === LOCK_ARC_CHILD_B_ID);
+  const node3 = lockArc?.childA;
+  const node7 = lockArc?.childB;
   const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
   // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
