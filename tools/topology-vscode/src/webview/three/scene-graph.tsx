@@ -319,19 +319,27 @@ function buildArrow(
   return { center, q };
 }
 
+/**
+ * Subscribe to one edge's segment from the edge-geometry store and derive a stable
+ * string key over the endpoints.  The key is the useMemo dependency for both
+ * SingleEdgeTube and DoubleEdgeOverlay: the memo re-runs only when Go re-streams
+ * the segment (e.g. after a node drag), not on every render.
+ */
+function useEdgeSegment(edgeId: string) {
+  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
+  const segKey = seg
+    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
+    : "";
+  return { seg, segKey };
+}
+
 export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: string; faded: boolean; selected: boolean; dimmed?: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
   // streams the endpoints (geometry trace) on load and on every node-move;
   // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's
   // endpoints and draw the tube from them — TS computes no geometry. A dragged node
   // re-streams its touched edges' segments, so the wire follows ~1 frame behind.
-  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
-
-  // Stable key over Go's streamed endpoints — rebuild the tube only when they
-  // change (e.g. a drag re-streams them).
-  const segKey = seg
-    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
-    : "";
+  const { seg, segKey } = useEdgeSegment(edgeId);
   const { tubeGeo, haloGeo, arrow } = useMemo(() => {
     if (!seg)
       return {
@@ -416,10 +424,7 @@ export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: st
  * Reads the same segment from the edge-geometry store as SingleEdgeTube so it lines up
  * exactly with the ports. Draws a thin tube line + two arrowheads pointing outward. */
 function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
-  const seg = useEdgeGeometryStore((s) => s.segments[edgeId]);
-  const segKey = seg
-    ? `${seg.start.x},${seg.start.y},${seg.start.z}:${seg.end.x},${seg.end.y},${seg.end.z}`
-    : "";
+  const { seg, segKey } = useEdgeSegment(edgeId);
   const { lineGeo, arrowStart, arrowEnd } = useMemo(() => {
     if (!seg)
       return {
