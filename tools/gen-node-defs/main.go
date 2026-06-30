@@ -965,6 +965,14 @@ func writeNodeDataTypes(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `  switch (kind) {`)
 	for _, e := range kinds {
 		if len(e.dataFields) == 0 {
+			// Explicit no-data case: the Go struct carries no wire:"data.*" fields,
+			// so there is nothing to validate. Emitting the case (instead of letting
+			// the kind fall through to default) keeps parseNodeData exhaustive over
+			// every RUNTIME_IMPLEMENTED_KIND. If a data field is later added to this
+			// kind, the generator replaces this with a validating case automatically,
+			// so a new field can never silently bypass validation.
+			fmt.Fprintf(w, "    case %q:\n", e.goKind)
+			fmt.Fprintln(w, `      return data; // no wire:"data.*" fields on the Go struct`)
 			continue
 		}
 		fmt.Fprintf(w, "    case %q: {\n", e.goKind)
