@@ -25,6 +25,10 @@ export interface ThreeStoreState {
   selectedId: string | null;
   // Incremented each time content is (re)loaded; used to trigger camera re-fit.
   loadEpoch: number;
+  // Non-null when the last load() call threw (parse failure). Cleared on the next
+  // successful load. Surfaced as a user-visible overlay so a blank diagram is
+  // diagnosable without opening .probe/ts-errors.jsonl.
+  loadError: string | null;
 
   // --- Fade state ---
   directlyFadedNodes: Set<string>;
@@ -59,6 +63,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
   edges: [],
   selectedId: null,
   loadEpoch: 0,
+  loadError: null,
   directlyFadedNodes: new Set<string>(),
   directlyFadedEdges: new Set<string>(),
   fadeEdgeOrder: [],
@@ -96,6 +101,7 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
         nodes,
         edges,
         loadEpoch: get().loadEpoch + 1,
+        loadError: null,
         directlyFadedNodes: restoredFadedNodes,
         directlyFadedEdges: restoredFadedEdges,
         fadeEdgeOrder,
@@ -111,10 +117,12 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       // silent parse failure (blank diagram, no store:load) is observable.
       // "load-error" must stay in ERROR_LABELS (extension/webview-log.ts).
       const e = err as { message?: string; stack?: string };
+      const message = e?.message ?? String(err);
       postLog("load-error", {
-        message: e?.message ?? String(err),
+        message,
         stack: e?.stack ?? null,
       });
+      set({ loadError: message });
     }
   },
 

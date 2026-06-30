@@ -30,6 +30,7 @@ import { scheduleViewSave } from "../save";
 export function ThreeView() {
   const nodes = useThreeStore((s) => s.nodes);
   const edges = useThreeStore((s) => s.edges);
+  const loadError = useThreeStore((s) => s.loadError);
   const storeCreateEdge = useThreeStore((s) => s.createEdge);
   const storeDeleteEdge = useThreeStore((s) => s.deleteEdge);
   const toggleFade = useThreeStore((s) => s.toggleFade);
@@ -97,25 +98,32 @@ export function ThreeView() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Read selectedId and edges from refs so this listener never needs to
+      // re-subscribe when they change — it subscribes exactly once.
+      const selId = selectedIdRef.current;
       const mod = e.metaKey || e.ctrlKey;
       // "f": toggle fade on the selected element.
-      if (e.key === "f" && !mod && selectedId) {
-        const isEdge = edges.some((ed) => ed.id === selectedId);
-        toggleFade({ kind: isEdge ? "edge" : "node", id: selectedId });
+      if (e.key === "f" && !mod && selId) {
+        const isEdge = edgesRef.current.some((ed) => ed.id === selId);
+        toggleFade({ kind: isEdge ? "edge" : "node", id: selId });
       }
       // Delete / Backspace: remove the selected edge (nodes/ports ignored).
-      if ((e.key === "Delete" || e.key === "Backspace") && !mod && selectedId) {
-        const isEdge = edges.some((ed) => ed.id === selectedId);
+      if ((e.key === "Delete" || e.key === "Backspace") && !mod && selId) {
+        const isEdge = edgesRef.current.some((ed) => ed.id === selId);
         if (isEdge) {
           e.preventDefault();
-          storeDeleteEdge(selectedId);
+          storeDeleteEdge(selId);
           setSelectedId(null);
         }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, edges, toggleFade, storeDeleteEdge]);
+  // toggleFade and storeDeleteEdge are stable Zustand action selectors.
+  // selectedId and edges are read via refs (selectedIdRef, edgesRef) so they
+  // are excluded from deps — the listener subscribes once for the component lifetime.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toggleFade, storeDeleteEdge]);
 
   // Route a pick result to selection state: a node/edge/port id, or null for empty space.
   const handleSelect = useCallback((id: string | null, ownSphere?: boolean) => {
@@ -299,6 +307,19 @@ export function ThreeView() {
 
       {/* Polar pan overlay — "mouse as polar" construction during a wheel-pan burst */}
       <PanPolarOverlay />
+
+      {/* Load-error banner: shown when store.load() throws (parse failure). Blank
+          diagram + this banner means the spec file is malformed; check .probe. */}
+      {loadError && (
+        <div style={{
+          position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)",
+          background: "rgba(180,40,40,0.92)", color: "#fff", borderRadius: 4,
+          padding: "6px 14px", fontSize: 12, pointerEvents: "none", zIndex: 100,
+          maxWidth: "80%", textAlign: "center",
+        }}>
+          Load failed: {loadError}
+        </div>
+      )}
 
     </div>
   );
