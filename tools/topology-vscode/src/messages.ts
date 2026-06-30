@@ -27,28 +27,31 @@ export type RunStatus =
 // (TS owns the graph; Go owns the recompute).
 export type MoveEntry = { nodeId: string; x: number; y: number; z: number };
 
-// OverlayFlag is the wire vocabulary of named boolean overlay attributes, shared
-// with Go's overlayToggles map (stdin_reader.go). Guarded by check-edit-op-parity.sh.
+// OVERLAY_FLAG_NAMES is the SINGLE source for the overlay wire vocabulary — named
+// boolean overlay attributes shared with Go's overlayToggles map and stdinGuideVisPayload
+// (stdin_reader.go). The OverlayFlag union, the OVERLAY_FLAGS runtime set, and the
+// OverlayState snapshot type are ALL derived from it, so the field set is listed once.
+// Guarded by check-edit-op-parity.sh.
 // OVERLAY_FLAGS_START
-export type OverlayFlag =
-  | "tori"
-  | "scenePoles"
-  | "nodePoles"
-  | "angleLabels"
-  | "selSpherePoles"
-  | "handholds"
-  | "labelsGlobal"
-  | "badgesGlobal"
-  | "overlays"
-  | "doubleLinks";
+export const OVERLAY_FLAG_NAMES = [
+  "tori",
+  "scenePoles",
+  "nodePoles",
+  "angleLabels",
+  "selSpherePoles",
+  "handholds",
+  "labelsGlobal",
+  "badgesGlobal",
+  "overlays",
+  "doubleLinks",
+] as const;
 // OVERLAY_FLAGS_END
 
+export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
+
 // OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
-export type OverlayState = {
-  tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean;
-  selSpherePoles: boolean; handholds: boolean; doubleLinks: boolean;
-  labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean;
-};
+// Derived from OverlayFlag so the field set can never drift from the flag vocabulary.
+export type OverlayState = Record<OverlayFlag, boolean>;
 
 // VP_KINDS_START
 export type ViewpointPayload =
@@ -157,10 +160,7 @@ export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new 
 // parseEdit validates an "edit" message by its op, mirroring the per-op payloads
 // in EditMsg (and Go's applyEdit). Returns undefined for an unknown op or a payload
 // missing required fields, so a malformed edit is dropped rather than forwarded.
-const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>([
-  "tori", "scenePoles", "nodePoles", "angleLabels", "selSpherePoles",
-  "handholds", "labelsGlobal", "badgesGlobal", "overlays", "doubleLinks",
-]);
+const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>(OVERLAY_FLAG_NAMES);
 
 // Validates that v is a full OverlayState (every flag a boolean).
 function isOverlayState(v: unknown): boolean {
