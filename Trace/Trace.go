@@ -116,13 +116,21 @@ const (
 	// the toggle is triggered (op="double-links"), so the renderer draws bidirectional
 	// arrow overlays on edges and dims the edge tubes.
 	KindDoubleLinks = "double-links"
+	// KindNodeStatus carries a node's processing-status state: whether its torus is in
+	// the RED error state and, when red, the "missed" bead's value plus a world position
+	// just OUTSIDE the node so the renderer can show the discarded different-color bead.
+	// Go emits torusRed=true (with the missed value+pos) when a different-color bead
+	// arrives on an input port mid-processing, and torusRed=false (revert to normal,
+	// clearing the missed marker) when the node finishes processing. Keyed by node id.
+	// This is Go REPORTING what it does — the renderer plots it later (no rendering yet).
+	KindNodeStatus = "node-status"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindNodeStatus}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -214,6 +222,11 @@ type Event struct {
 	// Visible carries the tori visibility state on scene-tori events (KindSceneTori).
 	// true = tori shown; false = tori hidden. Set on scene-tori events only.
 	Visible bool `json:"visible"`
+	// TorusRed carries the processing-error state on node-status events (KindNodeStatus):
+	// true = torus RED (a different-color bead was missed mid-processing; Value carries the
+	// missed bead's value and X/Y/Z a world position just outside the node); false = revert
+	// to normal (missed marker cleared). Set on node-status events only.
+	TorusRed bool `json:"torusRed"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -439,6 +452,16 @@ func (t *Trace) DoubleLinks(visible bool) {
 // shows/hides all 8 overlays at once without mutating individual overlay bools.
 func (t *Trace) OverlaysVis(visible bool) {
 	t.emit(Event{Kind: KindOverlaysVis, Visible: visible})
+}
+
+// NodeStatus emits a node's processing-status state (KindNodeStatus), keyed by node id.
+// torusRed=true marks the node's torus RED for an error: a different-color bead arrived on
+// an input port while the node was processing; missedValue is that discarded bead's value
+// and (x,y,z) a world position just OUTSIDE the node so the renderer can show it.
+// torusRed=false reverts the torus to normal and clears the missed marker (emitted when the
+// node finishes processing). Go REPORTS this; the renderer plots it later.
+func (t *Trace) NodeStatus(node string, torusRed bool, missedValue int, x, y, z float64) {
+	t.emit(Event{Kind: KindNodeStatus, Node: node, TorusRed: torusRed, Value: missedValue, X: x, Y: y, Z: z, hasPos: true})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -739,6 +762,19 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
+	case KindNodeStatus:
+		// torusRed + missed bead value + outside world position always emitted.
+		type nodeStatus struct {
+			Step        int     `json:"step"`
+			Kind        string  `json:"kind"`
+			Node        string  `json:"node"`
+			TorusRed    bool    `json:"torusRed"`
+			MissedValue int     `json:"missedValue"`
+			X           float64 `json:"x"`
+			Y           float64 `json:"y"`
+			Z           float64 `json:"z"`
+		}
+		return json.Marshal(nodeStatus{Step: e.Step, Kind: e.Kind, Node: e.Node, TorusRed: e.TorusRed, MissedValue: e.Value, X: e.X, Y: e.Y, Z: e.Z})
 	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
