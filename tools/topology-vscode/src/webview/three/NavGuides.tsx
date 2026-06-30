@@ -39,6 +39,20 @@ function AxisLabel({ text, color, position, size }: {
   );
 }
 
+// The 8 octants of the polar sphere — a sign triple (±x,±y,±z), a distinct color, and a
+// compact label. When octants={true} the θ/φ angle arcs are reflected (group scale) into
+// each octant and colored from here, so every octant gets its own angle-arc pair.
+const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
+  { s: [1, 1, 1], color: "#ffffff", tag: "+x+y+z" },
+  { s: [1, 1, -1], color: "#ff8c00", tag: "+x+y−z" },
+  { s: [1, -1, 1], color: "#00ced1", tag: "+x−y+z" },
+  { s: [1, -1, -1], color: "#9370db", tag: "+x−y−z" },
+  { s: [-1, 1, 1], color: "#ff69b4", tag: "−x+y+z" },
+  { s: [-1, 1, -1], color: "#9acd32", tag: "−x+y−z" },
+  { s: [-1, -1, 1], color: "#00bfff", tag: "−x−y+z" },
+  { s: [-1, -1, -1], color: "#cd853f", tag: "−x−y−z" },
+];
+
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
 // (yellow) angle arcs, all anchored at `center` with the pole = world +y. `scale`
@@ -46,8 +60,8 @@ function AxisLabel({ text, color, position, size }: {
 // the scene frame and a node's frame are distinguishable. Decorative (raycast off),
 // not affected by the scene-tori toggle. Same drawing for every center, so node 2's
 // frame matches the scene's exactly.
-function PolarFrame({ center, scale, tag }: {
-  center: THREE.Vector3; scale: number; tag?: string;
+function PolarFrame({ center, scale, tag, octants }: {
+  center: THREE.Vector3; scale: number; tag?: string; octants?: boolean;
 }) {
   const radiusKey = Math.max(Math.round(scale), 1);
   const poleLen = radiusKey * 1.3;
@@ -87,6 +101,7 @@ function PolarFrame({ center, scale, tag }: {
         <coneGeometry args={[coneBaseR, coneH, 12]} />
         <meshBasicMaterial color="#3366dd" depthWrite={false} />
       </mesh>
+      {!octants && (<>
       {/* θ angle arc (magenta): quarter-sweep from +Y pole to +X, X-Y meridian plane. */}
       <mesh raycast={() => null}>
         <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
@@ -97,12 +112,31 @@ function PolarFrame({ center, scale, tag }: {
         <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
         <meshBasicMaterial color="#dddd22" depthWrite={false} />
       </mesh>
+      </>)}
+      {octants && OCTANTS.map((o) => (
+        <group key={`oarc-${o.tag}`} scale={[o.s[0], o.s[1], o.s[2]]}>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
+            <meshBasicMaterial color={o.color} transparent opacity={0.75} depthWrite={false} />
+          </mesh>
+          <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+            <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
+            <meshBasicMaterial color={o.color} transparent opacity={0.75} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
       {/* Labels — billboard sprites, always face the camera. */}
       <AxisLabel text={`+Y pole${sfx}`} color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+X φ0${sfx}`} color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+Z φ90${sfx}`} color="#3366dd" position={[0, 0, poleLen + coneH * 2]} size={poleLen * 0.12} />
+      {!octants && (<>
       <AxisLabel text="θ" color="#dd33cc" position={[arcMid, arcMid, 0]} size={poleLen * 0.14} />
       <AxisLabel text="φ" color="#dddd22" position={[arcMid, 0, arcMid]} size={poleLen * 0.14} />
+      </>)}
+      {octants && OCTANTS.map((o) => (
+        <AxisLabel key={`olbl-${o.tag}`} text={o.tag} color={o.color}
+          position={[o.s[0] * arcR * 0.62, o.s[1] * arcR * 0.62, o.s[2] * arcR * 0.62]} size={poleLen * 0.09} />
+      ))}
     </group>
   );
 }
@@ -309,6 +343,7 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
           center={nodeWorldPos(center)}
           scale={geoms[center.id]?.sphereR ?? nodeRadius(center)}
           tag={`(${center.id})`}
+          octants
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
