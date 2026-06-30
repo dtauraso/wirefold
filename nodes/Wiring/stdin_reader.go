@@ -57,6 +57,39 @@ type moveEntry struct {
 	Z      float64 `json:"z"`
 }
 
+// stdinCRUDPayload holds the fields for create/delete/update/fade ops.
+type stdinCRUDPayload struct {
+	Target       string               `json:"target"`
+	TargetHandle string               `json:"targetHandle"`
+	Edges        map[string]bool      `json:"edges"`
+	Entries      map[string]moveEntry `json:"entries"`
+}
+
+// stdinAnchorPayload holds the fields for the port-anchor op.
+// Node/Port name the port; IsInput selects the input vs output list; Anchor is the
+// new direction offset. Keys lists the routing keys the reader mail-sorts to.
+type stdinAnchorPayload struct {
+	Node    string     `json:"node"`
+	Port    string     `json:"port"`
+	IsInput bool       `json:"isInput"`
+	Anchor  *anchorVec `json:"anchor"`
+	Keys    []string   `json:"keys"`
+}
+
+// stdinGuideVisPayload holds the explicit-visibility fields for the guide-vis op.
+type stdinGuideVisPayload struct {
+	Tori           bool `json:"tori"`
+	ScenePoles     bool `json:"scenePoles"`
+	NodePoles      bool `json:"nodePoles"`
+	AngleLabels    bool `json:"angleLabels"`
+	SelSpherePoles bool `json:"selSpherePoles"`
+	Handholds      bool `json:"handholds"`
+	DoubleLinks    bool `json:"doubleLinks"`
+	LabelsGlobal   bool `json:"labelsGlobal"`
+	BadgesGlobal   bool `json:"badgesGlobal"`
+	Overlays       bool `json:"overlays"`
+}
+
 // stdinMsg is the single editor→Go bridge shape. type is always "edit"; op
 // discriminates the CRUD/animation operation. The remaining fields are the union
 // of every op's payload (only the fields for the active op are populated).
@@ -64,36 +97,17 @@ type moveEntry struct {
 // For op=="update" (node-move), Entries maps each routing key (the moved node id
 // AND each incident edge id) to the moved node's new position. The reader mail-sorts
 // each entry to channels[key]; the owning node/edge goroutine recomputes.
+//
+// Anonymous embedding preserves flat JSON field names so the wire format is unchanged.
 type stdinMsg struct {
-	Type         string               `json:"type"`
-	Op           string               `json:"op"`
-	Target       string               `json:"target"`
-	TargetHandle string               `json:"targetHandle"`
-	Edges        map[string]bool      `json:"edges"`
-	Entries      map[string]moveEntry `json:"entries"`
-	// Port-anchor op (op=="port-anchor"): identify the dragged port and its new anchor.
-	// Node/Port name the port; IsInput selects the input vs output list; Anchor is the
-	// new direction offset. Keys lists the routing keys (the node id AND each incident
-	// edge id) the reader mail-sorts the anchor update to — same fan-out shape as a move.
-	Node    string          `json:"node"`
-	Port    string          `json:"port"`
-	IsInput bool            `json:"isInput"`
-	Anchor  *anchorVec      `json:"anchor"`
-	Keys    []string        `json:"keys"`
-	Scene   json.RawMessage `json:"scene"`
+	Type      string          `json:"type"`
+	Op        string          `json:"op"`
+	Scene     json.RawMessage `json:"scene"`
 	// Viewpoint is the payload for op=="viewpoint"; nil when the op is anything else.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
-	// guide-vis payload: explicit visibility for all polar-guide groups plus master.
-	Tori          bool `json:"tori"`
-	ScenePoles    bool `json:"scenePoles"`
-	NodePoles     bool `json:"nodePoles"`
-	AngleLabels   bool `json:"angleLabels"`
-	SelSpherePoles bool `json:"selSpherePoles"`
-	Handholds     bool `json:"handholds"`
-	DoubleLinks   bool `json:"doubleLinks"`
-	LabelsGlobal  bool `json:"labelsGlobal"`
-	BadgesGlobal  bool `json:"badgesGlobal"`
-	Overlays      bool `json:"overlays"`
+	stdinCRUDPayload
+	stdinAnchorPayload
+	stdinGuideVisPayload
 }
 
 // anchorVec mirrors the Port.anchor {x,y,z} shape in the port-anchor edit message.
