@@ -222,7 +222,7 @@ func TestResendGeometry(t *testing.T) {
 
 // TestMoverCenterRace is a -race regression for the data race between the mover
 // goroutines writing geom.Center/ReachR and the stdin goroutine reading those fields
-// via centerOfNode/nodeCenter/heldCenters/fanCenters/ResendGeometry. It hammers
+// via centerOfNode/heldCenters/fanCenters/ResendGeometry. It hammers
 // RootMove (which triggers fanCenters and heldCenters) and ResendGeometry from one
 // goroutine while center messages flow concurrently through the mover goroutines.
 // Must pass cleanly under `go test -race`.

@@ -159,7 +159,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		m.geom.Center = msg.Center
 		m.geom.ReachR = msg.ReachR
 		// Publish the new center atomically so readers on other goroutines
-		// (stdin reader: centerOfNode, nodeCenter, heldCenters, fanCenters)
+		// (stdin reader: centerOfNode, heldCenters, fanCenters)
 		// observe it without touching our live geom.
 		if msg.Center != nil {
 			m.snap.Store(&centerSnap{c: *msg.Center, reach: msg.ReachR})
@@ -756,7 +756,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		if w, ok := emit[id]; ok {
 			return w, true
 		}
-		return md.nodeCenter(id)
+		return md.centerOfNode(id)
 	}
 	// Drag edge: the mouse handed in a world point, so recompute the polar of every link
 	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
