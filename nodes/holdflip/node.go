@@ -7,8 +7,12 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// noValue is the sentinel meaning "no value held yet". Real values are
+// non-negative indices so noValue (-1) never collides with a legitimate value.
+const noValue = -1
+
 // Node is a drain-to-latest flip node. It HOLDS one int value (the last
-// received input), initialized to -1, and drives the FLIPPED value (1-held)
+// received input), initialized to noValue, and drives the FLIPPED value (1-held)
 // out continuously.
 //
 // Two goroutines split the two concerns so the held value (and its interior
@@ -28,24 +32,28 @@ type Node struct {
 	Fire         func()
 	EmitGeometry func()
 	// EmitHeldBead, injected by Wiring.reflectBuild, streams the held INPUT value
-	// as a SINGLE centered interior node-bead (present when held != -1).
-	// Re-emitted at startup (held = -1, empty interior) and whenever the held
+	// as a SINGLE centered interior node-bead (present when held != noValue).
+	// Re-emitted at startup (held = noValue, empty interior) and whenever the held
 	// value changes.
 	EmitHeldBead func(held int)
 	In           *Wiring.In
 	Out          *Wiring.Out
 }
 
-func (g *Node) Update(ctx context.Context) {
+func (g *Node) tryEmitGeometry() {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
 	}
+}
+
+func (g *Node) Update(ctx context.Context) {
+	g.tryEmitGeometry()
 
 	// held is shared between the drive goroutine and this main loop.
 	var held atomic.Int64
-	held.Store(-1)
+	held.Store(noValue)
 	if g.EmitHeldBead != nil {
-		g.EmitHeldBead(-1) // startup: empty interior (held == -1)
+		g.EmitHeldBead(noValue) // startup: empty interior
 	}
 
 	// DRIVE goroutine: continuously pulse the FLIPPED current held value to Out.
@@ -61,8 +69,8 @@ func (g *Node) Update(ctx context.Context) {
 			}
 			h := held.Load()
 			var out int
-			if h == -1 {
-				out = -1 // no value yet; emit sentinel so wire doesn't carry garbage
+			if h == noValue {
+				out = noValue // no value yet; emit sentinel so wire doesn't carry garbage
 			} else {
 				out = 1 - int(h)
 			}
@@ -75,7 +83,7 @@ func (g *Node) Update(ctx context.Context) {
 	// MAIN loop: BLOCK on input (TryRecv parks in paced mode). Once a value
 	// arrives, drain any additional queued beads non-blocking (PollRecv) to keep
 	// only the LATEST. Then Done()/Fire()/update held/emit interior bead.
-	var lastDisplayed int64 = -1
+	var lastDisplayed int64 = noValue
 	for {
 		v, ok := g.In.TryRecv()
 		if !ok {
@@ -93,7 +101,6 @@ func (g *Node) Update(ctx context.Context) {
 		if g.Fire != nil {
 			g.Fire()
 		}
-		g.In.Breadcrumb("hold_flip", "")
 		newHeld := int64(v)
 		held.Store(newHeld)
 		if newHeld != lastDisplayed && g.EmitHeldBead != nil {

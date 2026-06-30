@@ -2,36 +2,15 @@ package windowandinhibitleftgate
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
+	"github.com/dtauraso/wirefold/nodes/gatetesthelper"
 )
-
-// clearSink is a thread-safe io.Writer that counts window_clear breadcrumbs
-// written to the trace sink, so a test can observe sim-time window timeouts.
-type clearSink struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (s *clearSink) Write(p []byte) (int, error) {
-	if strings.Contains(string(p), "window_clear") {
-		s.mu.Lock()
-		s.n++
-		s.mu.Unlock()
-	}
-	return len(p), nil
-}
-
-func (s *clearSink) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.n
-}
 
 func run(left, right int) (int, error) {
 	tr := T.New(0)
@@ -95,62 +74,22 @@ func TestAndNeitherActive(t *testing.T) {
 	}
 }
 
-// deliver places a value on a paced In wire and delivers it into the slot so a
-// PollRecv on the matching In returns it. arcLength sets the wire's SimLatencyMs.
-func newInputWire(arcLength float64, tr *T.Trace, target, handle string) *Wiring.PacedWire {
-	pw := Wiring.NewPacedWire(arcLength, Wiring.PulseSpeedWuPerMs)
-	pw.Target = target
-	pw.TargetHandle = handle
-	pw.Trace = tr
-	return pw
-}
-
-// send places a value on a paced In wire and drives Go's clock past the bead's
-// in-flight time so the wire delivers it into the slot (clock-delivery contract;
-// replaces the old NotifyDelivered trigger). It uses a per-call FakeClock and a
-// fixed inFlightMs, advances past the deadline, then waits until the bead has
-// landed (InFlight cleared) so the helper is synchronous like the old one.
-func send(t *testing.T, pw *Wiring.PacedWire, v int) {
-	t.Helper()
-	ctx := context.Background()
-	clk := Wiring.NewFakeClock()
-	pw.SetClock(clk)
-	const inFlightMs = 10
-	if !pw.PlaceAndDriveDeliverOnly(ctx, v, inFlightMs) {
-		t.Fatal("PlaceAndDriveDeliverOnly returned false")
-	}
-	clk.Advance(inFlightMs * time.Millisecond)
-	// Wait for the clock-delivery goroutine to fill the slot.
-	deadline := time.Now().Add(time.Second)
-	for pw.InFlight() {
-		if time.Now().After(deadline) {
-			t.Fatal("clock delivery did not fill slot after Advance")
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // TestPauseFreezesWindowAndDwell drives the window + dwell off an injected
 // active-elapsed clock and asserts:
 //   - while the clock does NOT advance (paused), a single held input does NOT
 //     time out, even though real wall-time passes well past W;
 //   - advancing the clock past W with only one input held DOES clear it
 //     (window_clear), proving the timeout is measured in sim time;
-//   - the dwell only completes once the clock advances past fireDwellMs.
+//   - the dwell only completes once the clock advances past FireDwellMs.
 func TestPauseFreezesWindowAndDwell(t *testing.T) {
-	// Sink the trace so we can observe the window_clear breadcrumb (breadcrumbs
-	// are sink-only, not buffered events). cleared counts how many fired.
-	var clears clearSink
+	var clears gatetesthelper.ClearSink
 	tr := T.NewWithSink(0, &clears)
 	defer tr.Close()
 
-	// arcLength 8 (SimLatencyMs irrelevant; W is fixed at 3000ms = 120wu/0.04).
-	left := newInputWire(8, tr, "ilg", "FromLeft")
-	right := newInputWire(8, tr, "ilg", "FromRight")
+	left := gatetesthelper.NewInputWire(8, tr, "ilg", "FromLeft")
+	right := gatetesthelper.NewInputWire(8, tr, "ilg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Sim clock the node times against. It stays PAUSED (no Advance) until we
-	// choose to step it, while real wall-time keeps running underneath.
 	simClk := Wiring.NewFakeClock()
 
 	fired := make(chan struct{}, 4)
@@ -166,12 +105,11 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	go func() { defer wg.Done(); node.Update(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
 
-	// One input held; sim clock frozen. A window_clear breadcrumb signals a timeout.
-	send(t, left, 1)
+	// One input held; sim clock frozen → no clear.
+	gatetesthelper.Send(t, left, 1)
 
-	// Real wall-time elapses well past W (150ms), but sim time is frozen → no clear.
 	time.Sleep(400 * time.Millisecond)
-	if clears.count() != 0 {
+	if clears.Count() != 0 {
 		t.Fatal("window cleared while sim clock was paused (timed on wall-clock)")
 	}
 	select {
@@ -183,7 +121,7 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	// Advance sim time past W (3000ms = 120wu/0.04) with one input held → must clear.
 	simClk.Advance(3500 * time.Millisecond)
 	deadline := time.Now().Add(1 * time.Second)
-	for clears.count() == 0 {
+	for clears.Count() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("window did not clear after sim clock advanced past W")
 		}
@@ -193,14 +131,11 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	cancel()
 	wg.Wait()
 
-	// Now exercise the dwell on a fresh node/wires: deliver a full pair, then
-	// prove the fire waits on the sim clock advancing past fireDwellMs (800ms),
-	// not on wall-time. The window-timeout is gated off once both inputs are held,
-	// so a frozen clock holds the dwell open indefinitely without clearing.
+	// Dwell test: deliver a full pair, prove fire waits on sim clock past FireDwellMs.
 	dctx, dcancel := context.WithCancel(context.Background())
 	dClk := Wiring.NewFakeClock()
-	dLeft := newInputWire(8, tr, "ilg2", "FromLeft")
-	dRight := newInputWire(8, tr, "ilg2", "FromRight")
+	dLeft := gatetesthelper.NewInputWire(8, tr, "ilg2", "FromLeft")
+	dRight := gatetesthelper.NewInputWire(8, tr, "ilg2", "FromRight")
 	dFired := make(chan struct{}, 4)
 	dNode := &Node{
 		Fire:      func() { dFired <- struct{}{} },
@@ -215,37 +150,34 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	defer func() { dcancel(); dwg.Wait() }()
 
 	// left=0 → stored Left=1; right=1 → stored Right=1 → both held → dwell starts.
-	send(t, dLeft, 0)
-	send(t, dRight, 1)
+	gatetesthelper.Send(t, dLeft, 0)
+	gatetesthelper.Send(t, dRight, 1)
 
-	// Both held, sim clock frozen → dwell never completes despite wall-time.
 	select {
 	case <-dFired:
-		t.Fatal("node fired before sim clock advanced past fireDwellMs")
+		t.Fatal("node fired before sim clock advanced past FireDwellMs")
 	case <-time.After(300 * time.Millisecond):
-		// good: dwell not satisfied while sim time held below 800ms
+		// good: dwell not satisfied while sim time held below FireDwellMs
 	}
 
-	// Advance sim time past fireDwellMs (800ms) → the dwell completes and fires.
-	dClk.Advance((fireDwellMs + 50) * time.Millisecond)
+	dClk.Advance((gatecommon.FireDwellMs + 50) * time.Millisecond)
 	select {
 	case <-dFired:
-		// good: dwell completed once sim time crossed fireDwellMs
+		// good
 	case <-time.After(1 * time.Second):
-		t.Fatal("node did not fire after sim clock advanced past fireDwellMs")
+		t.Fatal("node did not fire after sim clock advanced past FireDwellMs")
 	}
 }
 
 // TestSkipMinusOnePlaceholder: -1 ("no value") beads on an input are discarded, not
 // held. After two -1 placeholders then a real 0 arrive on the left, the slot holds 0
 // (the latest). The gate NOTs left: stored Left = 1 - 0 = 1. Right=1 → AND(1,1)=1.
-// (With -1 wrongly held, HasLeft would be false and the node would never fire.)
 func TestSkipMinusOnePlaceholder(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 
-	left := newInputWire(100, tr, "ilg", "FromLeft")
-	right := newInputWire(100, tr, "ilg", "FromRight")
+	left := gatetesthelper.NewInputWire(100, tr, "ilg", "FromLeft")
+	right := gatetesthelper.NewInputWire(100, tr, "ilg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	out := make(chan int, 4)
@@ -260,17 +192,13 @@ func TestSkipMinusOnePlaceholder(t *testing.T) {
 	go func() { defer wg.Done(); node.Update(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
 
-	send(t, left, -1) // placeholder — must be discarded
-	send(t, left, -1) // placeholder — must be discarded
-	send(t, left, 0)  // real value — fills the slot
-	send(t, right, 1)
+	gatetesthelper.Send(t, left, -1) // placeholder — must be discarded
+	gatetesthelper.Send(t, left, -1) // placeholder — must be discarded
+	gatetesthelper.Send(t, left, 0)  // real value — fills the slot
+	gatetesthelper.Send(t, right, 1)
 
 	select {
 	case v := <-out:
-		// Left holds real 0 (the -1 placeholders are discarded); the gate NOTs it,
-		// so stored Left = 1. Right=1 → AND(1,1)=1. The node firing AT ALL proves
-		// left held a real value (a leaked -1 would leave HasLeft false and the node
-		// would never fire).
 		if v != 1 {
 			t.Fatalf("AND after discarding -1 placeholders: got %d, want 1 (left holds real 0 → ¬0=1, AND(1,1)=1)", v)
 		}
@@ -281,13 +209,13 @@ func TestSkipMinusOnePlaceholder(t *testing.T) {
 
 // TestLatestPerSide: a side tracks the MOST-RECENT real bead. Left gets 0 then 1;
 // the slot must hold 1 (the latest). The gate NOTs left: stored Left = 1 - 1 = 0.
-// Right=1 → AND(0,1)=0. (Holding the first value 0 would give ¬0 AND 1 = 1.)
+// Right=1 → AND(0,1)=0.
 func TestLatestPerSide(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 
-	left := newInputWire(100, tr, "ilg", "FromLeft")
-	right := newInputWire(100, tr, "ilg", "FromRight")
+	left := gatetesthelper.NewInputWire(100, tr, "ilg", "FromLeft")
+	right := gatetesthelper.NewInputWire(100, tr, "ilg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	out := make(chan int, 4)
@@ -302,9 +230,9 @@ func TestLatestPerSide(t *testing.T) {
 	go func() { defer wg.Done(); node.Update(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
 
-	send(t, left, 0) // first real value
-	send(t, left, 1) // newer real value — the slot must update to this
-	send(t, right, 1)
+	gatetesthelper.Send(t, left, 0) // first real value
+	gatetesthelper.Send(t, left, 1) // newer real value — the slot must update to this
+	gatetesthelper.Send(t, right, 1)
 
 	select {
 	case v := <-out:
@@ -321,9 +249,8 @@ func TestWindowFire(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
 
-	// arcLength 100 (SimLatencyMs irrelevant; W is fixed at 3000ms).
-	left := newInputWire(100, tr, "ilg", "FromLeft")
-	right := newInputWire(100, tr, "ilg", "FromRight")
+	left := gatetesthelper.NewInputWire(100, tr, "ilg", "FromLeft")
+	right := gatetesthelper.NewInputWire(100, tr, "ilg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	fired := make(chan struct{}, 4)
@@ -337,8 +264,8 @@ func TestWindowFire(t *testing.T) {
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
-	send(t, left, 0)
-	send(t, right, 1)
+	gatetesthelper.Send(t, left, 0)
+	gatetesthelper.Send(t, right, 1)
 
 	select {
 	case <-fired:
@@ -351,7 +278,6 @@ func TestWindowFire(t *testing.T) {
 	cancel()
 	wg.Wait()
 
-	// Both wires consumed (slot empty): a fresh poll sees nothing.
 	if _, ok := left.PollRecv(); ok {
 		t.Fatal("left wire not consumed after fire")
 	}
@@ -361,17 +287,17 @@ func TestWindowFire(t *testing.T) {
 }
 
 // TestWindowClear: one input delivered, second never arrives → after W the held
-// input is Done'd (drained), no fire, flags reset; a subsequent fresh pair fires.
+// input is cleared (window_clear breadcrumb), no fire, flags reset; a subsequent
+// fresh pair fires.
 func TestWindowClear(t *testing.T) {
-	tr := T.New(0)
+	var clears gatetesthelper.ClearSink
+	tr := T.NewWithSink(0, &clears)
 	defer tr.Close()
 
-	left := newInputWire(8, tr, "ilg", "FromLeft")
-	right := newInputWire(8, tr, "ilg", "FromRight")
+	left := gatetesthelper.NewInputWire(8, tr, "ilg", "FromLeft")
+	right := gatetesthelper.NewInputWire(8, tr, "ilg", "FromRight")
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Drive the window off an injected sim clock so we can step past W (3000ms)
-	// without the test sleeping for 3 real seconds.
 	simClk := Wiring.NewFakeClock()
 
 	fired := make(chan struct{}, 4)
@@ -388,37 +314,39 @@ func TestWindowClear(t *testing.T) {
 	defer func() { cancel(); wg.Wait() }()
 
 	// Only the left input arrives; right never does.
-	// WaitConsumed must return once the node clears (Done drains the wire).
-	send(t, left, 1)
-	consumed := make(chan struct{}, 1)
-	go func() { left.WaitConsumed(ctx); consumed <- struct{}{} }()
+	gatetesthelper.Send(t, left, 1)
+	// Give the node loop time to pick up the bead and set t0 before we advance the
+	// sim clock. Without this, t0 would be measured AFTER the advance and the window
+	// would never time out.
+	time.Sleep(50 * time.Millisecond)
 
-	// Advance sim clock past W (3000ms = 120wu / 0.04 wu/ms) → clear must fire.
 	simClk.Advance(3500 * time.Millisecond)
+
+	// Wait for window_clear breadcrumb (proves the node cleared rather than fired).
+	deadline := time.Now().Add(1 * time.Second)
+	for clears.Count() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("window did not clear the held input within W")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 
 	select {
 	case <-fired:
 		t.Fatal("node fired with only one input present")
-	case <-consumed:
-		// held input was Done'd by the window clear
-	case <-time.After(1 * time.Second):
-		t.Fatal("window did not clear the held input within W")
+	default:
 	}
 
-	// No fire happened.
 	select {
 	case <-fired:
 		t.Fatal("node fired after clear")
 	default:
 	}
 
-	// A subsequent fresh pair fires normally (flags reset). Give the node loop
-	// a few polls to pick up both inputs (it parks on pollInterval=5ms), then
-	// advance the sim clock past fireDwellMs (800ms) so the dwell completes.
-	send(t, left, 0)
-	send(t, right, 1)
-	time.Sleep(50 * time.Millisecond) // let node loop poll both inputs
-	simClk.Advance((fireDwellMs + 50) * time.Millisecond)
+	gatetesthelper.Send(t, left, 0)
+	gatetesthelper.Send(t, right, 1)
+	time.Sleep(50 * time.Millisecond)
+	simClk.Advance((gatecommon.FireDwellMs + 50) * time.Millisecond)
 	select {
 	case <-fired:
 	case <-time.After(2 * time.Second):

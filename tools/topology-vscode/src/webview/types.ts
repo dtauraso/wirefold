@@ -90,8 +90,10 @@ export interface NodeData {
 
 // Per-edge data carried in RF Edge<EdgeData>.data.
 // RF-native fields (id, source, sourceHandle, target, targetHandle) live on
-// the RF edge itself and are NOT duplicated here — except sourceHandle /
-// targetHandle are also stored in data for round-trip.
+// the RF edge itself. sourceHandle/targetHandle are intentionally also stored
+// here in data for round-trip fidelity: the spec serializer reads them from
+// EdgeData.data (not from RFEdge top-level) so handle names survive
+// save→load without a separate mapping step.
 export interface EdgeData extends WireProps {
   /** Raw Spec.Edge.data — carried verbatim for round-trip. */
   edgeData?: unknown;

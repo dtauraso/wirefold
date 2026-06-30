@@ -37,7 +37,9 @@ import (
 
 // moveMsgKind discriminates moveMsg payloads.
 const (
-	moveMsgKindMove    = "move" // default (zero-value "" is also treated as move)
+	// The node-move kind ("move", the zero value "") carries no payload and is a
+	// no-op in every mover switch, so it has no constant — the switches simply
+	// fall through. The remaining kinds each select a distinct payload.
 	moveMsgKindFade    = "fade"
 	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
@@ -740,11 +742,19 @@ func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	md.EmitViewpoint(tr)
 }
 
+// setFlag flips *field and emits the new value via emit. Shared body of the
+// uniform Toggle* visibility methods (those that are just flip-then-emit) so each
+// stays a single self-documenting line. The two flags that also drop a breadcrumb
+// (scene/node poles) keep their bodies inline.
+func (md *MoveDispatch) setFlag(field *bool, emit func(bool)) {
+	*field = !*field
+	emit(*field)
+}
+
 // ToggleSceneTori flips the polar-guide tori visibility and emits a scene-tori event.
 // Called from applyEdit on op="tori-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace) {
-	md.sceneToriVisible = !md.sceneToriVisible
-	tr.SceneTori(md.sceneToriVisible)
+	md.setFlag(&md.sceneToriVisible, tr.SceneTori)
 }
 
 // EmitSceneTori emits the current tori visibility without toggling it. Use this on
@@ -782,8 +792,7 @@ func (md *MoveDispatch) EmitNodePoles(tr *T.Trace) {
 // ToggleAngleLabels flips the θ/φ angle arc+label visibility and emits an angle-labels event.
 // Called from applyEdit on op="angle-labels"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace) {
-	md.angleLabelsVisible = !md.angleLabelsVisible
-	tr.AngleLabels(md.angleLabelsVisible)
+	md.setFlag(&md.angleLabelsVisible, tr.AngleLabels)
 }
 
 // EmitAngleLabels emits the current angle arc+label visibility without toggling it.
@@ -799,8 +808,7 @@ func (md *MoveDispatch) AngleLabels() bool {
 // ToggleSelSpherePoles flips the selection-sphere pole axis visibility and emits a sel-sphere-poles event.
 // Called from applyEdit on op="sel-sphere-poles"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) {
-	md.selSpherePolesVisible = !md.selSpherePolesVisible
-	tr.SelSpherePoles(md.selSpherePolesVisible)
+	md.setFlag(&md.selSpherePolesVisible, tr.SelSpherePoles)
 }
 
 // EmitSelSpherePoles emits the current selection-sphere pole axis visibility without toggling it.
@@ -811,8 +819,7 @@ func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace) {
 // ToggleHandholds flips the rotation-handhold grab-sphere visibility and emits a handholds event.
 // Called from applyEdit on op="handholds-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleHandholds(tr *T.Trace) {
-	md.handholdsVisible = !md.handholdsVisible
-	tr.Handholds(md.handholdsVisible)
+	md.setFlag(&md.handholdsVisible, tr.Handholds)
 }
 
 // EmitHandholds emits the current handhold visibility without toggling it.
@@ -823,8 +830,7 @@ func (md *MoveDispatch) EmitHandholds(tr *T.Trace) {
 // ToggleLabelsGlobal flips the global node-label visibility and emits a labels-global event.
 // Called from applyEdit on op="labels-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace) {
-	md.labelsGlobalVisible = !md.labelsGlobalVisible
-	tr.LabelsGlobal(md.labelsGlobalVisible)
+	md.setFlag(&md.labelsGlobalVisible, tr.LabelsGlobal)
 }
 
 // EmitLabelsGlobal emits the current global label visibility without toggling it.
@@ -835,8 +841,7 @@ func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace) {
 // ToggleBadgesGlobal flips the global occlusion-badge visibility and emits a badges-global event.
 // Called from applyEdit on op="badges-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace) {
-	md.badgesGlobalVisible = !md.badgesGlobalVisible
-	tr.BadgesGlobal(md.badgesGlobalVisible)
+	md.setFlag(&md.badgesGlobalVisible, tr.BadgesGlobal)
 }
 
 // EmitBadgesGlobal emits the current global badge visibility without toggling it.
@@ -847,8 +852,7 @@ func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace) {
 // ToggleOverlaysVis flips the master overlays visibility and emits an overlays-vis event.
 // Called from applyEdit on op="overlays-vis"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace) {
-	md.overlaysVisible = !md.overlaysVisible
-	tr.OverlaysVis(md.overlaysVisible)
+	md.setFlag(&md.overlaysVisible, tr.OverlaysVis)
 }
 
 // EmitOverlaysVis emits the current master overlays visibility without toggling it.
@@ -859,8 +863,7 @@ func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace) {
 // ToggleDoubleLinks flips the double-link overlay visibility and emits a double-links event.
 // Called from applyEdit on op="double-links"; fire-and-forget from TS.
 func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace) {
-	md.doubleLinksVisible = !md.doubleLinksVisible
-	tr.DoubleLinks(md.doubleLinksVisible)
+	md.setFlag(&md.doubleLinksVisible, tr.DoubleLinks)
 }
 
 // EmitDoubleLinks emits the current double-link overlay visibility without toggling it.

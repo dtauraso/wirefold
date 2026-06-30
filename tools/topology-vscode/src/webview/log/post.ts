@@ -6,6 +6,8 @@
 // Failure is swallowed: a logging path that throws would mask the real
 // error it was trying to report.
 
+import { vscode } from "../vscode-api";
+
 export function postLog(label: string, data?: Record<string, unknown>): void {
   const stepVal = typeof data?.step === "number" ? data.step
     : typeof data?.simStep === "number" ? data.simStep
@@ -20,10 +22,7 @@ export function postLog(label: string, data?: Record<string, unknown>): void {
   console.log(`[wirefold] ${label}`, data ?? {});
   if (typeof window === "undefined") return;
   try {
-    const api = (window as unknown as {
-      __vscodeApi?: { postMessage(msg: unknown): void };
-    }).__vscodeApi;
-    api?.postMessage({ type: "webview-log", entry });
+    (vscode as unknown as { postMessage(msg: unknown): void }).postMessage({ type: "webview-log", entry });
   } catch {
     /* swallow */
   }

@@ -161,13 +161,22 @@ func (c *RealClock) WaitUntil(ctx context.Context, target time.Duration) error {
 // watchCtx broadcasts on c.cond when ctx is done so a parked WaitUntil wakes to
 // observe cancellation. The caller closes the returned channel to stop the watcher.
 func (c *RealClock) watchCtx(ctx context.Context) chan struct{} {
+	return broadcastOnCancel(ctx, &c.mu, c.cond)
+}
+
+// broadcastOnCancel starts a goroutine that broadcasts on cond when ctx is done,
+// holding mu around the broadcast so the wake cannot be lost in a waiter's
+// check→Wait window. The caller closes the returned channel to stop the watcher.
+// Shared by RealClock.watchCtx, FakeClock.watchCtx, and PacedWire.Recv — the one
+// place the "wake a cond-parked waiter on cancellation" pattern lives.
+func broadcastOnCancel(ctx context.Context, mu *sync.Mutex, cond *sync.Cond) chan struct{} {
 	stop := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			c.mu.Lock()
-			c.cond.Broadcast()
-			c.mu.Unlock()
+			mu.Lock()
+			cond.Broadcast()
+			mu.Unlock()
 		case <-stop:
 		}
 	}()
@@ -251,17 +260,7 @@ func (c *FakeClock) WaitUntil(ctx context.Context, target time.Duration) error {
 
 // watchCtx broadcasts on c.cond when ctx is done so a parked WaitUntil wakes.
 func (c *FakeClock) watchCtx(ctx context.Context) chan struct{} {
-	stop := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			c.mu.Lock()
-			c.cond.Broadcast()
-			c.mu.Unlock()
-		case <-stop:
-		}
-	}()
-	return stop
+	return broadcastOnCancel(ctx, &c.mu, c.cond)
 }
 
 // Compile-time assertions that both impls satisfy Clock.

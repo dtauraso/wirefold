@@ -70,7 +70,3 @@ export const useCameraStore = create<CameraState>((set) => ({
   setOverlaysVisible: (v) => set({ overlaysVisible: v }),
   setDoubleLinksVisible: (v) => set({ doubleLinksVisible: v }),
 }));
-
-export function getCameraState(): CameraState {
-  return useCameraStore.getState();
-}

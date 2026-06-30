@@ -7,9 +7,13 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// noValue is the sentinel meaning "no value held yet". Real values are
+// non-negative indices so noValue (-1) never collides with a legitimate value.
+const noValue = -1
+
 // Node is a sample-and-hold pulse. It HOLDS one int value (the thing it is
-// outputting), initialized to -1, and drives that held value out continuously.
-// Even before any input arrives it emits -1. When an input value arrives on
+// outputting), initialized to noValue, and drives that held value out continuously.
+// Even before any input arrives it emits noValue. When an input value arrives on
 // FromInput, it UPDATES the held value; subsequent outputs emit the new value.
 //
 // Two goroutines split the two concerns so the held value (and its interior
@@ -24,14 +28,14 @@ import (
 //     when held changes the next pulse carries the new value.
 // held is shared via sync/atomic so the two goroutines don't race.
 //
-// The output is NOT precondition-gated: Pulse self-emits -1 from the start
+// The output is NOT precondition-gated: Pulse self-emits noValue from the start
 // (like the Input bootstrap), it is not inert until fed.
 type Node struct {
 	Fire         func()
 	EmitGeometry func()
 	// EmitHeldBead, injected by Wiring.reflectBuild, streams the held value as a
-	// SINGLE centered interior node-bead (present when held != -1). Re-emitted at
-	// startup (held = -1, empty interior) and whenever the held value changes.
+	// SINGLE centered interior node-bead (present when held != noValue). Re-emitted at
+	// startup (held = noValue, empty interior) and whenever the held value changes.
 	EmitHeldBead func(held int)
 	FromInput    *Wiring.In
 	Out          *Wiring.Out
@@ -42,22 +46,15 @@ type Node struct {
 	Out2 *Wiring.Out
 }
 
-func (g *Node) Update(ctx context.Context) {
+func (g *Node) tryEmitGeometry() {
 	if g.EmitGeometry != nil {
 		g.EmitGeometry()
 	}
+}
 
-	// held is shared between the drive goroutine and this main loop.
-	var held atomic.Int64
-	held.Store(-1)
-	if g.EmitHeldBead != nil {
-		g.EmitHeldBead(-1) // startup: empty interior (held == -1)
-	}
-
-	// DRIVE goroutine: continuously pulse the current held value to node 5.
-	// EmitOneDriven is synchronous (blocks for the full wire traversal), so this
-	// self-paces at the wire rate. Reading held each iteration means the next
-	// pulse after an input update carries the new value. Stops on ctx cancel.
+// driveOutput runs a continuous-drive goroutine on out, always emitting the
+// current value of held. Stops when ctx is cancelled or EmitOneDriven returns false.
+func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64) {
 	go func() {
 		for {
 			select {
@@ -65,28 +62,29 @@ func (g *Node) Update(ctx context.Context) {
 				return
 			default:
 			}
-			if !g.Out.EmitOneDriven(ctx, int(held.Load())) {
+			if !out.EmitOneDriven(ctx, int(held.Load())) {
 				return
 			}
 		}
 	}()
+}
 
-	// Optional SECOND drive goroutine: when Out2 is wired, continuously pulse the
-	// same held value to the second destination. Skipped when unwired so single-output
-	// Pulse nodes (e.g. node 7) behave exactly as before.
+func (g *Node) Update(ctx context.Context) {
+	g.tryEmitGeometry()
+
+	// held is shared between the drive goroutine(s) and this main loop.
+	var held atomic.Int64
+	held.Store(noValue)
+	if g.EmitHeldBead != nil {
+		g.EmitHeldBead(noValue) // startup: empty interior
+	}
+
+	// DRIVE goroutine: continuously pulse the current held value to Out.
+	driveOutput(ctx, g.Out, &held)
+
+	// Optional SECOND drive goroutine for Out2.
 	if g.Out2 != nil && g.Out2.Wired() {
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if !g.Out2.EmitOneDriven(ctx, int(held.Load())) {
-					return
-				}
-			}
-		}()
+		driveOutput(ctx, g.Out2, &held)
 	}
 
 	// MAIN loop: BLOCK on input. The instant a value arrives, show the bead and

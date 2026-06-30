@@ -6,6 +6,10 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// noValue is the sentinel meaning "no value seen yet". Real values are
+// non-negative indices so noValue (-1) never collides with a legitimate value.
+const noValue = -1
+
 type Node struct {
 	Fire         func()
 	EmitGeometry func()
@@ -15,13 +19,16 @@ type Node struct {
 	FeedbackOut  *Wiring.Out
 }
 
-func (p *Node) Update(ctx context.Context) {
+func (p *Node) tryEmitGeometry() {
 	if p.EmitGeometry != nil {
 		p.EmitGeometry()
 	}
-	// -1 is the sentinel meaning "no value seen yet"; real values are
-	// non-negative indices, so -1 never collides with a legitimate value.
-	held := -1
+}
+
+func (p *Node) Update(ctx context.Context) {
+	p.tryEmitGeometry()
+
+	held := noValue
 	if p.EmitHeldBead != nil {
 		p.EmitHeldBead(held)
 	}

@@ -32,6 +32,10 @@ function AxisLabel({ text, color, position, size }: {
     t.needsUpdate = true;
     return t;
   }, [text, color]);
+  // Dispose the previous texture when deps change and on unmount to prevent GPU memory leaks.
+  useEffect(() => {
+    return () => { texture.dispose(); };
+  }, [texture]);
   return (
     <sprite position={position} scale={[size * 4, size, 1]} raycast={() => null}>
       <spriteMaterial map={texture} transparent depthWrite={false} depthTest={false} />
@@ -356,6 +360,14 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   // Node ids remapped by the node rename: the old node 2 (HoldNewSendOld) is now node
   // 5, and its two children old 3/7 are now 7/8. The variable names keep the original
   // meaning (the parent and its two children) under the new ids.
+  //
+  // TODO(fix5): IDs "5", "7", "8" are hardcoded to the current topology. They cannot
+  // be derived from node.data.type alone (multiple HoldNewSendOld nodes are possible)
+  // and the children cannot be identified without edge traversal (edges are not passed
+  // to PolarSphere). To make this generic, either: (a) pass edges to PolarSphere and
+  // find the HoldNewSendOld node + its ToNext output neighbours, or (b) add a semantic
+  // "role" marker to Spec.Node that the store carries through NodeData, then filter by
+  // role. Until then these three IDs must be kept in sync with the topology manually.
   const node2 = nodes.find((n) => n.id === "5");
   const node2Center = node2 ? nodeWorldPos(node2) : null;
   const node2Scale = radiusKey * 0.5;

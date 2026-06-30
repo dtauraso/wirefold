@@ -6,6 +6,10 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// noValue is the sentinel meaning "no value seen yet" → empty interior.
+// Real values are non-negative indices so noValue (-1) never collides.
+const noValue = -1
+
 // Node is a terminal "Hold" kind: it receives a value on its single input,
 // holds/displays it, and produces NO output. On each received value it fires,
 // updates Held, and re-emits the held bead when the value changes.
@@ -17,14 +21,16 @@ type Node struct {
 	In           *Wiring.In
 }
 
-func (h *Node) Update(ctx context.Context) {
+func (h *Node) tryEmitGeometry() {
 	if h.EmitGeometry != nil {
 		h.EmitGeometry()
 	}
+}
 
-	// held tracks the last received value displayed inside the node sphere.
-	// -1 is the sentinel meaning "no value seen yet" → empty interior.
-	held := -1
+func (h *Node) Update(ctx context.Context) {
+	h.tryEmitGeometry()
+
+	held := noValue
 	if h.EmitHeldBead != nil {
 		h.EmitHeldBead(held)
 	}

@@ -52,8 +52,10 @@ export function sendViewpointSet(
   });
 }
 
-/** Tell Go to orbit from one spherical position to another. */
-export function sendViewpointOrbit(
+/** Tell Go to orbit from one spherical position to another. The locked variant
+ * keeps the orbit axis fixed; the only difference is the viewpoint `kind` string. */
+function sendViewpointOrbitKind(
+  kind: "orbit" | "orbit-locked",
   from: [number, number],
   to: [number, number],
 ): void {
@@ -62,8 +64,16 @@ export function sendViewpointOrbit(
   vscode.postMessage({
     type: "edit",
     op: "viewpoint",
-    viewpoint: { kind: "orbit", fromTheta, fromPhi, toTheta, toPhi },
+    viewpoint: { kind, fromTheta, fromPhi, toTheta, toPhi },
   });
+}
+
+/** Tell Go to orbit from one spherical position to another. */
+export function sendViewpointOrbit(
+  from: [number, number],
+  to: [number, number],
+): void {
+  sendViewpointOrbitKind("orbit", from, to);
 }
 
 /** Tell Go to orbit from one spherical position to another with a locked axis. */
@@ -71,13 +81,7 @@ export function sendViewpointOrbitLocked(
   from: [number, number],
   to: [number, number],
 ): void {
-  const [fromTheta, fromPhi] = from;
-  const [toTheta, toPhi] = to;
-  vscode.postMessage({
-    type: "edit",
-    op: "viewpoint",
-    viewpoint: { kind: "orbit-locked", fromTheta, fromPhi, toTheta, toPhi },
-  });
+  sendViewpointOrbitKind("orbit-locked", from, to);
 }
 
 /** Tell Go to zoom by a multiplicative factor. */

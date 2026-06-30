@@ -29,6 +29,7 @@ import type { TraceEventKind } from "./trace-kinds";
 import { useCameraStore } from "./camera-store";
 import { useThreeStore } from "./store";
 import { patchViewerState } from "../state/viewer-state";
+import type { ViewerState } from "../state/viewer/types";
 import { scheduleViewSave } from "../save";
 import { postLog } from "../log/post";
 import { setPulsePos, clearPulse } from "./pulse-state";
@@ -41,6 +42,68 @@ import { useNodeGeometryStore } from "./node-geometry";
 function assertNever(x: never): never {
   throw new Error(`[pump] unhandled trace event kind: ${String(x)}`);
 }
+
+// ── Overlay-toggle handler table ─────────────────────────────────────────────
+// Covers the 9 near-identical overlay toggle kinds. Each entry captures the
+// camera-store setter, the ViewerState field name, whether the visible→hidden
+// sense is inverted, and whether to emit a postLog("guide-recv") call.
+//
+// "labels-global" and "badges-global" invert the sense: Go emits visible=true
+// when items should show; store fields hold hidden=false.
+type OverlayKind =
+  | "scene-tori"
+  | "scene-poles"
+  | "node-poles"
+  | "angle-labels"
+  | "sel-sphere-poles"
+  | "handholds"
+  | "overlays-vis"
+  | "labels-global"
+  | "badges-global";
+
+type OverlayEntry = {
+  setter: (v: boolean) => void;
+  field: keyof ViewerState;
+  // inverted=true: Go's visible → store holds !visible (hidden sense)
+  inverted: boolean;
+  hasPostLog: boolean;
+};
+
+function getOverlayEntry(kind: OverlayKind): OverlayEntry {
+  const cs = useCameraStore.getState();
+  const table: Record<OverlayKind, OverlayEntry> = {
+    "scene-tori":       { setter: cs.setSceneToriVisible,      field: "sceneToriVisible",      inverted: false, hasPostLog: true  },
+    "scene-poles":      { setter: cs.setScenePolesVisible,     field: "scenePolesVisible",     inverted: false, hasPostLog: true  },
+    "node-poles":       { setter: cs.setNodePolesVisible,      field: "nodePolesVisible",      inverted: false, hasPostLog: true  },
+    "angle-labels":     { setter: cs.setAngleLabelsVisible,    field: "angleLabelsVisible",    inverted: false, hasPostLog: true  },
+    "sel-sphere-poles": { setter: cs.setSelSpherePolesVisible, field: "selSpherePolesVisible", inverted: false, hasPostLog: true  },
+    "handholds":        { setter: cs.setHandholdsVisible,      field: "handholdsVisible",      inverted: false, hasPostLog: true  },
+    "overlays-vis":     { setter: cs.setOverlaysVisible,       field: "overlaysActive",        inverted: false, hasPostLog: true  },
+    "labels-global":    { setter: cs.setLabelsGlobalHidden,    field: "labelsGlobalHidden",    inverted: true,  hasPostLog: false },
+    "badges-global":    { setter: cs.setBadgesHidden,          field: "badgesHidden",          inverted: true,  hasPostLog: false },
+  };
+  return table[kind];
+}
+
+function applyOverlay(kind: OverlayKind, visible: boolean | undefined): void {
+  const entry = getOverlayEntry(kind);
+  if (entry.hasPostLog) {
+    postLog("guide-recv", { kind, visible });
+  }
+  if (entry.inverted) {
+    entry.setter(!visible);
+    patchViewerState((v) => {
+      (v as Record<string, boolean | undefined>)[entry.field as string] = !visible || undefined;
+    });
+  } else {
+    entry.setter(visible !== false);
+    patchViewerState((v) => {
+      (v as Record<string, boolean | undefined>)[entry.field as string] = visible === false ? false : undefined;
+    });
+  }
+  scheduleViewSave();
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function handleTraceEvent(event: TraceEvent): void {
   const { step, kind } = event;
@@ -179,76 +242,51 @@ export function handleTraceEvent(event: TraceEvent): void {
     }
     case "scene-tori": {
       const e = event as Extract<TraceEvent, { kind: "scene-tori" }>;
-      postLog("guide-recv", { kind: "scene-tori", visible: e.visible });
-      useCameraStore.getState().setSceneToriVisible(e.visible);
-      patchViewerState((v) => { v.sceneToriVisible = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("scene-tori", e.visible);
       return;
     }
     case "scene-poles": {
       const e = event as Extract<TraceEvent, { kind: "scene-poles" }>;
-      postLog("guide-recv", { kind: "scene-poles", visible: e.visible });
-      useCameraStore.getState().setScenePolesVisible(e.visible);
-      patchViewerState((v) => { v.scenePolesVisible = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("scene-poles", e.visible);
       return;
     }
     case "node-poles": {
       const e = event as Extract<TraceEvent, { kind: "node-poles" }>;
-      postLog("guide-recv", { kind: "node-poles", visible: e.visible });
-      useCameraStore.getState().setNodePolesVisible(e.visible);
-      patchViewerState((v) => { v.nodePolesVisible = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("node-poles", e.visible);
       return;
     }
     case "angle-labels": {
       const e = event as Extract<TraceEvent, { kind: "angle-labels" }>;
-      postLog("guide-recv", { kind: "angle-labels", visible: e.visible });
-      useCameraStore.getState().setAngleLabelsVisible(e.visible);
-      patchViewerState((v) => { v.angleLabelsVisible = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("angle-labels", e.visible);
       return;
     }
     case "sel-sphere-poles": {
       const e = event as Extract<TraceEvent, { kind: "sel-sphere-poles" }>;
-      postLog("guide-recv", { kind: "sel-sphere-poles", visible: e.visible });
-      useCameraStore.getState().setSelSpherePolesVisible(e.visible);
-      patchViewerState((v) => { v.selSpherePolesVisible = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("sel-sphere-poles", e.visible);
       return;
     }
     case "handholds": {
       const e = event as Extract<TraceEvent, { kind: "handholds" }>;
-      postLog("guide-recv", { kind: "handholds", visible: e.visible });
-      useCameraStore.getState().setHandholdsVisible(e.visible);
-      patchViewerState((v) => { v.handholdsVisible = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("handholds", e.visible);
       return;
     }
     case "labels-global": {
       // Note: visible sense → hidden sense flip at the render boundary.
       // Go emits visible=true when labels should show; store holds hidden=false.
       const e = event as Extract<TraceEvent, { kind: "labels-global" }>;
-      useCameraStore.getState().setLabelsGlobalHidden(!e.visible);
-      patchViewerState((v) => { v.labelsGlobalHidden = !e.visible || undefined; });
-      scheduleViewSave();
+      applyOverlay("labels-global", e.visible);
       return;
     }
     case "badges-global": {
       // Note: visible sense → hidden sense flip at the render boundary.
       // Go emits visible=true when badges should show; store holds badgesHidden=false.
       const e = event as Extract<TraceEvent, { kind: "badges-global" }>;
-      useCameraStore.getState().setBadgesHidden(!e.visible);
-      patchViewerState((v) => { v.badgesHidden = !e.visible || undefined; });
-      scheduleViewSave();
+      applyOverlay("badges-global", e.visible);
       return;
     }
     case "overlays-vis": {
       const e = event as Extract<TraceEvent, { kind: "overlays-vis" }>;
-      postLog("guide-recv", { kind: "overlays-vis", visible: e.visible });
-      useCameraStore.getState().setOverlaysVisible(e.visible);
-      patchViewerState((v) => { v.overlaysActive = e.visible === false ? false : undefined; });
-      scheduleViewSave();
+      applyOverlay("overlays-vis", e.visible);
       return;
     }
     case "double-links": {

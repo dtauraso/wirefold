@@ -111,19 +111,29 @@ func (md *MoveDispatch) initLinkPolar(pos func(string) (vec3, bool)) {
 	}
 }
 
-// registerMovementLinks declares the double-link graph for the current topology. The
-// initial set mirrors the data edges; restriction-only links (e.g. 5↔11) are added
-// later. Each pair is registered only when both nodes are loaded.
-func (md *MoveDispatch) registerMovementLinks(has func(string) bool) {
-	pairs := [][2]string{
-		{"1", "4"}, {"1", "3"}, {"1", "2"},
-		{"2", "6"}, {"2", "5"},
-		{"5", "8"}, {"5", "7"},
-		{"3", "9"}, {"6", "9"}, {"6", "10"}, {"8", "10"},
-	}
-	for _, p := range pairs {
-		if has(p[0]) && has(p[1]) {
-			md.addLink(p[0], p[1])
+// registerMovementLinks declares the double-link movement graph by DERIVING it
+// from the topology edges: one undirected link per unique unordered {source,
+// target} pair, in first-occurrence order, registered only when both endpoints
+// are loaded. A bidirectional pair (e.g. 1↔4, present as both the 1→4 edge and
+// the 4→1 feedback edge) collapses to a single link. No node ids are hardcoded —
+// the graph follows whatever topology was loaded.
+func (md *MoveDispatch) registerMovementLinks(edges []sphereEdge, has func(string) bool) {
+	seen := map[[2]string]bool{}
+	for _, e := range edges {
+		a, b := e.Source, e.Target
+		if a == b {
+			continue
+		}
+		key := [2]string{a, b}
+		if a > b {
+			key = [2]string{b, a}
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if has(a) && has(b) {
+			md.addLink(a, b)
 		}
 	}
 }

@@ -15,8 +15,6 @@
 
 package Wiring
 
-import "math"
-
 // projectToSphere returns the point on the sphere of radius R centered at
 // `center` that lies along the direction from `center` toward `neighborPos`:
 //
@@ -27,15 +25,12 @@ import "math"
 // length), the direction is undefined; we fall back to +Y so the result is still
 // on the surface.
 func projectToSphere(center vec3, R float64, neighborPos vec3) vec3 {
-	dx := neighborPos.X - center.X
-	dy := neighborPos.Y - center.Y
-	dz := neighborPos.Z - center.Z
-	len := math.Sqrt(dx*dx + dy*dy + dz*dz)
-	if len == 0 {
+	d := neighborPos.sub(center)
+	l := d.length()
+	if l == 0 {
 		return vec3{X: center.X, Y: center.Y + R, Z: center.Z}
 	}
-	s := R / len
-	return vec3{X: center.X + dx*s, Y: center.Y + dy*s, Z: center.Z + dz*s}
+	return center.add(d.scale(R / l))
 }
 
 // diameterStepAngle returns the angular step (radians) on a sphere of radius R

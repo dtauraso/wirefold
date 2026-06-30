@@ -90,6 +90,37 @@ export interface PickOptions {
 }
 
 // ---------------------------------------------------------------------------
+// makeRafThrottle — shared rAF coalescing pattern
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a `schedule(payload)` function that coalesces calls to `apply` so
+ * only the latest payload is delivered once per animation frame (latest-wins).
+ * The pending value and scheduled flag live in the caller-supplied refs so they
+ * remain accessible to external code (e.g. ctx fields read by interaction-handlers).
+ */
+function makeRafThrottle<T>(
+  pendingRef: React.MutableRefObject<T | null>,
+  scheduledRef: React.MutableRefObject<boolean>,
+  apply: (payload: T) => void,
+): (payload: T) => void {
+  return (payload: T) => {
+    pendingRef.current = payload;
+    if (!scheduledRef.current) {
+      scheduledRef.current = true;
+      requestAnimationFrame(() => {
+        scheduledRef.current = false;
+        const p = pendingRef.current;
+        if (p !== null) {
+          apply(p);
+          pendingRef.current = null;
+        }
+      });
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // useInteractionControls
 // ---------------------------------------------------------------------------
 
@@ -156,20 +187,14 @@ export function useInteractionControls(
     vscode.postMessage({ type: "edit", op: "update", entries });
   }, [edgesRef]);
 
-  const scheduleNodeMove = useCallback((nodeId: string, x: number, y: number, z: number) => {
-    pendingNodeMove.current = { nodeId, x, y, z };
-    if (!rafPending.current) {
-      rafPending.current = true;
-      requestAnimationFrame(() => {
-        rafPending.current = false;
-        const p = pendingNodeMove.current;
-        if (p) {
-          flushNodeMove(p.nodeId, p.x, p.y, p.z);
-          pendingNodeMove.current = null;
-        }
-      });
-    }
-  }, [flushNodeMove]);
+  const _rafNodeMove = useRef(
+    makeRafThrottle(pendingNodeMove, rafPending, (p: { nodeId: string; x: number; y: number; z: number }) =>
+      flushNodeMove(p.nodeId, p.x, p.y, p.z)),
+  ).current;
+  const scheduleNodeMove = useCallback(
+    (nodeId: string, x: number, y: number, z: number) => _rafNodeMove({ nodeId, x, y, z }),
+    [],
+  );
 
   // Edge ids incident on a specific port (output → source/sourceHandle, input →
   // target/targetHandle). Used both to decide connected-vs-unconnected and to build
@@ -196,20 +221,14 @@ export function useInteractionControls(
     vscode.postMessage({ type: "edit", op: "set-origin", x, y, z });
   }, []);
 
-  const scheduleOrigin = useCallback((x: number, y: number, z: number) => {
-    pendingOrigin.current = { x, y, z };
-    if (!originRafPending.current) {
-      originRafPending.current = true;
-      requestAnimationFrame(() => {
-        originRafPending.current = false;
-        const p = pendingOrigin.current;
-        if (p) {
-          flushOrigin(p.x, p.y, p.z);
-          pendingOrigin.current = null;
-        }
-      });
-    }
-  }, [flushOrigin]);
+  const _rafOrigin = useRef(
+    makeRafThrottle(pendingOrigin, originRafPending, (p: { x: number; y: number; z: number }) =>
+      flushOrigin(p.x, p.y, p.z)),
+  ).current;
+  const scheduleOrigin = useCallback(
+    (x: number, y: number, z: number) => _rafOrigin({ x, y, z }),
+    [],
+  );
 
   // Throttle port-anchor IPC: one message per animation frame during a port drag.
   const pendingAnchor = useRef<{
@@ -239,21 +258,10 @@ export function useInteractionControls(
   );
 
   const schedulePortAnchor = useCallback(
-    (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) => {
-      pendingAnchor.current = p;
-      if (!anchorRafPending.current) {
-        anchorRafPending.current = true;
-        requestAnimationFrame(() => {
-          anchorRafPending.current = false;
-          const q = pendingAnchor.current;
-          if (q) {
-            flushPortAnchor(q);
-            pendingAnchor.current = null;
-          }
-        });
-      }
-    },
-    [flushPortAnchor],
+    makeRafThrottle(pendingAnchor, anchorRafPending,
+      (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) =>
+        flushPortAnchor(p)),
+    [pendingAnchor, anchorRafPending, flushPortAnchor],
   );
 
 
@@ -265,25 +273,22 @@ export function useInteractionControls(
   // current callbacks. The refs themselves are already stable, so reads/writes of
   // ctx.someRef.current behave exactly as the original inline code did.
   const ctxRef = useRef<InteractionCtx | null>(null);
+  // Build the full ctx object once per render; use it for both first-init and refresh so
+  // the field list is defined in exactly one place and cannot drift.
+  const freshCtx: InteractionCtx = {
+    state, nodeDragRef, wiringRef, portMoveRef,
+    pendingNodeMove, rafPending, pendingAnchor, anchorRafPending,
+    cameraRef, nodesRef, edgesRef, targetRef, pickRequest,
+    onSelect, storeCreateEdge, incidentEdgeIds,
+    scheduleNodeMove, flushNodeMove, schedulePortAnchor, flushPortAnchor, scheduleOrigin,
+  };
   if (ctxRef.current === null) {
-    ctxRef.current = {
-      state, nodeDragRef, wiringRef, portMoveRef,
-      pendingNodeMove, rafPending, pendingAnchor, anchorRafPending,
-      cameraRef, nodesRef, edgesRef, targetRef, pickRequest,
-      onSelect, storeCreateEdge, incidentEdgeIds,
-      scheduleNodeMove, flushNodeMove, schedulePortAnchor, flushPortAnchor, scheduleOrigin,
-    };
+    ctxRef.current = freshCtx;
   } else {
-    // Refresh the (potentially re-created) callbacks; refs are stable so they need no refresh.
-    const c = ctxRef.current;
-    c.onSelect = onSelect;
-    c.storeCreateEdge = storeCreateEdge;
-    c.incidentEdgeIds = incidentEdgeIds;
-    c.scheduleNodeMove = scheduleNodeMove;
-    c.flushNodeMove = flushNodeMove;
-    c.schedulePortAnchor = schedulePortAnchor;
-    c.flushPortAnchor = flushPortAnchor;
-    c.scheduleOrigin = scheduleOrigin;
+    // Merge into the existing object to preserve its identity (the useCallback wrappers
+    // below close over ctx which is ctxRef.current; replacing the object would make
+    // those stale). Object.assign refreshes every field from the single freshCtx source.
+    Object.assign(ctxRef.current, freshCtx);
   }
   const ctx = ctxRef.current;
 

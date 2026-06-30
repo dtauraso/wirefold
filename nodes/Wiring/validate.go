@@ -72,28 +72,11 @@ func validateSpec(spec *topoSpec) error {
 		}
 	}
 
-	// outMultiBaseName strips a trailing digit suffix from a sourceHandle when
-	// the base name is an OutMulti port on the given kind.
-	outMultiBaseName := func(handle, kind string) (string, bool) {
-		if len(handle) == 0 {
-			return handle, false
-		}
-		last := handle[len(handle)-1]
-		if last < '0' || last > '9' {
-			return handle, false
-		}
-		base := handle[:len(handle)-1]
-		if kindOutMultiPorts[kind][base] {
-			return base, true
-		}
-		return handle, false
-	}
-
 	// Check 3: port handle names must match declared ports on the node kind.
 	for _, e := range spec.Edges {
 		srcKind := nodeType[e.Source]
 		srcHandle := e.SourceHandle
-		if base, isMulti := outMultiBaseName(srcHandle, srcKind); isMulti {
+		if base, isMulti := outMultiBaseName(srcHandle, srcKind, kindOutMultiPorts); isMulti {
 			srcHandle = base
 		}
 		if !kindOutPorts[srcKind][srcHandle] {

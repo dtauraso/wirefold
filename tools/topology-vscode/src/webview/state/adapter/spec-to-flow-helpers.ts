@@ -54,7 +54,7 @@ export function buildEdges(
         kind: e.kind,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
-        route: ev?.route ?? (e.data as Record<string, unknown> | undefined)?.route as string | undefined,
+        route: ev?.route ?? (e.data as { route?: string } | undefined)?.route,
         ...pickWireProps(e as unknown as Record<string, unknown>),
         value: (e.data as Record<string, unknown> | undefined)?.value,
         edgeData: e.data, // verbatim: flow-to-spec round-trips backpressure/delay config

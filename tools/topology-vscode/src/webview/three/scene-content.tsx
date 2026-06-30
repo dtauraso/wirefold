@@ -21,6 +21,35 @@ import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 // ray distance is at most this many units closer than the nearest body hit.
 const PORT_HIT_TOL = 8;
 
+/**
+ * Scan an already-sorted (nearest-first) intersections list and return the
+ * nearest hit for each requested userData key.  Each intersection is matched
+ * against at most one key (first-wins per hit, mirroring the original
+ * `continue` after portHit / edgeHit so that a port mesh — which carries
+ * both `portId` and `nodeId` — is never double-counted as both a port and a
+ * node hit).  Hits whose `skip` predicate returns true are skipped entirely.
+ */
+function findNearestByTag(
+  hits: THREE.Intersection[],
+  keys: string[],
+  skip?: (obj: THREE.Mesh) => boolean
+): ({ id: string; dist: number } | null)[] {
+  const results: ({ id: string; dist: number } | null)[] = keys.map(() => null);
+  for (const hit of hits) {
+    const obj = hit.object as THREE.Mesh;
+    if (skip?.(obj)) continue;
+    for (let i = 0; i < keys.length; i++) {
+      if (results[i] !== null) continue;
+      const val = obj.userData?.[keys[i]];
+      if (val) {
+        results[i] = { id: val as string, dist: hit.distance };
+        break; // one category per hit — preserves original `continue` semantics
+      }
+    }
+  }
+  return results;
+}
+
 // ---------------------------------------------------------------------------
 // RaycasterHelper: performs pick on demand via ref callback.
 // ---------------------------------------------------------------------------
@@ -80,19 +109,20 @@ export function RaycasterHelper({
         // the body is the intended target → return null so the caller falls through
         // to the node-drag path. (Reducing lattice spacing only enlarged the relative
         // body target enough to sometimes clear ports — a symptom mask, not the fix.)
-        let portHit: { id: string; dist: number } | null = null;
+        // Use findNearestByTag for portHit (portId key, one-category-per-hit semantics).
+        // nodeHitDist uses the `body` boolean tag (no id), so it is found in a
+        // separate pass; no mesh has both `portId` and `body: true`, so the split
+        // is semantically equivalent to the original interleaved loop.
+        const [portHit] = findNearestByTag(hits, ["portId"]);
         let nodeHitDist: number | null = null;
         for (const hit of hits) {
           const hitObj = hit.object as THREE.Mesh;
-          if (!portHit && hitObj.userData?.portId) {
-            portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
-            continue;
-          }
-          if (nodeHitDist === null && hitObj.userData?.body === true) {
+          if (hitObj.userData?.body === true) {
             // Nearest node-body hit distance, by the body tag — z-aware and not
             // confusable with overlay meshes (the old x/y parent-proximity match
             // counted e.g. a handhold parented at the origin as a "node" here).
             nodeHitDist = hit.distance;
+            break;
           }
         }
         if (portHit && (nodeHitDist === null || portHit.dist <= nodeHitDist + PORT_HIT_TOL)) {
@@ -126,34 +156,26 @@ export function RaycasterHelper({
       }
 
       // Default path: scan ALL hits nearest-first, capture nearest of each category.
-      let portHit: { id: string; dist: number } | null = null;
-      let edgeHit: { id: string; dist: number } | null = null;
-      let nodeHit: { id: string; dist: number } | null = null;
-
-      for (const hit of hits) {
-        const hitObj = hit.object as THREE.Mesh;
+      // Handholds are skipped (grab affordance only). Port meshes carry both `portId`
+      // and `nodeId`; the one-category-per-hit rule inside findNearestByTag (mirrors
+      // the original `continue` after portHit) ensures a port mesh is counted as a
+      // port hit and NOT also as a node hit.  Categories are checked in priority
+      // order: port → edge → node, matching the original loop structure.
+      //
+      // Resolve a node hit to its node id by the explicit userData.nodeId tag —
+      // carried by the body sphere AND the ring torus AND port spheres. Z-aware
+      // (the NEAREST tagged mesh wins). This replaces the old x,y parent-proximity
+      // fallback, which was z-blind and type-blind: it matched ANY untagged mesh
+      // whose parent sat near a node's x,y (e.g. a handhold parented at the origin
+      // → the origin node), and could pick a node BEHIND another at the same x,y.
+      const [portHit, edgeHit, nodeHit] = findNearestByTag(
+        hits,
+        ["portId", "edgeId", "nodeId"],
         // Handholds are a grab affordance handled by the handholdOnly pick path; never
         // a node/port/edge. Skip here so the x/y-proximity fallback below can't
         // misattribute one (parent at origin) to the node at the origin.
-        if (hitObj.userData?.handhold) continue;
-        if (!portHit && hitObj.userData?.portId) {
-          portHit = { id: hitObj.userData.portId as string, dist: hit.distance };
-          continue;
-        }
-        if (!edgeHit && hitObj.userData?.edgeId) {
-          edgeHit = { id: hitObj.userData.edgeId as string, dist: hit.distance };
-          continue;
-        }
-        if (!nodeHit && hitObj.userData?.nodeId) {
-          // Resolve a node hit to its node id by the explicit userData.nodeId tag —
-          // carried by the body sphere AND the ring torus AND port spheres. Z-aware
-          // (the NEAREST tagged mesh wins). This replaces the old x,y parent-proximity
-          // fallback, which was z-blind and type-blind: it matched ANY untagged mesh
-          // whose parent sat near a node's x,y (e.g. a handhold parented at the origin
-          // → the origin node), and could pick a node BEHIND another at the same x,y.
-          nodeHit = { id: hitObj.userData.nodeId as string, dist: hit.distance };
-        }
-      }
+        (obj) => !!obj.userData?.handhold
+      );
 
       // Node-favoring margin: the wide invisible edge selection-halo runs node→node,
       // so over a node the halo surface is at/closer than the node sphere. Without a

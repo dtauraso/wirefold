@@ -164,15 +164,20 @@ export function CameraSettleDetector({
   onSettle: () => void;
 }) {
   const { camera } = useThree();
-  const lastMatrix = useRef<string>("");
+  const lastElements = useRef<Float32Array>(new Float32Array(16));
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useFrame(() => {
-    // Snapshot the camera matrix as a compact string (16 floats, 2 decimal places).
+    // Compare matrix elements with epsilon matching toFixed(2) rounding (~5e-3).
     camera.updateMatrixWorld();
-    const key = camera.matrixWorld.elements.map((v) => v.toFixed(2)).join(",");
-    if (key !== lastMatrix.current) {
-      lastMatrix.current = key;
+    const els = camera.matrixWorld.elements;
+    const EPSILON = 5e-3;
+    let changed = false;
+    for (let i = 0; i < 16; i++) {
+      if (Math.abs(els[i] - lastElements.current[i]) > EPSILON) { changed = true; break; }
+    }
+    if (changed) {
+      lastElements.current.set(els);
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;

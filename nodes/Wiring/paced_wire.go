@@ -361,40 +361,48 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 			}
 			if final || isFinal {
 				it.pw.mu.Lock()
-				for {
-					if it.gen < it.pw.teardownGen {
-						it.pw.mu.Unlock()
-						done[i] = true
-						remaining--
-						goto nextItem
-					}
-					j := it.pw.findInflightLocked(it.gen)
-					if j < 0 {
-						it.pw.mu.Unlock()
-						done[i] = true
-						remaining--
-						goto nextItem
-					}
-					if j == 0 {
-						break
-					}
-					it.pw.cond.Wait()
+				if ai, ok := it.pw.deliverHeadLocked(it.gen); ok {
+					it.pw.emitArrive(ai)
 				}
-				db := it.pw.inflight[0]
-				it.pw.inflight = it.pw.inflight[1:]
-				it.pw.delivered = append(it.pw.delivered, deliveredBead{val: db.val})
-				it.pw.cond.Broadcast()
-				ai := arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
-				it.pw.mu.Unlock()
-				it.pw.emitArrive(ai)
 				done[i] = true
 				remaining--
-				goto nextItem
+				continue
 			}
 			nexts[i] += interval
-		nextItem:
 		}
 	}
+}
+
+// deliverHeadLocked completes a bead's final delivery: it waits (parking on
+// pw.cond) until the bead identified by gen is at the FIFO head, then moves it
+// from inflight to delivered and returns its source identity for the arrive
+// trace. The caller MUST hold pw.mu on entry; this method always releases it
+// before returning (matching the inline delivery window it replaced). Returns
+// ok=false — with the lock released — when the bead was torn down or already
+// dropped (no arrive emit), ok=true when it was delivered.
+func (pw *PacedWire) deliverHeadLocked(gen uint64) (ai arriveInfo, ok bool) {
+	for {
+		if gen < pw.teardownGen {
+			pw.mu.Unlock()
+			return arriveInfo{}, false
+		}
+		j := pw.findInflightLocked(gen)
+		if j < 0 {
+			pw.mu.Unlock()
+			return arriveInfo{}, false
+		}
+		if j == 0 {
+			break
+		}
+		pw.cond.Wait()
+	}
+	db := pw.inflight[0]
+	pw.inflight = pw.inflight[1:]
+	pw.delivered = append(pw.delivered, deliveredBead{val: db.val})
+	pw.cond.Broadcast()
+	ai = arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
+	pw.mu.Unlock()
+	return ai, true
 }
 
 // DriveBeadToDelivery runs the same per-frame loop the walker would run for
@@ -420,7 +428,7 @@ func (pw *PacedWire) findInflightLocked(gen uint64) int {
 // (FIFO, in send order). Recv CONSUMES on read — there is no separate Done step.
 // Returns ErrCanceled if ctx is done before a value arrives.
 func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
-	done := pw.watchCtx(ctx)
+	done := broadcastOnCancel(ctx, &pw.mu, pw.cond)
 	defer close(done)
 
 	pw.mu.Lock()
@@ -587,11 +595,12 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool
 
 // Done is a PHASE-1 SHIM: removed in phase 2 (gate strip). Recv/PollRecv now
 // consume on read, so there is no separate acknowledgment step. No-op.
+// Retained because tests outside this package still call it.
 func (pw *PacedWire) Done() {}
 
 // WaitConsumed is a PHASE-1 SHIM: removed in phase 2 (gate strip). The consume
 // gate is gone (a wire never waits on the destination), so this returns nil
-// immediately.
+// immediately. Retained because tests outside this package still call it.
 func (pw *PacedWire) WaitConsumed(ctx context.Context) error { return nil }
 
 // teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
@@ -662,27 +671,4 @@ func (pw *PacedWire) Occupied() bool {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	return len(pw.inflight) > 0 || len(pw.delivered) > 0
-}
-
-// watchCtx starts a goroutine that broadcasts on pw.cond when ctx is done.
-// The caller must close the returned channel when done to stop the goroutine.
-func (pw *PacedWire) watchCtx(ctx context.Context) chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			// Hold mu around the broadcast (like every other Broadcast in this
-			// file) so it cannot land in a waiter's check→Wait window. The wait
-			// predicates that gate on ctx (e.g. Recv's ctx.Err()) are evaluated
-			// under mu but ctx itself is not mu-protected; without this the
-			// cancel broadcast can be lost and the waiter blocks until the next
-			// unrelated broadcast — or forever, when cancel arrives with no
-			// accompanying teardown.
-			pw.mu.Lock()
-			pw.cond.Broadcast()
-			pw.mu.Unlock()
-		case <-done:
-		}
-	}()
-	return done
 }

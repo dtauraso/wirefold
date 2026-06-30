@@ -58,10 +58,6 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
       localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, "out"))],
     },
   );
-  panel.webview.options = {
-    enableScripts: true,
-    localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, "out"))],
-  };
   panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
 
   const post = (msg: HostToWebviewMsg) => panel.webview.postMessage(msg);
@@ -177,17 +173,12 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   panel.webview.onDidReceiveMessage((raw) => {
     // If the webview just mounted and we have a cached spec, replay it so the
     // diagram renders even when Go's one-shot startup emission beat the listener.
-    if (typeof raw === "object" && raw !== null && (raw as { type?: string }).type === "ready" && lastSpec !== undefined) {
+    if ((raw as Record<string, unknown>)?.type === "ready" && lastSpec !== undefined) {
       post({ type: "load", text: JSON.stringify(lastSpec), sceneText: readSceneText() });
     }
     const workspaceFolder = folderUri ? vscode.workspace.getWorkspaceFolder(folderUri) : undefined;
     const logUri = workspaceFolder?.uri ?? (folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("."));
-    handleMessage(raw, {
-      logUri,
-      runner,
-      post,
-      send: () => Promise.resolve(true), // no-op: Go sends spec on startup
-    });
+    handleMessage(raw, { logUri, runner, post });
   });
 
   // Spawn Go immediately (halted); it emits spec on startup which triggers load.

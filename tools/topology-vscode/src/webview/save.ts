@@ -12,25 +12,28 @@ function guideSnapshot() {
     nodePoles: viewerState.nodePolesVisible,
     angleLabels: viewerState.angleLabelsVisible,
     selSpherePoles: viewerState.selSpherePolesVisible,
+    handholds: viewerState.handholdsVisible,
+    labelsGlobalHidden: viewerState.labelsGlobalHidden,
+    badgesHidden: viewerState.badgesHidden,
     overlaysActive: viewerState.overlaysActive,
   };
 }
 
-const status = document.getElementById("status")!;
+const statusEl = document.getElementById("status");
+if (!statusEl) console.warn("save.ts: #status element not found");
 
 let lastViewSyncedText: string | undefined;
 
 // Module-level debounce timer for scene persistence.
 let _sceneTimer: ReturnType<typeof setTimeout> | null = null;
+const SCENE_SAVE_DEBOUNCE_MS = 400;
 
 export function setStatus(dirty: boolean) {
-  status.textContent = dirty ? "saving…" : "saved";
-  status.className = dirty ? "dirty" : "clean";
+  if (statusEl) { statusEl.textContent = dirty ? "saving…" : "saved"; statusEl.className = dirty ? "dirty" : "clean"; }
 }
 
 export function setStatusError(msg: string) {
-  status.textContent = `save blocked: ${msg}`;
-  status.className = "dirty";
+  if (statusEl) { statusEl.textContent = `save blocked: ${msg}`; statusEl.className = "dirty"; }
 }
 
 function _sendScene() {
@@ -57,7 +60,7 @@ export function scheduleViewSave() {
   _sceneTimer = setTimeout(() => {
     _sceneTimer = null;
     _sendScene();
-  }, 400);
+  }, SCENE_SAVE_DEBOUNCE_MS);
 }
 
 export function flushViewSave() {
