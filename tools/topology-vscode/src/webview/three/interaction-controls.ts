@@ -60,6 +60,11 @@ export interface ControlState {
   emptyDown: boolean;
   // True when the pointer-down hit a handhold; gates the constrained locked-disk rotation.
   handholdDown: boolean;
+  // True when the pointer-down was a SECONDARY (button 2) press — a two-finger trackpad
+  // tap. A secondary press is always a deliberate tap-to-select: it never converts to a
+  // drag/rotate, and on release it selects with a lenient slop and no tight time gate
+  // (the first two-finger tap, fingers settling, is often slow/sloppy).
+  secondaryDown: boolean;
   // Locked rotation disk normal (axis) for "handhold-rotating", frozen from the first two
   // cursor points and reused for the whole gesture. null until the first move locks it.
   rotAxis: THREE.Vector3 | null;
@@ -136,6 +141,7 @@ export function useInteractionControls(
     prevX: 0, prevY: 0,
     emptyDown: false,
     handholdDown: false,
+    secondaryDown: false,
     rotAxis: null,
     rotPivot: new THREE.Vector3(),
     rotCx: 0, rotCy: 0, rotPxPerRad: 1,

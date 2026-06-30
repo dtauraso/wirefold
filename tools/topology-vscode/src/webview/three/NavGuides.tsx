@@ -43,6 +43,57 @@ function AxisLabel({ text, color, position, size }: {
   );
 }
 
+// The 8 octants of the polar sphere — a sign triple (±x,±y,±z), a distinct color, and a
+// compact label. When octants={true} the θ/φ angle arcs are reflected (group scale) into
+// each octant and colored from here, so every octant gets its own angle-arc pair.
+const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
+  { s: [1, 1, 1], color: "#ffffff", tag: "+x+y+z" },
+  { s: [1, 1, -1], color: "#ff8c00", tag: "+x+y−z" },
+  { s: [1, -1, 1], color: "#00ced1", tag: "+x−y+z" },
+  { s: [1, -1, -1], color: "#9370db", tag: "+x−y−z" },
+  { s: [-1, 1, 1], color: "#ff69b4", tag: "−x+y+z" },
+  { s: [-1, 1, -1], color: "#9acd32", tag: "−x+y−z" },
+  { s: [-1, -1, 1], color: "#00bfff", tag: "−x−y+z" },
+  { s: [-1, -1, -1], color: "#cd853f", tag: "−x−y−z" },
+];
+
+// ── ARC NUMBER ↔ COLOR LEGEND ───────────────────────────────────────────────
+// Each quarter-arc carries a unique number (θ arcs 1..8, φ arcs 9..16) drawn near
+// it, colored by its octant (OCTANTS[i].color). θ# = i+1, φ# = i+9.
+//
+// Per-octant (number → octant → color):
+//    #1 / #9   +x+y+z   white        #ffffff
+//    #2 / #10  +x+y−z   orange       #ff8c00
+//    #3 / #11  +x−y+z   teal         #00ced1
+//    #4 / #12  +x−y−z   purple       #9370db
+//    #5 / #13  −x+y+z   pink         #ff69b4
+//    #6 / #14  −x+y−z   yellow-green  #9acd32
+//    #7 / #15  −x−y+z   sky-blue     #00bfff
+//    #8 / #16  −x−y−z   peru/tan     #cd853f
+//
+// Grouped by shared-position REGION (the two offset circles you see together —
+// a→color1, b→color2 — so you can note just the numbers):
+//   θ regions (X-Y plane):        φ regions (X-Z plane):
+//     +x+y :  1 white  / 2 orange    +x+z :  9 white      / 11 teal
+//     +x−y :  3 teal   / 4 purple    +x−z : 10 orange     / 12 purple
+//     −x+y :  5 pink   / 6 yel-grn   −x+z : 13 pink       / 15 sky-blue
+//     −x−y :  7 sky-blu/ 8 peru      −x−z : 14 yel-grn    / 16 peru
+// ────────────────────────────────────────────────────────────────────────────
+
+// User-chosen single circle per region (1 per θ/φ). Each: sign pair, its number, color.
+const THETA_CIRCLES: { sx: number; sy: number; n: number; c: string }[] = [
+  { sx: 1, sy: 1, n: 2, c: "#ff8c00" },
+  { sx: 1, sy: -1, n: 4, c: "#9370db" },
+  { sx: -1, sy: 1, n: 6, c: "#9acd32" },
+  { sx: -1, sy: -1, n: 8, c: "#cd853f" },
+];
+const PHI_CIRCLES: { sx: number; sz: number; n: number; c: string }[] = [
+  { sx: 1, sz: 1, n: 11, c: "#00ced1" },
+  { sx: 1, sz: -1, n: 12, c: "#9370db" },
+  { sx: -1, sz: 1, n: 13, c: "#ff69b4" },
+  { sx: -1, sz: -1, n: 14, c: "#9acd32" },
+];
+
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
 // (yellow) angle arcs, all anchored at `center` with the pole = world +y. `scale`
@@ -50,8 +101,8 @@ function AxisLabel({ text, color, position, size }: {
 // the scene frame and a node's frame are distinguishable. Decorative (raycast off),
 // not affected by the scene-tori toggle. Same drawing for every center, so node 2's
 // frame matches the scene's exactly.
-function PolarFrame({ center, scale, tag }: {
-  center: THREE.Vector3; scale: number; tag?: string;
+function PolarFrame({ center, scale, tag, octants }: {
+  center: THREE.Vector3; scale: number; tag?: string; octants?: boolean;
 }) {
   const radiusKey = Math.max(Math.round(scale), 1);
   const poleLen = radiusKey * 1.3;
@@ -61,6 +112,8 @@ function PolarFrame({ center, scale, tag }: {
   const arcR = poleLen * 0.68;
   const arcTube = Math.max(radiusKey * 0.012, 1.2);
   const arcMid = arcR * 1.12 * Math.SQRT1_2;
+  const hhR = Math.max(radiusKey * 0.04, 3);   // handhold sphere radius (matches the tori handholds)
+  const arcHH = arcR * Math.SQRT1_2;           // a quarter-arc's midpoint radius (45° in its plane)
   const sfx = tag ? ` ${tag}` : "";
   return (
     <group position={[center.x, center.y, center.z]}>
@@ -91,6 +144,35 @@ function PolarFrame({ center, scale, tag }: {
         <coneGeometry args={[coneBaseR, coneH, 12]} />
         <meshBasicMaterial color="#3366dd" depthWrite={false} />
       </mesh>
+      {/* Negative spokes (octant mode): the other halves of each axis (−Y/−X/−Z), so the
+          full ±X ±Y ±Z cross frames all 8 octants. Same colors as the positive halves. */}
+      {octants && (<>
+        <mesh position={[0, -poleLen / 2, 0]} raycast={() => null}>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+          <meshBasicMaterial color="#22dd55" depthWrite={false} />
+        </mesh>
+        <mesh position={[0, -(poleLen + coneH / 2), 0]} rotation={[Math.PI, 0, 0]} raycast={() => null}>
+          <coneGeometry args={[coneBaseR, coneH, 12]} />
+          <meshBasicMaterial color="#22dd55" depthWrite={false} />
+        </mesh>
+        <mesh position={[-poleLen / 2, 0, 0]} rotation={[0, 0, Math.PI / 2]} raycast={() => null}>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+          <meshBasicMaterial color="#dd3333" depthWrite={false} />
+        </mesh>
+        <mesh position={[-(poleLen + coneH / 2), 0, 0]} rotation={[0, 0, Math.PI / 2]} raycast={() => null}>
+          <coneGeometry args={[coneBaseR, coneH, 12]} />
+          <meshBasicMaterial color="#dd3333" depthWrite={false} />
+        </mesh>
+        <mesh position={[0, 0, -poleLen / 2]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleLen, 12]} />
+          <meshBasicMaterial color="#3366dd" depthWrite={false} />
+        </mesh>
+        <mesh position={[0, 0, -(poleLen + coneH / 2)]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+          <coneGeometry args={[coneBaseR, coneH, 12]} />
+          <meshBasicMaterial color="#3366dd" depthWrite={false} />
+        </mesh>
+      </>)}
+      {!octants && (<>
       {/* θ angle arc (magenta): quarter-sweep from +Y pole to +X, X-Y meridian plane. */}
       <mesh raycast={() => null}>
         <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
@@ -101,12 +183,65 @@ function PolarFrame({ center, scale, tag }: {
         <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
         <meshBasicMaterial color="#dddd22" depthWrite={false} />
       </mesh>
+      </>)}
+      {octants && THETA_CIRCLES.map((t) => (
+        <group key={`tc-${t.n}`} scale={[t.sx, t.sy, 1]}>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
+            <meshBasicMaterial color={t.c} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
+      {octants && PHI_CIRCLES.map((p) => (
+        <group key={`pc-${p.n}`} scale={[p.sx, 1, p.sz]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+            <torusGeometry args={[arcR, arcTube, 8, 48, Math.PI / 2]} />
+            <meshBasicMaterial color={p.c} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
       {/* Labels — billboard sprites, always face the camera. */}
       <AxisLabel text={`+Y pole${sfx}`} color="#22dd55" position={[0, poleLen + coneH * 2, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+X φ0${sfx}`} color="#dd3333" position={[poleLen + coneH * 2, 0, 0]} size={poleLen * 0.12} />
       <AxisLabel text={`+Z φ90${sfx}`} color="#3366dd" position={[0, 0, poleLen + coneH * 2]} size={poleLen * 0.12} />
+      {octants && (<>
+        <AxisLabel text={`−Y${sfx}`} color="#22dd55" position={[0, -(poleLen + coneH * 2), 0]} size={poleLen * 0.12} />
+        <AxisLabel text={`−X φ180${sfx}`} color="#dd3333" position={[-(poleLen + coneH * 2), 0, 0]} size={poleLen * 0.12} />
+        <AxisLabel text={`−Z φ270${sfx}`} color="#3366dd" position={[0, 0, -(poleLen + coneH * 2)]} size={poleLen * 0.12} />
+      </>)}
+      {!octants && (<>
       <AxisLabel text="θ" color="#dd33cc" position={[arcMid, arcMid, 0]} size={poleLen * 0.14} />
       <AxisLabel text="φ" color="#dddd22" position={[arcMid, 0, arcMid]} size={poleLen * 0.14} />
+      </>)}
+      {octants && THETA_CIRCLES.map((t) => (
+        <AxisLabel key={`tl-${t.n}`} text={`${t.n}`} color={t.c} position={[t.sx * arcMid, t.sy * arcMid, 0]} size={poleLen * 0.11} />
+      ))}
+      {octants && PHI_CIRCLES.map((p) => (
+        <AxisLabel key={`pl-${p.n}`} text={`${p.n}`} color={p.c} position={[p.sx * arcMid, 0, p.sz * arcMid]} size={poleLen * 0.11} />
+      ))}
+      {octants && (<>
+        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere where each
+            pole crosses the arc circles (±arcR on each axis) and at each quarter-arc
+            midpoint. raycast off, no userData.handhold. Opaque so the color is stable. */}
+        {([[arcR, 0, 0], [-arcR, 0, 0], [0, arcR, 0], [0, -arcR, 0], [0, 0, arcR], [0, 0, -arcR]] as [number, number, number][]).map((p, i) => (
+          <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
+            <sphereGeometry args={[hhR, 12, 12]} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+          </mesh>
+        ))}
+        {THETA_CIRCLES.map((t) => (
+          <mesh key={`th-${t.n}`} position={[t.sx * arcHH, t.sy * arcHH, 0]} raycast={() => null}>
+            <sphereGeometry args={[hhR, 12, 12]} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+          </mesh>
+        ))}
+        {PHI_CIRCLES.map((p) => (
+          <mesh key={`ph-${p.n}`} position={[p.sx * arcHH, 0, p.sz * arcHH]} raycast={() => null}>
+            <sphereGeometry args={[hhR, 12, 12]} />
+            <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
+          </mesh>
+        ))}
+      </>)}
     </group>
   );
 }
@@ -321,6 +456,7 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
           center={nodeWorldPos(center)}
           scale={geoms[center.id]?.sphereR ?? nodeRadius(center)}
           tag={`(${center.id})`}
+          octants
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
