@@ -53,7 +53,21 @@ export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
 // Derived from OverlayFlag so the field set can never drift from the flag vocabulary.
 export type OverlayState = Record<OverlayFlag, boolean>;
 
+// VIEWPOINT_KINDS is the single source for the camera viewpoint sub-kind vocabulary,
+// shared with Go's vp.Kind switch (stdin_reader.go). Parity guarded by
+// check-edit-op-parity.sh via the VP_KINDS sentinels.
 // VP_KINDS_START
+export const VIEWPOINT_KINDS = [
+  "set",
+  "orbit",
+  "orbit-locked",
+  "zoom",
+  "pan",
+] as const;
+// VP_KINDS_END
+
+export type ViewpointKind = (typeof VIEWPOINT_KINDS)[number];
+
 export type ViewpointPayload =
   | {
       kind: "set";
@@ -66,7 +80,6 @@ export type ViewpointPayload =
   | { kind: "orbit-locked"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
   | { kind: "zoom"; factor: number }
   | { kind: "pan"; dx: number; dy: number; dz: number };
-// VP_KINDS_END
 
 // EDIT_MSG_START
 export type EditMsg =
@@ -162,6 +175,9 @@ export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new 
 // missing required fields, so a malformed edit is dropped rather than forwarded.
 const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>(OVERLAY_FLAG_NAMES);
 
+// Allowed camera viewpoint sub-kinds (derived from the single VIEWPOINT_KINDS source).
+const VP_KIND_SET: ReadonlySet<string> = new Set<ViewpointKind>(VIEWPOINT_KINDS);
+
 // Validates that v is a full OverlayState (every flag a boolean).
 function isOverlayState(v: unknown): boolean {
   if (!v || typeof v !== "object") return false;
@@ -228,10 +244,12 @@ function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }
     case "camera": {
-      // viewpoint must be a nested object with a string kind discriminator.
+      // viewpoint must be a nested object with a kind in the allowed VIEWPOINT_KINDS set;
+      // an unknown kind is dropped rather than forwarded to Go (where it would no-op).
       const vp = m.viewpoint;
       if (!vp || typeof vp !== "object") return undefined;
-      if (typeof (vp as Record<string, unknown>).kind !== "string") return undefined;
+      const vk = (vp as Record<string, unknown>).kind;
+      if (typeof vk !== "string" || !VP_KIND_SET.has(vk)) return undefined;
       return (m as unknown as WebviewToHostMsg);
     }
     case "overlays": {
