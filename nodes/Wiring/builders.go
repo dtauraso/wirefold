@@ -363,15 +363,11 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		const dataPrefix = "data."
 		const stateTag = "data.state"
 		if tag == stateTag {
-			// key is field name with first letter lowercased
+			// key is field name with first letter lowercased.
+			// validateSpec (Check 5) already verified data.State != nil and the key
+			// is present before LoadTopology calls reflectBuild, so no error check needed.
 			key := lowerFirst(f.Name)
-			if data.State == nil {
-				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
-			}
-			val, ok := data.State[key]
-			if !ok {
-				return nil, fmt.Errorf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", name, reflect.TypeOf(nodePtr).Elem().Name(), f.Name, key)
-			}
+			val := data.State[key]
 			fv.Set(reflect.ValueOf(val))
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
 			key := tag[len(dataPrefix):]
