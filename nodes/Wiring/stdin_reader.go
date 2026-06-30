@@ -84,7 +84,11 @@ type stdinAnchorPayload struct {
 	Keys    []string   `json:"keys"`
 }
 
-// stdinGuideVisPayload holds the explicit-visibility fields for the guide-vis op.
+// stdinGuideVisPayload holds the explicit-visibility fields for the overlays attr="set"
+// op. The json tags are the overlay FLAG vocabulary, shared with the TS OverlayState
+// (derived from OverlayFlag) — parity guarded by check-edit-op-parity.sh via the
+// GUIDEVIS sentinels below (a flag added/removed on either side fails the guard).
+// GUIDEVIS_FIELDS_START
 type stdinGuideVisPayload struct {
 	Tori           bool `json:"tori"`
 	ScenePoles     bool `json:"scenePoles"`
@@ -97,6 +101,8 @@ type stdinGuideVisPayload struct {
 	BadgesGlobal   bool `json:"badgesGlobal"`
 	Overlays       bool `json:"overlays"`
 }
+
+// GUIDEVIS_FIELDS_END
 
 // stdinMsg is the single editor→Go bridge shape. type is always "edit"; op is
 // one of exactly three values (create/update/delete). For op=="update", Kind
@@ -445,7 +451,20 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				return
 			}
 			s := msg.State
-			md.SetGuideVisibility(s.Tori, s.ScenePoles, s.NodePoles, s.AngleLabels, s.SelSpherePoles, s.Handholds, s.DoubleLinks, s.LabelsGlobal, s.BadgesGlobal, s.Overlays, tr)
+			// Map the wire payload fields onto the named overlayVisibility struct (no
+			// positional bool order to get wrong); SetGuideVisibility installs it wholesale.
+			md.SetGuideVisibility(overlayVisibility{
+				sceneToriVisible:      s.Tori,
+				scenePolesVisible:     s.ScenePoles,
+				nodePolesVisible:      s.NodePoles,
+				angleLabelsVisible:    s.AngleLabels,
+				selSpherePolesVisible: s.SelSpherePoles,
+				handholdsVisible:      s.Handholds,
+				doubleLinksVisible:    s.DoubleLinks,
+				labelsGlobalVisible:   s.LabelsGlobal,
+				badgesGlobalVisible:   s.BadgesGlobal,
+				overlaysVisible:       s.Overlays,
+			}, tr)
 		}
 	case "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {
