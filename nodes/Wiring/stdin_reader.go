@@ -81,8 +81,6 @@ type stdinMsg struct {
 	Anchor  *anchorVec      `json:"anchor"`
 	Keys    []string        `json:"keys"`
 	Scene   json.RawMessage `json:"scene"`
-	NodeId  string  `json:"nodeId"`
-	R       float64 `json:"r"`
 	// Viewpoint is the payload for op=="viewpoint"; nil when the op is anything else.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
 	// guide-vis payload: explicit visibility for all polar-guide groups plus master.
