@@ -12,4 +12,5 @@ export const PROBE_FILES = {
   goErrors: "go-errors.jsonl",
   ts: "ts.jsonl",
   tsErrors: "ts-errors.jsonl",
+  handlerErrorLast: "handler-error-last.json",
 } as const;

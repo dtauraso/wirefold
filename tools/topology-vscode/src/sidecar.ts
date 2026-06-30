@@ -38,15 +38,10 @@ export function injectViewText(docText: string, viewText: string): string {
     if (!raw || typeof raw !== "object") return docText;
     const view = JSON.parse(viewText);
     if (view === null || typeof view !== "object") return docText;
-    // Merge: keep any existing scene keys already in view (shouldn't be any after
-    // migration, but guard for safety), then overlay diagram keys.
-    const existingView = (raw.view && typeof raw.view === "object") ? raw.view as Record<string, unknown> : {};
+    // Keep only diagram keys (not scene keys, which live in topology.scene.json).
     const merged: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(existingView)) {
-      if (SCENE_KEYS.has(k)) merged[k] = v; // preserve legacy scene keys if present
-    }
     for (const [k, v] of Object.entries(view as Record<string, unknown>)) {
-      if (!SCENE_KEYS.has(k)) merged[k] = v; // diagram keys only
+      if (!SCENE_KEYS.has(k)) merged[k] = v;
     }
     raw.view = merged;
     return JSON.stringify(raw, null, 2) + "\n";
@@ -77,7 +72,7 @@ export function parseSceneText(sceneText: string | undefined): Record<string, un
   }
 }
 
-// Serialise scene fields (camera, camera3d, labelsGlobalHidden) to a flat JSON string.
+// Serialise scene fields (camera, camera3d, labelsGlobalHidden, badgesHidden) to a flat JSON string.
 export function serializeSceneText(fields: Record<string, unknown>): string {
   const out: Record<string, unknown> = {};
   for (const k of SCENE_KEYS) {

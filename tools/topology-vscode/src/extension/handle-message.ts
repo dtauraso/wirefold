@@ -13,13 +13,20 @@ import {
   type WebviewToHostMsg,
 } from "../messages";
 import { appendWebviewLog } from "./webview-log";
+import { PROBE_DIR, PROBE_FILES } from "../probe-files";
 
 export type MessageCtx = {
   logUri: vscode.Uri;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
-  send: () => Thenable<boolean>;
 };
+
+// No-payload toggle ops forwarded verbatim to Go's stdin. All share the same
+// handler: writeStdin({type:"edit", op}) with no additional fields.
+const NO_PAYLOAD_TOGGLE_OPS = new Set([
+  "tori-vis", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles",
+  "handholds-vis", "labels-vis", "badges-vis", "overlays-vis", "double-links",
+]);
 
 export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void> {
   const msg = parseWebviewToHost(raw);
@@ -37,9 +44,9 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
     const repoRoot = workspaceRoot();
     if (repoRoot) {
       try {
-        const probeDir = path.join(repoRoot, ".probe");
+        const probeDir = path.join(repoRoot, PROBE_DIR);
         fs.mkdirSync(probeDir, { recursive: true });
-        const probeFile = path.join(probeDir, "handler-error-last.json");
+        const probeFile = path.join(probeDir, PROBE_FILES.handlerErrorLast);
         const entry = JSON.stringify({
           timestamp: new Date().toISOString(),
           msgType: msg.type,
@@ -56,10 +63,9 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
 }
 
 async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
-  const { logUri, runner, post } = ctx;
+  const { logUri, runner } = ctx;
   switch (msg.type) {
     case "ready": {
-      ctx.send();
       // Spawn Go immediately so edges render from geometry events before the
       // user presses Run. Go starts HALTED — the clock won't tick until play().
       // A remount (hot-reload after npm run build) resets the webview's module-level
@@ -130,36 +136,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       } else if (msg.op === "viewpoint") {
         // Polar camera nav: forward the viewpoint payload verbatim. Fire-and-forget.
         runner.writeStdin(JSON.stringify({ type: "edit", op: "viewpoint", viewpoint: msg.viewpoint }));
-      } else if (msg.op === "tori-vis") {
-        // Toggle polar-guide tori visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "tori-vis" }));
-      } else if (msg.op === "scene-poles") {
-        // Toggle scene-center pole frame visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "scene-poles" }));
-      } else if (msg.op === "node-poles") {
-        // Toggle per-node pole frame visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "node-poles" }));
-      } else if (msg.op === "angle-labels") {
-        // Toggle the 2→3 / 2→7 θ/φ angle-label arcs. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "angle-labels" }));
-      } else if (msg.op === "sel-sphere-poles") {
-        // Toggle the selection-sphere pole axis markers. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "sel-sphere-poles" }));
-      } else if (msg.op === "handholds-vis") {
-        // Toggle the rotation-handhold grab-sphere visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "handholds-vis" }));
-      } else if (msg.op === "labels-vis") {
-        // Toggle the global node-label visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "labels-vis" }));
-      } else if (msg.op === "badges-vis") {
-        // Toggle the global occlusion-badge visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "badges-vis" }));
-      } else if (msg.op === "overlays-vis") {
-        // Toggle the master overlays visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "overlays-vis" }));
-      } else if (msg.op === "double-links") {
-        // Toggle the double-link overlay visibility. No payload — Go owns the toggle state.
-        runner.writeStdin(JSON.stringify({ type: "edit", op: "double-links" }));
+      } else if (NO_PAYLOAD_TOGGLE_OPS.has(msg.op)) {
+        // No-payload toggle — Go owns the state; TS just signals the flip.
+        runner.writeStdin(JSON.stringify({ type: "edit", op: msg.op }));
       } else if (msg.op === "guide-vis") {
         // Push all polar-guide visibilities plus master overlays to Go on reload so Go's
         // authoritative state matches persisted scene settings. Explicit values — not a toggle.

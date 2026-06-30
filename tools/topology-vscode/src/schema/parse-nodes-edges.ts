@@ -154,5 +154,7 @@ export function parseEdge(v: unknown, path: string): Edge {
       else if (def.tsType === "boolean") edge[key] = opt(val, (x) => bool(x, `${path}.${key}`));
     }
   }
+  // Double-cast: edge is built as Record<string,unknown> via the dynamic WIRE_PROPS loop;
+  // TypeScript can't statically verify all required Edge fields are present.
   return edge as unknown as Edge;
 }

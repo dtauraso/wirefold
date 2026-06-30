@@ -35,7 +35,10 @@ function defToTypeDef(key: string): NodeTypeDef | undefined {
 
 export const NODE_TYPES: Record<string, NodeTypeDef> = {
   ...Object.fromEntries(
-    Object.keys(NODE_DEFS).map((k) => [k, defToTypeDef(k)!]),
+    Object.keys(NODE_DEFS).flatMap((k) => {
+      const def = defToTypeDef(k);
+      return def ? [[k, def]] : [];
+    }),
   ),
   Generic: { role: "generic", inputs: [], outputs: [], shape: "rect", fill: "#ffffff", stroke: "#888", width: NODE_DIM_FALLBACK.width, height: NODE_DIM_FALLBACK.height },
 };

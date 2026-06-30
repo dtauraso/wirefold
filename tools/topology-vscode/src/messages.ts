@@ -210,16 +210,9 @@ function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       if (typeof v.kind !== "string") return undefined;
       return (m as unknown as WebviewToHostMsg);
     }
-    case "tori-vis":
-    case "scene-poles":
-    case "node-poles":
-    case "angle-labels":
-    case "sel-sphere-poles":
-    case "handholds-vis":
-    case "labels-vis":
-    case "badges-vis":
-    case "overlays-vis":
-    case "double-links":
+    case "tori-vis": case "scene-poles": case "node-poles": case "angle-labels":
+    case "sel-sphere-poles": case "handholds-vis": case "labels-vis":
+    case "badges-vis": case "overlays-vis": case "double-links":
       // No payload needed — toggle is stateless from the TS side.
       return (m as unknown as WebviewToHostMsg);
     case "guide-vis":

@@ -9,6 +9,7 @@
 // crash) would otherwise race on the read-then-write.
 
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import { PROBE_DIR, PROBE_FILES } from "../probe-files";
@@ -50,7 +51,6 @@ async function doAppend(entry: string, documentUri: vscode.Uri, filename: string
     console.warn("topology editor: webview-log append failed", err);
     // Mirror to ts-errors.jsonl (best-effort; if dir creation failed this may also fail)
     try {
-      const fsSync = await import("fs");
       const errFile = path.join(dir, PROBE_FILES.tsErrors);
       fsSync.appendFileSync(errFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.webview-log-append-failed", message: String(err) }) + "\n", "utf8");
     } catch { /* swallow */ }

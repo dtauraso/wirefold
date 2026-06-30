@@ -15,6 +15,11 @@ export type { RunStatus };
 // the pump automatically instead of being silently dropped by a hardcoded list.
 const TRACE_EVENT_KIND_SET: ReadonlySet<string> = new Set(TRACE_EVENT_KINDS);
 
+/** Format a Go-side error as a probe JSONL line (src="go", kind="error"). */
+function goErrorLine(message: string): string {
+  return JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message }) + "\n";
+}
+
 // Go stdout relay: trace events are written to .probe/go.jsonl with a
 // shared envelope { ts_ms, src:"go", step?, ...ev }. Errors (stderr,
 // non-zero exit, spawn failure) are written to .probe/go-errors.jsonl.
@@ -148,7 +153,7 @@ export class BuildAndRunRunner {
       this.channel.appendLine(`\n[build error: ${built.error}]`);
       if (this.goErrorsFile) {
         try {
-          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: built.error }) + "\n", "utf8");
+          fs.appendFileSync(this.goErrorsFile, goErrorLine(built.error), "utf8");
         } catch { /* swallow */ }
       }
       this.looping = false;
@@ -162,6 +167,8 @@ export class BuildAndRunRunner {
     // this.proc is guaranteed undefined here (run() returns early at the top if a
     // proc exists), so there is no active sim to spare — exceptPid is undefined.
     // Passing it explicitly keeps the contract honest if that guard ever changes.
+    // this.proc is undefined here (guarded by the early return above), so activePid
+    // is always undefined — the cast overrides TypeScript's control-flow narrowing.
     const activePid: number | undefined = (this.proc as cp.ChildProcess | undefined)?.pid;
     const { killed } = killOrphanedSims(binPath, activePid);
     if (killed > 0) {
@@ -187,7 +194,7 @@ export class BuildAndRunRunner {
       this.channel!.append(msg);
       if (this.goErrorsFile) {
         try {
-          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: msg }) + "\n", "utf8");
+          fs.appendFileSync(this.goErrorsFile, goErrorLine(msg), "utf8");
         } catch { /* swallow */ }
       }
     });
@@ -211,7 +218,7 @@ export class BuildAndRunRunner {
         this.channel!.appendLine(`\n[${message}]`);
         if (this.goErrorsFile) {
           try {
-            fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message }) + "\n", "utf8");
+            fs.appendFileSync(this.goErrorsFile, goErrorLine(message), "utf8");
           } catch { /* swallow */ }
         }
         this.post({ state: "error", message });
@@ -223,7 +230,7 @@ export class BuildAndRunRunner {
       this.channel!.appendLine(`\n[spawn error: ${err.message}]`);
       if (this.goErrorsFile) {
         try {
-          fs.appendFileSync(this.goErrorsFile, JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message: err.message }) + "\n", "utf8");
+          fs.appendFileSync(this.goErrorsFile, goErrorLine(err.message), "utf8");
         } catch { /* swallow */ }
       }
       this.post({ state: "error", message: err.message });
@@ -257,7 +264,7 @@ export class BuildAndRunRunner {
       }
       const ev = tryParseTraceEvent(line);
       if (ev && this.onTraceEvent) {
-        const _evNode = 'node' in ev ? ev.node : ('nodeId' in ev ? (ev as { nodeId?: string }).nodeId : undefined);
+        const _evNode = 'node' in ev ? ev.node : undefined;
         const _evPort = 'port' in ev ? (ev as { port?: string }).port : undefined;
         console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${_evNode} port=${_evPort ?? "-"}`);
         if (this.tsFile) {
