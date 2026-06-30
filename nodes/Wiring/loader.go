@@ -84,6 +84,26 @@ func (n specNode) toNodeGeom() nodeGeom {
 	return g
 }
 
+// outMultiBaseName strips a trailing digit suffix from a sourceHandle when the
+// base name is an OutMulti port on the given kind, per kindOutMultiPorts (kind →
+// set of OutMulti port names). e.g. "ToNext0" → "ToNext" for a kind with OutMulti
+// port "ToNext". Returns the canonical port name and whether it resolved. Shared
+// by buildFromSpec and validateSpec so the two normalizations can never drift.
+func outMultiBaseName(handle, kind string, kindOutMultiPorts map[string]map[string]bool) (string, bool) {
+	if len(handle) == 0 {
+		return handle, false
+	}
+	last := handle[len(handle)-1]
+	if last < '0' || last > '9' {
+		return handle, false
+	}
+	base := handle[:len(handle)-1]
+	if kindOutMultiPorts[kind][base] {
+		return base, true
+	}
+	return handle, false
+}
+
 func specPortsToGeom(ports []specPort) []portGeom {
 	out := make([]portGeom, 0, len(ports))
 	for _, p := range ports {
@@ -140,31 +160,33 @@ type WireRegistry map[string]*PacedWire
 // times its own delivery on it (MODEL.md: exactly one clock). Production passes a
 // RealClock; tests pass a FakeClock they advance deterministically.
 func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
-	// If jsonPath is a directory, use the tree reader instead of the monolithic JSON reader.
-	if info, err2 := os.Stat(jsonPath); err2 == nil && info.IsDir() {
-		spec, err := loadTree(jsonPath)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		if err := validateSpec(&spec); err != nil {
-			return nil, nil, nil, nil, err
-		}
-		return buildFromSpec(ctx, spec, tr, clk)
-	}
-
-	raw, err := os.ReadFile(jsonPath)
+	spec, err := parseSpec(jsonPath)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: read %s: %w", jsonPath, err)
-	}
-	var spec topoSpec
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("LoadTopology: parse %s: %w", jsonPath, err)
+		return nil, nil, nil, nil, err
 	}
 	if err := validateSpec(&spec); err != nil {
 		return nil, nil, nil, nil, err
 	}
-
 	return buildFromSpec(ctx, spec, tr, clk)
+}
+
+// parseSpec reads and parses the topology spec at path — a directory tree
+// (loadTree) or a monolithic topology.json — into a topoSpec, WITHOUT validating
+// or building. Shared by LoadTopology (which then validates + builds) and
+// readTopologySpec / EmitSpecLine (which only need the parsed spec).
+func parseSpec(path string) (topoSpec, error) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return loadTree(path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return topoSpec{}, fmt.Errorf("LoadTopology: read %s: %w", path, err)
+	}
+	var spec topoSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return topoSpec{}, fmt.Errorf("LoadTopology: parse %s: %w", path, err)
+	}
+	return spec, nil
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
@@ -185,18 +207,17 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// SphereRing reaches every surface node. Computed before newMoveDispatch so each
 	// node/edge mover captures it in its held geom.
 	{
-		reachR := map[string]float64{}
-		for _, e := range spec.Edges {
-			sg, okS := nodeGeoms[e.Source]
-			tg, okT := nodeGeoms[e.Target]
-			if !okS || !okT || sg.Center == nil || tg.Center == nil {
-				continue
-			}
-			if d := chordLength(*sg.Center, *tg.Center); d > reachR[e.Source] {
-				reachR[e.Source] = d
+		centers := map[string]vec3{}
+		for id, g := range nodeGeoms {
+			if g.Center != nil {
+				centers[id] = *g.Center
 			}
 		}
-		for id, r := range reachR {
+		edges := make([]sphereEdge, 0, len(spec.Edges))
+		for _, e := range spec.Edges {
+			edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
+		}
+		for id, r := range reachRFromCenters(centers, edges) {
 			g := nodeGeoms[id]
 			g.ReachR = r
 			nodeGeoms[id] = g
@@ -347,7 +368,11 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		for _, n := range spec.Nodes {
 			loaded[n.ID] = true
 		}
-		md.registerMovementLinks(func(id string) bool { return loaded[id] })
+		linkEdges := make([]sphereEdge, 0, len(spec.Edges))
+		for _, e := range spec.Edges {
+			linkEdges = append(linkEdges, sphereEdge{Source: e.Source, Target: e.Target})
+		}
+		md.registerMovementLinks(linkEdges, func(id string) bool { return loaded[id] })
 
 		// Fill each link's polar state from the loaded world centers (the one-time
 		// world→polar conversion at load; thereafter locks read the stored link polar).
@@ -386,25 +411,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		kindOutMultiPorts[kind] = outMultis
 	}
 
-	// outMultiBaseName strips a trailing digit suffix from a sourceHandle when
-	// the base name is an OutMulti port on the given kind.
-	// e.g. "ToNext0" → "ToNext" for a kind that has OutMulti port "ToNext".
-	// Returns the canonical port name and whether it resolved.
-	outMultiBaseName := func(handle, kind string) (string, bool) {
-		if len(handle) == 0 {
-			return handle, false
-		}
-		last := handle[len(handle)-1]
-		if last < '0' || last > '9' {
-			return handle, false
-		}
-		base := handle[:len(handle)-1]
-		if kindOutMultiPorts[kind][base] {
-			return base, true
-		}
-		return handle, false
-	}
-
 	// Build inbound and outbound edge maps.
 	// inbound:  target node id → port name → destKey ("destNode.destPort")
 	// outbound: source node id → port name → []edge label
@@ -425,7 +431,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		}
 		inbound[e.Target][e.TargetHandle] = e.Target + "." + e.TargetHandle
 		srcKey := e.SourceHandle
-		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source]); isMulti {
+		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source], kindOutMultiPorts); isMulti {
 			srcKey = base
 		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
@@ -517,22 +523,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 // directory tree) without building nodes or wires. Used to emit the spec to
 // the TS webview on startup.
 func readTopologySpec(jsonPath string) (topoSpec, error) {
-	if info, err := os.Stat(jsonPath); err == nil && info.IsDir() {
-		spec, err := loadTree(jsonPath)
-		if err != nil {
-			return topoSpec{}, err
-		}
-		return spec, nil
-	}
-	raw, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return topoSpec{}, fmt.Errorf("readTopologySpec: read %s: %w", jsonPath, err)
-	}
-	var spec topoSpec
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		return topoSpec{}, fmt.Errorf("readTopologySpec: parse %s: %w", jsonPath, err)
-	}
-	return spec, nil
+	return parseSpec(jsonPath)
 }
 
 // EmitSpecLine reads the topology spec at jsonPath and writes a single

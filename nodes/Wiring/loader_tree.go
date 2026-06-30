@@ -23,15 +23,6 @@ import (
 	"strings"
 )
 
-// jsonPos is a local unmarshal helper for view/nodes JSON files whose keys are
-// lowercase (x, y, z). specPosition already carries json tags so this alias is
-// not strictly needed, but it makes the intent explicit.
-type jsonPos struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-	Z float64 `json:"z"`
-}
-
 // jsonPort is a local unmarshal helper for port JSON files (lowercase keys).
 // specPort already has json tags with the same lowercase names, so we reuse
 // specPort directly; this type documents the expected shape.
@@ -148,12 +139,12 @@ func loadTree(root string) (topoSpec, error) {
 		if err != nil {
 			return spec, fmt.Errorf("loadTree: read view/nodes/%s: %w", fname, err)
 		}
-		var jp jsonPos
+		var jp specPosition
 		if err := json.Unmarshal(raw, &jp); err != nil {
 			return spec, fmt.Errorf("loadTree: parse view/nodes/%s: %w", fname, err)
 		}
 		id := strings.TrimSuffix(fname, ".json")
-		spec.View.Nodes[id] = specPosition{X: jp.X, Y: jp.Y, Z: jp.Z}
+		spec.View.Nodes[id] = jp
 	}
 
 	return spec, nil

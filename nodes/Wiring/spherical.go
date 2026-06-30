@@ -99,12 +99,5 @@ func arcBetween(from, to dir) rot {
 func angleAboutAxis(from, to, axis dir) float64 {
 	_, psiFrom := azimuthFrom(axis, from)
 	_, psiTo := azimuthFrom(axis, to)
-	d := psiTo - psiFrom
-	for d > math.Pi {
-		d -= 2 * math.Pi
-	}
-	for d <= -math.Pi {
-		d += 2 * math.Pi
-	}
-	return d
+	return wrapPi(psiTo - psiFrom)
 }
