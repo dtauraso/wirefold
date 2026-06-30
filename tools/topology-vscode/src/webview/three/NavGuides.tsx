@@ -53,13 +53,13 @@ const OCTANTS: { s: [number, number, number]; color: string; tag: string }[] = [
   { s: [-1, -1, -1], color: "#cd853f", tag: "−x−y−z" },
 ];
 
-// Angle-arc colors by sign-type so the four categories read apart at a glance: θ in a
-// magenta family, φ in a blue family (hue = θ vs φ); + bright / − muted (brightness =
-// sign). +θ and +φ are the bright, clearly-visible ones.
-const COL_THETA_POS = "#f06ec0"; // +θ  bright magenta
-const COL_THETA_NEG = "#9a4f86"; // −θ  muted magenta
-const COL_PHI_POS = "#57c7e8";   // +φ  bright blue
-const COL_PHI_NEG = "#3a7d94";   // −φ  muted blue
+// The earlier, most-visible angle-arc colors: θ magenta, φ cyan — the darker of each
+// historical candidate pair (θ: #dd33cc vs #ff8800; φ: #00ccff vs #dddd22). One color
+// per θ/φ (the +/− sign is carried by the label, not the color).
+const COL_THETA_POS = "#dd33cc"; // θ magenta
+const COL_THETA_NEG = "#dd33cc";
+const COL_PHI_POS = "#00ccff";   // φ cyan
+const COL_PHI_NEG = "#00ccff";
 
 // PolarFrame — the camera-independent pole-frame markers for ONE center: the three
 // axis sticks (+y pole green, +x φ0 red, +z φ90 blue) plus the θ (magenta) and φ
