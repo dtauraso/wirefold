@@ -178,15 +178,14 @@ function PolarFrame({ center, scale, tag, octants }: {
       <AxisLabel text="θ" color="#dd33cc" position={[arcMid, arcMid, 0]} size={poleLen * 0.14} />
       <AxisLabel text="φ" color="#dddd22" position={[arcMid, 0, arcMid]} size={poleLen * 0.14} />
       </>)}
-      {octants && OCTANTS.map((o) => (
+      {octants && OCTANTS.map((o, i) => (
         <React.Fragment key={`olbl-${o.tag}`}>
-          {/* θ label at this octant's θ-arc midpoint (X-Y plane), φ at its φ-arc midpoint
-              (X-Z plane), reflected by the octant sign and colored per octant. */}
-          {/* Sign of θ = pole-axis (y) side; sign of φ = z side (φ measured from +X φ0). Each
-              label is offset onto ITS circle's plane (matching arcOff) so the two circles
-              that share a position each get their own label near them. */}
-          <AxisLabel text={`${o.s[1] > 0 ? "+" : "−"}θ`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, o.s[2] * arcOff]} size={poleLen * 0.11} />
-          <AxisLabel text={`${o.s[2] > 0 ? "+" : "−"}φ`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcOff, o.s[2] * arcMid]} size={poleLen * 0.11} />
+          {/* A UNIQUE number per quarter-arc, shown near it: θ arcs are 1..8 (one per
+              octant), φ arcs are 9..16. Each label is offset onto ITS circle's plane
+              (matching arcOff) so the two circles sharing a position each carry their
+              own number nearby. Colored per octant. */}
+          <AxisLabel text={`${i + 1}`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcMid, o.s[2] * arcOff]} size={poleLen * 0.11} />
+          <AxisLabel text={`${i + 9}`} color={o.color} position={[o.s[0] * arcMid, o.s[1] * arcOff, o.s[2] * arcMid]} size={poleLen * 0.11} />
         </React.Fragment>
       ))}
       {octants && (<>
