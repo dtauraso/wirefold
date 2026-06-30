@@ -156,17 +156,18 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
 /** A single row inside the popover: square checkbox + label, fires the row's op on click.
  *  Styled to match the recommended mock (overlay-toggle-options.html): custom .cb checkbox
  *  that fills accent + ✓ when checked, with a subtle row-hover background. */
-function OverlayRow({ cfg }: { cfg: ToggleCfg }) {
+function OverlayRow({ cfg, disabled }: { cfg: ToggleCfg; disabled?: boolean }) {
   const val = useCameraStore(cfg.selector);
   const active = cfg.active(val);
   const [hover, setHover] = useState(false);
   const onClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (disabled) return;
       fireToggle(cfg, val);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [val]
+    [val, disabled]
   );
   const labelText = typeof cfg.label === "function" ? cfg.label(val) : cfg.label;
   return (
@@ -180,10 +181,10 @@ function OverlayRow({ cfg }: { cfg: ToggleCfg }) {
         alignItems: "center",
         gap: 7,
         padding: "4px 6px",
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
         color: "#e7e7ea",
         borderRadius: 5,
-        background: hover ? "rgba(255,255,255,0.05)" : "transparent",
+        background: !disabled && hover ? "rgba(255,255,255,0.05)" : "transparent",
         userSelect: "none",
         fontSize: 11.5,
       }}
@@ -315,7 +316,7 @@ export function OverlaysControl() {
                   {group.heading}
                 </div>
                 {group.cfgs.map((cfg) => (
-                  <OverlayRow key={cfg.op} cfg={cfg} />
+                  <OverlayRow key={cfg.op} cfg={cfg} disabled={!active} />
                 ))}
               </div>
             ))}
