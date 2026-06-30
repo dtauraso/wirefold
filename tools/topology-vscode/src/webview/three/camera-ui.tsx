@@ -1,5 +1,5 @@
 // camera-ui.tsx — standalone camera control UI widgets for ThreeView.
-// OverlaysControl (split-button + popover), HomeButton, DoubleLinksToggle — no scene/Go logic.
+// OverlaysControl (split-button + popover), HomeButton — no scene/Go logic.
 
 import React, { useCallback, useState } from "react";
 import * as THREE from "three";
@@ -24,7 +24,8 @@ type EditOp =
   | "sel-sphere-poles"
   | "handholds-vis"
   | "labels-vis"
-  | "badges-vis";
+  | "badges-vis"
+  | "double-links";
 
 type ToggleCfg = {
   op: EditOp;
@@ -130,6 +131,15 @@ const badgesCfg: ToggleCfg = {
   payload: (v) => ({ op: "badges-vis", wasHidden: v }),
 };
 
+const doubleLinksCfg: ToggleCfg = {
+  op: "double-links",
+  selector: (s) => s.doubleLinksVisible,
+  active: (v) => v,
+  label: "⇄ double links",
+  title: (a) => (a ? "Hide double-link overlay" : "Show double-link overlay"),
+  payload: (v) => ({ op: "double-links", was: v }),
+};
+
 // ---------------------------------------------------------------------------
 // Grouped overlay rows for the popover
 // ---------------------------------------------------------------------------
@@ -140,6 +150,7 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
   { heading: "GUIDES", cfgs: [angleLabelsCfg, ringsCfg, handholdsCfg] },
   { heading: "POLES",  cfgs: [scenePolesCfg, nodePolesCfg, selSpherePolesCfg] },
   { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
+  { heading: "EDGES",  cfgs: [doubleLinksCfg] },
 ];
 
 /** A single row inside the popover: square checkbox + label, fires the row's op on click.
@@ -393,42 +404,4 @@ export function HomeButton({
   );
 }
 
-/** DOUBLE-LINKS TOGGLE: Go-owned toggle for the bidirectional edge overlay.
- * When active, edge tubes are dimmed and each edge shows a cyan bidirectional arrow line.
- * Fire-and-forget to Go; Go echoes back via double-links trace event. */
-export function DoubleLinksToggle() {
-  const active = useCameraStore((s) => s.doubleLinksVisible);
-  const onClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    // Fire-and-forget: Go owns the toggle state and echoes back via double-links.
-    postLog("guide-btn-click", { op: "double-links", was: active });
-    vscode.postMessage({ type: "edit", op: "double-links" });
-  }, [active]);
-  return (
-    <div
-      onClick={onClick}
-      title={active ? "Hide double-link overlay" : "Show double-link overlay"}
-      style={{
-        position: "absolute",
-        top: 316,
-        right: 12,
-        background: "rgba(0,0,0,0.55)",
-        borderRadius: 6,
-        padding: "3px 7px",
-        cursor: "pointer",
-        pointerEvents: "auto",
-        zIndex: 20,
-        color: active ? "#00e5ff" : "#888",
-        fontSize: 11,
-        fontFamily: "monospace",
-        userSelect: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-      }}
-    >
-      ⇄ double links
-    </div>
-  );
-}
 
