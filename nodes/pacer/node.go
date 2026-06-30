@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // noValue is the sentinel meaning "no value seen yet". Real values are
 // non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = -1
+const noValue = gatecommon.NoValue
 
 type Node struct {
 	Fire         func()

@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // noValue is the sentinel meaning "no value seen yet" → empty interior.
 // Real values are non-negative indices so noValue (-1) never collides.
-const noValue = -1
+const noValue = gatecommon.NoValue
 
 // Node is a terminal "Hold" kind: it receives a value on its single input,
 // holds/displays it, and produces NO output. On each received value it fires,

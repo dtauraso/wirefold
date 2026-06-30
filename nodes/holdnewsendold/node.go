@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // noValue is the sentinel meaning "no value seen yet". Real values are
 // non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = -1
+const noValue = gatecommon.NoValue
 
 // occupiedPollInterval is the park duration between output-occupied checks to
 // avoid a busy-spin while waiting for the output wire to clear.

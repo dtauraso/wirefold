@@ -5,11 +5,12 @@ import (
 	"sync/atomic"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // noValue is the sentinel meaning "no value held yet". Real values are
 // non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = -1
+const noValue = gatecommon.NoValue
 
 // Node is a sample-and-hold pulse. It HOLDS one int value (the thing it is
 // outputting), initialized to noValue, and drives that held value out continuously.
