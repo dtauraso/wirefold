@@ -51,6 +51,100 @@ function findNearestByTag(
 }
 
 // ---------------------------------------------------------------------------
+// RaycasterHelper: per-mode pick helpers + main pick function.
+// ---------------------------------------------------------------------------
+
+/** handholdOnly: return "handhold" sentinel on the nearest handhold hit. */
+function pickHandhold(hits: THREE.Intersection[]): string | null {
+  // Detection only — which disk to rotate on is decided by the first two drag
+  // points, not which handhold was grabbed.
+  for (const hit of hits) {
+    if ((hit.object as THREE.Mesh).userData?.handhold === true) return "handhold";
+  }
+  return null;
+}
+
+/** ringOnly: return the nodeId of the nearest ring mesh hit. */
+function pickRing(hits: THREE.Intersection[]): string | null {
+  for (const hit of hits) {
+    const obj = hit.object as THREE.Mesh;
+    if (obj.userData?.ring === true) return (obj.userData.nodeId as string) ?? null;
+  }
+  return null;
+}
+
+/**
+ * portOnly: a port wins only if its hit is at/closer than the nearest node-body
+ * hit within PORT_HIT_TOL. Otherwise return null so the caller falls through to
+ * the node-drag path.
+ *
+ * Uses findNearestByTag for portHit (one-category-per-hit semantics). nodeHitDist
+ * is found in a separate pass because no mesh carries both `portId` and `body:true`.
+ */
+function pickPort(hits: THREE.Intersection[]): string | null {
+  const [portHit] = findNearestByTag(hits, ["portId"]);
+  let nodeHitDist: number | null = null;
+  for (const hit of hits) {
+    if ((hit.object as THREE.Mesh).userData?.body === true) {
+      // Nearest node-body hit distance, by the body tag — z-aware and not
+      // confusable with overlay meshes.
+      nodeHitDist = hit.distance;
+      break;
+    }
+  }
+  if (portHit && (nodeHitDist === null || portHit.dist <= nodeHitDist + PORT_HIT_TOL)) {
+    return portHit.id;
+  }
+  return null;
+}
+
+/**
+ * nodesOnly: iterate all hits nearest-first, resolve port-sphere hits to their
+ * owning node, skip handholds and edges. Respects opts.excludeId.
+ */
+function pickNodesOnly(hits: THREE.Intersection[], excludeId?: string): string | null {
+  for (const hit of hits) {
+    const obj = hit.object as THREE.Mesh;
+    if (obj.userData?.handhold) continue;
+    if (obj.userData?.edgeId) continue;
+    if (obj.userData?.port) {
+      const nId = obj.userData.nodeId as string;
+      if (excludeId && nId === excludeId) continue;
+      return nId;
+    }
+    if (obj.userData?.nodeId) {
+      const nId = obj.userData.nodeId as string;
+      if (excludeId && nId === excludeId) continue;
+      return nId;
+    }
+  }
+  return null;
+}
+
+// Node-favoring margin: the wide invisible edge selection-halo runs node→node,
+// so over a node the halo surface is at/closer than the node sphere. Without a
+// bias the edge would win and node-drag would silently break. An edge only wins
+// when it is clearly closer than the node by this margin (world units).
+const EDGE_BIAS = 2;
+
+/**
+ * Default pick: port → edge → node priority (nearest-first, one-category-per-hit).
+ * Handholds are skipped (grab affordance handled by the handholdOnly path).
+ */
+function pickDefault(hits: THREE.Intersection[]): string | null {
+  const [portHit, edgeHit, nodeHit] = findNearestByTag(
+    hits,
+    ["portId", "edgeId", "nodeId"],
+    (obj) => !!obj.userData?.handhold,
+  );
+  if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) return portHit.id;
+  if (edgeHit && nodeHit) return edgeHit.dist < nodeHit.dist - EDGE_BIAS ? edgeHit.id : nodeHit.id;
+  if (edgeHit) return edgeHit.id;
+  if (nodeHit) return nodeHit.id;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // RaycasterHelper: performs pick on demand via ref callback.
 // ---------------------------------------------------------------------------
 
@@ -77,125 +171,11 @@ export function RaycasterHelper({
       const hits = raycaster.current.intersectObjects(meshes, false);
       if (hits.length === 0) return null;
 
-      if (opts?.handholdOnly) {
-        // A handhold grab only needs detection (which disk to rotate on is decided by
-        // the first two drag points, not which handhold). Return a sentinel on the
-        // nearest handhold hit so the caller can switch into constrained rotation.
-        for (const hit of hits) {
-          if ((hit.object as THREE.Mesh).userData?.handhold === true) return "handhold";
-        }
-        return null;
-      }
-
-      if (opts?.ringOnly) {
-        for (const hit of hits) {
-          const hitObj = hit.object as THREE.Mesh;
-          if (hitObj.userData?.ring === true) {
-            return (hitObj.userData.nodeId as string) ?? null;
-          }
-        }
-        return null;
-      }
-
-      if (opts?.portOnly) {
-        // A port only wins the pointer when the click lands on its EXPOSED region,
-        // not merely anywhere the ray grazes a port sphere. Port spheres sit on the
-        // node's ring (radius ~= node radius), so the ray into a node body almost
-        // always also clips a connected port; returning that port unconditionally
-        // (the old behavior) hijacked every node-body grab into a port-slide and is
-        // the real reason nodes were "not draggable". Resolve with the SAME body-
-        // proximity precedence the default pick uses: a port wins only if its hit is
-        // at/closer than the nearest node-body hit, within PORT_HIT_TOL. Otherwise
-        // the body is the intended target → return null so the caller falls through
-        // to the node-drag path. (Reducing lattice spacing only enlarged the relative
-        // body target enough to sometimes clear ports — a symptom mask, not the fix.)
-        // Use findNearestByTag for portHit (portId key, one-category-per-hit semantics).
-        // nodeHitDist uses the `body` boolean tag (no id), so it is found in a
-        // separate pass; no mesh has both `portId` and `body: true`, so the split
-        // is semantically equivalent to the original interleaved loop.
-        const [portHit] = findNearestByTag(hits, ["portId"]);
-        let nodeHitDist: number | null = null;
-        for (const hit of hits) {
-          const hitObj = hit.object as THREE.Mesh;
-          if (hitObj.userData?.body === true) {
-            // Nearest node-body hit distance, by the body tag — z-aware and not
-            // confusable with overlay meshes (the old x/y parent-proximity match
-            // counted e.g. a handhold parented at the origin as a "node" here).
-            nodeHitDist = hit.distance;
-            break;
-          }
-        }
-        if (portHit && (nodeHitDist === null || portHit.dist <= nodeHitDist + PORT_HIT_TOL)) {
-          return portHit.id;
-        }
-        return null;
-      }
-
-      if (opts?.nodesOnly) {
-        // Iterate all hits to find the first node that isn't excluded.
-        // A port sphere hit resolves to its node (via userData.nodeId).
-        for (const hit of hits) {
-          const hitObj = hit.object as THREE.Mesh;
-          if (hitObj.userData?.handhold) continue; // grab affordance, never a node
-          if (hitObj.userData?.edgeId) continue; // skip edges
-          if (hitObj.userData?.port) {
-            // Port sphere — resolve to its owning node.
-            const nId = hitObj.userData.nodeId as string;
-            if (opts.excludeId && nId === opts.excludeId) continue;
-            return nId;
-          }
-          if (hitObj.userData?.nodeId) {
-            // body sphere, ring torus, or any node-attached mesh — resolved by the
-            // explicit nodeId tag, not by z-blind/type-blind x/y parent proximity.
-            const nId = hitObj.userData.nodeId as string;
-            if (opts.excludeId && nId === opts.excludeId) continue;
-            return nId;
-          }
-        }
-        return null;
-      }
-
-      // Default path: scan ALL hits nearest-first, capture nearest of each category.
-      // Handholds are skipped (grab affordance only). Port meshes carry both `portId`
-      // and `nodeId`; the one-category-per-hit rule inside findNearestByTag (mirrors
-      // the original `continue` after portHit) ensures a port mesh is counted as a
-      // port hit and NOT also as a node hit.  Categories are checked in priority
-      // order: port → edge → node, matching the original loop structure.
-      //
-      // Resolve a node hit to its node id by the explicit userData.nodeId tag —
-      // carried by the body sphere AND the ring torus AND port spheres. Z-aware
-      // (the NEAREST tagged mesh wins). This replaces the old x,y parent-proximity
-      // fallback, which was z-blind and type-blind: it matched ANY untagged mesh
-      // whose parent sat near a node's x,y (e.g. a handhold parented at the origin
-      // → the origin node), and could pick a node BEHIND another at the same x,y.
-      const [portHit, edgeHit, nodeHit] = findNearestByTag(
-        hits,
-        ["portId", "edgeId", "nodeId"],
-        // Handholds are a grab affordance handled by the handholdOnly pick path; never
-        // a node/port/edge. Skip here so the x/y-proximity fallback below can't
-        // misattribute one (parent at origin) to the node at the origin.
-        (obj) => !!obj.userData?.handhold
-      );
-
-      // Node-favoring margin: the wide invisible edge selection-halo runs node→node,
-      // so over a node the halo surface is at/closer than the node sphere. Without a
-      // bias the edge would win and node-drag would silently break. An edge only wins
-      // when it is clearly closer than the node by this margin (world units).
-      const EDGE_BIAS = 2;
-
-      // Precedence: port wins over node if within tolerance (covers embedded half of port sphere).
-      let picked: string | null = null;
-      if (portHit && (!nodeHit || portHit.dist <= nodeHit.dist + PORT_HIT_TOL)) {
-        picked = portHit.id;
-      } else if (edgeHit && nodeHit) {
-        picked = edgeHit.dist < nodeHit.dist - EDGE_BIAS ? edgeHit.id : nodeHit.id;
-      } else if (edgeHit) {
-        picked = edgeHit.id;
-      } else if (nodeHit) {
-        picked = nodeHit.id;
-      }
-
-      return picked;
+      if (opts?.handholdOnly) return pickHandhold(hits);
+      if (opts?.ringOnly) return pickRing(hits);
+      if (opts?.portOnly) return pickPort(hits);
+      if (opts?.nodesOnly) return pickNodesOnly(hits, opts.excludeId);
+      return pickDefault(hits);
     };
   }, [camera, scene, nodes]);
 
