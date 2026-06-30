@@ -376,19 +376,23 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			}
 		}
 	case "edge":
-		// attr "faded": mail-sort each (edgeId, faded) entry to its edge's inbox. Each
-		// edgeMover sets its OWN wire's faded flag — no central fan-out. Unknown keys
-		// are ignored (forward-compat).
-		if md == nil || len(msg.Edges) == 0 {
-			return
-		}
-		for edgeID, faded := range msg.Edges {
-			if ch, ok := md.dispatch[edgeID]; ok {
-				ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
+		// attr-guarded, symmetric with the "node" case above: switch on msg.Attr and
+		// ignore an unknown attr (forward-compat). Currently "faded" is the only edge attr.
+		switch msg.Attr {
+		case "faded":
+			// Mail-sort each (edgeId, faded) entry to its edge's inbox. Each edgeMover sets
+			// its OWN wire's faded flag — no central fan-out. Unknown keys are ignored.
+			if md == nil || len(msg.Edges) == 0 {
+				return
 			}
-		}
-		if treeRoot != "" {
-			_ = mergeFades(treeRoot, msg.Edges)
+			for edgeID, faded := range msg.Edges {
+				if ch, ok := md.dispatch[edgeID]; ok {
+					ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
+				}
+			}
+			if treeRoot != "" {
+				_ = mergeFades(treeRoot, msg.Edges)
+			}
 		}
 	case "camera":
 		// Update the polar camera viewpoint and emit a camera trace event. Fire-and-forget.
