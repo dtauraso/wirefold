@@ -220,10 +220,10 @@ function PolarFrame({ center, scale, tag, octants }: {
         <AxisLabel key={`pl-${p.n}`} text={`${p.n}`} color={p.c} position={[p.sx * arcMid, 0, p.sz * arcMid]} size={poleLen * 0.11} />
       ))}
       {octants && (<>
-        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere at each
-            pole's MIDPOINT and each quarter-arc midpoint. raycast off, no
-            userData.handhold. Opaque so the color is render-order-stable on camera move. */}
-        {([[poleLen / 2, 0, 0], [-poleLen / 2, 0, 0], [0, poleLen / 2, 0], [0, -poleLen / 2, 0], [0, 0, poleLen / 2], [0, 0, -poleLen / 2]] as [number, number, number][]).map((p, i) => (
+        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere where each
+            pole crosses the arc circles (±arcR on each axis) and at each quarter-arc
+            midpoint. raycast off, no userData.handhold. Opaque so the color is stable. */}
+        {([[arcR, 0, 0], [-arcR, 0, 0], [0, arcR, 0], [0, -arcR, 0], [0, 0, arcR], [0, 0, -arcR]] as [number, number, number][]).map((p, i) => (
           <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
             <sphereGeometry args={[hhR, 12, 12]} />
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
