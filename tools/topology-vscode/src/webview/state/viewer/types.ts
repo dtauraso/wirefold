@@ -89,7 +89,7 @@ function assignStrArr(out: ViewerState, raw: Record<string, unknown>, key: keyof
 // Default = true (visible/active); only persist when false.
 export const VISIBLE_SENSE_SCENE_KEYS = [
   "sceneToriVisible", "scenePolesVisible", "nodePolesVisible",
-  "angleLabelsVisible", "selSpherePolesVisible", "handholdsVisible", "doubleLinksVisible", "overlaysActive",
+  "angleLabelsVisible", "selSpherePolesVisible", "handholdsVisible", "overlaysActive",
 ] as const satisfies readonly (keyof ViewerState)[];
 
 // Keys that use the if-present-assign-else-delete merge pattern in mergeSceneIntoViewerState.
@@ -99,7 +99,7 @@ export const VISIBLE_SENSE_SCENE_KEYS = [
 // in three/ (camera-store.ts, pump.ts, ThreeView.tsx, camera-ui.tsx) which are out of scope;
 // polarity is documented at each use site in main.tsx.
 const MERGE_OPT_KEYS = [
-  "labelsGlobalHidden", "badgesHidden",
+  "labelsGlobalHidden", "badgesHidden", "doubleLinksVisible",
   ...VISIBLE_SENSE_SCENE_KEYS,
 ] as const satisfies readonly (keyof ViewerState)[];
 
@@ -153,6 +153,7 @@ export function parseViewerState(text: string | undefined): ViewerState {
   assignStrArr(out, raw, "fadeEdgeOrder");
   if (raw.labelsGlobalHidden === true) out.labelsGlobalHidden = true;
   if (raw.badgesHidden === true) out.badgesHidden = true;
+  if (typeof (raw as Record<string, unknown>).doubleLinksVisible === "boolean") out.doubleLinksVisible = (raw as Record<string, unknown>).doubleLinksVisible as boolean;
   for (const k of VISIBLE_SENSE_SCENE_KEYS) {
     if ((raw as Record<string, unknown>)[k] === false) out[k] = false;
   }
@@ -191,6 +192,7 @@ export function serializeSceneState(s: ViewerState): string {
   if (s.cameraPolar !== undefined) scene.cameraPolar = s.cameraPolar;
   if (s.labelsGlobalHidden !== undefined) scene.labelsGlobalHidden = s.labelsGlobalHidden;
   if (s.badgesHidden !== undefined) scene.badgesHidden = s.badgesHidden;
+  if (s.doubleLinksVisible !== undefined) scene.doubleLinksVisible = s.doubleLinksVisible;
   for (const k of VISIBLE_SENSE_SCENE_KEYS) {
     if (s[k] === false) scene[k] = false;
   }
