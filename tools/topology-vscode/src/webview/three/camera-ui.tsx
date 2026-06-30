@@ -4,7 +4,7 @@
 import React, { useCallback, useState } from "react";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
-import { nodeWorldPos, nodeRadius } from "./geometry-helpers";
+import { boundingBox3D, fitDistance } from "./geometry-helpers";
 import { vscode } from "../vscode-api";
 import { useCameraStore } from "./camera-store";
 import { postLog } from "../log/post";
@@ -349,21 +349,8 @@ export function HomeButton({
     const nodes = nodesRef.current;
     if (!cam || nodes.length === 0) return;
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const n of nodes) {
-      const p = nodeWorldPos(n);
-      const r = nodeRadius(n);
-      minX = Math.min(minX, p.x - r); maxX = Math.max(maxX, p.x + r);
-      minY = Math.min(minY, p.y - r); maxY = Math.max(maxY, p.y + r);
-      minZ = Math.min(minZ, p.z - r); maxZ = Math.max(maxZ, p.z + r);
-    }
-
-    const center = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-    const sizeX = maxX - minX;
-    const sizeY = maxY - minY;
-    const sizeZ = maxZ - minZ;
-    const fovRad = (cam.fov * Math.PI) / 180;
-    const dist = (Math.max(sizeX / aspect, sizeY) / 2) / Math.tan(fovRad / 2) + sizeZ / 2;
+    const { center, sizeX, sizeY, sizeZ } = boundingBox3D(nodes);
+    const dist = fitDistance(cam.fov, aspect, sizeX, sizeY) + sizeZ / 2;
     const paddedDist = dist * 1.2;
 
     // Reset to a square-on view: place the camera straight in front of the

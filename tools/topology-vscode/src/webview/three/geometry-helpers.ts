@@ -65,6 +65,37 @@ export function boundingBox(nodes: RFNode<NodeData>[]) {
 }
 
 /**
+ * 3D content sphere: bounding-box center + max-distance radius of all node world
+ * positions, with a 10% margin.  This is the SINGLE shared source for "where is
+ * the scene and how big is it?" used by computeContentSphere (interaction-controls)
+ * and sceneCenter (interaction-handlers).  Returns radius ≥ 1.
+ *
+ * Does NOT include nodeRadius in the AABB; it uses raw centers.
+ * Returns { center, radius } = (0,0,0), 100 when there are no finite nodes.
+ */
+export function contentSphere(nodes: RFNode<NodeData>[]): { center: THREE.Vector3; radius: number } {
+  const center = new THREE.Vector3();
+  if (!nodes || nodes.length === 0) return { center, radius: 100 };
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  let any = false;
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    min.min(p); max.max(p); any = true;
+  }
+  if (!any) return { center, radius: 100 };
+  center.addVectors(min, max).multiplyScalar(0.5);
+  let r = 0;
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    r = Math.max(r, p.distanceTo(center));
+  }
+  return { center, radius: Math.max(r * 1.1, 1) };
+}
+
+/**
  * World position for a node center — reads Go's emitted center, falls back to local
  * compute pre-emit. Go is authoritative for node position: on a node-move it updates
  * its held position AND re-emits node-geometry (see Wiring/stdin_reader.go
@@ -93,44 +124,21 @@ function nodeWorldPosLocal(_node: RFNode<NodeData>): THREE.Vector3 {
 // Port geometry
 // ---------------------------------------------------------------------------
 
-// Ring geometry constants — must match Go's port ring computation exactly.
-// N = floor(2 * PI * R / (BEAD_DIAM + BEAD_PAD)), direction_i = (cos(i*2PI/N), sin(i*2PI/N), 0)
-const PORT_RING_BEAD_DIAM = 8;
-const PORT_RING_BEAD_PAD = 2;
-
 /**
- * Unit direction (z=0 plane) from node center toward the given port's position,
- * derived from the ring anchor index (anchorId). Returns null if port not found.
+ * Unit direction (z=0 plane) from node center toward the given port's position.
+ * Go is authoritative: it streams per-port dir on every node-geometry event.
+ * Returns null if the geometry has not arrived yet (pre-emit) or port not found.
+ * Pre-emit callers (e.g. PortSphere) handle null by rendering nothing — port
+ * spheres appear once Go's first emit lands, not before.  The old fallback that
+ * mirrored Go's ring-anchor formula (N = floor(2πR/(d+p))) was drift and is
+ * removed; Go is the only place that formula lives.
  */
 export function portDir(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
   const g = getNodeGeometry(node.id);
-  if (g) {
-    const p = g.ports.find((pp) => pp.name === portName && pp.isInput === isInput);
-    if (p) return new THREE.Vector3(p.dir.x, p.dir.y, p.dir.z);
-    return null;
-  }
-  return portDirLocal(node, portName, isInput);
-}
-
-/**
- * FALLBACK: local port-direction compute. Used pre-emit only.
- * Mirrors Go's ring anchor computation exactly:
- *   R = min(w,h) / RADIUS_DIVISOR
- *   N = floor(2 * PI * R / (d + p)),  d=8, p=2
- *   direction = (cos(i * 2PI / N), sin(i * 2PI / N), 0),  i = port.anchorId ?? 0
- */
-function portDirLocal(node: RFNode<NodeData>, portName: string, isInput: boolean): THREE.Vector3 | null {
-  const list = (isInput ? node.data?.inputs : node.data?.outputs) ?? [];
-  const port = list.find((p) => p.name === portName);
-  if (!port) return null;
-  const w = node.data?.width ?? NODE_DIM_FALLBACK.width;
-  const h = node.data?.height ?? NODE_DIM_FALLBACK.height;
-  const R = Math.min(w, h) / CURVE_PARAM_NODE_RADIUS_DIVISOR;
-  const N = Math.floor(2 * Math.PI * R / (PORT_RING_BEAD_DIAM + PORT_RING_BEAD_PAD));
-  const i = port.anchorId ?? 0;
-  const safeN = N > 0 ? N : 1;
-  const angle = i * 2 * Math.PI / safeN;
-  return new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+  if (!g) return null; // pre-emit placeholder: no port until Go streams geometry
+  const p = g.ports.find((pp) => pp.name === portName && pp.isInput === isInput);
+  if (!p) return null;
+  return new THREE.Vector3(p.dir.x, p.dir.y, p.dir.z);
 }
 
 /** World position for the top of the node sphere (center.y + radius). */
@@ -178,6 +186,49 @@ export function pointerRingAnchor(
 // ---------------------------------------------------------------------------
 // Camera geometry
 // ---------------------------------------------------------------------------
+
+/**
+ * 3D AABB over node centers ± radius (sphere extents), Three y-up world frame.
+ * Used by HomeButton to frame the visible scene including node sphere radii.
+ * Returns a unit-volume centered on the origin when nodes is empty.
+ */
+export function boundingBox3D(nodes: RFNode<NodeData>[]): {
+  center: THREE.Vector3; sizeX: number; sizeY: number; sizeZ: number;
+} {
+  if (nodes.length === 0) {
+    return { center: new THREE.Vector3(), sizeX: 400, sizeY: 400, sizeZ: 400 };
+  }
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const n of nodes) {
+    const p = nodeWorldPos(n);
+    const r = nodeRadius(n);
+    minX = Math.min(minX, p.x - r); maxX = Math.max(maxX, p.x + r);
+    minY = Math.min(minY, p.y - r); maxY = Math.max(maxY, p.y + r);
+    minZ = Math.min(minZ, p.z - r); maxZ = Math.max(maxZ, p.z + r);
+  }
+  return {
+    center: new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+    sizeX: maxX - minX,
+    sizeY: maxY - minY,
+    sizeZ: maxZ - minZ,
+  };
+}
+
+/**
+ * Camera fit-distance: how far along +z to place the camera so a view of
+ * `width` × `height` world-units fills the viewport at the given `fov` and
+ * `aspect`.  Used by CameraFitter (scene-camera.tsx) and HomeButton
+ * (camera-ui.tsx); both add their own margin on top of this base distance.
+ *
+ *   d = max(height/2, width/2/aspect) / tan(fov/2)
+ *
+ * where fov is in degrees and aspect = viewport-width / viewport-height.
+ */
+export function fitDistance(fovDeg: number, aspect: number, width: number, height: number): number {
+  const fovRad = (fovDeg * Math.PI) / 180;
+  const halfTan = Math.tan(fovRad / 2);
+  return Math.max(height / 2, width / 2 / aspect) / halfTan;
+}
 
 // ---------------------------------------------------------------------------
 // NDC ↔ pixel helpers
