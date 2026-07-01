@@ -655,11 +655,3 @@ func (pw *PacedWire) InFlight() bool {
 	defer pw.mu.Unlock()
 	return len(pw.inflight) > 0
 }
-
-// Occupied reports whether the wire is non-empty: a bead is in flight or a
-// delivered value is waiting to be read.
-func (pw *PacedWire) Occupied() bool {
-	pw.mu.Lock()
-	defer pw.mu.Unlock()
-	return len(pw.inflight) > 0 || len(pw.delivered) > 0
-}

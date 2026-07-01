@@ -264,18 +264,6 @@ func (o *Out) InFlight() bool {
 	return o.pw.InFlight()
 }
 
-// Occupied reports whether the underlying wire is non-empty: either a bead is
-// in flight or a delivered pulse is parked in the slot (hasSend=true, not yet
-// consumed). Returns false in chan mode (no wire geometry / no slot concept).
-// Nil-safe; returns false for a nil Out.
-func (o *Out) Occupied() bool {
-	if o == nil || o.pw == nil {
-		return false
-	}
-	return o.pw.Occupied()
-}
-
-
 // DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
 // that drives several outbound edges on its OWN goroutine accumulates a set of
 // these (each carrying a SendWire trace already emitted at placement time) and

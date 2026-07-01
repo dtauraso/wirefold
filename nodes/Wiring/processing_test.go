@@ -64,6 +64,14 @@ func (h *processHarness) close() {
 	h.tr.Close()
 }
 
+// inputDrained reports whether the input wire is empty (no bead in flight and no
+// delivered value waiting) — i.e. the guard has consumed the mid-processing bead.
+func (h *processHarness) inputDrained() bool {
+	h.inPw.mu.Lock()
+	defer h.inPw.mu.Unlock()
+	return len(h.inPw.inflight) == 0 && len(h.inPw.delivered) == 0
+}
+
 func (h *processHarness) statusEvents() []T.Event {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -113,7 +121,7 @@ func TestProcessingSameColorIgnored(t *testing.T) {
 	// A SAME-color bead (0) arrives mid-processing (output deadline is 1000 ms away).
 	h.deliverInput(ctx, 0, 1)
 	// Wait until the guard has consumed it (input wire drained).
-	if !waitFor(func() bool { return !h.inPw.Occupied() }, time.Second) {
+	if !waitFor(h.inputDrained, time.Second) {
 		t.Fatal("same-color mid-processing bead was never consumed")
 	}
 	if got := h.statusEvents(); len(got) != 0 {
