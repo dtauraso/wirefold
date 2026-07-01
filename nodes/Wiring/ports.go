@@ -405,6 +405,17 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
+// NewPacedOutNoGeom builds a paced Out with a zero wire segment. Node packages
+// outside Wiring cannot name the unexported wireSegment, so they cannot call
+// NewOutPaced directly — this is the supported entry point for tests that need to
+// exercise the paced OUTPUT drive (EmitOneDriven → DriveBeadToDelivery) under a
+// FakeClock. Only bead timing is exercised; the zero segment means position
+// traces carry no geometry. Production paced Outs are built by the loader/builders
+// with real segments, not through this.
+func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string) *Out {
+	return NewOutPaced(pw, ctx, node, port, tr, rule, arcLength, simLatencyMs, wireSegment{}, edgeLabel)
+}
+
 func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
