@@ -32,7 +32,7 @@
   "scripts": {
     "gen:node-defs": "go run ../../tools/gen-node-defs",
     "build": "npm run gen:node-defs && node esbuild.mjs",
-    "watch": "node esbuild.mjs --watch",
+    "watch": "npm run gen:node-defs && node esbuild.mjs --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
