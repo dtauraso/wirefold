@@ -143,7 +143,9 @@ state and never tells Go when a bead has arrived — Go owns the clock.
   trace stream (bead positions, node events, edge curves, shading
   params) — Go reporting what it is doing. **TS → Go:** spec I/O for
   save/load (`save`, `view-save`, `load`) plus a single geometry-CRUD
-  `edit` message (`op` = create / update / delete / fade) and the
+  `edit` message (`op` = create / update / delete — exactly three ops;
+  fading is not an op but an edge attribute set via `op=update, kind=edge,
+  attr=faded`) and the
   play/pause control signal. The TS → Go send is fire-and-forget: the
   editor places an edit and never blocks on Go, never asks when a bead
   arrived, and there is no delivery signal — Go times its own delivery.
