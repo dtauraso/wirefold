@@ -173,7 +173,8 @@ export function useInteractionControls(
   ).current;
   const scheduleNodeMove = useCallback(
     (nodeId: string, x: number, y: number, z: number) => _rafNodeMove({ nodeId, x, y, z }),
-    [],
+    // _rafNodeMove is a useRef(...).current — a stable identity captured once.
+    [_rafNodeMove],
   );
 
   // Edge ids incident on a specific port (output → source/sourceHandle, input →
@@ -230,7 +231,8 @@ export function useInteractionControls(
   const schedulePortAnchor = useCallback(
     (p: { nodeId: string; portName: string; isInput: boolean; anchor: { x: number; y: number; z: number } }) =>
       _rafPortAnchor(p),
-    [],
+    // _rafPortAnchor is a useRef(...).current — a stable identity captured once.
+    [_rafPortAnchor],
   );
 
 
