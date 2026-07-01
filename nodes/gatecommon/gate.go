@@ -173,6 +173,10 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		if (g.HasLeft || g.HasRight) && !t0Set {
 			t0 = now()
 			t0Set = true
+			// Breadcrumb the window-open instant. t0 is now captured against the
+			// clock, so an observer that waits for this before advancing the sim
+			// clock can't race the t0 = now() read (deterministic test sync).
+			g.FromLeft.Breadcrumb("window_open", "")
 		}
 
 		if g.HasLeft && g.HasRight {
@@ -182,6 +186,10 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 			if !dwellSet {
 				dwellStart = now()
 				dwellSet = true
+				// Breadcrumb the dwell-start instant. dwellStart is now captured
+				// against the clock, so an observer can wait for this before
+				// advancing the sim clock without racing the dwellStart = now() read.
+				g.FromLeft.Breadcrumb("dwell_start", "")
 			}
 			if now()-dwellStart >= FireDwellMs*time.Millisecond {
 				// AND gate over the stored values (each side already applied its
