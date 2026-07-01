@@ -156,7 +156,10 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     goWatcher.onDidChange(rebuild);
     goWatcher.onDidCreate(rebuild);
     goWatcher.onDidDelete(rebuild);
-    context.subscriptions.push(goWatcher, goChannel);
+    // goWatcher/goChannel track THIS panel's lifetime, so the panel is their single
+    // disposal owner (onDidDispose below). Deliberately NOT pushed into
+    // context.subscriptions — mirrors the bundleWatcher single-owner contract and
+    // avoids a double-dispose across the two owners.
     panel.onDidDispose(() => goChannel.dispose());
   }
 
