@@ -82,17 +82,26 @@ func validateSpec(spec *topoSpec) error {
 	}
 
 	// Check 3: port handle names must match declared ports on the node kind.
+	// A dangling endpoint (edge referencing a node id absent from spec.Nodes) is
+	// caught first with a clear message — otherwise nodeType[...] returns "" and
+	// the port check below would misdirect with "not an output port on kind \"\"".
 	for _, e := range spec.Edges {
-		srcKind := nodeType[e.Source]
-		srcHandle := e.SourceHandle
-		if base, isMulti := outMultiBaseName(srcHandle, srcKind, kindOutMultiPorts); isMulti {
-			srcHandle = base
+		srcKind, srcKnown := nodeType[e.Source]
+		if !srcKnown {
+			errs = append(errs, fmt.Sprintf("edge %q references unknown node id %q as its source", e.Label, e.Source))
+		} else {
+			srcHandle := e.SourceHandle
+			if base, isMulti := outMultiBaseName(srcHandle, srcKind, kindOutMultiPorts); isMulti {
+				srcHandle = base
+			}
+			if !kindOutPorts[srcKind][srcHandle] {
+				errs = append(errs, fmt.Sprintf("edge %q: sourceHandle %q is not an output port on kind %q", e.Label, e.SourceHandle, srcKind))
+			}
 		}
-		if !kindOutPorts[srcKind][srcHandle] {
-			errs = append(errs, fmt.Sprintf("edge %q: sourceHandle %q is not an output port on kind %q", e.Label, e.SourceHandle, srcKind))
-		}
-		tgtKind := nodeType[e.Target]
-		if !kindInPorts[tgtKind][e.TargetHandle] {
+		tgtKind, tgtKnown := nodeType[e.Target]
+		if !tgtKnown {
+			errs = append(errs, fmt.Sprintf("edge %q references unknown node id %q as its target", e.Label, e.Target))
+		} else if !kindInPorts[tgtKind][e.TargetHandle] {
 			errs = append(errs, fmt.Sprintf("edge %q: targetHandle %q is not an input port on kind %q", e.Label, e.TargetHandle, tgtKind))
 		}
 	}
