@@ -20,9 +20,9 @@ type Node struct {
 	// It blocks for the slide duration (pause-aware). nil on test builds without
 	// injection — the caller then falls back to the instant refill. beads is the
 	// OLD backup contents that become the new working row.
-	EmitRefillSlide func(beads []int)
-	Init        []int `wire:"data.init"`
-	Repeat      bool  `wire:"data.repeat"`
+	EmitRefillSlide  func(beads []int)
+	Init             []int `wire:"data.init"`
+	Repeat           bool  `wire:"data.repeat"`
 	ToHoldNewSendOld *Wiring.Out
 	// ToExcitatory fans the emitted value out to a Pulse node (sample-and-hold). It is
 	// optional: when unwired (Wired()==false) the emit is skipped so existing
@@ -32,7 +32,7 @@ type Node struct {
 	// change-step feedback). Optional: when unwired (Wired()==false) the emit
 	// is skipped so existing topologies without a Pacer are unaffected.
 	ToPacer    *Wiring.Out
-	FeedbackIn  *Wiring.In
+	FeedbackIn *Wiring.In
 }
 
 // fanOut places beads on all wired outputs and drives them concurrently via

@@ -112,9 +112,13 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 			got := arcLengthBetweenPorts(c.src, c.srcH, c.tgt, c.tgtH)
 			// Straight-segment model: arc length is the chord distance.
 			srcCenter := vec3{}
-			if c.src.Center != nil { srcCenter = *c.src.Center }
+			if c.src.Center != nil {
+				srcCenter = *c.src.Center
+			}
 			tgtCenter := vec3{}
-			if c.tgt.Center != nil { tgtCenter = *c.tgt.Center }
+			if c.tgt.Center != nil {
+				tgtCenter = *c.tgt.Center
+			}
 			p0 := refPortWorldPos(c.src.Kind, srcCenter, c.src.Outputs, c.srcH, false)
 			p2 := refPortWorldPos(c.tgt.Kind, tgtCenter, c.tgt.Inputs, c.tgtH, true)
 			want := refChordLength(p0, p2)

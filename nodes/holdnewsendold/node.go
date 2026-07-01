@@ -12,9 +12,9 @@ import (
 const noValue = gatecommon.NoValue
 
 type Node struct {
-	Fire                       func()
-	EmitGeometry               func()
-	EmitHeldBead               func(held int)
+	Fire         func()
+	EmitGeometry func()
+	EmitHeldBead func(held int)
 	// EmitNodeStatus reports the node's torus status (processing error / revert). It
 	// is injected by the loader; nil in chan-mode unit tests. The shared
 	// Wiring.ProcessingGuard calls it when a different-color bead is missed mid-

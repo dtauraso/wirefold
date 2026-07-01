@@ -30,9 +30,9 @@ func TestNodeBeadSnapshotsTrackArray(t *testing.T) {
 	var snaps []beadSnapshot
 
 	node := &Node{
-		Fire:       func() { tr.Fire("in") },
-		Init:       []int{1, 0},
-		Repeat:     false, // one working drain: 2 pops then exit
+		Fire:             func() { tr.Fire("in") },
+		Init:             []int{1, 0},
+		Repeat:           false, // one working drain: 2 pops then exit
 		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 		EmitNodeBeads: func(working, backup []int) {
 			mu.Lock()

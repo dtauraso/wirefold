@@ -26,21 +26,21 @@ import (
 // the emitting node — the one that received the value (recv) or sent
 // it (send/fire).
 const (
-	KindRecv           = "recv"
-	KindFire           = "fire"
-	KindSend           = "send"
-	KindDone           = "done"
+	KindRecv = "recv"
+	KindFire = "fire"
+	KindSend = "send"
+	KindDone = "done"
 	// KindPosition is the per-frame bead-position event (Phase 2). The wire's
 	// delivery goroutine emits one every ~16 ms while a bead is in flight,
 	// carrying the bead's evaluated 3-D position so the renderer plots it without
 	// computing geometry itself.
-	KindPosition       = "edge-bead"
+	KindPosition = "edge-bead"
 	// KindGeometry carries an edge's authoritative straight-segment endpoints
 	// (Phase 3). Go owns node positions + per-edge segments; it emits one geometry
 	// event per edge on load and again whenever a node-move re-derives that edge's
 	// segment, so the renderer draws the wire tube from Go's endpoints and
 	// computes no geometry of its own. Keyed by edge label (== the TS edge id).
-	KindGeometry       = "geometry"
+	KindGeometry = "geometry"
 	// KindPulseCancelled tells the renderer to remove an in-flight bead's sprite
 	// (Phase 3). Go emits it when a wire drops a bead mid-flight (edge deleted while
 	// the bead was traversing). Keyed by the bead's SOURCE node+port — the same
@@ -79,7 +79,7 @@ const (
 	// KindSceneTori carries the polar-guide tori visibility state. Go emits it when
 	// the tori visibility is toggled (op="tori-vis"), so the renderer shows or hides
 	// the two polar tori in NavGuides without computing any geometry.
-	KindSceneTori  = "scene-tori"
+	KindSceneTori = "scene-tori"
 	// KindScenePoles carries the scene-center pole frame visibility state. Go emits it
 	// when the visibility is toggled (op="scene-poles"), so the renderer shows or hides
 	// the scene-center PolarFrame without computing any geometry.
@@ -136,18 +136,18 @@ var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosit
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
 // and the unit direction from node center toward the port (DX/DY/DZ).
 type PortGeom struct {
-	Name    string
-	IsInput bool
+	Name       string
+	IsInput    bool
 	PX, PY, PZ float64
 	DX, DY, DZ float64
 }
 
 type Event struct {
-	Step      int    `json:"step"`
-	Kind      string `json:"kind"`
-	Node      string `json:"node"`
-	Port      string `json:"port,omitempty"`      // recv: input port; send: output port
-	Value     int    `json:"value,omitempty"`     // recv/send only
+	Step  int    `json:"step"`
+	Kind  string `json:"kind"`
+	Node  string `json:"node"`
+	Port  string `json:"port,omitempty"`  // recv: input port; send: output port
+	Value int    `json:"value,omitempty"` // recv/send only
 	// Bead is the per-wire monotonic bead id (paced_wire.go gen). Set on the four
 	// wire-bead events (send, edge-bead/position, arrive, pulse-cancelled) so the
 	// renderer keys each in-flight bead independently and a wire can show N beads at
@@ -161,8 +161,8 @@ type Event struct {
 	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
 	// Destination slot identity — authoritative from Go. Set on send events backed
 	// by a PacedWire so the TS layer never derives targetHandle from edge data.
-	Target       string  `json:"target,omitempty"`
-	TargetHandle string  `json:"targetHandle,omitempty"`
+	Target       string `json:"target,omitempty"`
+	TargetHandle string `json:"targetHandle,omitempty"`
 	// X/Y/Z carry the bead's evaluated 3-D world position on position events
 	// (KindPosition). Go computes the position from the bead's curve + clock; the
 	// renderer plots these directly. hasPos distinguishes a real (possibly 0,0,0)
@@ -206,10 +206,10 @@ type Event struct {
 	// PX/PY/PZ carry the camera pivot world position on camera events (KindCamera).
 	// R is the orbit radius; PosTheta/PosPhi are the pivot→camera direction (spherical);
 	// UpTheta/UpPhi are the up-hint direction (spherical). Set on camera events only.
-	PX, PY, PZ float64
-	R          float64
+	PX, PY, PZ       float64
+	R                float64
 	PosTheta, PosPhi float64
-	UpTheta,  UpPhi  float64
+	UpTheta, UpPhi   float64
 	// Row/Col identify an interior bead's grid slot on node-bead events
 	// (KindNodeBead): Row 0 = top/backup, Row 1 = bottom/working; Col is the
 	// position in that row's slice. Keyed by Node + (Row,Col). X/Y/Z carry the
@@ -787,4 +787,3 @@ func marshalEvent(e Event) ([]byte, error) {
 		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
 	}
 }
-
