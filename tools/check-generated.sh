@@ -4,7 +4,8 @@
 # Generated files: src/schema/node-defs.ts, src/schema/node-data-types.ts,
 #                  src/schema/wire-defs.ts, src/schema/trace-kinds.ts,
 #                  src/schema/trace-event-fields.ts,
-#                  src/schema/curve-params.ts, src/schema/shading-params.ts
+#                  src/schema/curve-params.ts, src/schema/shading-params.ts,
+#                  nodes/Wiring/node_dims_gen.go
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
@@ -20,7 +21,8 @@ stale=$(git status --porcelain \
   tools/topology-vscode/src/schema/trace-kinds.ts \
   tools/topology-vscode/src/schema/trace-event-fields.ts \
   tools/topology-vscode/src/schema/curve-params.ts \
-  tools/topology-vscode/src/schema/shading-params.ts 2>/dev/null)
+  tools/topology-vscode/src/schema/shading-params.ts \
+  nodes/Wiring/node_dims_gen.go 2>/dev/null)
 
 if [ -n "$stale" ]; then
   echo "check-generated: stale generated file(s) — commit the regenerated output:"
