@@ -43,16 +43,16 @@ type specPort struct {
 
 // specNode mirrors the JSON node shape.
 type specNode struct {
-	ID       string     `json:"id"`
-	Type     string     `json:"type"`
-	Index    *int       `json:"index,omitempty"`
-	Data     *NodeData  `json:"data,omitempty"`
-	Inputs   []specPort `json:"inputs,omitempty"`
-	Outputs  []specPort `json:"outputs,omitempty"`
-	R        *float64   `json:"r,omitempty"`    // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
-	X        float64    `json:"x"`              // stored absolute world center (polar layout)
-	Y        float64    `json:"y"`
-	Z        float64    `json:"z"`
+	ID      string     `json:"id"`
+	Type    string     `json:"type"`
+	Index   *int       `json:"index,omitempty"`
+	Data    *NodeData  `json:"data,omitempty"`
+	Inputs  []specPort `json:"inputs,omitempty"`
+	Outputs []specPort `json:"outputs,omitempty"`
+	R       *float64   `json:"r,omitempty"` // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
+	X       float64    `json:"x"`           // stored absolute world center (polar layout)
+	Y       float64    `json:"y"`
+	Z       float64    `json:"z"`
 }
 
 // toNodeGeom builds the geometry descriptor for arc-length computation,
@@ -115,9 +115,9 @@ func specPortsToGeom(ports []specPort) []portGeom {
 
 // NodeData mirrors the JSON data block on a node.
 type NodeData struct {
-	Init      []int          `json:"init,omitempty"`
-	Repeat    bool           `json:"repeat,omitempty"`
-	State map[string]int `json:"state,omitempty"` // field-seeding: struct fields via wire:"data.state"
+	Init   []int          `json:"init,omitempty"`
+	Repeat bool           `json:"repeat,omitempty"`
+	State  map[string]int `json:"state,omitempty"` // field-seeding: struct fields via wire:"data.state"
 	// SendRules is the node-owned per-output-port send policy, keyed by output
 	// port name (the sourceHandle, e.g. "ToNext0"). Absent ports default to
 	// consumeGated. The send rule belongs to the SOURCE NODE, not the edge.
@@ -127,12 +127,12 @@ type NodeData struct {
 // specEdge mirrors the JSON edge shape.
 // Fields tagged wire:"prop,..." are wire props emitted to wire-defs.ts by gen-node-defs.
 type specEdge struct {
-	Label          string  `json:"label"          wire:"prop,optional,tsType:string"`
-	Kind           string  `json:"kind"           wire:"prop,required,tsType:EdgeKind"`
-	Source         string  `json:"source"`
-	SourceHandle   string  `json:"sourceHandle"`
-	Target         string  `json:"target"`
-	TargetHandle   string  `json:"targetHandle"`
+	Label        string `json:"label"          wire:"prop,optional,tsType:string"`
+	Kind         string `json:"kind"           wire:"prop,required,tsType:EdgeKind"`
+	Source       string `json:"source"`
+	SourceHandle string `json:"sourceHandle"`
+	Target       string `json:"target"`
+	TargetHandle string `json:"targetHandle"`
 }
 
 // topoView is the viewer-state block inside the JSON (view.nodes carries positions).
@@ -175,7 +175,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 // parseSpec reads and parses the topology spec at path — a directory tree
 // (loadTree) or a monolithic topology.json — into a topoSpec, WITHOUT validating
 // or building. Shared by LoadTopology (which then validates + builds) and
-// readTopologySpec / EmitSpecLine (which only need the parsed spec).
+// EmitSpecLine (which only needs the parsed spec).
 func parseSpec(path string) (topoSpec, error) {
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		return loadTree(path)
@@ -202,19 +202,24 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		nodeGeoms[n.ID] = n.toNodeGeom()
 	}
 
-	// Non-rooted layout: each node's world center is loaded directly from its spec
-	// (meta.json x/y/z, injected as nodeGeom.Center in toNodeGeom). Compute each
-	// node's REACH radius (max distance from its center to any node it outputs to)
-	// under the loaded centers; streamed in NodeGeometry's sphereR field so the TS
-	// SphereRing reaches every surface node. Computed before newMoveDispatch so each
-	// node/edge mover captures it in its held geom.
-	{
-		centers := map[string]vec3{}
-		for id, g := range nodeGeoms {
-			if g.Center != nil {
-				centers[id] = *g.Center
-			}
+	// Shared world-center map, built ONCE from the loaded geometry and reused by the
+	// reach-radius pass, the aimed-port registry, and the edge-geometry centerOf closure.
+	// Each node's world center is loaded directly from its spec (meta.json x/y/z, injected
+	// as nodeGeom.Center in toNodeGeom). Nothing below mutates a node's Center, so this
+	// snapshot stays authoritative for the whole build (the reach-radius pass writes
+	// ReachR, which does not affect centers).
+	centers := map[string]vec3{}
+	for id, g := range nodeGeoms {
+		if g.Center != nil {
+			centers[id] = *g.Center
 		}
+	}
+
+	// Non-rooted layout: compute each node's REACH radius (max distance from its center
+	// to any node it outputs to) under the loaded centers; streamed in NodeGeometry's
+	// sphereR field so the TS SphereRing reaches every surface node. Computed before
+	// newMoveDispatch so each node/edge mover captures it in its held geom.
+	{
 		edges := make([]sphereEdge, 0, len(spec.Edges))
 		for _, e := range spec.Edges {
 			edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
@@ -234,12 +239,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// non-aimed ports.
 	var aimedPorts AimedPortRegistry
 	{
-		centers := map[string]vec3{}
-		for id, g := range nodeGeoms {
-			if g.Center != nil {
-				centers[id] = *g.Center
-			}
-		}
 		// Derive the aimed-port registry from the loaded edge list: every edge-connected
 		// port aims toward the node on the other end. No node-ID hardcoding; any topology
 		// gets correct aimed ports automatically. Only register when BOTH endpoint nodes
@@ -262,13 +261,10 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	}
 
 	// centerOf closure for portDirAimed during initial edge-geometry construction:
-	// reads static world centers from nodeGeoms (before movers are running).
+	// reads the shared static world centers (before movers are running).
 	centerOf := func(id string) (vec3, bool) {
-		g, ok := nodeGeoms[id]
-		if !ok || g.Center == nil {
-			return vec3{}, false
-		}
-		return *g.Center, true
+		c, ok := centers[id]
+		return c, ok
 	}
 
 	// Allocate one *PacedWire per destination port (fan-in safe).
@@ -488,19 +484,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	return nodes, SlotRegistry(destWire), md, nil
 }
 
-// readTopologySpec reads and parses the topology spec at jsonPath (JSON file or
-// directory tree) without building nodes or wires. Used to emit the spec to
-// the TS webview on startup.
-func readTopologySpec(jsonPath string) (topoSpec, error) {
-	return parseSpec(jsonPath)
-}
-
 // EmitSpecLine reads the topology spec at jsonPath and writes a single
 // {"kind":"spec","nodes":[...],"edges":[...],"view":{...}} JSON line to w.
 // Called by main.go before node goroutines start so the TS webview receives
 // the full spec on startup without reading topology/ files directly.
 func EmitSpecLine(w io.Writer, jsonPath string) error {
-	spec, err := readTopologySpec(jsonPath)
+	spec, err := parseSpec(jsonPath)
 	if err != nil {
 		return err
 	}
