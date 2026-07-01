@@ -39,7 +39,7 @@ between() { # file start end
 }
 
 # Double-quoted literal values from a stream.
-quoted() { grep -oE '"[^"]+"' | tr -d '"' | sort -u; }
+quoted() { grep -aoE '"[^"]+"' | tr -d '"' | sort -u; }
 
 # Top-level Go `case "..."` labels: exactly one leading tab (nested cases have two
 # or more, so they are excluded). BSD grep lacks -P, so match with awk (\t = tab).
@@ -70,7 +70,7 @@ report_diff() { # label missing_in_a a_name missing_in_b b_name
 }
 
 # --- Axis 1: ops ------------------------------------------------------------
-TS_OPS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -oE 'op: "[^"]+"' | quoted)
+TS_OPS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'op: "[^"]+"' | quoted)
 GO_OPS=$(between EDIT_OPS_START EDIT_OPS_END "$STDIN_READER" | toplevel_case | quoted)
 assert_nonempty "$TS_OPS" "axis1 messages.ts ops"
 assert_nonempty "$GO_OPS" "axis1 stdin_reader.go ops"
@@ -78,9 +78,9 @@ report_diff "$(comm -13 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "stdin_reader.go o
             "$(comm -23 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "messages.ts ops"
 
 # --- Axis 2: update entity kinds (3-way) ------------------------------------
-TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -oE 'kind: "[^"]+"' | quoted)
+TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'kind: "[^"]+"' | quoted)
 GO_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$STDIN_READER" | toplevel_case | quoted)
-HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | grep -oE 'case "[^"]+"' | quoted)
+HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | grep -aoE 'case "[^"]+"' | quoted)
 assert_nonempty "$TS_KINDS" "axis2 messages.ts update kinds"
 assert_nonempty "$GO_KINDS" "axis2 stdin_reader.go update kinds"
 assert_nonempty "$HM_KINDS" "axis2 handle-message.ts update kinds"
@@ -91,7 +91,7 @@ report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-messag
 
 # --- Axis 3: overlay flags --------------------------------------------------
 TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted)
-GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$STDIN_READER" | grep -oE '"[^"]+":' | tr -d '":' | sort -u)
+GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$STDIN_READER" | grep -aoE '"[^"]+":' | tr -d '":' | sort -u)
 assert_nonempty "$TS_FLAGS" "axis3 messages.ts overlay flags"
 assert_nonempty "$GO_FLAGS" "axis3 stdin_reader.go overlay flags"
 report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.go overlay flags" \
@@ -103,7 +103,7 @@ report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.
 # field set IS the overlay flag set (TS_FLAGS). On the Go side it is the json tags of
 # stdinGuideVisPayload. Assert they agree so a flag added/removed in the set-path can't
 # silently no-op.
-GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$STDIN_READER" | grep -oE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
+GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$STDIN_READER" | grep -aoE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
 assert_nonempty "$GO_GUIDEVIS" "axis4 stdinGuideVisPayload fields"
 report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuideVisPayload fields" \
             "$(comm -23 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "messages.ts OverlayState/flags"
@@ -113,7 +113,7 @@ report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuide
 # them once in the VIEWPOINT_KINDS const (VP_KINDS sentinels); Go switches on vp.Kind
 # inside its own VP_KINDS sentinels. A kind on one side only silently no-ops.
 TS_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$MESSAGES_TS" | quoted)
-GO_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$STDIN_READER" | grep -oE 'case "[^"]+"' | quoted)
+GO_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$STDIN_READER" | grep -aoE 'case "[^"]+"' | quoted)
 assert_nonempty "$TS_VPKINDS" "axis5 messages.ts vp kinds"
 assert_nonempty "$GO_VPKINDS" "axis5 stdin_reader.go vp kinds"
 report_diff "$(comm -13 <(echo "$GO_VPKINDS") <(echo "$TS_VPKINDS"))" "stdin_reader.go vp kinds" \

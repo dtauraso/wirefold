@@ -5,6 +5,11 @@
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
+if [ ! -d nodes ]; then
+  echo "channel-naming: MISCONFIGURED — scan dir not found: nodes/ (run from repo root)" >&2
+  exit 1
+fi
+
 bad_pattern='^(ch[0-9]*|done|signal|out|in|ack|sig|tmp|x|c|ch)$'
 fail=0
 
@@ -16,6 +21,6 @@ while IFS= read -r line; do
     echo "channel-naming: $file: generic name '$name' (encode endpoints per CLAUDE.md)"
     fail=1
   fi
-done < <(grep -rnE --include='*.go' --exclude='*_test.go' '[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:?=[[:space:]]*make\(chan' nodes/ 2>/dev/null)
+done < <(grep -arnE --include='*.go' --exclude='*_test.go' '[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:?=[[:space:]]*make\(chan' nodes/ 2>/dev/null)
 
 exit $fail

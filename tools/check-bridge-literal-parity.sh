@@ -51,7 +51,7 @@ HITS=0
 # VP_KINDS_START / VP_KINDS_END sentinel comments around it in stdin_reader.go.
 vp_kinds_go() {
   awk '/VP_KINDS_START/{p=1;next} /VP_KINDS_END/{p=0} p' "$STDIN_READER" \
-    | grep -oE 'case "[^"]+"' \
+    | grep -aoE 'case "[^"]+"' \
     | grep -oE '"[^"]+"' | tr -d '"' | sort -u
 }
 # TS: the quoted string literals of the VIEWPOINT_KINDS array (the single source
@@ -60,7 +60,7 @@ vp_kinds_go() {
 # over the file; inside the sentinels the only quoted strings are the kind names.
 vp_kinds_ts() {
   awk '/VP_KINDS_START/{p=1;next} /VP_KINDS_END/{p=0} p' "$MESSAGES_TS" \
-    | grep -oE '"[^"]+"' | tr -d '"' | sort -u
+    | grep -aoE '"[^"]+"' | tr -d '"' | sort -u
 }
 
 GO_VP=$(vp_kinds_go)
@@ -85,13 +85,17 @@ if [[ -n "$MISSING_IN_TS" ]]; then
 fi
 
 # --- Axis 2: the "spec" startup-line kind -----------------------------------
-# Both sides must reference the literal. Presence check (not value extraction):
-# the producer marshals Kind:"spec"; the consumer compares kind === "spec".
-if ! grep -q 'Kind: "spec"' "$LOADER_GO"; then
+# Both sides must reference the literal. This axis is PRESENCE-only (not a value
+# comparison) by design: the two sides use asymmetric syntax — Go marshals a struct
+# field `Kind: "spec"` while TS compares `kind === "spec"` — so there is no single
+# shared token to extract-and-diff without brittle per-side parsing. Both anchor on
+# the same literal "spec", so a rename on either side drops that side's presence hit
+# and trips this guard. If the syntaxes ever converge, upgrade to value extraction.
+if ! grep -aq 'Kind: "spec"' "$LOADER_GO"; then
   echo "  producer literal missing: loader.go no longer emits Kind: \"spec\""
   HITS=$((HITS + 1))
 fi
-if ! grep -q '"spec"' "$RUN_COMMAND_TS"; then
+if ! grep -aq '"spec"' "$RUN_COMMAND_TS"; then
   echo "  consumer literal missing: runCommand.ts no longer recognizes \"spec\""
   HITS=$((HITS + 1))
 fi

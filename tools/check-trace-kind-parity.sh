@@ -10,6 +10,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 TRACE_KINDS_FILE="$REPO_ROOT/tools/topology-vscode/src/schema/trace-kinds.ts"
 PUMP_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/three/pump.ts"
+TRACE_GO_FILE="$REPO_ROOT/Trace/Trace.go"
+TRACE_FIELDS_FILE="$REPO_ROOT/tools/topology-vscode/src/schema/trace-event-fields.ts"
+
+for f in "$TRACE_KINDS_FILE" "$PUMP_FILE" "$TRACE_GO_FILE" "$TRACE_FIELDS_FILE"; do
+  if [[ ! -f "$f" ]]; then
+    echo "trace-kind-parity: MISCONFIGURED — file not found: $f" >&2
+    exit 1
+  fi
+done
 
 # Extract kinds from TRACE_EVENT_KINDS array (quoted string literals on that line).
 kinds_from_ts() {
@@ -71,13 +80,12 @@ fi
 # --- NodeStatusEvent interface in trace-event-fields.ts. The interface is generated
 # --- FROM Trace.go, so this catches a hand-edit of the generated file or a generator
 # --- bug — Go's field set and the TS payload's field set must be identical.
-TRACE_GO_FILE="$REPO_ROOT/Trace/Trace.go"
-TRACE_FIELDS_FILE="$REPO_ROOT/tools/topology-vscode/src/schema/trace-event-fields.ts"
+# (TRACE_GO_FILE / TRACE_FIELDS_FILE declared + existence-checked at the top.)
 
 # json tags of the `type nodeStatus struct { ... }` block in Trace.go's MarshalJSON.
 fields_from_go() {
   awk '/type nodeStatus struct {/{f=1; next} f&&/}/{f=0} f' "$TRACE_GO_FILE" \
-    | grep -o 'json:"[^"]*"' \
+    | grep -ao 'json:"[^"]*"' \
     | sed -e 's/json:"//' -e 's/"$//' -e 's/,.*//' \
     | sort
 }
@@ -85,7 +93,7 @@ fields_from_go() {
 # field names of the `export interface NodeStatusEvent { ... }` block.
 fields_from_ts() {
   awk '/export interface NodeStatusEvent {/{f=1; next} f&&/^}/{f=0} f' "$TRACE_FIELDS_FILE" \
-    | grep -oE '^[[:space:]]*[a-zA-Z0-9_]+' \
+    | grep -aoE '^[[:space:]]*[a-zA-Z0-9_]+' \
     | tr -d ' ' \
     | sort
 }

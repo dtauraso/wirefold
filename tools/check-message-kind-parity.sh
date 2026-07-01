@@ -12,13 +12,20 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
 
+for f in "$STDIN_READER" "$MESSAGES_TS"; do
+  if [[ ! -f "$f" ]]; then
+    echo "message-kind-parity: MISCONFIGURED — file not found: $f" >&2
+    exit 1
+  fi
+done
+
 # Extract string literals compared against msg.Type in stdin_reader.go.
 # Patterns matched:
 #   msg.Type != "..." or msg.Type == "..."  (if-style comparisons)
 #   case "...":  inside a switch msg.Type block
 kinds_from_go() {
   {
-    grep -oE 'msg\.Type[[:space:]]*[!=]=[[:space:]]*"[^"]+"' "$STDIN_READER" \
+    grep -aoE 'msg\.Type[[:space:]]*[!=]=[[:space:]]*"[^"]+"' "$STDIN_READER" \
       | grep -oE '"[^"]+"' \
       | tr -d '"'
     # Extract case literals from ONLY the `switch msg.Type` block. Bound the window
@@ -30,7 +37,7 @@ kinds_from_go() {
       inblk && /switch[[:space:]]/  { inblk=0 }
       inblk
     ' "$STDIN_READER" \
-      | grep -oE 'case[[:space:]]+"[^"]+"' \
+      | grep -aoE 'case[[:space:]]+"[^"]+"' \
       | grep -oE '"[^"]+"' \
       | tr -d '"'
   } | sort -u
@@ -41,7 +48,7 @@ kinds_from_go() {
 # then we drop the spread line, the declaration line, and the closing line.
 kinds_from_ts() {
   awk '/WEBVIEW_TO_HOST_TYPES/,/\]\)/' "$MESSAGES_TS" \
-    | grep -vE 'flatMap|WEBVIEW_TO_HOST_TYPES|\]\)' \
+    | grep -avE 'flatMap|WEBVIEW_TO_HOST_TYPES|\]\)' \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort -u
