@@ -1,5 +1,5 @@
 // scene-graph.tsx — GraphNode, SphereRing, SingleEdgeTube, GraphEdges.
-import React, { useMemo, useContext, useRef } from "react";
+import React, { useMemo, useContext, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
@@ -424,6 +424,18 @@ export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: st
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segKey]);
 
+  // Dispose the outgoing GPU TubeGeometries when the memo rebuilds (segKey change on
+  // drag re-streams) or on unmount. React runs this cleanup for the PREVIOUS tubeGeo/
+  // haloGeo before the next pair exists, so the still-mounted current pair is never
+  // double-disposed. R3F does NOT auto-dispose an imperatively-passed geometry={...},
+  // so without this the replaced buffers leak (mirrors the NavGuides tori fix).
+  useEffect(() => {
+    return () => {
+      tubeGeo?.dispose();
+      haloGeo?.dispose();
+    };
+  }, [tubeGeo, haloGeo]);
+
   // Until Go streams this edge's segment, draw nothing (geometry arrives on load).
   if (!tubeGeo || !haloGeo) {
     return <>{!faded && <PulseBead edgeId={edgeId} />}</>;
@@ -508,6 +520,16 @@ function DoubleEdgeOverlay({ edgeId }: { edgeId: string }) {
     return { lineGeo: _lineGeo, arrowStart: _arrowStart, arrowEnd: _arrowEnd };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segKey]);
+
+  // Dispose the outgoing GPU TubeGeometry when the memo rebuilds (drag re-stream) or on
+  // unmount — R3F does not auto-dispose an imperatively-passed geometry={...}. Cleanup
+  // runs for the PREVIOUS lineGeo before the next exists, so no double-dispose (mirrors
+  // the NavGuides tori fix).
+  useEffect(() => {
+    return () => {
+      lineGeo?.dispose();
+    };
+  }, [lineGeo]);
 
   if (!lineGeo) return null;
   return (
