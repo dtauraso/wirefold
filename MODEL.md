@@ -128,12 +128,12 @@ state and never tells Go when a bead has arrived — Go owns the clock.
   Pump is the boundary — no firing-rule or timing logic may live outside
   it on the TS side.
 - **`GraphNode`** (in
-  `tools/topology-vscode/src/webview/three/scene-content.tsx`) renders
+  `tools/topology-vscode/src/webview/three/scene-graph.tsx`) renders
   all nodes generically as a sphere mesh + border ring, keyed off
   `node.data.fill`/`node.data.stroke` from `NODE_DEFS`. There are no
   per-kind component files.
 - **`SingleEdgeTube`** (in
-  `tools/topology-vscode/src/webview/three/ThreeView.tsx`) renders wire
+  `tools/topology-vscode/src/webview/three/scene-graph.tsx`) renders wire
   animation driven by the positions Go emits. It owns no traversal
   timing.
 - **Global gate** is a play/pause signal sent to the Go process (the one
