@@ -25,6 +25,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import type { TraceEvent } from "../../messages";
+import type { RFEdge, EdgeData } from "../types";
 import type { TraceEventKind } from "../../schema/trace-kinds";
 import { useCameraStore } from "./camera-store";
 import { useThreeStore } from "./store";
@@ -132,6 +133,38 @@ function applyOverlay(kind: OverlayKind, visible: boolean | undefined): void {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Source-port → edges index ────────────────────────────────────────────────
+// Fan-out lookup: bead events (send/edge-bead/arrive/pulse-cancelled) match ALL
+// edges leaving a given (source node, sourceHandle). A naive edges.filter() is
+// O(E) + an array alloc on every event (~60Hz × beads-in-flight). Instead we
+// build a Map<"source\0sourceHandle", RFEdge[]> ONCE and reuse it, rebuilding
+// only when the store hands us a new edges array (setEdges always creates a new
+// array reference, so an identity check is a sufficient staleness signal). This
+// is pure plotting — same match result as the filter, no traversal/timing logic.
+let indexedEdges: RFEdge<EdgeData>[] | null = null;
+let sourceIndex = new Map<string, RFEdge<EdgeData>[]>();
+
+function srcKey(source: string, sourceHandle: string): string {
+  return `${source} ${sourceHandle}`;
+}
+
+function edgesBySource(node: string, port: string): RFEdge<EdgeData>[] {
+  const edges = useThreeStore.getState().edges;
+  if (edges !== indexedEdges) {
+    const next = new Map<string, RFEdge<EdgeData>[]>();
+    for (const e of edges) {
+      if (e.sourceHandle == null) continue;
+      const key = srcKey(e.source, e.sourceHandle);
+      const bucket = next.get(key);
+      if (bucket) bucket.push(e);
+      else next.set(key, [e]);
+    }
+    sourceIndex = next;
+    indexedEdges = edges;
+  }
+  return sourceIndex.get(srcKey(node, port)) ?? [];
+}
+
 export function handleTraceEvent(event: TraceEvent): void {
   const { step, kind } = event;
   // Cast to the generated enum so tsc checks all branches are covered.
@@ -155,10 +188,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       // + sourceHandle (fan-out), same key as send, and set the bead's world
       // position directly — TS plots, computes no geometry.
       const { node, port, value, x, y, z, f, bead } = event as Extract<TraceEvent, { kind: "edge-bead" }>;
-      const edges = useThreeStore.getState().edges;
-      const matched = edges.filter(
-        (e) => e.source === node && e.sourceHandle === port,
-      );
+      const matched = edgesBySource(node, port);
       for (const edge of matched) {
         // x/y/z is Go's fallback world position; f is the bead's fractional progress.
         // PulseBead places the bead at lerp(liveStart, liveEnd, f) on the editor's
@@ -186,10 +216,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       // and remove the bead sprite. The edge itself may already be gone from the
       // store (deleteEdge removes it locally); clearPulse is a safe no-op then.
       const { node, port, bead } = event as Extract<TraceEvent, { kind: "pulse-cancelled" }>;
-      const edges = useThreeStore.getState().edges;
-      const matched = edges.filter(
-        (e) => e.source === node && e.sourceHandle === port,
-      );
+      const matched = edgesBySource(node, port);
       for (const edge of matched) {
         clearPulse(edge.id, bead ?? 0);
       }
@@ -223,10 +250,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       // bead vanishes the instant it arrives, NOT when the node later consumes the
       // held value (that's "done"). deliverLocked fires arrive exactly once per bead.
       const { node, port, bead } = event as Extract<TraceEvent, { kind: "arrive" }>;
-      const edges = useThreeStore.getState().edges;
-      const matched = edges.filter(
-        (e) => e.source === node && e.sourceHandle === port,
-      );
+      const matched = edgesBySource(node, port);
       for (const edge of matched) {
         clearPulse(edge.id, bead ?? 0);
       }
