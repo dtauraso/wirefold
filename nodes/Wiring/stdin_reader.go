@@ -384,7 +384,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 					}
 				}
 			}
-			if treeRoot != "" {
+			if treeRoot != "" && safeSegment(msg.Node) && safeSegment(msg.Port) {
 				side := "inputs"
 				if !msg.IsInput {
 					side = "outputs"

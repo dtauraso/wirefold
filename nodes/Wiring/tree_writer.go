@@ -2,9 +2,30 @@ package Wiring
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// safeSegment reports whether s is safe to use as a single path segment (a node id
+// or port name) in a filesystem path built under the topology tree. node ids and
+// ports arrive over stdin from TS; filepath.Join cleans lexically but does NOT
+// prevent traversal (e.g. "../../evil" escapes the tree), so any segment that is
+// empty, contains a path separator, or contains ".." is rejected before a write
+// path is constructed.
+func safeSegment(s string) bool {
+	if s == "" {
+		return false
+	}
+	if strings.ContainsAny(s, `/\`) || strings.ContainsRune(s, filepath.Separator) {
+		return false
+	}
+	if s == ".." || strings.Contains(s, "..") {
+		return false
+	}
+	return true
+}
 
 // writeJSONAtomic marshals v compactly, writes to path+".tmp", then renames to path.
 // Output is single-line, no trailing newline, matching the fixture style.
@@ -25,6 +46,9 @@ func writeJSONAtomic(path string, v any) error {
 }
 
 func writeViewNode(root, nodeID string, pos specPosition) error {
+	if !safeSegment(nodeID) {
+		return fmt.Errorf("writeViewNode: unsafe node id %q", nodeID)
+	}
 	path := filepath.Join(root, "view", "nodes", nodeID+".json")
 	return writeJSONAtomic(path, pos)
 }
@@ -32,6 +56,9 @@ func writeViewNode(root, nodeID string, pos specPosition) error {
 // writeMetaPos sets the absolute world center on a node's meta.json, preserving its
 // id/type/r. Persisting x/y/z makes a node-drag (polar layout) durable across reload.
 func writeMetaPos(root, nodeID string, x, y, z float64) error {
+	if !safeSegment(nodeID) {
+		return fmt.Errorf("writeMetaPos: unsafe node id %q", nodeID)
+	}
 	path := filepath.Join(root, "nodes", nodeID, "meta.json")
 	var meta jsonMeta
 	if raw, err := os.ReadFile(path); err == nil {
@@ -45,6 +72,12 @@ func writeMetaPos(root, nodeID string, x, y, z float64) error {
 }
 
 func writePort(root, nodeID, port string, isInput bool, p specPort) error {
+	if !safeSegment(nodeID) {
+		return fmt.Errorf("writePort: unsafe node id %q", nodeID)
+	}
+	if !safeSegment(port) {
+		return fmt.Errorf("writePort: unsafe port %q", port)
+	}
 	side := "inputs"
 	if !isInput {
 		side = "outputs"
