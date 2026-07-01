@@ -229,24 +229,29 @@ export function Scene({
   // For each owner we draw its sphere and highlight the owner (center) plus all nodes
   // on its surface (the owner's children). Owners that center no sphere (no outgoing
   // edge) draw nothing but still contribute their own highlight.
-  const sphereOwners = !selectedId
-    ? []
-    : sphereMode === "own"
-      ? [selectedId]
-      : Array.from(
-          new Set<string>(
-            edges
-              .filter((e) => e.target === selectedId && e.source)
-              .map((e) => e.source as string),
-          ),
-        );
-  const surfaceIds = new Set<string>();
-  for (const ownerId of sphereOwners) {
-    surfaceIds.add(ownerId);
-    for (const e of edges) {
-      if (e.source === ownerId && e.target) surfaceIds.add(e.target);
+  // Memoized on [selectedId, sphereMode, edges]: recompute the owner list + surface
+  // set only when the selection or topology changes, not on every scene render.
+  const { sphereOwners, surfaceIds } = useMemo(() => {
+    const owners = !selectedId
+      ? []
+      : sphereMode === "own"
+        ? [selectedId]
+        : Array.from(
+            new Set<string>(
+              edges
+                .filter((e) => e.target === selectedId && e.source)
+                .map((e) => e.source as string),
+            ),
+          );
+    const ids = new Set<string>();
+    for (const ownerId of owners) {
+      ids.add(ownerId);
+      for (const e of edges) {
+        if (e.source === ownerId && e.target) ids.add(e.target);
+      }
     }
-  }
+    return { sphereOwners: owners, surfaceIds: ids };
+  }, [selectedId, sphereMode, edges]);
   // cameraPolar takes precedence; if present, skip camera3d restore and suppress auto-fit.
   const hasRestoredCamera = initialCameraPolar !== undefined || initialCamera3d !== undefined;
   return (

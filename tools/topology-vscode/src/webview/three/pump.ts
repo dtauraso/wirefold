@@ -62,42 +62,48 @@ type OverlayKind =
   | "labels-global"
   | "badges-global";
 
-type OverlayEntry = {
-  setter: (v: boolean) => void;
+type CameraState = ReturnType<typeof useCameraStore.getState>;
+type OverlaySetterKey = {
+  [K in keyof CameraState]: CameraState[K] extends (v: boolean) => void ? K : never;
+}[keyof CameraState];
+
+type OverlayMeta = {
+  // Name of the camera-store setter to invoke (looked up on the live state).
+  setterKey: OverlaySetterKey;
   field: keyof ViewerState;
   // inverted=true: Go's visible → store holds !visible (hidden sense)
   inverted: boolean;
   hasPostLog: boolean;
 };
 
-function getOverlayEntry(kind: OverlayKind): OverlayEntry {
-  const cs = useCameraStore.getState();
-  const table: Record<OverlayKind, OverlayEntry> = {
-    "scene-tori":       { setter: cs.setSceneToriVisible,      field: "sceneToriVisible",      inverted: false, hasPostLog: true  },
-    "scene-poles":      { setter: cs.setScenePolesVisible,     field: "scenePolesVisible",     inverted: false, hasPostLog: true  },
-    "node-poles":       { setter: cs.setNodePolesVisible,      field: "nodePolesVisible",      inverted: false, hasPostLog: true  },
-    "angle-labels":     { setter: cs.setAngleLabelsVisible,    field: "angleLabelsVisible",    inverted: false, hasPostLog: true  },
-    "sel-sphere-poles": { setter: cs.setSelSpherePolesVisible, field: "selSpherePolesVisible", inverted: false, hasPostLog: true  },
-    "handholds":        { setter: cs.setHandholdsVisible,      field: "handholdsVisible",      inverted: false, hasPostLog: true  },
-    "overlays-vis":     { setter: cs.setOverlaysVisible,       field: "overlaysActive",        inverted: false, hasPostLog: true  },
-    "labels-global":    { setter: cs.setLabelsGlobalHidden,    field: "labelsGlobalHidden",    inverted: true,  hasPostLog: false },
-    "badges-global":    { setter: cs.setBadgesHidden,          field: "badgesHidden",          inverted: true,  hasPostLog: false },
-  };
-  return table[kind];
-}
+// Static overlay metadata — no store instances captured, so it lifts to module
+// scope and is allocated once (not per overlay event). The live setter is looked
+// up from useCameraStore.getState() at apply time via setterKey.
+const OVERLAY_TABLE: Record<OverlayKind, OverlayMeta> = {
+  "scene-tori":       { setterKey: "setSceneToriVisible",      field: "sceneToriVisible",      inverted: false, hasPostLog: true  },
+  "scene-poles":      { setterKey: "setScenePolesVisible",     field: "scenePolesVisible",     inverted: false, hasPostLog: true  },
+  "node-poles":       { setterKey: "setNodePolesVisible",      field: "nodePolesVisible",      inverted: false, hasPostLog: true  },
+  "angle-labels":     { setterKey: "setAngleLabelsVisible",    field: "angleLabelsVisible",    inverted: false, hasPostLog: true  },
+  "sel-sphere-poles": { setterKey: "setSelSpherePolesVisible", field: "selSpherePolesVisible", inverted: false, hasPostLog: true  },
+  "handholds":        { setterKey: "setHandholdsVisible",      field: "handholdsVisible",      inverted: false, hasPostLog: true  },
+  "overlays-vis":     { setterKey: "setOverlaysVisible",       field: "overlaysActive",        inverted: false, hasPostLog: true  },
+  "labels-global":    { setterKey: "setLabelsGlobalHidden",    field: "labelsGlobalHidden",    inverted: true,  hasPostLog: false },
+  "badges-global":    { setterKey: "setBadgesHidden",          field: "badgesHidden",          inverted: true,  hasPostLog: false },
+};
 
 function applyOverlay(kind: OverlayKind, visible: boolean | undefined): void {
-  const entry = getOverlayEntry(kind);
+  const entry = OVERLAY_TABLE[kind];
+  const setter = useCameraStore.getState()[entry.setterKey] as (v: boolean) => void;
   if (entry.hasPostLog) {
     postLog("guide-recv", { kind, visible });
   }
   if (entry.inverted) {
-    entry.setter(!visible);
+    setter(!visible);
     patchViewerState((v) => {
       (v as Record<string, boolean | undefined>)[entry.field as string] = !visible || undefined;
     });
   } else {
-    entry.setter(visible !== false);
+    setter(visible !== false);
     patchViewerState((v) => {
       (v as Record<string, boolean | undefined>)[entry.field as string] = visible === false ? false : undefined;
     });

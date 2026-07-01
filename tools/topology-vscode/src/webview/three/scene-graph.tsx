@@ -260,7 +260,7 @@ export function SphereRing({
   ownerId: string | null; // the node whose sphere to draw (a sphere the selection sits on)
 }) {
   // Re-render when Go streams node geometry (centers/radius), so R + center track moves.
-  useNodeGeometryStore((s) => s.geoms);
+  const geoms = useNodeGeometryStore((s) => s.geoms);
 
   const ownerNode = ownerId ? nodes.find((n) => n.id === ownerId) ?? null : null;
 
@@ -273,7 +273,29 @@ export function SphereRing({
     [ownerNode?.data?.stroke],
   );
 
-  if (!ownerNode || !centersSphere) return null;
+  // Ring-plane orientation: Go streams the two great-circle normals (vertical
+  // vr*, flat fr*). Memoize the 4 Vector3s + 2 Quaternions so they aren't
+  // reallocated every render — recompute only when the owner or its streamed
+  // geometry changes. torusGeometry lies in XY (plane normal +Z), so each
+  // quaternion rotates +Z onto the emitted normal (fallback orientation before
+  // geometry arrives).
+  const orient = useMemo(() => {
+    if (!ownerNode) return null;
+    const geom = getNodeGeometry(ownerNode.id);
+    const torusDefaultNormal = new THREE.Vector3(0, 0, 1);
+    const vrNormal = geom
+      ? new THREE.Vector3(geom.vrx, geom.vry, geom.vrz).normalize()
+      : new THREE.Vector3(0, 0, 1); // fallback: XY plane (vertical ring)
+    const frNormal = geom
+      ? new THREE.Vector3(geom.frx, geom.fry, geom.frz).normalize()
+      : new THREE.Vector3(1, 0, 0); // fallback: rotate 90° about X into XZ plane
+    return {
+      vrQ: new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, vrNormal),
+      frQ: new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, frNormal),
+    };
+  }, [ownerNode?.id, geoms]);
+
+  if (!ownerNode || !centersSphere || !orient) return null;
 
   const center = nodeWorldPos(ownerNode);
   // Radius: Go streams the REACH radius in sphereR — the max distance from this owner's
@@ -288,20 +310,8 @@ export function SphereRing({
   // Thin tube so it reads as a ring, not a donut.
   const tube = Math.max(0.5, nodeRadius(ownerNode) * 0.08);
 
-  // Go streams the two great-circle ring normals (vrx/vry/vrz = vertical,
-  // frx/fry/frz = flat). Orient each torus so its default +Z axis aligns
-  // with the emitted normal via quaternion; fall back to hardcoded XY / XZ
-  // orientation if the geometry hasn't arrived yet.
-  // torusGeometry lies in the XY plane by default, so its plane normal = +Z (0,0,1).
-  const torusDefaultNormal = new THREE.Vector3(0, 0, 1);
-  const vrNormal = geom
-    ? new THREE.Vector3(geom.vrx, geom.vry, geom.vrz).normalize()
-    : new THREE.Vector3(0, 0, 1); // fallback: XY plane (vertical ring)
-  const frNormal = geom
-    ? new THREE.Vector3(geom.frx, geom.fry, geom.frz).normalize()
-    : new THREE.Vector3(1, 0, 0); // fallback: rotate 90° about X into XZ plane
-  const vrQ = new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, vrNormal);
-  const frQ = new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, frNormal);
+  // Ring-plane quaternions computed/memoized above (orient).
+  const { vrQ, frQ } = orient;
 
   const ringMat = (
     <meshStandardMaterial
