@@ -66,8 +66,9 @@ func (i *In) TryRecv() (int, bool) {
 
 // PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
 // calls pw.PollRecv (returns immediately with ok=false when no value is present,
-// without parking) and, on success, emits the same trace events as TryRecv but
-// does NOT clear the slot (the consumer must call Done). In chan mode it does a
+// without parking) and, on success, CONSUMES the value on read (pops the front
+// delivered bead) while emitting the same trace events as TryRecv. There is no
+// separate Done step — the read itself consumes. In chan mode it does a
 // non-blocking select, identical to TryRecv's default branch.
 func (i *In) PollRecv() (int, bool) {
 	if i == nil {
