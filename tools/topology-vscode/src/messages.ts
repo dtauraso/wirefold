@@ -164,10 +164,12 @@ export type HostToWebviewMsg =
   | { type: "trace-event"; event: TraceEvent };
 
 // Note: "resend" is host-originated (runner.resend() writes it straight to Go's
-// stdin) and is never emitted by the webview, so it is intentionally absent here —
-// parseWebviewToHost must not accept "resend" from the webview.
+// stdin) and is never emitted by the webview. It is kept in this set so the
+// message-kind-parity guard stays in lockstep with stdin_reader.go's "resend"
+// kind (every kind Go reads on stdin has a seam here); the webview simply never
+// sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
