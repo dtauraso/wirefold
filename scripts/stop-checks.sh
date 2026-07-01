@@ -84,6 +84,13 @@ if [ -n "$ts_changed" ]; then
     out+="check-eslint failed:\n$eslint_out\n\n"
     fail=1
   fi
+  # Vitest unit suite (trace-event field contracts, parseSpec, round-trips) —
+  # compiles + runs the tests, so EXPENSIVE; lives in the ts_changed block, not
+  # the fast unconditional guard loop.
+  if ! vitest_out=$(bash tools/check-vitest.sh 2>&1); then
+    out+="check-vitest failed:\n$vitest_out\n\n"
+    fail=1
+  fi
 fi
 
 for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-slot-phase-boundary check-generated check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt; do
