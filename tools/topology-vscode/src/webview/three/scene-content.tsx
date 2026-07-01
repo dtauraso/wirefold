@@ -16,6 +16,7 @@ import { ProceduralEnvProvider } from "./scene-env";
 import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, PolarCameraRestorer } from "./scene-camera";
 import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
+import { MissedBeadMarkers } from "./scene-beads";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
 // ray distance is at most this many units closer than the nearest body hit.
@@ -271,6 +272,10 @@ export function Scene({
       {sphereOwners.map((oid) => (
         <SphereRing key={oid} nodes={nodes} edges={edges} ownerId={oid} />
       ))}
+      {/* Missed-bead markers: rendered at Go-supplied WORLD positions just outside a
+          node while Go reports a firing error (node-status torusRed). Scene-level
+          (not a node child) since the position is world-space. */}
+      <MissedBeadMarkers />
     </ProceduralEnvProvider>
   );
 }

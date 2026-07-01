@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { beadStyleForValue } from "./bead-style";
 import { getPulseMap } from "./pulse-state";
 import { getInteriorBeadMap, interiorBeadKey } from "./interior-bead-state";
+import { getNodeStatusMap } from "./node-status-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 
 // PulseBead: draws the in-flight beads ON a wire at their Go-owned fractional progress.
@@ -139,6 +140,62 @@ function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; c
         <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
       </mesh>
     </group>
+  );
+}
+
+// MissedBeadMarkers: renders the missed/ignored bead just OUTSIDE a node while Go
+// reports a firing error (node-status torusRed=true). Go streams the WORLD position
+// (x/y/z) and the ignored bead's value; this component PLOTS ONLY — each frame it
+// reads getNodeStatusMap() imperatively, and for every entry whose torusRed=true
+// places one pooled marker at the Go-supplied world position, colored by the missed
+// value like any bead. torusRed=false → the entry is skipped → the marker hides. No
+// geometry, no timer: the revert rides the next node-status event Go sends. Mounted
+// at scene level (not a child of any node group) because the position is world-space.
+const MISSED_POOL = 16;
+const MISSED_BEAD_R = 5;
+
+export function MissedBeadMarkers() {
+  const slotRefs = useRef<(THREE.Group | null)[]>([]);
+  const sphereMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  const torusMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+
+  useFrame(() => {
+    const slots = slotRefs.current;
+    let slot = 0;
+    for (const status of getNodeStatusMap().values()) {
+      if (!status.torusRed) continue;
+      if (slot >= MISSED_POOL) break;
+      const g = slots[slot];
+      if (!g) { slot++; continue; }
+      const style = beadStyleForValue(status.missedValue);
+      if (!style) { g.visible = false; slot++; continue; }
+      g.position.set(status.pos.x, status.pos.y, status.pos.z);
+      sphereMatRefs.current[slot]?.color.set(style.fill);
+      torusMatRefs.current[slot]?.color.set(style.ring);
+      g.visible = true;
+      slot++;
+    }
+    for (let i = slot; i < MISSED_POOL; i++) {
+      const g = slots[i];
+      if (g) g.visible = false;
+    }
+  });
+
+  return (
+    <>
+      {Array.from({ length: MISSED_POOL }, (_, i) => (
+        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[MISSED_BEAD_R, 16, 16]} />
+            <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
+            <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+        </group>
+      ))}
+    </>
   );
 }
 
