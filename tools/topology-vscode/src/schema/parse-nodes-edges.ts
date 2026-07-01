@@ -38,7 +38,8 @@ function parseDir(v: unknown, path: string): [number, number, number] {
     }
     return n;
   });
-  return [c[0], c[1], c[2]];
+  // c has exactly 3 elements (mapped from the length-3-checked `a`).
+  return [c[0]!, c[1]!, c[2]!];
 }
 
 function parsePort(v: unknown, path: string): Port {

@@ -79,7 +79,7 @@ export function buildEdge(
   let n = 2;
   while (edges.some((e) => e.id === id)) id = `${baseId}#${n++}`;
 
-  const cap = (s: string) => (s.length === 0 ? s : s[0].toUpperCase() + s.slice(1));
+  const cap = (s: string) => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
   const baseLabel = `${sourceId}${cap(sourceHandle)}To${cap(targetId)}${cap(targetHandle)}`
     .replace(/[^A-Za-z0-9_]/g, "_")
     .replace(/^([0-9])/, "_$1");

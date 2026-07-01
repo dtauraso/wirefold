@@ -178,7 +178,8 @@ export function CameraSettleDetector({
     const EPSILON = 5e-3;
     let changed = false;
     for (let i = 0; i < 16; i++) {
-      if (Math.abs(els[i] - lastElements.current[i]) > EPSILON) { changed = true; break; }
+      // i < 16 and both arrays hold 16 elements — indices are in range.
+      if (Math.abs(els[i]! - lastElements.current[i]!) > EPSILON) { changed = true; break; }
     }
     if (changed) {
       lastElements.current.set(els);
