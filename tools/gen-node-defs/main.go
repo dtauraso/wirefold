@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -52,12 +53,12 @@ type viewDef struct {
 	displays     string
 	defaultLabel string
 	// NodeTypeDef-compatible fields (used by schema/node-types consumers).
-	role      string
-	shape     string
-	fill      string
-	stroke    string
-	width     string
-	height    string
+	role   string
+	shape  string
+	fill   string
+	stroke string
+	width  string
+	height string
 }
 
 // kindEntry is one node kind to emit.
@@ -1383,7 +1384,13 @@ func writeNodeDims(outPath string, kinds []kindEntry) error {
 	fmt.Fprintln(w, `}`)
 
 	w.Flush()
-	return os.WriteFile(outPath, buf.Bytes(), 0644)
+	// gofmt the generated Go so the output is canonical and the repo-wide
+	// gofmt guard (tools/check-gofmt.sh) stays in agreement with check-generated.
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("format node_dims_gen.go: %w", err)
+	}
+	return os.WriteFile(outPath, formatted, 0644)
 }
 
 func fatalf(format string, args ...any) {
