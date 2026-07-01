@@ -64,6 +64,14 @@ func (h *processHarness) close() {
 	h.tr.Close()
 }
 
+// inputDrained reports whether the input wire is empty (no bead in flight and no
+// delivered value waiting) — i.e. the guard has consumed the mid-processing bead.
+func (h *processHarness) inputDrained() bool {
+	h.inPw.mu.Lock()
+	defer h.inPw.mu.Unlock()
+	return len(h.inPw.inflight) == 0 && len(h.inPw.delivered) == 0
+}
+
 func (h *processHarness) statusEvents() []T.Event {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -113,7 +121,7 @@ func TestProcessingSameColorIgnored(t *testing.T) {
 	// A SAME-color bead (0) arrives mid-processing (output deadline is 1000 ms away).
 	h.deliverInput(ctx, 0, 1)
 	// Wait until the guard has consumed it (input wire drained).
-	if !waitFor(func() bool { return !h.inPw.Occupied() }, time.Second) {
+	if !waitFor(h.inputDrained, time.Second) {
 		t.Fatal("same-color mid-processing bead was never consumed")
 	}
 	if got := h.statusEvents(); len(got) != 0 {
@@ -183,6 +191,43 @@ func TestProcessingDifferentColorErrors(t *testing.T) {
 	}
 	if _, ok := h.outPw.PollRecv(); ok {
 		t.Fatal("a second output bead exists — the missed bead was wrongly processed")
+	}
+}
+
+// TestProcessingRevertOnCancel: if the error state is entered and ctx is then
+// canceled BEFORE the output transit completes, the torus-revert still fires so a
+// reused stream cannot stay red across teardown.
+func TestProcessingRevertOnCancel(t *testing.T) {
+	h := newProcessHarness(t, 0, 1000)
+	defer h.close()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h.deliverInput(ctx, 0, 1)
+	v, ok := h.in.TryRecv()
+	if !ok || v != 0 {
+		t.Fatalf("first input: got (%d,%v), want (0,true)", v, ok)
+	}
+	item := h.out.PlaceDriven(0)
+
+	done := make(chan struct{})
+	go func() { h.guard.Process(ctx, 0, []DriveItem{item}); close(done) }()
+
+	// A DIFFERENT-color bead (1) arrives mid-processing → error state entered.
+	h.deliverInput(ctx, 1, 1)
+	if !waitFor(func() bool { return len(h.statusEvents()) >= 1 }, time.Second) {
+		t.Fatal("different-color bead produced no torus-red event")
+	}
+
+	// Cancel mid-error (output transit is 1000 ms away, never completed).
+	cancel()
+	<-done
+
+	got := h.statusEvents()
+	if len(got) != 2 {
+		t.Fatalf("after cancel: %d status events, want 2 (red + revert): %+v", len(got), got)
+	}
+	if got[1].TorusRed {
+		t.Fatalf("revert event = %+v, want TorusRed=false", got[1])
 	}
 }
 

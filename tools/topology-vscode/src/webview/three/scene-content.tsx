@@ -163,11 +163,17 @@ export function RaycasterHelper({
     onPickRequest.current = (ndcX: number, ndcY: number, opts?: PickOptions): string | null => {
       const ndc = new THREE.Vector2(ndcX, ndcY);
       raycaster.current.setFromCamera(ndc, camera);
-      const meshes: THREE.Mesh[] = [];
-      scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) meshes.push(obj as THREE.Mesh);
-      });
-      const hits = raycaster.current.intersectObjects(meshes, false);
+      // Recursive intersect against the live scene, then keep only mesh hits.
+      // Equivalent to the old "traverse → collect every isMesh → intersect"
+      // (three sorts nearest-first and skips objects whose raycast yields
+      // nothing), but without allocating a fresh meshes[] buffer and traverse
+      // closure on every pointer-move pick. Non-mesh hits (lines/sprites) are
+      // filtered out to preserve the mesh-only candidate semantics exactly.
+      const allHits = raycaster.current.intersectObject(scene, true);
+      const hits =
+        allHits.length === 0
+          ? allHits
+          : allHits.filter((h) => (h.object as THREE.Mesh).isMesh);
       if (hits.length === 0) return null;
 
       if (opts?.handholdOnly) return pickHandhold(hits);
@@ -223,24 +229,29 @@ export function Scene({
   // For each owner we draw its sphere and highlight the owner (center) plus all nodes
   // on its surface (the owner's children). Owners that center no sphere (no outgoing
   // edge) draw nothing but still contribute their own highlight.
-  const sphereOwners = !selectedId
-    ? []
-    : sphereMode === "own"
-      ? [selectedId]
-      : Array.from(
-          new Set<string>(
-            edges
-              .filter((e) => e.target === selectedId && e.source)
-              .map((e) => e.source as string),
-          ),
-        );
-  const surfaceIds = new Set<string>();
-  for (const ownerId of sphereOwners) {
-    surfaceIds.add(ownerId);
-    for (const e of edges) {
-      if (e.source === ownerId && e.target) surfaceIds.add(e.target);
+  // Memoized on [selectedId, sphereMode, edges]: recompute the owner list + surface
+  // set only when the selection or topology changes, not on every scene render.
+  const { sphereOwners, surfaceIds } = useMemo(() => {
+    const owners = !selectedId
+      ? []
+      : sphereMode === "own"
+        ? [selectedId]
+        : Array.from(
+            new Set<string>(
+              edges
+                .filter((e) => e.target === selectedId && e.source)
+                .map((e) => e.source as string),
+            ),
+          );
+    const ids = new Set<string>();
+    for (const ownerId of owners) {
+      ids.add(ownerId);
+      for (const e of edges) {
+        if (e.source === ownerId && e.target) ids.add(e.target);
+      }
     }
-  }
+    return { sphereOwners: owners, surfaceIds: ids };
+  }, [selectedId, sphereMode, edges]);
   // cameraPolar takes precedence; if present, skip camera3d restore and suppress auto-fit.
   const hasRestoredCamera = initialCameraPolar !== undefined || initialCamera3d !== undefined;
   return (

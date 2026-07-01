@@ -50,6 +50,17 @@ kinds_from_ts() {
 GO_KINDS=$(kinds_from_go)
 TS_KINDS=$(kinds_from_ts)
 
+# Refuse a vacuous pass: if either extractor returns an EMPTY set (the switch/const was
+# renamed or removed), comm would compare empty-to-empty and "pass". Both sides must be
+# non-empty. (Positive-assertion pattern, per check-ts-shading-from-go.sh.)
+for pair in "GO_KINDS:stdin_reader.go msg.Type kinds" "TS_KINDS:WEBVIEW_TO_HOST_TYPES kinds"; do
+  var="${pair%%:*}"; label="${pair#*:}"
+  if [[ -z "$(printf '%s' "${!var}" | tr -d '[:space:]')" ]]; then
+    echo "message-kind-parity: EMPTY extracted set for '$label' — switch/const missing or renamed; refusing vacuous parity pass" >&2
+    exit 1
+  fi
+done
+
 MISSING=$(comm -23 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))
 EXTRA=$(comm -13 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))
 

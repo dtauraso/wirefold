@@ -311,7 +311,10 @@ function PhiArc({ center, sample, color, tube }: {
   );
 }
 
-function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
+// NavGuides — decorative 3D navigation overlays (the polar-sphere tori, pole
+// frames, and θ/φ arcs). Rendered directly as the combined export; there is no
+// pass-through wrapper.
+export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
   const geoms = useNodeGeometryStore((s) => s.geoms);
   const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
@@ -379,8 +382,6 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
     </group>
   );
 
-  if (nodes.length < 1) return null;
-
   // Lock-arc demo decoration: θ/φ arcs from a "parent" node down to two children that
   // sit on the parent's sphere — a visual aid showing two siblings sharing equal θ/φ
   // about the parent's own pole frame (the frame the θ-lock actually measures in;
@@ -392,7 +393,10 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   // such nodes. This works on any polar topology instead of silently no-op'ing on
   // every topology but the old demo. If no such parent+2-children triple exists the
   // arcs are omitted (presence-guarded below, same as before).
-  const lockArc = (() => {
+  //
+  // Memoized on [nodes, geoms]: this is an O(N²) scan (per parent, filter all nodes),
+  // so recompute only when the graph or its streamed geometry changes, not per render.
+  const lockArc = useMemo(() => {
     for (const parent of nodes) {
       const pr = geoms[parent.id]?.sphereR;
       if (!pr) continue;
@@ -404,7 +408,9 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
       if (children.length >= 2) return { parent, childA: children[0], childB: children[1] };
     }
     return null;
-  })();
+  }, [nodes, geoms]);
+
+  if (nodes.length < 1) return null;
 
   // Parent's own pole frame center — pole = world +y, parallel to the scene's. Sized
   // to ~half the scene radius.
@@ -487,14 +493,3 @@ function PolarSphere({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selecte
   );
 }
 
-// ---------------------------------------------------------------------------
-// NavGuides — combined export
-// ---------------------------------------------------------------------------
-
-export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
-  return (
-    <>
-      <PolarSphere nodes={nodes} selectedId={selectedId} />
-    </>
-  );
-}

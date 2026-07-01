@@ -40,6 +40,31 @@ export type PulseMap = ReadonlyMap<string, PulseData>;
 
 let _current: Map<string, PulseData> = new Map();
 
+// Secondary index: edgeId → (composite key → PulseData), maintained on every
+// write/delete alongside _current. PulseBead (one per wire) reads only its own
+// edge's slice, so per-frame rendering is O(beads-on-this-edge) instead of
+// O(all-beads-across-all-edges). The PulseData objects are shared with _current
+// (same reference), so in-place mutation in setPulsePos is visible through both.
+const _byEdge: Map<string, Map<string, PulseData>> = new Map();
+
+function indexPut(key: string, data: PulseData): void {
+  let inner = _byEdge.get(data.edgeId);
+  if (!inner) {
+    inner = new Map();
+    _byEdge.set(data.edgeId, inner);
+  }
+  inner.set(key, data);
+}
+
+function indexDelete(key: string, edgeId: string): void {
+  const inner = _byEdge.get(edgeId);
+  if (!inner) return;
+  inner.delete(key);
+  if (inner.size === 0) _byEdge.delete(edgeId);
+}
+
+const _EMPTY_SLICE: ReadonlyMap<string, PulseData> = new Map();
+
 /** Composite map key: a wire (edgeId) may carry N beads at once, each with a
  *  distinct per-wire id (beadID = Go's gen). Keying by edge alone collapsed N
  *  beads to one sprite; keying by `${edgeId}:${beadID}` lets them coexist. */
@@ -63,9 +88,11 @@ export function setPulsePos(edgeId: string, beadID: number, value: number, x: nu
   }
   // First position for this bead — establish its slot (new Map so a future
   // structural change is observable; per-frame pos updates mutate in place).
+  const data: PulseData = { edgeId, value, pos: { x, y, z }, frac };
   const next = new Map(_current);
-  next.set(key, { edgeId, value, pos: { x, y, z }, frac });
+  next.set(key, data);
   _current = next;
+  indexPut(key, data);
 }
 
 export function clearPulse(edgeId: string, beadID: number) {
@@ -80,6 +107,7 @@ export function clearPulse(edgeId: string, beadID: number) {
   const next = new Map(_current);
   next.delete(key);
   _current = next;
+  indexDelete(key, edgeId);
   postLog("clearPulse", { edgeId, beadID, removed: true, keysBefore, keysAfter: [...next.keys()] });
 }
 
@@ -96,6 +124,7 @@ export function clearPulsesForEdge(edgeId: string) {
     }
   }
   if (removed > 0) _current = next;
+  _byEdge.delete(edgeId);
   postLog("clearPulsesForEdge", { edgeId, removed });
 }
 
@@ -107,11 +136,19 @@ export function clearPulsesForEdge(edgeId: string) {
 export function clearAllPulses() {
   const count = _current.size;
   _current = new Map();
+  _byEdge.clear();
   postLog("lifecycle", { phase: "pulse-reset", cleared: count });
 }
 
 export function getPulseMap(): PulseMap {
   return _current;
+}
+
+/** Per-edge slice of the pulse map: only the in-flight beads on `edgeId`. Lets
+ *  each PulseBead render in O(beads-on-this-edge) instead of scanning the whole
+ *  flat map every frame. Returns an empty map when the edge has no live beads. */
+export function getPulseMapForEdge(edgeId: string): ReadonlyMap<string, PulseData> {
+  return _byEdge.get(edgeId) ?? _EMPTY_SLICE;
 }
 
 // The former non-React edge-curve cache (TS-built) was removed in Phase 3: the edge

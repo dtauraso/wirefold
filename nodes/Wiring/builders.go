@@ -263,7 +263,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	// node-bead event per present interior bead. The node's Update calls it with the
 	// LIVE working/backup contents whenever the arrays change.
 	injectFunc(v, "EmitNodeBeads", tEmitBeadsFunc, func(working, backup []int) {
-		emitNodeBeads(tr, name, geom, working, backup)
+		emitNodeBeads(tr, name, working, backup)
 	})
 
 	// Inject EmitHeldBead closure if the struct has an `EmitHeldBead func(held int)`
@@ -452,6 +452,16 @@ func emitNodeGeometryAimed(tr *T.Trace, nodeName string, g nodeGeom, registry Ai
 // ONLY in that function (static portDir vs aimed portDirAimed); everything else —
 // center, the input-then-output port order, the reach-radius fallback, and the
 // ring normals — is identical and lives here.
+// effectiveRadius returns the node's REACH radius (max distance to a surface child),
+// falling back to nodeR for childless nodes (ReachR == 0) so the value stays sane.
+// Shared by emitNodeGeometryWith (sphereR) and emitNodeStatus (missed-bead offset).
+func effectiveRadius(g nodeGeom) float64 {
+	if g.ReachR > 0 {
+		return g.ReachR
+	}
+	return nodeR(g)
+}
+
 func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) {
 	center := nodeWorldPos(g)
 	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
@@ -472,10 +482,7 @@ func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir f
 	// sphereR streams the REACH radius (max distance to a surface child) so the TS
 	// SphereRing sizes correctly without recomputing geometry. Childless nodes
 	// (ReachR == 0) fall back to nodeR so the value stays sane.
-	sphereR := nodeR(g)
-	if g.ReachR > 0 {
-		sphereR = g.ReachR
-	}
+	sphereR := effectiveRadius(g)
 	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
 		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
 		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
@@ -491,10 +498,9 @@ func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir f
 // ABSENT (popped) otherwise. Absent slots are emitted with present=false (and
 // value 0) so TS can clear them — absence can't be rendered, but an explicit empty
 // slot can. Discrete positions only (beads snap to slots; no slide yet). Called from
-// the node's injected EmitNodeBeads closure whenever the arrays change. g is no
-// longer used for geometry (offsets are node-local) but kept for signature parity.
-func emitNodeBeads(tr *T.Trace, nodeName string, g nodeGeom, working, backup []int) {
-	_ = g
+// the node's injected EmitNodeBeads closure whenever the arrays change. Offsets are
+// node-local, so no node geometry is needed.
+func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int) {
 	const cols = 2
 	emitRow := func(row int, slice []int) {
 		for col := 0; col < cols; col++ {
@@ -533,11 +539,7 @@ const nodeStatusMissedOffsetMul = 1.5
 // the node body computes no positions, matching emitHeldBead/emitNodeBeads.
 func emitNodeStatus(tr *T.Trace, nodeName string, g nodeGeom, torusRed bool, missedValue int) {
 	center := nodeWorldPos(g)
-	r := nodeR(g)
-	if g.ReachR > 0 {
-		r = g.ReachR
-	}
-	off := r * nodeStatusMissedOffsetMul
+	off := effectiveRadius(g) * nodeStatusMissedOffsetMul
 	tr.NodeStatus(nodeName, torusRed, missedValue, center.X+off, center.Y, center.Z)
 }
 
@@ -550,12 +552,6 @@ func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 	tr.NodeBead(nodeName, 0, 0, left != -1, left, -s, 0, 0)
 	tr.NodeBead(nodeName, 0, 1, right != -1, right, s, 0, 0)
 }
-
-// interiorSlideDurationMul scales the refill-slide duration relative to raw
-// pulse speed. At 1.0 the slide runs at the base pulse speed with no extra
-// multiplier — the same constant speed as the wire beads. (Knob retained so
-// the slide speed can still be tuned independently if needed.)
-const interiorSlideDurationMul = 1.0
 
 // emitRefillSlide runs the clock-paced animated refill for the Input node's
 // interior buffer: the OLD backup row (row 0, top) slides DOWN into the working
@@ -579,9 +575,9 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	row0Y := interiorSlotOffset(0, 0).Y
 	row1Y := interiorSlotOffset(1, 0).Y
 	rowPitch := row0Y - row1Y // downward translation distance (local y, positive)
-	// Slide runs at the base pulse speed (interiorSlideDurationMul = 1.0), the
-	// same constant speed as the wire beads; the clock is still pause-aware.
-	durationMs := rowPitch / PulseSpeedWuPerMs * interiorSlideDurationMul
+	// Slide runs at the base pulse speed — the same constant speed as the wire
+	// beads; the clock is still pause-aware.
+	durationMs := rowPitch / PulseSpeedWuPerMs
 	duration := time.Duration(durationMs * float64(time.Millisecond))
 	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
 

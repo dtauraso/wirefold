@@ -3,7 +3,7 @@ import React, { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { beadStyleForValue } from "./bead-style";
-import { getPulseMap } from "./pulse-state";
+import { getPulseMapForEdge } from "./pulse-state";
 import { getInteriorBeadMap, interiorBeadKey } from "./interior-bead-state";
 import { getNodeStatusMap } from "./node-status-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
@@ -23,6 +23,12 @@ import { useEdgeGeometryStore } from "./edge-geometry";
 // React state per bead — placement is pure useFrame mutation, off React's render path.
 const PULSE_POOL = 16;
 
+// In-flight (on-wire) bead radius, and the ratio of a bead's ring (torus tube)
+// radius to its sphere radius. The ratio is shared by every bead renderer
+// (on-wire, interior, missed) so their rings read consistently.
+const PULSE_BEAD_R = 4;
+const BEAD_RING_TUBE_RATIO = 0.12;
+
 export function PulseBead({
   edgeId,
 }: {
@@ -40,8 +46,9 @@ export function PulseBead({
     // No segment yet (startup race) → hide all, no crash.
     let slot = 0;
     if (seg) {
-      for (const pulse of getPulseMap().values()) {
-        if (pulse.edgeId !== edgeId) continue;
+      // Per-edge slice: only this wire's beads (O(beads-on-this-edge)), not a
+      // full scan of every in-flight bead across all edges.
+      for (const pulse of getPulseMapForEdge(edgeId).values()) {
         if (slot >= PULSE_POOL) break; // pool exhausted — extra beads wait a frame
         const g = slots[slot];
         if (!g) { slot++; continue; }
@@ -73,11 +80,11 @@ export function PulseBead({
       {Array.from({ length: PULSE_POOL }, (_, i) => (
         <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
           <mesh raycast={() => null}>
-            <sphereGeometry args={[4, 16, 16]} />
+            <sphereGeometry args={[PULSE_BEAD_R, 16, 16]} />
             <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
           <mesh raycast={() => null}>
-            <torusGeometry args={[4, 4 * 0.12, 8, 24]} />
+            <torusGeometry args={[PULSE_BEAD_R, PULSE_BEAD_R * BEAD_RING_TUBE_RATIO, 8, 24]} />
             <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
         </group>
@@ -136,7 +143,7 @@ function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; c
         <meshStandardMaterial ref={sphereMatRef} emissiveIntensity={0} />
       </mesh>
       <mesh raycast={() => null}>
-        <torusGeometry args={[INTERIOR_BEAD_R, INTERIOR_BEAD_R * 0.12, 8, 24]} />
+        <torusGeometry args={[INTERIOR_BEAD_R, INTERIOR_BEAD_R * BEAD_RING_TUBE_RATIO, 8, 24]} />
         <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
       </mesh>
     </group>
@@ -174,7 +181,7 @@ export function MissedBeadMarkers() {
       if (!g) { slot++; continue; }
       const style = beadStyleForValue(status.missedValue);
       if (!style) { g.visible = false; slot++; continue; }
-      g.position.set(status.pos.x, status.pos.y, status.pos.z);
+      g.position.set(status.x, status.y, status.z);
       g.scale.setScalar(1.0 + 0.25 * pulse);
       const sm = sphereMatRefs.current[slot];
       if (sm) {
@@ -203,7 +210,7 @@ export function MissedBeadMarkers() {
             <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
           <mesh raycast={() => null}>
-            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
+            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * BEAD_RING_TUBE_RATIO, 8, 24]} />
             <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
         </group>

@@ -66,8 +66,9 @@ func (i *In) TryRecv() (int, bool) {
 
 // PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
 // calls pw.PollRecv (returns immediately with ok=false when no value is present,
-// without parking) and, on success, emits the same trace events as TryRecv but
-// does NOT clear the slot (the consumer must call Done). In chan mode it does a
+// without parking) and, on success, CONSUMES the value on read (pops the front
+// delivered bead) while emitting the same trace events as TryRecv. There is no
+// separate Done step — the read itself consumes. In chan mode it does a
 // non-blocking select, identical to TryRecv's default branch.
 func (i *In) PollRecv() (int, bool) {
 	if i == nil {
@@ -263,18 +264,6 @@ func (o *Out) InFlight() bool {
 	}
 	return o.pw.InFlight()
 }
-
-// Occupied reports whether the underlying wire is non-empty: either a bead is
-// in flight or a delivered pulse is parked in the slot (hasSend=true, not yet
-// consumed). Returns false in chan mode (no wire geometry / no slot concept).
-// Nil-safe; returns false for a nil Out.
-func (o *Out) Occupied() bool {
-	if o == nil || o.pw == nil {
-		return false
-	}
-	return o.pw.Occupied()
-}
-
 
 // DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
 // that drives several outbound edges on its OWN goroutine accumulates a set of

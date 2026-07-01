@@ -92,11 +92,20 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 		}
 	}
 
+	// One reused timer for the whole window instead of a fresh time.After per poll
+	// iteration (which allocated and abandoned a Timer every ~1ms). Go 1.23 timer
+	// semantics make Reset safe without manual channel draining. Stop on return.
+	poll := time.NewTimer(processPollInterval)
+	defer poll.Stop()
+
 	for {
 		// Window complete (output delivered) or torn down? Finish before observing,
-		// so a fully-delivered output ends the window promptly.
+		// so a fully-delivered output ends the window promptly. finish() runs on the
+		// ctx.Done path too: if the error state was entered, the torus-revert must
+		// still emit on cancellation, else a reused stream could stay red.
 		select {
 		case <-ctx.Done():
+			finish()
 			return
 		case <-driveDone:
 			finish()
@@ -121,13 +130,15 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 		}
 
 		// Nothing waiting: park briefly, but wake on transit-complete / cancellation.
+		poll.Reset(processPollInterval)
 		select {
 		case <-ctx.Done():
+			finish()
 			return
 		case <-driveDone:
 			finish()
 			return
-		case <-time.After(processPollInterval):
+		case <-poll.C:
 		}
 	}
 }

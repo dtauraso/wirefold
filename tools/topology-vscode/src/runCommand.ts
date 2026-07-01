@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
 import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
+import { validateNodeStatusFields } from "./schema/trace-event-fields";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 
@@ -42,6 +43,10 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
       typeof obj.kind === "string" &&
       TRACE_EVENT_KIND_SET.has(obj.kind)
     ) {
+      // Per-kind FIELD validation: the kind-string set only proves the discriminant.
+      // node-status carries a typed payload (generated from Trace.go); drop a
+      // malformed one rather than casting it through and painting garbage.
+      if (obj.kind === "node-status" && !validateNodeStatusFields(obj)) return undefined;
       return obj as TraceEvent;
     }
   } catch { /* not JSON */ }

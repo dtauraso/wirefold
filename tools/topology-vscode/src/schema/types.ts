@@ -12,10 +12,21 @@ export type EdgeKind =
   | "inhibit-in"
   | "any";
 
-export const EDGE_KINDS: readonly EdgeKind[] = [
+// Compile-time union<->array parity (same guarantee KIND_COLORS gets from
+// Record<EdgeKind, string>): `as const satisfies` rejects a typo or an extra member,
+// and the MustEqual assertion below rejects a MISSING member. Adding an EdgeKind
+// without listing it here (or vice-versa) then fails tsc instead of silently
+// desyncing the runtime array from the type.
+export const EDGE_KINDS = [
   "chain", "signal", "release", "streak",
   "pointer", "and-out", "edge-connection", "inhibit-in", "any",
-];
+] as const satisfies readonly EdgeKind[];
+
+// True iff A and B are the same set (mutually assignable). Used as a coverage type:
+// `const _ : MustEqual<Union, ArrayUnion> = true` fails to compile when they diverge.
+type MustEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _edgeKindsParity: MustEqual<EdgeKind, (typeof EDGE_KINDS)[number]> = true;
 
 export const DEFAULT_EDGE_KIND: EdgeKind = "signal";
 
@@ -29,4 +40,6 @@ export type Port = {
 };
 export type StateValue = string | number;
 export type SendRule = "consumeGated" | "fireAndForget";
-export const SEND_RULES: readonly SendRule[] = ["consumeGated", "fireAndForget"];
+export const SEND_RULES = ["consumeGated", "fireAndForget"] as const satisfies readonly SendRule[];
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _sendRulesParity: MustEqual<SendRule, (typeof SEND_RULES)[number]> = true;

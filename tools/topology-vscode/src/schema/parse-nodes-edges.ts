@@ -148,10 +148,21 @@ export function parseEdge(v: unknown, path: string): Edge {
       if (def.tsType === "string") edge[key] = str(val, `${path}.${key}`);
       else if (def.tsType === "number") edge[key] = num(val, `${path}.${key}`);
       else if (def.tsType === "boolean") edge[key] = bool(val, `${path}.${key}`);
+      else
+        // A non-scalar wire prop would be silently DROPPED (never copied onto edge),
+        // and the double-cast at the bottom would hide the gap. Fail loudly instead so
+        // a future non-scalar WIRE_PROPS entry forces a parser update here.
+        throw new Error(
+          `${path}.${key}: unhandled wire-prop tsType "${def.tsType}" — extend parse-nodes-edges.ts to parse it`,
+        );
     } else {
       if (def.tsType === "string") edge[key] = opt(val, (x) => str(x, `${path}.${key}`));
       else if (def.tsType === "number") edge[key] = opt(val, (x) => num(x, `${path}.${key}`));
       else if (def.tsType === "boolean") edge[key] = opt(val, (x) => bool(x, `${path}.${key}`));
+      else
+        throw new Error(
+          `${path}.${key}: unhandled wire-prop tsType "${def.tsType}" — extend parse-nodes-edges.ts to parse it`,
+        );
     }
   }
   // Double-cast: edge is built as Record<string,unknown> via the dynamic WIRE_PROPS loop;

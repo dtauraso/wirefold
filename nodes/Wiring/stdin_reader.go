@@ -272,6 +272,13 @@ var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){
 //     scene:                   persist the scene blob.
 //
 // Unknown ops/kinds/attrs are ignored (forward-compat).
+
+// destPortKey is the slot-registry key for an edit's destination port
+// ("target.targetHandle"), matching how slotReg is keyed at load.
+func destPortKey(msg stdinMsg) string {
+	return msg.Target + "." + msg.TargetHandle
+}
+
 func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 	// EDIT_OPS_START
 	switch msg.Op {
@@ -280,7 +287,7 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		tr.Breadcrumb("edit-create-recv", msg.Target, msg.TargetHandle, "")
-		destKey := msg.Target + "." + msg.TargetHandle
+		destKey := destPortKey(msg)
 		pw, found := slotReg[destKey]
 		if !found {
 			tr.Breadcrumb("edit-create-notfound", msg.Target, msg.TargetHandle, destKey)
@@ -293,17 +300,16 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 			return
 		}
 		tr.Breadcrumb("edit-delete-recv", msg.Target, msg.TargetHandle, "")
-		destKey := msg.Target + "." + msg.TargetHandle
+		destKey := destPortKey(msg)
 		pw, found := slotReg[destKey]
 		if !found {
 			tr.Breadcrumb("edit-delete-notfound", msg.Target, msg.TargetHandle, destKey)
 			return
 		}
 		// "delete" breadcrumb emitted here (PacedWire.Delete has no Trace reference)
-		// carrying the wire's authoritative slot identity. Delete cancels any
-		// in-flight bead's clock-delivery and echoes pulse-cancelled atomically.
-		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, "")
-		tr.Breadcrumb("edit-delete-delete", msg.Target, msg.TargetHandle, destKey)
+		// carrying the wire's authoritative slot identity and the dest key. Delete cancels
+		// any in-flight bead's clock-delivery and echoes pulse-cancelled atomically.
+		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, destKey)
 		pw.Delete()
 	case "update":
 		applyUpdate(msg, md, tr, treeRoot)
@@ -456,9 +462,9 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				return
 			}
 			s := msg.State
-			// Map the wire payload fields onto the named overlayVisibility struct (no
+			// Map the wire payload fields onto the named overlayState struct (no
 			// positional bool order to get wrong); SetGuideVisibility installs it wholesale.
-			md.SetGuideVisibility(overlayVisibility{
+			md.SetGuideVisibility(overlayState{
 				sceneToriVisible:      s.Tori,
 				scenePolesVisible:     s.ScenePoles,
 				nodePolesVisible:      s.NodePoles,

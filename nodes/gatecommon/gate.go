@@ -56,10 +56,8 @@ type GateNode struct {
 	ToPassed  *Wiring.Out
 }
 
-// windowMs returns the fixed coincidence window as a duration.
-func windowMs() time.Duration {
-	return WindowMs * time.Millisecond
-}
+// windowDuration is the fixed coincidence window as a duration (WindowMs milliseconds).
+const windowDuration = WindowMs * time.Millisecond
 
 // RunGate runs the shared window-and-inhibit gate loop.
 // invertLeft=true  → the LEFT input is NOT-inverted on capture  (WindowAndInhibitLeftGate).
@@ -206,7 +204,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held
 		// we are committed to firing after the dwell.
-		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > windowMs() {
+		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > windowDuration {
 			clear()
 			emitInputs()
 		}
