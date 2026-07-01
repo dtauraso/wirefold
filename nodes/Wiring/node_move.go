@@ -492,7 +492,7 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 // all cross-goroutine reads of mover geom. When movers are not started (test setup
 // that never calls Start), the direct read path is safe — no concurrent goroutines
 // own the geom yet.
-func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
+func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 	if tr == nil {
 		return
 	}
@@ -525,16 +525,28 @@ func (md *MoveDispatch) ResendGeometry(tr *T.Trace) {
 	acks := make([]chan struct{}, 0, total)
 	for _, nm := range md.nodeMovers {
 		ack := make(chan struct{})
-		nm.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}
-		acks = append(acks, ack)
+		select {
+		case nm.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}:
+			acks = append(acks, ack)
+		case <-ctx.Done():
+			return
+		}
 	}
 	for _, em := range md.edgeMovers {
 		ack := make(chan struct{})
-		em.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}
-		acks = append(acks, ack)
+		select {
+		case em.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}:
+			acks = append(acks, ack)
+		case <-ctx.Done():
+			return
+		}
 	}
 	for _, ack := range acks {
-		<-ack
+		select {
+		case <-ack:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

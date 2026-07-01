@@ -195,8 +195,8 @@ func TestResendGeometry(t *testing.T) {
 	}
 
 	// Safe to call repeatedly; call twice to lock idempotency-while-running.
-	md.ResendGeometry(tr)
-	md.ResendGeometry(tr)
+	md.ResendGeometry(ctx, tr)
+	md.ResendGeometry(ctx, tr)
 
 	tr.Close()
 	events := tr.Events()
@@ -267,7 +267,7 @@ func TestMoverCenterRace(t *testing.T) {
 		for i := 0; i < iters; i++ {
 			x := float64(i) * 0.5
 			md.RootMove("src", vec3{X: x, Y: 0, Z: 0})
-			md.ResendGeometry(tr)
+			md.ResendGeometry(ctx, tr)
 		}
 	}()
 	wg.Wait()

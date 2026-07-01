@@ -195,7 +195,13 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 	lineCh := make(chan string, 8)
 	go func() {
 		for sc.Scan() {
-			lineCh <- sc.Text()
+			// ctx-aware send: after the reader stops draining lineCh, a plain send
+			// could park this goroutine forever on a full channel. Bail on cancel.
+			select {
+			case lineCh <- sc.Text():
+			case <-done:
+				return
+			}
 		}
 		if err := sc.Err(); err != nil {
 			// Scan encountered an error; write to stderr (stdout is the Go→TS trace stream).
@@ -234,7 +240,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				}
 			case "resend":
 				if md != nil {
-					md.ResendGeometry(tr)
+					md.ResendGeometry(ctx, tr)
 				}
 			}
 		}
