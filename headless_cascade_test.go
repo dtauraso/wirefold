@@ -159,13 +159,13 @@ func TestHeadlessCascadeCompletes(t *testing.T) {
 	if hop1 == nil || hop2 == nil {
 		t.Fatalf("missing per-edge Outs: hop1=%v hop2=%v", hop1, hop2)
 	}
-	if hop1.SimLatencyMs <= 0 || hop2.SimLatencyMs <= 0 {
+	if hop1.Geom().SimLatencyMs <= 0 || hop2.Geom().SimLatencyMs <= 0 {
 		t.Fatalf("expected positive in-flight times: hop1=%v hop2=%v",
-			hop1.SimLatencyMs, hop2.SimLatencyMs)
+			hop1.Geom().SimLatencyMs, hop2.Geom().SimLatencyMs)
 	}
-	maxHop := hop1.SimLatencyMs
-	if hop2.SimLatencyMs > maxHop {
-		maxHop = hop2.SimLatencyMs
+	maxHop := hop1.Geom().SimLatencyMs
+	if hop2.Geom().SimLatencyMs > maxHop {
+		maxHop = hop2.Geom().SimLatencyMs
 	}
 
 	// Run the real node goroutines headlessly.
@@ -229,7 +229,7 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 	if out == nil || pw == nil {
 		t.Fatalf("missing first-hop out/wire: out=%v wire=%v", out, pw)
 	}
-	inFlightMs := out.SimLatencyMs
+	inFlightMs := out.Geom().SimLatencyMs
 	if inFlightMs <= 1 {
 		t.Fatalf("expected first-hop in-flight time > 1ms, got %v", inFlightMs)
 	}
@@ -297,9 +297,9 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 	if hop1 == nil || hop2 == nil {
 		t.Fatalf("missing per-edge Outs: hop1=%v hop2=%v", hop1, hop2)
 	}
-	maxHop := hop1.SimLatencyMs
-	if hop2.SimLatencyMs > maxHop {
-		maxHop = hop2.SimLatencyMs
+	maxHop := hop1.Geom().SimLatencyMs
+	if hop2.Geom().SimLatencyMs > maxHop {
+		maxHop = hop2.Geom().SimLatencyMs
 	}
 
 	// Start the real node goroutines; Input seeds the first wire immediately.
@@ -392,7 +392,7 @@ func TestFeedbackRingAlternates(t *testing.T) {
 			}()
 		}
 
-		step := time.Duration(hop1.SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
+		step := time.Duration(hop1.Geom().SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
 		// activeNetTopo uses Init=[7]; just confirm i0 receives the value via the existing path.
 		want := `"kind":"recv","node":"i0"`
 		got := stepUntilSeen(clk, sink, step, want)
