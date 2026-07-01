@@ -77,7 +77,7 @@ for pat in "${FORBIDDEN[@]}"; do
     [[ -z "$line" ]] && continue
     printf '%s  (forbidden shading literal: %s)\n' "$line" "$pat"
     HITS=$((HITS + 1))
-  done < <(grep -rnE --include='*.ts' --include='*.tsx' "$pat" "$SCAN_DIR" 2>/dev/null || true)
+  done < <(grep -arnE --include='*.ts' --include='*.tsx' "$pat" "$SCAN_DIR" 2>/dev/null || true)
 done
 
 # Positive assertion: the render dir must import the Go-supplied shading params.

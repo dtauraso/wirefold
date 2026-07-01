@@ -47,7 +47,7 @@ for token in "${FORBIDDEN[@]}"; do
     [[ -z "$line" ]] && continue
     printf '%s  (forbidden: %s)\n' "$line" "$token"
     HITS=$((HITS + 1))
-  done < <(grep -rn --include="*.ts" --include="*.tsx" "$token" "$SRC_DIR" 2>/dev/null || true)
+  done < <(grep -arn --include="*.ts" --include="*.tsx" "$token" "$SRC_DIR" 2>/dev/null || true)
 done
 
 if [[ $HITS -eq 0 ]]; then

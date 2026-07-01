@@ -28,7 +28,7 @@ EXCLUDE='polar\.ts|PanPolarOverlay\.tsx'
 # Banned symbols: camera state reconstructed from a Cartesian position.
 PATTERN='setFromVector3|setFromCartesianCoords|\.makeSafe\(|new THREE\.Spherical'
 
-hits=$(grep -rnE "$PATTERN" "$DIR" --include='*.ts' --include='*.tsx' 2>/dev/null \
+hits=$(grep -arnE "$PATTERN" "$DIR" --include='*.ts' --include='*.tsx' 2>/dev/null \
        | grep -vE "$EXCLUDE" || true)
 
 if [ -n "$hits" ]; then
