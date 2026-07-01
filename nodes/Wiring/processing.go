@@ -100,9 +100,12 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 
 	for {
 		// Window complete (output delivered) or torn down? Finish before observing,
-		// so a fully-delivered output ends the window promptly.
+		// so a fully-delivered output ends the window promptly. finish() runs on the
+		// ctx.Done path too: if the error state was entered, the torus-revert must
+		// still emit on cancellation, else a reused stream could stay red.
 		select {
 		case <-ctx.Done():
+			finish()
 			return
 		case <-driveDone:
 			finish()
@@ -130,6 +133,7 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 		poll.Reset(processPollInterval)
 		select {
 		case <-ctx.Done():
+			finish()
 			return
 		case <-driveDone:
 			finish()

@@ -186,6 +186,43 @@ func TestProcessingDifferentColorErrors(t *testing.T) {
 	}
 }
 
+// TestProcessingRevertOnCancel: if the error state is entered and ctx is then
+// canceled BEFORE the output transit completes, the torus-revert still fires so a
+// reused stream cannot stay red across teardown.
+func TestProcessingRevertOnCancel(t *testing.T) {
+	h := newProcessHarness(t, 0, 1000)
+	defer h.close()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	h.deliverInput(ctx, 0, 1)
+	v, ok := h.in.TryRecv()
+	if !ok || v != 0 {
+		t.Fatalf("first input: got (%d,%v), want (0,true)", v, ok)
+	}
+	item := h.out.PlaceDriven(0)
+
+	done := make(chan struct{})
+	go func() { h.guard.Process(ctx, 0, []DriveItem{item}); close(done) }()
+
+	// A DIFFERENT-color bead (1) arrives mid-processing → error state entered.
+	h.deliverInput(ctx, 1, 1)
+	if !waitFor(func() bool { return len(h.statusEvents()) >= 1 }, time.Second) {
+		t.Fatal("different-color bead produced no torus-red event")
+	}
+
+	// Cancel mid-error (output transit is 1000 ms away, never completed).
+	cancel()
+	<-done
+
+	got := h.statusEvents()
+	if len(got) != 2 {
+		t.Fatalf("after cancel: %d status events, want 2 (red + revert): %+v", len(got), got)
+	}
+	if got[1].TorusRed {
+		t.Fatalf("revert event = %+v, want TorusRed=false", got[1])
+	}
+}
+
 // TestProcessingSteadyNoSpuriousEvents: steady single-bead operation (one input,
 // one output, no mid-processing arrival) emits no torus events.
 func TestProcessingSteadyNoSpuriousEvents(t *testing.T) {
