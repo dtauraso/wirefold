@@ -190,7 +190,9 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 				if g.Left == 1 && g.Right == 1 {
 					result = 1
 				}
-				g.Fire()
+				if g.Fire != nil {
+					g.Fire()
+				}
 				g.HasLeft = false
 				g.HasRight = false
 				t0Set = false
