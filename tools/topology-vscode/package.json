@@ -38,6 +38,7 @@
     "test:e2e": "playwright test",
     "test:tier4": "PLAYWRIGHT_TIER4=1 playwright test --project=tier4-latency",
     "lint": "eslint src",
+    "knip": "knip",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -58,7 +59,6 @@
   "dependencies": {
     "@react-three/fiber": "^9.6.1",
     "immer": "^11.1.4",
-    "lit-html": "^3.3.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "three": "^0.184.0",

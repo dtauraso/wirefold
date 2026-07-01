@@ -19,22 +19,11 @@ function guideSnapshot() {
   };
 }
 
-const statusEl = document.getElementById("status");
-if (!statusEl) console.warn("save.ts: #status element not found");
-
 let lastViewSyncedText: string | undefined;
 
 // Module-level debounce timer for scene persistence.
 let _sceneTimer: ReturnType<typeof setTimeout> | null = null;
 const SCENE_SAVE_DEBOUNCE_MS = 400;
-
-export function setStatus(dirty: boolean) {
-  if (statusEl) { statusEl.textContent = dirty ? "saving…" : "saved"; statusEl.className = dirty ? "dirty" : "clean"; }
-}
-
-export function setStatusError(msg: string) {
-  if (statusEl) { statusEl.textContent = `save blocked: ${msg}`; statusEl.className = "dirty"; }
-}
 
 function _sendScene() {
   if (lastViewSyncedText === undefined) {
