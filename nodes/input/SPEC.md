@@ -36,16 +36,18 @@
 
 ## Firing rule
 
-Plain emit path (FeedbackIn not wired): iterate through Init (wrapping if Repeat), Fire and send each value on ToHoldNewSendOld in order. Exit when all values sent (or never if Repeat).
+Emission is **end-first**: the last element of Init is emitted first, working toward the front. Init=[10,20,30] emits 30, then 20, then 10; the default init:[0,1] emits 1 then 0. This is the `popEnd` read/pop of a working/backup double buffer, not a front-to-back index walk.
 
-Feedback-ring path (FeedbackIn wired): iterate indefinitely (index `i` starting at 0).
+Plain emit path (FeedbackIn not wired): end-pop the working array each iteration, Fire and send each popped value on ToHoldNewSendOld. Exit when all values sent (or refill and continue if Repeat).
+
+Feedback-ring path (FeedbackIn wired): iterate indefinitely.
 1. Fire.
-2. Send Init[i % len(Init)] on ToHoldNewSendOld.
+2. Send the current end value of the working array on ToHoldNewSendOld.
 3. Block on FeedbackIn for a step value `s` from HoldNewSendOld.
-4. Advance: `i = (i + s) % len(Init)`.
+4. If `s == 1`, pop the end (advance the bead); refill working from backup when it empties. Otherwise hold and resend the same value.
 5. Loop (exit on ctx cancel or wire close).
 
-The first send (i=0) is the ring seed; there is no t=0 deadlock because the send precedes the first FeedbackIn read.
+The first send is the ring seed; there is no t=0 deadlock because the send precedes the first FeedbackIn read.
 
 ## Runtime status
 
