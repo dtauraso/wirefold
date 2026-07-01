@@ -456,9 +456,9 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				return
 			}
 			s := msg.State
-			// Map the wire payload fields onto the named overlayVisibility struct (no
+			// Map the wire payload fields onto the named overlayState struct (no
 			// positional bool order to get wrong); SetGuideVisibility installs it wholesale.
-			md.SetGuideVisibility(overlayVisibility{
+			md.SetGuideVisibility(overlayState{
 				sceneToriVisible:      s.Tori,
 				scenePolesVisible:     s.ScenePoles,
 				nodePolesVisible:      s.NodePoles,

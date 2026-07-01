@@ -30,7 +30,6 @@ package Wiring
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -63,9 +62,9 @@ type centerSnap struct {
 // ack (if non-nil) is closed by the mover after it has fully handled the message —
 // used only by the synchronous test façade. The live bridge path leaves ack nil.
 type moveMsg struct {
-	Kind    string
-	NodeID  string
-	Faded bool
+	Kind   string
+	NodeID string
+	Faded  bool
 	// Anchor payload (Kind == "anchor"): identify the port whose anchor changed.
 	// Port/IsInput name the port on NodeID; AnchorId is the snapped ring-anchor index
 	// (Go snaps from the incoming world-space direction; TS never computes the index).
@@ -111,13 +110,13 @@ func setPortAnchorId(g *nodeGeom, port string, isInput bool, anchorId int) bool 
 // nodeMover owns one node's geometry. It reads its inbox in its own goroutine and,
 // on a move for itself, updates its held position and re-emits its node-geometry.
 type nodeMover struct {
-	id       string
-	geom     nodeGeom
-	inbox    chan moveMsg
-	tr       *T.Trace
+	id    string
+	geom  nodeGeom
+	inbox chan moveMsg
+	tr    *T.Trace
 	// aimed is the registry of ports that dynamically point toward connected node
 	// centers. nil when no aimed ports are registered.
-	aimed    AimedPortRegistry
+	aimed AimedPortRegistry
 	// centerOf returns the current center for a node id — used only when aimed != nil.
 	centerOf func(string) (vec3, bool)
 	// snap is an atomically-published immutable snapshot of this node's current
@@ -381,42 +380,6 @@ func (m *edgeMover) run(ctx context.Context) {
 	}
 }
 
-// overlayVisibility groups the 10 per-toggle visibility booleans so MoveDispatch
-// keeps its overlay state in one named slot. The zero value has all bools false;
-// newMoveDispatch initializes it with 9 true defaults (doubleLinksVisible stays false).
-type overlayVisibility struct {
-	// sceneToriVisible is the current polar-guide tori visibility. true by default
-	// (tori shown on startup). Toggled by ToggleSceneTori; emitted via EmitSceneTori.
-	sceneToriVisible bool
-	// scenePolesVisible is the current scene-center pole frame visibility. true by default.
-	// Toggled by ToggleScenePoles; emitted via EmitScenePoles.
-	scenePolesVisible bool
-	// nodePolesVisible is the current per-node pole frame visibility. true by default.
-	// Toggled by ToggleNodePoles; emitted via EmitNodePoles.
-	nodePolesVisible bool
-	// angleLabelsVisible is the current θ/φ angle arc+label visibility. true by default.
-	// Toggled by ToggleAngleLabels; emitted via EmitAngleLabels.
-	angleLabelsVisible bool
-	// selSpherePolesVisible is the current selection-sphere pole axis visibility. true by default.
-	// Toggled by ToggleSelSpherePoles; emitted via EmitSelSpherePoles.
-	selSpherePolesVisible bool
-	// handholdsVisible is the current rotation-handhold grab-sphere visibility. true by default.
-	// Toggled by ToggleHandholds; emitted via EmitHandholds.
-	handholdsVisible bool
-	// labelsGlobalVisible is the current global node-label visibility. true by default.
-	// Toggled by ToggleLabelsGlobal; emitted via EmitLabelsGlobal.
-	labelsGlobalVisible bool
-	// badgesGlobalVisible is the current global occlusion-badge visibility. true by default.
-	// Toggled by ToggleBadgesGlobal; emitted via EmitBadgesGlobal.
-	badgesGlobalVisible bool
-	// overlaysVisible is the master overlays visibility. true by default (all overlays shown).
-	// Toggled by ToggleOverlaysVis; emitted via EmitOverlaysVis.
-	overlaysVisible bool
-	// doubleLinksVisible is the double-link overlay visibility. false by default (overlay hidden).
-	// Toggled by ToggleDoubleLinks; emitted via EmitDoubleLinks.
-	doubleLinksVisible bool
-}
-
 // MoveDispatch is the pure key→inbox dispatch registry built at load. Keys are BOTH
 // node ids AND edge ids; the stdin reader mail-sorts each move entry to channels[key].
 // It also retains the per-edge source Outs so out-of-package test/verifier callers can
@@ -439,16 +402,16 @@ type MoveDispatch struct {
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
 	AimedPorts AimedPortRegistry
-	// vp is the polar camera viewpoint state. Mutated by SetViewpoint/OrbitViewpoint/
-	// ZoomViewpoint/PanViewpoint; emitted via EmitViewpoint. Owned entirely by
+	// vp is the polar camera viewpoint state (viewpoint_state.go). Owned entirely by
 	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
-	// runs in a single goroutine).
-	vp viewpoint
+	// runs in a single goroutine). MoveDispatch exposes thin delegating methods.
+	vp viewpointState
 	// tr is the trace sink (retained for trace emission; diagnostic breadcrumbs removed).
 	tr *T.Trace
-	// ov groups the 10 overlay-toggle visibility booleans. Initialized to defaults
-	// by newMoveDispatch (9 true, doubleLinksVisible false).
-	ov overlayVisibility
+	// ov groups the 10 overlay-toggle visibility booleans and their flip/emit logic
+	// (overlay_state.go). Initialized to defaults by newMoveDispatch (9 true,
+	// doubleLinksVisible false). MoveDispatch exposes thin delegating methods.
+	ov overlayState
 }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
@@ -457,12 +420,12 @@ type MoveDispatch struct {
 // later by Bind once node construction has populated them.
 func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace) *MoveDispatch {
 	md := &MoveDispatch{
-		dispatch:         map[string]chan moveMsg{},
-		nodeMovers:       map[string]*nodeMover{},
-		edgeMovers:       map[string]*edgeMover{},
-		edgeOut:          map[string]*Out{},
-		tr: tr,
-		ov: overlayVisibility{
+		dispatch:   map[string]chan moveMsg{},
+		nodeMovers: map[string]*nodeMover{},
+		edgeMovers: map[string]*edgeMover{},
+		edgeOut:    map[string]*Out{},
+		tr:         tr,
+		ov: overlayState{
 			sceneToriVisible:      true,
 			scenePolesVisible:     true,
 			nodePolesVisible:      true,
@@ -807,198 +770,49 @@ func (md *MoveDispatch) NodeKind(nodeID string) string {
 	return ""
 }
 
+// Camera viewpoint API — thin delegators to the owned viewpointState (viewpoint_state.go).
+// The public signatures are unchanged; the state and behavior live on md.vp.
 
-// SetViewpoint installs a known camera state without emitting. Used by the "set"
-// viewpoint op to seed the viewpoint from persisted or initial values, followed by
-// EmitViewpoint to broadcast it. Also clears any locked rotation axis from a prior
-// handhold gesture so the next gesture starts fresh.
 func (md *MoveDispatch) SetViewpoint(pivot vec3, r float64, pos, up dir) {
-	md.vp.pivot = pivot
-	md.vp.r = r
-	md.vp.pos = pos
-	md.vp.up = up
-	md.vp.lockedAxis = nil
+	md.vp.SetViewpoint(pivot, r, pos, up)
 }
-
-// EmitViewpoint emits the current camera viewpoint state as a camera trace event.
-func (md *MoveDispatch) EmitViewpoint(tr *T.Trace) {
-	if tr == nil {
-		return
-	}
-	tr.Camera(md.vp.pivot.X, md.vp.pivot.Y, md.vp.pivot.Z, md.vp.r,
-		md.vp.pos.Theta, md.vp.pos.Phi,
-		md.vp.up.Theta, md.vp.up.Phi)
-}
-
-// OrbitViewpoint applies a great-circle orbit (carrying from→to) and emits the new state.
-func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) {
-	md.vp.orbit(from, to)
-	md.EmitViewpoint(tr)
-}
-
-// OrbitLockedViewpoint applies a handhold-constrained orbit: the first call locks the
-// rotation axis from the from→to arc; subsequent calls keep the same axis. The lock is
-// cleared by the next SetViewpoint. Emits a camera event each call.
+func (md *MoveDispatch) EmitViewpoint(tr *T.Trace)                { md.vp.EmitViewpoint(tr) }
+func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) { md.vp.OrbitViewpoint(from, to, tr) }
 func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
-	md.vp.orbitLocked(from, to)
-	md.EmitViewpoint(tr)
+	md.vp.OrbitLockedViewpoint(from, to, tr)
 }
+func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
+func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace)      { md.vp.PanViewpoint(delta, tr) }
 
-// ZoomViewpoint scales the orbit radius by factor and emits the new state.
-func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) {
-	md.vp.zoom(factor)
-	md.EmitViewpoint(tr)
-}
+// Overlay-visibility API — thin delegators to the owned overlayState (overlay_state.go).
+// The public signatures are unchanged (the stdin reader's overlayToggles method-expression
+// table binds these); the flags and flip/emit behavior live on md.ov.
 
-// PanViewpoint slides the orbit pivot by a world delta and emits the new state.
-func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
-	md.vp.pan(delta)
-	md.EmitViewpoint(tr)
-}
-
-// setFlag flips *field and emits the new value via emit. Shared body of the
-// uniform Toggle* visibility methods (those that are just flip-then-emit) so each
-// stays a single self-documenting line. The two flags that also drop a breadcrumb
-// (scene/node poles) keep their bodies inline.
-func (md *MoveDispatch) setFlag(field *bool, emit func(bool)) {
-	*field = !*field
-	emit(*field)
-}
-
-// ToggleSceneTori flips the polar-guide tori visibility and emits a scene-tori event.
-// Called from applyEdit on op="tori-vis"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace) {
-	md.setFlag(&md.ov.sceneToriVisible, tr.SceneTori)
-}
-
-// EmitSceneTori emits the current tori visibility without toggling it. Use this on
-// startup or geometry-resend to seed the renderer's initial state.
-func (md *MoveDispatch) EmitSceneTori(tr *T.Trace) {
-	tr.SceneTori(md.ov.sceneToriVisible)
-}
-
-// ToggleScenePoles flips the scene-center pole frame visibility and emits a scene-poles event.
-// Called from applyEdit on op="scene-poles"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace) {
-	md.ov.scenePolesVisible = !md.ov.scenePolesVisible
-	tr.Breadcrumb("pole-toggle-go", "scene", "", fmt.Sprintf("visible=%v", md.ov.scenePolesVisible))
-	tr.ScenePoles(md.ov.scenePolesVisible)
-}
-
-// EmitScenePoles emits the current scene pole frame visibility without toggling it.
-func (md *MoveDispatch) EmitScenePoles(tr *T.Trace) {
-	tr.ScenePoles(md.ov.scenePolesVisible)
-}
-
-// ToggleNodePoles flips the per-node pole frame visibility and emits a node-poles event.
-// Called from applyEdit on op="node-poles"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace) {
-	md.ov.nodePolesVisible = !md.ov.nodePolesVisible
-	tr.Breadcrumb("pole-toggle-go", "nodes", "", fmt.Sprintf("visible=%v", md.ov.nodePolesVisible))
-	tr.NodePoles(md.ov.nodePolesVisible)
-}
-
-// EmitNodePoles emits the current per-node pole frame visibility without toggling it.
-func (md *MoveDispatch) EmitNodePoles(tr *T.Trace) {
-	tr.NodePoles(md.ov.nodePolesVisible)
-}
-
-// ToggleAngleLabels flips the θ/φ angle arc+label visibility and emits an angle-labels event.
-// Called from applyEdit on op="angle-labels"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace) {
-	md.setFlag(&md.ov.angleLabelsVisible, tr.AngleLabels)
-}
-
-// EmitAngleLabels emits the current angle arc+label visibility without toggling it.
-func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace) {
-	tr.AngleLabels(md.ov.angleLabelsVisible)
-}
-
-// AngleLabels returns the current angle arc+label visibility.
-func (md *MoveDispatch) AngleLabels() bool {
-	return md.ov.angleLabelsVisible
-}
-
-// ToggleSelSpherePoles flips the selection-sphere pole axis visibility and emits a sel-sphere-poles event.
-// Called from applyEdit on op="sel-sphere-poles"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) {
-	md.setFlag(&md.ov.selSpherePolesVisible, tr.SelSpherePoles)
-}
-
-// EmitSelSpherePoles emits the current selection-sphere pole axis visibility without toggling it.
-func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace) {
-	tr.SelSpherePoles(md.ov.selSpherePolesVisible)
-}
-
-// ToggleHandholds flips the rotation-handhold grab-sphere visibility and emits a handholds event.
-// Called from applyEdit on op="handholds-vis"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleHandholds(tr *T.Trace) {
-	md.setFlag(&md.ov.handholdsVisible, tr.Handholds)
-}
-
-// EmitHandholds emits the current handhold visibility without toggling it.
-func (md *MoveDispatch) EmitHandholds(tr *T.Trace) {
-	tr.Handholds(md.ov.handholdsVisible)
-}
-
-// ToggleLabelsGlobal flips the global node-label visibility and emits a labels-global event.
-// Called from applyEdit on op="labels-vis"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace) {
-	md.setFlag(&md.ov.labelsGlobalVisible, tr.LabelsGlobal)
-}
-
-// EmitLabelsGlobal emits the current global label visibility without toggling it.
-func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace) {
-	tr.LabelsGlobal(md.ov.labelsGlobalVisible)
-}
-
-// ToggleBadgesGlobal flips the global occlusion-badge visibility and emits a badges-global event.
-// Called from applyEdit on op="badges-vis"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace) {
-	md.setFlag(&md.ov.badgesGlobalVisible, tr.BadgesGlobal)
-}
-
-// EmitBadgesGlobal emits the current global badge visibility without toggling it.
-func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace) {
-	tr.BadgesGlobal(md.ov.badgesGlobalVisible)
-}
-
-// ToggleOverlaysVis flips the master overlays visibility and emits an overlays-vis event.
-// Called from applyEdit on op="overlays-vis"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace) {
-	md.setFlag(&md.ov.overlaysVisible, tr.OverlaysVis)
-}
-
-// EmitOverlaysVis emits the current master overlays visibility without toggling it.
-func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace) {
-	tr.OverlaysVis(md.ov.overlaysVisible)
-}
-
-// ToggleDoubleLinks flips the double-link overlay visibility and emits a double-links event.
-// Called from applyEdit on op="double-links"; fire-and-forget from TS.
-func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace) {
-	md.setFlag(&md.ov.doubleLinksVisible, tr.DoubleLinks)
-}
-
-// EmitDoubleLinks emits the current double-link overlay visibility without toggling it.
-func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace) {
-	tr.DoubleLinks(md.ov.doubleLinksVisible)
-}
+func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace)      { md.ov.ToggleSceneTori(tr) }
+func (md *MoveDispatch) EmitSceneTori(tr *T.Trace)        { md.ov.EmitSceneTori(tr) }
+func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace)     { md.ov.ToggleScenePoles(tr) }
+func (md *MoveDispatch) EmitScenePoles(tr *T.Trace)       { md.ov.EmitScenePoles(tr) }
+func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace)      { md.ov.ToggleNodePoles(tr) }
+func (md *MoveDispatch) EmitNodePoles(tr *T.Trace)        { md.ov.EmitNodePoles(tr) }
+func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace)    { md.ov.ToggleAngleLabels(tr) }
+func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace)      { md.ov.EmitAngleLabels(tr) }
+func (md *MoveDispatch) AngleLabels() bool                { return md.ov.AngleLabels() }
+func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) { md.ov.ToggleSelSpherePoles(tr) }
+func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace)   { md.ov.EmitSelSpherePoles(tr) }
+func (md *MoveDispatch) ToggleHandholds(tr *T.Trace)      { md.ov.ToggleHandholds(tr) }
+func (md *MoveDispatch) EmitHandholds(tr *T.Trace)        { md.ov.EmitHandholds(tr) }
+func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace)   { md.ov.ToggleLabelsGlobal(tr) }
+func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace)     { md.ov.EmitLabelsGlobal(tr) }
+func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace)   { md.ov.ToggleBadgesGlobal(tr) }
+func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace)     { md.ov.EmitBadgesGlobal(tr) }
+func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace)    { md.ov.ToggleOverlaysVis(tr) }
+func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace)      { md.ov.EmitOverlaysVis(tr) }
+func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace)    { md.ov.ToggleDoubleLinks(tr) }
+func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace)      { md.ov.EmitDoubleLinks(tr) }
 
 // SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
-// push so settings survive a Go respawn on window reload) and emits each so the renderer
-// reflects them. Set-to-value, unlike the flip-style Toggle* methods.
-func (md *MoveDispatch) SetGuideVisibility(ov overlayVisibility, tr *T.Trace) {
-	md.ov = ov
-	md.EmitSceneTori(tr)
-	md.EmitScenePoles(tr)
-	md.EmitNodePoles(tr)
-	md.EmitAngleLabels(tr)
-	md.EmitSelSpherePoles(tr)
-	md.EmitHandholds(tr)
-	md.EmitDoubleLinks(tr)
-	md.EmitLabelsGlobal(tr)
-	md.EmitBadgesGlobal(tr)
-	md.EmitOverlaysVis(tr)
+// push so settings survive a Go respawn on window reload) and emits each. Delegates to
+// the owned overlayState.
+func (md *MoveDispatch) SetGuideVisibility(ov overlayState, tr *T.Trace) {
+	md.ov.SetGuideVisibility(ov, tr)
 }
-
