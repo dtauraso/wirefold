@@ -118,11 +118,13 @@ func main() {
 		}
 		view, accentOverrides, edgeKindOverrides, optionalPorts, err := parseSpecMD(pkgDir)
 		if err != nil {
-			// SPEC.md missing or no View section — skip this kind.
-			continue
+			// This dir has a Wiring.Register (a real node package), so a missing or
+			// broken SPEC.md View section is a half-landed kind — fail loudly rather
+			// than silently dropping the kind from all generated files.
+			fatalf("kind %q registers a Go runtime but its SPEC.md View section is missing/broken: %v", e.Name(), err)
 		}
 		if view.kind == "" {
-			continue
+			fatalf("kind %q registers a Go runtime but its SPEC.md ## View has an empty view.kind", e.Name())
 		}
 		// Apply accent, edgeKind overrides, and optional flags from SPEC.md Ports table.
 		for i, p := range ports {
