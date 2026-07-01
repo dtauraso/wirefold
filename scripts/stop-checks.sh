@@ -36,6 +36,13 @@ if [ -n "$go_changed" ]; then
     out+="go build failed:\n$go_out\n\n"
     fail=1
   fi
+  # go test — fast/cached here (~0.2s), so run it on the same gate as go build
+  # (Go changed / branch ahead of origin/main). This was the one verify step
+  # living outside the suite.
+  if ! gotest_out=$(go test ./... 2>&1); then
+    out+="go test failed:\n$gotest_out\n\n"
+    fail=1
+  fi
   # go vet + staticcheck. staticcheck COMPILES the whole module, so it is
   # expensive — it lives here in the go-gated block (Go changed / branch ahead of
   # origin/main), never in the fast unconditional guard loop below.
