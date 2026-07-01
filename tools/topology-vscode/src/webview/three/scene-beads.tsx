@@ -3,7 +3,7 @@ import React, { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { beadStyleForValue } from "./bead-style";
-import { getPulseMap } from "./pulse-state";
+import { getPulseMapForEdge } from "./pulse-state";
 import { getInteriorBeadMap, interiorBeadKey } from "./interior-bead-state";
 import { getNodeStatusMap } from "./node-status-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
@@ -40,8 +40,9 @@ export function PulseBead({
     // No segment yet (startup race) → hide all, no crash.
     let slot = 0;
     if (seg) {
-      for (const pulse of getPulseMap().values()) {
-        if (pulse.edgeId !== edgeId) continue;
+      // Per-edge slice: only this wire's beads (O(beads-on-this-edge)), not a
+      // full scan of every in-flight bead across all edges.
+      for (const pulse of getPulseMapForEdge(edgeId).values()) {
         if (slot >= PULSE_POOL) break; // pool exhausted — extra beads wait a frame
         const g = slots[slot];
         if (!g) { slot++; continue; }
