@@ -284,7 +284,16 @@ func parsePortsFromAST(pkgDir string) ([]port, error) {
 		pkgs[pkgName] = append(pkgs[pkgName], f)
 	}
 	var ports []port
-	for _, files := range pkgs {
+	// Iterate package names in sorted order so the emitted port order is
+	// deterministic even when a dir contains two package names (map iteration
+	// order is otherwise random and would flip-flop check-generated).
+	pkgNames := make([]string, 0, len(pkgs))
+	for name := range pkgs {
+		pkgNames = append(pkgNames, name)
+	}
+	sort.Strings(pkgNames)
+	for _, pkgName := range pkgNames {
+		files := pkgs[pkgName]
 		for _, file := range files {
 			for _, decl := range file.Decls {
 				genDecl, ok := decl.(*ast.GenDecl)
