@@ -35,7 +35,7 @@ report() {
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   report "await-on-send: $line"
-done < <(grep -rnE 'await[[:space:]]+[A-Za-z0-9_.]*\.(writeStdin|postMessage)\(' \
+done < <(grep -arnE 'await[[:space:]]+[A-Za-z0-9_.]*\.(writeStdin|postMessage)\(' \
   --include="*.ts" --include="*.tsx" "$SRC_DIR" 2>/dev/null || true)
 
 # 2. No `.then(`/`.catch(`/`.finally(` chained onto a bridge send (request/response
@@ -43,7 +43,7 @@ done < <(grep -rnE 'await[[:space:]]+[A-Za-z0-9_.]*\.(writeStdin|postMessage)\('
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   report "promise-chain-on-send: $line"
-done < <(grep -rnE '\.(writeStdin|postMessage)\([^)]*\)[[:space:]]*\.(then|catch|finally)\b' \
+done < <(grep -arnE '\.(writeStdin|postMessage)\([^)]*\)[[:space:]]*\.(then|catch|finally)\b' \
   --include="*.ts" --include="*.tsx" "$SRC_DIR" 2>/dev/null || true)
 
 # 3. writeStdin must NOT be declared to return a Promise/Thenable — a void return is
