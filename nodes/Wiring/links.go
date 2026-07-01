@@ -49,17 +49,6 @@ func (lk *movementLink) setPolar(frame, node string, p polar) {
 // touches reports whether node id is an endpoint of this link.
 func (lk movementLink) touches(id string) bool { return lk.A == id || lk.B == id }
 
-// other returns the endpoint that is not id (empty if id is not an endpoint).
-func (lk movementLink) other(id string) string {
-	switch id {
-	case lk.A:
-		return lk.B
-	case lk.B:
-		return lk.A
-	}
-	return ""
-}
-
 // refreshLink recomputes a link's polar state from the two endpoints' world positions.
 // This is the ONE world→polar conversion (cart2polar), used at load and at the drag edge.
 func refreshLink(lk *movementLink, posA, posB vec3) {
