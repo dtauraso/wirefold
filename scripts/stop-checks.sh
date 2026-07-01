@@ -100,7 +100,7 @@ if [ -n "$ts_changed" ]; then
   fi
 fi
 
-for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-slot-phase-boundary check-generated check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt; do
+for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-slot-phase-boundary check-generated check-wire-prop-used check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt; do
   if ! chk_out=$(bash "tools/$chk.sh" 2>&1); then
     out+="$chk failed:\n$chk_out\n\n"
     fail=1
