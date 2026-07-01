@@ -68,16 +68,20 @@ go_scan() {
     [[ -z "$hit" ]] && continue
     printf '%s: pattern "%s"\n' "$hit" "$pattern"
     HITS=$((HITS + 1))
-  done < <(go_files | sort -u | xargs grep -an "$pattern" 2>/dev/null || true)
+  done < <(go_files | sort -u | xargs grep -anE "$pattern" 2>/dev/null || true)
 }
 
 # Transition pattern: object-literal slot-phase writes (comma form, not type defs).
 ts_scan 'phase: "filled",'
 ts_scan 'phase: "empty"'
 
-# Go should have no slot-phase string literals at all.
-go_scan '"filled"'
-go_scan '"empty"'
+# Go should have no slot-phase transition WRITES. paced_wire.go models the slot with
+# a hasSend bool and never assigns a "filled"/"empty" phase. Match only a genuine
+# phase-field write — a struct-literal field (`Phase: "filled"`) or an assignment
+# (`slotPhase = "empty"`) — not any bare occurrence of the word in a log string,
+# map key, or fixture (those are not transition logic and must not trip the guard).
+go_scan '[Pp]hase[[:space:]]*(:=?|=)[[:space:]]*"filled"'
+go_scan '[Pp]hase[[:space:]]*(:=?|=)[[:space:]]*"empty"'
 
 if [[ $HITS -eq 0 ]]; then
   echo "slot-phase-boundary: clean"
