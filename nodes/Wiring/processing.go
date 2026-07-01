@@ -92,6 +92,12 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 		}
 	}
 
+	// One reused timer for the whole window instead of a fresh time.After per poll
+	// iteration (which allocated and abandoned a Timer every ~1ms). Go 1.23 timer
+	// semantics make Reset safe without manual channel draining. Stop on return.
+	poll := time.NewTimer(processPollInterval)
+	defer poll.Stop()
+
 	for {
 		// Window complete (output delivered) or torn down? Finish before observing,
 		// so a fully-delivered output ends the window promptly.
@@ -121,13 +127,14 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 		}
 
 		// Nothing waiting: park briefly, but wake on transit-complete / cancellation.
+		poll.Reset(processPollInterval)
 		select {
 		case <-ctx.Done():
 			return
 		case <-driveDone:
 			finish()
 			return
-		case <-time.After(processPollInterval):
+		case <-poll.C:
 		}
 	}
 }
