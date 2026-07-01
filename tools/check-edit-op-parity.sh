@@ -45,6 +45,17 @@ quoted() { grep -oE '"[^"]+"' | tr -d '"' | sort -u; }
 # or more, so they are excluded). BSD grep lacks -P, so match with awk (\t = tab).
 toplevel_case() { awk '/^\tcase "/'; }
 
+# Refuse a vacuous pass: if a sentinel-bounded extractor returns an EMPTY set, a
+# sentinel pair was deleted/renamed on that side and comm would compare empty-to-empty
+# and "pass". Every extracted axis set must be non-empty. (Positive-assertion pattern,
+# per check-ts-shading-from-go.sh / check-no-await-on-bridge.sh.)
+assert_nonempty() { # value label
+  if [[ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]]; then
+    echo "edit-op-parity: EMPTY extracted set for '$2' — sentinel block missing/renamed; refusing vacuous parity pass" >&2
+    exit 1
+  fi
+}
+
 HITS=0
 report_diff() { # label missing_in_a a_name missing_in_b b_name
   local missing_a="$1" a_name="$2" missing_b="$3" b_name="$4"
@@ -61,6 +72,8 @@ report_diff() { # label missing_in_a a_name missing_in_b b_name
 # --- Axis 1: ops ------------------------------------------------------------
 TS_OPS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -oE 'op: "[^"]+"' | quoted)
 GO_OPS=$(between EDIT_OPS_START EDIT_OPS_END "$STDIN_READER" | toplevel_case | quoted)
+assert_nonempty "$TS_OPS" "axis1 messages.ts ops"
+assert_nonempty "$GO_OPS" "axis1 stdin_reader.go ops"
 report_diff "$(comm -13 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "stdin_reader.go ops" \
             "$(comm -23 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "messages.ts ops"
 
@@ -68,6 +81,9 @@ report_diff "$(comm -13 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "stdin_reader.go o
 TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -oE 'kind: "[^"]+"' | quoted)
 GO_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$STDIN_READER" | toplevel_case | quoted)
 HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | grep -oE 'case "[^"]+"' | quoted)
+assert_nonempty "$TS_KINDS" "axis2 messages.ts update kinds"
+assert_nonempty "$GO_KINDS" "axis2 stdin_reader.go update kinds"
+assert_nonempty "$HM_KINDS" "axis2 handle-message.ts update kinds"
 report_diff "$(comm -13 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))" "stdin_reader.go kinds" \
             "$(comm -23 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))" "messages.ts kinds"
 report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-message.ts kinds" \
@@ -76,6 +92,8 @@ report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-messag
 # --- Axis 3: overlay flags --------------------------------------------------
 TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted)
 GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$STDIN_READER" | grep -oE '"[^"]+":' | tr -d '":' | sort -u)
+assert_nonempty "$TS_FLAGS" "axis3 messages.ts overlay flags"
+assert_nonempty "$GO_FLAGS" "axis3 stdin_reader.go overlay flags"
 report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.go overlay flags" \
             "$(comm -23 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "messages.ts overlay flags"
 
@@ -86,6 +104,7 @@ report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.
 # stdinGuideVisPayload. Assert they agree so a flag added/removed in the set-path can't
 # silently no-op.
 GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$STDIN_READER" | grep -oE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
+assert_nonempty "$GO_GUIDEVIS" "axis4 stdinGuideVisPayload fields"
 report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuideVisPayload fields" \
             "$(comm -23 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "messages.ts OverlayState/flags"
 
@@ -95,6 +114,8 @@ report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuide
 # inside its own VP_KINDS sentinels. A kind on one side only silently no-ops.
 TS_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$MESSAGES_TS" | quoted)
 GO_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$STDIN_READER" | grep -oE 'case "[^"]+"' | quoted)
+assert_nonempty "$TS_VPKINDS" "axis5 messages.ts vp kinds"
+assert_nonempty "$GO_VPKINDS" "axis5 stdin_reader.go vp kinds"
 report_diff "$(comm -13 <(echo "$GO_VPKINDS") <(echo "$TS_VPKINDS"))" "stdin_reader.go vp kinds" \
             "$(comm -23 <(echo "$GO_VPKINDS") <(echo "$TS_VPKINDS"))" "messages.ts vp kinds"
 

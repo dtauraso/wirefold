@@ -31,9 +31,22 @@ for f in "$STDIN_READER" "$MESSAGES_TS" "$LOADER_GO" "$RUN_COMMAND_TS"; do
   fi
 done
 
+# Refuse a vacuous pass: an empty sentinel-bounded extraction (both sides emptied by a
+# sentinel rename/deletion) would comm empty-to-empty and "pass". Assert non-empty.
+assert_nonempty() { # value label
+  if [[ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]]; then
+    echo "bridge-literal-parity: EMPTY extracted set for '$2' — sentinel block missing/renamed; refusing vacuous parity pass" >&2
+    exit 1
+  fi
+}
+
 HITS=0
 
 # --- Axis 1: viewpoint sub-kinds --------------------------------------------
+# NOTE: this vp-kinds axis is REDUNDANT with check-edit-op-parity.sh axis 5 (both
+# compare the VP_KINDS sentinel blocks in messages.ts vs stdin_reader.go). Coverage is
+# intentionally kept in both places; the assert_nonempty guards below (and in axis 5)
+# ensure the two cannot go blind together on a sentinel deletion.
 # Go: `case "..."` lines inside the `switch vp.Kind { ... }` block, bounded by the
 # VP_KINDS_START / VP_KINDS_END sentinel comments around it in stdin_reader.go.
 vp_kinds_go() {
@@ -52,6 +65,8 @@ vp_kinds_ts() {
 
 GO_VP=$(vp_kinds_go)
 TS_VP=$(vp_kinds_ts)
+assert_nonempty "$GO_VP" "viewpoint sub-kinds (stdin_reader.go)"
+assert_nonempty "$TS_VP" "viewpoint sub-kinds (messages.ts)"
 MISSING_IN_GO=$(comm -23 <(echo "$TS_VP") <(echo "$GO_VP"))
 MISSING_IN_TS=$(comm -13 <(echo "$TS_VP") <(echo "$GO_VP"))
 if [[ -n "$MISSING_IN_GO" ]]; then

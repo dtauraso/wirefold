@@ -30,6 +30,17 @@ kinds_from_pump() {
 TS_KINDS=$(kinds_from_ts)
 PUMP_KINDS=$(kinds_from_pump)
 
+# Refuse a vacuous pass: an empty extraction (array/switch renamed or removed) would comm
+# empty-to-empty and "pass". Assert non-empty. (Positive-assertion pattern.)
+assert_nonempty() { # value label
+  if [[ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]]; then
+    echo "trace-kind-parity: EMPTY extracted set for '$2' — array/switch/struct missing or renamed; refusing vacuous parity pass" >&2
+    exit 1
+  fi
+}
+assert_nonempty "$TS_KINDS" "TRACE_EVENT_KINDS array"
+assert_nonempty "$PUMP_KINDS" "pump.ts trace switch cases"
+
 # comm -23: in TS only (missing from pump); comm -13: in pump only (extra vs TS)
 MISSING=$(comm -23 <(echo "$TS_KINDS") <(echo "$PUMP_KINDS"))
 EXTRA=$(comm -13 <(echo "$TS_KINDS") <(echo "$PUMP_KINDS"))
@@ -76,6 +87,8 @@ fields_from_ts() {
 
 GO_FIELDS=$(fields_from_go)
 TS_FIELDS=$(fields_from_ts)
+assert_nonempty "$GO_FIELDS" "nodeStatus struct fields (Trace.go)"
+assert_nonempty "$TS_FIELDS" "NodeStatusEvent fields (trace-event-fields.ts)"
 
 FIELD_MISSING=$(comm -23 <(echo "$GO_FIELDS") <(echo "$TS_FIELDS"))
 FIELD_EXTRA=$(comm -13 <(echo "$GO_FIELDS") <(echo "$TS_FIELDS"))
