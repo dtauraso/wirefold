@@ -239,12 +239,3 @@ func arcLengthBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHand
 	end := portWorldPos(tgt, tgtHandle, true)    // target INPUT port
 	return chordLength(start, end)
 }
-
-// segmentBetweenPorts returns the straight-line wireSegment from the source
-// OUTPUT port to the target INPUT port. The bead's position stream evaluates
-// P(t) = Start + t*(End-Start) on this segment.
-func segmentBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHandle string) wireSegment {
-	start := portWorldPos(src, srcHandle, false) // source OUTPUT port
-	end := portWorldPos(tgt, tgtHandle, true)    // target INPUT port
-	return wireSegment{Start: start, End: end}
-}

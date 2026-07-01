@@ -43,7 +43,6 @@ func (a vec3) add(b vec3) vec3 { return vec3{a.X + b.X, a.Y + b.Y, a.Z + b.Z} }
 func (a vec3) scale(s float64) vec3 {
 	return vec3{a.X * s, a.Y * s, a.Z * s}
 }
-func (a vec3) dot(b vec3) float64 { return a.X*b.X + a.Y*b.Y + a.Z*b.Z }
 func (a vec3) length() float64 {
 	return math.Sqrt(a.X*a.X + a.Y*a.Y + a.Z*a.Z)
 }

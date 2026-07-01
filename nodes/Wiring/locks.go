@@ -17,11 +17,6 @@ type mirrorLock struct {
 	Follower string
 }
 
-// addMirror registers a mirror lock (Follower mirrors Leader about Center).
-func (md *MoveDispatch) addMirror(center, leader, follower string) {
-	md.mirrorLocks = append(md.mirrorLocks, mirrorLock{Center: center, Leader: leader, Follower: follower})
-}
-
 // applyMirrorLocks returns the new world positions of any mirror followers whose Leader
 // is movedID. It reads the leader's polar from the STORED link state (refreshed at the
 // drag edge), writes the follower's polar on its link, and derives the follower's world

@@ -36,6 +36,13 @@ if [ -n "$go_changed" ]; then
     out+="go build failed:\n$go_out\n\n"
     fail=1
   fi
+  # go vet + staticcheck. staticcheck COMPILES the whole module, so it is
+  # expensive — it lives here in the go-gated block (Go changed / branch ahead of
+  # origin/main), never in the fast unconditional guard loop below.
+  if ! sc_out=$(bash tools/check-staticcheck.sh 2>&1); then
+    out+="check-staticcheck failed:\n$sc_out\n\n"
+    fail=1
+  fi
 fi
 
 if [ -n "$ts_changed" ]; then

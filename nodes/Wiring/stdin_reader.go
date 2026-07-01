@@ -361,7 +361,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 						// two on-disk stores stay in sync across a drag (they diverged when
 						// only meta.json was written).
 						_ = writeMetaPos(treeRoot, id, w.X, w.Y, w.Z)
-						_ = writeViewNode(treeRoot, id, specPosition{X: w.X, Y: w.Y, Z: w.Z})
+						_ = writeViewNode(treeRoot, id, specPosition(w))
 					}
 				}
 			}

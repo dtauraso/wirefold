@@ -74,7 +74,6 @@ func TestRotateDirMatchesRodrigues(t *testing.T) {
 
 func TestRotateDirIdentities(t *testing.T) {
 	rng := rand.New(rand.NewSource(3))
-	const tol = 1e-9
 	for i := 0; i < 2000; i++ {
 		p := randDir(rng)
 		axis := randDir(rng)
