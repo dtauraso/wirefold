@@ -65,16 +65,3 @@ function mtimeMs(p: string): number {
     return 0;
   }
 }
-
-export async function applyEdit(
-  doc: vscode.TextDocument,
-  text: string,
-): Promise<void> {
-  const edit = new vscode.WorkspaceEdit();
-  const fullRange = new vscode.Range(
-    doc.positionAt(0),
-    doc.positionAt(doc.getText().length),
-  );
-  edit.replace(doc.uri, fullRange, text);
-  await vscode.workspace.applyEdit(edit);
-}
