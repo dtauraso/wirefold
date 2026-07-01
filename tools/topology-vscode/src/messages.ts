@@ -35,7 +35,7 @@ export type MoveEntry = { nodeId: string; x: number; y: number; z: number };
 // OverlayState snapshot type are ALL derived from it, so the field set is listed once.
 // Guarded by check-edit-op-parity.sh.
 // OVERLAY_FLAGS_START
-export const OVERLAY_FLAG_NAMES = [
+const OVERLAY_FLAG_NAMES = [
   "tori",
   "scenePoles",
   "nodePoles",
@@ -53,13 +53,13 @@ export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
 
 // OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
 // Derived from OverlayFlag so the field set can never drift from the flag vocabulary.
-export type OverlayState = Record<OverlayFlag, boolean>;
+type OverlayState = Record<OverlayFlag, boolean>;
 
 // VIEWPOINT_KINDS is the single source for the camera viewpoint sub-kind vocabulary,
 // shared with Go's vp.Kind switch (stdin_reader.go). Parity guarded by
 // check-edit-op-parity.sh via the VP_KINDS sentinels.
 // VP_KINDS_START
-export const VIEWPOINT_KINDS = [
+const VIEWPOINT_KINDS = [
   "set",
   "orbit",
   "orbit-locked",
@@ -68,9 +68,9 @@ export const VIEWPOINT_KINDS = [
 ] as const;
 // VP_KINDS_END
 
-export type ViewpointKind = (typeof VIEWPOINT_KINDS)[number];
+type ViewpointKind = (typeof VIEWPOINT_KINDS)[number];
 
-export type ViewpointPayload =
+type ViewpointPayload =
   | {
       kind: "set";
       pivotX?: number; pivotY?: number; pivotZ?: number;
@@ -84,7 +84,7 @@ export type ViewpointPayload =
   | { kind: "pan"; dx: number; dy: number; dz: number };
 
 // EDIT_MSG_START
-export type EditMsg =
+type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
@@ -177,7 +177,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
   "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend",
 ]);
 
-export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
+const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
   "load", "run-status", "flush", "save-error", "trace-event",
 ]);
 

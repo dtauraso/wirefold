@@ -96,7 +96,7 @@ export interface InteractionCtx {
 // ---------------------------------------------------------------------------
 
 /** Parse a portId of the form `nodeId:in:portName` or `nodeId:out:portName`. */
-export function parsePortId(pid: string): { nodeId: string; isInput: boolean; portName: string } {
+function parsePortId(pid: string): { nodeId: string; isInput: boolean; portName: string } {
   const i = pid.indexOf(":");
   const nodeId = pid.slice(0, i);
   const rest = pid.slice(i + 1);
@@ -113,7 +113,7 @@ export function parsePortId(pid: string): { nodeId: string; isInput: boolean; po
  * off the z=0 plane (e.g. node 8 at z≈-20) gets a hit ~20 units out of its ring plane and
  * a badly skewed anchor. Defaults to z=0 for any legacy caller.
  */
-export function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: number, rect: DOMRect, planeZ = 0): THREE.Vector3 | null {
+function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: number, rect: DOMRect, planeZ = 0): THREE.Vector3 | null {
   const cam = ctx.cameraRef.current;
   if (!cam) return null;
   const { ndcX, ndcY } = pixelToNDC(clientX, clientY, rect);
@@ -132,7 +132,7 @@ export function unprojectToPlane(ctx: InteractionCtx, clientX: number, clientY: 
  * Returns (0,0,0) when there are no nodes.
  * Delegates to geometry-helpers.contentSphere (the single source).
  */
-export function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
+function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
   const nodes = ctx.nodesRef.current;
   return contentSphere(nodes).center;
 }
@@ -144,7 +144,7 @@ export function sceneCenter(ctx: InteractionCtx): THREE.Vector3 {
  * scene depth along the actual view direction. Fall back to sceneCenter(), then
  * the origin. Defined purely from (camera pose, scene) — no z=0 raycast.
  */
-export function ensureTarget(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): THREE.Vector3 {
+function ensureTarget(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): THREE.Vector3 {
   const t = ctx.targetRef.current;
   if (Number.isFinite(t.x) && Number.isFinite(t.y) && Number.isFinite(t.z)) return t;
   cam.updateMatrixWorld(true);
@@ -174,7 +174,7 @@ export function ensureTarget(ctx: InteractionCtx, cam: THREE.PerspectiveCamera):
  * then orbit around it. Recomputed at each rotation start so the depth range is
  * current. Falls back to ensureTarget() when there are no finite node depths.
  */
-export function regionFocus(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): THREE.Vector3 {
+function regionFocus(ctx: InteractionCtx, cam: THREE.PerspectiveCamera): THREE.Vector3 {
   cam.updateMatrixWorld(true);
   const forward = new THREE.Vector3();
   cam.getWorldDirection(forward); // unit

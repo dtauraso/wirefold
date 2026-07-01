@@ -8,9 +8,6 @@ import {
   parseCamera, parseCamera3d, parsePolarCamera,
   parseNodeViews, parseEdgeViews,
 } from "./parse";
-// PolarCamera is Go's canonical camera representation — reuse the type from camera-store
-// to avoid duplication.
-export type { PolarCamera } from "../../three/camera-store";
 
 // Canonical camera is React Flow's pan/zoom: `{x, y, zoom}`. The lit-html
 // era persisted an SVG viewBox `{x, y, w, h}`; we still read those on load
@@ -87,7 +84,7 @@ function assignStrArr(out: ViewerState, raw: Record<string, unknown>, key: keyof
 
 // Keys whose semantics are "visible when present and true, hidden only when explicitly false".
 // Default = true (visible/active); only persist when false.
-export const VISIBLE_SENSE_SCENE_KEYS = [
+const VISIBLE_SENSE_SCENE_KEYS = [
   "sceneToriVisible", "scenePolesVisible", "nodePolesVisible",
   "angleLabelsVisible", "selSpherePolesVisible", "handholdsVisible", "overlaysActive",
 ] as const satisfies readonly (keyof ViewerState)[];
@@ -184,7 +181,7 @@ export function serializeViewerState(s: ViewerState): string {
 }
 
 // Scene-only fields (camera, camera3d, cameraPolar, labelsGlobalHidden, guideline visibilities) — for topology.scene.json.
-export type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "doubleLinksVisible" | "overlaysActive">;
+type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "doubleLinksVisible" | "overlaysActive">;
 
 export function serializeSceneState(s: ViewerState): string {
   const scene: SceneState = {};

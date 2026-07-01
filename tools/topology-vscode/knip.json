@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/extension.ts",
+    "src/webview/main.tsx",
+    "esbuild.mjs",
+    "test/**/*.test.ts"
+  ],
+  "project": ["src/**"]
+}

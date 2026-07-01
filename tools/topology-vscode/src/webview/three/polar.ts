@@ -56,15 +56,6 @@ export function deltaToPolar(dx: number, dy: number): { r: number; angle: number
   return { r: Math.hypot(dx, dy), angle: Math.atan2(dy, dx) };
 }
 
-/** World point on/near the sphere → polar (θ, φ) about the frame. Edge conversion for input
- *  (e.g. the cursor's raycast point), the mirror of toWorld. */
-export function fromWorld(f: PolarFrame, worldPoint: THREE.Vector3): Polar {
-  const d = worldPoint.clone().sub(f.center).normalize();
-  const phi = Math.acos(THREE.MathUtils.clamp(d.dot(f.pole), -1, 1));
-  const theta = Math.atan2(d.dot(f.refY), d.dot(f.refX));
-  return { theta, phi };
-}
-
 /** Cursor input edge: screen-pixel delta from sphere center → Polar.
  *  ONE uniform rule for the whole sphere — no clamp, no rim, no front/back special-casing
  *  (a sphere is uniform; there is nothing to protect against). phi = ρ/scale grows linearly

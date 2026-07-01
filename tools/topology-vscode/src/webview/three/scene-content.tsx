@@ -149,7 +149,7 @@ function pickDefault(hits: THREE.Intersection[]): string | null {
 // RaycasterHelper: performs pick on demand via ref callback.
 // ---------------------------------------------------------------------------
 
-export function RaycasterHelper({
+function RaycasterHelper({
   onPickRequest,
 }: {
   onPickRequest: React.MutableRefObject<

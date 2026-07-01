@@ -15,7 +15,7 @@
 // node-status wire shape (Trace.go emits flat x,y,z), so pump maps 1:1 with no
 // flat→nested rename.
 
-export interface NodeStatusData {
+interface NodeStatusData {
   /** true while Go reports a firing error (missed different-color bead). */
   torusRed: boolean;
   /** value of the ignored bead — colors the missed-bead marker like any bead. */
