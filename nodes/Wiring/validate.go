@@ -66,7 +66,15 @@ func validateSpec(spec *topoSpec) error {
 	// Check 1: unknown node kinds.
 	// also caught by TS parser; defense-in-depth
 	nodeType := map[string]string{}
+	seenID := map[string]bool{}
 	for _, n := range spec.Nodes {
+		if seenID[n.ID] {
+			// A duplicate id would silently overwrite nodeType[n.ID] (last-wins), so
+			// edges then validate against the wrong kind. Reject it explicitly.
+			errs = append(errs, fmt.Sprintf("duplicate node id %q", n.ID))
+			continue
+		}
+		seenID[n.ID] = true
 		nodeType[n.ID] = n.Type
 		if _, ok := Registry[n.Type]; !ok {
 			errs = append(errs, fmt.Sprintf("node %q: unknown type %q", n.ID, n.Type))

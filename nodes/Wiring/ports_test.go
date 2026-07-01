@@ -124,6 +124,24 @@ func TestValidateSpecSendRule(t *testing.T) {
 	}
 }
 
+// TestValidateSpecDuplicateNodeID verifies validateSpec rejects two nodes sharing
+// an id (which would otherwise silently last-wins the kind map).
+func TestValidateSpecDuplicateNodeID(t *testing.T) {
+	dup := &topoSpec{
+		Nodes: []specNode{
+			{ID: "n1", Type: "", Data: &NodeData{}},
+			{ID: "n1", Type: "", Data: &NodeData{}},
+		},
+	}
+	err := validateSpec(dup)
+	if err == nil {
+		t.Fatal("validateSpec with duplicate node id: expected error, got nil")
+	}
+	if !containsStr(err.Error(), "duplicate node id") {
+		t.Errorf("error should flag the duplicate id; got: %v", err)
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		func() bool {

@@ -24,6 +24,38 @@ func copyFixtureTree(t *testing.T) string {
 	return tmpDir
 }
 
+// TestWriteRejectsPathTraversal feeds a node id / port containing "../" to the
+// tree writers and asserts nothing is written outside the tree and the writers
+// return an error (the segment is rejected before any path is constructed).
+func TestWriteRejectsPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	escape := filepath.Join(root, "..", "evil.json") // where a "../evil" id would land
+
+	if err := writeViewNode(root, "../evil", specPosition{X: 1}); err == nil {
+		t.Error("writeViewNode accepted a traversal node id")
+	}
+	if err := writeMetaPos(root, "../../evil", 1, 2, 3); err == nil {
+		t.Error("writeMetaPos accepted a traversal node id")
+	}
+	if err := writePort(root, "../evil", "in", true, specPort{}); err == nil {
+		t.Error("writePort accepted a traversal node id")
+	}
+	if err := writePort(root, "n1", "../evil", false, specPort{}); err == nil {
+		t.Error("writePort accepted a traversal port")
+	}
+
+	if _, err := os.Stat(escape); err == nil {
+		t.Fatalf("a file escaped the tree at %s", escape)
+	}
+	// A legitimate segment still writes.
+	if err := writeViewNode(root, "n1", specPosition{X: 1}); err != nil {
+		t.Fatalf("writeViewNode rejected a legit node id: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "view", "nodes", "n1.json")); err != nil {
+		t.Fatalf("legit write missing: %v", err)
+	}
+}
+
 func TestWriteViewNodeRoundTrip(t *testing.T) {
 	root := copyFixtureTree(t)
 	// Pick the first node from the loaded topology

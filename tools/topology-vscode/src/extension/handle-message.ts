@@ -105,6 +105,13 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // request/response). Forwarding the validated message wholesale (rather than
       // reconstructing it field-by-field per op) means a new attribute can never be
       // silently dropped here. There are exactly three ops: create / update / delete.
+      // Gate every edit write on a running Go. writeStdin buffers when proc is null
+      // and that buffer flushes onto the NEXT spawned process — which re-reads the
+      // graph from disk — so an edit sent while Go is stopped would replay and
+      // double-apply. Go is always spawned on "ready" before any edit, so a running
+      // check here drops stale edits rather than buffering them. (play/pause/resume/
+      // resend already guard on this.proc.)
+      if (!runner.isRunning()) return;
       if (msg.op === "create" || msg.op === "delete") {
         // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
         // only); the writeStdin send itself is non-blocking.

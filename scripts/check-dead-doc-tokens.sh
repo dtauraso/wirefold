@@ -17,8 +17,12 @@ DEAD_TOKENS=(
 
 fail=0
 for doc in "${DOCS[@]}"; do
+  if [ ! -f "$doc" ]; then
+    echo "dead-doc-tokens: MISCONFIGURED — doc not found: $doc (renamed? a missing doc would vacuously pass)" >&2
+    exit 1
+  fi
   for token in "${DEAD_TOKENS[@]}"; do
-    if grep -qF "$token" "$doc" 2>/dev/null; then
+    if grep -aqF "$token" "$doc" 2>/dev/null; then
       echo "DEAD TOKEN: '$token' found in $doc — remove or update the reference"
       fail=1
     fi

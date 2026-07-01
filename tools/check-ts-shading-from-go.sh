@@ -83,11 +83,11 @@ done
 # Positive assertion: the render dir must import the Go-supplied shading params.
 # If the import is gone, TS is no longer sourcing shading from Go even if no
 # forbidden literal is present (e.g. someone inlined a different value).
-if ! grep -rq --include='*.ts' --include='*.tsx' 'from "../../schema/shading-params"' "$SCAN_DIR"; then
+if ! grep -arq --include='*.ts' --include='*.tsx' 'from "../../schema/shading-params"' "$SCAN_DIR"; then
   echo 'ts-shading-from-go: three/ does not import from "../../schema/shading-params" — shading params must come from Go'
   HITS=$((HITS + 1))
 fi
-if ! grep -rq --include='*.ts' --include='*.tsx' 'SHADING_PARAM_NODE_TRANSMISSION' "$SCAN_DIR"; then
+if ! grep -arq --include='*.ts' --include='*.tsx' 'SHADING_PARAM_NODE_TRANSMISSION' "$SCAN_DIR"; then
   echo 'ts-shading-from-go: SHADING_PARAM_NODE_TRANSMISSION not used — node glass material is not reading Go params'
   HITS=$((HITS + 1))
 fi

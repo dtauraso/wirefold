@@ -22,7 +22,7 @@ done
 # Extract SendRule const values from Go:
 #   lines of the form:  RuleFoo SendRule = "someValue"
 rules_from_go() {
-  grep -E 'SendRule[[:space:]]*=[[:space:]]*"[^"]+"' "$PORTS_GO" \
+  grep -aE 'SendRule[[:space:]]*=[[:space:]]*"[^"]+"' "$PORTS_GO" \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort
@@ -31,7 +31,7 @@ rules_from_go() {
 # Extract values from the SEND_RULES array in types.ts:
 #   export const SEND_RULES: readonly SendRule[] = ["consumeGated", "fireAndForget"];
 rules_from_ts() {
-  grep 'SEND_RULES' "$TYPES_TS" \
+  grep -a 'SEND_RULES' "$TYPES_TS" \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort

@@ -4,8 +4,26 @@
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 0
 
-changed=$(git status --porcelain 2>/dev/null | awk '{print $NF}')
-[ -z "$changed" ] && exit 0
+# Files to consider for the EXPENSIVE language builds. This is the union of:
+#   - the working tree (uncommitted changes), and
+#   - committed-but-unmerged work (branch ahead of origin/main, or main if no origin).
+# The guard LOOP below runs unconditionally regardless of this set — it is fast
+# (sub-second greps) and is the real enforcement; gating it on a dirty tree made
+# the whole suite decorative for the normal commit-then-stop workflow.
+worktree_changed=$(git status --porcelain 2>/dev/null | awk '{print $NF}')
+
+base=""
+if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+  base="origin/main"
+elif git rev-parse --verify -q main >/dev/null 2>&1; then
+  base="main"
+fi
+committed_changed=""
+if [ -n "$base" ]; then
+  committed_changed=$(git diff --name-only "$base"...HEAD 2>/dev/null || true)
+fi
+
+changed=$(printf '%s\n%s\n' "$worktree_changed" "$committed_changed")
 
 go_changed=$(echo "$changed" | grep -E '\.go$' || true)
 ts_changed=$(echo "$changed" | grep -E 'tools/topology-vscode/.*\.(ts|tsx)$' || true)

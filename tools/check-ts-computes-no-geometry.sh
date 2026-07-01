@@ -29,6 +29,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SRC_DIR="$REPO_ROOT/tools/topology-vscode/src"
 
+# Fail loud if the scanned tree moved — a silently-missing dir would make every
+# grep below error into `|| true`, keeping HITS at 0 and reporting a false clean
+# (mirror check-ts-shading-from-go.sh / check-slot-phase-boundary.sh).
+if [[ ! -d "$SRC_DIR" ]]; then
+  echo "ts-computes-no-geometry: MISCONFIGURED — scan dir not found: $SRC_DIR" >&2
+  exit 1
+fi
+
+# Positive sanity assertion: the scan must actually see source files. If the tree
+# is present but contains no .ts/.tsx (moved/renamed layout), a zero-hit result is
+# vacuous, not clean.
+ts_file_count=$(find "$SRC_DIR" \( -name "*.ts" -o -name "*.tsx" \) | head -1 | wc -l | tr -d ' ')
+if [[ "$ts_file_count" -eq 0 ]]; then
+  echo "ts-computes-no-geometry: MISCONFIGURED — no .ts/.tsx files under $SRC_DIR" >&2
+  exit 1
+fi
+
 # Forbidden tokens — any occurrence (code or comment) is a regression signal. The
 # Phase-2 deletion removed these names entirely, so a clean tree has zero hits and
 # their reappearance means bead-position math crept back into TS.

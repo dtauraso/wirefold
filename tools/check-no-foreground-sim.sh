@@ -29,8 +29,11 @@ emit() { # $1=allow|deny  $2=reason
 if [ -z "$cmd" ]; then emit allow "no command string"; exit 0; fi
 
 # Does the command invoke the sim? (./wirefold, bare wirefold binary, or `go run` of
-# the repo main). Narrow on purpose — `go test`, `go build`, editing, etc. are exempt.
-SIM_RE='(^|[^[:alnum:]_./-])(\./)?wirefold([[:space:]]|$)|go[[:space:]]+run([[:space:]]|$)'
+# the repo MAIN package specifically). Narrow on purpose — `go test`, `go build`,
+# editing, and `go run` of a subpackage tool (e.g. `go run ./tools/gen-node-defs`)
+# are exempt. The main package is the module root, so only `go run .`, `go run ./`,
+# or `go run github.com/dtauraso/wirefold` count as sim runs.
+SIM_RE='(^|[^[:alnum:]_./-])(\./)?wirefold([[:space:]]|$)|go[[:space:]]+run[[:space:]]+(\./?|github\.com/dtauraso/wirefold)([[:space:]]|$)'
 if ! printf '%s' "$cmd" | grep -Eq "$SIM_RE"; then
   emit allow "not a sim run"; exit 0
 fi
