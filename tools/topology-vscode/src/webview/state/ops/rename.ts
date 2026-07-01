@@ -4,7 +4,7 @@
 import type { Spec } from "../../../schema";
 import type { ViewerState } from "../viewer/types";
 
-export const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // Mutates spec and viewerState in place. Returns an error string if the
 // rename is rejected, or null on success.

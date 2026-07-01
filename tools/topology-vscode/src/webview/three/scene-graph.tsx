@@ -394,7 +394,7 @@ function useEdgeSegment(edgeId: string) {
   return { seg, segKey };
 }
 
-export function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: string; faded: boolean; selected: boolean; dimmed?: boolean }) {
+function SingleEdgeTube({ edgeId, faded, selected, dimmed }: { edgeId: string; faded: boolean; selected: boolean; dimmed?: boolean }) {
   // Go is the authoritative holder of this edge's segment (Phase 3, MODEL.md). It
   // streams the endpoints (geometry trace) on load and on every node-move;
   // pump.ts writes them to the edge-geometry store. We subscribe to THIS edge's

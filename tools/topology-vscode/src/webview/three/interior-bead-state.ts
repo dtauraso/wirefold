@@ -12,7 +12,7 @@
 // slot is marked empty (the bead is hidden) — absence streamed explicitly so a
 // popped bead disappears.
 
-export interface InteriorBeadData {
+interface InteriorBeadData {
   value: number;
   present: boolean;
   /** Go-computed slot NODE-LOCAL offset (relative to node center). TS never computes

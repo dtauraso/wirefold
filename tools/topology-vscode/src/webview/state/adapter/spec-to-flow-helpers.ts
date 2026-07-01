@@ -6,7 +6,7 @@ import type { ViewerState } from "../viewer/types";
 import { WIRE_PROPS } from "../../../schema/wire-defs";
 
 /** Iterate WIRE_PROPS registry; skip `kind` (handled explicitly at call sites). */
-export function pickWireProps(e: Record<string, unknown>): Partial<EdgeData> {
+function pickWireProps(e: Record<string, unknown>): Partial<EdgeData> {
   const out: Partial<EdgeData> = {};
   for (const key of Object.keys(WIRE_PROPS)) {
     if (key !== "kind" && e[key] !== undefined) (out as Record<string, unknown>)[key] = e[key];

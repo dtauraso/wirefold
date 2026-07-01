@@ -13,7 +13,7 @@
 import { create } from "zustand";
 
 /** One edge's Go-streamed straight-segment endpoints (source OUT pos, dest IN pos). */
-export interface EdgeSegment {
+interface EdgeSegment {
   start: { x: number; y: number; z: number };
   end: { x: number; y: number; z: number };
 }

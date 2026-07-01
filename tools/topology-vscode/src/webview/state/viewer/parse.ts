@@ -10,10 +10,10 @@ import type { PolarCamera } from "../../three/camera-store";
 
 export { isObj };
 
-export const isNum = (v: unknown): v is number =>
+const isNum = (v: unknown): v is number =>
   typeof v === "number" && Number.isFinite(v);
 
-export const isStr = (v: unknown): v is string => typeof v === "string";
+const isStr = (v: unknown): v is string => typeof v === "string";
 
 export const isStrArr = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every(isStr);

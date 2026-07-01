@@ -13,7 +13,7 @@
 
 import { create } from "zustand";
 
-export interface NodePortGeom {
+interface NodePortGeom {
   name: string;
   isInput: boolean;
   pos: { x: number; y: number; z: number };

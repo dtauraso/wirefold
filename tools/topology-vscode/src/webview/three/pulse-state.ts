@@ -67,7 +67,7 @@ const _EMPTY_SLICE: ReadonlyMap<string, PulseData> = new Map();
 /** Composite map key: a wire (edgeId) may carry N beads at once, each with a
  *  distinct per-wire id (beadID = Go's gen). Keying by edge alone collapsed N
  *  beads to one sprite; keying by `${edgeId}:${beadID}` lets them coexist. */
-export function pulseKey(edgeId: string, beadID: number): string {
+function pulseKey(edgeId: string, beadID: number): string {
   return `${edgeId}:${beadID}`;
 }
 

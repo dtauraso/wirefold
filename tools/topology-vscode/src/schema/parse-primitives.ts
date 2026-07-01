@@ -41,7 +41,7 @@ export const oneOf = <T extends string>(
     ? (v as T)
     : fail(path, `expected one of ${allowed.join("|")}, got ${JSON.stringify(v)}`);
 
-export const stateValue = (v: unknown, path: string): StateValue =>
+const stateValue = (v: unknown, path: string): StateValue =>
   typeof v === "string" || typeof v === "number"
     ? v
     : fail(path, `expected string|number, got ${typeof v}`);
