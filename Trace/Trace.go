@@ -617,6 +617,12 @@ func (t *Trace) drain() {
 // neither is correct (value 0 is a valid signal in this codebase, and
 // a missing port on recv/send is a bug worth surfacing). Hand-roll
 // to keep the shape stable.
+//
+// Perf note: this allocates a fresh []byte per event (incl. the high-volume
+// KindPosition stream). A reusable bytes.Buffer / json.Encoder could avoid the
+// per-call alloc, but Encoder differs from json.Marshal in HTML-escaping and
+// trailing-newline handling, so swapping it risks changing the emitted bytes —
+// not worth it at current trace volumes on this off-hot-path serializer. Left as-is.
 func marshalEvent(e Event) ([]byte, error) {
 	type recvOrSend struct {
 		Step  int    `json:"step"`
