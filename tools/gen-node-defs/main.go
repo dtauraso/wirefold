@@ -92,6 +92,7 @@ func main() {
 	}
 
 	var kinds []kindEntry
+	seenGoKind := map[string]string{} // goKind → dir name that registered it
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -117,6 +118,12 @@ func main() {
 		if err != nil {
 			fatalf("parse go kind name %s: %v", e.Name(), err)
 		}
+		// A duplicate goKind across dirs produces a silent last-wins duplicate TS
+		// object key in node-defs.ts; reject it here naming both dirs.
+		if prev, dup := seenGoKind[goKind]; dup {
+			fatalf("duplicate kind name %q registered by both %q and %q", goKind, prev, e.Name())
+		}
+		seenGoKind[goKind] = e.Name()
 		view, accentOverrides, edgeKindOverrides, optionalPorts, err := parseSpecMD(pkgDir)
 		if err != nil {
 			// This dir has a Wiring.Register (a real node package), so a missing or
