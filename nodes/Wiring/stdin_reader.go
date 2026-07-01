@@ -84,25 +84,10 @@ type stdinAnchorPayload struct {
 	Keys    []string   `json:"keys"`
 }
 
-// stdinGuideVisPayload holds the explicit-visibility fields for the overlays attr="set"
-// op. The json tags are the overlay FLAG vocabulary, shared with the TS OverlayState
-// (derived from OverlayFlag) — parity guarded by check-edit-op-parity.sh via the
-// GUIDEVIS sentinels below (a flag added/removed on either side fails the guard).
-// GUIDEVIS_FIELDS_START
-type stdinGuideVisPayload struct {
-	Tori           bool `json:"tori"`
-	ScenePoles     bool `json:"scenePoles"`
-	NodePoles      bool `json:"nodePoles"`
-	AngleLabels    bool `json:"angleLabels"`
-	SelSpherePoles bool `json:"selSpherePoles"`
-	Handholds      bool `json:"handholds"`
-	DoubleLinks    bool `json:"doubleLinks"`
-	LabelsGlobal   bool `json:"labelsGlobal"`
-	BadgesGlobal   bool `json:"badgesGlobal"`
-	Overlays       bool `json:"overlays"`
-}
-
-// GUIDEVIS_FIELDS_END
+// stdinGuideVisPayload (the overlays attr="set" wire struct) is GENERATED into
+// overlay_gen.go from OVERLAY_FLAG_NAMES; its json tags are the overlay FLAG vocabulary
+// shared with the TS OverlayState. Parity guarded by check-edit-op-parity.sh via the
+// GUIDEVIS_FIELDS sentinels in overlay_gen.go.
 
 // stdinMsg is the single editor→Go bridge shape. type is always "edit"; op is
 // one of exactly three values (create/update/delete). For op=="update", Kind
@@ -247,26 +232,9 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 	}
 }
 
-// overlayToggles maps an overlay FLAG name (the named boolean attribute set by an
-// op=="update" kind=="overlays" attr=="toggle" edit) to the MoveDispatch method
-// that flips it. The flag names are the wire vocabulary shared with the TS
-// OverlayFlag union in messages.ts (guarded by check-edit-op-parity.sh).
-//
-// OVERLAY_TOGGLES_START
-var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){
-	"tori":           (*MoveDispatch).ToggleSceneTori,
-	"scenePoles":     (*MoveDispatch).ToggleScenePoles,
-	"nodePoles":      (*MoveDispatch).ToggleNodePoles,
-	"angleLabels":    (*MoveDispatch).ToggleAngleLabels,
-	"selSpherePoles": (*MoveDispatch).ToggleSelSpherePoles,
-	"handholds":      (*MoveDispatch).ToggleHandholds,
-	"labelsGlobal":   (*MoveDispatch).ToggleLabelsGlobal,
-	"badgesGlobal":   (*MoveDispatch).ToggleBadgesGlobal,
-	"overlays":       (*MoveDispatch).ToggleOverlaysVis,
-	"doubleLinks":    (*MoveDispatch).ToggleDoubleLinks,
-}
-
-// OVERLAY_TOGGLES_END
+// overlayToggles (the FLAG name → MoveDispatch flip-method table) is GENERATED into
+// overlay_gen.go from OVERLAY_FLAG_NAMES. Parity guarded by check-edit-op-parity.sh via
+// the OVERLAY_TOGGLES sentinels in overlay_gen.go.
 
 // applyEdit dispatches one geometry-CRUD edit by its op. There are EXACTLY THREE
 // ops: create/update/delete (matched by value so they stay invisible to the
@@ -474,21 +442,9 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			if msg.State == nil {
 				return
 			}
-			s := msg.State
-			// Map the wire payload fields onto the named overlayState struct (no
-			// positional bool order to get wrong); SetGuideVisibility installs it wholesale.
-			md.SetGuideVisibility(overlayState{
-				sceneToriVisible:      s.Tori,
-				scenePolesVisible:     s.ScenePoles,
-				nodePolesVisible:      s.NodePoles,
-				angleLabelsVisible:    s.AngleLabels,
-				selSpherePolesVisible: s.SelSpherePoles,
-				handholdsVisible:      s.Handholds,
-				doubleLinksVisible:    s.DoubleLinks,
-				labelsGlobalVisible:   s.LabelsGlobal,
-				badgesGlobalVisible:   s.BadgesGlobal,
-				overlaysVisible:       s.Overlays,
-			}, tr)
+			// overlayStateFromPayload (generated) maps the wire fields onto the named
+			// overlayState struct; SetGuideVisibility installs it wholesale.
+			md.SetGuideVisibility(overlayStateFromPayload(msg.State), tr)
 		}
 	case "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {

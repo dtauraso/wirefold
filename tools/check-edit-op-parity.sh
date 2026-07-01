@@ -22,10 +22,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
+# The overlayToggles table + stdinGuideVisPayload struct are GENERATED into overlay_gen.go
+# from OVERLAY_FLAG_NAMES; their sentinel blocks live there.
+OVERLAY_GEN="$REPO_ROOT/nodes/Wiring/overlay_gen.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
 HANDLE_MSG="$REPO_ROOT/tools/topology-vscode/src/extension/handle-message.ts"
 
-for f in "$STDIN_READER" "$MESSAGES_TS" "$HANDLE_MSG"; do
+for f in "$STDIN_READER" "$OVERLAY_GEN" "$MESSAGES_TS" "$HANDLE_MSG"; do
   if [[ ! -f "$f" ]]; then
     echo "edit-op-parity: MISCONFIGURED — file not found: $f" >&2
     exit 1
@@ -91,7 +94,7 @@ report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-messag
 
 # --- Axis 3: overlay flags --------------------------------------------------
 TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted)
-GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$STDIN_READER" | grep -aoE '"[^"]+":' | tr -d '":' | sort -u)
+GO_FLAGS=$(between OVERLAY_TOGGLES_START OVERLAY_TOGGLES_END "$OVERLAY_GEN" | grep -aoE '"[^"]+":' | tr -d '":' | sort -u)
 assert_nonempty "$TS_FLAGS" "axis3 messages.ts overlay flags"
 assert_nonempty "$GO_FLAGS" "axis3 stdin_reader.go overlay flags"
 report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.go overlay flags" \
@@ -103,7 +106,7 @@ report_diff "$(comm -13 <(echo "$GO_FLAGS") <(echo "$TS_FLAGS"))" "stdin_reader.
 # field set IS the overlay flag set (TS_FLAGS). On the Go side it is the json tags of
 # stdinGuideVisPayload. Assert they agree so a flag added/removed in the set-path can't
 # silently no-op.
-GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$STDIN_READER" | grep -aoE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
+GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$OVERLAY_GEN" | grep -aoE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
 assert_nonempty "$GO_GUIDEVIS" "axis4 stdinGuideVisPayload fields"
 report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuideVisPayload fields" \
             "$(comm -23 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "messages.ts OverlayState/flags"
