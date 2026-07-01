@@ -1,5 +1,5 @@
 // scene-graph.tsx — GraphNode, SphereRing, SingleEdgeTube, GraphEdges.
-import React, { useMemo, useContext } from "react";
+import React, { useMemo, useContext, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
@@ -8,6 +8,7 @@ import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
 import { nodeRadius, nodeWorldPos, portDir } from "./geometry-helpers";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { PulseBead, InteriorBeads } from "./scene-beads";
+import { getNodeStatusMap } from "./node-status-state";
 import { useCameraStore } from "./camera-store";
 import {
   SHADING_PARAM_NODE_TRANSMISSION,
@@ -34,6 +35,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
+// Border-ring color while Go reports a firing error (node-status torusRed=true).
+const NODE_STATUS_RED = new THREE.Color("#ff2020");
 const DOUBLE_LINKS_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE);
 
 // ---------------------------------------------------------------------------
@@ -119,6 +122,18 @@ export function GraphNode({
   const torusThick = (selected || hovered || onSphereSurface) ? r * 0.14 : r * 0.08;
   const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
+  // Border-ring color reflects Go's node-status stream: red while torusRed=true,
+  // otherwise the render-derived strokeColor. Pure plot — poll the store each frame
+  // and set the material color imperatively (mirrors scene-beads' color-from-store
+  // idiom); no TS-side timer, the revert rides the next node-status event.
+  const ringMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  useFrame(() => {
+    const mat = ringMatRef.current;
+    if (!mat) return;
+    const status = getNodeStatusMap().get(node.id);
+    mat.color.copy(status?.torusRed ? NODE_STATUS_RED : strokeColor);
+  });
+
   return (
     <group position={[pos.x, pos.y, pos.z]}>
       <mesh userData={{ nodeId: node.id, body: true }}>
@@ -143,6 +158,7 @@ export function GraphNode({
       <mesh userData={{ nodeId: node.id, ring: true }}>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
+          ref={ringMatRef}
           key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}
