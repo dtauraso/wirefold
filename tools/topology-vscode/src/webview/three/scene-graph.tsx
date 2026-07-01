@@ -43,6 +43,12 @@ const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
 const NODE_STATUS_RED = new THREE.Color("#ff1a1a");
 const DOUBLE_LINKS_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE);
 
+// Port hit-sphere radius (world units): the small grabbable ball drawn at each port.
+const PORT_SPHERE_R = 4;
+// Selection/surface halo radius as a multiple of the node radius — the soft orange
+// glow sphere drawn around a selected or on-surface node.
+const NODE_HALO_R_RATIO = 1.45;
+
 // ---------------------------------------------------------------------------
 // Single node mesh: sphere + border ring
 // ---------------------------------------------------------------------------
@@ -76,7 +82,7 @@ function PortSphere({
       scale={isSel ? 1.5 : isHov ? 1.3 : 1}
       userData={{ portId, nodeId: node.id, portName: port.name, isInput, port: true }}
     >
-      <sphereGeometry args={[4, 8, 8]} />
+      <sphereGeometry args={[PORT_SPHERE_R, 8, 8]} />
       <meshStandardMaterial
         color={isSel ? "#ffcc00" : isHov ? "#aaddff" : strokeColor}
         emissive={isSel ? "#ffcc00" : isHov ? "#aaddff" : "#000000"}
@@ -195,7 +201,7 @@ export function GraphNode({
         />
       </mesh>
       <mesh raycast={() => null}>
-        <sphereGeometry args={[r * 1.45, 16, 16]} />
+        <sphereGeometry args={[r * NODE_HALO_R_RATIO, 16, 16]} />
         <meshBasicMaterial
           color="#ff5a00"
           transparent

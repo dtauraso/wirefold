@@ -23,6 +23,12 @@ import { useEdgeGeometryStore } from "./edge-geometry";
 // React state per bead — placement is pure useFrame mutation, off React's render path.
 const PULSE_POOL = 16;
 
+// In-flight (on-wire) bead radius, and the ratio of a bead's ring (torus tube)
+// radius to its sphere radius. The ratio is shared by every bead renderer
+// (on-wire, interior, missed) so their rings read consistently.
+const PULSE_BEAD_R = 4;
+const BEAD_RING_TUBE_RATIO = 0.12;
+
 export function PulseBead({
   edgeId,
 }: {
@@ -74,11 +80,11 @@ export function PulseBead({
       {Array.from({ length: PULSE_POOL }, (_, i) => (
         <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
           <mesh raycast={() => null}>
-            <sphereGeometry args={[4, 16, 16]} />
+            <sphereGeometry args={[PULSE_BEAD_R, 16, 16]} />
             <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
           <mesh raycast={() => null}>
-            <torusGeometry args={[4, 4 * 0.12, 8, 24]} />
+            <torusGeometry args={[PULSE_BEAD_R, PULSE_BEAD_R * BEAD_RING_TUBE_RATIO, 8, 24]} />
             <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
         </group>
@@ -137,7 +143,7 @@ function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; c
         <meshStandardMaterial ref={sphereMatRef} emissiveIntensity={0} />
       </mesh>
       <mesh raycast={() => null}>
-        <torusGeometry args={[INTERIOR_BEAD_R, INTERIOR_BEAD_R * 0.12, 8, 24]} />
+        <torusGeometry args={[INTERIOR_BEAD_R, INTERIOR_BEAD_R * BEAD_RING_TUBE_RATIO, 8, 24]} />
         <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
       </mesh>
     </group>
@@ -204,7 +210,7 @@ export function MissedBeadMarkers() {
             <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
           <mesh raycast={() => null}>
-            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
+            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * BEAD_RING_TUBE_RATIO, 8, 24]} />
             <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
         </group>
