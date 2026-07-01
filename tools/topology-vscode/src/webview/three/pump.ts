@@ -305,7 +305,7 @@ export function handleTraceEvent(event: TraceEvent): void {
       // store; GraphNode paints its ring red and MissedBeadMarkers places the marker.
       // Reverting is driven by the next event (torusRed=false) — no TS timer/logic.
       const e = event as Extract<TraceEvent, { kind: "node-status" }>;
-      setNodeStatus(e.node, e.torusRed, e.missedValue, { x: e.x, y: e.y, z: e.z });
+      setNodeStatus(e.node, e.torusRed, e.missedValue, e.x, e.y, e.z);
       return;
     }
     default:

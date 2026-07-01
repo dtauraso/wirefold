@@ -174,7 +174,7 @@ export function MissedBeadMarkers() {
       if (!g) { slot++; continue; }
       const style = beadStyleForValue(status.missedValue);
       if (!style) { g.visible = false; slot++; continue; }
-      g.position.set(status.pos.x, status.pos.y, status.pos.z);
+      g.position.set(status.x, status.y, status.z);
       g.scale.setScalar(1.0 + 0.25 * pulse);
       const sm = sphereMatRefs.current[slot];
       if (sm) {
