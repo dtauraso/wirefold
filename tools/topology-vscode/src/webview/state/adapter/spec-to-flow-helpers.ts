@@ -56,6 +56,10 @@ export function buildEdges(
         targetHandle: e.targetHandle,
         route: ev?.route ?? (e.data as { route?: string } | undefined)?.route,
         ...pickWireProps(e as unknown as Record<string, unknown>),
+        // label is a required wire prop (edge identity — keys the channel); set it
+        // explicitly AFTER the spread so its type stays `string` (pickWireProps
+        // returns Partial<EdgeData>, which would otherwise re-widen it to optional).
+        label: e.label,
         value: (e.data as Record<string, unknown> | undefined)?.value,
         edgeData: e.data, // verbatim: flow-to-spec round-trips backpressure/delay config
       },

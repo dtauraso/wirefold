@@ -20,14 +20,11 @@ import (
 // cancelled or all nodes exit. Shared by Run and RunTest.
 //
 // clk is the single monotonic clock every wire reads to time its own delivery
-// (MODEL.md). Pass nil to use a production RealClock; tests pass a clock they
-// control. The global play/pause gate is this clock's Halt/Resume.
+// (MODEL.md). Both callers (Run, RunTest) pass a real clock; it is always non-nil.
+// The global play/pause gate is this clock's Halt/Resume.
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string, clk W.Clock) {
 	tr := T.NewWithSink(0, os.Stdout)
 
-	if clk == nil {
-		clk = W.NewRealClock()
-	}
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()
 

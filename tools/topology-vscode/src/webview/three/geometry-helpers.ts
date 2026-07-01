@@ -103,21 +103,19 @@ export function contentSphere(nodes: RFNode<NodeData>[]): { center: THREE.Vector
  * the stream rather than from local React Flow node.position. The local-compute path
  * is the startup fallback only (before Go's first emit).
  */
-export function nodeWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
+// `target`, when supplied, is written into and returned instead of allocating a
+// fresh Vector3 — lets hot per-frame loops (LabelProjector) reuse scratch vectors.
+// Omitting it preserves the original allocate-and-return behavior for all callers.
+export function nodeWorldPos(node: RFNode<NodeData>, target?: THREE.Vector3): THREE.Vector3 {
   const g = getNodeGeometry(node.id);
-  if (g) return new THREE.Vector3(g.center.x, g.center.y, g.center.z);
-  return nodeWorldPosLocal(node);
-}
-
-/**
- * FALLBACK: local node-center compute. Used pre-emit ONLY (before Go's first
- * node-geometry emit). Authoritative WORLD centers are Go-computed under the polar
- * layout (polar roots → derived Cartesian centers; see nodes/Wiring/derived.go) and
- * streamed via node-geometry — the editor does not replicate that derivation here,
- * so this fallback returns the origin as a stable placeholder until the stream arrives.
- */
-function nodeWorldPosLocal(_node: RFNode<NodeData>): THREE.Vector3 {
-  return new THREE.Vector3(0, 0, 0);
+  const out = target ?? new THREE.Vector3();
+  if (g) return out.set(g.center.x, g.center.y, g.center.z);
+  // FALLBACK (pre-emit ONLY, before Go's first node-geometry emit): authoritative
+  // WORLD centers are Go-computed under the polar layout (polar roots → derived
+  // Cartesian centers; see nodes/Wiring/derived.go) and streamed via node-geometry.
+  // The editor does not replicate that derivation, so it returns the origin as a
+  // stable placeholder until the stream arrives.
+  return out.set(0, 0, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,10 +140,10 @@ export function portDir(node: RFNode<NodeData>, portName: string, isInput: boole
 }
 
 /** World position for the top of the node sphere (center.y + radius). */
-export function nodeTopWorldPos(node: RFNode<NodeData>): THREE.Vector3 {
-  const center = nodeWorldPos(node);
-  const r = nodeRadius(node);
-  return new THREE.Vector3(center.x, center.y + r, center.z);
+export function nodeTopWorldPos(node: RFNode<NodeData>, target?: THREE.Vector3): THREE.Vector3 {
+  const out = nodeWorldPos(node, target ?? new THREE.Vector3());
+  out.y += nodeRadius(node);
+  return out;
 }
 
 // The port-to-port curve builder was REMOVED in Phase 3. The port-to-port curve

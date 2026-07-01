@@ -95,9 +95,9 @@ func TestFiringErrorEmittedEndToEnd(t *testing.T) {
 	if in == nil || out == nil {
 		t.Fatalf("missing per-edge Outs: in=%v out=%v", in, out)
 	}
-	if !(out.SimLatencyMs > 4*in.SimLatencyMs) {
+	if !(out.Geom().SimLatencyMs > 4*in.Geom().SimLatencyMs) {
 		t.Fatalf("output wire not long enough for a wide window: in=%.1fms out=%.1fms",
-			in.SimLatencyMs, out.SimLatencyMs)
+			in.Geom().SimLatencyMs, out.Geom().SimLatencyMs)
 	}
 
 	var wg sync.WaitGroup
@@ -110,7 +110,7 @@ func TestFiringErrorEmittedEndToEnd(t *testing.T) {
 	// Advance the fake clock in input-latency-sized steps, polling for the red
 	// event first, then the revert. The step clears an input hop each time so the
 	// Input keeps feeding beads into h's open window.
-	step := time.Duration(in.SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
+	step := time.Duration(in.Geom().SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
 
 	// The FIRST real window is opened by value 0 (lastVal=0), so the missed
 	// different-color bead is value 1 — deterministic given init [0,1].

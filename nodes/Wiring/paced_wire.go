@@ -361,7 +361,7 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 			}
 			if final || isFinal {
 				it.pw.mu.Lock()
-				if ai, ok := it.pw.deliverHeadLocked(it.gen); ok {
+				if ai, ok := it.pw.deliverHeadLocked(ctx, it.gen); ok {
 					it.pw.emitArrive(ai)
 				}
 				done[i] = true
@@ -380,8 +380,25 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 // before returning (matching the inline delivery window it replaced). Returns
 // ok=false — with the lock released — when the bead was torn down or already
 // dropped (no arrive emit), ok=true when it was delivered.
-func (pw *PacedWire) deliverHeadLocked(gen uint64) (ai arriveInfo, ok bool) {
+func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arriveInfo, ok bool) {
+	// stop is the canceller installed only when this bead must actually PARK behind an
+	// earlier FIFO head (j != 0). Without it a waiter would park on pw.cond forever if
+	// the head bead's driver exits on ctx cancellation without delivering — the
+	// cond.Wait has no ctx wakeup of its own. broadcastOnCancel wakes it on ctx.Done
+	// (same mechanism Recv uses); the loop re-checks ctx.Err() and returns ok=false
+	// (no delivery). The common single-bead fast path (j == 0) never parks, so it
+	// spawns nothing and behavior is unchanged.
+	var stop chan struct{}
+	defer func() {
+		if stop != nil {
+			close(stop)
+		}
+	}()
 	for {
+		if ctx.Err() != nil {
+			pw.mu.Unlock()
+			return arriveInfo{}, false
+		}
 		if gen < pw.teardownGen {
 			pw.mu.Unlock()
 			return arriveInfo{}, false
@@ -393,6 +410,9 @@ func (pw *PacedWire) deliverHeadLocked(gen uint64) (ai arriveInfo, ok bool) {
 		}
 		if j == 0 {
 			break
+		}
+		if stop == nil {
+			stop = broadcastOnCancel(ctx, &pw.mu, pw.cond)
 		}
 		pw.cond.Wait()
 	}
@@ -596,13 +616,14 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool
 
 // teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
 // returns the per-bead source identities for any in-flight beads so the caller can
-// emit one PulseCancelled per dropped bead after unlocking. Must be called with
-// pw.mu held.
+// emit one PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors
+// the bead's streams flag — delivery-only beads carry no sprite and emit nothing,
+// matching deliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
 func (pw *PacedWire) teardownLocked() []arriveInfo {
 	var cancelled []arriveInfo
 	for i := range pw.inflight {
 		b := pw.inflight[i]
-		cancelled = append(cancelled, arriveInfo{emit: true, node: b.node, port: b.port, value: b.val, gen: b.gen})
+		cancelled = append(cancelled, arriveInfo{emit: b.streams, node: b.node, port: b.port, value: b.val, gen: b.gen})
 	}
 	pw.inflight = nil
 	pw.delivered = nil
@@ -637,7 +658,9 @@ func (pw *PacedWire) Delete() {
 	pw.mu.Unlock()
 
 	for _, ai := range cancelled {
-		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		if ai.emit {
+			pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		}
 	}
 }
 
@@ -658,7 +681,9 @@ func (pw *PacedWire) Restore() {
 	pw.mu.Unlock()
 
 	for _, ai := range cancelled {
-		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		if ai.emit {
+			pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		}
 	}
 }
 

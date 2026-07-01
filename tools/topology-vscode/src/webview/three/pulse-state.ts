@@ -2,8 +2,9 @@
 // sole source of bead positions — TS plots, it computes no geometry. pump.ts
 // calls setPulse (on send, to record the in-flight bead + its routing identity),
 // setPulsePos (on each ~16 ms position event, to set the Go-computed world
-// position), and clearPulse (on done). PulseBead reads getPulseMap() imperatively
-// each frame and draws pulse.pos directly — no curve sampling, no t, no clock.
+// position), and clearPulse (on done). PulseBead reads getPulseMapForEdge()
+// imperatively each frame and draws pulse.pos directly — no curve sampling, no t,
+// no clock.
 //
 // This is a plain non-React Map: there is no React subscriber (PulseBead polls in
 // useFrame), so updates mutate the map without triggering a commit. That keeps the
@@ -35,8 +36,6 @@ export interface PulseData {
    *  with no round-trip lag. Always set (slot established from a position event). */
   frac: number;
 }
-
-export type PulseMap = ReadonlyMap<string, PulseData>;
 
 let _current: Map<string, PulseData> = new Map();
 
@@ -131,17 +130,14 @@ export function clearPulsesForEdge(edgeId: string) {
 /** Wipe every in-flight bead. Called at run-start (store.load) so a fresh run's
  *  process (zero in-flight beads in Go) does not inherit a zombie bead left in
  *  the store from a prior run that was stopped after "send" but before "arrive".
- *  Mirrors clearPulse: swaps _current for a fresh Map — PulseBead polls getPulseMap
- *  in useFrame, so the next frame draws no beads (no version counter/listeners here). */
+ *  Mirrors clearPulse: swaps _current for a fresh Map — PulseBead polls
+ *  getPulseMapForEdge in useFrame, so the next frame draws no beads (no version
+ *  counter/listeners here). */
 export function clearAllPulses() {
   const count = _current.size;
   _current = new Map();
   _byEdge.clear();
   postLog("lifecycle", { phase: "pulse-reset", cleared: count });
-}
-
-export function getPulseMap(): PulseMap {
-  return _current;
 }
 
 /** Per-edge slice of the pulse map: only the in-flight beads on `edgeId`. Lets

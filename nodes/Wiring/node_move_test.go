@@ -82,8 +82,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 
 	// Place a bead on the wire so the move must revise it in flight.
-	seg0 := wireSegment{Start: out.Start, End: out.End}
-	bp := beadPlacement{InFlightMs: out.SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
+	seg0 := wireSegment{Start: out.Geom().Start, End: out.Geom().End}
+	bp := beadPlacement{InFlightMs: out.Geom().SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
 	if !placeAndDrive(pw, 7, bp) {
 		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
@@ -101,7 +101,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	dstGeom := nodeGeom{Kind: "FanInSink", Center: &dstCenter, Inputs: []portGeom{{Name: "In"}}}
 	wantReg := AimedPortRegistry{
 		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
-		{NodeID: "dst", PortName: "In", IsInput: true}:  "src",
+		{NodeID: "dst", PortName: "In", IsInput: true}:   "src",
 	}
 	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
 	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
@@ -109,11 +109,11 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	wantArc := wantSeg.Start.sub(wantSeg.End).length()
 
 	// Edge mover wrote the new segment/arc onto the source Out.
-	if !approxEq(out.ArcLength, wantArc) || !approxEq(out.SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
-		t.Fatalf("Out arc/lat = %v/%v, want %v/%v", out.ArcLength, out.SimLatencyMs, wantArc, wantArc/PulseSpeedWuPerMs)
+	if !approxEq(out.Geom().ArcLength, wantArc) || !approxEq(out.Geom().SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
+		t.Fatalf("Out arc/lat = %v/%v, want %v/%v", out.Geom().ArcLength, out.Geom().SimLatencyMs, wantArc, wantArc/PulseSpeedWuPerMs)
 	}
-	if !approxEq(out.End.X, wantSeg.End.X) || !approxEq(out.Start.X, wantSeg.Start.X) {
-		t.Fatalf("Out segment = %+v..%+v, want %+v..%+v", out.Start, out.End, wantSeg.Start, wantSeg.End)
+	if !approxEq(out.Geom().End.X, wantSeg.End.X) || !approxEq(out.Geom().Start.X, wantSeg.Start.X) {
+		t.Fatalf("Out segment = %+v..%+v, want %+v..%+v", out.Geom().Start, out.Geom().End, wantSeg.Start, wantSeg.End)
 	}
 
 	// Wire latency aggregate updated to the moved edge's latency.
@@ -268,6 +268,75 @@ func TestMoverCenterRace(t *testing.T) {
 			x := float64(i) * 0.5
 			md.RootMove("src", vec3{X: x, Y: 0, Z: 0})
 			md.ResendGeometry(tr)
+		}
+	}()
+	wg.Wait()
+	tr.Close()
+}
+
+// TestOutGeomRace is a -race regression for the data race between the edgeMover
+// goroutine writing the source Out's per-edge geometry (ArcLength/SimLatencyMs/
+// Start/End) in recomputeGeometry and the SOURCE NODE goroutine reading those four
+// fields in Out.placement()/PlaceDriven during bead placement. Before the published
+// snapshot they were bare struct fields written/read with no synchronization; this
+// test hammers RootMove (→ edgeMover.recomputeGeometry) on one goroutine while
+// placement reads flow on another. Must pass cleanly under `go test -race`.
+func TestOutGeomRace(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(4096)
+	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx) // launch mover goroutines
+
+	out := md.EdgeOut("e0")
+	if out == nil {
+		t.Fatal("missing Out e0")
+	}
+
+	const iters = 200
+	var wg sync.WaitGroup
+	// Writer side: RootMove fans a center → the edgeMover recomputes and publishes
+	// the source Out's geometry.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			md.RootMove("src", vec3{X: float64(i) * 0.5, Y: 0, Z: 0})
+		}
+	}()
+	// Reader side: read the four published geometry fields via placement(), exactly as
+	// the source node goroutine does when placing a bead.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			bp := out.placement()
+			_ = bp.InFlightMs
+			_ = bp.Start
+			_ = bp.End
 		}
 	}()
 	wg.Wait()

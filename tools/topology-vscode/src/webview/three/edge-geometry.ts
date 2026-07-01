@@ -25,6 +25,8 @@ interface EdgeGeometryState {
   setEdgeSegment: (edgeId: string, s: EdgeSegment) => void;
   /** Drop one edge's segment (on edge delete) so a stale segment can't draw. */
   removeEdgeSegment: (edgeId: string) => void;
+  /** Drop ALL segments (on run-restart) — a fresh run re-streams every edge. */
+  clearAllEdgeSegments: () => void;
 }
 
 export const useEdgeGeometryStore = create<EdgeGeometryState>((set) => ({
@@ -38,4 +40,14 @@ export const useEdgeGeometryStore = create<EdgeGeometryState>((set) => ({
       delete next[edgeId];
       return { segments: next };
     }),
+  clearAllEdgeSegments: () => set({ segments: {} }),
 }));
+
+/**
+ * Wipe all edge segments at the run-start boundary (symmetric with clearAllPulses):
+ * Go is re-spawned fresh and re-streams every edge's geometry event, so stale
+ * segments for deleted edges must not persist across edit-reload cycles.
+ */
+export function clearAllEdgeSegments() {
+  useEdgeGeometryStore.getState().clearAllEdgeSegments();
+}

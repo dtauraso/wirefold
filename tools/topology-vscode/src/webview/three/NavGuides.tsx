@@ -361,6 +361,17 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
     }),
     [radiusKey, tubeKey],
   );
+  // Dispose the outgoing GPU geometries when the memo rebuilds (radius/tube change) or
+  // on unmount. React runs this cleanup for the PREVIOUS geoA/geoB before creating the
+  // next pair, so the still-mounted current pair is never double-disposed. NavGuides
+  // re-renders on every node-geometry stream event (incl. drags); without this the
+  // replaced TorusGeometry buffers leak.
+  useEffect(() => {
+    return () => {
+      geoA.dispose();
+      geoB.dispose();
+    };
+  }, [geoA, geoB]);
   const rotB = useMemo(() => new THREE.Euler(Math.PI / 2, 0, 0), []);
 
   // Handholds: 4 grab points per torus, 90° apart. Grabbing one starts a CONSTRAINED

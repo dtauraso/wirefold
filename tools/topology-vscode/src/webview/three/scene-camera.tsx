@@ -120,6 +120,13 @@ export function CameraRefBridge({
 // Updates positions via a ref callback (no React state → no re-render cost).
 // ---------------------------------------------------------------------------
 
+// Module-scope scratch vectors reused across the projection loop so the throttled
+// useFrame allocates no Vector3 per node per frame. Kept distinct (never aliased):
+// _topScratch holds the node top, _centerScratch the center, and neither is read
+// after the other is overwritten within one node's iteration.
+const _topScratch = new THREE.Vector3();
+const _centerScratch = new THREE.Vector3();
+
 export function LabelProjector({
   nodes,
   onPositions,
@@ -136,10 +143,10 @@ export function LabelProjector({
     // This is much cheaper than every frame while still tracking well visually.
     if (frameCountRef.current % 2 !== 0) return;
     const positions = nodes.map((n) => {
-      const top = nodeTopWorldPos(n);
+      const top = nodeTopWorldPos(n, _topScratch);
       top.project(camera);
       const topPx = ndcToPixel(top.x, top.y, size);
-      const center = nodeWorldPos(n);
+      const center = nodeWorldPos(n, _centerScratch);
       center.project(camera);
       const centerPx = ndcToPixel(center.x, center.y, size);
       return { id: n.id, px: topPx.px, py: topPx.py, cx: centerPx.px, cy: centerPx.py };

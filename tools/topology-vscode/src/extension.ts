@@ -161,7 +161,9 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   }
 
   context.subscriptions.push(viewStateSub, runner);
-  if (bundleWatcher) context.subscriptions.push(bundleWatcher);
+  // bundleWatcher tracks THIS panel's lifetime, so the panel is its single disposal
+  // owner (onDidDispose below). It is deliberately NOT pushed into
+  // context.subscriptions to avoid a muddled double-owner contract.
 
   panel.onDidDispose(() => {
     bundleWatcher?.dispose();
