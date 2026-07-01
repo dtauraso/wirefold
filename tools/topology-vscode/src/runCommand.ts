@@ -107,9 +107,27 @@ function ensureBinaryBuilt(
   } catch { /* missing → rebuild */ }
   const needsRebuild = binMtime < 0 || maxGoMtime(repoRoot) > binMtime;
   if (!needsRebuild) return { ok: true };
-  const res = buildBinary(repoRoot, binPath);
-  if (!res.ok) return res;
-  return { ok: true };
+  // buildBinary may COALESCE (returns ok with busy:true) when a watcher build is
+  // in flight against the same output path. On first open the binary can be
+  // absent AND a watcher build in flight — a coalesced ok would let run() spawn a
+  // non-existent path (ENOENT, runner stuck). So only report ok once the binary
+  // actually exists on disk: retry buildBinary until it runs to completion (the
+  // guard is released) or the in-flight build has produced the binary.
+  const maxAttempts = 50;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = buildBinary(repoRoot, binPath);
+    if (!res.ok) return res;
+    if (!res.busy) {
+      // Our own build ran synchronously to completion (ok). Trust it — but sanity
+      // check the file so a silent absence still surfaces as an error, not ENOENT.
+      if (fs.existsSync(binPath)) return { ok: true };
+      return { ok: false, error: `go build reported success but ${binPath} is missing` };
+    }
+    // Coalesced against an in-flight build. If that build has already produced the
+    // binary, we're done; otherwise retry (the guard will clear and our own build runs).
+    if (fs.existsSync(binPath)) return { ok: true };
+  }
+  return { ok: false, error: `binary ${binPath} not built after ${maxAttempts} attempts` };
 }
 
 export class BuildAndRunRunner {
