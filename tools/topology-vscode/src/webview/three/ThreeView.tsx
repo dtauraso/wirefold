@@ -105,6 +105,16 @@ export function ThreeView() {
     }
   }, []);
 
+  // Cancel any pending label RAF on unmount so it can't fire against a torn-down component.
+  useEffect(() => {
+    return () => {
+      if (labelRaf.current !== null) {
+        cancelAnimationFrame(labelRaf.current);
+        labelRaf.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Read selectedId and edges from refs so this listener never needs to
