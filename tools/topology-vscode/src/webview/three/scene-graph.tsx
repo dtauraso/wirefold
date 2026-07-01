@@ -35,8 +35,12 @@ import {
 // ---------------------------------------------------------------------------
 
 const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
-// Border-ring color while Go reports a firing error (node-status torusRed=true).
-const NODE_STATUS_RED = new THREE.Color("#ff2020");
+// Alarm color while Go reports a firing error (node-status torusRed=true). Chosen
+// distinct from every node's static stroke (esp. the gate nodes' dark crimson
+// #880e4f): a bright saturated red painted onto BOTH color and emissive so the ring
+// self-glows, plus a per-frame pulse (see the ring useFrame) that no static border
+// color can imitate.
+const NODE_STATUS_RED = new THREE.Color("#ff1a1a");
 const DOUBLE_LINKS_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE);
 
 // ---------------------------------------------------------------------------
@@ -122,16 +126,39 @@ export function GraphNode({
   const torusThick = (selected || hovered || onSphereSurface) ? r * 0.14 : r * 0.08;
   const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
 
-  // Border-ring color reflects Go's node-status stream: red while torusRed=true,
-  // otherwise the render-derived strokeColor. Pure plot — poll the store each frame
-  // and set the material color imperatively (mirrors scene-beads' color-from-store
-  // idiom); no TS-side timer, the revert rides the next node-status event.
+  // Border-ring appearance reflects Go's node-status stream. While torusRed=true the
+  // ring becomes an unmistakable ALARM: bright red on both color AND emissive (self-
+  // glow), a per-frame PULSING emissiveIntensity, and a thickening scale — none of
+  // which any static stroke color (e.g. the gate nodes' #880e4f) can imitate. When
+  // torusRed is false it reverts to the render-derived strokeColor, no glow, unit
+  // scale. Pure plot: the error/normal state is gated ENTIRELY by torusRed from the
+  // Go-owned store (polled each frame, set imperatively — mirrors scene-beads' color-
+  // from-store idiom). The pulse is cosmetic styling of that Go boolean using the
+  // render clock; it decides NO model state and the revert rides Go's next node-status
+  // event, not any TS timer.
   const ringMatRef = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame(() => {
+  const ringMeshRef = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
     const mat = ringMatRef.current;
+    const mesh = ringMeshRef.current;
     if (!mat) return;
     const status = getNodeStatusMap().get(node.id);
-    mat.color.copy(status?.torusRed ? NODE_STATUS_RED : strokeColor);
+    if (status?.torusRed) {
+      // 0..1 pulse from the render clock (cosmetic only).
+      const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
+      mat.color.copy(NODE_STATUS_RED);
+      mat.emissive.copy(NODE_STATUS_RED);
+      mat.emissiveIntensity = 0.6 + 1.9 * pulse;
+      if (mesh) {
+        const s = 1.18 + 0.14 * pulse;
+        mesh.scale.setScalar(s);
+      }
+    } else {
+      mat.color.copy(strokeColor);
+      mat.emissive.copy(emissiveStroke);
+      mat.emissiveIntensity = 0;
+      if (mesh) mesh.scale.setScalar(1);
+    }
   });
 
   return (
@@ -155,7 +182,7 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
-      <mesh userData={{ nodeId: node.id, ring: true }}>
+      <mesh ref={ringMeshRef} userData={{ nodeId: node.id, ring: true }}>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
           ref={ringMatRef}
