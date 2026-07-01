@@ -33,6 +33,12 @@ of this file is the only entry point you need.
    exists. The schema dir is `tools/topology-vscode/src/schema/`.
 3. The Go node package under `nodes/<Kind>/`.
 
+If the new kind emits a **new trace-event kind string** (not just reusing existing
+ones), a matching `case` must be added to the trace switch in
+`tools/topology-vscode/src/webview/three/pump.ts` in the same commit —
+`check-trace-kind-parity.sh` fails otherwise. This is the one grep-discoverable
+edit the three items above don't cover.
+
 **Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`)
 are part of `EdgeData` (`tools/topology-vscode/src/webview/types.ts`) and flow from
 the store into `SingleEdgeTube` via `GraphEdges` in
