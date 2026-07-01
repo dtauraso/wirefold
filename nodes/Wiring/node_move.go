@@ -342,12 +342,11 @@ func (m *edgeMover) recomputeGeometry() {
 	arc := seg.Start.sub(seg.End).length()
 	lat := arc / PulseSpeedWuPerMs
 
-	// Write the new per-edge segment/arc/latency onto the source Out so the next
-	// placement uses the new segment (same as old applyNodeMove).
+	// Publish the new per-edge segment/arc/latency onto the source Out as an immutable
+	// snapshot so the next placement (on the source node goroutine) reads the new
+	// segment via an atomic load — no data race with recomputeGeometry's write here.
 	if m.out != nil {
-		m.out.ArcLength = arc
-		m.out.SimLatencyMs = lat
-		m.out.Start, m.out.End = seg.Start, seg.End
+		m.out.publishGeom(outGeom{ArcLength: arc, SimLatencyMs: lat, Start: seg.Start, End: seg.End})
 	}
 	// Re-derive an in-flight bead on this edge from the new arc + segment (no-op if
 	// none in flight); the dest wire owns the bead under its own mutex.
@@ -463,7 +462,7 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 		if pw, ok := slotReg[em.dstID+"."+em.dstH]; ok {
 			em.dest = pw
 			if em.out != nil {
-				pw.SetIncomingLatency(edgeID, em.out.SimLatencyMs)
+				pw.SetIncomingLatency(edgeID, em.out.Geom().SimLatencyMs)
 			}
 		}
 	}

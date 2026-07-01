@@ -119,7 +119,7 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 		Inputs: []portGeom{{Name: "In"}}}
 	wantRegistry := AimedPortRegistry{
 		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
-		{NodeID: "dst", PortName: "In", IsInput: true}:  "src",
+		{NodeID: "dst", PortName: "In", IsInput: true}:   "src",
 	}
 	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
 	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
@@ -127,18 +127,18 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	wantArc := wantSeg.Start.sub(wantSeg.End).length()
 
 	// Segment endpoints on the source Out must match exactly.
-	if !approxEq(out.Start.X, wantSeg.Start.X) || !approxEq(out.Start.Y, wantSeg.Start.Y) || !approxEq(out.Start.Z, wantSeg.Start.Z) {
-		t.Fatalf("Out.Start = %+v, want %+v", out.Start, wantSeg.Start)
+	if !approxEq(out.Geom().Start.X, wantSeg.Start.X) || !approxEq(out.Geom().Start.Y, wantSeg.Start.Y) || !approxEq(out.Geom().Start.Z, wantSeg.Start.Z) {
+		t.Fatalf("Out.Start = %+v, want %+v", out.Geom().Start, wantSeg.Start)
 	}
-	if !approxEq(out.End.X, wantSeg.End.X) || !approxEq(out.End.Y, wantSeg.End.Y) || !approxEq(out.End.Z, wantSeg.End.Z) {
-		t.Fatalf("Out.End = %+v, want %+v", out.End, wantSeg.End)
+	if !approxEq(out.Geom().End.X, wantSeg.End.X) || !approxEq(out.Geom().End.Y, wantSeg.End.Y) || !approxEq(out.Geom().End.Z, wantSeg.End.Z) {
+		t.Fatalf("Out.End = %+v, want %+v", out.Geom().End, wantSeg.End)
 	}
 	// Arc length + derived latency must match.
-	if !approxEq(out.ArcLength, wantArc) {
-		t.Fatalf("Out.ArcLength = %v, want %v", out.ArcLength, wantArc)
+	if !approxEq(out.Geom().ArcLength, wantArc) {
+		t.Fatalf("Out.ArcLength = %v, want %v", out.Geom().ArcLength, wantArc)
 	}
-	if !approxEq(out.SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
-		t.Fatalf("Out.SimLatencyMs = %v, want %v", out.SimLatencyMs, wantArc/PulseSpeedWuPerMs)
+	if !approxEq(out.Geom().SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
+		t.Fatalf("Out.SimLatencyMs = %v, want %v", out.Geom().SimLatencyMs, wantArc/PulseSpeedWuPerMs)
 	}
 
 	// A geometry event for e0 carrying the new segment was streamed on the move.

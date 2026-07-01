@@ -78,12 +78,12 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 	}
 
 	// 1. Distinct per-edge travel-times: the far edge is longer.
-	if !(farOut.SimLatencyMs > nearOut.SimLatencyMs) {
+	if !(farOut.Geom().SimLatencyMs > nearOut.Geom().SimLatencyMs) {
 		t.Fatalf("expected far edge slower than near: near=%v far=%v",
-			nearOut.SimLatencyMs, farOut.SimLatencyMs)
+			nearOut.Geom().SimLatencyMs, farOut.Geom().SimLatencyMs)
 	}
-	if nearOut.SimLatencyMs == farOut.SimLatencyMs {
-		t.Fatalf("per-edge latencies collapsed to one value: %v", nearOut.SimLatencyMs)
+	if nearOut.Geom().SimLatencyMs == farOut.Geom().SimLatencyMs {
+		t.Fatalf("per-edge latencies collapsed to one value: %v", nearOut.Geom().SimLatencyMs)
 	}
 
 	// 2. The shared dest wire's window aggregate is the max of the two edges.
@@ -91,37 +91,37 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 	if pw == nil {
 		t.Fatal("missing dest wire sink.In")
 	}
-	wantMax := math.Max(nearOut.SimLatencyMs, farOut.SimLatencyMs)
+	wantMax := math.Max(nearOut.Geom().SimLatencyMs, farOut.Geom().SimLatencyMs)
 	if math.Abs(pw.MaxIncomingSimLatencyMs-wantMax) > 1e-9 {
 		t.Fatalf("MaxIncomingSimLatencyMs = %v, want max(%v,%v) = %v",
-			pw.MaxIncomingSimLatencyMs, nearOut.SimLatencyMs, farOut.SimLatencyMs, wantMax)
+			pw.MaxIncomingSimLatencyMs, nearOut.Geom().SimLatencyMs, farOut.Geom().SimLatencyMs, wantMax)
 	}
 
 	// 3. Degenerate 1:1 parity: a single edge's port reports max == that edge.
 	//    (Both source ports here are 1:1 on their own Out; assert near's Out
 	//    equals the aggregate it would produce alone — i.e. the aggregate is not
 	//    smaller than any single feeding edge.)
-	if pw.MaxIncomingSimLatencyMs < nearOut.SimLatencyMs ||
-		pw.MaxIncomingSimLatencyMs < farOut.SimLatencyMs {
+	if pw.MaxIncomingSimLatencyMs < nearOut.Geom().SimLatencyMs ||
+		pw.MaxIncomingSimLatencyMs < farOut.Geom().SimLatencyMs {
 		t.Fatalf("aggregate %v below a feeding edge (near=%v far=%v)",
-			pw.MaxIncomingSimLatencyMs, nearOut.SimLatencyMs, farOut.SimLatencyMs)
+			pw.MaxIncomingSimLatencyMs, nearOut.Geom().SimLatencyMs, farOut.Geom().SimLatencyMs)
 	}
 
 	// 4. Node-move recomputes both the moved edge's Out and the port aggregate.
 	//    Move srcFar even farther; far Out latency rises and so does the aggregate.
-	beforeFar := farOut.SimLatencyMs
+	beforeFar := farOut.Geom().SimLatencyMs
 	deliver(nmr, "srcFar", 2000, 0, 0)
-	if !(farOut.SimLatencyMs > beforeFar) {
+	if !(farOut.Geom().SimLatencyMs > beforeFar) {
 		t.Fatalf("node-move did not raise far Out latency: before=%v after=%v",
-			beforeFar, farOut.SimLatencyMs)
+			beforeFar, farOut.Geom().SimLatencyMs)
 	}
-	if math.Abs(pw.MaxIncomingSimLatencyMs-farOut.SimLatencyMs) > 1e-9 {
+	if math.Abs(pw.MaxIncomingSimLatencyMs-farOut.Geom().SimLatencyMs) > 1e-9 {
 		t.Fatalf("post-move aggregate %v != far latency %v",
-			pw.MaxIncomingSimLatencyMs, farOut.SimLatencyMs)
+			pw.MaxIncomingSimLatencyMs, farOut.Geom().SimLatencyMs)
 	}
 	// near edge unchanged by the move of srcFar.
-	if nearOut.SimLatencyMs >= farOut.SimLatencyMs {
+	if nearOut.Geom().SimLatencyMs >= farOut.Geom().SimLatencyMs {
 		t.Fatalf("near should stay below far after move: near=%v far=%v",
-			nearOut.SimLatencyMs, farOut.SimLatencyMs)
+			nearOut.Geom().SimLatencyMs, farOut.Geom().SimLatencyMs)
 	}
 }

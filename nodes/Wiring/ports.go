@@ -19,6 +19,7 @@ package Wiring
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -35,7 +36,6 @@ type In struct {
 	port  string
 	trace *T.Trace
 }
-
 
 // TryRecv in chan mode: non-blocking select. In paced mode: blocks until
 // a value is placed or ctx is cancelled.
@@ -160,6 +160,29 @@ func ParseSendRule(s string) (SendRule, error) {
 	}
 }
 
+// outGeom is an immutable snapshot of an Out's per-edge geometry, published by the
+// owning edgeMover goroutine (recomputeGeometry) via atomic.Pointer and LOADED by
+// cross-goroutine readers on the source node goroutine (placement / PlaceDriven /
+// EmitOneDriven / the EmitGeometry closure). Writes happen only on the owning
+// goroutine, reads via atomic load — no lock, no coordinator. This mirrors the
+// nodeMover.snap / centerSnap publish/observe pattern (MODEL.md: per-goroutine
+// ownership, cross-goroutine reads via atomic snapshots).
+//
+//   - ArcLength / SimLatencyMs: this edge's own travel-time, computed from this
+//     edge's port-to-port geometry (chord length of this specific segment). SendWire
+//     logs these so each bead animates at its own speed even when multiple edges fan
+//     into one destination port.
+//   - Start/End: this edge's straight-segment endpoints (source OUT-port world pos,
+//     dest IN-port world pos) in the SAME 3-D frame the renderer draws. They travel
+//     WITH each placed bead (beadPlacement) so the wire's position stream evaluates
+//     P(t)=Start+t*(End-Start) on this edge — fan-in safe because the shared dest
+//     wire never stores per-edge geometry.
+type outGeom struct {
+	ArcLength    float64
+	SimLatencyMs float64
+	Start, End   vec3
+}
+
 // Out is a typed output port.
 type Out struct {
 	// chan mode
@@ -171,18 +194,11 @@ type Out struct {
 	node  string
 	port  string
 	trace *T.Trace
-	// ArcLength / SimLatencyMs are this edge's own travel-time, computed from
-	// this edge's port-to-port geometry. Travel-time is per-edge (the chord length
-	// of this specific segment); SendWire logs these so each bead animates at
-	// its own speed even when multiple edges fan into one destination port.
-	ArcLength    float64
-	SimLatencyMs float64
-	// Start/End are this edge's straight-segment endpoints (source OUT-port world
-	// pos, dest IN-port world pos) in the SAME 3-D frame the renderer draws. They
-	// travel WITH each placed bead (beadPlacement) so the wire's position stream
-	// evaluates P(t)=Start+t*(End-Start) on this edge — fan-in safe because the
-	// shared dest wire never stores per-edge geometry.
-	Start, End vec3
+	// geom is this edge's per-edge geometry, published as an immutable snapshot via
+	// atomic.Pointer. Seeded at construction (NewOutPaced) and republished by the
+	// owning edgeMover on every drag tick; read only via Geom() (atomic load). Never
+	// accessed as bare fields across goroutines.
+	geom atomic.Pointer[outGeom]
 	// EdgeLabel is the TS edge id for this output port's wire. Set by the loader
 	// so the node's EmitGeometry closure can stream the authoritative curve via
 	// tr.Geometry(EdgeLabel, Start..End) on startup.
@@ -192,14 +208,40 @@ type Out struct {
 	Rule SendRule
 }
 
+// Geom loads the current per-edge geometry snapshot. Returns the zero outGeom when
+// none has been published (chan-mode test Outs never publish). Safe from any
+// goroutine — reads the atomically-published snapshot, never the writer's live state.
+func (o *Out) Geom() outGeom {
+	if o == nil {
+		return outGeom{}
+	}
+	if g := o.geom.Load(); g != nil {
+		return *g
+	}
+	return outGeom{}
+}
+
+// publishGeom atomically publishes a fresh per-edge geometry snapshot. Called only
+// on the owning goroutine (edgeMover.recomputeGeometry) and at construction.
+func (o *Out) publishGeom(g outGeom) {
+	o.geom.Store(&g)
+}
+
 // placement builds the per-bead beadPlacement this Out hands to the wire: the
 // per-edge in-flight time plus the position-stream context (segment endpoints
 // + source identity). Centralized so TrySend and TryEmit stay in lockstep.
 func (o *Out) placement() beadPlacement {
+	return o.placementFrom(o.Geom())
+}
+
+// placementFrom builds a beadPlacement from an already-loaded geometry snapshot, so
+// a caller can use ONE consistent snapshot for both the placement and the SendWire
+// trace (rather than two independent atomic loads that could straddle a republish).
+func (o *Out) placementFrom(g outGeom) beadPlacement {
 	return beadPlacement{
-		InFlightMs: o.SimLatencyMs,
-		Start:      o.Start,
-		End:        o.End,
+		InFlightMs: g.SimLatencyMs,
+		Start:      g.Start,
+		End:        g.End,
 		Node:       o.node,
 		Port:       o.port,
 	}
@@ -223,11 +265,12 @@ func (o *Out) EmitOneDriven(ctx context.Context, v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		gen, ok := o.pw.placeBeadNoWalker(v, o.placement())
+		g := o.Geom()
+		gen, ok := o.pw.placeBeadNoWalker(v, o.placementFrom(g))
 		if !ok {
 			return false
 		}
-		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		o.pw.DriveBeadToDelivery(ctx, gen)
 		return true
 	}
@@ -286,11 +329,12 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 		return DriveItem{}
 	}
 	if o.pw != nil {
-		gen, ok := o.pw.placeBeadNoWalker(v, o.placement())
+		g := o.Geom()
+		gen, ok := o.pw.placeBeadNoWalker(v, o.placementFrom(g))
 		if !ok {
 			return DriveItem{}
 		}
-		o.trace.SendWire(o.node, o.port, v, o.ArcLength, o.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+		o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
 	}
 	// chan mode (tests): no drive needed, send now and return inert.
@@ -365,5 +409,8 @@ func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tr
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	return &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End, EdgeLabel: edgeLabel}
+	o := &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel}
+	// Seed the atomic snapshot so the first placement reads valid geometry before any move.
+	o.publishGeom(outGeom{ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End})
+	return o
 }
