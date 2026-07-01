@@ -40,6 +40,19 @@ rules_from_ts() {
 GO_RULES=$(rules_from_go)
 TS_RULES=$(rules_from_ts)
 
+# Refuse a vacuous pass: if either extractor returns an EMPTY set (a SendRule const
+# rename in ports.go or a SEND_RULES rename in types.ts), comm would compare
+# empty-to-empty and "pass" blind. Assert each set is non-empty. (Positive-assertion
+# pattern, per check-edit-op-parity.sh / check-trace-kind-parity.sh.)
+assert_nonempty() { # value label
+  if [[ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]]; then
+    echo "send-rule-parity: EMPTY extracted set for '$2' — const/array missing or renamed; refusing vacuous parity pass" >&2
+    exit 1
+  fi
+}
+assert_nonempty "$GO_RULES" "SendRule consts (ports.go)"
+assert_nonempty "$TS_RULES" "SEND_RULES array (types.ts)"
+
 MISSING=$(comm -23 <(echo "$GO_RULES") <(echo "$TS_RULES"))
 EXTRA=$(comm -13 <(echo "$GO_RULES") <(echo "$TS_RULES"))
 
