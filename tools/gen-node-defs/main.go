@@ -878,13 +878,17 @@ func parseDataFieldsFromAST(pkgDir string) ([]dataField, error) {
 					if !ok2 {
 						continue
 					}
-					typeStr, ok := goTypeExprStr(field.Type)
-					if !ok {
-						return nil, fmt.Errorf("field %v: cannot stringify type", field.Names)
-					}
 					var fname string
 					if len(field.Names) > 0 {
 						fname = field.Names[0].Name
+					}
+					typeStr, ok := goTypeExprStr(field.Type)
+					if !ok {
+						displayName := fname
+						if displayName == "" {
+							displayName = "<anonymous>"
+						}
+						return nil, fmt.Errorf("kind %q: wire:\"data.%s\" field %q has an unsupported/unstringifiable Go type %T", filepath.Base(pkgDir), wireKey, displayName, field.Type)
 					}
 					fields = append(fields, dataField{wireTag: wireKey, goType: typeStr, fieldName: fname})
 				}
