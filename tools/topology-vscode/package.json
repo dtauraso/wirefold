@@ -23,7 +23,7 @@
       "explorer/context": [
         {
           "command": "topology.openEditor",
-          "when": "explorerResourceIsFolder && resourceFilename == topology",
+          "when": "explorerResourceIsFolder && resourceFilename =~ /^topology/",
           "group": "navigation"
         }
       ]
