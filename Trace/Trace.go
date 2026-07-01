@@ -151,7 +151,10 @@ type Event struct {
 	// Bead is the per-wire monotonic bead id (paced_wire.go gen). Set on the four
 	// wire-bead events (send, edge-bead/position, arrive, pulse-cancelled) so the
 	// renderer keys each in-flight bead independently and a wire can show N beads at
-	// once. Always emitted on those kinds (bead 0 is valid); unset on other kinds.
+	// once. Bead ids are 1-based (nextGen increments before it is read, so the first
+	// bead is gen 1); 0 never occurs, so omitempty safely marks "no bead" — the four
+	// wire-bead kinds always carry a real id ≥1, every other kind omits it (TS reads
+	// `bead ?? 0`).
 	Bead uint64 `json:"bead,omitempty"`
 	// Wire geometry fields — populated on send events when the outgoing port
 	// is backed by a PacedWire. Zero values are omitted from JSON output.

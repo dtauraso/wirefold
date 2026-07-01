@@ -51,6 +51,13 @@ function assertNever(x: never): never {
 //
 // "labels-global" and "badges-global" invert the sense: Go emits visible=true
 // when items should show; store fields hold hidden=false.
+// OverlayKind is the trace-kind vocabulary for the overlay toggles. It has one
+// entry per overlay flag in OVERLAY_FLAG_NAMES (messages.ts) — the mapping is 1:1
+// (tori→scene-tori, doubleLinks→double-links, …). Because OVERLAY_TABLE is a
+// Record<OverlayKind, …>, every kind here MUST have a table entry, and the switch's
+// assertNever(k) forces a new overlay trace-kind to route through applyOverlay — so
+// a newly-added overlay flag fails tsc until it is handled here. No inline special
+// case escapes the table.
 type OverlayKind =
   | "scene-tori"
   | "scene-poles"
@@ -60,7 +67,8 @@ type OverlayKind =
   | "handholds"
   | "overlays-vis"
   | "labels-global"
-  | "badges-global";
+  | "badges-global"
+  | "double-links";
 
 type CameraState = ReturnType<typeof useCameraStore.getState>;
 type OverlaySetterKey = {
@@ -74,6 +82,10 @@ type OverlayMeta = {
   // inverted=true: Go's visible → store holds !visible (hidden sense)
   inverted: boolean;
   hasPostLog: boolean;
+  // literal=true: store Go's visible value AS-IS (both true and false persist), rather
+  // than the collapse-to-undefined sense the other overlays use. double-links saves its
+  // literal value (no defaultOff special-case) so it survives Reload Window.
+  literal?: boolean;
 };
 
 // Static overlay metadata — no store instances captured, so it lifts to module
@@ -89,6 +101,7 @@ const OVERLAY_TABLE: Record<OverlayKind, OverlayMeta> = {
   "overlays-vis":     { setterKey: "setOverlaysVisible",       field: "overlaysActive",        inverted: false, hasPostLog: true  },
   "labels-global":    { setterKey: "setLabelsGlobalHidden",    field: "labelsGlobalHidden",    inverted: true,  hasPostLog: false },
   "badges-global":    { setterKey: "setBadgesHidden",          field: "badgesHidden",          inverted: true,  hasPostLog: false },
+  "double-links":     { setterKey: "setDoubleLinksVisible",    field: "doubleLinksVisible",    inverted: false, hasPostLog: false, literal: true },
 };
 
 function applyOverlay(kind: OverlayKind, visible: boolean | undefined): void {
@@ -97,7 +110,14 @@ function applyOverlay(kind: OverlayKind, visible: boolean | undefined): void {
   if (entry.hasPostLog) {
     postLog("guide-recv", { kind, visible });
   }
-  if (entry.inverted) {
+  if (entry.literal) {
+    // Store the value verbatim — both true and false persist (no undefined collapse).
+    const lit = !!visible;
+    setter(lit);
+    patchViewerState((v) => {
+      (v as Record<string, boolean | undefined>)[entry.field as string] = lit;
+    });
+  } else if (entry.inverted) {
     setter(!visible);
     patchViewerState((v) => {
       (v as Record<string, boolean | undefined>)[entry.field as string] = !visible || undefined;
@@ -297,12 +317,9 @@ export function handleTraceEvent(event: TraceEvent): void {
       return;
     }
     case "double-links": {
+      // Handled by OVERLAY_TABLE (literal:true — saves its literal value).
       const e = event as Extract<TraceEvent, { kind: "double-links" }>;
-      useCameraStore.getState().setDoubleLinksVisible(e.visible);
-      patchViewerState((v) => {
-        (v as Record<string, boolean | undefined>).doubleLinksVisible = e.visible;
-      });
-      scheduleViewSave();
+      applyOverlay("double-links", e.visible);
       return;
     }
     case "node-status": {

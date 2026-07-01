@@ -14,28 +14,74 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// ClearSink is a thread-safe io.Writer that counts window_clear breadcrumbs
-// written to the trace sink, so a test can observe sim-time window timeouts.
+// ClearSink is a thread-safe io.Writer that counts the gate's lifecycle
+// breadcrumbs (window_open, dwell_start, window_clear) written to the trace
+// sink, so a test can observe sim-time gate transitions deterministically
+// instead of sleeping. window_open / dwell_start let a test wait until the gate
+// has captured t0 / dwellStart against the clock BEFORE it advances the clock,
+// eliminating the read-vs-advance ordering race.
 type ClearSink struct {
-	mu sync.Mutex
-	n  int
+	mu     sync.Mutex
+	n      int // window_clear
+	opens  int // window_open
+	dwells int // dwell_start
 }
 
-var windowClearBytes = []byte("window_clear")
+var (
+	windowClearBytes = []byte("window_clear")
+	windowOpenBytes  = []byte("window_open")
+	dwellStartBytes  = []byte("dwell_start")
+)
 
 func (s *ClearSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
 	if bytes.Contains(p, windowClearBytes) {
-		s.mu.Lock()
 		s.n++
-		s.mu.Unlock()
 	}
+	if bytes.Contains(p, windowOpenBytes) {
+		s.opens++
+	}
+	if bytes.Contains(p, dwellStartBytes) {
+		s.dwells++
+	}
+	s.mu.Unlock()
 	return len(p), nil
 }
 
+// Count returns the number of window_clear breadcrumbs seen.
 func (s *ClearSink) Count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.n
+}
+
+// OpenCount returns the number of window_open breadcrumbs seen.
+func (s *ClearSink) OpenCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opens
+}
+
+// DwellCount returns the number of dwell_start breadcrumbs seen.
+func (s *ClearSink) DwellCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dwells
+}
+
+// WaitCount polls get() until it reaches at least want, or fails after a bounded
+// timeout. It replaces fixed wall-clock sleeps used to let the gate goroutine
+// reach a known state: the poll is on real gate state (a breadcrumb counter), so
+// the wait is deterministic and the timeout is only a missed-wake guard.
+func WaitCount(t *testing.T, get func() int, want int, what string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for get() < want {
+		if time.Now().After(deadline) {
+			t.Fatalf("gate did not reach %d %s (have %d)", want, what, get())
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // NewInputWire creates a PacedWire for use in gate tests.

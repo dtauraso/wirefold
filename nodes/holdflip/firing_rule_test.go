@@ -236,3 +236,110 @@ loop:
 		t.Fatalf("expected interior bead to show input value 1, got %d (sequence: %v)", last, beads)
 	}
 }
+
+// --- Paced-path coverage -----------------------------------------------------
+//
+// The tests above run in CHAN mode. Production wires holdflip with PacedWire +
+// the one FakeClock/RealClock, where the DRIVE goroutine's EmitOneDriven BLOCKS
+// per wire traversal (self-pacing) instead of spinning into a buffer. This test
+// exercises that real paced output drive: it feeds inputs over a paced In wire
+// and observes the flipped pulses delivered over a paced Out wire, advancing the
+// shared FakeClock to move beads. It asserts the core flip behavior 0->1->0.
+
+// pacedFlipRig wires a holdflip Node with a paced In and paced Out sharing one
+// FakeClock, plus an observer In on the output wire to read delivered pulses.
+type pacedFlipRig struct {
+	clk      *Wiring.FakeClock
+	inPw     *Wiring.PacedWire
+	observer *Wiring.In
+	cancel   context.CancelFunc
+	wg       *sync.WaitGroup
+	ctx      context.Context
+}
+
+func newPacedFlipRig(t *testing.T) *pacedFlipRig {
+	t.Helper()
+	const latMs = 10.0
+	clk := Wiring.NewFakeClock()
+	tr := T.New(0)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	inPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	inPw.SetClock(clk)
+	inPw.Trace = tr
+	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	outPw.SetClock(clk)
+	outPw.Trace = tr
+
+	node := &Node{
+		Fire: func() { tr.Fire("hf") },
+		In:   Wiring.NewInPaced(inPw, ctx, "hf", "In", tr),
+		Out: Wiring.NewPacedOutNoGeom(outPw, ctx, "hf", "Out", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+	}
+	// observer reads the flipped pulses the node drives onto the output wire.
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+
+	return &pacedFlipRig{clk: clk, inPw: inPw, observer: observer, cancel: cancel, wg: &wg, ctx: ctx}
+}
+
+func (r *pacedFlipRig) close() { r.cancel(); r.wg.Wait() }
+
+// feed places value v on the paced input wire and advances the shared clock so
+// the bead is delivered into the node's input slot.
+func (r *pacedFlipRig) feed(t *testing.T, v int) {
+	t.Helper()
+	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, v, 0) { // 0 latency: delivered on next advance
+		t.Fatal("PlaceAndDriveDeliverOnly returned false")
+	}
+	r.clk.Advance(1 * time.Millisecond)
+}
+
+// expectFlip advances the shared clock in wire-latency steps, draining the
+// observer, until a pulse carrying want is delivered. The DRIVE goroutine runs
+// autonomously (self-pacing on EmitOneDriven), so the loop is a bounded
+// advance-and-poll: it always converges once held is set, and the iteration cap
+// is only a hang guard — there is no wall-clock timing assertion.
+func (r *pacedFlipRig) expectFlip(t *testing.T, want int) {
+	t.Helper()
+	const latMs = 10.0
+	for i := 0; i < 5000; i++ {
+		r.clk.Advance(latMs * time.Millisecond)
+		for {
+			v, ok := r.observer.PollRecv()
+			if !ok {
+				break
+			}
+			if v == want {
+				return
+			}
+		}
+		// Yield so the autonomous DRIVE goroutine can place its next pulse before
+		// the next advance. Scheduling nudge only — not a timing assertion.
+		time.Sleep(50 * time.Microsecond)
+	}
+	t.Fatalf("paced drive never delivered flipped value %d", want)
+}
+
+// TestFlipPacedPath drives the core flip behavior over real PacedWires + FakeClock:
+// input 0 -> output 1, then input 1 -> output 0 (1-held each time).
+func TestFlipPacedPath(t *testing.T) {
+	r := newPacedFlipRig(t)
+	defer r.close()
+
+	// held := 0 → drive pulses 1-0 = 1.
+	r.feed(t, 0)
+	r.expectFlip(t, 1)
+
+	// held := 1 → drive pulses 1-1 = 0.
+	r.feed(t, 1)
+	r.expectFlip(t, 0)
+
+	// held := 0 again → back to 1 (0->1->0 round trip on the flipped output).
+	r.feed(t, 0)
+	r.expectFlip(t, 1)
+}

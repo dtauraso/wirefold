@@ -108,7 +108,12 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	// One input held; sim clock frozen → no clear.
 	gatetesthelper.Send(t, left, 1)
 
-	time.Sleep(400 * time.Millisecond)
+	// Wait until the gate has opened the window (t0 captured) — the node is now in
+	// the window-waiting state. Because the sim clock is frozen, no amount of
+	// wall-time can advance now() past t0, so the window can never clear and the
+	// node can never fire. Asserting on that invariant is deterministic; the old
+	// fixed 400ms wall sleep only sampled it at one arbitrary wall instant.
+	gatetesthelper.WaitCount(t, clears.OpenCount, 1, "window_open")
 	if clears.Count() != 0 {
 		t.Fatal("window cleared while sim clock was paused (timed on wall-clock)")
 	}
@@ -315,10 +320,11 @@ func TestWindowClear(t *testing.T) {
 
 	// Only the left input arrives; right never does.
 	gatetesthelper.Send(t, left, 1)
-	// Give the node loop time to pick up the bead and set t0 before we advance the
-	// sim clock. Without this, t0 would be measured AFTER the advance and the window
-	// would never time out.
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the gate has actually opened the window (t0 captured against the
+	// frozen clock) before advancing. This replaces a fixed 50ms sleep that raced
+	// the t0 = now() read: if the advance beat t0's capture, t0 would be measured
+	// AFTER the advance and the window would never time out.
+	gatetesthelper.WaitCount(t, clears.OpenCount, 1, "window_open")
 
 	simClk.Advance(3500 * time.Millisecond)
 
@@ -345,7 +351,10 @@ func TestWindowClear(t *testing.T) {
 
 	gatetesthelper.Send(t, left, 1)
 	gatetesthelper.Send(t, right, 0)
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the gate holds both inputs and has captured dwellStart against the
+	// clock before advancing past the dwell (replaces a fixed 50ms sleep that raced
+	// the dwellStart = now() read).
+	gatetesthelper.WaitCount(t, clears.DwellCount, 1, "dwell_start")
 	simClk.Advance((gatecommon.FireDwellMs + 50) * time.Millisecond)
 	select {
 	case <-fired:

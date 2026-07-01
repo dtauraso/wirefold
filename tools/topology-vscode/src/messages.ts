@@ -314,11 +314,56 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   }
 }
 
+// Documented run-status states (RunStatus["state"] union), used to validate the
+// run-status payload without duplicating the union literals.
+const RUN_STATUS_STATES: ReadonlySet<string> = new Set([
+  "running", "paused", "ok", "error", "cancelled",
+]);
+
+// parseHostToWebview validates a host→webview message by its type AND its payload,
+// mirroring parseWebviewToHost's per-op shape checks. A malformed message (esp.
+// type="trace-event" with a missing/malformed event) is dropped (undefined) rather
+// than forwarded — the webview message listener drops undefined, so a bad envelope
+// can never reach pump.ts (`const {step,kind}=event`) and throw, blanking the editor.
+// Only the ENVELOPE is checked here (event is a non-null object with numeric step +
+// string kind); full per-kind field validation lives in runCommand.ts/trace-event-fields.
 export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const t = (raw as { type?: unknown }).type;
+  const m = raw as Record<string, unknown>;
+  const t = m.type;
   if (typeof t !== "string" || !HOST_TO_WEBVIEW_TYPES.has(t as HostToWebviewMsg["type"])) {
     return undefined;
   }
-  return raw as HostToWebviewMsg;
+  switch (t) {
+    case "load":
+      // text is fed to JSON.parse in store.load(); require it to be a string here
+      // (the single authoritative type check — store keeps its try/catch as
+      // defense-in-depth). sceneText is optional and, if present, must be a string.
+      if (typeof m.text !== "string") return undefined;
+      if (m.sceneText !== undefined && typeof m.sceneText !== "string") return undefined;
+      return m as unknown as HostToWebviewMsg;
+    case "run-status":
+      // state must be a documented RunStatus state; message (if present) a string.
+      if (typeof m.state !== "string" || !RUN_STATUS_STATES.has(m.state)) return undefined;
+      if (m.message !== undefined && typeof m.message !== "string") return undefined;
+      return m as unknown as HostToWebviewMsg;
+    case "save-error":
+      // message is the error text — required string.
+      return typeof m.message === "string" ? (m as unknown as HostToWebviewMsg) : undefined;
+    case "flush":
+      // No payload.
+      return m as unknown as HostToWebviewMsg;
+    case "trace-event": {
+      // Minimal envelope pump.ts relies on: event is a non-null object carrying a
+      // numeric step and a string kind. Per-kind fields are validated downstream.
+      const ev = m.event;
+      if (!ev || typeof ev !== "object") return undefined;
+      const e = ev as Record<string, unknown>;
+      if (typeof e.step !== "number" || !Number.isFinite(e.step)) return undefined;
+      if (typeof e.kind !== "string") return undefined;
+      return m as unknown as HostToWebviewMsg;
+    }
+    default:
+      return undefined;
+  }
 }
