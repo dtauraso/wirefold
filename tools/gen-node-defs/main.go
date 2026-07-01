@@ -1069,22 +1069,10 @@ func parseWirePropsFromFile(filePath string) ([]wireProp, error) {
 					continue
 				}
 				rawTag := strings.Trim(field.Tag.Value, "`")
-				// Extract wire tag value.
-				wireVal, _, hasWire := strings.Cut(rawTag, `wire:"`)
+				// Extract wire tag value (text after `wire:"` up to the closing quote).
+				_, wireVal, hasWire := strings.Cut(rawTag, `wire:"`)
 				if !hasWire {
-					// Try alternate: tag may not start with wire
-					_, after, found := strings.Cut(rawTag, `wire:"`)
-					if !found {
-						continue
-					}
-					wireVal = after
-				} else {
-					_ = wireVal
-					_, after, found := strings.Cut(rawTag, `wire:"`)
-					if !found {
-						continue
-					}
-					wireVal = after
+					continue
 				}
 				wireVal, _, _ = strings.Cut(wireVal, `"`)
 				if !strings.HasPrefix(wireVal, "prop,") {
