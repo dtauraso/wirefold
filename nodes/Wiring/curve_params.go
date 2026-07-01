@@ -24,7 +24,6 @@ const CurveParamPulseSpeedWuPerMs = 0.04
 // Prevents zero-duration pulses when two nodes are co-located.
 const CurveParamMinArcLength = 1.0
 
-
 // CurveParamNodeRadiusDivisor is the divisor applied to min(width,height)
 // to obtain the node sphere radius.  Matches nodeRadius in geometry-helpers.ts
 // (Math.min(width, height) / 4); port endpoints sit on this sphere surface.

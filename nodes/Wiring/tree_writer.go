@@ -44,7 +44,6 @@ func writeMetaPos(root, nodeID string, x, y, z float64) error {
 	return writeJSONAtomic(path, meta)
 }
 
-
 func writePort(root, nodeID, port string, isInput bool, p specPort) error {
 	side := "inputs"
 	if !isInput {

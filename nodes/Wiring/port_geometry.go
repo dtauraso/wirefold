@@ -29,9 +29,9 @@ type portGeom struct {
 // Center is the polar-layout propagated world center; nodeWorldPos returns it directly.
 // A nil Center falls back to the world origin (used only for hand-written/partial specs).
 type nodeGeom struct {
-	Kind    string
-	R       *float64    // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
-	Center  *vec3       // optional precomputed world center (polar-layout propagation); when set, nodeWorldPos returns it directly
+	Kind   string
+	R      *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
+	Center *vec3    // optional precomputed world center (polar-layout propagation); when set, nodeWorldPos returns it directly
 	// ReachR is the sphere REACH radius: the max distance from this node's center to
 	// any node it outputs to (its surface children), under the resolved centers. It is
 	// streamed in the NodeGeometry sphereR field and consumed by the TS SphereRing so the

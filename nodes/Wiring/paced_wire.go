@@ -160,7 +160,6 @@ func (pw *PacedWire) SetFaded(v bool) {
 	pw.mu.Unlock()
 }
 
-
 // PlaceAndDrive places a bead and drives it to delivery on a new goroutine.
 // Returns false if the wire is faded/deleted (nothing placed). This is the
 // public entry point used by cross-package tests and by placeAndDrive in the
@@ -443,7 +442,6 @@ func (pw *PacedWire) findInflightLocked(gen uint64) int {
 	return -1
 }
 
-
 // Recv blocks until a delivered value is available, then pops and returns it
 // (FIFO, in send order). Recv CONSUMES on read — there is no separate Done step.
 // Returns ErrCanceled if ctx is done before a value arrives.
@@ -533,10 +531,10 @@ type arriveInfo struct {
 // posEmitArgs holds the arguments for a deferred tr.Position call, returned by
 // advanceBeadLocked so the caller can emit off the lock.
 type posEmitArgs struct {
-	node, port  string
-	val         int
+	node, port string
+	val        int
 	x, y, z, t float64
-	gen         uint64
+	gen        uint64
 }
 
 // emitArrive sends the traversal-complete trace for a delivered bead. Called by
@@ -612,7 +610,6 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool
 	}
 	return
 }
-
 
 // teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
 // returns the per-bead source identities for any in-flight beads so the caller can

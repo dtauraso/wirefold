@@ -36,15 +36,15 @@ func TestNodeGeometryEmitsEvent(t *testing.T) {
 		t.Fatalf("marshalEvent: %v", err)
 	}
 	var got struct {
-		Kind  string `json:"kind"`
-		Node  string `json:"node"`
-		NX    float64 `json:"nx"`
-		NY    float64 `json:"ny"`
+		Kind   string  `json:"kind"`
+		Node   string  `json:"node"`
+		NX     float64 `json:"nx"`
+		NY     float64 `json:"ny"`
 		NZ     float64 `json:"nz"`
 		Radius float64 `json:"radius"`
 		Ports  []struct {
-			Name    string  `json:"name"`
-			IsInput bool    `json:"isInput"`
+			Name       string  `json:"name"`
+			IsInput    bool    `json:"isInput"`
 			PX, PY, PZ float64 `json:"-"`
 			DX, DY, DZ float64 `json:"-"`
 		} `json:"ports"`

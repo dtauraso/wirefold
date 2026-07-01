@@ -27,6 +27,7 @@ const noValue = gatecommon.NoValue
 //     output. EmitOneDriven is synchronous (blocks for the wire traversal), so
 //     this goroutine self-paces at the wire rate and re-reads held each pulse —
 //     when held changes the next pulse carries the new value.
+//
 // held is shared via sync/atomic so the two goroutines don't race.
 //
 // The output is NOT precondition-gated: Pulse self-emits noValue from the start

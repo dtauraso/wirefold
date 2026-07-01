@@ -29,8 +29,8 @@ func TestEmitsInitValues(t *testing.T) {
 	defer tr.Close()
 	toRG := make(chan int, 3)
 	node := &Node{
-		Fire:       func() { tr.Fire("in") },
-		Init:       []int{10, 20, 30},
+		Fire:             func() { tr.Fire("in") },
+		Init:             []int{10, 20, 30},
 		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 	}
 
@@ -101,10 +101,10 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	node := &Node{
-		Fire:       func() { tr.Fire("in") },
-		Init:       []int{1, 0},
+		Fire:             func() { tr.Fire("in") },
+		Init:             []int{1, 0},
 		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
-		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
+		FeedbackIn:       Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
 	}
 
 	var wg sync.WaitGroup
@@ -162,10 +162,10 @@ func TestFeedbackSendDoesNotDeplete(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	node := &Node{
-		Fire:       func() { tr.Fire("in") },
-		Init:       []int{1, 0},
+		Fire:             func() { tr.Fire("in") },
+		Init:             []int{1, 0},
 		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
-		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
+		FeedbackIn:       Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
 		EmitNodeBeads: func(working, backup []int) {
 			mu.Lock()
 			snaps = append(snaps, beadSnapshot{
@@ -208,8 +208,8 @@ func TestEmptyInit(t *testing.T) {
 	defer tr.Close()
 	toRG := make(chan int, 1)
 	node := &Node{
-		Fire:       func() { tr.Fire("in") },
-		Init:       nil,
+		Fire:             func() { tr.Fire("in") },
+		Init:             nil,
 		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
 	}
 

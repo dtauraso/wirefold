@@ -24,10 +24,10 @@ func approxVec3(a, b vec3, eps float64) bool {
 // (same keys as loader.go populates in production).
 func buildAimedFixture() AimedPortRegistry {
 	return AimedPortRegistry{
-		{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
+		{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}:          "2",
 		{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
-		{NodeID: "1", PortName: "ToExcitatory", IsInput: false}: "6",
-		{NodeID: "6", PortName: "FromInput", IsInput: true}: "1",
+		{NodeID: "1", PortName: "ToExcitatory", IsInput: false}:              "6",
+		{NodeID: "6", PortName: "FromInput", IsInput: true}:                  "1",
 	}
 }
 
@@ -116,7 +116,7 @@ func TestLoaderInitialEdgeSegment_AimedPortUsesRadialNotRingAnchor(t *testing.T)
 
 	// Registry matching what loader.go builds for edges 1→2.
 	registry := AimedPortRegistry{
-		{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}: "2",
+		{NodeID: "1", PortName: "ToHoldNewSendOld", IsInput: false}:          "2",
 		{NodeID: "2", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "1",
 	}
 	centers := map[string]vec3{"1": node1Center, "2": node2Center}
