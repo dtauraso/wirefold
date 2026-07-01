@@ -34,6 +34,7 @@ import { scheduleViewSave } from "../save";
 import { postLog } from "../log/post";
 import { setPulsePos, clearPulse } from "./pulse-state";
 import { setInteriorBead } from "./interior-bead-state";
+import { setNodeStatus } from "./node-status-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useNodeGeometryStore } from "./node-geometry";
 
@@ -300,9 +301,11 @@ export function handleTraceEvent(event: TraceEvent): void {
     }
     case "node-status": {
       // Go REPORTS a node's processing-status (torus red on a missed different-color
-      // bead, or revert to normal). Rendering is NOT implemented yet — this is a
-      // type/passthrough stub so the closed-vocabulary exhaustiveness check compiles.
-      // When the renderer lands, read torusRed/missedValue/x/y/z here and write a store.
+      // bead, or revert to normal). Pure plot: write what Go sent into the node-status
+      // store; GraphNode paints its ring red and MissedBeadMarkers places the marker.
+      // Reverting is driven by the next event (torusRed=false) — no TS timer/logic.
+      const e = event as Extract<TraceEvent, { kind: "node-status" }>;
+      setNodeStatus(e.node, e.torusRed, e.missedValue, { x: e.x, y: e.y, z: e.z });
       return;
     }
     default:
