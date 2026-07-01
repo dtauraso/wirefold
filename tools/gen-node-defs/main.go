@@ -167,8 +167,9 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d entries)\n", wireDefsPath, len(wireProps))
 
-	traceGoPath := filepath.Join(repoRoot, "Trace", "Trace.go")
-	traceKinds, err := parseTraceKinds(traceGoPath)
+	traceDir := filepath.Join(repoRoot, "Trace")
+	traceGoPath := filepath.Join(traceDir, "Trace.go")
+	traceKinds, err := parseTraceKinds(traceDir)
 	if err != nil {
 		fatalf("parse trace kinds: %v", err)
 	}
@@ -1146,42 +1147,57 @@ func writeWireDefs(outPath string, props []wireProp) error {
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }
 
-// parseTraceKinds reads Trace/Trace.go and returns the string values of
-// all Kind* constants in the const block (e.g. "recv", "fire", "send", "slot").
-func parseTraceKinds(traceGoPath string) ([]string, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, traceGoPath, nil, 0)
+// parseTraceKinds scans EVERY non-test *.go file under the Trace/ dir and returns
+// the string values of all Kind* constants (e.g. "recv", "fire", "send", "slot").
+// Scanning the whole dir (not just Trace.go) means a Kind* const declared in any
+// sibling file under Trace/ is still picked up — the single-file-path guard-blindness
+// class (memory: feedback_guards_hardcoding_single_file_break_on_split).
+func parseTraceKinds(traceDir string) ([]string, error) {
+	entries, err := os.ReadDir(traceDir)
 	if err != nil {
 		return nil, err
 	}
 	var kinds []string
-	for _, decl := range f.Decls {
-		genDecl, ok := decl.(*ast.GenDecl)
-		if !ok || genDecl.Tok != token.CONST {
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		for _, spec := range genDecl.Specs {
-			vs, ok := spec.(*ast.ValueSpec)
-			if !ok {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, filepath.Join(traceDir, name), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, decl := range f.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.CONST {
 				continue
 			}
-			for i, name := range vs.Names {
-				if !strings.HasPrefix(name.Name, "Kind") {
+			for _, spec := range genDecl.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
 					continue
 				}
-				if i >= len(vs.Values) {
-					continue
+				for i, nm := range vs.Names {
+					if !strings.HasPrefix(nm.Name, "Kind") {
+						continue
+					}
+					if i >= len(vs.Values) {
+						continue
+					}
+					lit, ok := vs.Values[i].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						continue
+					}
+					kinds = append(kinds, strings.Trim(lit.Value, `"`))
 				}
-				lit, ok := vs.Values[i].(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					continue
-				}
-				kinds = append(kinds, strings.Trim(lit.Value, `"`))
 			}
 		}
 	}
+	// No sort: os.ReadDir yields filenames in lexical order and go/ast preserves
+	// in-file declaration order, so the emitted slice is deterministic across runs.
 	if len(kinds) == 0 {
-		return nil, fmt.Errorf("no Kind* constants found in %s", traceGoPath)
+		return nil, fmt.Errorf("no Kind* constants found in %s", traceDir)
 	}
 	return kinds, nil
 }
