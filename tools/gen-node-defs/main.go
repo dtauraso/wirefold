@@ -14,6 +14,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -788,6 +789,11 @@ func goTypeExprStr(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
+// goIdentRE matches a legal TS/Go identifier. goKind is emitted as an unquoted
+// TS object key in node-defs.ts, so a non-identifier name (hyphen, space, leading
+// digit) would produce invalid TS; validate it at parse time and fail loudly.
+var goIdentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // parseGoKindName extracts the first string argument to Wiring.Register in pkgDir.
 func parseGoKindName(pkgDir string) (string, error) {
 	entries, err := os.ReadDir(pkgDir)
@@ -812,6 +818,9 @@ func parseGoKindName(pkgDir string) (string, error) {
 		name2, _, ok2 := strings.Cut(rest, `"`)
 		if !ok2 {
 			continue
+		}
+		if !goIdentRE.MatchString(name2) {
+			fatalf("kind name %q from Wiring.Register in %s is not a legal identifier (must match [A-Za-z_][A-Za-z0-9_]*); it is emitted as an unquoted TS object key", name2, pkgDir)
 		}
 		return name2, nil
 	}
