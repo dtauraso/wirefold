@@ -13,7 +13,8 @@ import { vscode } from "../vscode-api";
 import { clearPulsesForEdge, clearAllPulses } from "./pulse-state";
 import { clearNodeStatus } from "./node-status-state";
 import { clearInteriorBeads } from "./interior-bead-state";
-import { useEdgeGeometryStore } from "./edge-geometry";
+import { useEdgeGeometryStore, clearAllEdgeSegments } from "./edge-geometry";
+import { clearAllNodeGeometry } from "./node-geometry";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
 
@@ -80,6 +81,11 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       clearAllPulses();
       clearInteriorBeads();
       clearNodeStatus();
+      // The two Go-fed geometry stores reset symmetrically too: a fresh run
+      // re-streams every node-geometry and edge geometry event, so stale entries
+      // for nodes/edges deleted across an edit-reload cycle must not accumulate.
+      clearAllNodeGeometry();
+      clearAllEdgeSegments();
       const raw = JSON.parse(text);
       const spec = parseSpec(raw);
       // Diagram view: positions + fades from topology.json#view (Go reads view.nodes).

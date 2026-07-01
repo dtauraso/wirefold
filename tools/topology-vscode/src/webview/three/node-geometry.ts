@@ -48,6 +48,8 @@ interface NodeGeometryState {
   ) => void;
   /** Drop one node's geometry (on node delete) so stale geometry can't be read. */
   removeNodeGeometry: (nodeId: string) => void;
+  /** Drop ALL node geometry (on run-restart) — a fresh run re-streams every node. */
+  clearAllNodeGeometry: () => void;
 }
 
 export const useNodeGeometryStore = create<NodeGeometryState>((set) => ({
@@ -61,9 +63,19 @@ export const useNodeGeometryStore = create<NodeGeometryState>((set) => ({
       delete next[nodeId];
       return { geoms: next };
     }),
+  clearAllNodeGeometry: () => set({ geoms: {} }),
 }));
 
 /** Non-React read of one node's Go-streamed geometry (for imperative call sites). */
 export function getNodeGeometry(nodeId: string): NodeGeom | undefined {
   return useNodeGeometryStore.getState().geoms[nodeId];
+}
+
+/**
+ * Wipe all node geometry at the run-start boundary (symmetric with clearAllPulses):
+ * Go is re-spawned fresh and re-streams every node's node-geometry event, so stale
+ * entries for deleted nodes must not persist across edit-reload cycles.
+ */
+export function clearAllNodeGeometry() {
+  useNodeGeometryStore.getState().clearAllNodeGeometry();
 }
