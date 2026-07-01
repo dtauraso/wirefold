@@ -9,13 +9,68 @@ package Wiring
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
+
+// TestRunStdinReaderLargeLineNotDropped feeds a single stdin line well over the
+// default 64 KB bufio.Scanner token limit and asserts the message is parsed (its
+// side effect — a scene write — lands) rather than silently dropped. Without the
+// raised sc.Buffer, bufio.ErrTooLong would close lineCh and deafen the bridge.
+func TestRunStdinReaderLargeLineNotDropped(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r, w := io.Pipe()
+	go RunStdinReader(ctx, r, SlotRegistry{}, nil, nil, nil, root)
+
+	// Build a scene blob whose serialized line exceeds 64 KB (~200 KB payload).
+	big := strings.Repeat("x", 200*1024)
+	blob, err := json.Marshal(map[string]any{"note": big})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(map[string]any{
+		"type":  "edit",
+		"op":    "update",
+		"kind":  "scene",
+		"scene": json.RawMessage(blob),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(line) <= 64*1024 {
+		t.Fatalf("test line only %d bytes; must exceed the 64 KB default to exercise the fix", len(line))
+	}
+	io.WriteString(w, string(line)+"\n")
+
+	scenePath := filepath.Join(root, "view", "scene.json")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(scenePath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("large scene line was dropped: scene.json never written (bridge deafened by 64 KB limit)")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	got, err := os.ReadFile(scenePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 200*1024 {
+		t.Fatalf("scene.json is %d bytes; large payload not fully written", len(got))
+	}
+	w.Close()
+}
 
 func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)

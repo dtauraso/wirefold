@@ -184,6 +184,13 @@ type SlotRegistry map[string]*PacedWire
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
 func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock, treeRoot string) {
 	sc := bufio.NewScanner(r)
+	// Raise the token buffer well above the default 64 KB. A single stdin JSON line
+	// carrying a large scene/topology payload (update kind="scene") can exceed 64 KB;
+	// with the default buffer sc.Scan() would return false with bufio.ErrTooLong, the
+	// reader goroutine would close lineCh, RunStdinReader would return, and every later
+	// editor→Go message would be silently dropped (bridge deaf, no UI error). 1 MB is
+	// comfortable headroom for realistic scene blobs.
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	done := ctx.Done()
 	lineCh := make(chan string, 8)
 	go func() {
