@@ -424,17 +424,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		edgeMovers: map[string]*edgeMover{},
 		edgeOut:    map[string]*Out{},
 		tr:         tr,
-		ov: overlayState{
-			sceneToriVisible:      true,
-			scenePolesVisible:     true,
-			nodePolesVisible:      true,
-			angleLabelsVisible:    true,
-			selSpherePolesVisible: true,
-			handholdsVisible:      true,
-			labelsGlobalVisible:   true,
-			badgesGlobalVisible:   true,
-			overlaysVisible:       true,
-		},
+		ov:         defaultOverlayState(),
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -795,35 +785,6 @@ func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
 func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace)      { md.vp.PanViewpoint(delta, tr) }
 
-// Overlay-visibility API — thin delegators to the owned overlayState (overlay_state.go).
-// The public signatures are unchanged (the stdin reader's overlayToggles method-expression
-// table binds these); the flags and flip/emit behavior live on md.ov.
-
-func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace)      { md.ov.ToggleSceneTori(tr) }
-func (md *MoveDispatch) EmitSceneTori(tr *T.Trace)        { md.ov.EmitSceneTori(tr) }
-func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace)     { md.ov.ToggleScenePoles(tr) }
-func (md *MoveDispatch) EmitScenePoles(tr *T.Trace)       { md.ov.EmitScenePoles(tr) }
-func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace)      { md.ov.ToggleNodePoles(tr) }
-func (md *MoveDispatch) EmitNodePoles(tr *T.Trace)        { md.ov.EmitNodePoles(tr) }
-func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace)    { md.ov.ToggleAngleLabels(tr) }
-func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace)      { md.ov.EmitAngleLabels(tr) }
-func (md *MoveDispatch) AngleLabels() bool                { return md.ov.AngleLabels() }
-func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) { md.ov.ToggleSelSpherePoles(tr) }
-func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace)   { md.ov.EmitSelSpherePoles(tr) }
-func (md *MoveDispatch) ToggleHandholds(tr *T.Trace)      { md.ov.ToggleHandholds(tr) }
-func (md *MoveDispatch) EmitHandholds(tr *T.Trace)        { md.ov.EmitHandholds(tr) }
-func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace)   { md.ov.ToggleLabelsGlobal(tr) }
-func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace)     { md.ov.EmitLabelsGlobal(tr) }
-func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace)   { md.ov.ToggleBadgesGlobal(tr) }
-func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace)     { md.ov.EmitBadgesGlobal(tr) }
-func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace)    { md.ov.ToggleOverlaysVis(tr) }
-func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace)      { md.ov.EmitOverlaysVis(tr) }
-func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace)    { md.ov.ToggleDoubleLinks(tr) }
-func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace)      { md.ov.EmitDoubleLinks(tr) }
-
-// SetGuideVisibility sets all polar-guide visibilities to explicit values (the TS startup
-// push so settings survive a Go respawn on window reload) and emits each. Delegates to
-// the owned overlayState.
-func (md *MoveDispatch) SetGuideVisibility(ov overlayState, tr *T.Trace) {
-	md.ov.SetGuideVisibility(ov, tr)
-}
+// Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the
+// overlayToggles table, defaultOverlayState, and the stdinGuideVisPayload mapper are all
+// GENERATED into overlay_gen.go from OVERLAY_FLAG_NAMES (tools/gen-node-defs).

@@ -36,6 +36,13 @@ if [ -n "$go_changed" ]; then
     out+="go build failed:\n$go_out\n\n"
     fail=1
   fi
+  # go test — fast/cached here (~0.2s), so run it on the same gate as go build
+  # (Go changed / branch ahead of origin/main). This was the one verify step
+  # living outside the suite.
+  if ! gotest_out=$(go test ./... 2>&1); then
+    out+="go test failed:\n$gotest_out\n\n"
+    fail=1
+  fi
   # go vet + staticcheck. staticcheck COMPILES the whole module, so it is
   # expensive — it lives here in the go-gated block (Go changed / branch ahead of
   # origin/main), never in the fast unconditional guard loop below.
@@ -93,7 +100,7 @@ if [ -n "$ts_changed" ]; then
   fi
 fi
 
-for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-slot-phase-boundary check-generated check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt; do
+for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-slot-phase-boundary check-generated check-wire-prop-used check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt; do
   if ! chk_out=$(bash "tools/$chk.sh" 2>&1); then
     out+="$chk failed:\n$chk_out\n\n"
     fail=1

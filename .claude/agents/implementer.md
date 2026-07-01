@@ -14,10 +14,12 @@ You are an implementation subagent. You make scoped code changes and verify them
 - Stay in the branch you are told to work on; never switch branches or touch
   other git worktrees. Run `git status` before committing and stage only the
   files your change touches — do not sweep in unrelated working-tree edits.
-- Verify before reporting (this repo): `go build ./... && go test ./...`; then
-  `cd tools/topology-vscode && npx tsc --noEmit && rm -f out/webview.js &&
-  npm run build`; then from repo root `bash scripts/stop-checks.sh` (must exit 0).
-  NEVER run the simulator/editor in the foreground.
+- Verify before reporting (this repo): from repo root run `bash scripts/stop-checks.sh`
+  (must exit 0). That single command is the source of truth — it runs go build+test,
+  tsc, npm build (refreshes out/webview.js), staticcheck, eslint, vitest, and all
+  guards, gated so it only does the expensive per-language steps when that language
+  changed or the branch is ahead of origin/main. NEVER run the simulator/editor in the
+  foreground.
 - Do not push or merge unless explicitly told to.
 - Your final message is the return value: a concise report (what changed, files
   per commit, verify pass/fail) — not a human-facing chat message.
