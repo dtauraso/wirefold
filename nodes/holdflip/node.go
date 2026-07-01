@@ -84,13 +84,17 @@ func (g *Node) Update(ctx context.Context) {
 		if !ok {
 			return // ctx cancelled or input closed
 		}
-		// Drain-to-latest: consume any additional queued beads, keeping the last.
+		// Drain-to-latest: consume any additional queued beads, keeping the last
+		// REAL value. A stray NoValue sentinel must not overwrite v (storing -1 would
+		// emit 1-(-1)=2) — mirrors gatecommon.drainLatestReal's NoValue guard.
 		for {
 			next, ok := g.In.PollRecv()
 			if !ok {
 				break
 			}
-			v = next
+			if next != noValue {
+				v = next
+			}
 		}
 		if g.Fire != nil {
 			g.Fire()
