@@ -14,6 +14,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -91,6 +92,7 @@ func main() {
 	}
 
 	var kinds []kindEntry
+	seenGoKind := map[string]string{} // goKind → dir name that registered it
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -116,13 +118,21 @@ func main() {
 		if err != nil {
 			fatalf("parse go kind name %s: %v", e.Name(), err)
 		}
+		// A duplicate goKind across dirs produces a silent last-wins duplicate TS
+		// object key in node-defs.ts; reject it here naming both dirs.
+		if prev, dup := seenGoKind[goKind]; dup {
+			fatalf("duplicate kind name %q registered by both %q and %q", goKind, prev, e.Name())
+		}
+		seenGoKind[goKind] = e.Name()
 		view, accentOverrides, edgeKindOverrides, optionalPorts, err := parseSpecMD(pkgDir)
 		if err != nil {
-			// SPEC.md missing or no View section — skip this kind.
-			continue
+			// This dir has a Wiring.Register (a real node package), so a missing or
+			// broken SPEC.md View section is a half-landed kind — fail loudly rather
+			// than silently dropping the kind from all generated files.
+			fatalf("kind %q registers a Go runtime but its SPEC.md View section is missing/broken: %v", e.Name(), err)
 		}
 		if view.kind == "" {
-			continue
+			fatalf("kind %q registers a Go runtime but its SPEC.md ## View has an empty view.kind", e.Name())
 		}
 		// Apply accent, edgeKind overrides, and optional flags from SPEC.md Ports table.
 		for i, p := range ports {
@@ -282,7 +292,16 @@ func parsePortsFromAST(pkgDir string) ([]port, error) {
 		pkgs[pkgName] = append(pkgs[pkgName], f)
 	}
 	var ports []port
-	for _, files := range pkgs {
+	// Iterate package names in sorted order so the emitted port order is
+	// deterministic even when a dir contains two package names (map iteration
+	// order is otherwise random and would flip-flop check-generated).
+	pkgNames := make([]string, 0, len(pkgs))
+	for name := range pkgs {
+		pkgNames = append(pkgNames, name)
+	}
+	sort.Strings(pkgNames)
+	for _, pkgName := range pkgNames {
+		files := pkgs[pkgName]
 		for _, file := range files {
 			for _, decl := range file.Decls {
 				genDecl, ok := decl.(*ast.GenDecl)
@@ -777,6 +796,11 @@ func goTypeExprStr(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
+// goIdentRE matches a legal TS/Go identifier. goKind is emitted as an unquoted
+// TS object key in node-defs.ts, so a non-identifier name (hyphen, space, leading
+// digit) would produce invalid TS; validate it at parse time and fail loudly.
+var goIdentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // parseGoKindName extracts the first string argument to Wiring.Register in pkgDir.
 func parseGoKindName(pkgDir string) (string, error) {
 	entries, err := os.ReadDir(pkgDir)
@@ -801,6 +825,9 @@ func parseGoKindName(pkgDir string) (string, error) {
 		name2, _, ok2 := strings.Cut(rest, `"`)
 		if !ok2 {
 			continue
+		}
+		if !goIdentRE.MatchString(name2) {
+			fatalf("kind name %q from Wiring.Register in %s is not a legal identifier (must match [A-Za-z_][A-Za-z0-9_]*); it is emitted as an unquoted TS object key", name2, pkgDir)
 		}
 		return name2, nil
 	}
@@ -858,13 +885,17 @@ func parseDataFieldsFromAST(pkgDir string) ([]dataField, error) {
 					if !ok2 {
 						continue
 					}
-					typeStr, ok := goTypeExprStr(field.Type)
-					if !ok {
-						return nil, fmt.Errorf("field %v: cannot stringify type", field.Names)
-					}
 					var fname string
 					if len(field.Names) > 0 {
 						fname = field.Names[0].Name
+					}
+					typeStr, ok := goTypeExprStr(field.Type)
+					if !ok {
+						displayName := fname
+						if displayName == "" {
+							displayName = "<anonymous>"
+						}
+						return nil, fmt.Errorf("kind %q: wire:\"data.%s\" field %q has an unsupported/unstringifiable Go type %T", filepath.Base(pkgDir), wireKey, displayName, field.Type)
 					}
 					fields = append(fields, dataField{wireTag: wireKey, goType: typeStr, fieldName: fname})
 				}
@@ -1038,22 +1069,10 @@ func parseWirePropsFromFile(filePath string) ([]wireProp, error) {
 					continue
 				}
 				rawTag := strings.Trim(field.Tag.Value, "`")
-				// Extract wire tag value.
-				wireVal, _, hasWire := strings.Cut(rawTag, `wire:"`)
+				// Extract wire tag value (text after `wire:"` up to the closing quote).
+				_, wireVal, hasWire := strings.Cut(rawTag, `wire:"`)
 				if !hasWire {
-					// Try alternate: tag may not start with wire
-					_, after, found := strings.Cut(rawTag, `wire:"`)
-					if !found {
-						continue
-					}
-					wireVal = after
-				} else {
-					_ = wireVal
-					_, after, found := strings.Cut(rawTag, `wire:"`)
-					if !found {
-						continue
-					}
-					wireVal = after
+					continue
 				}
 				wireVal, _, _ = strings.Cut(wireVal, `"`)
 				if !strings.HasPrefix(wireVal, "prop,") {
