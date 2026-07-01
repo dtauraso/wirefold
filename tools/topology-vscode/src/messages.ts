@@ -27,30 +27,47 @@ export type RunStatus =
 // (TS owns the graph; Go owns the recompute).
 export type MoveEntry = { nodeId: string; x: number; y: number; z: number };
 
-// OverlayFlag is the wire vocabulary of named boolean overlay attributes, shared
-// with Go's overlayToggles map (stdin_reader.go). Guarded by check-edit-op-parity.sh.
+// OVERLAY_FLAG_NAMES is the SINGLE source for the overlay wire vocabulary — named
+// boolean overlay attributes shared with Go's overlayToggles map and stdinGuideVisPayload
+// (stdin_reader.go). The OverlayFlag union, the OVERLAY_FLAGS runtime set, and the
+// OverlayState snapshot type are ALL derived from it, so the field set is listed once.
+// Guarded by check-edit-op-parity.sh.
 // OVERLAY_FLAGS_START
-export type OverlayFlag =
-  | "tori"
-  | "scenePoles"
-  | "nodePoles"
-  | "angleLabels"
-  | "selSpherePoles"
-  | "handholds"
-  | "labelsGlobal"
-  | "badgesGlobal"
-  | "overlays"
-  | "doubleLinks";
+export const OVERLAY_FLAG_NAMES = [
+  "tori",
+  "scenePoles",
+  "nodePoles",
+  "angleLabels",
+  "selSpherePoles",
+  "handholds",
+  "labelsGlobal",
+  "badgesGlobal",
+  "overlays",
+  "doubleLinks",
+] as const;
 // OVERLAY_FLAGS_END
 
-// OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
-export type OverlayState = {
-  tori: boolean; scenePoles: boolean; nodePoles: boolean; angleLabels: boolean;
-  selSpherePoles: boolean; handholds: boolean; doubleLinks: boolean;
-  labelsGlobal: boolean; badgesGlobal: boolean; overlays: boolean;
-};
+export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
 
+// OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
+// Derived from OverlayFlag so the field set can never drift from the flag vocabulary.
+export type OverlayState = Record<OverlayFlag, boolean>;
+
+// VIEWPOINT_KINDS is the single source for the camera viewpoint sub-kind vocabulary,
+// shared with Go's vp.Kind switch (stdin_reader.go). Parity guarded by
+// check-edit-op-parity.sh via the VP_KINDS sentinels.
 // VP_KINDS_START
+export const VIEWPOINT_KINDS = [
+  "set",
+  "orbit",
+  "orbit-locked",
+  "zoom",
+  "pan",
+] as const;
+// VP_KINDS_END
+
+export type ViewpointKind = (typeof VIEWPOINT_KINDS)[number];
+
 export type ViewpointPayload =
   | {
       kind: "set";
@@ -63,7 +80,6 @@ export type ViewpointPayload =
   | { kind: "orbit-locked"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
   | { kind: "zoom"; factor: number }
   | { kind: "pan"; dx: number; dy: number; dz: number };
-// VP_KINDS_END
 
 // EDIT_MSG_START
 export type EditMsg =
@@ -137,7 +153,8 @@ export type TraceEvent =
   | { step: number; kind: "labels-global"; visible: boolean }
   | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
-  | { step: number; kind: "double-links"; visible: boolean };
+  | { step: number; kind: "double-links"; visible: boolean }
+  | { step: number; kind: "node-status"; node: string; torusRed: boolean; missedValue: number; x: number; y: number; z: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -146,8 +163,13 @@ export type HostToWebviewMsg =
   | { type: "save-error"; message: string }
   | { type: "trace-event"; event: TraceEvent };
 
+// Note: "resend" is host-originated (runner.resend() writes it straight to Go's
+// stdin) and is never emitted by the webview. It is kept in this set so the
+// message-kind-parity guard stays in lockstep with stdin_reader.go's "resend"
+// kind (every kind Go reads on stdin has a seam here); the webview simply never
+// sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "resend", "stop", "webview-log", "edit",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend",
 ]);
 
 export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
@@ -157,10 +179,10 @@ export const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new 
 // parseEdit validates an "edit" message by its op, mirroring the per-op payloads
 // in EditMsg (and Go's applyEdit). Returns undefined for an unknown op or a payload
 // missing required fields, so a malformed edit is dropped rather than forwarded.
-const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>([
-  "tori", "scenePoles", "nodePoles", "angleLabels", "selSpherePoles",
-  "handholds", "labelsGlobal", "badgesGlobal", "overlays", "doubleLinks",
-]);
+const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>(OVERLAY_FLAG_NAMES);
+
+// Allowed camera viewpoint sub-kinds (derived from the single VIEWPOINT_KINDS source).
+const VP_KIND_SET: ReadonlySet<string> = new Set<ViewpointKind>(VIEWPOINT_KINDS);
 
 // Validates that v is a full OverlayState (every flag a boolean).
 function isOverlayState(v: unknown): boolean {
@@ -228,10 +250,12 @@ function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
       return ok ? (m as unknown as WebviewToHostMsg) : undefined;
     }
     case "camera": {
-      // viewpoint must be a nested object with a string kind discriminator.
+      // viewpoint must be a nested object with a kind in the allowed VIEWPOINT_KINDS set;
+      // an unknown kind is dropped rather than forwarded to Go (where it would no-op).
       const vp = m.viewpoint;
       if (!vp || typeof vp !== "object") return undefined;
-      if (typeof (vp as Record<string, unknown>).kind !== "string") return undefined;
+      const vk = (vp as Record<string, unknown>).kind;
+      if (typeof vk !== "string" || !VP_KIND_SET.has(vk)) return undefined;
       return (m as unknown as WebviewToHostMsg);
     }
     case "overlays": {

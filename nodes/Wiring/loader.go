@@ -1,9 +1,10 @@
 // loader.go — runtime topology loader.
 //
 // LoadTopology reads topology.json, allocates one PacedWire per destination
-// port (fan-in safe), and returns ([]Node, SlotRegistry, WireRegistry, *MoveDispatch).
-// WireRegistry is edge-label-keyed; fade ops are now routed via MoveDispatch.dispatch
-// so WireRegistry is retained for future use but no longer consumed by RunStdinReader.
+// port (fan-in safe), and returns ([]Node, SlotRegistry, *MoveDispatch).
+// An edge-label-keyed WireRegistry is built internally to bind each source Out to
+// its wire, but it is not returned: fade ops route via MoveDispatch.dispatch and no
+// caller consumed the map.
 //
 // Key behaviors:
 //   - One *PacedWire per (destNode, destPort); multiple edges sharing a
@@ -148,24 +149,25 @@ type topoSpec struct {
 
 // WireRegistry maps edge label → *PacedWire. Each entry points to the wire owned by
 // the destination port; multiple edges sharing a destination port map to the same *PacedWire.
-// Fade is now routed via MoveDispatch (per-wire dispatch), not via this map.
+// It is an internal build aid (binding source Out → wire); it is not returned, and
+// fade is routed via MoveDispatch (per-wire dispatch), not via this map.
 type WireRegistry map[string]*PacedWire
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a
-// SlotRegistry (keyed by "target.targetHandle" for delivery acks), a WireRegistry
-// (keyed by edge label), and a MoveDispatch (key→inbox registry
-// for the decentralized node-move path: each node and edge owns its own recompute).
+// SlotRegistry (keyed by "target.targetHandle" for delivery acks) and a MoveDispatch
+// (key→inbox registry for the decentralized node-move path: each node and edge owns
+// its own recompute).
 //
 // clk is the single monotonic clock injected into every PacedWire so each wire
 // times its own delivery on it (MODEL.md: exactly one clock). Production passes a
 // RealClock; tests pass a FakeClock they advance deterministically.
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, error) {
 	spec, err := parseSpec(jsonPath)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := validateSpec(&spec); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	return buildFromSpec(ctx, spec, tr, clk)
 }
@@ -191,7 +193,7 @@ func parseSpec(path string) (topoSpec, error) {
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
 // and validated topoSpec.
-func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, WireRegistry, *MoveDispatch, error) {
+func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, error) {
 	// Build id→geometry map for arc-length computation at wire construction.
 	// nodeGeom carries kind/dims/port side+slot so the Go arc length mirrors
 	// buildPortCurve (3-D port-to-port) exactly.
@@ -307,11 +309,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			pw.Trace = tr
 			pw.SetClock(clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
-		} else if simLatencyMs > pw.MaxIncomingSimLatencyMs {
-			// Fan-in: raise the per-port window aggregate to the max over all
-			// edges feeding this destination port.
-			pw.MaxIncomingSimLatencyMs = simLatencyMs
 		}
+		// Fan-in MaxIncomingSimLatencyMs is NOT pre-written here. md.Bind (below) calls
+		// PacedWire.SetIncomingLatency for every feeding edge, which is the CANONICAL
+		// source: it records each edge's SimLatencyMs and recomputes the per-port
+		// aggregate as the max over all of them. A manual raise here would just be
+		// overwritten by that authoritative pass.
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
@@ -472,7 +475,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 
 		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID])
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
+			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
 		nodes = append(nodes, nd)
 	}
@@ -482,7 +485,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// dest wire's per-edge latency for the MaxIncomingSimLatencyMs aggregate.
 	md.Bind(outSink, SlotRegistry(destWire))
 
-	return nodes, SlotRegistry(destWire), edgeWire, md, nil
+	return nodes, SlotRegistry(destWire), md, nil
 }
 
 // readTopologySpec reads and parses the topology spec at jsonPath (JSON file or

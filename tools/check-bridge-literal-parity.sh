@@ -41,13 +41,12 @@ vp_kinds_go() {
     | grep -oE 'case "[^"]+"' \
     | grep -oE '"[^"]+"' | tr -d '"' | sort -u
 }
-# TS: `kind: "..."` literals inside the ViewpointPayload union, bounded by the
-# VP_KINDS_START / VP_KINDS_END sentinels in messages.ts. Sentinels (not a bare
-# grep) are required because the entity-kind discriminator and trace-event union
-# also use `kind: "..."`.
+# TS: the quoted string literals of the VIEWPOINT_KINDS array (the single source
+# for viewpoint sub-kinds), bounded by the VP_KINDS_START / VP_KINDS_END sentinels
+# in messages.ts. Sentinels are required because bare `"..."` literals appear all
+# over the file; inside the sentinels the only quoted strings are the kind names.
 vp_kinds_ts() {
   awk '/VP_KINDS_START/{p=1;next} /VP_KINDS_END/{p=0} p' "$MESSAGES_TS" \
-    | grep -oE 'kind: "[^"]+"' \
     | grep -oE '"[^"]+"' | tr -d '"' | sort -u
 }
 

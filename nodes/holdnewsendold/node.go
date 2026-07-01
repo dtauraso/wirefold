@@ -2,7 +2,6 @@ package holdnewsendold
 
 import (
 	"context"
-	"time"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -12,14 +11,15 @@ import (
 // non-negative indices so noValue (-1) never collides with a legitimate value.
 const noValue = gatecommon.NoValue
 
-// occupiedPollInterval is the park duration between output-occupied checks to
-// avoid a busy-spin while waiting for the output wire to clear.
-const occupiedPollInterval = time.Millisecond
-
 type Node struct {
 	Fire                       func()
 	EmitGeometry               func()
 	EmitHeldBead               func(held int)
+	// EmitNodeStatus reports the node's torus status (processing error / revert). It
+	// is injected by the loader; nil in chan-mode unit tests. The shared
+	// Wiring.ProcessingGuard calls it when a different-color bead is missed mid-
+	// processing (torusRed=true) and on processing-finish (torusRed=false).
+	EmitNodeStatus             func(torusRed bool, missedValue int)
 	Held                       int `wire:"data.state"`
 	FromPrevHoldNewSendOldNode *Wiring.In
 	ToNext                     Wiring.OutMulti
@@ -51,6 +51,16 @@ func (in *Node) Update(ctx context.Context) {
 		in.EmitHeldBead(held)
 	}
 
+	// The shared processing mechanism: it owns the per-input processing window —
+	// driving the output transit INDEPENDENTLY (its own goroutine) while observing
+	// this input port for same/different mid-processing arrivals, and emitting the
+	// torus-red/normal status. No output-occupied backpressure: input consumption is
+	// decoupled from output transit (the removed defect).
+	guard := &Wiring.ProcessingGuard{
+		In:         in.FromPrevHoldNewSendOldNode,
+		EmitStatus: in.EmitNodeStatus,
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -58,51 +68,36 @@ func (in *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		// Hold: if any output wire still has a bead in flight or holding an
-		// unconsumed pulse, park briefly and retry — do not consume the input
-		// pulse yet. This prevents drops when output transit time exceeds the
-		// loop's input rate. A short sleep breaks the busy-spin.
-		anyOccupied := false
-		for _, out := range in.ToNext {
-			if out.Occupied() {
-				anyOccupied = true
-				break
-			}
-		}
-		if anyOccupied {
-			// Park briefly before re-checking, but honor cancellation so a
-			// cancelled ctx with a permanently-occupied output cannot spin
-			// forever and block wg.Wait at shutdown.
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(occupiedPollInterval):
-			}
+		value, ok := in.FromPrevHoldNewSendOldNode.TryRecv()
+		if !ok {
+			// chan mode: nothing queued yet → retry. paced mode: TryRecv blocks, so
+			// !ok means ctx was canceled → fall through to the top-of-loop ctx check.
 			continue
 		}
-
-		if value, ok := in.FromPrevHoldNewSendOldNode.TryRecv(); ok {
+		if in.Fire != nil {
 			in.Fire()
-
-			// Interior held-value bead: emit only when the held value changes
-			// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the
-			// received value; update it once here at recv time.
-			heldChanged := value != held
-			held = value
-			if heldChanged && in.EmitHeldBead != nil {
-				in.EmitHeldBead(value)
-			}
-
-			// Drive the ToNext fan-out beads concurrently on THIS goroutine:
-			// place them WITHOUT walkers, then drive them all together in one
-			// Wiring.DriveAll. prevHeld is the OLD held value (captured before
-			// updating in.Held) so the ordering is explicit and obviously correct.
-			var items []Wiring.DriveItem
-			prevHeld := in.Held
-			items = placeHeld(in.ToNext, prevHeld, items)
-			in.Held = value
-			Wiring.DriveAll(ctx, items)
 		}
+
+		// Interior held-value bead: emit only when the held value changes
+		// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the
+		// received value; update it once here at recv time.
+		heldChanged := value != held
+		held = value
+		if heldChanged && in.EmitHeldBead != nil {
+			in.EmitHeldBead(value)
+		}
+
+		// Place the ToNext fan-out beads WITHOUT walkers. prevHeld is the OLD held
+		// value (captured before updating in.Held) so the ordering is explicit.
+		var items []Wiring.DriveItem
+		prevHeld := in.Held
+		items = placeHeld(in.ToNext, prevHeld, items)
+		in.Held = value
+
+		// Run the processing window: drive the placed beads to delivery on an
+		// independent goroutine while observing this input port for same/different
+		// arrivals. Returns when the output transit completes (window finishes).
+		guard.Process(ctx, value, items)
 	}
 }
 

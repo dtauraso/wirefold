@@ -93,11 +93,14 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 
 		// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
 		v := (*working)[len(*working)-1]
-		n.Fire()
-		// Node 1 initiates a goroutine per wired output so node 2
-		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
-		// concurrently. wg.Wait keeps node 1 paced and preserves the
-		// feedback-ring ordering (the TryRecv below still runs after).
+		if n.Fire != nil {
+			n.Fire()
+		}
+		// Node 1 places the same bead on every wired output and drives them
+		// concurrently via DriveAll (place-all-then-drive) so node 2
+		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get it in lockstep. fanOut
+		// blocks until all traversals finish, keeping node 1 paced and preserving
+		// the feedback-ring ordering (the TryRecv below still runs after).
 		n.fanOut(ctx, v)
 
 		// READ: block until HoldNewSendOld sends the step on FeedbackIn.
@@ -163,12 +166,15 @@ func (n *Node) Update(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		n.Fire()
+		if n.Fire != nil {
+			n.Fire()
+		}
 		v := popEnd(&working, &backup, init)
 		emitBeads() // array changed (pop, maybe refill) → restream interior
-		// Node 1 initiates a goroutine per wired output so node 2
-		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get the same bead
-		// concurrently; wg.Wait keeps node 1 paced before the next pop.
+		// Node 1 places the same bead on every wired output and drives them
+		// concurrently via DriveAll (place-all-then-drive) so node 2
+		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get it in lockstep; fanOut
+		// blocks until all traversals finish, keeping node 1 paced before the next pop.
 		n.fanOut(ctx, v)
 		emitted++
 	}

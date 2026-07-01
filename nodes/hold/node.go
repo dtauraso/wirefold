@@ -38,7 +38,9 @@ func (h *Node) Update(ctx context.Context) {
 		}
 
 		if value, ok := h.In.TryRecv(); ok {
-			h.Fire()
+			if h.Fire != nil {
+				h.Fire()
+			}
 			if value != held && h.EmitHeldBead != nil {
 				h.EmitHeldBead(value)
 			}

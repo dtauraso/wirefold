@@ -60,7 +60,7 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, slotReg, _, nmr, err := LoadTopology(ctx, path, T.New(16), NewFakeClock())
+	_, slotReg, nmr, err := LoadTopology(ctx, path, T.New(16), NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

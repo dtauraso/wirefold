@@ -16,7 +16,7 @@ import { appendWebviewLog } from "./webview-log";
 import { PROBE_DIR, PROBE_FILES } from "../probe-files";
 
 export type MessageCtx = {
-  logUri: vscode.Uri;
+  logUri: vscode.Uri | undefined;
   runner: BuildAndRunRunner;
   post: (msg: HostToWebviewMsg) => Thenable<boolean>;
 };
@@ -44,7 +44,6 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
         const entry = JSON.stringify({
           timestamp: new Date().toISOString(),
           msgType: msg.type,
-          nodeId: (msg as { nodeId?: string }).nodeId ?? null,
           message: error.message,
           stack: error.stack ?? null,
         });

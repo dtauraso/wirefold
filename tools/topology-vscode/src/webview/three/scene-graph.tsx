@@ -1,5 +1,5 @@
 // scene-graph.tsx — GraphNode, SphereRing, SingleEdgeTube, GraphEdges.
-import React, { useMemo, useContext } from "react";
+import React, { useMemo, useContext, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
@@ -8,6 +8,7 @@ import { useNodeGeometryStore, getNodeGeometry } from "./node-geometry";
 import { nodeRadius, nodeWorldPos, portDir } from "./geometry-helpers";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { PulseBead, InteriorBeads } from "./scene-beads";
+import { getNodeStatusMap } from "./node-status-state";
 import { useCameraStore } from "./camera-store";
 import {
   SHADING_PARAM_NODE_TRANSMISSION,
@@ -34,6 +35,12 @@ import {
 // ---------------------------------------------------------------------------
 
 const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
+// Alarm color while Go reports a firing error (node-status torusRed=true). Chosen
+// distinct from every node's static stroke (esp. the gate nodes' dark crimson
+// #880e4f): a bright saturated red painted onto BOTH color and emissive so the ring
+// self-glows, plus a per-frame pulse (see the ring useFrame) that no static border
+// color can imitate.
+const NODE_STATUS_RED = new THREE.Color("#ff1a1a");
 const DOUBLE_LINKS_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE);
 
 // ---------------------------------------------------------------------------
@@ -114,11 +121,45 @@ export function GraphNode({
   // Memoize THREE.Color objects to avoid allocating on every render.
   const fillColor = useMemo(() => new THREE.Color(fillHex), [fillHex]);
   const strokeColor = useMemo(() => new THREE.Color(strokeHex), [strokeHex]);
-  const emissiveFill = useMemo(() => new THREE.Color(0x000000), []);
   const emissiveStroke = useMemo(() => new THREE.Color(0x000000), []);
 
   const torusThick = (selected || hovered || onSphereSurface) ? r * 0.14 : r * 0.08;
   const fadeOpacity = SHADING_PARAM_NODE_FADE_OPACITY;
+
+  // Border-ring appearance reflects Go's node-status stream. While torusRed=true the
+  // ring becomes an unmistakable ALARM: bright red on both color AND emissive (self-
+  // glow), a per-frame PULSING emissiveIntensity, and a thickening scale — none of
+  // which any static stroke color (e.g. the gate nodes' #880e4f) can imitate. When
+  // torusRed is false it reverts to the render-derived strokeColor, no glow, unit
+  // scale. Pure plot: the error/normal state is gated ENTIRELY by torusRed from the
+  // Go-owned store (polled each frame, set imperatively — mirrors scene-beads' color-
+  // from-store idiom). The pulse is cosmetic styling of that Go boolean using the
+  // render clock; it decides NO model state and the revert rides Go's next node-status
+  // event, not any TS timer.
+  const ringMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const ringMeshRef = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    const mat = ringMatRef.current;
+    const mesh = ringMeshRef.current;
+    if (!mat) return;
+    const status = getNodeStatusMap().get(node.id);
+    if (status?.torusRed) {
+      // 0..1 pulse from the render clock (cosmetic only).
+      const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
+      mat.color.copy(NODE_STATUS_RED);
+      mat.emissive.copy(NODE_STATUS_RED);
+      mat.emissiveIntensity = 0.6 + 1.9 * pulse;
+      if (mesh) {
+        const s = 1.18 + 0.14 * pulse;
+        mesh.scale.setScalar(s);
+      }
+    } else {
+      mat.color.copy(strokeColor);
+      mat.emissive.copy(emissiveStroke);
+      mat.emissiveIntensity = 0;
+      if (mesh) mesh.scale.setScalar(1);
+    }
+  });
 
   return (
     <group position={[pos.x, pos.y, pos.z]}>
@@ -141,9 +182,10 @@ export function GraphNode({
           depthWrite={false}
         />
       </mesh>
-      <mesh userData={{ nodeId: node.id, ring: true }}>
+      <mesh ref={ringMeshRef} userData={{ nodeId: node.id, ring: true }}>
         <torusGeometry args={[r, torusThick, 8, 32]} />
         <meshStandardMaterial
+          ref={ringMatRef}
           key={faded ? "faded" : "solid"}
           color={strokeColor}
           emissive={emissiveStroke}

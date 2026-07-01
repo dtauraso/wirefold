@@ -69,7 +69,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, slotReg, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, slotReg, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestResendGeometry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestResendGeometry(t *testing.T) {
 
 // TestMoverCenterRace is a -race regression for the data race between the mover
 // goroutines writing geom.Center/ReachR and the stdin goroutine reading those fields
-// via centerOfNode/nodeCenter/heldCenters/fanCenters/ResendGeometry. It hammers
+// via centerOfNode/heldCenters/fanCenters/ResendGeometry. It hammers
 // RootMove (which triggers fanCenters and heldCenters) and ResendGeometry from one
 // goroutine while center messages flow concurrently through the mover goroutines.
 // Must pass cleanly under `go test -race`.
@@ -250,7 +250,7 @@ func TestMoverCenterRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

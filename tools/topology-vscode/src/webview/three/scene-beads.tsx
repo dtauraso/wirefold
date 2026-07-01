@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { beadStyleForValue } from "./bead-style";
 import { getPulseMap } from "./pulse-state";
 import { getInteriorBeadMap, interiorBeadKey } from "./interior-bead-state";
+import { getNodeStatusMap } from "./node-status-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 
 // PulseBead: draws the in-flight beads ON a wire at their Go-owned fractional progress.
@@ -139,6 +140,75 @@ function InteriorSlotBead({ nodeId, row, col }: { nodeId: string; row: number; c
         <meshStandardMaterial ref={torusMatRef} emissiveIntensity={0} />
       </mesh>
     </group>
+  );
+}
+
+// MissedBeadMarkers: renders the missed/ignored bead just OUTSIDE a node while Go
+// reports a firing error (node-status torusRed=true). Go streams the WORLD position
+// (x/y/z) and the ignored bead's value; this component PLOTS ONLY — each frame it
+// reads getNodeStatusMap() imperatively, and for every entry whose torusRed=true
+// places one pooled marker at the Go-supplied world position, colored by the missed
+// value like any bead. torusRed=false → the entry is skipped → the marker hides. No
+// geometry, no timer: the revert rides the next node-status event Go sends. Mounted
+// at scene level (not a child of any node group) because the position is world-space.
+const MISSED_POOL = 16;
+// Deliberately larger than a normal in-flight bead so the missed bead reads as
+// "the one that got ignored," not just another bead passing by.
+const MISSED_BEAD_R = 9;
+
+export function MissedBeadMarkers() {
+  const slotRefs = useRef<(THREE.Group | null)[]>([]);
+  const sphereMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  const torusMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+
+  useFrame((state) => {
+    const slots = slotRefs.current;
+    // Cosmetic pulse (0..1) from the render clock, shared by all active markers so
+    // they throb in sync with the errored ring. Styling only — decides no model state.
+    const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
+    let slot = 0;
+    for (const status of getNodeStatusMap().values()) {
+      if (!status.torusRed) continue;
+      if (slot >= MISSED_POOL) break;
+      const g = slots[slot];
+      if (!g) { slot++; continue; }
+      const style = beadStyleForValue(status.missedValue);
+      if (!style) { g.visible = false; slot++; continue; }
+      g.position.set(status.pos.x, status.pos.y, status.pos.z);
+      g.scale.setScalar(1.0 + 0.25 * pulse);
+      const sm = sphereMatRefs.current[slot];
+      if (sm) {
+        sm.color.set(style.fill);
+        // Self-glow in the bead's own color so the missed bead stands out from the
+        // matte in-flight beads.
+        sm.emissive.set(style.fill);
+        sm.emissiveIntensity = 0.5 + 1.2 * pulse;
+      }
+      torusMatRefs.current[slot]?.color.set(style.ring);
+      g.visible = true;
+      slot++;
+    }
+    for (let i = slot; i < MISSED_POOL; i++) {
+      const g = slots[i];
+      if (g) g.visible = false;
+    }
+  });
+
+  return (
+    <>
+      {Array.from({ length: MISSED_POOL }, (_, i) => (
+        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[MISSED_BEAD_R, 16, 16]} />
+            <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
+            <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+        </group>
+      ))}
+    </>
   );
 }
 

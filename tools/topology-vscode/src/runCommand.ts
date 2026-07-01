@@ -3,7 +3,7 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent } from "./messages";
-import { TRACE_EVENT_KINDS } from "./webview/three/trace-kinds";
+import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 

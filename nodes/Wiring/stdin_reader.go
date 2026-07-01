@@ -84,7 +84,11 @@ type stdinAnchorPayload struct {
 	Keys    []string   `json:"keys"`
 }
 
-// stdinGuideVisPayload holds the explicit-visibility fields for the guide-vis op.
+// stdinGuideVisPayload holds the explicit-visibility fields for the overlays attr="set"
+// op. The json tags are the overlay FLAG vocabulary, shared with the TS OverlayState
+// (derived from OverlayFlag) — parity guarded by check-edit-op-parity.sh via the
+// GUIDEVIS sentinels below (a flag added/removed on either side fails the guard).
+// GUIDEVIS_FIELDS_START
 type stdinGuideVisPayload struct {
 	Tori           bool `json:"tori"`
 	ScenePoles     bool `json:"scenePoles"`
@@ -97,6 +101,8 @@ type stdinGuideVisPayload struct {
 	BadgesGlobal   bool `json:"badgesGlobal"`
 	Overlays       bool `json:"overlays"`
 }
+
+// GUIDEVIS_FIELDS_END
 
 // stdinMsg is the single editor→Go bridge shape. type is always "edit"; op is
 // one of exactly three values (create/update/delete). For op=="update", Kind
@@ -331,7 +337,12 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				md.RootMove(e.NodeId, vec3{X: e.X, Y: e.Y, Z: e.Z})
 				if treeRoot != "" {
 					for id, w := range md.heldCenters() {
+						// meta.json is canonical for Go node geometry; view/nodes is the
+						// auxiliary position store the TS spec-emit reads. Write both so the
+						// two on-disk stores stay in sync across a drag (they diverged when
+						// only meta.json was written).
 						_ = writeMetaPos(treeRoot, id, w.X, w.Y, w.Z)
+						_ = writeViewNode(treeRoot, id, specPosition{X: w.X, Y: w.Y, Z: w.Z})
 					}
 				}
 			}
@@ -376,19 +387,23 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			}
 		}
 	case "edge":
-		// attr "faded": mail-sort each (edgeId, faded) entry to its edge's inbox. Each
-		// edgeMover sets its OWN wire's faded flag — no central fan-out. Unknown keys
-		// are ignored (forward-compat).
-		if md == nil || len(msg.Edges) == 0 {
-			return
-		}
-		for edgeID, faded := range msg.Edges {
-			if ch, ok := md.dispatch[edgeID]; ok {
-				ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
+		// attr-guarded, symmetric with the "node" case above: switch on msg.Attr and
+		// ignore an unknown attr (forward-compat). Currently "faded" is the only edge attr.
+		switch msg.Attr {
+		case "faded":
+			// Mail-sort each (edgeId, faded) entry to its edge's inbox. Each edgeMover sets
+			// its OWN wire's faded flag — no central fan-out. Unknown keys are ignored.
+			if md == nil || len(msg.Edges) == 0 {
+				return
 			}
-		}
-		if treeRoot != "" {
-			_ = mergeFades(treeRoot, msg.Edges)
+			for edgeID, faded := range msg.Edges {
+				if ch, ok := md.dispatch[edgeID]; ok {
+					ch <- moveMsg{Kind: moveMsgKindFade, Faded: faded}
+				}
+			}
+			if treeRoot != "" {
+				_ = mergeFades(treeRoot, msg.Edges)
+			}
 		}
 	case "camera":
 		// Update the polar camera viewpoint and emit a camera trace event. Fire-and-forget.
@@ -441,7 +456,20 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				return
 			}
 			s := msg.State
-			md.SetGuideVisibility(s.Tori, s.ScenePoles, s.NodePoles, s.AngleLabels, s.SelSpherePoles, s.Handholds, s.DoubleLinks, s.LabelsGlobal, s.BadgesGlobal, s.Overlays, tr)
+			// Map the wire payload fields onto the named overlayVisibility struct (no
+			// positional bool order to get wrong); SetGuideVisibility installs it wholesale.
+			md.SetGuideVisibility(overlayVisibility{
+				sceneToriVisible:      s.Tori,
+				scenePolesVisible:     s.ScenePoles,
+				nodePolesVisible:      s.NodePoles,
+				angleLabelsVisible:    s.AngleLabels,
+				selSpherePolesVisible: s.SelSpherePoles,
+				handholdsVisible:      s.Handholds,
+				doubleLinksVisible:    s.DoubleLinks,
+				labelsGlobalVisible:   s.LabelsGlobal,
+				badgesGlobalVisible:   s.BadgesGlobal,
+				overlaysVisible:       s.Overlays,
+			}, tr)
 		}
 	case "scene":
 		if treeRoot != "" && len(msg.Scene) > 0 {

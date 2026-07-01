@@ -1,7 +1,7 @@
 // scene-content.tsx — 3D scene render components for ThreeView.
 // Scene (orchestrator) and RaycasterHelper.
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, RFEdge, NodeData, EdgeData } from "../types";
@@ -16,6 +16,7 @@ import { ProceduralEnvProvider } from "./scene-env";
 import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, PolarCameraRestorer } from "./scene-camera";
 import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
+import { MissedBeadMarkers } from "./scene-beads";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
 // ray distance is at most this many units closer than the nearest body hit.
@@ -149,10 +150,8 @@ function pickDefault(hits: THREE.Intersection[]): string | null {
 // ---------------------------------------------------------------------------
 
 export function RaycasterHelper({
-  nodes,
   onPickRequest,
 }: {
-  nodes: RFNode<NodeData>[];
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
@@ -177,7 +176,9 @@ export function RaycasterHelper({
       if (opts?.nodesOnly) return pickNodesOnly(hits, opts.excludeId);
       return pickDefault(hits);
     };
-  }, [camera, scene, nodes]);
+    // No `nodes` dep: the pick callback reads the live scene via useThree()/traverse,
+    // not the `nodes` prop, so it must not reinstall every geometry frame.
+  }, [camera, scene, onPickRequest]);
 
   return null;
 }
@@ -213,7 +214,7 @@ export function Scene({
   onPositions: (positions: { id: string; px: number; py: number; cx: number; cy: number }[]) => void;
   onCameraSettle: () => void;
 }) {
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   // Sphere owners depend on the click kind (sphereMode):
   //   "surface" (single click): the spheres the node sits ON the surface of — every
   //     sphere whose center outputs to it (its incoming-edge sources; one node can be
@@ -248,7 +249,7 @@ export function Scene({
       <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCameraPolar === undefined ? initialCamera3d : undefined} />
       {initialCameraPolar !== undefined && <PolarCameraRestorer initialCameraPolar={initialCameraPolar} />}
       <CameraFromStore />
-      <RaycasterHelper nodes={nodes} onPickRequest={onPickRequest} />
+      <RaycasterHelper onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <CameraSettleDetector onSettle={onCameraSettle} />
       <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
@@ -271,6 +272,10 @@ export function Scene({
       {sphereOwners.map((oid) => (
         <SphereRing key={oid} nodes={nodes} edges={edges} ownerId={oid} />
       ))}
+      {/* Missed-bead markers: rendered at Go-supplied WORLD positions just outside a
+          node while Go reports a firing error (node-status torusRed). Scene-level
+          (not a node child) since the position is world-space. */}
+      <MissedBeadMarkers />
     </ProceduralEnvProvider>
   );
 }

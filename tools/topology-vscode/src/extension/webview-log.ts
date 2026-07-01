@@ -25,8 +25,11 @@ let pendingTsErrors: Promise<void> = Promise.resolve();
 
 export async function appendWebviewLog(
   entry: string,
-  documentUri: vscode.Uri,
+  documentUri: vscode.Uri | undefined,
 ): Promise<void> {
+  // No real workspace uri → nowhere to anchor .probe/; trace to nowhere rather
+  // than misdirecting the log to an arbitrary cwd.
+  if (documentUri === undefined) return;
   let parsed: { label?: string } | undefined;
   try { parsed = JSON.parse(entry); } catch { /* malformed — route to ts.jsonl */ }
   const isError = parsed?.label !== undefined && ERROR_LABELS.has(parsed.label);
