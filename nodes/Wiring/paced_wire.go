@@ -596,13 +596,14 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool
 
 // teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
 // returns the per-bead source identities for any in-flight beads so the caller can
-// emit one PulseCancelled per dropped bead after unlocking. Must be called with
-// pw.mu held.
+// emit one PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors
+// the bead's streams flag — delivery-only beads carry no sprite and emit nothing,
+// matching deliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
 func (pw *PacedWire) teardownLocked() []arriveInfo {
 	var cancelled []arriveInfo
 	for i := range pw.inflight {
 		b := pw.inflight[i]
-		cancelled = append(cancelled, arriveInfo{emit: true, node: b.node, port: b.port, value: b.val, gen: b.gen})
+		cancelled = append(cancelled, arriveInfo{emit: b.streams, node: b.node, port: b.port, value: b.val, gen: b.gen})
 	}
 	pw.inflight = nil
 	pw.delivered = nil
@@ -637,7 +638,9 @@ func (pw *PacedWire) Delete() {
 	pw.mu.Unlock()
 
 	for _, ai := range cancelled {
-		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		if ai.emit {
+			pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		}
 	}
 }
 
@@ -658,7 +661,9 @@ func (pw *PacedWire) Restore() {
 	pw.mu.Unlock()
 
 	for _, ai := range cancelled {
-		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		if ai.emit {
+			pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+		}
 	}
 }
 
