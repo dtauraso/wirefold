@@ -37,6 +37,16 @@ export function setNodeStatus(
   _current.set(node, { torusRed, missedValue, pos });
 }
 
+/** Wipe every node's status. Called at run-start (store.load) so a fresh run's
+ *  process (no node-status reported yet) does not inherit a stale torusRed=true
+ *  left in the store from a prior run that was stopped mid-error. Mirrors
+ *  clearAllPulses: swaps _current for a fresh Map — the renderers poll
+ *  getNodeStatusMap in useFrame, so the next frame paints no red ring / missed
+ *  markers (no version counter/listeners here). */
+export function clearNodeStatus() {
+  _current = new Map();
+}
+
 export function getNodeStatusMap(): NodeStatusMap {
   return _current;
 }

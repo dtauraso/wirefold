@@ -41,6 +41,14 @@ export function setInteriorBead(
   _current.set(interiorBeadKey(node, row, col), { value, present, pos });
 }
 
+/** Wipe every slot. Called at run-start (store.load) so a fresh run's process
+ *  does not inherit a stale slot left in the store from a prior run that was
+ *  stopped. Mirrors clearAllPulses: swaps _current for a fresh Map — InteriorBeads
+ *  polls getInteriorBeadMap in useFrame, so the next frame draws no stale slots. */
+export function clearInteriorBeads() {
+  _current = new Map();
+}
+
 export function getInteriorBeadMap(): InteriorBeadMap {
   return _current;
 }
