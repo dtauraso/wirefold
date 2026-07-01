@@ -524,7 +524,7 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 	total := len(md.nodeMovers) + len(md.edgeMovers)
 	acks := make([]chan struct{}, 0, total)
 	for _, nm := range md.nodeMovers {
-		ack := make(chan struct{})
+		ack := make(chan struct{}) // chan-name-ok: resend-handled acknowledgment sync signal, not a node wire
 		select {
 		case nm.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}:
 			acks = append(acks, ack)
@@ -533,7 +533,7 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 		}
 	}
 	for _, em := range md.edgeMovers {
-		ack := make(chan struct{})
+		ack := make(chan struct{}) // chan-name-ok: resend-handled acknowledgment sync signal, not a node wire
 		select {
 		case em.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}:
 			acks = append(acks, ack)

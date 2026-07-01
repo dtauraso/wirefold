@@ -128,7 +128,7 @@ func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *Pace
 func (pb *PortBindings) In(name string) <-chan int {
 	ch := pb.single[name]
 	if ch == nil {
-		ch = make(chan int, 1)
+		ch = make(chan int, 1) // chan-name-ok: local placeholder accessor; wire identity is the port `name` (map key)
 	}
 	return ch
 }
@@ -136,7 +136,7 @@ func (pb *PortBindings) In(name string) <-chan int {
 func (pb *PortBindings) Out(name string) chan<- int {
 	ch := pb.single[name]
 	if ch == nil {
-		ch = make(chan int, 1)
+		ch = make(chan int, 1) // chan-name-ok: local placeholder accessor; wire identity is the port `name` (map key)
 	}
 	return ch
 }
