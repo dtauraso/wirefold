@@ -12,11 +12,9 @@ import (
 // (row,col): top row (0) = backup, bottom row (1) = working. A popped/absent slot is
 // emitted with present=false (not omitted) so TS can clear it. Always 4 events.
 func TestEmitNodeBeadsPositions(t *testing.T) {
-	g := nodeGeom{Kind: "Input"}
-
 	// Full state: working=[1,0], backup=[1,0] → 4 present slots.
 	tr := T.New(0)
-	emitNodeBeads(tr, "in", g, []int{1, 0}, []int{1, 0})
+	emitNodeBeads(tr, "in", []int{1, 0}, []int{1, 0})
 	tr.Close()
 	full := tr.Events()
 	if len(full) != 4 {
@@ -55,7 +53,7 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 	// After one pop: working=[1] (end 0 removed). Still a 4-slot snapshot, but the
 	// working col-1 slot is now present=false; the other 3 are present=true.
 	tr2 := T.New(0)
-	emitNodeBeads(tr2, "in", g, []int{1}, []int{1, 0})
+	emitNodeBeads(tr2, "in", []int{1}, []int{1, 0})
 	tr2.Close()
 	ev := tr2.Events()
 	if len(ev) != 4 {

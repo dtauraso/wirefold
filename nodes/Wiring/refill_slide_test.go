@@ -34,7 +34,7 @@ func TestRefillSlideClockPaced(t *testing.T) {
 
 	// rowPitch and duration mirror emitRefillSlide.
 	rowPitch := interiorSlotOffset(0, 0).Y - interiorSlotOffset(1, 0).Y
-	durationMs := rowPitch / PulseSpeedWuPerMs * interiorSlideDurationMul
+	durationMs := rowPitch / PulseSpeedWuPerMs
 	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
 
 	// Advance the clock past the full slide duration in 16ms steps. A couple extra
