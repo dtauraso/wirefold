@@ -163,11 +163,17 @@ export function RaycasterHelper({
     onPickRequest.current = (ndcX: number, ndcY: number, opts?: PickOptions): string | null => {
       const ndc = new THREE.Vector2(ndcX, ndcY);
       raycaster.current.setFromCamera(ndc, camera);
-      const meshes: THREE.Mesh[] = [];
-      scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) meshes.push(obj as THREE.Mesh);
-      });
-      const hits = raycaster.current.intersectObjects(meshes, false);
+      // Recursive intersect against the live scene, then keep only mesh hits.
+      // Equivalent to the old "traverse → collect every isMesh → intersect"
+      // (three sorts nearest-first and skips objects whose raycast yields
+      // nothing), but without allocating a fresh meshes[] buffer and traverse
+      // closure on every pointer-move pick. Non-mesh hits (lines/sprites) are
+      // filtered out to preserve the mesh-only candidate semantics exactly.
+      const allHits = raycaster.current.intersectObject(scene, true);
+      const hits =
+        allHits.length === 0
+          ? allHits
+          : allHits.filter((h) => (h.object as THREE.Mesh).isMesh);
       if (hits.length === 0) return null;
 
       if (opts?.handholdOnly) return pickHandhold(hits);
