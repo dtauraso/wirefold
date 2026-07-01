@@ -108,7 +108,7 @@ func outMultiBaseName(handle, kind string, kindOutMultiPorts map[string]map[stri
 func specPortsToGeom(ports []specPort) []portGeom {
 	out := make([]portGeom, 0, len(ports))
 	for _, p := range ports {
-		out = append(out, portGeom{Name: p.Name, AnchorId: p.AnchorId})
+		out = append(out, portGeom(p))
 	}
 	return out
 }

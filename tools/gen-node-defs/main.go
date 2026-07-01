@@ -463,7 +463,7 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 	fieldIdx := indexOf(headers, "Field")
 	valueIdx := indexOf(headers, "Value")
 	if fieldIdx == -1 || valueIdx == -1 {
-		return viewDef{}, nil, nil, nil, fmt.Errorf("View table missing Field/Value columns")
+		return viewDef{}, nil, nil, nil, fmt.Errorf("view table missing Field/Value columns")
 	}
 	vmap := map[string]string{}
 	for _, row := range rows {

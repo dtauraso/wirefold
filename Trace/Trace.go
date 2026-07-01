@@ -771,7 +771,7 @@ func eventValue(e Event) (any, error) {
 	case KindNodeGeometry:
 		ports := make([]portGeomJSON, len(e.Ports))
 		for i, p := range e.Ports {
-			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
+			ports[i] = portGeomJSON(p)
 		}
 		return nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR,
 			VRX: e.VRX, VRY: e.VRY, VRZ: e.VRZ, FRX: e.FRX, FRY: e.FRY, FRZ: e.FRZ, Ports: ports}, nil
