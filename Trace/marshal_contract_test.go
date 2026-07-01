@@ -56,6 +56,18 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 			}},
 		{Step: 8, Kind: KindArrive, Node: "A", Port: "out", Value: 1},
 		{Step: 9, Kind: KindNodeBead, Node: "A", Row: 1, Col: 0, Present: true, Value: 1, X: 4.5, Y: -6.5, Z: 0, hasPos: true},
+		{Step: 10, Kind: KindCamera, PX: 0, PY: 0, PZ: 0, R: 30, PosTheta: 1.2, PosPhi: 0.5, UpTheta: 0, UpPhi: 0},
+		{Step: 11, Kind: KindSceneTori, Visible: true},
+		{Step: 12, Kind: KindScenePoles, Visible: false},
+		{Step: 13, Kind: KindNodePoles, Visible: true},
+		{Step: 14, Kind: KindAngleLabels, Visible: false},
+		{Step: 15, Kind: KindSelSpherePoles, Visible: true},
+		{Step: 16, Kind: KindHandholds, Visible: false},
+		{Step: 17, Kind: KindLabelsGlobal, Visible: true},
+		{Step: 18, Kind: KindBadgesGlobal, Visible: false},
+		{Step: 19, Kind: KindOverlaysVis, Visible: true},
+		{Step: 20, Kind: KindDoubleLinks, Visible: false},
+		{Step: 21, Kind: KindNodeStatus, Node: "A", TorusRed: true, Value: 7, X: 1.5, Y: -2.5, Z: 0, hasPos: true},
 	}
 
 	fixture := fixtureLines(t)
