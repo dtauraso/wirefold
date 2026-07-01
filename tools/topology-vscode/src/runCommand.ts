@@ -365,16 +365,6 @@ export class BuildAndRunRunner {
     this.cancel();
   }
 
-  /** Stop the runner and resolve when the process has fully exited. Resolves
-   *  immediately if no process is active. */
-  stopAndAwait(): Promise<void> {
-    if (!this.proc) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      this.proc!.once("close", () => resolve());
-      this.stop();
-    });
-  }
-
   /** Lines written before Go's stdin exists, flushed on spawn (see writeStdin/run). */
   private pendingStdin: string[] = [];
 
