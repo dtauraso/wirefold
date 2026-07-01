@@ -642,11 +642,24 @@ func (pw *PacedWire) Delete() {
 }
 
 // Restore clears the deleted flag set by Delete so the wire carries pulses again.
+//
+// In the live flow Restore only runs to un-silence a wire that is currently deleted
+// (the "create" edit re-adds a previously-deleted edge), and while deleted the source
+// places no beads — so Delete's teardown already drained inflight and it stays empty.
+// The teardown here is therefore a no-op for beads in practice. But rather than rely on
+// that invariant, Restore matches Delete: it emits one pulse-cancelled per dropped bead
+// (captured under the lock, emitted after unlock — PulseCancelled sends on a channel and
+// must not hold the wire lock) so a Restore that ever did race a live bead cannot orphan
+// a sprite. In the normal empty case no traces are emitted, so behavior is unchanged.
 func (pw *PacedWire) Restore() {
 	pw.mu.Lock()
 	pw.deleted = false
-	pw.teardownLocked()
+	cancelled := pw.teardownLocked()
 	pw.mu.Unlock()
+
+	for _, ai := range cancelled {
+		pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
+	}
 }
 
 // InFlight reports whether any bead is currently traversing this wire.
