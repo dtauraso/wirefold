@@ -41,10 +41,32 @@ func TestEmitHeldBead(t *testing.T) {
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
+	// waitEmits blocks until at least n interior emits have been observed, or fails
+	// after a bounded timeout. Polls the real observable (emitted) rather than
+	// sleeping a fixed interval, so the sequencing is guaranteed not assumed.
+	waitEmits := func(n int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			mu.Lock()
+			got := len(emitted)
+			mu.Unlock()
+			if got >= n {
+				return
+			}
+			if time.Now().After(deadline) {
+				cancel()
+				wg.Wait()
+				t.Fatalf("only %d interior emits after wait, want %d", got, n)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
 	// Startup emit (held == -1) lands before any input.
-	time.Sleep(20 * time.Millisecond)
+	waitEmits(1)
 	mu.Lock()
-	if len(emitted) != 1 || emitted[0] != -1 {
+	if emitted[0] != -1 {
 		mu.Unlock()
 		cancel()
 		wg.Wait()
@@ -67,7 +89,8 @@ func TestEmitHeldBead(t *testing.T) {
 	fromPrev <- 1
 	recv(t, out0)
 
-	time.Sleep(20 * time.Millisecond)
+	// Wait for all three interior emits (-1, 0, 1) to land before tearing down.
+	waitEmits(3)
 	cancel()
 	wg.Wait()
 
