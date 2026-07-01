@@ -252,9 +252,8 @@ func (c *FakeClock) WaitUntil(ctx context.Context, target time.Duration) error {
 		}
 		c.cond.Wait()
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
+	// Deadline met: prefer deadline-success over a simultaneous ctx cancellation,
+	// matching RealClock.WaitUntil (which returns nil directly on now >= target).
 	return nil
 }
 
