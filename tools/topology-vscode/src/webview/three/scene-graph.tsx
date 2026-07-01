@@ -299,6 +299,9 @@ export function SphereRing({
       vrQ: new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, vrNormal),
       frQ: new THREE.Quaternion().setFromUnitVectors(torusDefaultNormal, frNormal),
     };
+    // Deliberate: key off ownerNode.id (stable), not the ownerNode object
+    // identity — geometry only depends on which node it is + streamed geoms.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerNode?.id, geoms]);
 
   if (!ownerNode || !centersSphere || !orient) return null;

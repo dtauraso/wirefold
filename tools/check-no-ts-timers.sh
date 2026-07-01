@@ -35,7 +35,10 @@ scan() {
     [[ -z "$hit" ]] && continue
     printf '%s: pattern "%s"\n' "$hit" "$pattern"
     HITS=$((HITS + 1))
-  done < <(grep -n "$pattern" "$PUMP_FILE" 2>/dev/null || true)
+  # -a/--text: pump.ts has multibyte chars that BSD grep treats as binary,
+  # collapsing real matches to a single "Binary file ... matches" line and
+  # garbling this guard's file:line report. Force text mode.
+  done < <(grep -an "$pattern" "$PUMP_FILE" 2>/dev/null || true)
 }
 
 scan "setInterval"

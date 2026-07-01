@@ -37,7 +37,7 @@ fi
 PATTERN='setFromUnitVectors|\.cross\(|new THREE\.Raycaster|\.unproject\(|setFromAxisAngle|setFromMatrixColumn|new THREE\.Spherical'
 
 # Lines marked `// polar-nav-ok` are exempted (node-drag/pan — not in the rotation path).
-hits=$(grep -nE "$PATTERN" "${NAV_FILES[@]}" 2>/dev/null | grep -v 'polar-nav-ok' || true)
+hits=$(grep -anE "$PATTERN" "${NAV_FILES[@]}" 2>/dev/null | grep -v 'polar-nav-ok' || true)
 
 if [ -n "$hits" ]; then
   echo "✗ polar-nav violation(s) found — all rotation/axis math must live in polar.ts:"

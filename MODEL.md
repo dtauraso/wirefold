@@ -128,12 +128,12 @@ state and never tells Go when a bead has arrived — Go owns the clock.
   Pump is the boundary — no firing-rule or timing logic may live outside
   it on the TS side.
 - **`GraphNode`** (in
-  `tools/topology-vscode/src/webview/three/scene-content.tsx`) renders
+  `tools/topology-vscode/src/webview/three/scene-graph.tsx`) renders
   all nodes generically as a sphere mesh + border ring, keyed off
   `node.data.fill`/`node.data.stroke` from `NODE_DEFS`. There are no
   per-kind component files.
 - **`SingleEdgeTube`** (in
-  `tools/topology-vscode/src/webview/three/ThreeView.tsx`) renders wire
+  `tools/topology-vscode/src/webview/three/scene-graph.tsx`) renders wire
   animation driven by the positions Go emits. It owns no traversal
   timing.
 - **Global gate** is a play/pause signal sent to the Go process (the one
@@ -143,7 +143,9 @@ state and never tells Go when a bead has arrived — Go owns the clock.
   trace stream (bead positions, node events, edge curves, shading
   params) — Go reporting what it is doing. **TS → Go:** spec I/O for
   save/load (`save`, `view-save`, `load`) plus a single geometry-CRUD
-  `edit` message (`op` = create / update / delete / fade) and the
+  `edit` message (`op` = create / update / delete — exactly three ops;
+  fading is not an op but an edge attribute set via `op=update, kind=edge,
+  attr=faded`) and the
   play/pause control signal. The TS → Go send is fire-and-forget: the
   editor places an edit and never blocks on Go, never asks when a bead
   arrived, and there is no delivery signal — Go times its own delivery.

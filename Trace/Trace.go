@@ -16,6 +16,7 @@
 package Trace
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"sync"
@@ -568,6 +569,12 @@ func writeAll(events []Event, w io.Writer, marshal func(Event) ([]byte, error)) 
 }
 
 func (t *Trace) drain() {
+	// Reused across every event in this single drain goroutine — no per-event
+	// destination allocation. json.Encoder defaults to SetEscapeHTML(true), matching
+	// json.Marshal exactly, and Encode appends the trailing '\n' the sink line needs,
+	// so buf.Bytes() is byte-identical to the previous marshalEvent(ev)+'\n' pair.
+	encBuf := &bytes.Buffer{}
+	enc := json.NewEncoder(encBuf)
 	record := func(ev Event) {
 		// Hold the lock ACROSS the sink write. Breadcrumb() and Close() also write to
 		// the sink under t.mu; if we unlocked before writing (as before), an event's
@@ -580,9 +587,12 @@ func (t *Trace) drain() {
 		ev.Step = len(t.events)
 		t.events = append(t.events, ev)
 		if t.sink != nil {
-			if b, err := marshalEvent(ev); err == nil {
-				_, _ = t.sink.Write(b)
-				_, _ = t.sink.Write([]byte{'\n'})
+			if v, err := eventValue(ev); err == nil {
+				encBuf.Reset()
+				if enc.Encode(v) == nil {
+					// encBuf holds the JSON body plus Encode's trailing '\n'.
+					_, _ = t.sink.Write(encBuf.Bytes())
+				}
 			}
 		}
 		t.mu.Unlock()
@@ -617,7 +627,25 @@ func (t *Trace) drain() {
 // neither is correct (value 0 is a valid signal in this codebase, and
 // a missing port on recv/send is a bug worth surfacing). Hand-roll
 // to keep the shape stable.
+//
+// json.Marshal(eventValue(e)) is byte-identical to encoding the same struct via
+// a json.Encoder (both default to SetEscapeHTML(true)); the only Encoder addition
+// is a trailing '\n', which the drain loop already appends anyway. The drain
+// goroutine therefore encodes eventValue into a reused bytes.Buffer to avoid the
+// per-event destination allocation on the high-volume KindPosition stream, while
+// this wrapper preserves the []byte API for WriteJSONL's batch replay path.
 func marshalEvent(e Event) ([]byte, error) {
+	v, err := eventValue(e)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
+}
+
+// eventValue returns the closed-vocabulary struct value for e (the thing to
+// json-encode). Kept separate from marshalEvent so the drain loop can encode it
+// straight into a reused buffer without allocating a fresh []byte per event.
+func eventValue(e Event) (any, error) {
 	type recvOrSend struct {
 		Step  int    `json:"step"`
 		Kind  string `json:"kind"`
@@ -719,37 +747,37 @@ func marshalEvent(e Event) ([]byte, error) {
 	}
 	switch e.Kind {
 	case KindFire:
-		return json.Marshal(fire{Step: e.Step, Kind: e.Kind, Node: e.Node})
+		return fire{Step: e.Step, Kind: e.Kind, Node: e.Node}, nil
 	case KindSend:
 		if e.ArcLength != 0 || e.SimLatencyMs != 0 {
-			return json.Marshal(sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs, Target: e.Target, TargetHandle: e.TargetHandle})
+			return sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs, Target: e.Target, TargetHandle: e.TargetHandle}, nil
 		}
-		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+		return recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value}, nil
 	case KindDone:
-		return json.Marshal(doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port})
+		return doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port}, nil
 	case KindPosition:
 		// All three coordinates always emitted (0,0,0 is a valid position).
-		return json.Marshal(position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z, F: e.F, Bead: e.Bead})
+		return position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z, F: e.F, Bead: e.Bead}, nil
 	case KindGeometry:
 		// All six segment-endpoint coordinates always emitted (0 is valid).
-		return json.Marshal(geometry{Step: e.Step, Kind: e.Kind, Edge: e.Edge,
+		return geometry{Step: e.Step, Kind: e.Kind, Edge: e.Edge,
 			SX: e.SX, SY: e.SY, SZ: e.SZ,
-			EX: e.EX, EY: e.EY, EZ: e.EZ})
+			EX: e.EX, EY: e.EY, EZ: e.EZ}, nil
 	case KindPulseCancelled:
-		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead})
+		return pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead}, nil
 	case KindArrive:
 		// Same wire shape as pulse-cancelled: source node+port+value+bead routing key.
-		return json.Marshal(pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead})
+		return pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead}, nil
 	case KindNodeGeometry:
 		ports := make([]portGeomJSON, len(e.Ports))
 		for i, p := range e.Ports {
 			ports[i] = portGeomJSON{Name: p.Name, IsInput: p.IsInput, PX: p.PX, PY: p.PY, PZ: p.PZ, DX: p.DX, DY: p.DY, DZ: p.DZ}
 		}
-		return json.Marshal(nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR,
-			VRX: e.VRX, VRY: e.VRY, VRZ: e.VRZ, FRX: e.FRX, FRY: e.FRY, FRZ: e.FRZ, Ports: ports})
+		return nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR,
+			VRX: e.VRX, VRY: e.VRY, VRZ: e.VRZ, FRX: e.FRX, FRY: e.FRY, FRZ: e.FRZ, Ports: ports}, nil
 	case KindNodeBead:
 		// row/col/present/value/position always emitted (0/false is valid for each).
-		return json.Marshal(nodeBead{Step: e.Step, Kind: e.Kind, Node: e.Node, Row: e.Row, Col: e.Col, Present: e.Present, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z})
+		return nodeBead{Step: e.Step, Kind: e.Kind, Node: e.Node, Row: e.Row, Col: e.Col, Present: e.Present, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z}, nil
 	case KindCamera:
 		// All camera fields always emitted (0 is valid for any angle or position).
 		type camera struct {
@@ -764,7 +792,7 @@ func marshalEvent(e Event) ([]byte, error) {
 			UpTheta  float64 `json:"upTheta"`
 			UpPhi    float64 `json:"upPhi"`
 		}
-		return json.Marshal(camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi})
+		return camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi}, nil
 	case KindNodeStatus:
 		// torusRed + missed bead value + outside world position always emitted.
 		type nodeStatus struct {
@@ -777,7 +805,7 @@ func marshalEvent(e Event) ([]byte, error) {
 			Y           float64 `json:"y"`
 			Z           float64 `json:"z"`
 		}
-		return json.Marshal(nodeStatus{Step: e.Step, Kind: e.Kind, Node: e.Node, TorusRed: e.TorusRed, MissedValue: e.Value, X: e.X, Y: e.Y, Z: e.Z})
+		return nodeStatus{Step: e.Step, Kind: e.Kind, Node: e.Node, TorusRed: e.TorusRed, MissedValue: e.Value, X: e.X, Y: e.Y, Z: e.Z}, nil
 	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
@@ -785,8 +813,8 @@ func marshalEvent(e Event) ([]byte, error) {
 			Kind    string `json:"kind"`
 			Visible bool   `json:"visible"`
 		}
-		return json.Marshal(visToggle{Step: e.Step, Kind: e.Kind, Visible: e.Visible})
+		return visToggle{Step: e.Step, Kind: e.Kind, Visible: e.Visible}, nil
 	default:
-		return json.Marshal(recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value})
+		return recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value}, nil
 	}
 }

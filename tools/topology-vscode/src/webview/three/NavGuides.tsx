@@ -348,7 +348,7 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori
   // (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
   const cs = computeContentSphere(nodes);
-  const tube = nodes.length > 0 ? Math.max(0.5, nodeRadius(nodes[0]) * 0.08) : 1;
+  const tube = nodes.length > 0 ? Math.max(0.5, nodeRadius(nodes[0]!) * 0.08) : 1;
   // Build geometry ONLY when the sphere actually changes (rounded radius/tube), not on
   // every render — rebuilding each frame under node-geometry churn made the tori flicker
   // and effectively disappear.

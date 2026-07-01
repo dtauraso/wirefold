@@ -174,7 +174,8 @@ export function parseViewerState(text: string | undefined): ViewerState {
 function withStableViewOrder(s: ViewerState): ViewerState {
   if (!s.nodes) return s;
   const sorted: Record<string, NodeView> = {};
-  for (const id of Object.keys(s.nodes).sort()) sorted[id] = s.nodes[id];
+  // id comes from Object.keys(s.nodes), so the lookup is always present.
+  for (const id of Object.keys(s.nodes).sort()) sorted[id] = s.nodes[id]!;
   return { ...s, nodes: sorted };
 }
 

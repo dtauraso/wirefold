@@ -13,7 +13,7 @@ PUMP_FILE="$REPO_ROOT/tools/topology-vscode/src/webview/three/pump.ts"
 
 # Extract kinds from TRACE_EVENT_KINDS array (quoted string literals on that line).
 kinds_from_ts() {
-  grep 'TRACE_EVENT_KINDS' "$TRACE_KINDS_FILE" \
+  grep -a 'TRACE_EVENT_KINDS' "$TRACE_KINDS_FILE" \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort
@@ -21,7 +21,12 @@ kinds_from_ts() {
 
 # Extract case labels from pump.ts (lines of the form: case "...":)
 kinds_from_pump() {
-  grep -E '^\s*case "[^"]+":' "$PUMP_FILE" \
+  # -a/--text: pump.ts contains multibyte box-drawing/arrow chars in its header
+  # comments; BSD (macOS) grep classifies it as a "Binary file" and prints only
+  # "Binary file ... matches" instead of the matching lines, so the extraction
+  # comes back empty and assert_nonempty trips. Force text mode. [[:space:]] is
+  # the POSIX class (portable across GNU/BSD grep) in place of the GNU-only \s.
+  grep -aE '^[[:space:]]*case "[^"]+":' "$PUMP_FILE" \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort
@@ -80,7 +85,7 @@ fields_from_go() {
 # field names of the `export interface NodeStatusEvent { ... }` block.
 fields_from_ts() {
   awk '/export interface NodeStatusEvent {/{f=1; next} f&&/^}/{f=0} f' "$TRACE_FIELDS_FILE" \
-    | grep -oE '^\s*[a-zA-Z0-9_]+' \
+    | grep -oE '^[[:space:]]*[a-zA-Z0-9_]+' \
     | tr -d ' ' \
     | sort
 }

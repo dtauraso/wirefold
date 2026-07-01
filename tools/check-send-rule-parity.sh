@@ -22,7 +22,7 @@ done
 # Extract SendRule const values from Go:
 #   lines of the form:  RuleFoo SendRule = "someValue"
 rules_from_go() {
-  grep -E 'SendRule\s*=\s*"[^"]+"' "$PORTS_GO" \
+  grep -E 'SendRule[[:space:]]*=[[:space:]]*"[^"]+"' "$PORTS_GO" \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort

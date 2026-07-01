@@ -44,8 +44,9 @@ export function computeOcclusionCounts(
 
   for (let i = 0; i < projected.length; i++) {
     for (let j = i + 1; j < projected.length; j++) {
-      const a = projected[i];
-      const b = projected[j];
+      // i, j both index within projected.length.
+      const a = projected[i]!;
+      const b = projected[j]!;
       const screenDist = Math.hypot(a.px - b.px, a.py - b.py);
 
       // Overlap: use front node's screen radius as threshold.

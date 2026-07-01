@@ -53,6 +53,12 @@ if [ -n "$ts_changed" ]; then
       fail=1
     fi
   fi
+  # ESLint (react-hooks correctness guard) — TS-only, needs node_modules, so it
+  # lives in the ts_changed block alongside tsc rather than the generic loop.
+  if ! eslint_out=$(bash tools/check-eslint.sh 2>&1); then
+    out+="check-eslint failed:\n$eslint_out\n\n"
+    fail=1
+  fi
 fi
 
 for chk in check-trace-kind-parity check-no-ts-timers check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-slot-phase-boundary check-generated check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt; do

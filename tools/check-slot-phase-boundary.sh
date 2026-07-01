@@ -48,7 +48,7 @@ ts_scan() {
   done < <(
     find "$RF_DIR" -name "*.ts" -o -name "*.tsx" | sort |
     grep -v "$(printf '%s' "$PUMP_FILE")" |
-    xargs grep -n "$pattern" 2>/dev/null || true
+    xargs grep -an "$pattern" 2>/dev/null || true
   )
 }
 
@@ -68,7 +68,7 @@ go_scan() {
     [[ -z "$hit" ]] && continue
     printf '%s: pattern "%s"\n' "$hit" "$pattern"
     HITS=$((HITS + 1))
-  done < <(go_files | sort -u | xargs grep -n "$pattern" 2>/dev/null || true)
+  done < <(go_files | sort -u | xargs grep -an "$pattern" 2>/dev/null || true)
 }
 
 # Transition pattern: object-literal slot-phase writes (comma form, not type defs).
