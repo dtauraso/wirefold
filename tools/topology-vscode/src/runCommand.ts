@@ -311,6 +311,10 @@ export class BuildAndRunRunner {
   }
 
   cancel() {
+    // Drop any stdin lines buffered while proc was null — they belong to the
+    // stopped session and must NOT replay onto the next spawned Go process (which
+    // re-reads the graph from disk); stale replay would double-apply edits.
+    this.pendingStdin = [];
     if (!this.proc || this.proc.pid === undefined) return;
     this.cancelled = true;
     try {
@@ -357,6 +361,7 @@ export class BuildAndRunRunner {
 
   stop() {
     this.looping = false;
+    this.pendingStdin = [];
     this.cancel();
   }
 
