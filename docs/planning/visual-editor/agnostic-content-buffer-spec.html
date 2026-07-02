@@ -194,7 +194,7 @@ nodes   : <span class="b">{ ...persistent..., fired:u8, sent:u8, arrived:u8, rec
   </table>
   <div class="note warn"><b>Doctrine touchpoint:</b> this makes the Go&rarr;TS lane <b>all-binary</b> (content <em>and</em> log). CLAUDE.md&rsquo;s &ldquo;two channels&rdquo; still holds (it&rsquo;s one Go&rarr;TS stream), but the wire format is now binary end-to-end &mdash; MODEL.md/CLAUDE.md bridge wording must be updated in the same change, and a parity guard added for the layout.</div>
   <h3>Clock &amp; the buffer</h3>
-  <p>Go enqueues <b>one full snapshot per tick</b> in which anything changed &mdash; a bead step, a node-window transition, a geometry/camera edit. <b>The tick is the emit driver</b>; there is no separate render beat. Ticks are human-paced (the clock&rsquo;s scale), so buffer updates arrive at human-watchable speed; play/pause freezes the tick, which freezes buffer updates and thus the render. The clock model is pinned in <b>MODEL.md</b> (human-speed clock, <code>WaitTick</code>, tick-count windows) &mdash; this plan is where it meets the buffer.</p>
+  <p>Go enqueues <b>one full snapshot per tick</b> in which anything changed &mdash; a bead step, a node-window transition, a geometry/camera change. <b>The tick is the emit driver</b>; there is no separate render beat. Ticks are human-paced (the clock&rsquo;s scale), so buffer updates arrive at human-watchable speed; play/pause freezes the tick, which freezes buffer updates and thus the render. The clock model is pinned in <b>MODEL.md</b> (human-speed clock, <code>WaitTick</code>, tick-count windows) &mdash; this plan is where it meets the buffer.</p>
   <h3>Two buffers (SPSC) &mdash; decoupled timescales</h3>
   <p>The bridge is <b>two double-ended queues (deques)</b>, one per direction, each single-producer / single-consumer. <b>Go&rarr;TS:</b> Go adds one end, TS reads the other &mdash; content snapshots (the log's event columns ride inside them). <b>TS&rarr;Go:</b> TS adds one end, Go reads the other &mdash; input events. Producer-one-end / consumer-other-end never contend, and the producer never blocks on the consumer &mdash; that <em>is</em> fire-and-forget.</p>
   <p><b>Why two buffers:</b> they <b>decouple Go&rsquo;s timescale from TS&rsquo;s</b>. Go produces at the human-speed tick rate; TS consumes at the browser frame rate (rAF). Neither has to stay in sync with the other &mdash; the buffer absorbs the mismatch. (Realized over the transport &mdash; pipe &rarr; ext host &rarr; <code>postMessage</code>, each hop already FIFO &mdash; not one literal shared ring across the process boundary.)</p>
@@ -217,7 +217,7 @@ instanced.count = liveBeadCount;</pre>
   <ul>
     <li>the 5 render stores &mdash; <code>pulse-state</code>, <code>interior-bead-state</code>, <code>node-status-state</code>, <code>node-geometry</code>, <code>edge-geometry</code> &mdash; and their <code>useFrame</code>-poll consumers;</li>
     <li>the <b>overlay-visibility flags</b> (currently Go-reflected in <code>camera-store</code>) &mdash; they move into the buffer as bool/enum columns;</li>
-    <li>the <b>spec/diagram store</b> (<code>store.ts</code>) &mdash; Go owns the topology, persists it, and streams it back; the editor renders it and sends CRUD;</li>
+    <li>the <b>spec/diagram store</b> (<code>store.ts</code>) &mdash; Go owns the topology, persists it, and streams it back; the editor renders it and forwards raw input (Go&rsquo;s FSM produces the edits);</li>
     <li>the <b>camera pose</b> &mdash; Go owns it too (a few columns); mouse gestures are input events to Go, the pose streams back like any other content.</li>
   </ul>
   <p class="muted">TS keeps <b>no state at all</b> &mdash; not even gesture bookkeeping. Raw pointer events (<code>pointerdown/move/up</code>, <code>wheel</code>) are forwarded to Go; drag origin, which button is down, and the in-progress gesture all live in <b>Go&rsquo;s gesture state machine</b>. (Browser pointer-capture is a DOM mechanism, not app state.)</p>
@@ -258,7 +258,7 @@ instanced.count = liveBeadCount;</pre>
   </ul>
   <h3>Non-goals</h3>
   <ul>
-    <li><span class="pill keep">no change</span> to the fire-and-forget TS&rarr;Go edit path, or to the <em>meaning</em> of the causal log &mdash; its semantics are unchanged; only its encoding moves to the shared binary.</li>
+    <li><span class="pill keep">no change</span> to the <em>meaning</em> of the causal log &mdash; its semantics are unchanged; only its encoding moves to the shared binary.</li>
     <li><span class="pill keep">no</span> client-side domain state &mdash; Go owns topology, camera, overlays, everything; TS renders + forwards input only.</li>
     <li><span class="pill keep">no</span> new request/response or awaiting on the bridge &mdash; the buffer is one-way Go&rarr;TS, like the trace.</li>
   </ul>
