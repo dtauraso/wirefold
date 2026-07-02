@@ -13,7 +13,7 @@
 // buffer directly (zero-copy DataView slices via buffer-decode.ts) and fills
 // GPU attribute arrays imperatively via useFrame. No domain state flows out.
 
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useContext } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
@@ -23,6 +23,18 @@ import { getNavNodeIds, getNavNodeKind } from "./buffer-nav";
 import { NODE_DEFS } from "../../schema/node-defs";
 import { ndcToPixel } from "./geometry-helpers";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
+import { EnvTexContext } from "./scene-env";
+import {
+  SHADING_PARAM_NODE_TRANSMISSION,
+  SHADING_PARAM_NODE_THICKNESS,
+  SHADING_PARAM_NODE_ROUGHNESS,
+  SHADING_PARAM_NODE_IOR,
+  SHADING_PARAM_NODE_METALNESS,
+  SHADING_PARAM_NODE_CLEARCOAT,
+  SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
+  SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
+  SHADING_PARAM_NODE_OPACITY,
+} from "../../schema/shading-params";
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
@@ -113,6 +125,7 @@ function BeadInstances({ capacity }: { capacity: number }) {
 // stroke is driven via instanceColor (setColorAt). Kind→color is a pure NODE_DEFS lookup
 // keyed by the row-aligned id table (buffer-nav) — no color travels in the buffer.
 function NodeInstances({ capacity }: { capacity: number }) {
+  const envTex = useContext(EnvTexContext);
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const ringRef = useRef<THREE.InstancedMesh>(null);
   const matRef  = useRef(new THREE.Matrix4());
@@ -166,7 +179,26 @@ function NodeInstances({ capacity }: { capacity: number }) {
     <>
       <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]}>
         <sphereGeometry args={[1, 16, 16]} />
-        <meshStandardMaterial roughness={0.5} metalness={0.1} />
+        {/* Match GraphNode's glassy translucent body EXACTLY (scene-graph.tsx): a
+            meshPhysicalMaterial with transmission + depthWrite=false + opacity 0.92 so
+            the node interior (held/interior beads) shows through. Per-node fill is the
+            instanceColor (setColorAt below); the shared material color stays white so
+            instanceColor is applied verbatim. envMap comes from the same PMREM context
+            the JSON path uses (BufferScene is wrapped in ProceduralEnvProvider). */}
+        <meshPhysicalMaterial
+          transmission={SHADING_PARAM_NODE_TRANSMISSION}
+          thickness={SHADING_PARAM_NODE_THICKNESS}
+          roughness={SHADING_PARAM_NODE_ROUGHNESS}
+          ior={SHADING_PARAM_NODE_IOR}
+          metalness={SHADING_PARAM_NODE_METALNESS}
+          clearcoat={SHADING_PARAM_NODE_CLEARCOAT}
+          clearcoatRoughness={SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS}
+          envMap={envTex ?? undefined}
+          envMapIntensity={SHADING_PARAM_NODE_ENV_MAP_INTENSITY}
+          transparent
+          opacity={SHADING_PARAM_NODE_OPACITY}
+          depthWrite={false}
+        />
       </instancedMesh>
       <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]}>
         <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />

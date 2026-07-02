@@ -18,6 +18,7 @@ import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene } from "./scene-content";
 import { BufferScene, BufferLabelProjector, USE_BUFFER_RENDER } from "./buffer-scene";
+import { ProceduralEnvProvider } from "./scene-env";
 import type { BufferLabelPos } from "./buffer-scene";
 import { computeOcclusionCounts, computeOcclusionCountsNav } from "./scene-occlusion";
 import { getLatestSnapshot } from "../snapshot-buffer";
@@ -312,7 +313,14 @@ export function ThreeView() {
               mount. (The `nodes`/`selectedId` props are consumed only on the flag-off
               path; flag-on ignores them and reads the buffer.) */}
           <NavGuides nodes={nodes} selectedId={selectedId} />
-          {USE_BUFFER_RENDER && <BufferScene cameraRef={cameraRef} />}
+          {/* BufferScene's node bodies use the same glassy PMREM-lit meshPhysicalMaterial
+              as the JSON path (GraphNode), so it needs the env texture. Provide it here —
+              SceneContent's own ProceduralEnvProvider wraps only the flag-off geometry. */}
+          {USE_BUFFER_RENDER && (
+            <ProceduralEnvProvider>
+              <BufferScene cameraRef={cameraRef} />
+            </ProceduralEnvProvider>
+          )}
           {USE_BUFFER_RENDER && <BufferLabelProjector onPositions={onBufferPositions} />}
         </Canvas>
       </div>
