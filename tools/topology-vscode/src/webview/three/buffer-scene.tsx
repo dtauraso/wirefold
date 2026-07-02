@@ -18,10 +18,11 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { USE_NEW_SYSTEM } from "../new-system";
-import { decodeSnapshot } from "./buffer-decode";
+import { decodeSnapshot, shouldAutoFitCamera } from "./buffer-decode";
 import { getNavNodeIds } from "./buffer-nav";
 import { ndcToPixel } from "./geometry-helpers";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
+import { sendRawInput, buildHomeRaw } from "./raw-input";
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
@@ -259,6 +260,38 @@ function BufferCamera({ cameraRef }: {
   return null;
 }
 
+// ── BufferCameraAutoFit ─────────────────────────────────────────────────────────
+// Seeds the FSM camera viewpoint on load under the new system. The old path auto-framed
+// on load via CameraFitter / restored a saved pose via PolarCameraRestorer — BOTH gated
+// OFF under USE_NEW_SYSTEM. Without a replacement, Go's gesture-FSM viewpoint stays at its
+// zero value (pos = up = θ0,φ0), which is DEGENERATE: pos and up both map to +Y, so the
+// screen basis (up × pole) collapses. Orbit/zoom/home each re-establish a valid pose from
+// scratch, but a PAN slides the pivot within that collapsed basis, so it visibly does
+// nothing until some other gesture seeds a real orientation. Fix: once Go's node geometry
+// has landed in the buffer (nodeCount > 0) AND no viewpoint exists yet (camera R <= 0),
+// send a single "home" command — exactly what HomeButton sends under the new system — so
+// Go frames the scene from its own geometry and installs a non-degenerate pose. Fires once
+// per mount (ref-guarded so the few frames before Go's camera event lands don't re-send).
+function BufferCameraAutoFit() {
+  const { camera, size } = useThree();
+  const sentRef = useRef(false);
+
+  useFrame(() => {
+    if (sentRef.current) return;
+    if (size.width === 0 || size.height === 0) return;
+    const snap = getLatestSnapshot();
+    if (!snap) return;
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) return;
+    if (!shouldAutoFitCamera(decoded)) return;
+    sentRef.current = true;
+    const cam = camera as THREE.PerspectiveCamera;
+    sendRawInput(buildHomeRaw(cam.fov, size.width / size.height));
+  });
+
+  return null;
+}
+
 // ── BufferLabelProjector ────────────────────────────────────────────────────────
 // Buffer-driven node-label projector: each ~2 frames it reads the snapshot's node
 // block, projects each node's top (center.y+radius) and center to screen, and reports
@@ -335,6 +368,7 @@ export function BufferScene({ cameraRef }: {
   return (
     <>
       <BufferCamera cameraRef={cameraRef} />
+      <BufferCameraAutoFit />
       <BeadInstances capacity={beadCap} />
       <NodeInstances capacity={nodeCap} />
       <SelectionHighlight capacity={nodeCap} />
