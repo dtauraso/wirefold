@@ -220,7 +220,7 @@ instanced.count = liveBeadCount;</pre>
     <li>the <b>spec/diagram store</b> (<code>store.ts</code>) &mdash; Go owns the topology, persists it, and streams it back; the editor renders it and sends CRUD;</li>
     <li>the <b>camera pose</b> &mdash; Go owns it too (a few columns); mouse gestures are input events to Go, the pose streams back like any other content.</li>
   </ul>
-  <p class="muted">The only TS state that remains is <b>ephemeral in-gesture bookkeeping</b> inside the input handler (drag origin, which button is down) &mdash; not a domain store.</p>
+  <p class="muted">TS keeps <b>no state at all</b> &mdash; not even gesture bookkeeping. Raw pointer events (<code>pointerdown/move/up</code>, <code>wheel</code>) are forwarded to Go; drag origin, which button is down, and the in-progress gesture all live in <b>Go&rsquo;s gesture state machine</b>. (Browser pointer-capture is a DOM mechanism, not app state.)</p>
   <h3>Interaction</h3>
   <p>Mouse events (orbit / zoom / drag / add / delete) are forwarded to Go <b>immediately</b> as CRUD/input; everything the renderer needs (incl. port positions during a drag) is read from the <b>buffer view</b>. TS renders + forwards; it holds nothing.</p>
   <h3>Hit-testing (resolved &mdash; option a)</h3>
