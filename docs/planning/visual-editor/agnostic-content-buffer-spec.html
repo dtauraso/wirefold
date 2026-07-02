@@ -165,7 +165,9 @@
 beads   : <span class="b">{ maxRows, cols:[ x:f32, y:f32, z:f32, value:i32, frac:f32, live:u8 ] }</span>
 nodes   : <span class="b">{ maxRows, cols:[ cx:f32, cy:f32, cz:f32, r:f32, ...ports ] }</span>
 edges   : <span class="b">{ maxRows, cols:[ sx:f32, sy:f32, sz:f32, ex:f32, ey:f32, ez:f32 ] }</span>
-status  : <span class="b">{ maxRows, cols:[ torusRed:u8, missVal:i32, mx:f32, my:f32, mz:f32 ] }</span></pre>
+status  : <span class="b">{ maxRows, cols:[ torusRed:u8, missVal:i32, mx:f32, my:f32, mz:f32 ] }</span>
+nodes   : <span class="b">{ ...persistent..., fired:u8, sent:u8, arrived:u8, recv:u8 ]</span> <span class="c">// transient event flags</span></pre>
+  <p><b>Fields are persistent or transient.</b> Persistent fields carry state between ticks (position, geometry, held value). <b>The semantic events are transient fields</b> &mdash; a <code>fired</code>/<code>sent</code>/<code>arrived</code>/<code>recv</code> flag set only on the tick it occurs. They&rsquo;re numeric like everything else; the <em>name</em> (&ldquo;fired&rdquo;) lives in the schema, and the human <code>.probe</code> log is decoded from these fields. The log is not a separate representation or a string &mdash; it&rsquo;s columns in the snapshot, read through the schema. Since nothing is dropped, a flag set for a single tick is seen by every consumer.</p>
   <h3>Update discipline (keeps it delta-cheap)</h3>
   <ul>
     <li><b>Positions</b> (bead columns): written each frame while beads are in flight &mdash; the moving content.</li>
@@ -263,7 +265,6 @@ instanced.count = liveBeadCount;</pre>
   <h3>Open decisions (resolve before build)</h3>
   <ul>
     <li><b>maxRows policy:</b> fixed ceiling vs grow-and-refit on overflow.</li>
-    <li><b>Event-record layout:</b> fixed-width vs variable-length records for the semantic events (each carries a kind id + a few fields) &mdash; decide the record framing within the binary.</li>
     <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete all domain stores + forward input as CRUD, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
   </ul>
 </section>
