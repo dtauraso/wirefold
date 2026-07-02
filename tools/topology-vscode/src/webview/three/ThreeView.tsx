@@ -17,8 +17,12 @@ import { useCameraStore } from "./camera-store";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene } from "./scene-content";
-import { BufferScene, USE_BUFFER_RENDER } from "./buffer-scene";
-import { computeOcclusionCounts } from "./scene-occlusion";
+import { BufferScene, BufferLabelProjector, USE_BUFFER_RENDER } from "./buffer-scene";
+import type { BufferLabelPos } from "./buffer-scene";
+import { computeOcclusionCounts, computeOcclusionCountsNav } from "./scene-occlusion";
+import { getLatestSnapshot } from "../snapshot-buffer";
+import { decodeSnapshot } from "./buffer-decode";
+import { decodeNavNodes, getNavNodeIds } from "./buffer-nav";
 import { NavGuides } from "./NavGuides";
 import { PanPolarOverlay } from "./PanPolarOverlay";
 import { viewerState, patchViewerState } from "../state/viewer-state";
@@ -51,6 +55,10 @@ export function ThreeView() {
   const [sphereMode, setSphereMode] = useState<"surface" | "own">("surface");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [labelPositions, setLabelPositions] = useState<{ id: string; px: number; py: number; cx: number; cy: number }[]>([]);
+  // Buffer-driven label positions (new-system path): projected from the binary buffer's
+  // node block + the buffer-nav id table by BufferLabelProjector. Separate from the
+  // old-path labelPositions so flag-off stays byte-for-byte.
+  const [bufferLabelPositions, setBufferLabelPositions] = useState<BufferLabelPos[]>([]);
   // globalLabelsHidden is Go-owned: written by pump on labels-global trace events.
   const globalLabelsHidden = useCameraStore((s) => s.labelsGlobalHidden);
   // badgesHidden is Go-owned: written by pump on badges-global trace events.
@@ -107,12 +115,29 @@ export function ThreeView() {
     }
   }, []);
 
+  // Buffer-driven label positions — same RAF-batching as onPositions, separate buffer.
+  const bufferLabelRaf = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+  const pendingBufferPositions = useRef<BufferLabelPos[]>([]);
+  const onBufferPositions = useCallback((positions: BufferLabelPos[]) => {
+    pendingBufferPositions.current = positions;
+    if (bufferLabelRaf.current === null) {
+      bufferLabelRaf.current = requestAnimationFrame(() => {
+        setBufferLabelPositions(pendingBufferPositions.current);
+        bufferLabelRaf.current = null;
+      });
+    }
+  }, []);
+
   // Cancel any pending label RAF on unmount so it can't fire against a torn-down component.
   useEffect(() => {
     return () => {
       if (labelRaf.current !== null) {
         cancelAnimationFrame(labelRaf.current);
         labelRaf.current = null;
+      }
+      if (bufferLabelRaf.current !== null) {
+        cancelAnimationFrame(bufferLabelRaf.current);
+        bufferLabelRaf.current = null;
       }
     };
   }, []);
@@ -207,15 +232,31 @@ export function ThreeView() {
   // Occlusion counts: recomputed only when the camera settles (not per-frame).
   // Map from frontNodeId → N (nodes hidden directly behind it from current viewpoint).
   const [occlusionCounts, setOcclusionCounts] = useState<Map<string, number>>(new Map());
+  // Buffer-driven occlusion counts (new-system path), computed from the buffer's node
+  // block on camera-settle. Separate from occlusionCounts so flag-off stays unchanged.
+  const [bufferOcclusionCounts, setBufferOcclusionCounts] = useState<Map<string, number>>(new Map());
 
   const onCameraSettle = useCallback(() => {
     const cam = cameraRef.current;
     if (!cam) return;
+    if (USE_NEW_SYSTEM) {
+      // Buffer-driven: decode the latest snapshot's node block + id table and compute
+      // occlusion from Go-owned centers/radii (never the RFNode array).
+      const snap = getLatestSnapshot();
+      const decoded = snap ? decodeSnapshot(snap) : null;
+      const nav = decoded ? decodeNavNodes(decoded, getNavNodeIds()) : [];
+      setBufferOcclusionCounts(computeOcclusionCountsNav(nav, cam, canvasSize));
+      return;
+    }
     const counts = computeOcclusionCounts(nodes, cam, canvasSize);
     setOcclusionCounts(counts);
   }, [nodes, cameraRef, canvasSize]);
 
   const labelMap = useMemo(() => new Map(labelPositions.map((p) => [p.id, p])), [labelPositions]);
+  const bufferLabelMap = useMemo(() => new Map(bufferLabelPositions.map((p) => [p.id, p])), [bufferLabelPositions]);
+  // Node label text keyed by id (from the loaded topology; the buffer is numeric).
+  // Used by the new-system pills to render human labels for each buffer node row.
+  const nodeLabelMap = useMemo(() => new Map(nodes.map((n) => [n.id, n.data?.label ?? n.id])), [nodes]);
 
 
   return (
@@ -258,14 +299,15 @@ export function ThreeView() {
               path; flag-on ignores them and reads the buffer.) */}
           <NavGuides nodes={nodes} selectedId={selectedId} />
           {USE_BUFFER_RENDER && <BufferScene cameraRef={cameraRef} />}
+          {USE_BUFFER_RENDER && <BufferLabelProjector onPositions={onBufferPositions} />}
         </Canvas>
       </div>
 
       {/* Label overlay — real camera projection, updated every frame.
           All nodes with a projected position render their label (subject to the global toggle). */}
-      {/* Node label pills — projected from the OLD path (LabelProjector over the RFNode
-          array; node labels/ids are not carried in the binary buffer). Gated OFF under
-          the new-system flag and reported as a known overlay gap. */}
+      {/* Node label pills — FLAG-OFF path: projected by LabelProjector over the RFNode
+          array. Byte-for-byte unchanged. The new-system path renders the equivalent
+          pills below from the buffer projection + id table. */}
       {!USE_NEW_SYSTEM && !globalLabelsHidden && nodes.map((n) => {
         const pos = labelMap.get(n.id);
         if (!pos) return null;
@@ -292,12 +334,37 @@ export function ThreeView() {
         );
       })}
 
+      {/* Node label pills — NEW-SYSTEM path: one pill per buffer-projected node position
+          (BufferLabelProjector), label text looked up from the id table via nodeLabelMap.
+          Same style as the flag-off pills; positions/geometry are buffer-driven. */}
+      {USE_NEW_SYSTEM && !globalLabelsHidden && bufferLabelPositions.map((pos) => (
+        <div
+          key={pos.id}
+          style={{
+            position: "absolute",
+            left: pos.px,
+            top: pos.py - 4,
+            transform: "translate(-50%, -100%)",
+            fontSize: 11,
+            fontFamily: "monospace",
+            color: "#e0e0e0",
+            pointerEvents: "none",
+            lineHeight: 1.25,
+            textAlign: "center",
+            zIndex: 10,
+            ...PILL_STYLE,
+          }}
+        >
+          <div style={{ whiteSpace: "nowrap" }}>{nodeLabelMap.get(pos.id) ?? pos.id}</div>
+        </div>
+      ))}
+
       {/* Occlusion count badges — "+N" pill at top-right of front node's projected center.
           Only shown when N >= 1. Recomputed on camera settle (not per-frame).
           Full occlusion is allowed — layout never moves (honesty preserved).
           TODO(3d): large-count cap/format deferred */}
-      {/* Occlusion "+N" badges — old-path (occlusion computed over the RFNode array +
-          old label projection). Gated OFF under the new-system flag; known overlay gap. */}
+      {/* Occlusion "+N" badges — FLAG-OFF path (occlusion computed over the RFNode array
+          + old label projection). Byte-for-byte unchanged. New-system badges below. */}
       {!USE_NEW_SYSTEM && !badgesHidden && nodes.map((n) => {
         const count = occlusionCounts.get(n.id);
         if (!count || count < 1) return null;
@@ -306,6 +373,38 @@ export function ThreeView() {
         return (
           <div
             key={`badge-${n.id}`}
+            style={{
+              position: "absolute",
+              left: pos.px + 10,
+              top: pos.py - 18,
+              background: "rgba(30,30,50,0.88)",
+              color: "#7df",
+              fontSize: 9,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              padding: "1px 5px",
+              borderRadius: 8,
+              border: "1px solid rgba(100,180,255,0.5)",
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+              zIndex: 15,
+              lineHeight: "14px",
+            }}
+          >
+            +{count}
+          </div>
+        );
+      })}
+
+      {/* Occlusion "+N" badges — NEW-SYSTEM path: occlusion computed from the buffer's
+          node block (computeOcclusionCountsNav), positioned at the buffer projection.
+          Same style as the flag-off badges; fully buffer-driven. */}
+      {USE_NEW_SYSTEM && !badgesHidden && bufferLabelPositions.map((pos) => {
+        const count = bufferOcclusionCounts.get(pos.id);
+        if (!count || count < 1) return null;
+        return (
+          <div
+            key={`badge-${pos.id}`}
             style={{
               position: "absolute",
               left: pos.px + 10,

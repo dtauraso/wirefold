@@ -19,14 +19,19 @@ import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { USE_NEW_SYSTEM } from "../new-system";
 import { decodeSnapshot } from "./buffer-decode";
+import { getNavNodeIds } from "./buffer-nav";
+import { ndcToPixel } from "./geometry-helpers";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive,
-  readNodeCX, readNodeCY, readNodeCZ, readNodeSelected,
+  readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
+
+/** Projected label position, keyed by node id (buffer row → id via the id table). */
+export interface BufferLabelPos { id: string; px: number; py: number; cx: number; cy: number; }
 
 // ── Dev flag ──────────────────────────────────────────────────────────────────
 // Follows the ONE master switch (USE_NEW_SYSTEM). ON = mount the buffer render path;
@@ -249,6 +254,49 @@ function BufferCamera({ cameraRef }: {
     cam.up.copy(upDir);
     cam.lookAt(pivot);
     cam.updateMatrixWorld(true);
+  });
+
+  return null;
+}
+
+// ── BufferLabelProjector ────────────────────────────────────────────────────────
+// Buffer-driven node-label projector: each ~2 frames it reads the snapshot's node
+// block, projects each node's top (center.y+radius) and center to screen, and reports
+// {id,px,py,cx,cy} keyed by the buffer-nav id table (row i → ids[i]). Mirrors the old
+// JSON-path LabelProjector but sourced from the buffer + id table instead of the
+// RFNode array. The DOM pills/badges (ThreeView) render from these positions under the
+// new-system flag. Pure projection — no geometry math, no store writes.
+const _bufTopScratch = new THREE.Vector3();
+const _bufCenterScratch = new THREE.Vector3();
+
+export function BufferLabelProjector({ onPositions }: {
+  onPositions: (positions: BufferLabelPos[]) => void;
+}) {
+  const { camera, size } = useThree();
+  const frameCountRef = useRef(0);
+
+  useFrame(() => {
+    frameCountRef.current++;
+    if (frameCountRef.current % 2 !== 0) return; // ~30fps, matches LabelProjector
+    const snap = getLatestSnapshot();
+    if (!snap) return;
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) return;
+    const { nodeCount, nodeView } = decoded;
+    const ids = getNavNodeIds();
+    const positions: BufferLabelPos[] = [];
+    for (let i = 0; i < nodeCount; i++) {
+      const cx = readNodeCX(nodeView, i);
+      const cy = readNodeCY(nodeView, i);
+      const cz = readNodeCZ(nodeView, i);
+      const r = readNodeRadius(nodeView, i);
+      _bufTopScratch.set(cx, cy + r, cz).project(camera);
+      const topPx = ndcToPixel(_bufTopScratch.x, _bufTopScratch.y, size);
+      _bufCenterScratch.set(cx, cy, cz).project(camera);
+      const centerPx = ndcToPixel(_bufCenterScratch.x, _bufCenterScratch.y, size);
+      positions.push({ id: ids[i] ?? `#${i}`, px: topPx.px, py: topPx.py, cx: centerPx.px, cy: centerPx.py });
+    }
+    onPositions(positions);
   });
 
   return null;
