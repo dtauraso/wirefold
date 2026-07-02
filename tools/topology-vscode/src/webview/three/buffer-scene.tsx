@@ -13,7 +13,7 @@
 // buffer directly (zero-copy DataView slices via buffer-decode.ts) and fills
 // GPU attribute arrays imperatively via useFrame. No domain state flows out.
 
-import React, { useRef, useState, useContext } from "react";
+import React, { useRef, useState, useContext, useMemo, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
@@ -36,12 +36,20 @@ import {
   SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
   SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
   SHADING_PARAM_NODE_OPACITY,
+  SHADING_PARAM_TUBE_COLOR,
+  SHADING_PARAM_TUBE_EMISSIVE,
+  SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
+  SHADING_PARAM_DOUBLE_LINKS_COLOR,
+  SHADING_PARAM_DOUBLE_LINKS_EMISSIVE,
+  SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY,
 } from "../../schema/shading-params";
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive, readBeadValue,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
+  readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
+  readOverlayOverlaysVis, readOverlayDoubleLinks,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
@@ -392,50 +400,254 @@ function InteriorBeadInstances({ capacity }: { capacity: number }) {
   );
 }
 
-function EdgeLines({ capacity }: { capacity: number }) {
-  const linesRef  = useRef<THREE.LineSegments>(null);
-  const geoRef    = useRef(new THREE.BufferGeometry());
-  const posRef    = useRef(new Float32Array(capacity * 6)); // capacity edges × 2 pts × 3
+// ── Edge tubes + arrowheads ─────────────────────────────────────────────────────
+// Real 3D edge render matching the JSON path's SingleEdgeTube / DoubleEdgeOverlay
+// (scene-graph.tsx). Endpoints come from the buffer's Edge block (SX..EZ). Edges change
+// only on load / node-drag, so we hold the segment set in React state and rebuild the
+// per-edge TubeGeometry only when a coordinate actually changes (keyed compare in the
+// per-frame poll) — no geometry rebuilt on frames where nothing moved. When double-links
+// is ON (OverlaysVis && DoubleLinks in the buffer's Overlay block), the main tubes dim to
+// opacity 0.25 and a cyan bidirectional overlay is drawn on the same segment.
 
-  // Initialize geometry attribute on first render.
-  React.useLayoutEffect(() => {
-    const attr = new THREE.BufferAttribute(posRef.current, 3);
-    attr.setUsage(THREE.DynamicDrawUsage);
-    geoRef.current.setAttribute("position", attr);
-  }, []);
+// Arrowhead cone dims for the core tube — mirror scene-graph.tsx.
+const ARROWHEAD_LENGTH = 6;
+const ARROWHEAD_RADIUS = 3;
+// Arrowhead cone dims for the double-link overlay (slightly larger than the tube arrows).
+const DL_ARROWHEAD_LENGTH = 7;
+const DL_ARROWHEAD_RADIUS = 3.5;
+
+const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
+const DOUBLE_LINKS_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_DOUBLE_LINKS_EMISSIVE);
+
+interface EdgeSeg { sx: number; sy: number; sz: number; ex: number; ey: number; ez: number; }
+
+/**
+ * Builds an arrow descriptor: a cone whose apex sits at `apex`, pointing in `dir`
+ * (normalized, toward the apex). ConeGeometry apex is at +Y; we rotate +Y onto `dir`.
+ * center places the cone so its apex lands at `apex`. Mirrors scene-graph.tsx buildArrow.
+ */
+function buildArrow(apex: THREE.Vector3, dir: THREE.Vector3, height: number): {
+  center: THREE.Vector3; q: THREE.Quaternion;
+} {
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  const center = apex.clone().addScaledVector(dir, -height / 2);
+  return { center, q };
+}
+
+// One edge's core tube (radius 1.5) + destination arrowhead, mirroring SingleEdgeTube.
+// `dimmed` (double-links on) drops opacity to 0.25 like the JSON path.
+function EdgeTube({ seg, dimmed }: { seg: EdgeSeg; dimmed: boolean }) {
+  const { tubeGeo, arrow } = useMemo(() => {
+    const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
+    const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
+    const curve = new THREE.LineCurve3(start, end);
+    const _tubeGeo = new THREE.TubeGeometry(curve, 1, 1.5, 6, false);
+    const dir = end.clone().sub(start);
+    let _arrow: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    if (dir.length() >= 1e-6) {
+      dir.normalize();
+      _arrow = buildArrow(end, dir, ARROWHEAD_LENGTH);
+    }
+    return { tubeGeo: _tubeGeo, arrow: _arrow };
+  }, [seg.sx, seg.sy, seg.sz, seg.ex, seg.ey, seg.ez]);
+
+  // R3F does not auto-dispose an imperatively-passed geometry={...}; dispose on rebuild/unmount.
+  useEffect(() => () => { tubeGeo.dispose(); }, [tubeGeo]);
+
+  return (
+    <>
+      <mesh geometry={tubeGeo}>
+        <meshStandardMaterial
+          key={dimmed ? "dimmed" : "solid"}
+          color={SHADING_PARAM_TUBE_COLOR}
+          emissive={TUBE_EMISSIVE_COLOR}
+          emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
+          transparent={dimmed}
+          opacity={dimmed ? 0.25 : 1}
+        />
+      </mesh>
+      {arrow && (
+        <mesh
+          position={[arrow.center.x, arrow.center.y, arrow.center.z]}
+          quaternion={[arrow.q.x, arrow.q.y, arrow.q.z, arrow.q.w]}
+          raycast={() => null}
+        >
+          <coneGeometry args={[ARROWHEAD_RADIUS, ARROWHEAD_LENGTH, 16]} />
+          <meshStandardMaterial
+            key={dimmed ? "dimmed" : "solid"}
+            color={SHADING_PARAM_TUBE_COLOR}
+            emissive={TUBE_EMISSIVE_COLOR}
+            emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
+            transparent={dimmed}
+            opacity={dimmed ? 0.25 : 1}
+          />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+// One edge's cyan bidirectional double-link overlay: thin tube (radius 1.0) + an
+// outward-pointing arrowhead at each end. Mirrors DoubleEdgeOverlay (scene-graph.tsx).
+function DoubleEdgeOverlayBuf({ seg }: { seg: EdgeSeg }) {
+  const { lineGeo, arrowStart, arrowEnd } = useMemo(() => {
+    const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
+    const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
+    const curve = new THREE.LineCurve3(start, end);
+    const _lineGeo = new THREE.TubeGeometry(curve, 1, 1.0, 6, false);
+    const dir = end.clone().sub(start);
+    let _arrowStart: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    let _arrowEnd: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    if (dir.length() >= 1e-6) {
+      const dirNorm = dir.clone().normalize();
+      _arrowStart = buildArrow(start, dirNorm.clone().negate(), DL_ARROWHEAD_LENGTH);
+      _arrowEnd = buildArrow(end, dirNorm, DL_ARROWHEAD_LENGTH);
+    }
+    return { lineGeo: _lineGeo, arrowStart: _arrowStart, arrowEnd: _arrowEnd };
+  }, [seg.sx, seg.sy, seg.sz, seg.ex, seg.ey, seg.ez]);
+
+  useEffect(() => () => { lineGeo.dispose(); }, [lineGeo]);
+
+  const cone = (a: { center: THREE.Vector3; q: THREE.Quaternion }) => (
+    <mesh
+      position={[a.center.x, a.center.y, a.center.z]}
+      quaternion={[a.q.x, a.q.y, a.q.z, a.q.w]}
+      raycast={() => null}
+    >
+      <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
+      <meshStandardMaterial
+        color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
+        emissive={DOUBLE_LINKS_EMISSIVE_COLOR}
+        emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
+      />
+    </mesh>
+  );
+
+  return (
+    <>
+      <mesh geometry={lineGeo} raycast={() => null}>
+        <meshStandardMaterial
+          color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
+          emissive={DOUBLE_LINKS_EMISSIVE_COLOR}
+          emissiveIntensity={SHADING_PARAM_DOUBLE_LINKS_EMISSIVE_INTENSITY}
+          transparent={false}
+        />
+      </mesh>
+      {arrowStart && cone(arrowStart)}
+      {arrowEnd && cone(arrowEnd)}
+    </>
+  );
+}
+
+function EdgeTubes({ capacity }: { capacity: number }) {
+  const [segs, setSegs] = useState<EdgeSeg[]>([]);
+  const [showDouble, setShowDouble] = useState(false);
+  const keyRef = useRef<string>("");
 
   useFrame(() => {
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
-    const { edgeCount, edgeView } = decoded;
+    const { edgeCount, edgeView, overlayView } = decoded;
 
-    const pos = posRef.current;
+    const dbl = !!readOverlayOverlaysVis(overlayView) && !!readOverlayDoubleLinks(overlayView);
     const n = Math.min(edgeCount, capacity);
+    const next: EdgeSeg[] = new Array<EdgeSeg>(n);
+    let key = dbl ? "D|" : "S|";
     for (let i = 0; i < n; i++) {
-      const b = i * 6;
-      pos[b]     = readEdgeSX(edgeView, i);
-      pos[b + 1] = readEdgeSY(edgeView, i);
-      pos[b + 2] = readEdgeSZ(edgeView, i);
-      pos[b + 3] = readEdgeEX(edgeView, i);
-      pos[b + 4] = readEdgeEY(edgeView, i);
-      pos[b + 5] = readEdgeEZ(edgeView, i);
+      const s: EdgeSeg = {
+        sx: readEdgeSX(edgeView, i), sy: readEdgeSY(edgeView, i), sz: readEdgeSZ(edgeView, i),
+        ex: readEdgeEX(edgeView, i), ey: readEdgeEY(edgeView, i), ez: readEdgeEZ(edgeView, i),
+      };
+      next[i] = s;
+      key += `${s.sx},${s.sy},${s.sz}:${s.ex},${s.ey},${s.ez};`;
     }
-
-    const geo = geoRef.current;
-    geo.setDrawRange(0, n * 2); // 2 vertices per segment
-    const attr = geo.attributes.position as THREE.BufferAttribute;
-    attr.needsUpdate = true;
-
-    const lines = linesRef.current;
-    if (lines) lines.visible = n > 0;
+    // Rebuild the segment set (and thus the tube geometries) only when something moved
+    // or the double-links flag flipped — not every frame.
+    if (key !== keyRef.current) {
+      keyRef.current = key;
+      setSegs(next);
+      setShowDouble(dbl);
+    }
   });
 
   return (
-    <lineSegments ref={linesRef} geometry={geoRef.current}>
-      <lineBasicMaterial color="#44ff88" />
-    </lineSegments>
+    <>
+      {segs.map((s, i) => (
+        <React.Fragment key={i}>
+          <EdgeTube seg={s} dimmed={showDouble} />
+          {showDouble && <DoubleEdgeOverlayBuf seg={s} />}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
+// ── Missed-bead markers ─────────────────────────────────────────────────────────
+// Renders the missed/ignored bead just outside a node while Go reports a firing error
+// (node TorusRed=1). World position (MX/MY/MZ) and the missed value (MissVal) come from
+// the buffer's Node block. Mirrors MissedBeadMarkers (scene-beads.tsx): a pooled sphere+
+// ring per active node, colored by beadStyleForValue(MissVal), self-glowing with a
+// cosmetic render-clock pulse. TorusRed=0 → the node's marker hides. Nodes whose MissVal
+// has no bead-style are hidden (never a fallback color), matching the JSON path.
+const MISSED_POOL = 16;
+const MISSED_BEAD_R = 9;
+
+function MissedBeadMarkersBuf() {
+  const slotRefs = useRef<(THREE.Group | null)[]>([]);
+  const sphereMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  const torusMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+
+  useFrame((state) => {
+    const slots = slotRefs.current;
+    const snap = getLatestSnapshot();
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    // Cosmetic pulse (0..1) from the render clock, shared by all active markers.
+    const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
+    let slot = 0;
+    if (decoded) {
+      const { nodeCount, nodeView } = decoded;
+      for (let i = 0; i < nodeCount && slot < MISSED_POOL; i++) {
+        if (!readNodeTorusRed(nodeView, i)) continue;
+        const g = slots[slot];
+        if (!g) { slot++; continue; }
+        const style = beadStyleForValue(readNodeMissVal(nodeView, i));
+        if (!style) { g.visible = false; slot++; continue; }
+        g.position.set(readNodeMX(nodeView, i), readNodeMY(nodeView, i), readNodeMZ(nodeView, i));
+        g.scale.setScalar(1.0 + 0.25 * pulse);
+        const sm = sphereMatRefs.current[slot];
+        if (sm) {
+          sm.color.set(style.fill);
+          sm.emissive.set(style.fill);
+          sm.emissiveIntensity = 0.5 + 1.2 * pulse;
+        }
+        torusMatRefs.current[slot]?.color.set(style.ring);
+        g.visible = true;
+        slot++;
+      }
+    }
+    for (let i = slot; i < MISSED_POOL; i++) {
+      const g = slots[i];
+      if (g) g.visible = false;
+    }
+  });
+
+  return (
+    <>
+      {Array.from({ length: MISSED_POOL }, (_, i) => (
+        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[MISSED_BEAD_R, 16, 16]} />
+            <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
+            <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
+          </mesh>
+        </group>
+      ))}
+    </>
   );
 }
 
@@ -572,7 +784,8 @@ export function BufferScene({ cameraRef }: {
       <NodeInstances capacity={nodeCap} />
       <InteriorBeadInstances capacity={nodeCap * INTERIOR_SLOTS_PER_NODE} />
       <SelectionHighlight capacity={nodeCap} />
-      <EdgeLines     capacity={edgeCap} />
+      <EdgeTubes     capacity={edgeCap} />
+      <MissedBeadMarkersBuf />
     </>
   );
 }
