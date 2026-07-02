@@ -30,6 +30,7 @@ type portGeom struct {
 // A nil Center falls back to the world origin (used only for hand-written/partial specs).
 type nodeGeom struct {
 	Kind   string
+	Label  string   // human label for this node (data.label, else node id); streamed on node-geometry events for the new-system label sidecar
 	R      *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
 	Center *vec3    // optional precomputed world center (polar-layout propagation); when set, nodeWorldPos returns it directly
 	// ReachR is the sphere REACH radius: the max distance from this node's center to

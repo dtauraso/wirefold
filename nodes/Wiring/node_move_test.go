@@ -225,6 +225,80 @@ func TestResendGeometry(t *testing.T) {
 	}
 }
 
+// TestNodeGeometryLabelSidecar locks the new-system label sidecar contract at the Go
+// layer: every node-geometry event carries a Label field (data.label when present, else
+// the node id), and the labels arrive in node-row order (first-seen node-geometry order,
+// == Buffer.SnapshotState insertion order). ResendGeometry re-emits them so a remounted
+// webview repopulates its row-keyed label table. The webview host derives the {id,label}
+// sidecar message straight from these events.
+func TestNodeGeometryLabelSidecar(t *testing.T) {
+	// "src" carries an explicit human label; "dst" omits data.label → label falls back to id.
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","data":{"label":"Source Node"},"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(256)
+	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+
+	// Resend re-emits held geometry (the remount-recovery path the sidecar rides).
+	// Called twice to lock idempotent re-emission (matches TestResendGeometry).
+	md.ResendGeometry(ctx, tr)
+	md.ResendGeometry(ctx, tr)
+
+	tr.Close()
+
+	// Expected label per node id: explicit data.label for src, id fallback for dst.
+	wantLabel := map[string]string{"src": "Source Node", "dst": "dst"}
+
+	// First-seen node id order == buffer node-row order. Collect it and verify each
+	// node-geometry event's Label matches, and that resend re-emitted every node.
+	var firstSeen []string
+	seen := map[string]bool{}
+	reemitted := map[string]int{}
+	for _, e := range tr.Events() {
+		if e.Kind != T.KindNodeGeometry {
+			continue
+		}
+		reemitted[e.Node]++
+		if !seen[e.Node] {
+			seen[e.Node] = true
+			firstSeen = append(firstSeen, e.Node)
+		}
+		if want := wantLabel[e.Node]; e.Label != want {
+			t.Fatalf("node %q: label = %q, want %q", e.Node, e.Label, want)
+		}
+	}
+	if len(firstSeen) != 2 {
+		t.Fatalf("first-seen node order = %v, want 2 distinct nodes", firstSeen)
+	}
+	for _, n := range []string{"src", "dst"} {
+		if reemitted[n] < 2 {
+			t.Fatalf("node %q re-emitted %d times, want >= 2 (startup + resend)", n, reemitted[n])
+		}
+	}
+}
+
 // TestResendGeometryEmitsFullBufferSnapshot locks the new-system (agnostic-content-buffer)
 // remount recovery: a freshly (re)loaded webview mounts AFTER Go's startup snapshot burst,
 // and an idle/paused sim emits no further buffer snapshots — so the fresh webview would

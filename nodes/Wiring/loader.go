@@ -55,11 +55,21 @@ type specNode struct {
 	Z       float64    `json:"z"`
 }
 
+// label returns the node's human label: data.label when present and non-empty,
+// otherwise the node id. Mirrors the TS `n.data?.label ?? n.id` fallback so the
+// new-system label sidecar renders the same pill text the old spec store produced.
+func (n specNode) label() string {
+	if n.Data != nil && n.Data.Label != "" {
+		return n.Data.Label
+	}
+	return n.ID
+}
+
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, R: n.R, Center: &vec3{X: n.X, Y: n.Y, Z: n.Z}}
+	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, Center: &vec3{X: n.X, Y: n.Y, Z: n.Z}}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -115,6 +125,9 @@ func specPortsToGeom(ports []specPort) []portGeom {
 
 // NodeData mirrors the JSON data block on a node.
 type NodeData struct {
+	// Label is the node's human label (optional). When absent, the node id is used
+	// as the label. Streamed on node-geometry events for the new-system label sidecar.
+	Label  string         `json:"label,omitempty"`
 	Init   []int          `json:"init,omitempty"`
 	Repeat bool           `json:"repeat,omitempty"`
 	State  map[string]int `json:"state,omitempty"` // field-seeding: struct fields via wire:"data.state"

@@ -483,7 +483,14 @@ func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir f
 	// SphereRing sizes correctly without recomputing geometry. Childless nodes
 	// (ReachR == 0) fall back to nodeR so the value stays sane.
 	sphereR := effectiveRadius(g)
-	tr.NodeGeometry(nodeName, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
+	// label = the node's human label (g.Label), falling back to the node id so the
+	// sidecar always carries a non-empty pill string even for hand-written specs whose
+	// geom omits Label.
+	label := g.Label
+	if label == "" {
+		label = nodeName
+	}
+	tr.NodeGeometry(nodeName, label, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
 		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
 		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
 }
