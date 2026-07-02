@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
+	B "github.com/dtauraso/wirefold/Buffer"
 	T "github.com/dtauraso/wirefold/Trace"
 	W "github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -23,7 +25,25 @@ import (
 // (MODEL.md). Both callers (Run, RunTest) pass a real clock; it is always non-nil.
 // The global play/pause gate is this clock's Halt/Resume.
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string, clk W.Clock) {
-	tr := T.NewWithSink(0, os.Stdout)
+	// Open the binary snapshot output channel (default fd 3; set WIREFOLD_BUF_OUT_FD=0
+	// to disable). Writes are fire-and-forget: if fd 3 is not connected nothing reads
+	// it and write errors are silently ignored (on-but-harmless until rollout flip).
+	// At rollout flip (a later phase) this becomes the sole framed stdout once JSON
+	// trace is removed; for now it runs in parallel on a side file descriptor.
+	var snapOut *os.File
+	{
+		fdNum := 3
+		if v := os.Getenv("WIREFOLD_BUF_OUT_FD"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				fdNum = n
+			}
+		}
+		if fdNum > 0 {
+			snapOut = os.NewFile(uintptr(fdNum), fmt.Sprintf("fd%d", fdNum))
+		}
+	}
+	snapState := B.NewSnapshotState(snapOut)
+	tr := T.NewWithSinkHook(0, os.Stdout, snapState.Update)
 
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()

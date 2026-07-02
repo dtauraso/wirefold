@@ -244,7 +244,8 @@ type Trace struct {
 	mu      sync.Mutex
 	events  []Event
 	closed  bool
-	sink    io.Writer // if non-nil, each event is written as JSONL in real time
+	sink    io.Writer   // if non-nil, each event is written as JSONL in real time
+	onEvent func(Event) // if non-nil, called from drain goroutine on every event (binary snapshot hook)
 }
 
 // New allocates a Trace with a buffered emit channel. buf controls
@@ -259,6 +260,14 @@ func New(buf int) *Trace {
 // real time (inside the drain goroutine) in addition to buffering.
 // Pass nil for sink to disable streaming (identical to New).
 func NewWithSink(buf int, sink io.Writer) *Trace {
+	return NewWithSinkHook(buf, sink, nil)
+}
+
+// NewWithSinkHook is like NewWithSink but also installs onEvent, which is called
+// from the drain goroutine on every recorded event (after the event is appended
+// and the JSONL sink written). Use this to attach a binary snapshot state without
+// a separate goroutine or channel. Pass nil for onEvent to omit the hook.
+func NewWithSinkHook(buf int, sink io.Writer, onEvent func(Event)) *Trace {
 	if buf <= 0 {
 		buf = 1024
 	}
@@ -267,6 +276,7 @@ func NewWithSink(buf int, sink io.Writer) *Trace {
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
 		sink:    sink,
+		onEvent: onEvent,
 	}
 	go t.drain()
 	return t
@@ -596,6 +606,12 @@ func (t *Trace) drain() {
 			}
 		}
 		t.mu.Unlock()
+		// Binary snapshot hook: called outside the lock (pure state mutation, no
+		// channel sends). The drain goroutine is the sole caller, so the hook
+		// never races with itself or with the lock-protected sink writes above.
+		if t.onEvent != nil {
+			t.onEvent(ev)
+		}
 	}
 	for {
 		select {
