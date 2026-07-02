@@ -14,15 +14,18 @@
 // GPU attribute arrays imperatively via useFrame. No domain state flows out.
 
 import React, { useRef, useState } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { USE_NEW_SYSTEM } from "../new-system";
 import { decodeSnapshot } from "./buffer-decode";
+import { anglesToWorldOffset } from "./viewpoint-bridge";
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive,
   readNodeCX, readNodeCY, readNodeCZ, readNodeSelected,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
+  readCameraPX, readCameraPY, readCameraPZ, readCameraR,
+  readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
 
 // ── Dev flag ──────────────────────────────────────────────────────────────────
@@ -199,12 +202,66 @@ function EdgeLines({ capacity }: { capacity: number }) {
   );
 }
 
+// ── BufferCamera ───────────────────────────────────────────────────────────────
+// Buffer-driven camera: each frame reads the snapshot's single Camera row and drives
+// the three.js camera (position / up / lookAt) from it. This REPLACES the old
+// JSON-trace camera path (CameraFromStore ← useCameraStore ← pump) under the new-system
+// flag — Go still owns the camera, but the render side now reads it from the binary
+// buffer instead of the Zustand camera-store.
+//
+// The polar→cartesian mapping is IDENTICAL to CameraFromStore's (anglesToWorldOffset in
+// viewpoint-bridge), so a given Go camera state produces the same three.js pose on
+// either path:
+//   pivot   = (PX, PY, PZ)
+//   position = pivot + anglesToWorldOffset(R, PosTheta, PosPhi)
+//   up      = anglesToWorldOffset(1, UpTheta, UpPhi).normalize()
+//   lookAt(pivot)
+//
+// Also keeps `cameraRef` current (the old CameraRefBridge did this; it is gated off
+// under the flag, but raw-input / HomeButton still read cameraRef.current).
+function BufferCamera({ cameraRef }: {
+  cameraRef?: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+}) {
+  const { camera } = useThree();
+  const pivotRef = useRef(new THREE.Vector3());
+
+  useFrame(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    if (cameraRef) cameraRef.current = cam; // keep the ref alive for raw-input / HomeButton
+
+    const snap = getLatestSnapshot();
+    if (!snap) return;
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) return;
+    const cv = decoded.cameraView;
+
+    const r = readCameraR(cv);
+    // Guard the uninitialized camera row: Go emits a real viewpoint (restore / home fit)
+    // on load, but node-geometry snapshots can land first, with the camera row still all
+    // zeros. r <= 0 means "no viewpoint yet" — skip, mirroring CameraFromStore's `!polar`.
+    if (!(r > 0)) return;
+
+    const pivot = pivotRef.current;
+    pivot.set(readCameraPX(cv), readCameraPY(cv), readCameraPZ(cv));
+    const posOffset = anglesToWorldOffset(r, readCameraPosTheta(cv), readCameraPosPhi(cv));
+    cam.position.copy(pivot).add(posOffset);
+    const upDir = anglesToWorldOffset(1, readCameraUpTheta(cv), readCameraUpPhi(cv)).normalize();
+    cam.up.copy(upDir);
+    cam.lookAt(pivot);
+    cam.updateMatrixWorld(true);
+  });
+
+  return null;
+}
+
 // ── BufferScene ───────────────────────────────────────────────────────────────
 // Capacity manager: checks the latest snapshot each frame and grows per-block
 // capacities when counts exceed current allocation, triggering a React re-render
 // (which remounts the InstancedMesh/LineSegments with a larger buffer).
 
-export function BufferScene() {
+export function BufferScene({ cameraRef }: {
+  cameraRef?: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+} = {}) {
   const [beadCap,  setBeadCap]  = useState(INITIAL_BEAD_CAP);
   const [nodeCap,  setNodeCap]  = useState(INITIAL_NODE_CAP);
   const [edgeCap,  setEdgeCap]  = useState(INITIAL_EDGE_CAP);
@@ -229,6 +286,7 @@ export function BufferScene() {
 
   return (
     <>
+      <BufferCamera cameraRef={cameraRef} />
       <BeadInstances capacity={beadCap} />
       <NodeInstances capacity={nodeCap} />
       <SelectionHighlight capacity={nodeCap} />
