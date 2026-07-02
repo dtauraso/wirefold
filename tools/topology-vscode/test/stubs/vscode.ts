@@ -24,8 +24,13 @@ export const window = {
   },
 };
 
-export const workspace: { workspaceFolders: Array<{ uri: { fsPath: string } }> | undefined } = {
+export const workspace: {
+  workspaceFolders: Array<{ uri: { fsPath: string } }> | undefined;
+  getConfiguration: (section?: string) => { get<T>(key: string): T | undefined };
+} = {
   workspaceFolders: undefined,
+  // Minimal config stub: returns undefined for every key (so newSystem defaults to off).
+  getConfiguration: () => ({ get: <T>(_key: string): T | undefined => undefined }),
 };
 
 export const Uri = {
