@@ -99,6 +99,14 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "webview-log":
       await appendWebviewLog(msg.entry, logUri);
       return;
+    case "raw-input":
+      // Raw-input bridge (Phase 6): forward the (already parseRawInput-validated) raw
+      // pointer/wheel event + raycast hit to Go's stdin VERBATIM. Fire-and-forget — Go's
+      // gesture state machine interprets it; we never await Go. Gated on a running Go
+      // (same rationale as "edit": a buffered event would replay on the next spawn).
+      if (!runner.isRunning()) return;
+      runner.writeStdin(JSON.stringify(msg));
+      return;
     case "edit": {
       // Geometry-CRUD bridge: forward the (already parseEdit-validated) edit to Go's
       // stdin VERBATIM. Fire-and-forget — Go owns the clock; we never await Go (no

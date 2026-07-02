@@ -106,8 +106,53 @@ type EditMsg =
   | { type: "edit"; op: "update"; kind: "scene"; scene: unknown };
 // EDIT_MSG_END
 
+// RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel
+// event plus the stateless three.js raycast hit, forwarded fire-and-forget to Go. TS does
+// NOT interpret the gesture — Go's gesture state machine (nodes/Wiring/gesture.go) decides
+// what the raw event means (orbit / zoom / pan / create / delete). The hit carries only the
+// rendered ENTITY under the pointer (three.js computes the geometry); topology facts like
+// "is this port already connected?" are Go's to decide, not carried here.
+//
+// This is a NEW top-level message kind ("raw-input"), NOT an edit op — it is INPUT, not a
+// geometry-CRUD edit. Kept in message-kind parity with stdin_reader.go's msg.Type switch.
+// RAW_INPUT_START
+export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "wheel";
+
+/** The stateless raycast hit: which rendered entity is under the pointer + its world point.
+ *  kind classifies the rendered target (three.js hit-testing); id is the entity id
+ *  (node id, or "nodeId:in|out:portName" for a port); isInput selects the port side. */
+export type RawHit = {
+  kind: "port" | "handhold" | "node" | "empty";
+  id: string;
+  isInput: boolean;
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type RawInputEvent = {
+  kind: RawPointerKind;
+  x: number; // client pixel X
+  y: number; // client pixel Y
+  rectLeft: number;
+  rectTop: number;
+  rectWidth: number;
+  rectHeight: number;
+  button: number; // pointer button (0 primary, 2 secondary); -1 for move/wheel
+  ctrl: boolean;
+  shift: boolean;
+  alt: boolean;
+  meta: boolean;
+  deltaX: number; // wheel delta X (0 otherwise)
+  deltaY: number; // wheel delta Y (0 otherwise)
+  fov: number; // camera vertical fov (degrees)
+  hit: RawHit;
+};
+// RAW_INPUT_END
+
 export type WebviewToHostMsg =
   | { type: "ready" }
+  | { type: "raw-input"; event: RawInputEvent }
   | { type: "run" }
   | { type: "run-cancel" }
   | { type: "play" }
@@ -178,7 +223,7 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "raw-input",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
@@ -285,6 +330,36 @@ function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
   }
 }
 
+const RAW_POINTER_KINDS: ReadonlySet<string> = new Set<RawPointerKind>([
+  "pointerdown", "pointermove", "pointerup", "wheel",
+]);
+const RAW_HIT_KINDS: ReadonlySet<string> = new Set<RawHit["kind"]>([
+  "port", "handhold", "node", "empty",
+]);
+
+// parseRawInput validates a "raw-input" message: a raw pointer/wheel event with a
+// classified raycast hit. All numeric fields must be finite; kind and hit.kind must be
+// in their allowed sets. A malformed event is dropped rather than forwarded to Go.
+function parseRawInput(m: Record<string, unknown>): WebviewToHostMsg | undefined {
+  const ev = m.event;
+  if (!ev || typeof ev !== "object") return undefined;
+  const e = ev as Record<string, unknown>;
+  const num = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v);
+  const bool = (v: unknown): boolean => typeof v === "boolean";
+  if (typeof e.kind !== "string" || !RAW_POINTER_KINDS.has(e.kind)) return undefined;
+  if (![e.x, e.y, e.rectLeft, e.rectTop, e.rectWidth, e.rectHeight, e.button, e.deltaX, e.deltaY, e.fov].every(num)) {
+    return undefined;
+  }
+  if (![e.ctrl, e.shift, e.alt, e.meta].every(bool)) return undefined;
+  const h = e.hit;
+  if (!h || typeof h !== "object") return undefined;
+  const hit = h as Record<string, unknown>;
+  if (typeof hit.kind !== "string" || !RAW_HIT_KINDS.has(hit.kind)) return undefined;
+  if (typeof hit.id !== "string" || !bool(hit.isInput)) return undefined;
+  if (![hit.x, hit.y, hit.z].every(num)) return undefined;
+  return m as unknown as WebviewToHostMsg;
+}
+
 function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
   switch (m.op) {
     case "create":
@@ -313,6 +388,8 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "edit":
       return parseEdit(m);
+    case "raw-input":
+      return parseRawInput(m);
     default:
       return m as unknown as WebviewToHostMsg;
   }

@@ -110,6 +110,8 @@ type stdinMsg struct {
 	Scene json.RawMessage `json:"scene"`
 	// Viewpoint is the payload for kind=="camera"; nil otherwise.
 	Viewpoint *viewpointMsg `json:"viewpoint,omitempty"`
+	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
+	Event *rawInputMsg `json:"event,omitempty"`
 	// State is the explicit-visibility payload for kind=="overlays" attr=="set"; nil otherwise.
 	State *stdinGuideVisPayload `json:"state,omitempty"`
 	stdinCRUDPayload
@@ -151,6 +153,42 @@ type viewpointMsg struct {
 	PosPhi   float64 `json:"posPhi,omitempty"`
 	UpTheta  float64 `json:"upTheta,omitempty"`
 	UpPhi    float64 `json:"upPhi,omitempty"`
+}
+
+// rawInputMsg carries the payload for a top-level type=="raw-input" message (Phase 6):
+// a single RAW pointer/wheel event plus the stateless three.js raycast hit. Go's gesture
+// state machine (gesture.go) decides what it means — TS does not interpret it. Mirrors the
+// TS RawInputEvent (messages.ts). Field names match the JSON wire format exactly.
+type rawInputMsg struct {
+	Kind       string  `json:"kind"` // pointerdown | pointermove | pointerup | wheel
+	X          float64 `json:"x"`    // client pixel X
+	Y          float64 `json:"y"`    // client pixel Y
+	RectLeft   float64 `json:"rectLeft"`
+	RectTop    float64 `json:"rectTop"`
+	RectWidth  float64 `json:"rectWidth"`
+	RectHeight float64 `json:"rectHeight"`
+	Button     int     `json:"button"` // 0 primary, 2 secondary; -1 for move/wheel
+	Ctrl       bool    `json:"ctrl"`
+	Shift      bool    `json:"shift"`
+	Alt        bool    `json:"alt"`
+	Meta       bool    `json:"meta"`
+	DeltaX     float64 `json:"deltaX"`
+	DeltaY     float64 `json:"deltaY"`
+	Fov        float64 `json:"fov"`
+	Hit        rawHit  `json:"hit"`
+}
+
+// rawHit is the classified raycast hit: which rendered entity is under the pointer and its
+// world point. Kind ∈ port|handhold|node|empty; Id is the entity id (node id, or
+// "nodeId:in|out:portName" for a port). Topology facts (e.g. connected?) are NOT carried —
+// Go's FSM decides those from its own held state.
+type rawHit struct {
+	Kind    string  `json:"kind"`
+	Id      string  `json:"id"`
+	IsInput bool    `json:"isInput"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	Z       float64 `json:"z"`
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
@@ -226,6 +264,13 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			case "resend":
 				if md != nil {
 					md.ResendGeometry(ctx, tr)
+				}
+			case "raw-input":
+				// Raw pointer/wheel event (Phase 6): hand it to the gesture state machine,
+				// which owns gesture bookkeeping and produces camera/topology changes.
+				// Fire-and-forget — nothing on this seam triggers delivery.
+				if md != nil && msg.Event != nil {
+					md.HandleRawInput(*msg.Event, slotReg, tr)
 				}
 			}
 		}
