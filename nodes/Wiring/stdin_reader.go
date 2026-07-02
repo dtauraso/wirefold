@@ -190,7 +190,12 @@ type rawHit struct {
 	// port identity rides the Id string ("nodeId:in|out:portName") instead. Go resolves this
 	// row → (node, port) via its own port-row table (portFromHit); no port name crosses the
 	// bridge.
-	PortRow int     `json:"portRow"`
+	PortRow int `json:"portRow"`
+	// EdgeRow is the numeric buffer EDGE-ROW index for a new-system edge hit (the edge's
+	// pick-halo carries its buffer edge row). -1 (or absent) when not an edge hit. Go
+	// resolves this row → edge label via its own edge-row table (edgeFromHit); no edge
+	// label crosses the bridge.
+	EdgeRow int     `json:"edgeRow"`
 	IsInput bool    `json:"isInput"`
 	X       float64 `json:"x"`
 	Y       float64 `json:"y"`

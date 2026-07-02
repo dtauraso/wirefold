@@ -73,6 +73,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		// (which carries only a numeric buffer PORT-ROW index) resolves back to its (node,
 		// port) here in Go — Go owns the topology and wrote the Port block in that row order.
 		md.SetPortRowResolver(snapState)
+		// Likewise the edge-row table: a new-system edge hit carries only a numeric buffer
+		// EDGE-ROW index; Go resolves it back to its edge label here (Go wrote the Edge block
+		// in that row order) to mark the Go-owned edge selection.
+		md.SetEdgeRowResolver(snapState)
 		W.SeedInitialViewpoint(topologyPath, md, tr)
 		// Arm the WRITE side AFTER the seed: from here, every gesture that changes the FSM
 		// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to

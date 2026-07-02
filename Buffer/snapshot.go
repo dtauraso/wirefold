@@ -83,6 +83,14 @@ type SnapshotState struct {
 	// change) on the Trace-drain goroutine and read via LookupPortRow from the stdin/gesture
 	// goroutine — the atomic pointer hands off an immutable snapshot with no lock.
 	portTable atomic.Pointer[[]PortRowEntry]
+
+	// edgeTable publishes the current edge-row table (the edge labels in the SAME stable
+	// row order as the Edge block) as an immutable slice. Rebuilt whenever a new edge is
+	// registered (onEdgeGeometry) on the Trace-drain goroutine and read via LookupEdgeRow
+	// from the gesture goroutine — the atomic pointer hands off an immutable snapshot with
+	// no lock. This is the edge analogue of portTable: a numeric edge-row hit resolves to
+	// its edge label so the gesture FSM can mark the Go-owned edge selection.
+	edgeTable atomic.Pointer[[]string]
 }
 
 type beadSnapKey struct {
@@ -153,6 +161,10 @@ type edgeSnapState struct {
 	ex, ey, ez float64
 	srcNode    string
 	dstNode    string
+	// selected is PERSISTENT (not a transient event flag): 1 marks this edge as the
+	// current click-selected edge. Set/cleared by KindSelect (Edge field); exclusive with
+	// node selection. Not reset in clearTransients.
+	selected uint8
 }
 
 // beadSnapState holds current position + metadata for one in-flight bead.
@@ -301,16 +313,25 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot() // state-change point: emit on interior-bead updates
 
 	case T.KindSelect:
-		// Go-owned selection: mark ev.Node selected, clear every other node. ev.Node==""
-		// clears the selection entirely. Persistent — survives across snapshots until the
-		// next select. Emit so the change is reflected in the buffer immediately.
-		s.setSelected(ev.Node)
-		// Value carries the select mode (1 = own, 0 = surface); store it for the
-		// on-surface highlight. Cleared to surface when the selection is cleared.
-		if ev.Node == "" {
+		// Go-owned selection: a select event marks EITHER one node (ev.Node) OR one edge
+		// (ev.Edge) — never both (the gesture FSM enforces the exclusivity). ev.Edge!=""
+		// selects that edge and clears any node selection; otherwise ev.Node selects that
+		// node (or clears everything when empty) and clears any edge selection. Persistent —
+		// survives across snapshots until the next select. Emit so the change is reflected
+		// in the buffer immediately.
+		if ev.Edge != "" {
+			s.setSelectedEdge(ev.Edge)
+			// Edge selection has no surface/own owner set; reset the mode to surface.
 			s.overlay.selMode = 0
 		} else {
-			s.overlay.selMode = uint8(ev.Value)
+			s.setSelected(ev.Node)
+			// Value carries the select mode (1 = own, 0 = surface); store it for the
+			// on-surface highlight. Cleared to surface when the selection is cleared.
+			if ev.Node == "" {
+				s.overlay.selMode = 0
+			} else {
+				s.overlay.selMode = uint8(ev.Value)
+			}
 		}
 		s.emitSnapshot()
 	}
@@ -404,6 +425,9 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 		s.edgeIndex[label] = len(s.edgeLabels)
 		s.edgeLabels = append(s.edgeLabels, label)
 		s.edges = append(s.edges, edgeSnapState{})
+		// A new edge row exists: republish the edge-row table (same stable row order as the
+		// Edge block) so a numeric edge-row hit resolves to its label.
+		s.rebuildEdgeTable()
 	}
 	idx := s.edgeIndex[label]
 	e := &s.edges[idx]
@@ -490,6 +514,60 @@ func (s *SnapshotState) setSelected(nodeID string) {
 			s.nodes[i].selected = 0
 		}
 	}
+	// Node selection is exclusive with edge selection: selecting/clearing a node clears
+	// any selected edge.
+	s.clearSelectedEdges()
+}
+
+// setSelectedEdge marks the edge with the given label selected and clears the flag on
+// every other edge; it also clears any node selection (selection is single + exclusive).
+// An unknown label clears all edge selection. Persistent — not touched by clearTransients.
+func (s *SnapshotState) setSelectedEdge(label string) {
+	sel := -1
+	if idx, ok := s.edgeIndex[label]; ok {
+		sel = idx
+	}
+	for i := range s.edges {
+		if i == sel {
+			s.edges[i].selected = 1
+		} else {
+			s.edges[i].selected = 0
+		}
+	}
+	// Exclusive with node selection.
+	for i := range s.nodes {
+		s.nodes[i].selected = 0
+	}
+}
+
+// clearSelectedEdges clears the selected flag on every edge.
+func (s *SnapshotState) clearSelectedEdges() {
+	for i := range s.edges {
+		s.edges[i].selected = 0
+	}
+}
+
+// rebuildEdgeTable rebuilds and atomically publishes the edge-row table — the edge labels
+// in the SAME stable row order buildSnapshot writes the Edge block (edge label insertion
+// order). Called from the Trace-drain goroutine whenever a new edge registers. The
+// published slice is immutable — LookupEdgeRow reads it lock-free from another goroutine.
+func (s *SnapshotState) rebuildEdgeTable() {
+	tbl := make([]string, len(s.edgeLabels))
+	copy(tbl, s.edgeLabels)
+	s.edgeTable.Store(&tbl)
+}
+
+// LookupEdgeRow resolves a numeric buffer EDGE-ROW index to its edge label via the
+// published edge-row table. ok=false for an out-of-range row or before any edge registers.
+// Safe to call from a goroutine other than the Trace drain (reads an immutable atomically-
+// published slice). This is the row→edge resolution the gesture FSM uses to mark the
+// Go-owned edge selection — the numeric buffer carries no edge label strings.
+func (s *SnapshotState) LookupEdgeRow(row int) (label string, ok bool) {
+	tbl := s.edgeTable.Load()
+	if tbl == nil || row < 0 || row >= len(*tbl) {
+		return "", false
+	}
+	return (*tbl)[row], true
 }
 
 // nodeRowIndex returns the buffer node-row index for a node id, or -1 when the id is
@@ -616,7 +694,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		SetEdgeRow(edgeBuf, i,
 			float32(e.sx), float32(e.sy), float32(e.sz),
 			float32(e.ex), float32(e.ey), float32(e.ez),
-			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)))
+			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)), e.selected)
 	}
 	off += int(edgeCount) * BufEdgeStride
 

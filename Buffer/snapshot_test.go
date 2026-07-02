@@ -603,3 +603,73 @@ func TestSelectionPersistsAndIsExclusive(t *testing.T) {
 		t.Fatalf("after clear: n1.Selected=%d n2.Selected=%d want 0,0", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
 	}
 }
+
+// TestEdgeSelectionExclusiveWithNode verifies KindSelect with the Edge field marks exactly
+// one edge's Selected column, persists it, moves it exclusively to another edge, and that
+// node/edge selection is MUTUALLY exclusive (selecting an edge clears the node, and vice
+// versa). Also exercises LookupEdgeRow: an edge row resolves to its label.
+func TestEdgeSelectionExclusiveWithNode(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
+	// Two edges (KindGeometry registers them in first-seen order → rows 0,1).
+	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e0", Node: "n1", Target: "n2"})
+	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e1", Node: "n2", Target: "n1"})
+
+	// Edge-row table resolves rows → labels in stable order.
+	if l, ok := s.LookupEdgeRow(0); !ok || l != "e0" {
+		t.Fatalf("LookupEdgeRow(0)=%q,%v want e0,true", l, ok)
+	}
+	if l, ok := s.LookupEdgeRow(1); !ok || l != "e1" {
+		t.Fatalf("LookupEdgeRow(1)=%q,%v want e1,true", l, ok)
+	}
+	if _, ok := s.LookupEdgeRow(2); ok {
+		t.Fatalf("LookupEdgeRow(2) ok=true want false (out of range)")
+	}
+
+	nodeCount := 2
+	edgeBase := BufHeaderSize +
+		0*BufBeadStride +
+		nodeCount*BufNodeStride +
+		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride
+	e0Sel := edgeBase + 0*BufEdgeStride + BufEdgeColSelected
+	e1Sel := edgeBase + 1*BufEdgeStride + BufEdgeColSelected
+	n1Sel := BufHeaderSize + 0*BufNodeStride + BufNodeColSelected
+
+	// Select node n1 first.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
+	snap := s.BuildSnapshot()
+	if snap[n1Sel] != 1 {
+		t.Fatalf("after select n1: n1.Selected=%d want 1", snap[n1Sel])
+	}
+
+	// Select edge e0: sets e0, clears the node selection (exclusive).
+	s.Update(T.Event{Kind: T.KindSelect, Edge: "e0"})
+	snap = s.BuildSnapshot()
+	if snap[e0Sel] != 1 || snap[e1Sel] != 0 {
+		t.Fatalf("after select e0: e0.Selected=%d e1.Selected=%d want 1,0", snap[e0Sel], snap[e1Sel])
+	}
+	if snap[n1Sel] != 0 {
+		t.Fatalf("after select e0: n1.Selected=%d want 0 (edge select clears node)", snap[n1Sel])
+	}
+
+	// Persists across snapshots.
+	snap = s.BuildSnapshot()
+	if snap[e0Sel] != 1 {
+		t.Fatalf("edge selection did not persist: e0.Selected=%d want 1", snap[e0Sel])
+	}
+
+	// Exclusive among edges: selecting e1 clears e0.
+	s.Update(T.Event{Kind: T.KindSelect, Edge: "e1"})
+	snap = s.BuildSnapshot()
+	if snap[e0Sel] != 0 || snap[e1Sel] != 1 {
+		t.Fatalf("after select e1: e0.Selected=%d e1.Selected=%d want 0,1", snap[e0Sel], snap[e1Sel])
+	}
+
+	// Selecting a node again clears the edge selection (exclusive both ways).
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
+	snap = s.BuildSnapshot()
+	if snap[e1Sel] != 0 {
+		t.Fatalf("after select node n2: e1.Selected=%d want 0 (node select clears edge)", snap[e1Sel])
+	}
+}

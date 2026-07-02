@@ -427,9 +427,21 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 	g.reset()
 }
 
-// applySelect sets the Go-owned selection from a click hit and emits it. A node/port hit
-// selects that node; an empty (or handhold) hit clears the selection.
+// applySelect sets the Go-owned selection from a click hit and emits it. Selection is
+// single + EXCLUSIVE across nodes and edges: an EDGE hit selects that edge (clearing any
+// node selection); a node/port hit selects that node (clearing any edge selection); an
+// empty (or handhold) hit clears both.
 func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
+	if ev.Hit.Kind == "edge" {
+		if label, ok := md.edgeFromHit(ev.Hit); ok {
+			md.selectedEdge = label
+			md.selected = ""
+			tr.SelectEdge(label)
+			return
+		}
+		// Unresolvable edge hit → clear selection rather than leaving stale state.
+	}
+
 	var node string
 	switch ev.Hit.Kind {
 	case "node":
@@ -440,7 +452,23 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 		}
 	}
 	md.selected = node
+	md.selectedEdge = ""
 	tr.Select(node, own)
+}
+
+// edgeFromHit resolves an edge hit to its edge label. On the new-system path an edge hit
+// carries only a numeric buffer EDGE-ROW index (no label string); Go maps it back through
+// its own edge-row table (edgeRows), since Go owns the topology and wrote the Edge block in
+// that same row order. When no resolver is wired (old path / unit tests) it falls back to
+// the hit's Id string.
+func (md *MoveDispatch) edgeFromHit(h rawHit) (label string, ok bool) {
+	if md.edgeRows != nil && h.EdgeRow >= 0 {
+		return md.edgeRows.LookupEdgeRow(h.EdgeRow)
+	}
+	if h.Id != "" {
+		return h.Id, true
+	}
+	return "", false
 }
 
 // gestWheel mirrors interaction-handlers.ts handleWheelNative: ctrl+wheel = zoom-to-cursor

@@ -512,6 +512,15 @@ func (t *Trace) Select(node string, own bool) {
 	t.emit(Event{Kind: KindSelect, Node: node, Value: v})
 }
 
+// SelectEdge emits an EDGE selection (KindSelect with the edge label in Edge, Node empty).
+// Selection is single + exclusive: selecting an edge clears any node selection on the
+// snapshot side. edge="" clears the edge selection. This reuses the KindSelect kind (no new
+// trace-kind string) — the snapshot distinguishes a node vs edge select by which field is
+// set.
+func (t *Trace) SelectEdge(edge string) {
+	t.emit(Event{Kind: KindSelect, Edge: edge})
+}
+
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
 // keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
 // emits it when a wire drops a bead mid-flight (edge deleted during traversal).

@@ -422,13 +422,36 @@ type MoveDispatch struct {
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
 	// KindSelect so the buffer snapshot marks the node's Selected column.
 	selected string
+	// selectedEdge is the CURRENTLY-SELECTED edge label (click-select), owned by Go. "" =
+	// no edge selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
+	// KindSelect (Edge field) so the buffer snapshot marks the edge's Selected column.
+	// Exclusive with `selected`: selecting an edge clears the node selection and vice versa.
+	selectedEdge string
 	// portRows resolves a numeric buffer PORT-ROW index (carried on a new-system raw hit)
 	// back to its (node, port, isInput) identity. Wired to the buffer SnapshotState's
 	// port-row table in main.go (new-system only); nil on the old path and in unit tests, in
 	// which case the gesture FSM falls back to parsing the legacy port-id string. Go owns the
 	// topology and wrote the Port block, so it — not TS — maps a port row to a (node, port).
 	portRows PortRowResolver
+	// edgeRows resolves a numeric buffer EDGE-ROW index (carried on a new-system raw hit)
+	// back to its edge label. Wired to the buffer SnapshotState's edge-row table in main.go
+	// (new-system only); nil on the old path and in unit tests, in which case the gesture
+	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Edge
+	// block, so it — not TS — maps an edge row to its label.
+	edgeRows EdgeRowResolver
 }
+
+// EdgeRowResolver maps a numeric buffer EDGE-ROW index to its edge label. Implemented by
+// Buffer.SnapshotState (which wrote the Edge block in this same row order). Kept as an
+// interface here so the Wiring package needs no dependency on the Buffer package — main.go
+// injects the concrete resolver.
+type EdgeRowResolver interface {
+	LookupEdgeRow(row int) (label string, ok bool)
+}
+
+// SetEdgeRowResolver injects the edge-row resolver (new-system only). Called once at
+// startup after LoadTopology.
+func (md *MoveDispatch) SetEdgeRowResolver(r EdgeRowResolver) { md.edgeRows = r }
 
 // PortRowResolver maps a numeric buffer PORT-ROW index to its (node, port, isInput)
 // identity. Implemented by Buffer.SnapshotState (which wrote the Port block in this same

@@ -162,6 +162,70 @@ func (t stubPortRows) LookupPortRow(row int) (node, port string, isInput, ok boo
 	return e.Node, e.Port, e.IsInput, true
 }
 
+// stubEdgeRows is a fixed edge-row table for the new-system edge-hit resolution test: it
+// maps a numeric buffer EDGE-ROW index → edge label, mirroring Buffer's
+// SnapshotState.LookupEdgeRow without pulling in the Buffer package.
+type stubEdgeRows []string
+
+func (t stubEdgeRows) LookupEdgeRow(row int) (label string, ok bool) {
+	if row < 0 || row >= len(t) {
+		return "", false
+	}
+	return t[row], true
+}
+
+// Click-select is Go-owned for EDGES too: a click on an edge (new-system: a numeric buffer
+// EDGE-ROW hit) resolves the row → edge label via the injected edge-row table and sets
+// md.selectedEdge, clearing any node selection (exclusive). Selecting a node afterwards
+// clears the edge selection, and an empty click clears both.
+func TestGestureClickSelectsEdgeGoOwned(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+	md.SetEdgeRowResolver(stubEdgeRows{"e0", "e1"})
+
+	// First select a node so we can prove edge-select clears it.
+	nd := rawEvent("pointerdown", 400, 300)
+	nd.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(nd, nil, nil)
+	nu := rawEvent("pointerup", 400, 300)
+	nu.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(nu, nil, nil)
+	if md.selected != "N7" {
+		t.Fatalf("pre: selected=%q want N7", md.selected)
+	}
+
+	// Tap EDGE row 1 → selectedEdge=e1, node selection cleared.
+	ed := rawEvent("pointerdown", 400, 300)
+	ed.Hit = rawHit{Kind: "edge", EdgeRow: 1}
+	md.HandleRawInput(ed, nil, nil)
+	eu := rawEvent("pointerup", 400, 300)
+	eu.Hit = rawHit{Kind: "edge", EdgeRow: 1}
+	md.HandleRawInput(eu, nil, nil)
+	if md.selectedEdge != "e1" {
+		t.Fatalf("selectedEdge=%q want e1", md.selectedEdge)
+	}
+	if md.selected != "" {
+		t.Fatalf("selected=%q want empty (edge select clears node)", md.selected)
+	}
+
+	// Selecting a node clears the edge selection (exclusive both ways).
+	nd2 := rawEvent("pointerdown", 400, 300)
+	nd2.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(nd2, nil, nil)
+	nu2 := rawEvent("pointerup", 400, 300)
+	nu2.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(nu2, nil, nil)
+	if md.selectedEdge != "" {
+		t.Fatalf("selectedEdge=%q want empty after node select", md.selectedEdge)
+	}
+
+	// Empty-space click clears both.
+	md.HandleRawInput(rawEvent("pointerdown", 400, 300), nil, nil)
+	md.HandleRawInput(rawEvent("pointerup", 400, 300), nil, nil)
+	if md.selected != "" || md.selectedEdge != "" {
+		t.Fatalf("after empty click: selected=%q selectedEdge=%q want empty,empty", md.selected, md.selectedEdge)
+	}
+}
+
 // New-system wiring: a port hit carries ONLY a numeric buffer PORT-ROW index (no port-name
 // string). The gesture FSM resolves each row → (node, port) via its injected port-row table,
 // then drives the SAME create-edge slot path. Drives a full port-row→port-row drag and
