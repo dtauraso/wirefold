@@ -31,10 +31,10 @@ import {
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   // Edge
   EDGE_COL_SX, EDGE_COL_SY, EDGE_COL_SZ, EDGE_COL_EX, EDGE_COL_EY, EDGE_COL_EZ,
-  EDGE_COL_SRC_NODE_ROW, EDGE_COL_DST_NODE_ROW,
+  EDGE_COL_SRC_NODE_ROW, EDGE_COL_DST_NODE_ROW, EDGE_COL_SELECTED,
   EDGE_STRIDE,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
-  readEdgeSrcNodeRow, readEdgeDstNodeRow,
+  readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected,
   // Camera
   CAMERA_COL_PX, CAMERA_COL_PY, CAMERA_COL_PZ, CAMERA_COL_R,
   CAMERA_COL_POS_THETA, CAMERA_COL_POS_PHI, CAMERA_COL_UP_THETA, CAMERA_COL_UP_PHI,
@@ -202,8 +202,8 @@ describe("buffer-layout — Interior block", () => {
 
 describe("buffer-layout — Edge block", () => {
   it("stride equals packed field sizes", () => {
-    // 6×f32 + 2×i32 = 32
-    expect(EDGE_STRIDE).toBe(32);
+    // 6×f32 + 2×i32 + 1×u8 = 33
+    expect(EDGE_STRIDE).toBe(33);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -218,6 +218,7 @@ describe("buffer-layout — Edge block", () => {
     dv.setFloat32(EDGE_COL_EZ, 6.0, true);
     dv.setInt32(EDGE_COL_SRC_NODE_ROW, 2, true);
     dv.setInt32(EDGE_COL_DST_NODE_ROW, -1, true);
+    dv.setUint8(EDGE_COL_SELECTED, 1);
 
     expectF32(readEdgeSX(dv, 0), 1.0);
     expectF32(readEdgeSY(dv, 0), 2.0);
@@ -227,6 +228,7 @@ describe("buffer-layout — Edge block", () => {
     expectF32(readEdgeEZ(dv, 0), 6.0);
     expect(readEdgeSrcNodeRow(dv, 0)).toBe(2);
     expect(readEdgeDstNodeRow(dv, 0)).toBe(-1);
+    expect(readEdgeSelected(dv, 0)).toBe(1);
   });
 });
 
@@ -321,7 +323,7 @@ describe("buffer-layout — event enum", () => {
 
 describe("buffer-layout — meta", () => {
   it("schema version is 7", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(7);
+    expect(BUF_LAYOUT_VERSION).toBe(8);
   });
 
   it("header size is 20 bytes (5×u32)", () => {

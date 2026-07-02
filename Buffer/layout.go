@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 7
+const BufLayoutVersion = 8
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -125,6 +125,7 @@ type bufLayoutEdge struct {
 	EZ         float32 `buf:"f32"` // end world z
 	SrcNodeRow int32   `buf:"i32"` // source node's buffer node-row index (-1 = unresolved)
 	DstNodeRow int32   `buf:"i32"` // destination node's buffer node-row index (-1 = unresolved)
+	Selected   uint8   `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
 }
 
 // bufLayoutPort defines one row of the ports column block.
