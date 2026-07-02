@@ -26,6 +26,7 @@ import { anglesToWorldOffset } from "./viewpoint-bridge";
 import { EnvTexContext } from "./scene-env";
 import { beadStyleForValue } from "./bead-style";
 import { INTERIOR_SLOTS_PER_NODE } from "./buffer-decode";
+import { surfaceRowSet, type EdgeAdj, type SelMode } from "./buffer-surface";
 import {
   SHADING_PARAM_NODE_TRANSMISSION,
   SHADING_PARAM_NODE_THICKNESS,
@@ -49,7 +50,8 @@ import {
   readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
-  readOverlayOverlaysVis, readOverlayDoubleLinks,
+  readEdgeSrcNodeRow, readEdgeDstNodeRow,
+  readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
@@ -263,62 +265,95 @@ function NodeInstances({ capacity }: { capacity: number }) {
   );
 }
 
-// Highlight drawn around the Go-selected node (Selected column = 1). Matches the
-// scene-graph.tsx GraphNode look: a thick yellow torus ring + an orange halo sphere.
-// Go OWNS the selection; this is pure render of the buffer's Selected column — no TS
-// selection state. At most one node is selected at a time.
-function SelectionHighlight({ capacity: _capacity }: { capacity: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  // Store radius so the geometry can scale; update each frame.
-  const radiusRef = useRef<number>(NODE_SPHERE_RADIUS);
+// Highlight drawn around the Go-selected node AND every node ON THE SURFACE of that
+// node's sphere (pre-branch parity). Matches the scene-graph.tsx GraphNode look: a thick
+// yellow torus ring + an orange halo sphere, identical for the selected node and each
+// on-surface node. Go OWNS the selection (the Selected column marks the one selected
+// node, SelMode picks the mode); the on-surface set is pure edge-graph topology derived
+// here from the Edge block's src/dst node-row adjacency via surfaceRowSet — no TS
+// selection state, no geometry/timing logic. A pooled set of highlight groups (one per
+// highlighted node) is repositioned each frame; unused pool slots hide.
+const HIGHLIGHT_POOL = 32;
+
+function SelectionHighlight({ capacity }: { capacity: number }) {
+  const groupRefs = useRef<(THREE.Group | null)[]>([]);
+  // Reused scratch across frames so the useFrame allocates nothing steady-state.
+  const edgesRef = useRef<EdgeAdj[]>([]);
 
   useFrame(() => {
-    const group = groupRef.current;
-    if (!group) return;
+    const groups = groupRefs.current;
 
     const snap = getLatestSnapshot();
-    if (!snap) { group.visible = false; return; }
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) { group.visible = false; return; }
-    const { nodeCount, nodeView } = decoded;
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    let slot = 0;
+    if (decoded) {
+      const { nodeCount, nodeView, edgeCount, edgeView, overlayView } = decoded;
 
-    for (let i = 0; i < nodeCount; i++) {
-      if (!readNodeSelected(nodeView, i)) continue;
-      const r = readNodeRadius(nodeView, i) || NODE_SPHERE_RADIUS;
-      group.position.set(
-        readNodeCX(nodeView, i),
-        readNodeCY(nodeView, i),
-        readNodeCZ(nodeView, i),
-      );
-      // Scale the group so child geometries built at radius=1 match r.
-      // Torus: args=[1, 0.14, 8, 32]; halo sphere: args=[1.45, 16, 16].
-      group.scale.setScalar(r);
-      group.visible = true;
-      radiusRef.current = r;
-      return;
+      // Find the selected row (at most one).
+      let selectedRow = -1;
+      for (let i = 0; i < nodeCount; i++) {
+        if (readNodeSelected(nodeView, i)) { selectedRow = i; break; }
+      }
+
+      if (selectedRow >= 0) {
+        // Build edge adjacency (node-row src/dst) from the Edge block.
+        const edges = edgesRef.current;
+        edges.length = 0;
+        for (let e = 0; e < edgeCount; e++) {
+          edges.push({ src: readEdgeSrcNodeRow(edgeView, e), dst: readEdgeDstNodeRow(edgeView, e) });
+        }
+        const mode: SelMode = readOverlaySelMode(overlayView) ? "own" : "surface";
+        const rows = surfaceRowSet(selectedRow, mode, edges);
+
+        for (const row of rows) {
+          if (slot >= HIGHLIGHT_POOL || slot >= capacity) break;
+          if (row < 0 || row >= nodeCount) continue;
+          const g = groups[slot];
+          if (!g) { slot++; continue; }
+          const r = readNodeRadius(nodeView, row) || NODE_SPHERE_RADIUS;
+          g.position.set(
+            readNodeCX(nodeView, row),
+            readNodeCY(nodeView, row),
+            readNodeCZ(nodeView, row),
+          );
+          // Scale so child geometries built at radius=1 match r.
+          // Torus: args=[1, 0.14, 8, 32]; halo sphere: args=[1.45, 16, 16].
+          g.scale.setScalar(r);
+          g.visible = true;
+          slot++;
+        }
+      }
     }
-    group.visible = false;
+    // Hide unused pool slots.
+    for (let i = slot; i < HIGHLIGHT_POOL; i++) {
+      const g = groups[i];
+      if (g) g.visible = false;
+    }
   });
 
   return (
-    <group ref={groupRef} visible={false}>
-      {/* Yellow torus ring — matches GraphNode selected border: r*0.14 thick */}
-      <mesh raycast={() => null}>
-        <torusGeometry args={[1, 0.14, 8, 32]} />
-        <meshStandardMaterial color="#ffcc00" emissive="#ffcc00" emissiveIntensity={0.3} />
-      </mesh>
-      {/* Orange halo sphere — matches GraphNode NODE_HALO_R_RATIO=1.45 */}
-      <mesh raycast={() => null}>
-        <sphereGeometry args={[1.45, 16, 16]} />
-        <meshBasicMaterial
-          color="#ff5a00"
-          transparent
-          opacity={0.5}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-    </group>
+    <>
+      {Array.from({ length: HIGHLIGHT_POOL }, (_, i) => (
+        <group key={i} ref={(el) => { groupRefs.current[i] = el; }} visible={false}>
+          {/* Yellow torus ring — matches GraphNode selected border: r*0.14 thick */}
+          <mesh raycast={() => null}>
+            <torusGeometry args={[1, 0.14, 8, 32]} />
+            <meshStandardMaterial color="#ffcc00" emissive="#ffcc00" emissiveIntensity={0.3} />
+          </mesh>
+          {/* Orange halo sphere — matches GraphNode NODE_HALO_R_RATIO=1.45 */}
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[1.45, 16, 16]} />
+            <meshBasicMaterial
+              color="#ff5a00"
+              transparent
+              opacity={0.5}
+              side={THREE.DoubleSide}
+              depthWrite={false}
+            />
+          </mesh>
+        </group>
+      ))}
+    </>
   );
 }
 
