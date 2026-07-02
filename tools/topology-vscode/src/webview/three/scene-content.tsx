@@ -259,10 +259,21 @@ export function Scene({
   const hasRestoredCamera = initialCameraPolar !== undefined || initialCamera3d !== undefined;
   return (
     <ProceduralEnvProvider>
-      <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
-      <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCameraPolar === undefined ? initialCamera3d : undefined} />
-      {initialCameraPolar !== undefined && <PolarCameraRestorer initialCameraPolar={initialCameraPolar} />}
-      <CameraFromStore />
+      {/* Old JSON-trace camera path. Gated OFF under the new-system flag: with
+          USE_NEW_SYSTEM on, BufferCamera (in BufferScene) drives the three.js camera
+          from the binary buffer's Camera row and keeps cameraRef current, so these
+          would fight it. CameraFitter (auto-fit on load), PolarCameraRestorer (saved-view
+          restore → Go), CameraRefBridge (ref + camera3d restore), and CameraFromStore
+          (useCameraStore → camera) are all part of the old driving path. When flag OFF,
+          unchanged. */}
+      {!USE_NEW_SYSTEM && (
+        <>
+          <CameraFitter nodes={nodes} hasRestoredCamera={hasRestoredCamera} />
+          <CameraRefBridge cameraRef={cameraRef} initialCamera3d={initialCameraPolar === undefined ? initialCamera3d : undefined} />
+          {initialCameraPolar !== undefined && <PolarCameraRestorer initialCameraPolar={initialCameraPolar} />}
+          <CameraFromStore />
+        </>
+      )}
       <RaycasterHelper onPickRequest={onPickRequest} />
       <LabelProjector nodes={nodes} onPositions={onPositions} />
       <CameraSettleDetector onSettle={onCameraSettle} />
