@@ -299,7 +299,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		edgeSegments[e.Label] = seg
 		pw, exists := destWire[destKey]
 		if !exists {
-			pw = NewPacedWire(arcLength, PulseSpeedWuPerMs)
+			pw = NewPacedWire(arcLength, PulseSpeedWuPerTick)
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
 			pw.Trace = tr

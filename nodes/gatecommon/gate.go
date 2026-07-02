@@ -20,10 +20,11 @@ const WindowMs = 3000
 // if PulseSpeedWuPerMs is retuned: WindowWu = WindowMs × PulseSpeedWuPerMs.
 const WindowWu = WindowMs * Wiring.PulseSpeedWuPerMs // = 120 wu at PulseSpeedWuPerMs=0.04
 
-// PollInterval bounds the busy-spin of the window loop. It is a free scheduling
-// choice (not derivable from pulse speed or fire-dwell) that trades CPU burn
-// against reaction latency between window polls.
-const PollInterval = 5 * time.Millisecond
+// PollIntervalTicks bounds the busy-spin of the window loop. It is a free
+// scheduling choice (not derivable from pulse speed or fire-dwell) that trades
+// CPU burn against reaction latency between window polls. One tick is the finest
+// grain of the human-speed clock (MsPerTick ms ≈ the old 5 ms poll rounds up to 1).
+const PollIntervalTicks = 1
 
 // FireDwellMs holds both inputs visible (interior beads present) for this long
 // once both are held, before the gate fires + clears. Without it the
@@ -40,13 +41,13 @@ type GateNode struct {
 	Fire           func()
 	EmitGeometry   func()
 	EmitInputBeads func(left, right int)
-	// Now returns active-elapsed sim time (pause-aware) from the same clock the
-	// PacedWire/train use. Injected by the loader (builders.go) from pb.clock.
-	// The window and dwell are measured against it so they freeze on pause and
-	// resume on resume — never timing out mid-pause. If unset (unit tests with no
-	// loader), it falls back to a monotonic wall-clock so timing still progresses.
-	Now       func() time.Duration
-	WaitUntil func(ctx context.Context, target time.Duration) error // pause-aware park; nil → wall-clock fallback
+	// Tick returns the current tick (pause-aware) from the same human-speed clock
+	// the PacedWire/train use. Injected by the loader (builders.go) from pb.clock.
+	// The window and dwell are measured in ticks against it so they freeze on pause
+	// and resume on resume — never timing out mid-pause. If unset (unit tests with
+	// no loader), it falls back to a wall-clock-derived tick so timing progresses.
+	Tick      func() int64
+	WaitTick  func(ctx context.Context, k int64) error // pause-aware park; nil → wall-clock fallback
 	Left      int
 	HasLeft   bool
 	Right     int
@@ -56,8 +57,11 @@ type GateNode struct {
 	ToPassed  *Wiring.Out
 }
 
-// windowDuration is the fixed coincidence window as a duration (WindowMs milliseconds).
-const windowDuration = WindowMs * time.Millisecond
+// windowTicks is the fixed coincidence window as a tick count (WindowMs / MsPerTick).
+const windowTicks = int64(WindowMs / Wiring.MsPerTick)
+
+// fireDwellTicks is FireDwellMs converted to a tick count.
+const fireDwellTicks = int64(FireDwellMs / Wiring.MsPerTick)
 
 // RunGate runs the shared window-and-inhibit gate loop.
 // invertLeft=true  → the LEFT input is NOT-inverted on capture  (WindowAndInhibitLeftGate).
@@ -67,27 +71,27 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		g.EmitGeometry()
 	}
 
-	now := g.Now
+	now := g.Tick
 	if now == nil {
 		start := time.Now()
-		now = func() time.Duration { return time.Since(start) }
+		now = func() int64 { return int64(time.Since(start) / (Wiring.MsPerTick * time.Millisecond)) }
 	}
 
-	park := g.WaitUntil
+	park := g.WaitTick
 	if park == nil {
-		park = func(ctx context.Context, _ time.Duration) error {
+		park = func(ctx context.Context, _ int64) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(PollInterval):
+			case <-time.After(PollIntervalTicks * Wiring.MsPerTick * time.Millisecond):
 				return nil
 			}
 		}
 	}
 
-	var t0 time.Duration
+	var t0 int64
 	var t0Set bool
-	var dwellStart time.Duration
+	var dwellStart int64
 	var dwellSet bool
 
 	emitInputs := func() {
@@ -191,7 +195,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 				// advancing the sim clock without racing the dwellStart = now() read.
 				g.FromLeft.Breadcrumb("dwell_start", "")
 			}
-			if now()-dwellStart >= FireDwellMs*time.Millisecond {
+			if now()-dwellStart >= fireDwellTicks {
 				// AND gate over the stored values (each side already applied its
 				// inversion on capture); fires 1 iff Left==1 AND Right==1.
 				result := 0
@@ -214,13 +218,13 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held
 		// we are committed to firing after the dwell.
-		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > windowDuration {
+		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > windowTicks {
 			clear()
 			emitInputs()
 		}
 
 		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).
-		if park(ctx, now()+PollInterval) != nil {
+		if park(ctx, now()+PollIntervalTicks) != nil {
 			return
 		}
 	}

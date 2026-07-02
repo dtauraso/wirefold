@@ -1,25 +1,33 @@
-// clock.go — the single monotonic clock the network reads.
+// clock.go — the single human-speed clock the network reads.
 //
-// MODEL.md pins this: there is exactly one clock. All wire timing is arithmetic
-// on its readings — `inFlightTime = arcLength / pulseSpeed` is derived, not a
-// second timer, and each wire converts clock deltas into bead advancement and
-// self-delivers when elapsed reaches inFlightTime. The play/pause gate stops the
-// arithmetic, not the clock: elapsed excludes paused intervals (a bead 40% across
-// stays 40% on resume).
+// MODEL.md pins this: there is exactly one clock — the system monotonic clock
+// read through a fixed SCALE so it advances in integer TICKS at human-watchable
+// speed (`tick = ⌊(systemNow − start) × scale⌋`). All timing in the network is
+// tick counts, never wall-clock durations: goroutines wait on WaitTick(k)
+// ("resume when tick ≥ k"). A bead crossing an edge takes `ticksToCross =
+// arcLength / pulseSpeed` ticks (pulseSpeed in world-units-per-tick); node
+// processing windows are tick counts. There is no separate render cadence — the
+// tick IS the animation clock.
+//
+// SCALE arithmetic (behavior-preserving vs. the retired wall-clock model):
+// the old model sampled bead positions every 16 ms and crossed an edge in
+// arcLength/pulseSpeedWuPerMs wall-ms. We pick one tick ≈ one old 16 ms sample:
+//
+//	MsPerTick = 16   ⇒   scale = 1 tick / 16 ms = 62.5 ticks/sec.
+//
+// So a bead visits ~the same number of positions in ~the same wall time, and
+// pause/resume look identical. (pulseSpeed's world-units-per-tick reinterpret
+// lives in paced_wire.go: PulseSpeedWuPerTick = PulseSpeedWuPerMs × MsPerTick.)
 //
 // The clock is injectable so tests are deterministic:
-//   - RealClock wraps Go's monotonic clock (time.Now) and sleeps for real.
-//   - FakeClock is advanced by tests via Advance(d); Advance wakes every wire
-//     waiting to deliver, so no real sleeps are needed.
-//
-// The interface exposes a pause-aware Now() (active elapsed since start, with
-// paused intervals excluded) and WaitUntil(ctx, target): block until active
-// elapsed reaches target. Each PacedWire calls WaitUntil to self-deliver — there
-// is no central scheduler; every wire reads this one clock independently.
+//   - RealClock wraps Go's monotonic clock (time.Now) and derives the tick from
+//     active elapsed; it sleeps for real between ticks.
+//   - FakeClock's tick is set directly by tests via SetTick/AdvanceTicks; those
+//     wake every waiter so no real sleeps are needed.
 //
 // Halt/Resume is the global play/pause gate (MODEL.md: "a single global gate
-// halts or resumes wire animation"). While halted, active elapsed does not
-// advance, so no wire's WaitUntil deadline is reached — progress freezes.
+// halts or resumes wire animation"). While halted the tick does not advance, so
+// no wire's WaitTick target is reached — progress freezes.
 
 package Wiring
 
@@ -29,31 +37,40 @@ import (
 	"time"
 )
 
-// Clock is the one monotonic clock the network reads. Now() returns active
-// elapsed (paused intervals excluded). WaitUntil blocks until active elapsed
-// reaches target (or ctx is done). Halt/Resume is the global play/pause gate.
+// MsPerTick is the scale of the human-speed clock: one tick spans this many
+// wall-milliseconds while running (scale = 1/MsPerTick ticks per ms). 16 ms/tick
+// = 62.5 ticks/sec, matching the retired 16 ms position-sample cadence so visible
+// bead speed is unchanged.
+const MsPerTick = 16
+
+// tickPeriod is MsPerTick as a Duration (the wall span of one running tick).
+const tickPeriod = MsPerTick * time.Millisecond
+
+// Clock is the one human-speed clock the network reads. Tick() returns the
+// current integer tick (paused intervals excluded). WaitTick blocks until the
+// tick reaches k. Halt/Resume is the global play/pause gate.
 type Clock interface {
-	// Now returns the active elapsed time since the clock started, excluding any
-	// intervals during which the clock was halted (pause-aware: elapsed-while-
-	// paused is zero).
-	Now() time.Duration
-	// WaitUntil blocks until Now() >= target, or until ctx is done. Returns
-	// ctx.Err() if the context was canceled before the deadline was reached,
-	// nil otherwise. Waking is edge-triggered: Resume() and (for the fake)
-	// Advance() re-evaluate every waiter.
-	WaitUntil(ctx context.Context, target time.Duration) error
-	// Halt pauses the clock: active elapsed stops advancing until Resume.
+	// Tick returns the current tick since the clock started, excluding any
+	// intervals during which the clock was halted (pause-aware: ticks-while-
+	// paused do not accrue).
+	Tick() int64
+	// WaitTick blocks until Tick() >= k, or until ctx is done. Returns ctx.Err()
+	// if the context was canceled before the target tick was reached, nil
+	// otherwise. Waking is edge-triggered: Resume() and (for the fake)
+	// AdvanceTicks()/SetTick() re-evaluate every waiter.
+	WaitTick(ctx context.Context, k int64) error
+	// Halt pauses the clock: the tick stops advancing until Resume.
 	Halt()
-	// Resume un-pauses the clock: active elapsed advances again from where it
-	// stopped (no wall-clock catch-up).
+	// Resume un-pauses the clock: the tick advances again from where it stopped
+	// (no wall-clock catch-up).
 	Resume()
 }
 
 // RealClock is the production Clock. It tracks active elapsed by subtracting the
-// total halted duration from wall-clock elapsed, so pause stops the arithmetic
-// while the underlying monotonic clock keeps ticking. Waiters poll the active
-// elapsed against their deadline; Resume broadcasts so a freshly-resumed clock
-// re-checks every waiter promptly.
+// total halted duration from wall-clock elapsed, then floors that to a tick via
+// MsPerTick, so pause stops tick advance while the underlying monotonic clock
+// keeps ticking. Resume broadcasts so a freshly-resumed clock re-checks every
+// waiter promptly.
 type RealClock struct {
 	mu sync.Mutex
 	// cond signals waiters when state changes (Resume, or the periodic re-check).
@@ -75,8 +92,8 @@ func NewRealClock() *RealClock {
 	return c
 }
 
-// nowLocked computes active elapsed; caller must hold c.mu.
-func (c *RealClock) nowLocked() time.Duration {
+// activeElapsedLocked computes active elapsed (pause-aware); caller holds c.mu.
+func (c *RealClock) activeElapsedLocked() time.Duration {
 	elapsed := time.Since(c.start) - c.haltedTotal
 	if c.halted {
 		// Subtract the in-progress halt so elapsed freezes while paused.
@@ -88,11 +105,16 @@ func (c *RealClock) nowLocked() time.Duration {
 	return elapsed
 }
 
-// Now returns active elapsed (pause-aware).
-func (c *RealClock) Now() time.Duration {
+// tickLocked floors active elapsed to a tick; caller holds c.mu.
+func (c *RealClock) tickLocked() int64 {
+	return int64(c.activeElapsedLocked() / tickPeriod)
+}
+
+// Tick returns the current tick (pause-aware).
+func (c *RealClock) Tick() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.nowLocked()
+	return c.tickLocked()
 }
 
 // Halt pauses the clock.
@@ -105,7 +127,7 @@ func (c *RealClock) Halt() {
 	c.mu.Unlock()
 }
 
-// Resume un-pauses the clock and wakes all waiters to re-check their deadlines.
+// Resume un-pauses the clock and wakes all waiters to re-check their targets.
 func (c *RealClock) Resume() {
 	c.mu.Lock()
 	if c.halted {
@@ -116,11 +138,11 @@ func (c *RealClock) Resume() {
 	c.mu.Unlock()
 }
 
-// WaitUntil blocks until active elapsed reaches target (pause-aware) or ctx is
-// done. The real clock keeps advancing on its own, so a waiter that is not yet
-// at its deadline sleeps for the remaining wall-clock duration and re-checks;
-// while halted it parks on cond until Resume. A ctx watcher broadcasts on cancel.
-func (c *RealClock) WaitUntil(ctx context.Context, target time.Duration) error {
+// WaitTick blocks until the tick reaches k (pause-aware) or ctx is done. The real
+// clock keeps advancing on its own, so a waiter not yet at its target sleeps for
+// the remaining wall duration to the next tick boundary and re-checks; while
+// halted it parks on cond until Resume. A ctx watcher broadcasts on cancel.
+func (c *RealClock) WaitTick(ctx context.Context, k int64) error {
 	stop := c.watchCtx(ctx)
 	defer close(stop)
 
@@ -130,8 +152,7 @@ func (c *RealClock) WaitUntil(ctx context.Context, target time.Duration) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		now := c.nowLocked()
-		if now >= target {
+		if c.tickLocked() >= k {
 			return nil
 		}
 		if c.halted {
@@ -139,11 +160,14 @@ func (c *RealClock) WaitUntil(ctx context.Context, target time.Duration) error {
 			c.cond.Wait()
 			continue
 		}
-		// Running: sleep for the remaining active duration, then re-check.
-		// (Active and wall-clock advance 1:1 while running, so remaining active
-		// == remaining wall-clock.) Drop the lock while sleeping so Halt/Resume
-		// and ctx cancel can proceed; a timer broadcast re-checks the deadline.
-		remaining := target - now
+		// Running: sleep for the remaining active duration to tick k, then
+		// re-check. remaining = k·tickPeriod − activeElapsed (>0 here since
+		// tick < k). Drop the lock while sleeping so Halt/Resume and ctx cancel
+		// can proceed; a timer broadcast re-checks the target.
+		remaining := time.Duration(k)*tickPeriod - c.activeElapsedLocked()
+		if remaining <= 0 {
+			remaining = time.Millisecond
+		}
 		c.mu.Unlock()
 		timer := time.NewTimer(remaining)
 		select {
@@ -158,7 +182,7 @@ func (c *RealClock) WaitUntil(ctx context.Context, target time.Duration) error {
 	}
 }
 
-// watchCtx broadcasts on c.cond when ctx is done so a parked WaitUntil wakes to
+// watchCtx broadcasts on c.cond when ctx is done so a parked WaitTick wakes to
 // observe cancellation. The caller closes the returned channel to stop the watcher.
 func (c *RealClock) watchCtx(ctx context.Context) chan struct{} {
 	return broadcastOnCancel(ctx, &c.mu, c.cond)
@@ -183,52 +207,65 @@ func broadcastOnCancel(ctx context.Context, mu *sync.Mutex, cond *sync.Cond) cha
 	return stop
 }
 
-// FakeClock is the deterministic Clock for tests. Active elapsed advances ONLY
-// via Advance(d) (and never while halted). Advance wakes every waiter so a test
-// can drive the whole cascade with no real sleeps: place beads, Advance past
-// their inFlightTime, and delivery fires synchronously on the test's timeline.
+// FakeClock is the deterministic Clock for tests. The tick advances ONLY via
+// AdvanceTicks(n)/SetTick(n) (and never while halted). Advancing wakes every
+// waiter so a test can drive the whole cascade with no real sleeps: place beads,
+// advance past their ticksToCross, and delivery fires synchronously on the test's
+// timeline.
 type FakeClock struct {
-	mu      sync.Mutex
-	cond    *sync.Cond
-	elapsed time.Duration
-	halted  bool
+	mu     sync.Mutex
+	cond   *sync.Cond
+	tick   int64
+	halted bool
 }
 
-// NewFakeClock returns a FakeClock at elapsed 0.
+// NewFakeClock returns a FakeClock at tick 0.
 func NewFakeClock() *FakeClock {
 	c := &FakeClock{}
 	c.cond = sync.NewCond(&c.mu)
 	return c
 }
 
-// Now returns the fake active elapsed.
-func (c *FakeClock) Now() time.Duration {
+// Tick returns the fake tick.
+func (c *FakeClock) Tick() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.elapsed
+	return c.tick
 }
 
-// Advance moves active elapsed forward by d and wakes every waiter. While
-// halted, Advance is a no-op (pause stops the arithmetic). A non-positive d is
-// ignored. After Advance returns, every WaitUntil whose deadline is now satisfied
-// will observe it (waking is via cond.Broadcast under the same lock).
-func (c *FakeClock) Advance(d time.Duration) {
+// AdvanceTicks moves the tick forward by n and wakes every waiter. While halted,
+// AdvanceTicks is a no-op (pause stops the tick). A non-positive n is ignored.
+// After it returns, every WaitTick whose target is now satisfied will observe it
+// (waking is via cond.Broadcast under the same lock).
+func (c *FakeClock) AdvanceTicks(n int64) {
 	c.mu.Lock()
-	if !c.halted && d > 0 {
-		c.elapsed += d
+	if !c.halted && n > 0 {
+		c.tick += n
 	}
 	c.cond.Broadcast()
 	c.mu.Unlock()
 }
 
-// Halt freezes fake elapsed; subsequent Advance calls are no-ops until Resume.
+// SetTick sets the tick to an absolute value and wakes every waiter. It ignores a
+// value below the current tick (the tick never moves backward) and is a no-op
+// while halted. Convenience for tests that think in absolute tick targets.
+func (c *FakeClock) SetTick(k int64) {
+	c.mu.Lock()
+	if !c.halted && k > c.tick {
+		c.tick = k
+	}
+	c.cond.Broadcast()
+	c.mu.Unlock()
+}
+
+// Halt freezes the fake tick; subsequent AdvanceTicks/SetTick are no-ops until Resume.
 func (c *FakeClock) Halt() {
 	c.mu.Lock()
 	c.halted = true
 	c.mu.Unlock()
 }
 
-// Resume un-freezes fake elapsed and wakes waiters to re-check.
+// Resume un-freezes the fake tick and wakes waiters to re-check.
 func (c *FakeClock) Resume() {
 	c.mu.Lock()
 	c.halted = false
@@ -236,28 +273,28 @@ func (c *FakeClock) Resume() {
 	c.mu.Unlock()
 }
 
-// WaitUntil blocks until fake elapsed reaches target or ctx is done. It parks on
-// cond and is woken by Advance / Resume / ctx-cancel; on each wake it re-checks
-// the deadline. This is fully deterministic — the only thing that moves the
-// deadline closer is a test calling Advance.
-func (c *FakeClock) WaitUntil(ctx context.Context, target time.Duration) error {
+// WaitTick blocks until the fake tick reaches k or ctx is done. It parks on cond
+// and is woken by AdvanceTicks / SetTick / Resume / ctx-cancel; on each wake it
+// re-checks the target. Fully deterministic — the only thing that moves the
+// target closer is a test advancing the tick.
+func (c *FakeClock) WaitTick(ctx context.Context, k int64) error {
 	stop := c.watchCtx(ctx)
 	defer close(stop)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for c.elapsed < target {
+	for c.tick < k {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		c.cond.Wait()
 	}
-	// Deadline met: prefer deadline-success over a simultaneous ctx cancellation,
-	// matching RealClock.WaitUntil (which returns nil directly on now >= target).
+	// Target met: prefer target-success over a simultaneous ctx cancellation,
+	// matching RealClock.WaitTick (which returns nil directly on tick >= k).
 	return nil
 }
 
-// watchCtx broadcasts on c.cond when ctx is done so a parked WaitUntil wakes.
+// watchCtx broadcasts on c.cond when ctx is done so a parked WaitTick wakes.
 func (c *FakeClock) watchCtx(ctx context.Context) chan struct{} {
 	return broadcastOnCancel(ctx, &c.mu, c.cond)
 }

@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -160,7 +159,7 @@ var (
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
 	tNodeStatusFunc     = reflect.TypeFor[func(torusRed bool, missedValue int)]()
 	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
-	tNowFunc            = reflect.TypeFor[func() time.Duration]()
+	tTickFunc           = reflect.TypeFor[func() int64]()
 )
 
 // reflectStateKeys returns the data.state map keys required by sample's
@@ -216,7 +215,7 @@ func collectPorts(t reflect.Type) []PortSpec {
 // injectFunc sets the named func-typed field on v to fn, but only when the field
 // exists, is settable, and has exactly the expected type `want`. This is the one
 // shape every closure injection in reflectBuild shares (Fire, EmitGeometry, the
-// Emit* bead closures, Now, WaitUntil); structs lacking the field are left
+// Emit* bead closures, Tick, WaitTick); structs lacking the field are left
 // untouched. Returns whether the field was set.
 func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 	f := v.FieldByName(name)
@@ -301,14 +300,14 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(beads []int) {
 			emitRefillSlide(ctx, tr, name, clk, beads)
 		})
-		// Now func() time.Duration: active-elapsed sim time (pause-aware) off the
-		// shared clock, so a node timing a window/dwell freezes on pause.
-		injectFunc(v, "Now", tNowFunc, func() time.Duration { return clk.Now() })
-		// WaitUntil func(context.Context, time.Duration) error: park on the shared
-		// clock so poll loops freeze on pause instead of advancing on wall-clock time.
-		tWaitFunc := reflect.TypeFor[func(context.Context, time.Duration) error]()
-		injectFunc(v, "WaitUntil", tWaitFunc, func(ctx context.Context, target time.Duration) error {
-			return clk.WaitUntil(ctx, target)
+		// Tick func() int64: current tick (pause-aware) off the shared human-speed
+		// clock, so a node timing a window/dwell in ticks freezes on pause.
+		injectFunc(v, "Tick", tTickFunc, func() int64 { return clk.Tick() })
+		// WaitTick func(context.Context, int64) error: park on the shared clock so
+		// poll loops freeze on pause instead of advancing on wall-clock time.
+		tWaitFunc := reflect.TypeFor[func(context.Context, int64) error]()
+		injectFunc(v, "WaitTick", tWaitFunc, func(ctx context.Context, k int64) error {
+			return clk.WaitTick(ctx, k)
 		})
 	}
 
@@ -562,8 +561,8 @@ func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 //
 // Geometry: each bead animates from its row-0 slot offset to its row-1 slot offset
 // — a downward translation of rowPitch = row0.y − row1.y in local y. Duration at
-// human speed = rowPitch / PulseSpeedWuPerMs ms. The clock loops from t=0 to t=1 in
-// positionEmitIntervalMs (16ms) steps via WaitUntil (pause-aware). Each frame:
+// human speed = rowPitch / PulseSpeedWuPerTick ticks. The clock loops from t=0 to
+// t=1 one tick per step via WaitTick (pause-aware). Each frame:
 //   - row 1, every col: present, value = beads[col], offset = lerp(row0,row1,t)
 //     (keyed to the DESTINATION bottom slot, sliding down from the top position).
 //   - row 0, every col: present=false (the top row is empty during the slide).
@@ -577,12 +576,10 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	row1Y := interiorSlotOffset(1, 0).Y
 	rowPitch := row0Y - row1Y // downward translation distance (local y, positive)
 	// Slide runs at the base pulse speed — the same constant speed as the wire
-	// beads; the clock is still pause-aware.
-	durationMs := rowPitch / PulseSpeedWuPerMs
-	duration := time.Duration(durationMs * float64(time.Millisecond))
-	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
+	// beads; the clock is still pause-aware. Duration is a tick count.
+	durationTicks := rowPitch / PulseSpeedWuPerTick
 
-	start := clk.Now()
+	start := clk.Tick()
 	emitFrame := func(t float64) {
 		for col := 0; col < len(beads); col++ {
 			a := interiorSlotOffset(0, col)
@@ -597,11 +594,11 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	}
 
 	emitFrame(0) // initial frame: beads at the top, top row cleared
-	for target := step; ; target += step {
-		if err := clk.WaitUntil(ctx, start+target); err != nil {
+	for target := int64(1); ; target++ {
+		if err := clk.WaitTick(ctx, start+target); err != nil {
 			return
 		}
-		t := float64(clk.Now()-start) / float64(duration)
+		t := float64(clk.Tick()-start) / durationTicks
 		if t >= 1 {
 			emitFrame(1) // land exactly on the bottom row
 			return

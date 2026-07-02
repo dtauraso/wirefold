@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
-	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -16,19 +16,29 @@ type deliveredBead struct {
 	val int
 }
 
-// PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs for call sites that
-// pass it to NewPacedWire.  The canonical value lives in curve_params.go so
-// the codegen tool can export it to TS.
+// PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs. It is retained as the
+// fixed world-units-per-MILLISECOND conversion for the SimLatencyMs REPORTING
+// path (the ms value emitted on the send trace); it is NOT the clock's unit.
+// The canonical value lives in curve_params.go so the codegen tool can export it
+// to TS.
 const PulseSpeedWuPerMs = CurveParamPulseSpeedWuPerMs
+
+// PulseSpeedWuPerTick is the uniform pulse speed reinterpreted in world-units per
+// TICK (MODEL.md: pulseSpeed is world-units-per-tick). It is the ms speed scaled
+// by the tick period: 0.04 wu/ms × 16 ms/tick = 0.64 wu/tick. This is what the
+// human-speed clock uses to derive ticksToCross = arcLength / PulseSpeedWuPerTick,
+// which equals the retired arc/pulseSpeedMs/16 sample count — so a bead visits the
+// same number of positions in the same wall time.
+const PulseSpeedWuPerTick = PulseSpeedWuPerMs * MsPerTick
 
 // ErrCanceled is returned by Send or Recv when the context is canceled.
 var ErrCanceled = errors.New("paced wire: context canceled")
 
-// positionEmitIntervalMs is the per-frame position-stream cadence (~60 Hz).
-// MODEL.md: "The ~16 ms position emit is a render cadence, not a clock." A
-// per-bead delivery goroutine wakes on the one clock every interval to emit
-// its bead's evaluated position; this is the report rate, not the bead speed.
-const positionEmitIntervalMs = 16
+// positionStepTicks is the position-stream cadence: one position step per tick
+// (MODEL.md: "the tick IS the animation clock" — there is no separate render
+// cadence). The driver advances each in-flight bead one tick and emits its
+// position each iteration.
+const positionStepTicks = 1
 
 // beadPlacement bundles everything one placement needs. The in-flight time times
 // delivery; the segment endpoints + source identity drive the per-frame position
@@ -55,21 +65,31 @@ func (bp beadPlacement) streams() bool {
 // inflightBead is one bead traversing the wire. Each bead carries its own
 // geometry so a mid-flight geometry edit (node-move) re-derives the remaining
 // travel from the NEW arc while preserving the bead's FRACTIONAL progress t.
-// Distance is NOT stored: distanceCovered = pulseSpeed × (clock.Now() −
-// placement) is a pure function of the one clock (MODEL.md "Geometry and time").
+// Distance is NOT stored: fractional progress t = (clock.Tick() − placementTick)
+// / ticksToCross is a pure function of the one clock (MODEL.md "Geometry and time").
 // All fields are guarded by pw.mu.
 type inflightBead struct {
-	val       int
-	placement time.Duration // clock active-elapsed reading when placed
-	startedAt time.Duration // clock reading when the driver goroutine anchors its first tick;
-	// set to placement time so the driver's first tick is always placement+interval
+	val           int
+	placementTick float64 // clock tick reading when placed (fractional after a geometry rebase)
+	startedTick   float64 // clock tick when the driver anchors its first step;
+	// set to placement tick so the driver's first step is always placementTick+1
 	// regardless of when the goroutine actually starts executing.
-	arc     float64     // current arc length of this bead's edge
+	arc     float64     // current arc length of this bead's edge (world units)
 	seg     wireSegment // current straight-segment endpoints of this bead's edge
 	node    string      // source node id — the position/cancel routing key
 	port    string      // source output port — the position/cancel routing key
 	streams bool        // whether this bead carries position-stream context
 	gen     uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
+}
+
+// ticksToCross returns the tick count for a bead of the given arc length to cross
+// at the uniform pulse speed: arcLength / PulseSpeedWuPerTick (MODEL.md). Fractional;
+// the driver delivers on the first integer tick at or past placementTick + this.
+func (pw *PacedWire) ticksToCross(arc float64) float64 {
+	if pw.pulseSpeed <= 0 {
+		return 0
+	}
+	return arc / pw.pulseSpeed
 }
 
 // PacedWire is a multi-bead FIFO transport. Beads are placed via placeBeadNoWalker
@@ -79,14 +99,13 @@ type inflightBead struct {
 // deadline. Recv pops `delivered` in send order and CONSUMES on read (no separate
 // Done step).
 //
-// Clock-driven delivery: the wire times its own delivery on the one monotonic
-// clock (MODEL.md). When a bead is placed, the wire records the placement elapsed
-// reading; the driven loop calls clock.WaitUntil(placement + arc/pulseSpeed). When
-// that pause-aware deadline is reached, the driven loop moves the bead from `inflight`
+// Clock-driven delivery: the wire times its own delivery on the one human-speed
+// clock (MODEL.md). When a bead is placed, the wire records the placement tick;
+// the driven loop calls clock.WaitTick(placementTick + ticksToCross). When that
+// pause-aware target tick is reached, the driven loop moves the bead from `inflight`
 // to `delivered`. There is no TS "delivered" signal and no central scheduler — every
-// wire reads the same clock independently. Pause freezes the arithmetic (WaitUntil
-// does not advance while halted); Reset/Delete bump teardownGen so the driven loop
-// drops the bead.
+// wire reads the same clock independently. Pause freezes the tick (WaitTick does not
+// advance while halted); Reset/Delete bump teardownGen so the driven loop drops the bead.
 type PacedWire struct {
 	mu   sync.Mutex
 	cond *sync.Cond
@@ -117,10 +136,12 @@ type PacedWire struct {
 
 // NewPacedWire creates an empty PacedWire. arcLength is the straight-line
 // distance between source and target (world units); pulseSpeed is in world-units
-// per millisecond (use PulseSpeedWuPerMs).
+// per TICK (use PulseSpeedWuPerTick). MaxIncomingSimLatencyMs stays in ms (the
+// reporting unit) so it is derived from the fixed ms conversion, independent of
+// the clock's tick speed.
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	pw := &PacedWire{
-		MaxIncomingSimLatencyMs: arcLength / pulseSpeed,
+		MaxIncomingSimLatencyMs: arcLength / PulseSpeedWuPerMs,
 		pulseSpeed:              pulseSpeed,
 		clock:                   NewRealClock(),
 	}
@@ -194,17 +215,19 @@ func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64,
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
 	}
-	now := pw.clock.Now()
+	nowTick := float64(pw.clock.Tick())
 	b := inflightBead{
-		val:       beadVal,
-		placement: now,
-		startedAt: now, // anchor first tick to placement time, not goroutine-start time
-		arc:       bp.InFlightMs * pw.pulseSpeed,
-		seg:       wireSegment{Start: bp.Start, End: bp.End},
-		node:      bp.Node,
-		port:      bp.Port,
-		streams:   bp.streams(),
-		gen:       pw.nextGen,
+		val:           beadVal,
+		placementTick: nowTick,
+		startedTick:   nowTick, // anchor first step to placement tick, not goroutine-start tick
+		// arc (world units) is reconstructed from the reported ms latency via the
+		// FIXED ms conversion, so it is independent of the clock's tick speed.
+		arc:     bp.InFlightMs * PulseSpeedWuPerMs,
+		seg:     wireSegment{Start: bp.Start, End: bp.End},
+		node:    bp.Node,
+		port:    bp.Port,
+		streams: bp.streams(),
+		gen:     pw.nextGen,
 	}
 	pw.inflight = append(pw.inflight, b)
 	pw.cond.Broadcast()
@@ -220,9 +243,10 @@ type driveItem struct {
 }
 
 // DriveBeadsToDelivery drives multiple beads on different PacedWires in lockstep
-// on the calling goroutine — no additional goroutines. Each ~16 ms frame it
-// advances every not-yet-final bead, emits position traces, and marks delivered
-// items done. Blocks until all items are delivered or ctx is canceled.
+// on the calling goroutine — no additional goroutines. Each tick it advances
+// every not-yet-final bead one position, emits position traces, and marks
+// delivered items done. Blocks until all items are delivered or ctx is canceled.
+// All quantities are ticks on the shared human-speed clock (MODEL.md).
 func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 	if len(items) == 0 {
 		return
@@ -232,20 +256,20 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 	done := make([]bool, len(items))
 	remaining := len(items)
 
-	interval := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
+	const interval = float64(positionStepTicks) // one position step per tick
 
-	// Compute the first tick target for each item anchored to its placement.
-	nexts := make([]time.Duration, len(items))
+	// Compute the first step tick for each item anchored to its placement tick.
+	nexts := make([]float64, len(items))
 	for i, it := range items {
 		if done[i] {
 			continue
 		}
 		it.pw.mu.Lock()
 		idx := it.pw.findInflightLocked(it.gen)
-		var placement, startedAt time.Duration
+		var placementTick, startedTick float64
 		if idx >= 0 {
-			placement = it.pw.inflight[idx].placement
-			startedAt = it.pw.inflight[idx].startedAt
+			placementTick = it.pw.inflight[idx].placementTick
+			startedTick = it.pw.inflight[idx].startedTick
 		}
 		it.pw.mu.Unlock()
 
@@ -254,13 +278,13 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 			remaining--
 			continue
 		}
-		// Anchor the first tick to startedAt (= clock reading at placement time).
-		// This ensures intermediate position ticks are emitted even when the driver
+		// Anchor the first step to startedTick (= clock tick at placement). This
+		// ensures intermediate position steps are emitted even when the driver
 		// goroutine starts late (after the test advances the clock past the deadline).
-		next := placement + interval
-		if next <= startedAt {
-			steps := (startedAt-placement)/interval + 1
-			next = placement + steps*interval
+		next := placementTick + interval
+		if next <= startedTick {
+			steps := math.Floor((startedTick-placementTick)/interval) + 1
+			next = placementTick + steps*interval
 		}
 		nexts[i] = next
 	}
@@ -282,25 +306,23 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 			return
 		}
 
-		// Find the minimum next tick across live items, capping each item's next
-		// at its bead's deadline so we never park past the delivery point.
-		var minNext time.Duration
+		// Find the minimum next step across live items, capping each item's next
+		// at its bead's delivery tick so we never park past the delivery point.
+		var minNext float64
 		first := true
 		for i, it := range items {
 			if done[i] {
 				continue
 			}
-			// Cap nexts[i] at the bead's delivery deadline so WaitUntil never
-			// parks past the point where final=true would be set.
+			// Cap nexts[i] at the bead's delivery tick so WaitTick never parks
+			// past the point where final=true would be set.
 			it.pw.mu.Lock()
 			idx := it.pw.findInflightLocked(it.gen)
 			if idx >= 0 {
 				b := it.pw.inflight[idx]
-				if it.pw.pulseSpeed > 0 {
-					dl := b.placement + time.Duration(b.arc/it.pw.pulseSpeed*float64(time.Millisecond))
-					if nexts[i] > dl {
-						nexts[i] = dl
-					}
+				dl := b.placementTick + it.pw.ticksToCross(b.arc)
+				if nexts[i] > dl {
+					nexts[i] = dl
 				}
 			}
 			it.pw.mu.Unlock()
@@ -310,11 +332,13 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 			}
 		}
 
-		if err := clk.WaitUntil(ctx, minNext); err != nil {
+		// WaitTick resumes when the tick reaches the target; ceil so we wait for
+		// the integer tick at or past the (possibly fractional) delivery tick.
+		if err := clk.WaitTick(ctx, int64(math.Ceil(minNext))); err != nil {
 			return
 		}
 
-		// Advance all items whose next tick is at or before minNext.
+		// Advance all items whose next step is at or before minNext.
 		for i, it := range items {
 			if done[i] || nexts[i] > minNext {
 				continue
@@ -336,14 +360,10 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 			}
 			b := it.pw.inflight[idx]
 			arc := b.arc
-			placement := b.placement
+			placementTick := b.placementTick
 			it.pw.mu.Unlock()
 
-			pulseSpeed := it.pw.pulseSpeed
-			deadline := placement
-			if pulseSpeed > 0 {
-				deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
-			}
+			deadline := placementTick + it.pw.ticksToCross(arc)
 
 			target := nexts[i]
 			final := false
@@ -491,13 +511,13 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) 
 	if pw.deleted || len(pw.inflight) == 0 {
 		return
 	}
-	now := pw.clock.Now()
+	nowTick := float64(pw.clock.Tick())
 	for i := range pw.inflight {
 		b := &pw.inflight[i]
 		t := 0.0
 		if b.arc > 0 && pw.pulseSpeed > 0 {
-			covered := pw.pulseSpeed * float64(now-b.placement) / float64(time.Millisecond)
-			t = covered / b.arc
+			// elapsed ticks / old ticksToCross = fraction covered.
+			t = (nowTick - b.placementTick) / (b.arc / pw.pulseSpeed)
 			if t < 0 {
 				t = 0
 			}
@@ -507,15 +527,15 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) 
 		}
 		b.arc = newArc
 		b.seg = newSeg
-		// Rebase placement so elapsed-since-placement maps to the same fraction t on
-		// the NEW arc: covered' = t·newArc ⇒ placement' = Now() − (t·newArc/pulseSpeed).
+		// Rebase placementTick so elapsed-since-placement maps to the same fraction t
+		// on the NEW arc: remainingTicks = (1−t)·newArc/pulseSpeed, so the covered part
+		// is t·newArc/pulseSpeed ticks ⇒ placementTick' = nowTick − t·(newArc/pulseSpeed).
 		if pw.pulseSpeed > 0 {
-			coveredNew := t * newArc
-			b.placement = now - time.Duration(coveredNew/pw.pulseSpeed*float64(time.Millisecond))
+			b.placementTick = nowTick - t*(newArc/pw.pulseSpeed)
 		}
-		// Update startedAt to now so the driver's next tick is anchored to the
-		// rebase point (avoids replaying the traversal from the old startedAt).
-		b.startedAt = now
+		// Update startedTick to now so the driver's next step is anchored to the
+		// rebase point (avoids replaying the traversal from the old startedTick).
+		b.startedTick = nowTick
 	}
 }
 
@@ -561,9 +581,8 @@ func (pw *PacedWire) emitArrive(ai arriveInfo) {
 // NOTE: the inflight→delivered move and cond.Broadcast are NOT done here; the
 // walker's FIFO-head wait loop does that after this returns when final=true. This
 // keeps the two locking phases (trace-emit window vs. delivery window) unchanged.
-func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool, pos posEmitArgs, final bool) {
+func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, pos posEmitArgs, final bool) {
 	tr := pw.Trace
-	pulseSpeed := pw.pulseSpeed
 
 	if gen < pw.teardownGen {
 		pw.mu.Unlock()
@@ -577,26 +596,25 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, now time.Duration) (emit bool
 	b := pw.inflight[i]
 	arc := b.arc
 	seg := b.seg
-	placement := b.placement
+	placementTick := b.placementTick
 	stream := b.streams && tr != nil && arc > 0
+	crossTicks := pw.ticksToCross(arc)
 	pw.mu.Unlock()
 
-	deadline := placement
-	if pulseSpeed > 0 {
-		deadline += time.Duration(arc / pulseSpeed * float64(time.Millisecond))
-	}
+	deadline := placementTick + crossTicks
 
-	target := now
-	if now >= deadline {
+	target := nowTick
+	if nowTick >= deadline {
 		target = deadline
 		final = true
 	}
 
 	if stream {
-		covered := pulseSpeed * float64(target-placement) / float64(time.Millisecond)
+		// fractional progress t = elapsed ticks / ticksToCross (== distance
+		// covered / arc, since both scale by the uniform pulse speed).
 		t := 0.0
-		if arc > 0 {
-			t = covered / arc
+		if crossTicks > 0 {
+			t = (target - placementTick) / crossTicks
 		}
 		if t > 1 {
 			t = 1
@@ -624,7 +642,7 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	}
 	pw.inflight = nil
 	pw.delivered = nil
-	// Invalidate every outstanding driven loop at once and wake any parked WaitUntil.
+	// Invalidate every outstanding driven loop at once and wake any parked WaitTick.
 	pw.teardownGen = pw.nextGen + 1
 	pw.cond.Broadcast()
 	return cancelled
