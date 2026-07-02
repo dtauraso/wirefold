@@ -18,6 +18,8 @@ import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 import { MissedBeadMarkers } from "./scene-beads";
 import { USE_NEW_SYSTEM } from "../new-system";
+import { getNavNodeIds, instanceIdToNodeId } from "./buffer-nav";
+import { BUFFER_NODE_TAG } from "./buffer-scene";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
 // ray distance is at most this many units closer than the nearest body hit.
@@ -135,6 +137,26 @@ const EDGE_BIAS = 2;
  * Default pick: port → edge → node priority (nearest-first, one-category-per-hit).
  * Handholds are skipped (grab affordance handled by the handholdOnly path).
  */
+/**
+ * New-system pick: buffer-rendered nodes are an InstancedMesh (buffer-scene.tsx
+ * NodeInstances) tagged with BUFFER_NODE_TAG, not the old per-node GraphNode meshes,
+ * so they carry no userData.nodeId. Resolve the nearest tagged instanced hit via
+ * hit.instanceId → the buffer-nav id table. Ports/edges/handholds are NOT rendered as
+ * pickable meshes in the buffer, so those modes return null (see the reported port gap).
+ */
+function pickBufferNode(hits: THREE.Intersection[], excludeId?: string): string | null {
+  const ids = getNavNodeIds();
+  for (const hit of hits) {
+    if ((hit.object as THREE.Mesh).userData?.[BUFFER_NODE_TAG] !== true) continue;
+    if (hit.instanceId === undefined) continue;
+    const id = instanceIdToNodeId(hit.instanceId, ids);
+    if (id === null) continue;
+    if (excludeId && id === excludeId) continue;
+    return id;
+  }
+  return null;
+}
+
 function pickDefault(hits: THREE.Intersection[]): string | null {
   const [portHit, edgeHit, nodeHit] = findNearestByTag(
     hits,
@@ -178,6 +200,16 @@ function RaycasterHelper({
           ? allHits
           : allHits.filter((h) => (h.object as THREE.Mesh).isMesh);
       if (hits.length === 0) return null;
+
+      // New-system path: nodes are the buffer InstancedMesh, not GraphNode meshes, so
+      // the old userData.nodeId picks always come back empty. Resolve node hits from the
+      // instanced mesh (instanceId → nav id table). Ports/handholds/edges/rings are not
+      // pickable in the buffer, so those modes return null; node-oriented modes
+      // (default / nodesOnly / ringOnly) resolve the nearest buffer node.
+      if (USE_NEW_SYSTEM) {
+        if (opts?.handholdOnly || opts?.portOnly) return null;
+        return pickBufferNode(hits, opts?.nodesOnly ? opts.excludeId : undefined);
+      }
 
       if (opts?.handholdOnly) return pickHandhold(hits);
       if (opts?.ringOnly) return pickRing(hits);

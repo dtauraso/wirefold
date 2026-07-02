@@ -12,7 +12,7 @@ import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
   recordNavNodeId, recordNavNodeLabel, clearNavNodeIds, getNavNodeIds,
   getNavNodeLabel, getNavNodeKind,
-  decodeNavNodes, contentSphereFromCenters,
+  decodeNavNodes, contentSphereFromCenters, instanceIdToNodeId,
 } from "../src/webview/three/buffer-nav";
 import { NODE_DEFS } from "../src/schema/node-defs";
 import {
@@ -140,6 +140,23 @@ describe("decodeNavNodes — row ↔ id pairing (ordering guarantee)", () => {
     const nav = decodeNavNodes(decoded, getNavNodeIds());
     expect(nav[0]!.id).toBe("only0");
     expect(nav[1]!.id).toBe("#1");
+  });
+});
+
+describe("instanceIdToNodeId — InstancedMesh instanceId ↔ node id", () => {
+  // This is the hit-testing fix: under the new system nodes are a buffer InstancedMesh
+  // with no per-node userData.nodeId, so RaycasterHelper resolves a node hit from the
+  // ray's instanceId via this mapping (instanceId == buffer node row == id-table index).
+  it("maps instanceId to the row-aligned node id", () => {
+    const ids = ["n0", "n1", "n2"];
+    expect(instanceIdToNodeId(0, ids)).toBe("n0");
+    expect(instanceIdToNodeId(1, ids)).toBe("n1");
+    expect(instanceIdToNodeId(2, ids)).toBe("n2");
+  });
+
+  it("returns null for an out-of-range instanceId (id table not yet populated)", () => {
+    expect(instanceIdToNodeId(3, ["n0", "n1", "n2"])).toBeNull();
+    expect(instanceIdToNodeId(0, [])).toBeNull();
   });
 });
 

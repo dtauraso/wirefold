@@ -110,6 +110,18 @@ export function getNavNodeIds(): string[] {
   return navNodeIds;
 }
 
+/**
+ * Resolve a buffer InstancedMesh `instanceId` to its node id. The NodeInstances
+ * mesh (buffer-scene.tsx) draws one instance per buffer node row in row order, and
+ * getNavNodeIds()[i] is the id of buffer node row i (the ordering invariant above),
+ * so instanceId is exactly the row index. Returns null for an out-of-range instanceId
+ * (id table not yet populated for that row). Pure — the id table is passed in so this
+ * is unit-testable without the module-level table.
+ */
+export function instanceIdToNodeId(instanceId: number, ids: string[]): string | null {
+  return ids[instanceId] ?? null;
+}
+
 // ── Pure decode ───────────────────────────────────────────────────────────────
 
 /**

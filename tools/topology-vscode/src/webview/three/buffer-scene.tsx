@@ -77,6 +77,11 @@ const INTERIOR_RING_TUBE_RATIO = 0.12;
 // (fill "#ffffff"/stroke "#888888" ← node.data fallbacks).
 const NODE_DEFAULT_FILL = "#ffffff";
 const NODE_DEFAULT_STROKE = "#888888";
+// userData tag marking the NodeInstances body InstancedMesh as the pickable node
+// target under the new system. RaycasterHelper (scene-content.tsx) sees this tag on a
+// hit and resolves hit.instanceId → node id via the buffer-nav id table, since the
+// buffer-rendered nodes carry no per-node userData.nodeId the old raycast path relies on.
+export const BUFFER_NODE_TAG = "bufferNode";
 // Border-ring tube thickness as a fraction of the node radius (mirrors GraphNode's
 // resting torusThick = r * 0.08).
 const NODE_RING_TUBE_RATIO = 0.08;
@@ -210,11 +215,16 @@ function NodeInstances({ capacity }: { capacity: number }) {
     ring.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
     if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
+    // Refresh the InstancedMesh bounding sphere so raycast picking stays accurate as
+    // nodes move (three.js early-outs a ray against a cached union sphere; a dragged
+    // node outside the stale sphere would otherwise be un-pickable). Cheap for the
+    // small node counts here.
+    body.computeBoundingSphere();
   });
 
   return (
     <>
-      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]}>
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_NODE_TAG]: true }}>
         <sphereGeometry args={[1, 16, 16]} />
         {/* Match GraphNode's glassy translucent body EXACTLY (scene-graph.tsx): a
             meshPhysicalMaterial with transmission + depthWrite=false + opacity 0.92 so
