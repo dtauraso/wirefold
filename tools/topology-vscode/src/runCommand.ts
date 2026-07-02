@@ -24,6 +24,23 @@ function goErrorLine(message: string): string {
   return JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message }) + "\n";
 }
 
+// splitJsonlLines is the pure newline-framing step for stdout: given the carried-over
+// partial buffer and a freshly-arrived chunk, it returns every COMPLETE (newline-
+// terminated) line and the trailing partial `rest` to carry into the next call. A line
+// split across two chunks is reassembled (its bytes accumulate in `rest` until the
+// newline arrives); multiple lines in one chunk all come out; a trailing partial is
+// buffered. handleStdout owns per-line dispatch; this owns only the framing.
+export function splitJsonlLines(buf: string, chunk: string): { lines: string[]; rest: string } {
+  let rest = buf + chunk;
+  const lines: string[] = [];
+  let nl: number;
+  while ((nl = rest.indexOf("\n")) !== -1) {
+    lines.push(rest.slice(0, nl));
+    rest = rest.slice(nl + 1);
+  }
+  return { lines, rest };
+}
+
 // Go stdout relay: trace events are written to .probe/go.jsonl with a
 // shared envelope { ts_ms, src:"go", step?, ...ev }. Errors (stderr,
 // non-zero exit, spawn failure) are written to .probe/go-errors.jsonl.
@@ -264,11 +281,9 @@ export class BuildAndRunRunner {
   }
 
   private handleStdout(chunk: string) {
-    this.stdoutBuf += chunk;
-    let nl: number;
-    while ((nl = this.stdoutBuf.indexOf("\n")) !== -1) {
-      const line = this.stdoutBuf.slice(0, nl);
-      this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
+    const { lines, rest } = splitJsonlLines(this.stdoutBuf, chunk);
+    this.stdoutBuf = rest;
+    for (const line of lines) {
       // Spec line — Go startup message carrying the full topology spec. Intercepted
       // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS).
       const spec = tryParseSpecLine(line);
