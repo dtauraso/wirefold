@@ -192,7 +192,7 @@ export type TraceEvent =
   | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
   | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number; bead?: number }
   | { step: number; kind: "arrive"; node: string; port: string; value?: number; bead?: number }
-  | { step: number; kind: "node-geometry"; node: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
+  | { step: number; kind: "node-geometry"; node: string; label?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
   | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
   | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
   | { step: number; kind: "scene-tori"; visible: boolean }
@@ -221,7 +221,13 @@ export type HostToWebviewMsg =
   // Phase 3: binary snapshot from Go's fd3 side channel.
   // The ArrayBuffer is transferred zero-copy (postMessage transferable).
   // Phase 5 will render from it; for now the webview stubs the handler.
-  | { type: "buffer-snapshot"; buffer: ArrayBuffer };
+  | { type: "buffer-snapshot"; buffer: ArrayBuffer }
+  // New-system label sidecar: per-node {id,label} derived by the host from each
+  // node-geometry trace event (which now carries the node's human label). The webview
+  // records it into the row-keyed buffer-nav label table (first-seen order == buffer
+  // node-row order), so the new render path resolves pill text without the old spec
+  // store. One message per node id per run (host dedups); repopulated on resend.
+  | { type: "node-label"; id: string; label: string };
 
 // Note: "resend" is host-originated (runner.resend() writes it straight to Go's
 // stdin) and is never emitted by the webview. It is kept in this set so the
@@ -233,7 +239,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "load", "run-status", "flush", "save-error", "trace-event", "buffer-snapshot",
+  "load", "run-status", "flush", "save-error", "trace-event", "buffer-snapshot", "node-label",
 ]);
 
 // parseEdit validates an "edit" message by its op, mirroring the per-op payloads
@@ -453,6 +459,11 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
     case "buffer-snapshot":
       // buffer must be an ArrayBuffer (transferred zero-copy from the host).
       return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;
+    case "node-label":
+      // id + label are both required strings (the row-keyed sidecar payload).
+      return typeof m.id === "string" && typeof m.label === "string"
+        ? (m as unknown as HostToWebviewMsg)
+        : undefined;
     default:
       return undefined;
   }

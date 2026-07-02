@@ -63,6 +63,17 @@ describe("parseHostToWebview", () => {
     expect(parseHostToWebview(msg)).toEqual(msg);
   });
 
+  it("accepts a node-label sidecar with id + label strings", () => {
+    const msg = { type: "node-label", id: "n1", label: "Source" };
+    expect(parseHostToWebview(msg)).toEqual(msg);
+  });
+
+  it("rejects a node-label missing id or label", () => {
+    expect(parseHostToWebview({ type: "node-label", id: "n1" })).toBeUndefined();
+    expect(parseHostToWebview({ type: "node-label", label: "Source" })).toBeUndefined();
+    expect(parseHostToWebview({ type: "node-label", id: 1, label: "Source" })).toBeUndefined();
+  });
+
   it("rejects an unknown message type", () => {
     expect(parseHostToWebview({ type: "nope" })).toBeUndefined();
   });

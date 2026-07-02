@@ -39,9 +39,19 @@ export interface NavNode {
   selected: boolean;
 }
 
-// ── Ordered id table (label resource keyed by buffer row) ─────────────────────
+// ── Ordered id table + human-label map (label resource keyed by buffer row) ────
+// TWO writers feed navNodeIds, both with the identical first-seen dedup, so the row
+// order is the same either way:
+//   • recordNavNodeId  — the OLD path (pump.ts node-geometry case). Unused when the
+//     new system is on (pump is gated off in main.tsx).
+//   • recordNavNodeLabel — the NEW path (the node-label host→webview sidecar, routed
+//     in main.tsx, independent of pump). This is the sole writer under the flag and
+//     ALSO stores the node's human label so the new-path pills need no spec store.
+// navNodeIds is read only by the new render path (NavGuides / BufferLabelProjector /
+// occlusion), so the redundant flag-off double-write is invisible.
 let navNodeIds: string[] = [];
 const navNodeIdSet = new Set<string>();
+const navNodeLabels = new Map<string, string>();
 
 /**
  * Record a node id in first-seen order. Called from pump.ts on every node-geometry
@@ -54,10 +64,30 @@ export function recordNavNodeId(id: string): void {
   navNodeIds.push(id);
 }
 
-/** Wipe the id table at the run-start boundary (symmetric with clearAllNodeGeometry). */
+/**
+ * Record a node id + its human label from the node-label sidecar (main.tsx). Appends
+ * the id in first-seen order (same dedup/order as recordNavNodeId) AND stores the
+ * label, so the new render path resolves pill text without the old spec store. The
+ * label is always set (even on a repeat id) so a label change within a run is picked up.
+ */
+export function recordNavNodeLabel(id: string, label: string): void {
+  if (!navNodeIdSet.has(id)) {
+    navNodeIdSet.add(id);
+    navNodeIds.push(id);
+  }
+  navNodeLabels.set(id, label);
+}
+
+/** Human label for a node id (undefined until its sidecar message arrives). */
+export function getNavNodeLabel(id: string): string | undefined {
+  return navNodeLabels.get(id);
+}
+
+/** Wipe the id table + label map at the run-start boundary (symmetric with clearAllNodeGeometry). */
 export function clearNavNodeIds(): void {
   navNodeIds = [];
   navNodeIdSet.clear();
+  navNodeLabels.clear();
 }
 
 /** Current ordered id table; index i ↔ buffer node row i. */
