@@ -26,7 +26,7 @@ import { anglesToWorldOffset } from "./viewpoint-bridge";
 import { EnvTexContext } from "./scene-env";
 import { beadStyleForValue } from "./bead-style";
 import { INTERIOR_SLOTS_PER_NODE } from "./buffer-decode";
-import { surfaceRowSet, type EdgeAdj, type SelMode } from "./buffer-surface";
+import { surfaceRowSet, ownerRowSet, type EdgeAdj, type SelMode } from "./buffer-surface";
 import {
   SHADING_PARAM_NODE_TRANSMISSION,
   SHADING_PARAM_NODE_THICKNESS,
@@ -48,6 +48,7 @@ import {
   readBeadX, readBeadY, readBeadZ, readBeadLive, readBeadValue,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
   readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
+  readNodeSphereR, readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSrcNodeRow, readEdgeDstNodeRow,
@@ -352,6 +353,136 @@ function SelectionHighlight({ capacity }: { capacity: number }) {
             />
           </mesh>
         </group>
+      ))}
+    </>
+  );
+}
+
+// ── Sphere rings ─────────────────────────────────────────────────────────────────
+// "Show the sphere" visualization: for each sphere OWNER of the current selection, two
+// thin see-through great-circle tori are drawn AT the owner's center showing the sphere
+// boundary. Mirrors the pre-branch SphereRing (scene-graph.tsx) EXACTLY: major radius R =
+// the owner's Go-streamed sphereR (buffer SphereR column), tube = max(0.5, radius*0.08),
+// two tori oriented by the node's two ring-plane normals (VR vertical, FR flat), material
+// = owner stroke color, emissiveIntensity 0.25, opacity 0.55, depthWrite false, raycast
+// disabled (purely decorative — clicks pass through to the nodes inside). Owners come from
+// ownerRowSet over the Edge-block adjacency; only drawn when a selection exists.
+const SPHERE_RING_EMISSIVE_INTENSITY = 0.25;
+const SPHERE_RING_OPACITY = 0.55;
+const SPHERE_RING_TUBE_RATIO = 0.08; // pre-branch: nodeRadius(owner) * 0.08
+const SPHERE_RING_TUBE_MIN = 0.5;
+const _sphereRingDefaultNormal = new THREE.Vector3(0, 0, 1); // torusGeometry lies in XY (normal +Z)
+
+interface OwnerRing {
+  cx: number; cy: number; cz: number;
+  R: number; tube: number;
+  vrx: number; vry: number; vrz: number;
+  frx: number; fry: number; frz: number;
+  color: string;
+}
+
+// One owner's pair of great-circle tori. Geometry + orientation quaternions are rebuilt
+// only when the owner's R/tube/normals change (keyed useMemo) — not every frame.
+function SphereRingBuf({ ring }: { ring: OwnerRing }) {
+  const { geo, vrQ, frQ } = useMemo(() => {
+    const _geo = new THREE.TorusGeometry(ring.R, ring.tube, 12, 96);
+    const vrN = new THREE.Vector3(ring.vrx, ring.vry, ring.vrz);
+    if (vrN.lengthSq() < 1e-12) vrN.set(0, 0, 1); else vrN.normalize();
+    const frN = new THREE.Vector3(ring.frx, ring.fry, ring.frz);
+    if (frN.lengthSq() < 1e-12) frN.set(1, 0, 0); else frN.normalize();
+    return {
+      geo: _geo,
+      vrQ: new THREE.Quaternion().setFromUnitVectors(_sphereRingDefaultNormal, vrN),
+      frQ: new THREE.Quaternion().setFromUnitVectors(_sphereRingDefaultNormal, frN),
+    };
+  }, [ring.R, ring.tube, ring.vrx, ring.vry, ring.vrz, ring.frx, ring.fry, ring.frz]);
+
+  // R3F does not auto-dispose an imperatively-passed geometry; dispose on rebuild/unmount.
+  useEffect(() => () => { geo.dispose(); }, [geo]);
+
+  return (
+    <group position={[ring.cx, ring.cy, ring.cz]}>
+      <mesh geometry={geo} quaternion={[vrQ.x, vrQ.y, vrQ.z, vrQ.w]} raycast={() => null}>
+        <meshStandardMaterial
+          color={ring.color}
+          emissive={ring.color}
+          emissiveIntensity={SPHERE_RING_EMISSIVE_INTENSITY}
+          transparent
+          opacity={SPHERE_RING_OPACITY}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh geometry={geo} quaternion={[frQ.x, frQ.y, frQ.z, frQ.w]} raycast={() => null}>
+        <meshStandardMaterial
+          color={ring.color}
+          emissive={ring.color}
+          emissiveIntensity={SPHERE_RING_EMISSIVE_INTENSITY}
+          transparent
+          opacity={SPHERE_RING_OPACITY}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function SphereRings() {
+  const [rings, setRings] = useState<OwnerRing[]>([]);
+  const keyRef = useRef<string>("");
+  const edgesRef = useRef<EdgeAdj[]>([]);
+
+  useFrame(() => {
+    const snap = getLatestSnapshot();
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    let key = "";
+    const next: OwnerRing[] = [];
+    if (decoded) {
+      const { nodeCount, nodeView, edgeCount, edgeView, overlayView } = decoded;
+
+      // Selected row (at most one).
+      let selectedRow = -1;
+      for (let i = 0; i < nodeCount; i++) {
+        if (readNodeSelected(nodeView, i)) { selectedRow = i; break; }
+      }
+
+      if (selectedRow >= 0) {
+        const edges = edgesRef.current;
+        edges.length = 0;
+        for (let e = 0; e < edgeCount; e++) {
+          edges.push({ src: readEdgeSrcNodeRow(edgeView, e), dst: readEdgeDstNodeRow(edgeView, e) });
+        }
+        const mode: SelMode = readOverlaySelMode(overlayView) ? "own" : "surface";
+        const ids = getNavNodeIds();
+        for (const row of ownerRowSet(selectedRow, mode, edges)) {
+          if (row < 0 || row >= nodeCount) continue;
+          // R = Go-streamed reach radius (sphereR); fall back to node radius pre-emit.
+          const radius = readNodeRadius(nodeView, row) || NODE_SPHERE_RADIUS;
+          const R = readNodeSphereR(nodeView, row) || radius;
+          if (R < 1e-3) continue;
+          const tube = Math.max(SPHERE_RING_TUBE_MIN, radius * SPHERE_RING_TUBE_RATIO);
+          const ring: OwnerRing = {
+            cx: readNodeCX(nodeView, row), cy: readNodeCY(nodeView, row), cz: readNodeCZ(nodeView, row),
+            R, tube,
+            vrx: readNodeVRX(nodeView, row), vry: readNodeVRY(nodeView, row), vrz: readNodeVRZ(nodeView, row),
+            frx: readNodeFRX(nodeView, row), fry: readNodeFRY(nodeView, row), frz: readNodeFRZ(nodeView, row),
+            color: nodeRowColors(ids[row] ?? `#${row}`).stroke,
+          };
+          next.push(ring);
+          key += `${ring.cx},${ring.cy},${ring.cz}|${ring.R},${ring.tube}|${ring.vrx},${ring.vry},${ring.vrz}|${ring.frx},${ring.fry},${ring.frz}|${ring.color};`;
+        }
+      }
+    }
+    // Rebuild only when the owner set / geometry / color actually changed.
+    if (key !== keyRef.current) {
+      keyRef.current = key;
+      setRings(next);
+    }
+  });
+
+  return (
+    <>
+      {rings.map((ring, i) => (
+        <SphereRingBuf key={i} ring={ring} />
       ))}
     </>
   );
@@ -686,6 +817,72 @@ function MissedBeadMarkersBuf() {
   );
 }
 
+// ── Node status-red pulse rings ───────────────────────────────────────────────────
+// Per-node RED alarm ring drawn OVER every node whose buffer TorusRed=1. The shared-
+// material NodeInstances ring can't do a per-instance emissive/scale pulse, so this draws
+// a SEPARATE pulsing red ring per active node (a pooled group per node, like
+// SelectionHighlight). Mirrors the pre-branch GraphNode useFrame status pulse EXACTLY:
+// color+emissive #ff1a1a, emissiveIntensity 0.6 + 1.9*pulse, scale 1.18 + 0.14*pulse,
+// pulse = 0.5 + 0.5*sin(elapsedTime*8) (~8Hz, cosmetic render-clock only — decides NO
+// model state). The ring geometry is the unit border torus (major radius 1, tube ratio
+// NODE_RING_TUBE_RATIO) scaled by the node radius × pulse scale, matching NodeInstances'
+// ring. TorusRed=0 nodes get no red ring (their pool slot hides).
+const NODE_STATUS_RED = "#ff1a1a";
+const STATUS_RED_POOL = 16;
+
+function NodeStatusRedRings() {
+  const slotRefs = useRef<(THREE.Group | null)[]>([]);
+  const matRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+
+  useFrame((state) => {
+    const slots = slotRefs.current;
+    const snap = getLatestSnapshot();
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    // Cosmetic 0..1 pulse from the render clock (~8Hz), shared by all active rings.
+    const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
+    let slot = 0;
+    if (decoded) {
+      const { nodeCount, nodeView } = decoded;
+      for (let i = 0; i < nodeCount && slot < STATUS_RED_POOL; i++) {
+        if (!readNodeTorusRed(nodeView, i)) continue;
+        const g = slots[slot];
+        if (!g) { slot++; continue; }
+        const r = readNodeRadius(nodeView, i) || NODE_SPHERE_RADIUS;
+        g.position.set(readNodeCX(nodeView, i), readNodeCY(nodeView, i), readNodeCZ(nodeView, i));
+        // Scale: node radius × the pre-branch pulse scale (1.18 + 0.14*pulse). The child
+        // torus is built at major radius 1, so this lands the red ring on the node border.
+        g.scale.setScalar(r * (1.18 + 0.14 * pulse));
+        const mat = matRefs.current[slot];
+        if (mat) mat.emissiveIntensity = 0.6 + 1.9 * pulse;
+        g.visible = true;
+        slot++;
+      }
+    }
+    for (let i = slot; i < STATUS_RED_POOL; i++) {
+      const g = slots[i];
+      if (g) g.visible = false;
+    }
+  });
+
+  return (
+    <>
+      {Array.from({ length: STATUS_RED_POOL }, (_, i) => (
+        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
+          <mesh raycast={() => null}>
+            <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
+            <meshStandardMaterial
+              ref={(el) => { matRefs.current[i] = el; }}
+              color={NODE_STATUS_RED}
+              emissive={NODE_STATUS_RED}
+              emissiveIntensity={0.6}
+            />
+          </mesh>
+        </group>
+      ))}
+    </>
+  );
+}
+
 // ── BufferCamera ───────────────────────────────────────────────────────────────
 // Buffer-driven camera: each frame reads the snapshot's single Camera row and drives
 // the three.js camera (position / up / lookAt) from it. This REPLACES the old
@@ -819,8 +1016,10 @@ export function BufferScene({ cameraRef }: {
       <NodeInstances capacity={nodeCap} />
       <InteriorBeadInstances capacity={nodeCap * INTERIOR_SLOTS_PER_NODE} />
       <SelectionHighlight capacity={nodeCap} />
+      <SphereRings />
       <EdgeTubes     capacity={edgeCap} />
       <MissedBeadMarkersBuf />
+      <NodeStatusRedRings />
     </>
   );
 }

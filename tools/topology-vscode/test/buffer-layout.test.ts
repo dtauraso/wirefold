@@ -19,7 +19,9 @@ import {
   NODE_COL_EV_RECV, NODE_COL_EV_FIRE, NODE_COL_EV_SEND, NODE_COL_EV_ARRIVE, NODE_COL_EV_DONE,
   NODE_COL_SELECTED,
   NODE_STRIDE,
+  NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
+  readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
   readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readNodeEvRecv, readNodeEvFire, readNodeEvSend, readNodeEvArrive, readNodeEvDone,
   readNodeSelected,
@@ -113,9 +115,9 @@ describe("buffer-layout — Bead block", () => {
 
 describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
-    // 5×f32 + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected)
-    //   = (5+3)×4 + 1 + 4 + 5 + 1 = 43
-    expect(NODE_STRIDE).toBe(43);
+    // 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected)
+    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 = 67
+    expect(NODE_STRIDE).toBe(67);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -127,6 +129,12 @@ describe("buffer-layout — Node block", () => {
     dv.setFloat32(NODE_COL_CZ, 3.0, true);
     dv.setFloat32(NODE_COL_RADIUS, 0.5, true);
     dv.setFloat32(NODE_COL_SPHERE_R, 0.25, true);
+    dv.setFloat32(NODE_COL_VRX, 0.1, true);
+    dv.setFloat32(NODE_COL_VRY, 0.2, true);
+    dv.setFloat32(NODE_COL_VRZ, 0.3, true);
+    dv.setFloat32(NODE_COL_FRX, 0.4, true);
+    dv.setFloat32(NODE_COL_FRY, 0.5, true);
+    dv.setFloat32(NODE_COL_FRZ, 0.6, true);
     dv.setUint8(NODE_COL_TORUS_RED, 1);
     dv.setInt32(NODE_COL_MISS_VAL, -42, true);
     dv.setFloat32(NODE_COL_MX, 4.0, true);
@@ -144,6 +152,12 @@ describe("buffer-layout — Node block", () => {
     expectF32(readNodeCZ(dv, 0), 3.0);
     expectF32(readNodeRadius(dv, 0), 0.5);
     expectF32(readNodeSphereR(dv, 0), 0.25);
+    expectF32(readNodeVRX(dv, 0), 0.1);
+    expectF32(readNodeVRY(dv, 0), 0.2);
+    expectF32(readNodeVRZ(dv, 0), 0.3);
+    expectF32(readNodeFRX(dv, 0), 0.4);
+    expectF32(readNodeFRY(dv, 0), 0.5);
+    expectF32(readNodeFRZ(dv, 0), 0.6);
     expect(readNodeTorusRed(dv, 0)).toBe(1);
     expect(readNodeMissVal(dv, 0)).toBe(-42);
     expectF32(readNodeMX(dv, 0), 4.0);
@@ -306,8 +320,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 5", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(5);
+  it("schema version is 6", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(6);
   });
 
   it("header size is 16 bytes (4×u32)", () => {

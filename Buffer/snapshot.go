@@ -86,13 +86,13 @@ type nodeSnapState struct {
 	vrx, vry, vrz float64
 	frx, fry, frz float64
 	torusRed      uint8
-	missVal         int32
-	mx, my, mz      float64
-	evRecv          uint8
-	evFire          uint8
-	evSend          uint8
-	evArrive        uint8
-	evDone          uint8
+	missVal       int32
+	mx, my, mz    float64
+	evRecv        uint8
+	evFire        uint8
+	evSend        uint8
+	evArrive      uint8
+	evDone        uint8
 	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
 	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
 	selected uint8

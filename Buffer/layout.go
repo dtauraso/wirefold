@@ -65,11 +65,11 @@ type bufLayoutBead struct {
 // One row per node. Persistent geometry + status + transient event flags.
 // Matched from KindNodeGeometry, KindNodeStatus, KindRecv/Fire/Send/Arrive/Done.
 type bufLayoutNode struct {
-	CX       float32 `buf:"f32"` // node center x (world)
-	CY       float32 `buf:"f32"` // node center y (world)
-	CZ       float32 `buf:"f32"` // node center z (world)
-	Radius   float32 `buf:"f32"` // body/ring sphere radius
-	SphereR  float32 `buf:"f32"` // sphere-chain radius (port placement)
+	CX      float32 `buf:"f32"` // node center x (world)
+	CY      float32 `buf:"f32"` // node center y (world)
+	CZ      float32 `buf:"f32"` // node center z (world)
+	Radius  float32 `buf:"f32"` // body/ring sphere radius
+	SphereR float32 `buf:"f32"` // sphere-chain radius (port placement)
 	// VR*/FR* are the node's two great-circle ring-plane normals (vertical vr, flat fr),
 	// the same orientation vectors the pre-branch SphereRing read from nodeGeometryStore.
 	// SphereRing draws two tori at the owner's center oriented by these; they arrive on the

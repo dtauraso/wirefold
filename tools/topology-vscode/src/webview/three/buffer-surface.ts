@@ -63,3 +63,34 @@ export function surfaceRowSet(
   ids.add(selectedRow);
   return ids;
 }
+
+/**
+ * Compute the set of buffer node ROWS whose SPHERE is drawn for a selection (the sphere
+ * OWNERS). Mirrors the pre-branch scene-content.tsx `sphereOwners`: the owner nodes for
+ * this selection, filtered to those that actually CENTER a sphere (have at least one
+ * outgoing edge — output-less nodes live on others' surfaces and own no sphere).
+ *
+ * @param selectedRow the selected node's buffer row, or -1 when nothing is selected.
+ * @param mode        "own" (owner = [selected]) or "surface" (owners output TO selected).
+ * @param edges       edge adjacency (src/dst node rows); -1 endpoints are ignored.
+ * @returns the set of owner node rows to draw a SphereRing at. Empty when no selection.
+ */
+export function ownerRowSet(
+  selectedRow: number,
+  mode: SelMode,
+  edges: readonly EdgeAdj[],
+): Set<number> {
+  const owners = new Set<number>();
+  if (selectedRow < 0) return owners;
+
+  const candidates =
+    mode === "own"
+      ? [selectedRow]
+      : edges.filter((e) => e.dst === selectedRow && e.src >= 0).map((e) => e.src);
+
+  for (const owner of candidates) {
+    // Only output-bearing nodes center a sphere (pre-branch centersSphere check).
+    if (edges.some((e) => e.src === owner && e.dst >= 0)) owners.add(owner);
+  }
+  return owners;
+}
