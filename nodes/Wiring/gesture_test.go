@@ -108,6 +108,134 @@ func TestGestureCtrlWheelDolliesPivot(t *testing.T) {
 	}
 }
 
+// Edge creation by port→port drag reuses the EXISTING create-edge slot path: dropping an
+// unconnected OUT port onto another node's IN port un-silences (Restore) that dest slot's
+// wire — the same effect as an op=create edit.
+func TestGestureWireCreatesEdgeViaExistingCreatePath(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+	// A silenced (deleted) wire at dest slot B.in — as if the edge had been deleted.
+	pw := NewPacedWire(10, 1)
+	pw.Target, pw.TargetHandle = "B", "in"
+	pw.Delete() // silence it (as if the edge had been deleted)
+	slotReg := SlotRegistry{"B.in": pw}
+
+	down := rawEvent("pointerdown", 400, 300)
+	down.Hit = rawHit{Kind: "port", Id: "A:out:out", IsInput: false}
+	md.HandleRawInput(down, slotReg, nil)
+	if md.gest.wireNode != "A" || md.gest.wirePort != "out" || md.gest.wireInput {
+		t.Fatalf("after port down: wireNode=%q wirePort=%q wireInput=%v", md.gest.wireNode, md.gest.wirePort, md.gest.wireInput)
+	}
+	// Drag past slop → wiring.
+	md.HandleRawInput(rawEvent("pointermove", 460, 300), slotReg, nil)
+	if md.gest.phase != gestWiring {
+		t.Fatalf("phase=%v want wiring", md.gest.phase)
+	}
+	// Drop on B's IN port → create-edge (Restore) on B.in.
+	up := rawEvent("pointerup", 460, 300)
+	up.Hit = rawHit{Kind: "port", Id: "B:in:in", IsInput: true}
+	md.HandleRawInput(up, slotReg, nil)
+	if pw.deleted {
+		t.Fatalf("wire B.in still deleted; create-edge path did not Restore it")
+	}
+	if md.gest.phase != gestIdle {
+		t.Fatalf("after wire up phase=%v want idle", md.gest.phase)
+	}
+}
+
+// Click-select is Go-owned: a click on a node sets md.selected to that node id; a click on
+// empty space clears it. (No camera change — covered by TestGestureClickNoCameraChange.)
+func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+
+	down := rawEvent("pointerdown", 400, 300)
+	down.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(down, nil, nil)
+	md.HandleRawInput(func() rawInputMsg {
+		e := rawEvent("pointerup", 401, 300)
+		e.Hit = rawHit{Kind: "node", Id: "N7"}
+		return e
+	}(), nil, nil)
+	if md.selected != "N7" {
+		t.Fatalf("selected=%q want N7", md.selected)
+	}
+
+	// Empty-space click clears selection.
+	d2 := rawEvent("pointerdown", 400, 300) // Hit defaults to empty
+	md.HandleRawInput(d2, nil, nil)
+	md.HandleRawInput(rawEvent("pointerup", 401, 300), nil, nil)
+	if md.selected != "" {
+		t.Fatalf("selected=%q want empty after empty-space click", md.selected)
+	}
+}
+
+// A handhold grab resolves (past the slop) to axis-locked orbit: the camera pose changes
+// (pos moves) while the pivot + radius stay fixed, just like a free orbit.
+func TestGestureHandholdOrbits(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+	down := rawEvent("pointerdown", 400, 300)
+	down.Hit = rawHit{Kind: "handhold", Id: "handhold-x"}
+	md.HandleRawInput(down, nil, nil)
+	if !md.gest.handholdDown || md.gest.phase != gestPending {
+		t.Fatalf("after handhold down: handholdDown=%v phase=%v", md.gest.handholdDown, md.gest.phase)
+	}
+	md.HandleRawInput(rawEvent("pointermove", 460, 320), nil, nil)
+	if md.gest.phase != gestHandhold {
+		t.Fatalf("phase=%v want handhold", md.gest.phase)
+	}
+	rBefore, pivotBefore, posBefore := md.vp.r, md.vp.pivot, md.vp.pos
+	md.HandleRawInput(rawEvent("pointermove", 520, 360), nil, nil)
+	if math.Abs(md.vp.r-rBefore) > 1e-9 {
+		t.Fatalf("handhold orbit changed r: %v != %v", md.vp.r, rBefore)
+	}
+	if !vecClose(md.vp.pivot, pivotBefore, 1e-9) {
+		t.Fatalf("handhold orbit moved pivot: %v != %v", md.vp.pivot, pivotBefore)
+	}
+	if angularDistance(md.vp.pos, posBefore) < 1e-6 {
+		t.Fatalf("handhold orbit did not change pos (stayed %v)", md.vp.pos)
+	}
+	md.HandleRawInput(rawEvent("pointerup", 520, 360), nil, nil)
+	if md.gest.phase != gestIdle {
+		t.Fatalf("after handhold up phase=%v want idle", md.gest.phase)
+	}
+}
+
+// Dragging a CONNECTED port along its ring dispatches a ring-anchor update to the node
+// mover's inbox (the same moveMsgKindAnchor the op=update kind=node attr=anchor path sends).
+func TestGestureConnectedPortRingMove(t *testing.T) {
+	center := vec3{0, 0, 0}
+	geoms := map[string]nodeGeom{
+		"N1": {Kind: "Input", Center: &center, Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
+		"N2": {Kind: "Input", Center: &vec3{50, 0, 0}, Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"e1": {Source: "N1", Target: "N2", SourceHandle: "out", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.vp.viewpoint = canonicalViewpoint()
+
+	// Grab the CONNECTED out-port of N1.
+	down := rawEvent("pointerdown", 400, 300)
+	down.Hit = rawHit{Kind: "port", Id: "N1:out:out", IsInput: false}
+	md.HandleRawInput(down, nil, nil)
+	if md.gest.portMoveNode != "N1" {
+		t.Fatalf("connected-port down: portMoveNode=%q want N1 (phase=%v)", md.gest.portMoveNode, md.gest.phase)
+	}
+	// Drag past slop, off-center so the ring direction is nonzero.
+	md.HandleRawInput(rawEvent("pointermove", 520, 300), nil, nil)
+	if md.gest.phase != gestPortMove {
+		t.Fatalf("phase=%v want portMove", md.gest.phase)
+	}
+	// The N1 mover inbox (buffered) must have received an anchor update.
+	select {
+	case msg := <-md.nodeMovers["N1"].inbox:
+		if msg.Kind != moveMsgKindAnchor || msg.NodeID != "N1" || msg.Port != "out" || msg.IsInput {
+			t.Fatalf("anchor msg mismatch: %+v", msg)
+		}
+	default:
+		t.Fatalf("no anchor message dispatched to N1 mover")
+	}
+}
+
 // A short press-release under the move slop stays in pending and resolves as a click
 // (recognized only); it must NOT change the camera pose.
 func TestGestureClickNoCameraChange(t *testing.T) {

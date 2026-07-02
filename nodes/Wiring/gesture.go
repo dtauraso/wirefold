@@ -27,10 +27,13 @@ import (
 //   rotating  — empty-space great-circle orbit about a frozen region-focus pivot.
 //   dragging  — node body drag (world target on a camera-facing plane → RootMove).
 //   wiring    — an unconnected port is being dragged toward another port to wire an edge.
+//   portMove  — a CONNECTED port is being dragged along its node's ring (ring-anchor snap).
+//   handhold  — a handhold grab-sphere is dragged for axis-locked (constrained) orbit.
 //
-// Deferred (recognized but not yet acted on in this additive phase; see report): handhold-
-// constrained orbit, connected-port ring-move, and click-select — those are not camera
-// substance and stay on the current interaction path until the flip phase.
+// Phase 7 closed the interaction gaps: edge creation reuses the existing create-edge slot
+// path (createEdgeInSlot); click-select is Go-owned (md.selected + KindSelect trace →
+// buffer Selected column); handhold-constrained orbit and connected-port ring-move are
+// ported here formula-faithfully from interaction-handlers.ts.
 
 type gesturePhase int
 
@@ -40,6 +43,8 @@ const (
 	gestRotating
 	gestDragging
 	gestWiring
+	gestPortMove
+	gestHandhold
 )
 
 // gestureState is the FSM's owned bookkeeping. Zero value = idle.
@@ -62,6 +67,15 @@ type gestureState struct {
 	wireNode  string
 	wirePort  string
 	wireInput bool
+
+	// connected-port ring-move (portMove): the grabbed port + its node's center at grab.
+	portMoveNode   string
+	portMovePort   string
+	portMoveInput  bool
+	portMoveCenter vec3
+
+	// handhold-constrained orbit gate (set at pointer-down on a handhold hit).
+	handholdDown bool
 
 	// rotation frame, FROZEN at gesture start (mirrors beginSphereRotation): the pivot,
 	// its screen-pixel center, and pixels-per-radian for screenToPolar.
@@ -119,6 +133,8 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 	g.emptyDown = false
 	g.dragNode = ""
 	g.wireNode = ""
+	g.portMoveNode = ""
+	g.handholdDown = false
 
 	switch ev.Hit.Kind {
 	case "port":
@@ -127,14 +143,20 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 			return
 		}
 		if md.portConnected(node, port, isInput) {
-			// Connected port → ring-move. Not ported in this additive phase.
-			tr.Breadcrumb("gesture-port-move-deferred", node, port, "")
+			// Connected port → ring-move along the node's ring. Freeze the node center
+			// (the ring plane is z = center.z) at grab, mirroring portMoveRef.nodeCenter.
+			if c, ok := md.centerOfNode(node); ok {
+				g.portMoveNode, g.portMovePort, g.portMoveInput = node, port, isInput
+				g.portMoveCenter = c
+			}
 			return
 		}
 		g.wireNode, g.wirePort, g.wireInput = node, port, isInput
 	case "handhold":
-		// Handhold-constrained orbit not ported in this additive phase.
-		tr.Breadcrumb("gesture-handhold-deferred", ev.Hit.Id, "", "")
+		// Handhold grab → axis-locked (constrained) orbit. Freeze the sphere rotation frame
+		// now (mirrors interaction-handlers.ts: beginSphereRotation on a handhold hit).
+		g.handholdDown = true
+		md.beginSphereRotation(ev)
 	case "node":
 		if c, ok := md.centerOfNode(ev.Hit.Id); ok {
 			g.dragNode = ev.Hit.Id
@@ -180,18 +202,23 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 		switch {
 		case g.wireNode != "":
 			g.phase = gestWiring
+		case g.portMoveNode != "":
+			g.phase = gestPortMove
 		case g.dragNode != "":
 			g.phase = gestDragging
+		case g.handholdDown:
+			// Handhold-constrained orbit: seed prevX/prevY from the GRAB point (downX/downY),
+			// not the slop-crossing point, so the first locked arc is grab→first-move (mirrors
+			// interaction-handlers.ts). Seed the viewpoint about the frozen pivot, then lock.
+			g.prevX, g.prevY = g.downX, g.downY
+			g.phase = gestHandhold
+			md.seedOrbitPivot(g.rotPivot)
 		case g.emptyDown:
 			g.prevX, g.prevY = ev.X, ev.Y
 			g.phase = gestRotating
 			// Seed the viewpoint so the orbit pivot is the frozen region-focus (mirrors the
 			// TS sendViewpointSet at rotation start). pos/up/r recompute about the new pivot.
-			vp := md.vp.viewpoint
-			eye := eyeOf(vp)
-			r := eye.sub(g.rotPivot).length()
-			pos := worldDirToAngles(eye.sub(g.rotPivot))
-			md.SetViewpoint(g.rotPivot, r, pos, vp.up)
+			md.seedOrbitPivot(g.rotPivot)
 		}
 	}
 
@@ -203,7 +230,24 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 	case gestRotating:
 		md.applyOrbit(ev, tr)
 		g.prevX, g.prevY = ev.X, ev.Y
+	case gestHandhold:
+		md.applyOrbitLocked(ev, tr)
+		g.prevX, g.prevY = ev.X, ev.Y
+	case gestPortMove:
+		md.applyPortMove(ev)
+		g.prevX, g.prevY = ev.X, ev.Y
 	}
+}
+
+// seedOrbitPivot installs the frozen pivot as the viewpoint pivot (mirrors the TS
+// sendViewpointSet at rotation start): pos/up/r recompute about the new pivot so the
+// subsequent orbit is rigid about it.
+func (md *MoveDispatch) seedOrbitPivot(pivot vec3) {
+	vp := md.vp.viewpoint
+	eye := eyeOf(vp)
+	r := eye.sub(pivot).length()
+	pos := worldDirToAngles(eye.sub(pivot))
+	md.SetViewpoint(pivot, r, pos, vp.up)
 }
 
 // applyOrbit mirrors the "rotating" branch of interaction-handlers.ts handlePointerMove:
@@ -218,6 +262,60 @@ func (md *MoveDispatch) applyOrbit(ev rawInputMsg, tr *T.Trace) {
 	prevDir := toWorldDir(basis, prev)
 	currDir := toWorldDir(basis, curr)
 	md.OrbitViewpoint(worldDirToAngles(currDir), worldDirToAngles(prevDir), tr)
+}
+
+// applyOrbitLocked mirrors the "handhold-rotating" branch of interaction-handlers.ts
+// handlePointerMove: identical prev/curr → world-direction mapping as applyOrbit, but the
+// arc is applied through OrbitLockedViewpoint, which locks the rotation axis on the first
+// call and reuses it (constrained "disk" orbit). The lock clears on the next SetViewpoint.
+func (md *MoveDispatch) applyOrbitLocked(ev rawInputMsg, tr *T.Trace) {
+	g := &md.gest
+	vp := md.vp.viewpoint
+	basis := basisFromViewpoint(vp.pos, vp.up)
+	prev := screenToPolar(g.prevX-g.rotCx, g.prevY-g.rotCy, g.rotPxPerRad)
+	curr := screenToPolar(ev.X-g.rotCx, ev.Y-g.rotCy, g.rotPxPerRad)
+	prevDir := toWorldDir(basis, prev)
+	currDir := toWorldDir(basis, curr)
+	md.OrbitLockedViewpoint(worldDirToAngles(currDir), worldDirToAngles(prevDir), tr)
+}
+
+// applyPortMove mirrors the "port-move" branch of interaction-handlers.ts handlePointerMove:
+// project the pointer ray onto the horizontal plane (normal +z) at the node's ring height
+// (z = center.z), take the in-plane direction from center to the hit (z zeroed, matching
+// pointerRingAnchor), and apply it as a ring-anchor update via the existing anchor path.
+func (md *MoveDispatch) applyPortMove(ev rawInputMsg) {
+	g := &md.gest
+	hit, ok := md.pointerOnRingPlane(ev, g.portMoveCenter.Z)
+	if !ok {
+		return
+	}
+	dx := hit.X - g.portMoveCenter.X
+	dy := hit.Y - g.portMoveCenter.Y
+	if dx == 0 && dy == 0 {
+		return
+	}
+	md.applyRingAnchor(g.portMoveNode, g.portMovePort, g.portMoveInput, vec3{X: dx, Y: dy, Z: 0})
+}
+
+// pointerOnRingPlane intersects the pointer ray with the horizontal plane (normal +z) at
+// world height planeZ, mirroring interaction-handlers.ts unprojectToPlane. Returns
+// (hit, false) if the ray is parallel to the plane or the result is non-finite.
+func (md *MoveDispatch) pointerOnRingPlane(ev rawInputMsg, planeZ float64) (vec3, bool) {
+	g := &md.gest
+	vp := md.vp.viewpoint
+	eye := eyeOf(vp)
+	basis := basisFromViewpoint(vp.pos, vp.up)
+	nx, ny := g.pixelToNDC(ev.X, ev.Y)
+	dir := rayDirThroughNDC(nx, ny, basis, ev.Fov, g.rect.aspect())
+	if dir.Z == 0 {
+		return vec3{}, false
+	}
+	t := (planeZ - eye.Z) / dir.Z
+	hit := eye.add(dir.scale(t))
+	if math.IsNaN(hit.X) || math.IsInf(hit.X, 0) {
+		return vec3{}, false
+	}
+	return hit, true
 }
 
 // applyNodeDragTarget mirrors the "dragging" branch: unproject the pointer onto a
@@ -250,12 +348,9 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 	switch {
 	case g.wireNode != "" && (g.phase == gestWiring || g.phase == gestPending):
 		// Wiring completed: if dropped on a port of another node with the opposite
-		// direction, the intent is an OUT→IN edge. New-edge CREATION requires the loader
-		// to rebuild the graph (Go has no in-place add-edge for an arbitrary port pair);
-		// a create op only RESTORES a previously-silenced slot. So the FSM resolves the
-		// intended edge and, when it maps to a known slot, restores it; otherwise it emits
-		// the intent for the (future) create path. Deletion of an existing wire IS fully
-		// supported via slotReg. See report.
+		// direction, the intent is an OUT→IN edge. The FSM orients the pair and hands the
+		// destination slot to the EXISTING create-edge path (createEdgeInSlot — the same
+		// helper op=create uses); it un-silences that wire so it carries beads again.
 		if ev.Hit.Kind == "port" {
 			tn, tp, ti, ok := parseGesturePortId(ev.Hit.Id)
 			if ok && tn != g.wireNode {
@@ -270,19 +365,39 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 				}
 				if oriented {
 					tr.Breadcrumb("gesture-wire", srcNode+":"+srcPort, dstNode+":"+dstPort, "")
-					if pw, found := slotReg[dstNode+"."+dstPort]; found {
-						pw.Restore()
-					}
+					createEdgeInSlot(slotReg, dstNode, dstPort, tr)
 				}
 			}
 		}
+	case g.phase == gestPortMove:
+		md.applyPortMove(ev) // final ring-anchor flush
 	case g.phase == gestDragging:
 		md.applyNodeDragTarget(ev) // final target flush
+	case g.phase == gestHandhold, g.phase == gestRotating:
+		// Rotation completed (free or handhold-constrained): nothing to flush.
 	case g.phase == gestPending:
-		// Click. Selection is not Go-owned yet; recognized only. See report.
-		tr.Breadcrumb("gesture-click", ev.Hit.Kind, ev.Hit.Id, "")
+		// Click → Go-owned selection. A node hit selects it; empty space clears the
+		// selection. md.selected is the authoritative selection; Select() emits it so the
+		// buffer snapshot marks the node's Selected column.
+		md.applySelect(ev, tr)
 	}
 	g.reset()
+}
+
+// applySelect sets the Go-owned selection from a click hit and emits it. A node/port hit
+// selects that node; an empty (or handhold) hit clears the selection.
+func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
+	var node string
+	switch ev.Hit.Kind {
+	case "node":
+		node = ev.Hit.Id
+	case "port":
+		if n, _, _, ok := parseGesturePortId(ev.Hit.Id); ok {
+			node = n
+		}
+	}
+	md.selected = node
+	tr.Select(node)
 }
 
 // gestWheel mirrors interaction-handlers.ts handleWheelNative: ctrl+wheel = zoom-to-cursor
@@ -339,6 +454,30 @@ func (g *gestureState) reset() {
 	g.emptyDown = false
 	g.dragNode = ""
 	g.wireNode = ""
+	g.portMoveNode = ""
+	g.handholdDown = false
+}
+
+// applyRingAnchor snaps a world-space direction (node center → pointer) to the node's
+// nearest ring-anchor index and mail-sorts a moveMsgKindAnchor to the node's mover AND
+// every incident edge mover — the SAME dispatch the op=update kind=node attr=anchor path
+// uses (applyUpdate). Live-only (no disk persistence), matching the FSM node-drag path.
+func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec3) {
+	anchorID := snapToRingAnchorIndex(md.NodeKind(node), dir)
+	msg := moveMsg{Kind: moveMsgKindAnchor, NodeID: node, Port: port, IsInput: isInput, AnchorId: anchorID}
+	if ch, ok := md.dispatch[node]; ok {
+		ch <- msg
+	}
+	for edgeID, em := range md.edgeMovers {
+		incident := (isInput && em.dstID == node && em.dstH == port) ||
+			(!isInput && em.srcID == node && em.srcH == port)
+		if !incident {
+			continue
+		}
+		if ch, ok := md.dispatch[edgeID]; ok {
+			ch <- msg
+		}
+	}
 }
 
 // portConnected reports whether the named port has at least one incident edge. It scans the

@@ -305,22 +305,33 @@ func destPortKey(msg stdinMsg) string {
 	return msg.Target + "." + msg.TargetHandle
 }
 
+// createEdgeInSlot un-silences the wire at the given destination slot — the op=create
+// path (an existing edge whose slot was silenced is RESTORED so it carries beads again).
+// Returns true when a matching slot existed. Shared by applyEdit's create op AND the
+// gesture FSM's wire-completion outcome, so a port→port drag reuses the EXACT existing
+// create-edge path rather than any new add-edge machinery. tr may be nil (Breadcrumb
+// tolerates a nil receiver).
+func createEdgeInSlot(slotReg SlotRegistry, dstNode, dstPort string, tr *T.Trace) bool {
+	if dstNode == "" || dstPort == "" {
+		return false
+	}
+	tr.Breadcrumb("edit-create-recv", dstNode, dstPort, "")
+	destKey := dstNode + "." + dstPort
+	pw, found := slotReg[destKey]
+	if !found {
+		tr.Breadcrumb("edit-create-notfound", dstNode, dstPort, destKey)
+		return false
+	}
+	tr.Breadcrumb("edit-create-restore", pw.Target, pw.TargetHandle, "")
+	pw.Restore()
+	return true
+}
+
 func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 	// EDIT_OPS_START
 	switch msg.Op {
 	case "create":
-		if msg.Target == "" || msg.TargetHandle == "" {
-			return
-		}
-		tr.Breadcrumb("edit-create-recv", msg.Target, msg.TargetHandle, "")
-		destKey := destPortKey(msg)
-		pw, found := slotReg[destKey]
-		if !found {
-			tr.Breadcrumb("edit-create-notfound", msg.Target, msg.TargetHandle, destKey)
-			return
-		}
-		tr.Breadcrumb("edit-create-restore", pw.Target, pw.TargetHandle, "")
-		pw.Restore()
+		createEdgeInSlot(slotReg, msg.Target, msg.TargetHandle, tr)
 	case "delete":
 		if msg.Target == "" || msg.TargetHandle == "" {
 			return

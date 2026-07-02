@@ -415,6 +415,10 @@ type MoveDispatch struct {
 	// and produces camera (viewpoint) + topology (node-move) changes. Owned by
 	// MoveDispatch; serialized by the single-goroutine stdin reader. Zero value = idle.
 	gest gestureState
+	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
+	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
+	// KindSelect so the buffer snapshot marks the node's Selected column.
+	selected string
 }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
