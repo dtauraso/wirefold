@@ -123,8 +123,8 @@ type nodeSnapState struct {
 	// ports holds this node's port geometry (input + output), from the node-geometry
 	// event's Ports. PERSISTENT — re-emitted on every node-move (only the dirs change;
 	// the port set/order is stable), so buildSnapshot flattens the current ports across
-	// all nodes in node-row order into the Port block. The per-port name strings ride the
-	// host→webview sidecar in this same flattened order (the numeric buffer carries no strings).
+	// all nodes in node-row order into the Port block. The numeric buffer carries no port
+	// strings; a port hit is resolved by row index via the Go-side port-row table.
 	ports []portSnapState
 }
 
@@ -385,7 +385,7 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	n.frx, n.fry, n.frz = ev.FRX, ev.FRY, ev.FRZ
 	// Port geometry: replace this node's ports with the event's current port set/dirs
 	// (re-emit on move updates the dirs; the port set/order is stable). Kept in the
-	// event's Ports order so the buffer Port block and the host-side name sidecar stay
+	// event's Ports order so the buffer Port block and the Go-side port-row table stay
 	// in the same flattened row order.
 	n.ports = n.ports[:0]
 	for _, p := range ev.Ports {
@@ -623,8 +623,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	// Port block: flattened over nodes in stable node-row order — for each node in its
 	// buffer row order, that node's ports in node-geometry Ports order. NodeRow is the
 	// owning node's row index; DX/DY/DZ is the port surface direction; IsInput marks input
-	// ports. The host-side name sidecar (buffer-nav port table) is built in this identical
-	// flattened order, so port row i ↔ sidecar entry i.
+	// ports. The Go-side port-row table (LookupPortRow) is built in this identical
+	// flattened order, so port row i ↔ (node, port) i for hit resolution.
 	portBuf := buf[off : off+portCount*BufPortStride]
 	prow := 0
 	for i := range s.nodes {

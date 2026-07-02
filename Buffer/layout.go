@@ -135,9 +135,9 @@ type bufLayoutEdge struct {
 // is the port's unit direction on the node surface (node center → port, the pre-branch
 // portDir); IsInput=1 for an input port, 0 for an output port. The port world position is
 // nodeCenter + DIR*nodeRadius, computed on the render side (mirrors the pre-branch
-// PortSphere placement). The per-port {nodeId, portName, isInput} strings ride a sidecar
-// (buffer-nav port table) in this same flattened row order — the numeric buffer carries no
-// strings.
+// PortSphere placement). The numeric buffer carries NO port strings: a port HIT is resolved
+// by its port-row index, which Go maps back to its own (node, port) via the Go-side port-row
+// table (LookupPortRow), built in this same flattened row order — so port row i ↔ (node,port) i.
 type bufLayoutPort struct {
 	NodeRow int32   `buf:"i32"` // owning node's buffer node-row index
 	DX      float32 `buf:"f32"` // unit dir x (node center → port)
