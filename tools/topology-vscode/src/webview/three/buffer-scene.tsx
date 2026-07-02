@@ -19,7 +19,8 @@ import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { USE_NEW_SYSTEM } from "../new-system";
 import { decodeSnapshot } from "./buffer-decode";
-import { getNavNodeIds } from "./buffer-nav";
+import { getNavNodeIds, getNavNodeKind } from "./buffer-nav";
+import { NODE_DEFS } from "../../schema/node-defs";
 import { ndcToPixel } from "./geometry-helpers";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
 import {
@@ -46,6 +47,25 @@ const INITIAL_EDGE_CAP  = 32; // edge positions buffer: N edges × 2 endpoints �
 
 const BEAD_SPHERE_RADIUS = 4;
 const NODE_SPHERE_RADIUS = 12;
+
+// Fallback fill/stroke for a node whose kind is unknown or whose sidecar message has
+// not arrived yet. Neutral grey — matches GraphNode's own defaults
+// (fill "#ffffff"/stroke "#888888" ← node.data fallbacks).
+const NODE_DEFAULT_FILL = "#ffffff";
+const NODE_DEFAULT_STROKE = "#888888";
+// Border-ring tube thickness as a fraction of the node radius (mirrors GraphNode's
+// resting torusThick = r * 0.08).
+const NODE_RING_TUBE_RATIO = 0.08;
+
+/** Resolve a node row's fill/stroke from its Go kind via NODE_DEFS, with a grey fallback. */
+export function nodeRowColors(id: string): { fill: string; stroke: string } {
+  const kind = getNavNodeKind(id);
+  const def = kind ? NODE_DEFS[kind] : undefined;
+  return {
+    fill: def?.fill ?? NODE_DEFAULT_FILL,
+    stroke: def?.stroke ?? NODE_DEFAULT_STROKE,
+  };
+}
 
 // ── Sub-components (split so capacity growth triggers localised re-render) ────
 
@@ -86,38 +106,73 @@ function BeadInstances({ capacity }: { capacity: number }) {
   );
 }
 
+// Solid node render matching GraphNode's look: a SOLID sphere per node (fill from
+// NODE_DEFS[kind].fill) plus a border torus ring (stroke from NODE_DEFS[kind].stroke).
+// Two InstancedMeshes share one useFrame; both use unit geometry scaled per-instance by
+// the buffer's node radius, so a node's world size matches the JSON path. Per-node fill/
+// stroke is driven via instanceColor (setColorAt). Kind→color is a pure NODE_DEFS lookup
+// keyed by the row-aligned id table (buffer-nav) — no color travels in the buffer.
 function NodeInstances({ capacity }: { capacity: number }) {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const bodyRef = useRef<THREE.InstancedMesh>(null);
+  const ringRef = useRef<THREE.InstancedMesh>(null);
   const matRef  = useRef(new THREE.Matrix4());
+  const posRef  = useRef(new THREE.Vector3());
+  const quatRef = useRef(new THREE.Quaternion());
+  const sclRef  = useRef(new THREE.Vector3());
+  const colRef  = useRef(new THREE.Color());
 
   useFrame(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
+    const body = bodyRef.current;
+    const ring = ringRef.current;
+    if (!body || !ring) return;
 
     const snap = getLatestSnapshot();
-    if (!snap) { mesh.count = 0; return; }
+    if (!snap) { body.count = 0; ring.count = 0; return; }
     const decoded = decodeSnapshot(snap);
-    if (!decoded) { mesh.count = 0; return; }
+    if (!decoded) { body.count = 0; ring.count = 0; return; }
     const { nodeCount, nodeView } = decoded;
+    const ids = getNavNodeIds();
 
     const n = Math.min(nodeCount, capacity);
+    const q = quatRef.current; // identity (no per-node rotation)
     for (let i = 0; i < n; i++) {
-      matRef.current.setPosition(
+      const r = readNodeRadius(nodeView, i) || NODE_SPHERE_RADIUS;
+      posRef.current.set(
         readNodeCX(nodeView, i),
         readNodeCY(nodeView, i),
         readNodeCZ(nodeView, i),
       );
-      mesh.setMatrixAt(i, matRef.current);
+      // Body: unit sphere scaled to the node radius.
+      sclRef.current.setScalar(r);
+      matRef.current.compose(posRef.current, q, sclRef.current);
+      body.setMatrixAt(i, matRef.current);
+      // Ring: unit torus (major radius 1) scaled to the node radius; tube thickness
+      // is baked into the geometry as a fraction of that radius (NODE_RING_TUBE_RATIO).
+      ring.setMatrixAt(i, matRef.current);
+
+      const { fill, stroke } = nodeRowColors(ids[i] ?? `#${i}`);
+      body.setColorAt(i, colRef.current.set(fill));
+      ring.setColorAt(i, colRef.current.set(stroke));
     }
-    mesh.count = n;
-    mesh.instanceMatrix.needsUpdate = true;
+    body.count = n;
+    ring.count = n;
+    body.instanceMatrix.needsUpdate = true;
+    ring.instanceMatrix.needsUpdate = true;
+    if (body.instanceColor) body.instanceColor.needsUpdate = true;
+    if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]}>
-      <sphereGeometry args={[NODE_SPHERE_RADIUS, 12, 12]} />
-      <meshBasicMaterial color="#4488ff" wireframe />
-    </instancedMesh>
+    <>
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]}>
+        <sphereGeometry args={[1, 16, 16]} />
+        <meshStandardMaterial roughness={0.5} metalness={0.1} />
+      </instancedMesh>
+      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]}>
+        <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
+        <meshStandardMaterial roughness={0.6} metalness={0} />
+      </instancedMesh>
+    </>
   );
 }
 
