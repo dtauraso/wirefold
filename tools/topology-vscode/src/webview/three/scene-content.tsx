@@ -17,6 +17,7 @@ import { CameraFitter, CameraRefBridge, LabelProjector, CameraSettleDetector, Po
 import { CameraFromStore } from "./CameraFromStore";
 import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 import { MissedBeadMarkers } from "./scene-beads";
+import { USE_NEW_SYSTEM } from "../new-system";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
 // ray distance is at most this many units closer than the nearest body hit.
@@ -267,28 +268,38 @@ export function Scene({
       <CameraSettleDetector onSettle={onCameraSettle} />
       <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
       <directionalLight position={[0, 0, 10]} intensity={SHADING_PARAM_SCENE_DIR_INTENSITY} />
-      {nodes.map((n) => (
-        <GraphNode
-          key={n.id}
-          node={n}
-          selected={n.id === selectedId}
-          hovered={n.id === hoveredId}
-          faded={!!n.data?.faded}
-          selectedId={selectedId}
-          hoveredId={hoveredId}
-          onSphereSurface={surfaceIds.has(n.id)}
-        />
-      ))}
-      {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
-          node-local offsets) so they ride the node on move — no top-level mount. */}
-      <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
-      {sphereOwners.map((oid) => (
-        <SphereRing key={oid} nodes={nodes} edges={edges} ownerId={oid} />
-      ))}
-      {/* Missed-bead markers: rendered at Go-supplied WORLD positions just outside a
-          node while Go reports a firing error (node-status torusRed). Scene-level
-          (not a node child) since the position is world-space. */}
-      <MissedBeadMarkers />
+      {/* Geometry (nodes + interior beads/pulses, edge tubes + edge beads/pulses,
+          selection sphere-rings, and missed-bead markers) is gated OFF under the
+          new-system flag: with USE_NEW_SYSTEM on, BufferScene renders all geometry
+          from the binary buffer, so rendering it again here would double it (and
+          double the selection highlight). Camera, overlays, picking, labels, and
+          lighting above stay unconditional so the old path keeps hosting them. */}
+      {!USE_NEW_SYSTEM && (
+        <>
+          {nodes.map((n) => (
+            <GraphNode
+              key={n.id}
+              node={n}
+              selected={n.id === selectedId}
+              hovered={n.id === hoveredId}
+              faded={!!n.data?.faded}
+              selectedId={selectedId}
+              hoveredId={hoveredId}
+              onSphereSurface={surfaceIds.has(n.id)}
+            />
+          ))}
+          {/* Interior beads are now mounted INSIDE each GraphNode group (at Go-given
+              node-local offsets) so they ride the node on move — no top-level mount. */}
+          <GraphEdges edges={edges} nodeMap={nodeMap} selectedId={selectedId} />
+          {sphereOwners.map((oid) => (
+            <SphereRing key={oid} nodes={nodes} edges={edges} ownerId={oid} />
+          ))}
+          {/* Missed-bead markers: rendered at Go-supplied WORLD positions just outside a
+              node while Go reports a firing error (node-status torusRed). Scene-level
+              (not a node child) since the position is world-space. */}
+          <MissedBeadMarkers />
+        </>
+      )}
     </ProceduralEnvProvider>
   );
 }
