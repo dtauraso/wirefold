@@ -10,13 +10,18 @@
 package Wiring
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	B "github.com/dtauraso/wirefold/Buffer"
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
@@ -218,6 +223,102 @@ func TestResendGeometry(t *testing.T) {
 	if !edgeGeoms["e0"] {
 		t.Fatal("ResendGeometry did not re-emit edge-geometry for 'e0'")
 	}
+}
+
+// TestResendGeometryEmitsFullBufferSnapshot locks the new-system (agnostic-content-buffer)
+// remount recovery: a freshly (re)loaded webview mounts AFTER Go's startup snapshot burst,
+// and an idle/paused sim emits no further buffer snapshots — so the fresh webview would
+// receive no node geometry and render nothing. The recovery is the existing "resend"
+// bridge kind: ResendGeometry re-emits held node/edge geometry through the Trace, whose
+// sink hook is Buffer.SnapshotState.Update (wired exactly as main.go does), so a single
+// resend produces a FULL buffer snapshot (full-state by construction) even though the sim
+// never advanced (no KindPosition events). This test wires that path end-to-end and asserts
+// a full framed snapshot containing the current node geometry lands on the fd3 sink.
+func TestResendGeometryEmitsFullBufferSnapshot(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// fd3 sink: the Buffer.SnapshotState writes framed binary snapshots here, exactly as
+	// main.go wires os.NewFile(3). Trace's onEvent hook is snapState.Update — the single
+	// seam through which geometry events become buffer snapshots.
+	var snapOut bytes.Buffer
+	snapState := B.NewSnapshotState(&snapOut)
+	tr := T.NewWithSinkHook(256, io.Discard, snapState.Update)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+
+	// The sim is IDLE: a FakeClock that never ticks and no node ran, so there are zero
+	// KindPosition events — the ONLY snapshots come from geometry emits. Whatever startup
+	// burst preceded this, the resend re-emits held geometry, and we assert on the FINAL
+	// frame, whose full-state contents are exactly what a freshly mounted webview receives.
+	md.ResendGeometry(ctx, tr)
+
+	// Close flushes the drain goroutine: every onEvent hook has run and snapOut is safe to read.
+	tr.Close()
+
+	frames := splitBufferFrames(t, snapOut.Bytes())
+	if len(frames) == 0 {
+		t.Fatal("idle resend emitted no buffer snapshot frames; a fresh webview would render nothing")
+	}
+	// The final frame is full-state: assert it carries both nodes with their geometry.
+	last := frames[len(frames)-1]
+	if len(last) < B.BufHeaderSize {
+		t.Fatalf("final frame too short: %d bytes", len(last))
+	}
+	nodeCount := binary.LittleEndian.Uint32(last[8:])
+	if nodeCount != 2 {
+		t.Fatalf("final buffer snapshot nodeCount: got %d, want 2 (full node geometry not present)", nodeCount)
+	}
+	// Spot-check that node geometry is real (non-zero radius), i.e. actual held state was emitted.
+	if binary.LittleEndian.Uint32(last[4:]) != 0 {
+		t.Fatalf("idle sim should have 0 beads, got %d", binary.LittleEndian.Uint32(last[4:]))
+	}
+	nodeBlock := last[B.BufHeaderSize:] // beadCount is 0 (idle sim), so nodes start right after header
+	// Node row layout: [cx,cy,cz,radius,...] as float32; radius is column index 3.
+	radius := math.Float32frombits(binary.LittleEndian.Uint32(nodeBlock[3*4:]))
+	if radius <= 0 {
+		t.Fatalf("first node radius: got %v, want > 0 (geometry not populated in resend snapshot)", radius)
+	}
+}
+
+// splitBufferFrames decodes the [len:u32-LE][payload] framing that Buffer.emitSnapshot
+// writes, mirroring the extension host's splitFrames. Fails the test on a truncated frame.
+func splitBufferFrames(t *testing.T, buf []byte) [][]byte {
+	t.Helper()
+	var frames [][]byte
+	for len(buf) >= 4 {
+		n := int(binary.LittleEndian.Uint32(buf[:4]))
+		buf = buf[4:]
+		if len(buf) < n {
+			t.Fatalf("truncated buffer frame: need %d bytes, have %d", n, len(buf))
+		}
+		frames = append(frames, buf[:n])
+		buf = buf[n:]
+	}
+	return frames
 }
 
 // TestMoverCenterRace is a -race regression for the data race between the mover
