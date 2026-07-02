@@ -21,6 +21,8 @@ import { handleTraceEvent } from "./three/pump";
 import { viewerState } from "./state/viewer-state";
 import { useCameraStore } from "./three/camera-store";
 import { setLatestSnapshot } from "./snapshot-buffer";
+import { USE_NEW_SYSTEM } from "./new-system";
+import { recordNavNodeLabel, clearNavNodeIds } from "./three/buffer-nav";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -70,11 +72,22 @@ window.addEventListener("message", (e) => {
     // becoming hidden / about to dispose).
     flushViewSave();
   } else if (msg.type === "load") {
-    // Feed the R3F store; topology.json text carries spec + diagram view;
-    // sceneText (optional) carries camera/camera3d/labelsGlobalHidden from topology.scene.json.
-    useThreeStore.getState().load(msg.text, msg.sceneText);
+    if (USE_NEW_SYSTEM) {
+      // New system is fully Go/buffer-driven: NO old spec store, NO pump. Skip
+      // store.load()'s spec parse so the old node/edge/pulse/geometry stores stay empty
+      // and inert. Reset the row-keyed buffer-nav id/label table (store.load does this
+      // on the old path) so it repopulates in node-row order from the fresh run's
+      // node-label sidecar. Everything the new render needs arrives via buffer-snapshot
+      // + node-label; label/badge visibility comes from the buffer overlay columns.
+      clearNavNodeIds();
+    } else {
+      // Feed the R3F store; topology.json text carries spec + diagram view;
+      // sceneText (optional) carries camera/camera3d/labelsGlobalHidden from topology.scene.json.
+      useThreeStore.getState().load(msg.text, msg.sceneText);
+    }
     // Push all Go-owned guide visibilities (including the master overlays toggle) so Go's
-    // authoritative state survives a window reload.
+    // authoritative state survives a window reload. Runs for BOTH paths: under the flag
+    // Go reflects these into the buffer overlay columns the new render path reads.
     useCameraStore.getState().setOverlaysVisible(viewerState.overlaysActive !== false);
     const guidePush = {
       tori: viewerState.sceneToriVisible !== false,
@@ -97,7 +110,15 @@ window.addEventListener("message", (e) => {
     }, pushed: guidePush });
     vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "set", state: guidePush });
   } else if (msg.type === "trace-event") {
-    handleTraceEvent(msg.event);
+    // Flag ON: the webview consumes ONLY the binary buffer + node-label sidecar; the
+    // JSON trace-event stream (pump.ts) does not run and the old stores stay empty.
+    // Flag OFF: unchanged — pump translates every trace event into the old stores.
+    if (!USE_NEW_SYSTEM) handleTraceEvent(msg.event);
+  } else if (msg.type === "node-label") {
+    // New-system label sidecar: record {id,label} into the row-keyed buffer-nav table
+    // (first-seen order == buffer node-row order). Runs under both flags; flag-off never
+    // reads this table, so the extra write is invisible there.
+    recordNavNodeLabel(msg.id, msg.label);
   } else if (msg.type === "buffer-snapshot") {
     // Phase 3/4: store the latest snapshot for buffer-scene rendering.
     // No render change here — the JSON trace still drives the scene.

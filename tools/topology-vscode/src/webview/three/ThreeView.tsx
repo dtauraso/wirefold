@@ -22,7 +22,8 @@ import type { BufferLabelPos } from "./buffer-scene";
 import { computeOcclusionCounts, computeOcclusionCountsNav } from "./scene-occlusion";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
-import { decodeNavNodes, getNavNodeIds } from "./buffer-nav";
+import { decodeNavNodes, getNavNodeIds, getNavNodeLabel } from "./buffer-nav";
+import { readOverlayLabelsGlobal, readOverlayBadgesGlobal } from "../../schema/buffer-layout";
 import { NavGuides } from "./NavGuides";
 import { PanPolarOverlay } from "./PanPolarOverlay";
 import { viewerState, patchViewerState } from "../state/viewer-state";
@@ -254,9 +255,22 @@ export function ThreeView() {
 
   const labelMap = useMemo(() => new Map(labelPositions.map((p) => [p.id, p])), [labelPositions]);
   const bufferLabelMap = useMemo(() => new Map(bufferLabelPositions.map((p) => [p.id, p])), [bufferLabelPositions]);
-  // Node label text keyed by id (from the loaded topology; the buffer is numeric).
-  // Used by the new-system pills to render human labels for each buffer node row.
-  const nodeLabelMap = useMemo(() => new Map(nodes.map((n) => [n.id, n.data?.label ?? n.id])), [nodes]);
+
+  // New-system label/badge global visibility come from the buffer overlay columns
+  // (Go-owned), NOT useCameraStore. Read at render time: on the new path ThreeView
+  // re-renders every frame (bufferLabelPositions updates each rAF), so a toggle change
+  // — which Go reflects into the buffer overlay row — is picked up within a frame.
+  // Buffer sense: LabelsGlobal/BadgesGlobal == 1 means VISIBLE, so hidden = (col === 0).
+  let bufLabelsHidden = false;
+  let bufBadgesHidden = false;
+  if (USE_NEW_SYSTEM) {
+    const snap = getLatestSnapshot();
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    if (decoded) {
+      bufLabelsHidden = readOverlayLabelsGlobal(decoded.overlayView) === 0;
+      bufBadgesHidden = readOverlayBadgesGlobal(decoded.overlayView) === 0;
+    }
+  }
 
 
   return (
@@ -335,9 +349,10 @@ export function ThreeView() {
       })}
 
       {/* Node label pills — NEW-SYSTEM path: one pill per buffer-projected node position
-          (BufferLabelProjector), label text looked up from the id table via nodeLabelMap.
+          (BufferLabelProjector), label text looked up from the buffer-nav label table
+          (getNavNodeLabel) fed by the node-label sidecar — no old spec store.
           Same style as the flag-off pills; positions/geometry are buffer-driven. */}
-      {USE_NEW_SYSTEM && !globalLabelsHidden && bufferLabelPositions.map((pos) => (
+      {USE_NEW_SYSTEM && !bufLabelsHidden && bufferLabelPositions.map((pos) => (
         <div
           key={pos.id}
           style={{
@@ -355,7 +370,7 @@ export function ThreeView() {
             ...PILL_STYLE,
           }}
         >
-          <div style={{ whiteSpace: "nowrap" }}>{nodeLabelMap.get(pos.id) ?? pos.id}</div>
+          <div style={{ whiteSpace: "nowrap" }}>{getNavNodeLabel(pos.id) ?? pos.id}</div>
         </div>
       ))}
 
@@ -399,7 +414,7 @@ export function ThreeView() {
       {/* Occlusion "+N" badges — NEW-SYSTEM path: occlusion computed from the buffer's
           node block (computeOcclusionCountsNav), positioned at the buffer projection.
           Same style as the flag-off badges; fully buffer-driven. */}
-      {USE_NEW_SYSTEM && !badgesHidden && bufferLabelPositions.map((pos) => {
+      {USE_NEW_SYSTEM && !bufBadgesHidden && bufferLabelPositions.map((pos) => {
         const count = bufferOcclusionCounts.get(pos.id);
         if (!count || count < 1) return null;
         return (
