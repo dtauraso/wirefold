@@ -51,6 +51,7 @@
 
 <div class="tabs" id="tabs">
   <button class="tab active" data-t="principle">Principle</button>
+  <button class="tab" data-t="ownership">Ownership &amp; loop</button>
   <button class="tab" data-t="today">Today (3 copies)</button>
   <button class="tab" data-t="path">The Path</button>
   <button class="tab" data-t="layout">Layout</button>
@@ -76,6 +77,29 @@
   <p class="muted">Numeric content <em>and</em> the semantic/log events are the one agnostic binary representation. The human-readable <code>.probe</code> log and the tests read a <b>decode</b> of the same binary.</p>
   <div class="note"><b>Semantic names live <em>in</em> the representation.</b> Event kinds (<code>fire</code>, <code>send</code>&hellip;) and column names are declared once in the shared schema (an enum / a field table). The binary carries a small <b>id</b> into that schema; the name is resolved from the schema, identically on both sides. Names aren&rsquo;t lost &mdash; they&rsquo;re part of the layout, resolved from the shared schema, not re-spelled as text on every message.</div>
   <p>The whole system is one loop: <b>input &rarr; Go (owns all state) &rarr; one binary buffer &rarr; TS renders</b>. TS renders and forwards input; it holds no domain state.</p>
+</section>
+
+<!-- OWNERSHIP -->
+<section id="ownership">
+  <h2>Ownership &amp; the loop</h2>
+  <h3>Ownership &mdash; Go owns all state</h3>
+  <table>
+    <tr><th>Owner</th><th>State</th></tr>
+    <tr><td><b>Go</b></td><td>Topology (nodes, edges, kinds, spec positions, fades); geometry (node centers, ports, wire segments); bead transit positions; interior-buffer slots; node status (torus / missed bead); overlay-visibility flags; <b>camera pose</b> (pivot, r, &theta;, &phi;); the semantic/log events; and <b>persistence</b> of the topology/spec file.</td></tr>
+    <tr><td><b>TS</b></td><td>Nothing domain. Only <b>ephemeral in-gesture bookkeeping</b> inside the input handler (drag origin, which button is down) &mdash; transient, discarded when the gesture ends. Not a store.</td></tr>
+    <tr><td>the buffer</td><td>The one binary representation &mdash; <b>Go writes it, TS views it</b>. Single source; no second copy.</td></tr>
+  </table>
+  <h3>The loop (the &ldquo;round trip&rdquo;)</h3>
+  <ol>
+    <li>User performs a gesture &mdash; orbit / zoom / drag / add / delete / click.</li>
+    <li>TS converts it to a CRUD/input event and sends it to Go <b>immediately, fire-and-forget</b> (no await, no response expected).</li>
+    <li>Go updates its owned state (camera / topology / &hellip;).</li>
+    <li>Go writes the updated state into the one binary buffer.</li>
+    <li>The buffer streams to TS (framed stdout &rarr; ext host &rarr; transferable ArrayBuffer &rarr; webview).</li>
+    <li>TS views the bytes and renders.</li>
+    <li>&hellip; repeat.</li>
+  </ol>
+  <div class="note"><b>Not a request/response.</b> Step 2 (input out) and steps 4&ndash;6 (buffer in) are <b>decoupled</b>: TS never blocks waiting for Go to answer its input &mdash; it just keeps rendering the latest buffer. &ldquo;Round trip&rdquo; means the <em>cycle</em> input&rarr;Go&rarr;buffer&rarr;render&rarr;(user)&rarr;input, not a blocking call. The only thing that crosses TS&rarr;Go is input; the only thing that crosses Go&rarr;TS is the buffer.</div>
 </section>
 
 <!-- TODAY -->
