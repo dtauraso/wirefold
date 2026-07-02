@@ -38,7 +38,7 @@ import {
   SHADING_PARAM_NODE_OPACITY,
 } from "../../schema/shading-params";
 import {
-  readBeadX, readBeadY, readBeadZ, readBeadLive,
+  readBeadX, readBeadY, readBeadZ, readBeadLive, readBeadValue,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
@@ -61,6 +61,10 @@ const INITIAL_NODE_CAP  = 32;
 const INITIAL_EDGE_CAP  = 32; // edge positions buffer: N edges × 2 endpoints × 3 floats
 
 const BEAD_SPHERE_RADIUS = 4;
+// On-wire (transit) bead ring tube ratio — mirror scene-beads.tsx's PulseBead
+// (PULSE_BEAD_R=4, BEAD_RING_TUBE_RATIO=0.12) so the buffer path's transit beads
+// match the JSON path's look exactly.
+const BEAD_RING_TUBE_RATIO = 0.12;
 const NODE_SPHERE_RADIUS = 12;
 // Interior (held) bead sphere radius + ring tube ratio — mirror scene-beads.tsx's
 // InteriorSlotBead (INTERIOR_BEAD_R=5, BEAD_RING_TUBE_RATIO=0.12) so the buffer path's
@@ -89,40 +93,65 @@ export function nodeRowColors(id: string): { fill: string; stroke: string } {
 
 // ── Sub-components (split so capacity growth triggers localised re-render) ────
 
+// On-wire (transit) beads rendered along the wires, matching the JSON path's PulseBead
+// (scene-beads.tsx). A bead draws only when Live=1 AND its value has a bead-style (0|1);
+// a non-0/1 value has no style and is HIDDEN (excluded from the draw count), exactly like
+// PulseBead. Two InstancedMeshes share one useFrame: a sphere body (R=4) and a torus ring
+// (R=4, tube 4*0.12), both meshStandardMaterial with emissiveIntensity=0 like PulseBead.
+// Color is value-driven via bead-style.ts (fill sphere + ring torus) — the same source the
+// JSON on-wire/interior beads use, so buffer and JSON transit beads cannot visually diverge.
 function BeadInstances({ capacity }: { capacity: number }) {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const bodyRef = useRef<THREE.InstancedMesh>(null);
+  const ringRef = useRef<THREE.InstancedMesh>(null);
   const matRef  = useRef(new THREE.Matrix4());
+  const colRef  = useRef(new THREE.Color());
 
   useFrame(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
+    const body = bodyRef.current;
+    const ring = ringRef.current;
+    if (!body || !ring) return;
 
     const snap = getLatestSnapshot();
-    if (!snap) { mesh.count = 0; return; }
+    if (!snap) { body.count = 0; ring.count = 0; return; }
     const decoded = decodeSnapshot(snap);
-    if (!decoded) { mesh.count = 0; return; }
+    if (!decoded) { body.count = 0; ring.count = 0; return; }
     const { beadCount, beadView } = decoded;
 
     let slot = 0;
     for (let i = 0; i < beadCount && slot < capacity; i++) {
       if (!readBeadLive(beadView, i)) continue;
+      const style = beadStyleForValue(readBeadValue(beadView, i));
+      if (!style) continue; // non-0/1 value → hide (never paint a fallback)
       matRef.current.setPosition(
         readBeadX(beadView, i),
         readBeadY(beadView, i),
         readBeadZ(beadView, i),
       );
-      mesh.setMatrixAt(slot, matRef.current);
+      body.setMatrixAt(slot, matRef.current);
+      ring.setMatrixAt(slot, matRef.current);
+      body.setColorAt(slot, colRef.current.set(style.fill));
+      ring.setColorAt(slot, colRef.current.set(style.ring));
       slot++;
     }
-    mesh.count = slot;
-    mesh.instanceMatrix.needsUpdate = true;
+    body.count = slot;
+    ring.count = slot;
+    body.instanceMatrix.needsUpdate = true;
+    ring.instanceMatrix.needsUpdate = true;
+    if (body.instanceColor) body.instanceColor.needsUpdate = true;
+    if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]}>
-      <sphereGeometry args={[BEAD_SPHERE_RADIUS, 8, 8]} />
-      <meshBasicMaterial color="#ff8844" />
-    </instancedMesh>
+    <>
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]}>
+        <sphereGeometry args={[BEAD_SPHERE_RADIUS, 16, 16]} />
+        <meshStandardMaterial emissiveIntensity={0} />
+      </instancedMesh>
+      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]}>
+        <torusGeometry args={[BEAD_SPHERE_RADIUS, BEAD_SPHERE_RADIUS * BEAD_RING_TUBE_RATIO, 8, 24]} />
+        <meshStandardMaterial emissiveIntensity={0} />
+      </instancedMesh>
+    </>
   );
 }
 
