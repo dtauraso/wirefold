@@ -500,10 +500,16 @@ func (t *Trace) NodeStatus(node string, torusRed bool, missedValue int, x, y, z 
 
 // Select emits the currently-selected node id (KindSelect). node="" clears the selection.
 // Go owns selection state; the gesture FSM emits this on a click so the buffer snapshot
-// marks the node's Selected column. The eventValue default shape ({step,kind,node,...})
-// carries the node id — no dedicated struct needed.
-func (t *Trace) Select(node string) {
-	t.emit(Event{Kind: KindSelect, Node: node})
+// marks the node's Selected column. own carries the select MODE: true = "own" (secondary/
+// two-finger tap), false = "surface" (primary click); the buffer snapshot stores it as
+// SelMode so the on-surface highlight picks the right owner/surface set. Carried on the
+// existing Value field (1=own, 0=surface) — no dedicated struct needed.
+func (t *Trace) Select(node string, own bool) {
+	v := 0
+	if own {
+		v = 1
+	}
+	t.emit(Event{Kind: KindSelect, Node: node, Value: v})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),

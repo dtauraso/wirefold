@@ -145,6 +145,9 @@ type overlaySnapState struct {
 	badgesGlobal   uint8
 	overlaysVis    uint8
 	doubleLinks    uint8
+	// selMode is the current select mode (1 = own, 0 = surface), set by KindSelect.
+	// Not an overlay flag — rides the overlay singleton row for the on-surface highlight.
+	selMode uint8
 }
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
@@ -264,6 +267,13 @@ func (s *SnapshotState) Update(ev T.Event) {
 		// clears the selection entirely. Persistent — survives across snapshots until the
 		// next select. Emit so the change is reflected in the buffer immediately.
 		s.setSelected(ev.Node)
+		// Value carries the select mode (1 = own, 0 = surface); store it for the
+		// on-surface highlight. Cleared to surface when the selection is cleared.
+		if ev.Node == "" {
+			s.overlay.selMode = 0
+		} else {
+			s.overlay.selMode = uint8(ev.Value)
+		}
 		s.emitSnapshot()
 	}
 }
@@ -524,7 +534,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles, ov.angleLabels,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal, ov.badgesGlobal,
-		ov.overlaysVis, ov.doubleLinks)
+		ov.overlaysVis, ov.doubleLinks, ov.selMode)
 
 	return buf
 }

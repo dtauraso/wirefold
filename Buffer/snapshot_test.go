@@ -224,6 +224,43 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSelectMode verifies that KindSelect's Value carries the select mode into the
+// overlay SelMode column (1 = own / secondary, 0 = surface / primary), and that
+// clearing the selection resets SelMode to surface.
+func TestSelectMode(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1})
+
+	selModeOf := func() byte {
+		snap := s.BuildSnapshot()
+		nodeCount := readU32(snap, 8)
+		edgeCount := readU32(snap, 12)
+		ovOff := BufHeaderSize +
+			int(readU32(snap, 4))*BufBeadStride +
+			int(nodeCount)*BufNodeStride +
+			int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
+			int(edgeCount)*BufEdgeStride +
+			BufCameraStride
+		return snap[ovOff+BufOverlayColSelMode]
+	}
+
+	// Primary click → surface (Value 0).
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n0", Value: 0})
+	if got := selModeOf(); got != 0 {
+		t.Errorf("surface select: SelMode got %d, want 0", got)
+	}
+	// Two-finger tap → own (Value 1).
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n0", Value: 1})
+	if got := selModeOf(); got != 1 {
+		t.Errorf("own select: SelMode got %d, want 1", got)
+	}
+	// Clear selection → SelMode resets to surface.
+	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
+	if got := selModeOf(); got != 0 {
+		t.Errorf("cleared select: SelMode got %d, want 0", got)
+	}
+}
+
 // parseFrameStream reads all framed snapshots from raw and returns their payloads.
 // Each frame is [len:u32-LE][payload]; returns an error string on malformed input.
 func parseFrameStream(t *testing.T, raw []byte) [][]byte {

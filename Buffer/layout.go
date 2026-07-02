@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 4
+const BufLayoutVersion = 5
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -144,6 +144,12 @@ type bufLayoutOverlay struct {
 	BadgesGlobal   uint8 `buf:"u8"` // 1 = all occlusion +N badges visible
 	OverlaysVis    uint8 `buf:"u8"` // 1 = master overlays toggle on
 	DoubleLinks    uint8 `buf:"u8"` // 1 = double-link arrow overlays visible
+	// SelMode is NOT an overlay flag — it rides the overlay singleton row only because
+	// it is a single global value that changes with selection. 1 = "own" (secondary /
+	// two-finger select: owners = [selected]); 0 = "surface" (primary click: owners =
+	// nodes that output TO selected). Set by KindSelect from the gesture button. The
+	// on-surface highlight reads it to pick the pre-branch owner/surface mode.
+	SelMode uint8 `buf:"u8"`
 }
 
 // schemaTypes prevents the bufLayout* types from being flagged as unused by

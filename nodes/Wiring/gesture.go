@@ -421,15 +421,16 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 	case g.phase == gestPending:
 		// Click → Go-owned selection. A node hit selects it; empty space clears the
 		// selection. md.selected is the authoritative selection; Select() emits it so the
-		// buffer snapshot marks the node's Selected column.
-		md.applySelect(ev, tr)
+		// buffer snapshot marks the node's Selected column. g.secondary (two-finger tap)
+		// picks the "own" select mode; a primary click picks "surface".
+		md.applySelect(ev, tr, g.secondary)
 	}
 	g.reset()
 }
 
 // applySelect sets the Go-owned selection from a click hit and emits it. A node/port hit
 // selects that node; an empty (or handhold) hit clears the selection.
-func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
+func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	var node string
 	switch ev.Hit.Kind {
 	case "node":
@@ -440,7 +441,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 		}
 	}
 	md.selected = node
-	tr.Select(node)
+	tr.Select(node, own)
 }
 
 // gestWheel mirrors interaction-handlers.ts handleWheelNative: ctrl+wheel = zoom-to-cursor
