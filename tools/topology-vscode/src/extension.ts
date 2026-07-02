@@ -60,7 +60,14 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   );
   panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
 
-  const post = (msg: HostToWebviewMsg) => panel.webview.postMessage(msg);
+  // Return void (not the postMessage Thenable) so this can be passed where VS
+  // Code expects void-returning callbacks; observe any rejection instead of
+  // letting it float silently.
+  const post = (msg: HostToWebviewMsg): void => {
+    void panel.webview.postMessage(msg).then(undefined, (err: unknown) => {
+      console.error("topology: postMessage failed", err);
+    });
+  };
   // Read the scene sidecar (topology/view/scene.json) fresh at load time so the
   // navigated camera (camera3d) is delivered to the webview as `sceneText`.
   // Without this the spec from Go carries only nodes/edges/view (diagram) and
@@ -185,7 +192,9 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     // Final fallback is undefined (no real workspace) — appendWebviewLog skips the
     // write rather than misdirecting .probe/ logs to an arbitrary cwd.
     const logUri = workspaceFolder?.uri ?? folderUri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
-    handleMessage(raw, { logUri, runner, post });
+    void handleMessage(raw, { logUri, runner, post }).catch((err: unknown) => {
+      console.error("topology: handleMessage failed", err);
+    });
   });
 
   // Spawn Go immediately (halted); it emits spec on startup which triggers load.

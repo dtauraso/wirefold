@@ -41,7 +41,7 @@ export function buildWebviewHtml(
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <title>Topology Editor</title>
-  <link rel="stylesheet" href="${styleUri}" />
+  <link rel="stylesheet" href="${styleUri.toString()}" />
 </head>
 <body>
   <div class="toolbar">
@@ -49,7 +49,7 @@ export function buildWebviewHtml(
     <span id="run-mount"></span>
   </div>
   <div id="app"></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
+  <script nonce="${nonce}" src="${scriptUri.toString()}"></script>
 </body>
 </html>`;
 }
