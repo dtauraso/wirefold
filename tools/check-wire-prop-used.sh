@@ -21,6 +21,19 @@ WIRE_DEFS_FILE="$REPO_ROOT/tools/topology-vscode/src/schema/wire-defs.ts"
 # The edge-render path: files where a wire prop legitimately flows from EdgeData /
 # WireProps into the drawn tube (geometry, styling, beads). A prop referenced in
 # ANY of these counts as rendered.
+#
+# SCOPE / HEURISTIC (deliberately loose, by design):
+#   - RENDER_PATH_FILES is a broad "render path" heuristic, not a precise draw-call
+#     set. spec-to-flow-helpers.ts (the spec→EdgeData adapter) is included even though
+#     it only POPULATES EdgeData rather than drawing the tube — a prop the adapter
+#     copies but never forwards to the tube would still pass this guard.
+#   - The per-key test below is a `.<prop>` REFERENCE match (see grep at "Axis"),
+#     not a call-graph trace: it confirms the prop NAME appears somewhere on the
+#     render path, not that its value actually reaches the drawn geometry/material.
+# Net: this catches the dominant failure (a WireProps key wired into NO render-path
+# file at all — dead prop), and accepts false-negatives for props that are referenced
+# but not truly forwarded. Threading-through-to-the-tube is verified by the CLAUDE.md
+# "Bridge surface" review and tsc types, not by this guard.
 RENDER_PATH_FILES=(
   "$REPO_ROOT/tools/topology-vscode/src/webview/three/scene-graph.tsx"
   "$REPO_ROOT/tools/topology-vscode/src/webview/three/ThreeView.tsx"
