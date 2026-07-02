@@ -20,3 +20,4 @@
 {"step":19,"kind":"overlays-vis","visible":true}
 {"step":20,"kind":"double-links","visible":false}
 {"step":21,"kind":"node-status","node":"A","torusRed":true,"missedValue":7,"x":1.5,"y":-2.5,"z":0}
+{"step":22,"kind":"select","node":"A","port":"","value":0}

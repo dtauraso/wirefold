@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 1
+const BufLayoutVersion = 2
 
 // --- Semantic event enum ------------------------------------------------
 // Transient flags stored in node rows (one u8 per event kind per node per tick).
@@ -72,6 +72,7 @@ type bufLayoutNode struct {
 	EvSend   uint8   `buf:"u8"`  // transient: node sent a bead this tick
 	EvArrive uint8   `buf:"u8"`  // transient: a bead arrived at node this tick
 	EvDone   uint8   `buf:"u8"`  // transient: node finished consuming this tick
+	Selected uint8   `buf:"u8"`  // persistent: 1 = this node is the click-selected node
 }
 
 // bufLayoutEdge defines one row of the edges column block.

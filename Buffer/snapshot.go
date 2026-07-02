@@ -88,6 +88,9 @@ type nodeSnapState struct {
 	evSend          uint8
 	evArrive        uint8
 	evDone          uint8
+	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
+	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
+	selected uint8
 }
 
 // edgeSnapState holds persistent segment endpoints for one edge.
@@ -230,6 +233,13 @@ func (s *SnapshotState) Update(ev T.Event) {
 
 	case T.KindDone:
 		s.setNodeEvent(ev.Node, BufEventDoneID)
+
+	case T.KindSelect:
+		// Go-owned selection: mark ev.Node selected, clear every other node. ev.Node==""
+		// clears the selection entirely. Persistent — survives across snapshots until the
+		// next select. Emit so the change is reflected in the buffer immediately.
+		s.setSelected(ev.Node)
+		s.emitSnapshot()
 	}
 }
 
@@ -313,6 +323,25 @@ func (s *SnapshotState) setNodeEvent(nodeID string, eventID int) {
 	}
 }
 
+// setSelected marks nodeID as the selected node and clears the flag on every other
+// node. nodeID=="" clears all selection. Persistent state — not touched by
+// clearTransients.
+func (s *SnapshotState) setSelected(nodeID string) {
+	sel := -1
+	if nodeID != "" {
+		if idx, ok := s.nodeIndex[nodeID]; ok {
+			sel = idx
+		}
+	}
+	for i := range s.nodes {
+		if i == sel {
+			s.nodes[i].selected = 1
+		} else {
+			s.nodes[i].selected = 0
+		}
+	}
+}
+
 // clearTransients resets all transient node event flags to 0 after snapshot emit.
 func (s *SnapshotState) clearTransients() {
 	for i := range s.nodes {
@@ -386,7 +415,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			float32(n.radius), float32(n.sphereR),
 			n.torusRed, n.missVal,
 			float32(n.mx), float32(n.my), float32(n.mz),
-			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone)
+			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected)
 	}
 	off += int(nodeCount) * BufNodeStride
 

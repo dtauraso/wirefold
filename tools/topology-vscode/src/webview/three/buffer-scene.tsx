@@ -17,17 +17,19 @@ import React, { useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
+import { USE_NEW_SYSTEM } from "../new-system";
 import { decodeSnapshot } from "./buffer-decode";
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive,
-  readNodeCX, readNodeCY, readNodeCZ,
+  readNodeCX, readNodeCY, readNodeCZ, readNodeSelected,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
 } from "../../schema/buffer-layout";
 
 // ── Dev flag ──────────────────────────────────────────────────────────────────
-// Set to true to mount the buffer render path alongside the existing JSON render.
-// Flip this to true in the "flip" phase to switch over entirely.
-export const USE_BUFFER_RENDER = false;
+// Follows the ONE master switch (USE_NEW_SYSTEM). ON = mount the buffer render path;
+// OFF (default) = zero cost, the JSON render path runs unchanged. Toggle at RUNTIME via
+// the `wirefold.newSystem` VS Code setting + Reload Window — no source edit needed.
+export const USE_BUFFER_RENDER = USE_NEW_SYSTEM;
 
 // ── Sizing constants ──────────────────────────────────────────────────────────
 const INITIAL_BEAD_CAP  = 64;
@@ -111,6 +113,45 @@ function NodeInstances({ capacity }: { capacity: number }) {
   );
 }
 
+// Highlight ring drawn around the Go-selected node (Selected column = 1). Go OWNS the
+// selection; this is pure render of the buffer's Selected column — no TS selection store.
+function SelectionHighlight({ capacity }: { capacity: number }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const matRef  = useRef(new THREE.Matrix4());
+
+  useFrame(() => {
+    const snap = getLatestSnapshot();
+    if (!snap) return;
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) return;
+    const { nodeCount, nodeView } = decoded;
+
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    let slot = 0;
+    for (let i = 0; i < nodeCount && slot < capacity; i++) {
+      if (!readNodeSelected(nodeView, i)) continue;
+      matRef.current.setPosition(
+        readNodeCX(nodeView, i),
+        readNodeCY(nodeView, i),
+        readNodeCZ(nodeView, i),
+      );
+      mesh.setMatrixAt(slot, matRef.current);
+      slot++;
+    }
+    mesh.count = slot;
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]}>
+      <sphereGeometry args={[NODE_SPHERE_RADIUS * 1.25, 16, 16]} />
+      <meshBasicMaterial color="#ffee44" wireframe transparent opacity={0.85} />
+    </instancedMesh>
+  );
+}
+
 function EdgeLines({ capacity }: { capacity: number }) {
   const linesRef  = useRef<THREE.LineSegments>(null);
   const geoRef    = useRef(new THREE.BufferGeometry());
@@ -190,6 +231,7 @@ export function BufferScene() {
     <>
       <BeadInstances capacity={beadCap} />
       <NodeInstances capacity={nodeCap} />
+      <SelectionHighlight capacity={nodeCap} />
       <EdgeLines     capacity={edgeCap} />
     </>
   );

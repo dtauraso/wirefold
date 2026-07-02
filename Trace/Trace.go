@@ -125,13 +125,18 @@ const (
 	// clearing the missed marker) when the node finishes processing. Keyed by node id.
 	// This is Go REPORTING what it does — the renderer plots it later (no rendering yet).
 	KindNodeStatus = "node-status"
+	// KindSelect carries the CURRENTLY-SELECTED node id (click-select). Selection is
+	// Go-owned state: the gesture state machine (gesture.go) sets it on a click and emits
+	// this event so the buffer snapshot marks the node's Selected column. Node="" clears
+	// the selection (empty-space click). Keyed by node id; the renderer highlights it.
+	KindSelect = "select"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindNodeStatus}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindNodeStatus, KindSelect}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -476,6 +481,14 @@ func (t *Trace) OverlaysVis(visible bool) {
 // node finishes processing). Go REPORTS this; the renderer plots it later.
 func (t *Trace) NodeStatus(node string, torusRed bool, missedValue int, x, y, z float64) {
 	t.emit(Event{Kind: KindNodeStatus, Node: node, TorusRed: torusRed, Value: missedValue, X: x, Y: y, Z: z, hasPos: true})
+}
+
+// Select emits the currently-selected node id (KindSelect). node="" clears the selection.
+// Go owns selection state; the gesture FSM emits this on a click so the buffer snapshot
+// marks the node's Selected column. The eventValue default shape ({step,kind,node,...})
+// carries the node id — no dedicated struct needed.
+func (t *Trace) Select(node string) {
+	t.emit(Event{Kind: KindSelect, Node: node})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),

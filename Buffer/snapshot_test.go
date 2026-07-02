@@ -311,3 +311,43 @@ func TestTransientFlagsCleared(t *testing.T) {
 		t.Errorf("EvFire not cleared after snapshot: got %v, want 0", snap[nodeOff+BufNodeColEvFire])
 	}
 }
+
+// TestSelectionPersistsAndIsExclusive verifies KindSelect marks exactly one node's
+// Selected column, that it PERSISTS across snapshots (unlike transient event flags),
+// and that a later select on another node moves the flag (exclusive), while node=""
+// clears it entirely.
+func TestSelectionPersistsAndIsExclusive(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
+
+	n1 := BufHeaderSize // no beads, no need to offset
+	n2 := n1 + BufNodeStride
+
+	// Select n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
+	snap := s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 1 || snap[n2+BufNodeColSelected] != 0 {
+		t.Fatalf("after select n1: n1.Selected=%d n2.Selected=%d want 1,0", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
+	}
+
+	// Persists: a fresh snapshot with no further select keeps n1 selected.
+	snap = s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 1 {
+		t.Fatalf("selection did not persist: n1.Selected=%d want 1", snap[n1+BufNodeColSelected])
+	}
+
+	// Exclusive: selecting n2 clears n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
+	snap = s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 0 || snap[n2+BufNodeColSelected] != 1 {
+		t.Fatalf("after select n2: n1.Selected=%d n2.Selected=%d want 0,1", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
+	}
+
+	// Clear: node="" deselects all.
+	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
+	snap = s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 0 || snap[n2+BufNodeColSelected] != 0 {
+		t.Fatalf("after clear: n1.Selected=%d n2.Selected=%d want 0,0", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
+	}
+}

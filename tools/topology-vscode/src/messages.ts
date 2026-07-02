@@ -201,6 +201,8 @@ export type TraceEvent =
   | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
   | { step: number; kind: "double-links"; visible: boolean }
+  // Go-owned click-selection: the currently-selected node id (node="" clears it).
+  | { step: number; kind: "select"; node: string }
   // node-status payload is GENERATED from Trace.go (schema/trace-event-fields.ts):
   // a Go field rename/retype regenerates NodeStatusEvent and breaks tsc here +
   // at pump.ts, closing the hand-authored field-drift gap.

@@ -355,6 +355,11 @@ export function handleTraceEvent(event: TraceEvent): void {
       setNodeStatus(e.node, e.torusRed, e.missedValue, e.x, e.y, e.z);
       return;
     }
+    case "select":
+      // Go-owned click-selection. On the CURRENT (non-buffer) render path selection is
+      // owned by the TS store, so this is a no-op here; the new buffer path reads the
+      // Selected column straight from the snapshot (BufferScene), not this event.
+      return;
     default:
       assertNever(k);
   }
