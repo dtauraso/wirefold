@@ -92,8 +92,8 @@
   <h3>The loop (the &ldquo;round trip&rdquo;)</h3>
   <ol>
     <li>User performs a gesture &mdash; orbit / zoom / drag / add / delete / click.</li>
-    <li>TS converts it to a CRUD/input event and sends it to Go <b>immediately, fire-and-forget</b> (no await, no response expected).</li>
-    <li>Go updates its owned state (camera / topology / &hellip;).</li>
+    <li>TS forwards the <b>raw pointer event</b> (<code>pointerdown/move/up</code>, <code>wheel</code>, modifiers) plus the stateless raycast hit to Go <b>immediately, fire-and-forget</b> (no await, no response expected). TS does not interpret the gesture.</li>
+    <li>Go&rsquo;s gesture state machine decides what the raw input means (orbit / zoom / drag / create / delete) and updates its owned state (camera / topology / &hellip;).</li>
     <li>Go writes the updated state into the one binary buffer.</li>
     <li>The buffer streams to TS (framed stdout &rarr; ext host &rarr; transferable ArrayBuffer &rarr; webview).</li>
     <li>TS views the bytes and renders.</li>
@@ -160,7 +160,7 @@
 <!-- LAYOUT -->
 <section id="layout">
   <h2>The layout (defined once)</h2>
-  <p>Content is a set of fixed-width numeric <b>columns</b>. A row = one entity, indexed by a stable slot (a bead&rsquo;s slot, a node&rsquo;s index). The layout &mdash; column names, types, offsets, max rows &mdash; is declared in <b>one schema</b> and generated for both sides.</p>
+  <p>Content is a set of fixed-width numeric <b>columns</b>. A row = one entity in that snapshot. The layout &mdash; column names, types, and offsets &mdash; is declared in <b>one schema</b> and generated for both sides. The row <code>count</code> is per-snapshot (in the snapshot header), not a fixed maximum.</p>
   <pre><span class="c">// one schema (illustrative) — offsets/strides generated for Go writer + TS reader</span>
 beads   : <span class="b">{ count, cols:[ x:f32, y:f32, z:f32, value:i32, frac:f32, live:u8 ] }</span>
 nodes   : <span class="b">{ count, cols:[ cx:f32, cy:f32, cz:f32, r:f32, ...ports ] }</span>
@@ -222,7 +222,7 @@ instanced.count = liveBeadCount;</pre>
   </ul>
   <p class="muted">TS keeps <b>no state at all</b> &mdash; not even gesture bookkeeping. Raw pointer events (<code>pointerdown/move/up</code>, <code>wheel</code>) are forwarded to Go; drag origin, which button is down, and the in-progress gesture all live in <b>Go&rsquo;s gesture state machine</b>. (Browser pointer-capture is a DOM mechanism, not app state.)</p>
   <h3>Interaction</h3>
-  <p>Mouse events (orbit / zoom / drag / add / delete) are forwarded to Go <b>immediately</b> as CRUD/input; everything the renderer needs (incl. port positions during a drag) is read from the <b>buffer view</b>. TS renders + forwards; it holds nothing.</p>
+  <p>Raw pointer events (<code>pointerdown/move/up</code>, <code>wheel</code>) plus the stateless raycast hit are forwarded to Go <b>immediately, fire-and-forget</b>. Go&rsquo;s gesture state machine decides what they mean (orbit / zoom / drag / create / delete). Everything the renderer needs (incl. port positions during a drag) is read from the <b>buffer view</b>. TS renders + forwards; it holds nothing.</p>
   <h3>Hit-testing (resolved &mdash; option a)</h3>
   <p>three.js builds its scene from the buffer; on a pointer event its <b>raycaster computes which rendered entity is under the pointer</b> (using the buffer&rsquo;s camera). TS sends that hit &mdash; <b>entity id + world point, in the shared format</b> &mdash; directly to Go. Division of labor: <b>three.js computes the hit geometry; Go&rsquo;s gesture state machine decides what it means.</b> TS stays stateless: <em>build scene from buffer &rarr; raycast on demand &rarr; forward the hit</em>. (Go&rsquo;s data is a neutral numeric layout, not three.js&rsquo;s format &mdash; TS maps columns into three.js structures.)</p>
 </section>
@@ -253,7 +253,7 @@ instanced.count = liveBeadCount;</pre>
   <ul>
     <li><b>Go:</b> pack all output &mdash; position/geometry/status <em>and</em> the semantic events (as transient columns) &mdash; into the snapshot layout; frame stdout output &mdash; one binary emitter.</li>
     <li><b>Bridge/ext host:</b> read framed stdout; transfer each snapshot to the webview; decode its event columns to the log.</li>
-    <li><b>Webview:</b> hold the buffer, expose typed views, feed instanced GPU attributes; delete <em>all</em> domain stores (render + overlay flags + spec/diagram + camera pose); forward mouse events as CRUD/input; read everything else from the buffer.</li>
+    <li><b>Webview:</b> hold the buffer, expose typed views, feed instanced GPU attributes; delete <em>all</em> domain stores (render + overlay flags + spec/diagram + camera pose); forward raw pointer events (+ raycast hit) to Go; read everything else from the buffer.</li>
     <li><b>Codegen + guard:</b> single layout schema → Go writer + TS reader + a layout-parity guard; docs (MODEL.md/CLAUDE.md bridge wording).</li>
   </ul>
   <h3>Non-goals</h3>
