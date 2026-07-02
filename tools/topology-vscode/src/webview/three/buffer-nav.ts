@@ -9,14 +9,18 @@
 // ── Ordering guarantee (id table index i ↔ buffer node row i) ──────────────────
 // Go's Buffer.SnapshotState assigns each node its row on the FIRST KindNodeGeometry
 // event it sees for that id (insertion order; re-emits on a move do not reorder — see
-// Buffer/snapshot.go onNodeGeometry). The webview receives the SAME node-geometry
-// trace-event stream, in the SAME emission order (sequential JSONL on stdout →
-// ordered postMessage). recordNavNodeId is called from pump.ts's node-geometry case
-// with the identical first-seen rule (append on first sight, ignore repeats), so the
-// id table is built by the same rule over the same stream — index i therefore maps to
-// buffer node row i by construction. Both sides start empty per run (Go re-spawns
-// fresh; the webview clears this table at the run-start boundary next to
-// clearAllNodeGeometry), keeping the two orderings aligned across edit/reload cycles.
+// Buffer/snapshot.go onNodeGeometry). The webview builds this id table from the SAME
+// node-geometry stream by the SAME first-seen rule, so index i maps to buffer node
+// row i by construction. Two writers, both first-seen dedup:
+//   • NEW system (USE_NEW_SYSTEM): the node-label host→webview sidecar. The host
+//     derives one {id,label} per node id — once, in first-seen node-geometry order —
+//     from the geometry stream and forwards it independent of pump.ts; main.tsx routes
+//     it to recordNavNodeLabel. This is the sole builder when the flag is on (pump is
+//     gated off), and it also carries the human label so pills need no spec store.
+//   • OLD system (flag off): recordNavNodeId, called from pump.ts's node-geometry case.
+// Both sides start empty per run (Go re-spawns fresh; the host clears its per-run dedup
+// on the spec/new-run boundary; the webview clears this table at the load boundary next
+// to clearAllNodeGeometry), keeping the two orderings aligned across edit/reload cycles.
 //
 // This is a RENDERING RESOURCE keyed by row, NOT a domain store of positions or
 // topology: it holds only the ordered ids. Positions/radii/sphereR/selection all come
