@@ -243,6 +243,23 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d constants)\n", shadingParamsTsPath, len(shadingParams))
 
+	bufLayoutGoPath := filepath.Join(repoRoot, "Buffer", "layout.go")
+	bufSchema, err := parseBufferLayout(bufLayoutGoPath)
+	if err != nil {
+		fatalf("parse buffer layout: %v", err)
+	}
+	bufLayoutGenGoPath := filepath.Join(repoRoot, "Buffer", "buffer_layout_gen.go")
+	if err := writeBufferLayoutGo(bufLayoutGenGoPath, bufSchema); err != nil {
+		fatalf("write %s: %v", bufLayoutGenGoPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d blocks, %d events)\n", bufLayoutGenGoPath, len(bufSchema.blocks), len(bufSchema.events))
+
+	bufLayoutTSPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "buffer-layout.ts")
+	if err := writeBufferLayoutTS(bufLayoutTSPath, bufSchema); err != nil {
+		fatalf("write %s: %v", bufLayoutTSPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d blocks, %d events)\n", bufLayoutTSPath, len(bufSchema.blocks), len(bufSchema.events))
+
 }
 
 // findRepoRoot walks up from dir until it finds a directory containing "nodes/".
@@ -1486,11 +1503,18 @@ func parseCurveParams(goPath string) ([]curveParam, error) {
 
 // camelToScreamingSnake converts PascalCase/camelCase to SCREAMING_SNAKE_CASE.
 // e.g. CurveParamBulgeFactor → CURVE_PARAM_BULGE_FACTOR
+// Inserts '_' before an uppercase letter only when the PRECEDING rune was
+// lowercase, so abbreviations like "BeadID" → "BEAD_ID" and "CX" → "CX"
+// stay intact (consecutive uppercase letters are NOT split).
 func camelToScreamingSnake(s string) string {
+	runes := []rune(s)
 	var out []rune
-	for i, r := range s {
+	for i, r := range runes {
 		if i > 0 && r >= 'A' && r <= 'Z' {
-			out = append(out, '_')
+			prev := runes[i-1]
+			if prev >= 'a' && prev <= 'z' {
+				out = append(out, '_')
+			}
 		}
 		if r >= 'a' && r <= 'z' {
 			out = append(out, r-32) // to upper
@@ -1881,6 +1905,406 @@ func kebabOf(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// ─── Buffer layout codegen ───────────────────────────────────────────────────
+
+// bufCol is one column within a buffer block (from a buf: struct tag).
+type bufCol struct {
+	name    string // Go field name, e.g. "X"
+	bufType string // "f32" | "i32" | "u32" | "u8"
+	offset  int    // byte offset within one row (packed, no padding)
+}
+
+// bufBlock is one column block from a bufLayout* struct definition.
+type bufBlock struct {
+	name    string   // e.g. "Bead", "Node", "Edge", "Camera", "Overlay"
+	columns []bufCol // in declaration order
+	stride  int      // total bytes per row
+}
+
+// bufEventEntry is one entry in the semantic event enum (BufEvent* constants).
+type bufEventEntry struct {
+	name  string // e.g. "Recv"
+	value int
+}
+
+// bufLayoutSchema is the parsed content of Buffer/layout.go.
+type bufLayoutSchema struct {
+	version int
+	blocks  []bufBlock
+	events  []bufEventEntry
+}
+
+// bufTypeSize returns the byte width of a buf: type tag value.
+func bufTypeSize(t string) (int, error) {
+	switch t {
+	case "f32", "i32", "u32":
+		return 4, nil
+	case "u8":
+		return 1, nil
+	}
+	return 0, fmt.Errorf("unknown buf type %q (expected f32|i32|u32|u8)", t)
+}
+
+// parseBufferLayout reads Buffer/layout.go and returns the schema:
+// - BufLayoutVersion const → version
+// - BufEvent* consts in source order → events
+// - bufLayout* struct types in source order → blocks with columns + strides
+func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, layoutPath, nil, 0)
+	if err != nil {
+		return bufLayoutSchema{}, err
+	}
+
+	var schema bufLayoutSchema
+
+	// Walk declarations in source order to preserve relative ordering of consts
+	// and struct types (they are interleaved intentionally — version first, then
+	// events, then blocks).
+	for _, decl := range f.Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			if d.Tok == token.CONST {
+				for _, spec := range d.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, nm := range vs.Names {
+						if i >= len(vs.Values) {
+							continue
+						}
+						lit, ok := vs.Values[i].(*ast.BasicLit)
+						if !ok || lit.Kind != token.INT {
+							continue
+						}
+						var ival int
+						fmt.Sscan(lit.Value, &ival)
+						switch {
+						case nm.Name == "BufLayoutVersion":
+							schema.version = ival
+						case strings.HasPrefix(nm.Name, "BufEvent"):
+							suffix := nm.Name[len("BufEvent"):]
+							schema.events = append(schema.events, bufEventEntry{name: suffix, value: ival})
+						}
+					}
+				}
+			} else if d.Tok == token.TYPE {
+				for _, spec := range d.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					if !strings.HasPrefix(ts.Name.Name, "bufLayout") {
+						continue
+					}
+					st, ok := ts.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					blockName := ts.Name.Name[len("bufLayout"):]
+					block := bufBlock{name: blockName}
+					offset := 0
+					for _, field := range st.Fields.List {
+						if field.Tag == nil || len(field.Names) == 0 {
+							continue
+						}
+						rawTag := strings.Trim(field.Tag.Value, "`")
+						_, after, ok := strings.Cut(rawTag, `buf:"`)
+						if !ok {
+							continue
+						}
+						bufType, _, _ := strings.Cut(after, `"`)
+						sz, err := bufTypeSize(bufType)
+						if err != nil {
+							return bufLayoutSchema{}, fmt.Errorf("block %s field %s: %w", blockName, field.Names[0].Name, err)
+						}
+						block.columns = append(block.columns, bufCol{
+							name:    field.Names[0].Name,
+							bufType: bufType,
+							offset:  offset,
+						})
+						offset += sz
+					}
+					block.stride = offset
+					schema.blocks = append(schema.blocks, block)
+				}
+			}
+		}
+	}
+
+	if schema.version == 0 {
+		return bufLayoutSchema{}, fmt.Errorf("BufLayoutVersion const not found in %s", layoutPath)
+	}
+	if len(schema.events) == 0 {
+		return bufLayoutSchema{}, fmt.Errorf("no BufEvent* consts found in %s", layoutPath)
+	}
+	if len(schema.blocks) == 0 {
+		return bufLayoutSchema{}, fmt.Errorf("no bufLayout* struct types found in %s", layoutPath)
+	}
+	return schema, nil
+}
+
+// buildBufFingerprint builds a deterministic fingerprint string from the schema.
+// Both generated files embed this as a comment; the parity guard greps and compares.
+func buildBufFingerprint(schema bufLayoutSchema) string {
+	var parts []string
+	parts = append(parts, fmt.Sprintf("version:%d", schema.version))
+	for _, blk := range schema.blocks {
+		var cols []string
+		for _, c := range blk.columns {
+			cols = append(cols, fmt.Sprintf("%s:%s:%d", c.name, c.bufType, c.offset))
+		}
+		parts = append(parts, fmt.Sprintf("block:%s[%s]:stride:%d", blk.name, strings.Join(cols, ","), blk.stride))
+	}
+	var evs []string
+	for _, ev := range schema.events {
+		evs = append(evs, fmt.Sprintf("%s:%d", ev.name, ev.value))
+	}
+	parts = append(parts, "event["+strings.Join(evs, ",")+"]")
+	return strings.Join(parts, "|")
+}
+
+// goWriterCall returns the Go snippet to write one column into buf[off+c.offset:].
+func goWriterCall(c bufCol) string {
+	off := fmt.Sprintf("off+%d", c.offset)
+	param := strings.ToLower(c.name[:1]) + c.name[1:]
+	switch c.bufType {
+	case "f32":
+		return fmt.Sprintf("\tbinary.LittleEndian.PutUint32(buf[%s:], math.Float32bits(%s))", off, param)
+	case "i32":
+		return fmt.Sprintf("\tbinary.LittleEndian.PutUint32(buf[%s:], uint32(%s))", off, param)
+	case "u32":
+		return fmt.Sprintf("\tbinary.LittleEndian.PutUint32(buf[%s:], %s)", off, param)
+	case "u8":
+		return fmt.Sprintf("\tbuf[%s] = %s", off, param)
+	}
+	return ""
+}
+
+// goParamType returns the Go parameter type for a buf: type tag.
+func goParamType(t string) string {
+	switch t {
+	case "f32":
+		return "float32"
+	case "i32":
+		return "int32"
+	case "u32":
+		return "uint32"
+	case "u8":
+		return "uint8"
+	}
+	return "byte"
+}
+
+// tsDataViewGetter returns the DataView getter method for a buf: type.
+func tsDataViewGetter(t string) string {
+	switch t {
+	case "f32":
+		return "getFloat32"
+	case "i32":
+		return "getInt32"
+	case "u32":
+		return "getUint32"
+	case "u8":
+		return "getUint8"
+	}
+	return "getUint8"
+}
+
+// tsDataViewLE returns ", true" for multi-byte types (little-endian flag) or ""
+// for single-byte types.
+func tsDataViewLE(t string) string {
+	if t == "u8" {
+		return ""
+	}
+	return ", true"
+}
+
+// colGoName converts a block name + column name to the Go const name.
+// e.g. Bead + X → BufBeadColX; Bead + stride → BufBeadStride.
+func colGoName(block, col string) string {
+	return "Buf" + block + "Col" + col
+}
+
+// strideGoName returns the Go stride constant name for a block.
+func strideGoName(block string) string {
+	return "Buf" + block + "Stride"
+}
+
+// colTSName converts a block name + column name to the TS const name (SCREAMING_SNAKE).
+// e.g. Bead + X → BEAD_COL_X; Node + CX → NODE_COL_CX.
+func colTSName(block, col string) string {
+	return camelToScreamingSnake(block) + "_COL_" + camelToScreamingSnake(col)
+}
+
+// strideTSName returns the TS stride constant name for a block.
+func strideTSName(block string) string {
+	return camelToScreamingSnake(block) + "_STRIDE"
+}
+
+// writerFnGoName returns the Go writer function name for a block.
+func writerFnGoName(block string) string {
+	return "Set" + block + "Row"
+}
+
+// readerFnTSName returns the TS reader function name for one column.
+func readerFnTSName(block, col string) string {
+	return "read" + block + col
+}
+
+// writeBufferLayoutGo emits Buffer/buffer_layout_gen.go.
+func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
+	fp := buildBufFingerprint(schema)
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+
+	fmt.Fprintln(w, `// GENERATED by tools/gen-node-defs — do not edit.`)
+	fmt.Fprintln(w, `// Source: Buffer/layout.go  Regenerate: cd tools/topology-vscode && npm run gen:node-defs`)
+	fmt.Fprintf(w, "// BUF_LAYOUT_FINGERPRINT: %s\n", fp)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `package Buffer`)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `import (`)
+	fmt.Fprintln(w, `	"encoding/binary"`)
+	fmt.Fprintln(w, `	"math"`)
+	fmt.Fprintln(w, `)`)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "// BufLayoutVersionGenerated must equal BufLayoutVersion in layout.go.\n")
+	fmt.Fprintf(w, "const BufLayoutVersionGenerated = %d\n", schema.version)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `// BufHeaderSize is the byte width of the snapshot header:`)
+	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]`)
+	fmt.Fprintln(w, `const BufHeaderSize = 16`)
+
+	for _, blk := range schema.blocks {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "// ── %s block ", blk.name)
+		fmt.Fprintln(w, strings.Repeat("─", 60-len(blk.name)-9))
+		fmt.Fprintln(w, `const (`)
+		for _, c := range blk.columns {
+			fmt.Fprintf(w, "\t%-35s = %d // %s\n", colGoName(blk.name, c.name), c.offset, c.bufType)
+		}
+		fmt.Fprintf(w, "\t%-35s = %d\n", strideGoName(blk.name), blk.stride)
+		fmt.Fprintln(w, `)`)
+		fmt.Fprintln(w)
+
+		// Writer function.
+		var params []string
+		if blk.name == "Camera" || blk.name == "Overlay" {
+			// Camera and Overlay always have exactly 1 row; omit row param.
+			for _, c := range blk.columns {
+				pname := strings.ToLower(c.name[:1]) + c.name[1:]
+				params = append(params, fmt.Sprintf("%s %s", pname, goParamType(c.bufType)))
+			}
+			fmt.Fprintf(w, "// %s writes the %s row into buf (always 1 row; no row param).\n", writerFnGoName(blk.name), blk.name)
+			fmt.Fprintf(w, "func %s(buf []byte, %s) {\n", writerFnGoName(blk.name), strings.Join(params, ", "))
+			for _, c := range blk.columns {
+				pname := strings.ToLower(c.name[:1]) + c.name[1:]
+				off := fmt.Sprintf("%d", c.offset)
+				switch c.bufType {
+				case "f32":
+					fmt.Fprintf(w, "\tbinary.LittleEndian.PutUint32(buf[%s:], math.Float32bits(%s))\n", off, pname)
+				case "i32":
+					fmt.Fprintf(w, "\tbinary.LittleEndian.PutUint32(buf[%s:], uint32(%s))\n", off, pname)
+				case "u32":
+					fmt.Fprintf(w, "\tbinary.LittleEndian.PutUint32(buf[%s:], %s)\n", off, pname)
+				case "u8":
+					fmt.Fprintf(w, "\tbuf[%s] = %s\n", off, pname)
+				}
+			}
+			fmt.Fprintln(w, `}`)
+		} else {
+			for _, c := range blk.columns {
+				pname := strings.ToLower(c.name[:1]) + c.name[1:]
+				params = append(params, fmt.Sprintf("%s %s", pname, goParamType(c.bufType)))
+			}
+			fmt.Fprintf(w, "// %s writes one %s row into buf[row*%s:].\n", writerFnGoName(blk.name), blk.name, strideGoName(blk.name))
+			fmt.Fprintf(w, "func %s(buf []byte, row int, %s) {\n", writerFnGoName(blk.name), strings.Join(params, ", "))
+			fmt.Fprintf(w, "\toff := row * %s\n", strideGoName(blk.name))
+			for _, c := range blk.columns {
+				fmt.Fprintln(w, goWriterCall(c))
+			}
+			fmt.Fprintln(w, `}`)
+		}
+	}
+
+	// Event enum.
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `// ── Semantic event enum ─────────────────────────────────────────────────────────`)
+	fmt.Fprintln(w, `// Transient per-node flags stored in node rows (EvRecv/EvFire/…).`)
+	fmt.Fprintln(w, `// These ids are embedded in snapshots; names are resolved from this schema.`)
+	fmt.Fprintln(w, `const (`)
+	for _, ev := range schema.events {
+		fmt.Fprintf(w, "\tBufEvent%sID = %d\n", ev.name, ev.value)
+	}
+	fmt.Fprintln(w, `)`)
+
+	w.Flush()
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("format buffer_layout_gen.go: %w\n--- unformatted ---\n%s", err, buf.String())
+	}
+	return os.WriteFile(outPath, formatted, 0644)
+}
+
+// writeBufferLayoutTS emits tools/topology-vscode/src/schema/buffer-layout.ts.
+func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
+	fp := buildBufFingerprint(schema)
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+
+	fmt.Fprintln(w, `// GENERATED by tools/gen-node-defs — do not edit.`)
+	fmt.Fprintln(w, `// Source: Buffer/layout.go  Regenerate: npm run gen:node-defs`)
+	fmt.Fprintf(w, "// BUF_LAYOUT_FINGERPRINT: %s\n", fp)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "/** Schema version — must match BufLayoutVersion in Buffer/layout.go. */\n")
+	fmt.Fprintf(w, "export const BUF_LAYOUT_VERSION = %d;\n", schema.version)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32] */`)
+	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 16;`)
+
+	for _, blk := range schema.blocks {
+		fmt.Fprintln(w)
+		sep := strings.Repeat("─", 60-len(blk.name)-9)
+		fmt.Fprintf(w, "// ── %s block %s\n", blk.name, sep)
+		for _, c := range blk.columns {
+			fmt.Fprintf(w, "export const %-35s = %d; // %s\n", colTSName(blk.name, c.name), c.offset, c.bufType)
+		}
+		fmt.Fprintf(w, "export const %-35s = %d;\n", strideTSName(blk.name), blk.stride)
+		fmt.Fprintln(w)
+
+		// Reader helpers.
+		stride := strideTSName(blk.name)
+		for _, c := range blk.columns {
+			colConst := colTSName(blk.name, c.name)
+			getter := tsDataViewGetter(c.bufType)
+			le := tsDataViewLE(c.bufType)
+			fnName := readerFnTSName(blk.name, c.name)
+			if blk.name == "Camera" || blk.name == "Overlay" {
+				// Single-row blocks: no row param.
+				fmt.Fprintf(w, "export function %s(view: DataView): number { return view.%s(%s%s); }\n",
+					fnName, getter, colConst, le)
+			} else {
+				fmt.Fprintf(w, "export function %s(view: DataView, row: number): number { return view.%s(row * %s + %s%s); }\n",
+					fnName, getter, stride, colConst, le)
+			}
+		}
+	}
+
+	// Event enum.
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `// ── Semantic event enum ─────────────────────────────────────────────────────────`)
+	fmt.Fprintln(w, `// Transient per-node event flags; ids embedded in snapshots, names in this schema.`)
+	for _, ev := range schema.events {
+		tsName := "BUF_EVENT_" + strings.ToUpper(ev.name)
+		fmt.Fprintf(w, "export const %-25s = %d;\n", tsName, ev.value)
+	}
+
+	w.Flush()
+	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }
 
 // joinPortsTyped emits {name, kind, isMulti?} pairs for NodeTypeDef-compatible consumers.
