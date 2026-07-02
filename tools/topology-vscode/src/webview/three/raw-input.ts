@@ -34,29 +34,35 @@ export function sendRawInput(event: RawInputEvent): void {
 /** Classify the rendered entity under the pointer via the existing pick callback (three.js
  *  raycast). Port ids are "nodeId:in|out:portName"; isInput is read off that id. Topology
  *  facts (connected?) are NOT decided here — Go's FSM owns those. */
-function classifyHit(pickRequest: PickRef, ndcX: number, ndcY: number): { kind: RawHit["kind"]; id: string; isInput: boolean; portRow: number } {
+function classifyHit(pickRequest: PickRef, ndcX: number, ndcY: number): { kind: RawHit["kind"]; id: string; isInput: boolean; portRow: number; edgeRow: number } {
   if (USE_NEW_SYSTEM) {
     // New system: a port hit carries ONLY its numeric buffer PORT-ROW index (pickBufferPort
     // returns the row as a string). No name/side string — Go resolves the row → (node, port,
     // isInput) via its own port-row table, so id stays empty and isInput is irrelevant here.
+    // Priority mirrors the pre-branch pickDefault: port, then edge, then node.
     const portStr = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
-    if (portStr !== null) return { kind: "port", id: "", isInput: false, portRow: Number(portStr) };
+    if (portStr !== null) return { kind: "port", id: "", isInput: false, portRow: Number(portStr), edgeRow: -1 };
+    // An edge hit carries ONLY its numeric buffer EDGE-ROW index (pickBufferEdge returns the
+    // row as a string). Go resolves the row → its edge via its own edge-row table, so id stays
+    // empty here.
+    const edgeStr = pickRequest.current?.(ndcX, ndcY, { edgeOnly: true }) ?? null;
+    if (edgeStr !== null) return { kind: "edge", id: "", isInput: false, portRow: -1, edgeRow: Number(edgeStr) };
     const node = pickRequest.current?.(ndcX, ndcY) ?? null;
-    if (node !== null) return { kind: "node", id: node, isInput: false, portRow: -1 };
-    return { kind: "empty", id: "", isInput: false, portRow: -1 };
+    if (node !== null) return { kind: "node", id: node, isInput: false, portRow: -1, edgeRow: -1 };
+    return { kind: "empty", id: "", isInput: false, portRow: -1, edgeRow: -1 };
   }
   const port = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
   if (port !== null) {
     const i = port.indexOf(":");
     const rest = port.slice(i + 1);
     const dir = rest.slice(0, rest.indexOf(":"));
-    return { kind: "port", id: port, isInput: dir === "in", portRow: -1 };
+    return { kind: "port", id: port, isInput: dir === "in", portRow: -1, edgeRow: -1 };
   }
   const handhold = pickRequest.current?.(ndcX, ndcY, { handholdOnly: true }) ?? null;
-  if (handhold !== null) return { kind: "handhold", id: handhold, isInput: false, portRow: -1 };
+  if (handhold !== null) return { kind: "handhold", id: handhold, isInput: false, portRow: -1, edgeRow: -1 };
   const node = pickRequest.current?.(ndcX, ndcY) ?? null;
-  if (node !== null) return { kind: "node", id: node, isInput: false, portRow: -1 };
-  return { kind: "empty", id: "", isInput: false, portRow: -1 };
+  if (node !== null) return { kind: "node", id: node, isInput: false, portRow: -1, edgeRow: -1 };
+  return { kind: "empty", id: "", isInput: false, portRow: -1, edgeRow: -1 };
 }
 
 /** World point under the pointer: unproject the pointer ray onto the z=0 plane. This is the
@@ -83,7 +89,7 @@ export function buildPointerRaw(
   const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
   const c = classifyHit(pickRequest, ndcX, ndcY);
   const p = hitWorldPoint(cam, ndcX, ndcY);
-  const hit: RawHit = { kind: c.kind, id: c.id, isInput: c.isInput, portRow: c.portRow, x: p.x, y: p.y, z: p.z };
+  const hit: RawHit = { kind: c.kind, id: c.id, isInput: c.isInput, portRow: c.portRow, edgeRow: c.edgeRow, x: p.x, y: p.y, z: p.z };
   return {
     kind,
     x: e.clientX, y: e.clientY,
@@ -101,7 +107,7 @@ export function buildPointerRaw(
  *  rect.aspect() reads width/height = aspect). No pose is computed here; Go frames the scene
  *  from its own node geometry. Pointer/hit fields are inert (unused for a home command). */
 export function buildHomeRaw(fov: number, aspect: number): RawInputEvent {
-  const hit: RawHit = { kind: "empty", id: "", isInput: false, portRow: -1, x: 0, y: 0, z: 0 };
+  const hit: RawHit = { kind: "empty", id: "", isInput: false, portRow: -1, edgeRow: -1, x: 0, y: 0, z: 0 };
   return {
     kind: "home",
     x: 0, y: 0,
@@ -126,7 +132,7 @@ export function buildWheelRaw(
   const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
   const c = classifyHit(pickRequest, ndcX, ndcY);
   const p = hitWorldPoint(cam, ndcX, ndcY);
-  const hit: RawHit = { kind: c.kind, id: c.id, isInput: c.isInput, portRow: c.portRow, x: p.x, y: p.y, z: p.z };
+  const hit: RawHit = { kind: c.kind, id: c.id, isInput: c.isInput, portRow: c.portRow, edgeRow: c.edgeRow, x: p.x, y: p.y, z: p.z };
   return {
     kind: "wheel",
     x: e.clientX, y: e.clientY,

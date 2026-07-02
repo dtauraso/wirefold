@@ -129,10 +129,14 @@ export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "whee
  *  hit (the port InstancedMesh instanceId == its buffer row); -1 when not a new-system port.
  *  Go resolves portRow → (node, port) via its own port-row table — no port name crosses. */
 export type RawHit = {
-  kind: "port" | "handhold" | "node" | "empty";
+  kind: "port" | "handhold" | "node" | "edge" | "empty";
   id: string;
   isInput: boolean;
   portRow: number;
+  /** Numeric buffer EDGE-ROW index for a NEW-system edge hit (the edge's pick-halo carries
+   *  its buffer edge row); -1 when not an edge hit. Go resolves edgeRow → its edge via its
+   *  own edge-row table — no edge label crosses the bridge. */
+  edgeRow: number;
   x: number;
   y: number;
   z: number;

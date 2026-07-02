@@ -68,6 +68,9 @@ export interface PickOptions {
   ringOnly?: boolean;
   portOnly?: boolean;
   handholdOnly?: boolean;
+  /** New-system only: restrict the pick to the buffer edge pick-halos (BUFFER_EDGE_TAG),
+   *  returning the hit edge's buffer EDGE-ROW index as a decimal string. */
+  edgeOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------

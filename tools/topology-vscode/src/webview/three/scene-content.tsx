@@ -19,7 +19,7 @@ import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 import { MissedBeadMarkers } from "./scene-beads";
 import { USE_NEW_SYSTEM } from "../new-system";
 import { getNavNodeIds, instanceIdToNodeId } from "./buffer-nav";
-import { BUFFER_NODE_TAG, BUFFER_PORT_TAG } from "./buffer-scene";
+import { BUFFER_NODE_TAG, BUFFER_PORT_TAG, BUFFER_EDGE_TAG } from "./buffer-scene";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
 // ray distance is at most this many units closer than the nearest body hit.
@@ -161,6 +161,21 @@ function pickBufferPort(hits: THREE.Intersection[]): string | null {
   return null;
 }
 
+/**
+ * New-system EDGE pick: buffer-rendered edges each carry a wide pick-halo mesh (buffer-scene.tsx
+ * EdgeTube) whose userData[BUFFER_EDGE_TAG] holds its buffer EDGE-ROW index. Returns that row as
+ * a decimal STRING (the pick callback's string contract) so classifyHit can forward the numeric
+ * row to Go — which resolves it back to its edge. No edge label is produced here (there is none).
+ */
+function pickBufferEdge(hits: THREE.Intersection[]): string | null {
+  for (const hit of hits) {
+    const row: unknown = (hit.object as THREE.Mesh).userData?.[BUFFER_EDGE_TAG];
+    if (typeof row !== "number") continue;
+    return String(row);
+  }
+  return null;
+}
+
 function pickBufferNode(hits: THREE.Intersection[], excludeId?: string): string | null {
   const ids = getNavNodeIds();
   for (const hit of hits) {
@@ -226,6 +241,7 @@ function RaycasterHelper({
       if (USE_NEW_SYSTEM) {
         if (opts?.handholdOnly) return null; // handholds are not pickable meshes in the buffer
         if (opts?.portOnly) return pickBufferPort(hits); // → buffer port-row index as a string
+        if (opts?.edgeOnly) return pickBufferEdge(hits); // → buffer edge-row index as a string
         return pickBufferNode(hits, opts?.nodesOnly ? opts.excludeId : undefined);
       }
 
