@@ -10,6 +10,7 @@ import { contentSphere } from "./geometry-helpers";
 import { vscode } from "../vscode-api";
 import type { InteractionCtx } from "./interaction-handlers";
 import { handlePointerDown, handlePointerMove, handlePointerUp, handleWheelNative } from "./interaction-handlers";
+import { USE_RAW_INPUT, sendRawInput, buildPointerRaw, buildWheelRaw } from "./raw-input";
 
 /**
  * The diagram's WORLD-FIXED content sphere: center = bounding-box center of the node
@@ -282,6 +283,34 @@ export function useInteractionControls(
     (e: WheelEvent) => handleWheelNative(ctx, e),
     [ctx],
   );
+
+  // Raw-input forwarding path (Phase 6, OFF by default behind USE_RAW_INPUT). When enabled,
+  // the handlers forward the RAW event + raycast hit to Go's gesture FSM and hold NO state
+  // locally. When disabled (default), these are never returned and the current handlers
+  // above run byte-for-byte as before.
+  const onRawPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const ev = buildPointerRaw(e, "pointerdown", cameraRef, pickRequest);
+    if (ev) sendRawInput(ev);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [cameraRef, pickRequest]);
+  const onRawPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const ev = buildPointerRaw(e, "pointermove", cameraRef, pickRequest);
+    if (ev) sendRawInput(ev);
+  }, [cameraRef, pickRequest]);
+  const onRawPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const ev = buildPointerRaw(e, "pointerup", cameraRef, pickRequest);
+    if (ev) sendRawInput(ev);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }, [cameraRef, pickRequest]);
+  const onRawWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const ev = buildWheelRaw(e, cameraRef, pickRequest);
+    if (ev) sendRawInput(ev);
+  }, [cameraRef, pickRequest]);
+
+  if (USE_RAW_INPUT) {
+    return { onPointerDown: onRawPointerDown, onPointerMove: onRawPointerMove, onPointerUp: onRawPointerUp, onWheelNative: onRawWheel };
+  }
 
   return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
 }
