@@ -20,12 +20,7 @@ import { useThreeStore } from "./three/store";
 import { handleTraceEvent } from "./three/pump";
 import { viewerState } from "./state/viewer-state";
 import { useCameraStore } from "./three/camera-store";
-
-// Phase 3: latest binary snapshot received from Go's fd3 side channel.
-// Phase 5 rendering will read from this; for now it is a module-level stub.
-let latestSnapshot: ArrayBuffer | null = null;
-// Exported so tests / Phase 5 can read it without reaching into the closure.
-export function getLatestSnapshot(): ArrayBuffer | null { return latestSnapshot; }
+import { setLatestSnapshot } from "./snapshot-buffer";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -104,9 +99,9 @@ window.addEventListener("message", (e) => {
   } else if (msg.type === "trace-event") {
     handleTraceEvent(msg.event);
   } else if (msg.type === "buffer-snapshot") {
-    // Phase 3 stub: store the latest snapshot for Phase 5 rendering.
+    // Phase 3/4: store the latest snapshot for buffer-scene rendering.
     // No render change here — the JSON trace still drives the scene.
-    latestSnapshot = msg.buffer;
+    setLatestSnapshot(msg.buffer);
     postLog("buf-snapshot", { byteLength: msg.buffer.byteLength });
   }
   // load for 2D is fully handled inside App's message effect.
