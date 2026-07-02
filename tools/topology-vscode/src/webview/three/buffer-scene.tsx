@@ -170,11 +170,11 @@ function BeadInstances({ capacity }: { capacity: number }) {
 
   return (
     <>
-      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]}>
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
         <sphereGeometry args={[BEAD_SPHERE_RADIUS, 16, 16]} />
         <meshStandardMaterial emissiveIntensity={0} />
       </instancedMesh>
-      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]}>
+      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
         <torusGeometry args={[BEAD_SPHERE_RADIUS, BEAD_SPHERE_RADIUS * BEAD_RING_TUBE_RATIO, 8, 24]} />
         <meshStandardMaterial emissiveIntensity={0} />
       </instancedMesh>
@@ -246,7 +246,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
 
   return (
     <>
-      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_NODE_TAG]: true }}>
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_NODE_TAG]: true }} frustumCulled={false}>
         <sphereGeometry args={[1, 16, 16]} />
         {/* Match GraphNode's glassy translucent body EXACTLY (scene-graph.tsx): a
             meshPhysicalMaterial with transmission + depthWrite=false + opacity 0.92 so
@@ -269,7 +269,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
           depthWrite={false}
         />
       </instancedMesh>
-      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]}>
+      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
         <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
         <meshStandardMaterial roughness={0.6} metalness={0} />
       </instancedMesh>
@@ -335,7 +335,7 @@ function PortInstances({ capacity }: { capacity: number }) {
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_PORT_TAG]: true }}>
+    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_PORT_TAG]: true }} frustumCulled={false}>
       <sphereGeometry args={[PORT_SPHERE_R, 8, 8]} />
       <meshStandardMaterial />
     </instancedMesh>
@@ -413,12 +413,12 @@ function SelectionHighlight({ capacity }: { capacity: number }) {
       {Array.from({ length: HIGHLIGHT_POOL }, (_, i) => (
         <group key={i} ref={(el) => { groupRefs.current[i] = el; }} visible={false}>
           {/* Yellow torus ring — matches GraphNode selected border: r*0.14 thick */}
-          <mesh raycast={() => null}>
+          <mesh raycast={() => null} frustumCulled={false}>
             <torusGeometry args={[1, 0.14, 8, 32]} />
             <meshStandardMaterial color="#ffcc00" emissive="#ffcc00" emissiveIntensity={0.3} />
           </mesh>
           {/* Orange halo sphere — matches GraphNode NODE_HALO_R_RATIO=1.45 */}
-          <mesh raycast={() => null}>
+          <mesh raycast={() => null} frustumCulled={false}>
             <sphereGeometry args={[1.45, 16, 16]} />
             <meshBasicMaterial
               color="#ff5a00"
@@ -478,7 +478,7 @@ function SphereRingBuf({ ring }: { ring: OwnerRing }) {
 
   return (
     <group position={[ring.cx, ring.cy, ring.cz]}>
-      <mesh geometry={geo} quaternion={[vrQ.x, vrQ.y, vrQ.z, vrQ.w]} raycast={() => null}>
+      <mesh geometry={geo} quaternion={[vrQ.x, vrQ.y, vrQ.z, vrQ.w]} raycast={() => null} frustumCulled={false}>
         <meshStandardMaterial
           color={ring.color}
           emissive={ring.color}
@@ -488,7 +488,7 @@ function SphereRingBuf({ ring }: { ring: OwnerRing }) {
           depthWrite={false}
         />
       </mesh>
-      <mesh geometry={geo} quaternion={[frQ.x, frQ.y, frQ.z, frQ.w]} raycast={() => null}>
+      <mesh geometry={geo} quaternion={[frQ.x, frQ.y, frQ.z, frQ.w]} raycast={() => null} frustumCulled={false}>
         <meshStandardMaterial
           color={ring.color}
           emissive={ring.color}
@@ -630,11 +630,11 @@ function InteriorBeadInstances({ capacity }: { capacity: number }) {
     <>
       {/* Unit-radius geometry scaled per-instance to INTERIOR_BEAD_R; color is
           value-driven via setColorAt (fill sphere + ring torus). */}
-      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]}>
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
         <sphereGeometry args={[1, 16, 16]} />
         <meshStandardMaterial />
       </instancedMesh>
-      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]}>
+      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
         <torusGeometry args={[1, INTERIOR_RING_TUBE_RATIO, 8, 24]} />
         <meshStandardMaterial />
       </instancedMesh>
@@ -698,7 +698,7 @@ function EdgeTube({ seg, dimmed }: { seg: EdgeSeg; dimmed: boolean }) {
 
   return (
     <>
-      <mesh geometry={tubeGeo}>
+      <mesh geometry={tubeGeo} frustumCulled={false}>
         <meshStandardMaterial
           key={dimmed ? "dimmed" : "solid"}
           color={SHADING_PARAM_TUBE_COLOR}
@@ -713,6 +713,7 @@ function EdgeTube({ seg, dimmed }: { seg: EdgeSeg; dimmed: boolean }) {
           position={[arrow.center.x, arrow.center.y, arrow.center.z]}
           quaternion={[arrow.q.x, arrow.q.y, arrow.q.z, arrow.q.w]}
           raycast={() => null}
+          frustumCulled={false}
         >
           <coneGeometry args={[ARROWHEAD_RADIUS, ARROWHEAD_LENGTH, 16]} />
           <meshStandardMaterial
@@ -755,6 +756,7 @@ function DoubleEdgeOverlayBuf({ seg }: { seg: EdgeSeg }) {
       position={[a.center.x, a.center.y, a.center.z]}
       quaternion={[a.q.x, a.q.y, a.q.z, a.q.w]}
       raycast={() => null}
+      frustumCulled={false}
     >
       <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
       <meshStandardMaterial
@@ -767,7 +769,7 @@ function DoubleEdgeOverlayBuf({ seg }: { seg: EdgeSeg }) {
 
   return (
     <>
-      <mesh geometry={lineGeo} raycast={() => null}>
+      <mesh geometry={lineGeo} raycast={() => null} frustumCulled={false}>
         <meshStandardMaterial
           color={SHADING_PARAM_DOUBLE_LINKS_COLOR}
           emissive={DOUBLE_LINKS_EMISSIVE_COLOR}
@@ -879,11 +881,11 @@ function MissedBeadMarkersBuf() {
     <>
       {Array.from({ length: MISSED_POOL }, (_, i) => (
         <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
-          <mesh raycast={() => null}>
+          <mesh raycast={() => null} frustumCulled={false}>
             <sphereGeometry args={[MISSED_BEAD_R, 16, 16]} />
             <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
-          <mesh raycast={() => null}>
+          <mesh raycast={() => null} frustumCulled={false}>
             <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
             <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
           </mesh>
@@ -944,7 +946,7 @@ function NodeStatusRedRings() {
     <>
       {Array.from({ length: STATUS_RED_POOL }, (_, i) => (
         <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
-          <mesh raycast={() => null}>
+          <mesh raycast={() => null} frustumCulled={false}>
             <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
             <meshStandardMaterial
               ref={(el) => { matRefs.current[i] = el; }}
