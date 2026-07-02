@@ -52,6 +52,7 @@ import {
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSrcNodeRow, readEdgeDstNodeRow,
+  readPortNodeRow, readPortDX, readPortDY, readPortDZ,
   readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
@@ -70,6 +71,7 @@ export const USE_BUFFER_RENDER = USE_NEW_SYSTEM;
 const INITIAL_BEAD_CAP  = 64;
 const INITIAL_NODE_CAP  = 32;
 const INITIAL_EDGE_CAP  = 32; // edge positions buffer: N edges × 2 endpoints × 3 floats
+const INITIAL_PORT_CAP  = 64; // port spheres: one per node port (input + output), grows as needed
 
 const BEAD_SPHERE_RADIUS = 4;
 // On-wire (transit) bead ring tube ratio — mirror scene-beads.tsx's PulseBead
@@ -93,6 +95,15 @@ const NODE_DEFAULT_STROKE = "#888888";
 // hit and resolves hit.instanceId → node id via the buffer-nav id table, since the
 // buffer-rendered nodes carry no per-node userData.nodeId the old raycast path relies on.
 export const BUFFER_NODE_TAG = "bufferNode";
+// userData tag marking the PortInstances InstancedMesh as the pickable PORT target under the
+// new system. On a hit, RaycasterHelper (scene-content.tsx) reads intersection.instanceId —
+// which IS the buffer PORT-ROW index (PortInstances draws ports in buffer row order) — and
+// forwards that numeric row to Go, which resolves it back to a (node, port). No port-name
+// string is rendered or sent.
+export const BUFFER_PORT_TAG = "bufferPort";
+// Port hit-sphere radius (world units): the small grabbable ball drawn at each port. Matches
+// the pre-branch PortSphere (scene-graph.tsx PORT_SPHERE_R).
+const PORT_SPHERE_R = 4;
 // Border-ring tube thickness as a fraction of the node radius (mirrors GraphNode's
 // resting torusThick = r * 0.08).
 const NODE_RING_TUBE_RATIO = 0.08;
@@ -263,6 +274,71 @@ function NodeInstances({ capacity }: { capacity: number }) {
         <meshStandardMaterial roughness={0.6} metalness={0} />
       </instancedMesh>
     </>
+  );
+}
+
+// Port spheres: one small grabbable ball per buffer PORT row, matching the pre-branch
+// PortSphere (scene-graph.tsx). Placement mirrors PortSphere exactly: at nodeCenter +
+// portDir*nodeRadius, where nodeCenter/nodeRadius come from the owning node's row (the port's
+// NodeRow column) and portDir is the port's DX/DY/DZ surface direction. Color is the owning
+// node's stroke (the same NODE_DEFS[kind].stroke NodeInstances uses for its ring). One
+// InstancedMesh for all ports, tagged BUFFER_PORT_TAG for picking — instance i IS buffer port
+// row i, so a raycast hit's instanceId is the port row Go resolves to a (node, port). No port
+// position or identity is computed beyond this render placement; the numeric buffer owns it.
+function PortInstances({ capacity }: { capacity: number }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const matRef  = useRef(new THREE.Matrix4());
+  const posRef  = useRef(new THREE.Vector3());
+  const quatRef = useRef(new THREE.Quaternion());
+  const sclRef  = useRef(new THREE.Vector3());
+  const colRef  = useRef(new THREE.Color());
+
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    const snap = getLatestSnapshot();
+    if (!snap) { mesh.count = 0; return; }
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) { mesh.count = 0; return; }
+    const { portCount, portView, nodeCount, nodeView } = decoded;
+    const ids = getNavNodeIds();
+
+    const q = quatRef.current;
+    // Instance index MUST stay == buffer port row so a raycast hit's instanceId is the port
+    // row Go resolves. Every row 0..portCount-1 is filled; a port whose owning node has not
+    // yet streamed is hidden with a zero-scale (degenerate) matrix rather than skipped.
+    const n = Math.min(portCount, capacity);
+    for (let i = 0; i < n; i++) {
+      const nodeRow = readPortNodeRow(portView, i);
+      if (nodeRow < 0 || nodeRow >= nodeCount) {
+        sclRef.current.setScalar(0); // hide until the owning node resolves
+        posRef.current.set(0, 0, 0);
+      } else {
+        const r = readNodeRadius(nodeView, nodeRow) || NODE_SPHERE_RADIUS;
+        sclRef.current.setScalar(1);
+        // World placement = node center + surface dir * node radius (pre-branch PortSphere).
+        posRef.current.set(
+          readNodeCX(nodeView, nodeRow) + readPortDX(portView, i) * r,
+          readNodeCY(nodeView, nodeRow) + readPortDY(portView, i) * r,
+          readNodeCZ(nodeView, nodeRow) + readPortDZ(portView, i) * r,
+        );
+        mesh.setColorAt(i, colRef.current.set(nodeRowColors(ids[nodeRow] ?? `#${nodeRow}`).stroke));
+      }
+      matRef.current.compose(posRef.current, q, sclRef.current);
+      mesh.setMatrixAt(i, matRef.current);
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_PORT_TAG]: true }}>
+      <sphereGeometry args={[PORT_SPHERE_R, 8, 8]} />
+      <meshStandardMaterial />
+    </instancedMesh>
   );
 }
 
@@ -990,6 +1066,7 @@ export function BufferScene({ cameraRef }: {
   const [beadCap,  setBeadCap]  = useState(INITIAL_BEAD_CAP);
   const [nodeCap,  setNodeCap]  = useState(INITIAL_NODE_CAP);
   const [edgeCap,  setEdgeCap]  = useState(INITIAL_EDGE_CAP);
+  const [portCap,  setPortCap]  = useState(INITIAL_PORT_CAP);
 
   // Capacity-growth guard: runs every frame to detect need for reallocation.
   useFrame(() => {
@@ -1007,6 +1084,9 @@ export function BufferScene({ cameraRef }: {
     if (decoded.edgeCount > edgeCap) {
       setEdgeCap(Math.ceil(decoded.edgeCount * 1.5));
     }
+    if (decoded.portCount > portCap) {
+      setPortCap(Math.ceil(decoded.portCount * 1.5));
+    }
   });
 
   return (
@@ -1014,6 +1094,7 @@ export function BufferScene({ cameraRef }: {
       <BufferCamera cameraRef={cameraRef} />
       <BeadInstances capacity={beadCap} />
       <NodeInstances capacity={nodeCap} />
+      <PortInstances capacity={portCap} />
       <InteriorBeadInstances capacity={nodeCap * INTERIOR_SLOTS_PER_NODE} />
       <SelectionHighlight capacity={nodeCap} />
       <SphereRings />

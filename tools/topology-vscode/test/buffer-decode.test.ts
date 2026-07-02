@@ -8,11 +8,13 @@ import { describe, it, expect } from "vitest";
 import { decodeSnapshot, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 import {
   BUF_HEADER_SIZE,
-  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  PORT_COL_NODE_ROW, PORT_COL_DX, PORT_COL_DY, PORT_COL_DZ, PORT_COL_IS_INPUT,
   readBeadX, readBeadY, readBeadZ, readBeadFrac, readBeadLive, readBeadBeadID,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
+  readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortIsInput,
 } from "../src/schema/buffer-layout";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -25,13 +27,14 @@ function expectF32(got: number, want: number) {
  * Build a minimal snapshot ArrayBuffer for given counts.
  * Caller receives a DataView over the entire buffer so it can fill in fields.
  */
-function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number): {
+function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number, portCount = 0): {
   buf: ArrayBuffer;
   dv: DataView;
   beadOff: number;
   nodeOff: number;
   interiorOff: number;
   edgeOff: number;
+  portOff: number;
   cameraOff: number;
   overlayOff: number;
 } {
@@ -40,25 +43,28 @@ function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number): 
   // Interior block: FIXED INTERIOR_SLOTS_PER_NODE rows per node (no header count).
   const interiorBytes = nodeCount  * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
   const edgeBytes     = edgeCount  * EDGE_STRIDE;
-  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const portBytes     = portCount  * PORT_STRIDE;
+  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
 
   const buf = new ArrayBuffer(totalBytes);
   const dv  = new DataView(buf);
 
-  // Write header: [tick=0][beadCount][nodeCount][edgeCount]
+  // Write header: [tick=0][beadCount][nodeCount][edgeCount][portCount]
   dv.setUint32(0,  0,          true); // tick
   dv.setUint32(4,  beadCount,  true);
   dv.setUint32(8,  nodeCount,  true);
   dv.setUint32(12, edgeCount,  true);
+  dv.setUint32(16, portCount,  true);
 
   const beadOff    = BUF_HEADER_SIZE;
   const nodeOff    = beadOff     + beadBytes;
   const interiorOff = nodeOff    + nodeBytes;
   const edgeOff    = interiorOff + interiorBytes;
-  const cameraOff  = edgeOff     + edgeBytes;
+  const portOff    = edgeOff     + edgeBytes;
+  const cameraOff  = portOff     + portBytes;
   const overlayOff = cameraOff   + CAMERA_STRIDE;
 
-  return { buf, dv, beadOff, nodeOff, interiorOff, edgeOff, cameraOff, overlayOff };
+  return { buf, dv, beadOff, nodeOff, interiorOff, edgeOff, portOff, cameraOff, overlayOff };
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -102,6 +108,7 @@ describe("decodeSnapshot — empty snapshot (no beads, nodes, edges)", () => {
     expect(d.nodeView.byteLength).toBe(0);
     expect(d.interiorView.byteLength).toBe(0);
     expect(d.edgeView.byteLength).toBe(0);
+    expect(d.portView.byteLength).toBe(0);
     expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
     expect(d.overlayView.byteLength).toBe(OVERLAY_STRIDE);
   });
@@ -257,6 +264,56 @@ describe("live-bead instance-count logic", () => {
       if (readBeadLive(d.beadView, i)) liveSlot++;
     }
     expect(liveSlot).toBe(0);
+  });
+});
+
+describe("decodeSnapshot — port block", () => {
+  it("slices the port block after the edge block; instanceId row == port row", () => {
+    // 1 node, 0 edges, 3 ports. Rows: (nodeRow 0, in, dir -1,0,0), (nodeRow 0, out, dir 1,0,0),
+    // (nodeRow 1, in, dir 0,1,0). Mirrors the flattened Go Port block order.
+    const { buf, dv, portOff } = makeSnapshot(0, 2, 0, 3);
+
+    const setPort = (row: number, nodeRow: number, dx: number, dy: number, dz: number, isInput: number) => {
+      const o = portOff + row * PORT_STRIDE;
+      dv.setInt32(o + PORT_COL_NODE_ROW, nodeRow, true);
+      dv.setFloat32(o + PORT_COL_DX, dx, true);
+      dv.setFloat32(o + PORT_COL_DY, dy, true);
+      dv.setFloat32(o + PORT_COL_DZ, dz, true);
+      dv.setUint8(o + PORT_COL_IS_INPUT, isInput);
+    };
+    setPort(0, 0, -1, 0, 0, 1);
+    setPort(1, 0, 1, 0, 0, 0);
+    setPort(2, 1, 0, 1, 0, 1);
+
+    const d = decodeSnapshot(buf)!;
+    expect(d.portCount).toBe(3);
+    expect(d.portView.byteLength).toBe(3 * PORT_STRIDE);
+
+    const pv = d.portView;
+    // Row 0 (the same index a port InstancedMesh instanceId carries).
+    expect(readPortNodeRow(pv, 0)).toBe(0);
+    expectF32(readPortDX(pv, 0), -1);
+    expect(readPortIsInput(pv, 0)).toBe(1);
+    // Row 1.
+    expect(readPortNodeRow(pv, 1)).toBe(0);
+    expectF32(readPortDX(pv, 1), 1);
+    expect(readPortIsInput(pv, 1)).toBe(0);
+    // Row 2 — a different owning node row.
+    expect(readPortNodeRow(pv, 2)).toBe(1);
+    expectF32(readPortDY(pv, 2), 1);
+    expect(readPortIsInput(pv, 2)).toBe(1);
+  });
+
+  it("keeps camera/overlay correctly offset PAST the port block", () => {
+    // Regression guard: the camera/overlay views must start AFTER the port block, not on top
+    // of it. With ports present, a decoder that forgot the port block would alias camera onto
+    // port bytes. Write a sentinel into camera and read it back through the decoded view.
+    const { buf, dv, cameraOff } = makeSnapshot(0, 1, 0, 2);
+    dv.setFloat32(cameraOff, 123.5, true); // Camera PX
+    const d = decodeSnapshot(buf)!;
+    expect(d.portCount).toBe(2);
+    expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
+    expectF32(d.cameraView.getFloat32(0, true), 123.5);
   });
 });
 

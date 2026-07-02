@@ -19,7 +19,7 @@ import { GraphNode, GraphEdges, SphereRing } from "./scene-graph";
 import { MissedBeadMarkers } from "./scene-beads";
 import { USE_NEW_SYSTEM } from "../new-system";
 import { getNavNodeIds, instanceIdToNodeId } from "./buffer-nav";
-import { BUFFER_NODE_TAG } from "./buffer-scene";
+import { BUFFER_NODE_TAG, BUFFER_PORT_TAG } from "./buffer-scene";
 
 // Port hit tolerance (pixels): a port wins over a node-body hit only if its
 // ray distance is at most this many units closer than the nearest body hit.
@@ -141,9 +141,26 @@ const EDGE_BIAS = 2;
  * New-system pick: buffer-rendered nodes are an InstancedMesh (buffer-scene.tsx
  * NodeInstances) tagged with BUFFER_NODE_TAG, not the old per-node GraphNode meshes,
  * so they carry no userData.nodeId. Resolve the nearest tagged instanced hit via
- * hit.instanceId → the buffer-nav id table. Ports/edges/handholds are NOT rendered as
- * pickable meshes in the buffer, so those modes return null (see the reported port gap).
+ * hit.instanceId → the buffer-nav id table. Ports ARE now pickable (pickBufferPort, via the
+ * PortInstances mesh → port-row index); edges/handholds are not rendered as pickable meshes
+ * in the buffer, so those modes return null.
  */
+/**
+ * New-system PORT pick: buffer-rendered ports are an InstancedMesh (buffer-scene.tsx
+ * PortInstances) tagged with BUFFER_PORT_TAG, where instanceId IS the buffer PORT-ROW index
+ * (PortInstances draws ports in buffer row order). Returns that row as a decimal STRING (the
+ * pick callback's string contract) so classifyHit can forward the numeric row to Go — which
+ * resolves it back to a (node, port). No port-name string is produced here (there is none).
+ */
+function pickBufferPort(hits: THREE.Intersection[]): string | null {
+  for (const hit of hits) {
+    if ((hit.object as THREE.Mesh).userData?.[BUFFER_PORT_TAG] !== true) continue;
+    if (hit.instanceId === undefined) continue;
+    return String(hit.instanceId);
+  }
+  return null;
+}
+
 function pickBufferNode(hits: THREE.Intersection[], excludeId?: string): string | null {
   const ids = getNavNodeIds();
   for (const hit of hits) {
@@ -207,7 +224,8 @@ function RaycasterHelper({
       // pickable in the buffer, so those modes return null; node-oriented modes
       // (default / nodesOnly / ringOnly) resolve the nearest buffer node.
       if (USE_NEW_SYSTEM) {
-        if (opts?.handholdOnly || opts?.portOnly) return null;
+        if (opts?.handholdOnly) return null; // handholds are not pickable meshes in the buffer
+        if (opts?.portOnly) return pickBufferPort(hits); // → buffer port-row index as a string
         return pickBufferNode(hits, opts?.nodesOnly ? opts.excludeId : undefined);
       }
 

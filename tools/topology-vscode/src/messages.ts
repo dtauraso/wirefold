@@ -124,11 +124,15 @@ export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "whee
 
 /** The stateless raycast hit: which rendered entity is under the pointer + its world point.
  *  kind classifies the rendered target (three.js hit-testing); id is the entity id
- *  (node id, or "nodeId:in|out:portName" for a port); isInput selects the port side. */
+ *  (node id, or "nodeId:in|out:portName" for a port on the OLD path); isInput selects the
+ *  port side (old path). portRow is the numeric buffer PORT-ROW index for a NEW-system port
+ *  hit (the port InstancedMesh instanceId == its buffer row); -1 when not a new-system port.
+ *  Go resolves portRow → (node, port) via its own port-row table — no port name crosses. */
 export type RawHit = {
   kind: "port" | "handhold" | "node" | "empty";
   id: string;
   isInput: boolean;
+  portRow: number;
   x: number;
   y: number;
   z: number;
@@ -370,7 +374,7 @@ function parseRawInput(m: Record<string, unknown>): WebviewToHostMsg | undefined
   const hit = h as Record<string, unknown>;
   if (typeof hit.kind !== "string" || !RAW_HIT_KINDS.has(hit.kind)) return undefined;
   if (typeof hit.id !== "string" || !bool(hit.isInput)) return undefined;
-  if (![hit.x, hit.y, hit.z].every(num)) return undefined;
+  if (![hit.portRow, hit.x, hit.y, hit.z].every(num)) return undefined;
   return m as unknown as WebviewToHostMsg;
 }
 
