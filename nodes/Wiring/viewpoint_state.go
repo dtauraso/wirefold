@@ -17,6 +17,11 @@ import (
 // viewpointState carries the camera viewpoint and its emit/navigation methods.
 type viewpointState struct {
 	viewpoint
+	// persist, when non-nil, is called with the current viewpoint after every EmitViewpoint
+	// so a gesture-driven change is persisted to scene.json. nil until armed by
+	// MoveDispatch.EnableViewpointPersist (after the startup seed), so the seed's own emit
+	// does not write. Owned by MoveDispatch; the debounce/write live in the persister.
+	persist func(viewpoint)
 }
 
 // SetViewpoint installs a known camera state without emitting. Used by the "set"
@@ -33,12 +38,17 @@ func (v *viewpointState) SetViewpoint(pivot vec3, r float64, pos, up dir) {
 
 // EmitViewpoint emits the current camera viewpoint state as a camera trace event.
 func (v *viewpointState) EmitViewpoint(tr *T.Trace) {
-	if tr == nil {
-		return
+	if tr != nil {
+		tr.Camera(v.pivot.X, v.pivot.Y, v.pivot.Z, v.r,
+			v.pos.Theta, v.pos.Phi,
+			v.up.Theta, v.up.Phi)
 	}
-	tr.Camera(v.pivot.X, v.pivot.Y, v.pivot.Z, v.r,
-		v.pos.Theta, v.pos.Phi,
-		v.up.Theta, v.up.Phi)
+	// Persist the just-emitted viewpoint (debounced, off the hot path) when armed —
+	// independent of the trace sink. Every gesture viewpoint change (orbit/zoom/pan/home)
+	// flows through EmitViewpoint, so this is the single chokepoint for the write side.
+	if v.persist != nil {
+		v.persist(v.viewpoint)
+	}
 }
 
 // OrbitViewpoint applies a great-circle orbit (carrying from→to) and emits the new state.

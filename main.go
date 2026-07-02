@@ -70,6 +70,12 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Old path (flag off) is unchanged: it still restores via sceneText + PolarCameraRestorer.
 	if os.Getenv("WIREFOLD_NEW_SYSTEM") == "true" {
 		W.SeedInitialViewpoint(topologyPath, md, tr)
+		// Arm the WRITE side AFTER the seed: from here, every gesture that changes the FSM
+		// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
+		// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
+		// Arming after the seed keeps the seed's own emit from persisting the loaded/default
+		// pose. Go owns this write; the old path persists the camera via its own TS scene-save.
+		md.EnableViewpointPersist(topologyPath)
 	}
 
 	// Launch the per-node and per-edge move-handler goroutines (decentralized

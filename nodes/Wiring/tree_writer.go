@@ -93,16 +93,56 @@ func writeFades(root string, fades map[string]bool) error {
 
 // writeScene writes raw scene JSON to <root>/view/scene.json atomically.
 // The raw bytes are written verbatim (no re-marshal) so the scene's field order is preserved.
+//
+// Under the new system Go owns cameraPolar (scene_camera_persist.go), so this write must
+// NOT clobber the Go-persisted camera with the stale value a TS scene-save (fades/overlays)
+// carries. In that mode we merge: the on-disk cameraPolar is preserved and all other fields
+// come from the TS blob. Serialized against the camera persister via sceneFileMu. The old
+// path (flag off) is unchanged — verbatim write, field order preserved.
 func writeScene(root string, raw json.RawMessage) error {
 	path := filepath.Join(root, "view", "scene.json")
+	out := []byte(raw)
+	if newSystemEnabled() {
+		sceneFileMu.Lock()
+		defer sceneFileMu.Unlock()
+		out = preserveSceneCameraPolar(path, raw)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(raw), 0644); err != nil {
+	if err := os.WriteFile(tmp, out, 0644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// preserveSceneCameraPolar returns the incoming scene blob with its cameraPolar replaced by
+// the value currently on disk (the Go-owned camera). If there is no on-disk cameraPolar, or
+// either blob cannot be parsed as an object, the incoming blob is returned unchanged.
+func preserveSceneCameraPolar(path string, incoming json.RawMessage) json.RawMessage {
+	diskRaw, err := os.ReadFile(path)
+	if err != nil {
+		return incoming
+	}
+	var disk map[string]json.RawMessage
+	if json.Unmarshal(diskRaw, &disk) != nil {
+		return incoming
+	}
+	cam, ok := disk["cameraPolar"]
+	if !ok {
+		return incoming
+	}
+	var in map[string]json.RawMessage
+	if json.Unmarshal(incoming, &in) != nil {
+		return incoming
+	}
+	in["cameraPolar"] = cam
+	merged, err := json.Marshal(in)
+	if err != nil {
+		return incoming
+	}
+	return merged
 }
 
 func mergeFades(root string, delta map[string]bool) error {

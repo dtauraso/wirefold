@@ -415,6 +415,9 @@ type MoveDispatch struct {
 	// and produces camera (viewpoint) + topology (node-move) changes. Owned by
 	// MoveDispatch; serialized by the single-goroutine stdin reader. Zero value = idle.
 	gest gestureState
+	// vpPersist is the debounced camera-viewpoint persister (scene_camera_persist.go), armed
+	// by EnableViewpointPersist after the startup seed. nil until armed (old path / tests).
+	vpPersist *viewpointPersister
 	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
 	// KindSelect so the buffer snapshot marks the node's Selected column.
@@ -792,6 +795,17 @@ func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 }
 func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
 func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace)      { md.vp.PanViewpoint(delta, tr) }
+
+// EnableViewpointPersist arms gesture-driven camera persistence: every subsequent
+// EmitViewpoint (orbit/zoom/pan/home) debounces a write of the current viewpoint to
+// `<topologyPath>/view/scene.json`'s cameraPolar (scene_camera_persist.go). Call AFTER
+// SeedInitialViewpoint so the seed's own emit does not write the loaded/default pose back.
+// Go owns this write (MODEL.md); the old path persists the camera via its own TS scene-save.
+func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
+	p := &viewpointPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.vpPersist = p
+	md.vp.persist = p.schedule
+}
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the
 // overlayToggles table, defaultOverlayState, and the stdinGuideVisPayload mapper are all
