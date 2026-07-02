@@ -93,6 +93,29 @@ func TestGestureWheelPansPivot(t *testing.T) {
 	}
 }
 
+// Plain-wheel PAN must fire regardless of what the raycast hit is under the cursor: the
+// gesture FSM's wheel path is hit-independent for a plain (non-ctrl) wheel. This pins that a
+// node/edge hit does NOT suppress or divert the pan (the TS-side validator drop of "edge"
+// hits was the real bug; this guards the Go contract the fix relies on).
+func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
+	for _, h := range []rawHit{
+		{Kind: "node", Id: "N7"},
+		{Kind: "edge", EdgeRow: 0},
+		{Kind: "port", PortRow: 0},
+	} {
+		md := newGestureMD(canonicalViewpoint())
+		before := md.vp.pivot
+		ev := rawEvent("wheel", 400, 300)
+		ev.DeltaX = 10
+		ev.DeltaY = 0
+		ev.Hit = h
+		md.HandleRawInput(ev, nil, nil)
+		if vecClose(md.vp.pivot, before, 1e-9) {
+			t.Fatalf("plain wheel with %s hit did not pan pivot (stayed %v)", h.Kind, md.vp.pivot)
+		}
+	}
+}
+
 func TestGestureCtrlWheelDolliesPivot(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	ev := rawEvent("wheel", 400, 300)

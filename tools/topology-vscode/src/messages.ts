@@ -355,8 +355,12 @@ function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
 const RAW_POINTER_KINDS: ReadonlySet<string> = new Set<RawPointerKind>([
   "pointerdown", "pointermove", "pointerup", "wheel", "home",
 ]);
+// Every variant of RawHit["kind"] MUST appear here — parseRawInput DROPS any raw-input
+// event whose hit.kind is absent, which silently kills EVERY gesture (pan/orbit/select)
+// while the cursor is over that entity. An earlier omission of "edge" broke plain-wheel
+// pan over edges (and over nodes, whose incident edge pick-halos classify as "edge" first).
 const RAW_HIT_KINDS: ReadonlySet<string> = new Set<RawHit["kind"]>([
-  "port", "handhold", "node", "empty",
+  "port", "handhold", "node", "edge", "empty",
 ]);
 
 // parseRawInput validates a "raw-input" message: a raw pointer/wheel event with a
@@ -378,7 +382,7 @@ function parseRawInput(m: Record<string, unknown>): WebviewToHostMsg | undefined
   const hit = h as Record<string, unknown>;
   if (typeof hit.kind !== "string" || !RAW_HIT_KINDS.has(hit.kind)) return undefined;
   if (typeof hit.id !== "string" || !bool(hit.isInput)) return undefined;
-  if (![hit.portRow, hit.x, hit.y, hit.z].every(num)) return undefined;
+  if (![hit.portRow, hit.edgeRow, hit.x, hit.y, hit.z].every(num)) return undefined;
   return m as unknown as WebviewToHostMsg;
 }
 
