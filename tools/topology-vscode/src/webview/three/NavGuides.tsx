@@ -3,14 +3,33 @@
 //     radius scaled to ARCBALL_FILL * camera-to-focus distance, updated each frame.
 // Purely decorative: raycast disabled, depthWrite false, transparent.
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RFNode, NodeData } from "../types";
 import { nodeRadius, nodeWorldPos } from "./geometry-helpers";
 import { useNodeGeometryStore } from "./node-geometry";
-import { computeContentSphere } from "./interaction-controls";
 import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
 import { useCameraStore } from "./camera-store";
+import { USE_NEW_SYSTEM } from "../new-system";
+import { getLatestSnapshot } from "../snapshot-buffer";
+import { decodeSnapshot } from "./buffer-decode";
+import {
+  type NavNode, decodeNavNodes, getNavNodeIds, contentSphereFromCenters,
+} from "./buffer-nav";
+
+// navSignature — coarse fingerprint of the buffer-derived nav nodes (rounded
+// positions/radii/sphereR/selection). NavGuides bumps a render tick only when this
+// changes, so the tori/frames rebuild on real position/selection changes (a drag)
+// without per-frame churn — mirroring the old path's re-render on node-geometry
+// store events. Not used on the flag-off path.
+function navSignature(nav: NavNode[]): string {
+  let s = "";
+  for (const n of nav) {
+    s += `${n.id}:${Math.round(n.center.x)},${Math.round(n.center.y)},${Math.round(n.center.z)},${Math.round(n.radius)},${Math.round(n.sphereR ?? 0)},${n.selected ? 1 : 0};`;
+  }
+  return s;
+}
 
 // ---------------------------------------------------------------------------
 // PolarSphere — two perpendicular tori tracking the polar rotation-sphere center.
@@ -316,6 +335,7 @@ function PhiArc({ center, sample, color, tube }: {
 // pass-through wrapper.
 export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
   // Re-derive when Go streams node geometry (positions change → content sphere moves).
+  // (Flag-off path only; the flag-on path reads the buffer instead — see below.)
   const geoms = useNodeGeometryStore((s) => s.geoms);
   const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
   const scenePolesVisible = useCameraStore((s) => s.scenePolesVisible);
@@ -335,20 +355,67 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
   const showSelPoles = g && selSpherePolesVisible !== false;
   const showAngles = g && angleLabelsVisible !== false;
 
-  // Latch the last node the user selected. Selection only DECIDES which sphere the
+  // ── Buffer-driven nav sampling (new-system path) ─────────────────────────────
+  // Under USE_NEW_SYSTEM the overlay geometry derives from the binary buffer (Go-owned
+  // node centers/radii/sphereR + Go-owned selection column) instead of the RFNode
+  // array / node-geometry store. Sample the latest snapshot each frame and bump a
+  // render tick only when the coarse signature changes, so tori/frames rebuild on real
+  // position/selection changes (a drag) — not every frame. On the flag-off path
+  // useFrame returns immediately and navTick never advances, so nothing changes.
+  const [navTick, setNavTick] = useState(0);
+  const bufNavRef = useRef<NavNode[]>([]);
+  const bufSigRef = useRef("");
+  useFrame(() => {
+    if (!USE_NEW_SYSTEM) return;
+    const snap = getLatestSnapshot();
+    if (!snap) return;
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) return;
+    bufNavRef.current = decodeNavNodes(decoded, getNavNodeIds());
+    const sig = navSignature(bufNavRef.current);
+    if (sig !== bufSigRef.current) {
+      bufSigRef.current = sig;
+      setNavTick((t) => t + 1);
+    }
+  });
+
+  // Node records that drive every guide below. SAME NavNode shape both paths, so the
+  // rendering body is identical — only the DATA SOURCE is gated. Flag-off builds them
+  // from the RFNode array + node-geometry store exactly as before (byte-for-byte);
+  // flag-on reads the buffer. Memoized so the O(N²) lockArc scan below recomputes only
+  // when the node data actually changes (flag-off: nodes/geoms; flag-on: navTick).
+  const navNodes = useMemo<NavNode[]>(() => {
+    if (USE_NEW_SYSTEM) return bufNavRef.current;
+    return nodes.map((n) => ({
+      id: n.id,
+      center: nodeWorldPos(n),
+      radius: nodeRadius(n),
+      sphereR: geoms[n.id]?.sphereR,
+      selected: n.id === selectedId,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, geoms, selectedId, navTick]);
+
+  // Selection: Go-owned Selected column under the flag; the TS selectedId prop
+  // otherwise.
+  const effectiveSelectedId = USE_NEW_SYSTEM
+    ? (navNodes.find((n) => n.selected)?.id ?? null)
+    : (selectedId ?? null);
+
+  // Latch the last selected node. Selection only DECIDES which sphere the
   // sel-highlight frames; it does not have to stay selected to keep the frame shown.
   // So DEselecting the node (clicking empty space) leaves the latched sphere framed —
   // only selecting a different node replaces it. The sel toggle still gates visibility.
-  const [latchedSel, setLatchedSel] = useState<string | null>(selectedId ?? null);
+  const [latchedSel, setLatchedSel] = useState<string | null>(effectiveSelectedId);
   useEffect(() => {
-    if (selectedId) setLatchedSel(selectedId);
-  }, [selectedId]);
+    if (effectiveSelectedId) setLatchedSel(effectiveSelectedId);
+  }, [effectiveSelectedId]);
 
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori
   // (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
-  const cs = computeContentSphere(nodes);
-  const tube = nodes.length > 0 ? Math.max(0.5, nodeRadius(nodes[0]!) * 0.08) : 1;
+  const cs = contentSphereFromCenters(navNodes.map((n) => n.center));
+  const tube = navNodes.length > 0 ? Math.max(0.5, navNodes[0]!.radius * 0.08) : 1;
   // Build geometry ONLY when the sphere actually changes (rounded radius/tube), not on
   // every render — rebuilding each frame under node-geometry churn made the tori flicker
   // and effectively disappear.
@@ -405,28 +472,28 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
   // every topology but the old demo. If no such parent+2-children triple exists the
   // arcs are omitted (presence-guarded below, same as before).
   //
-  // Memoized on [nodes, geoms]: this is an O(N²) scan (per parent, filter all nodes),
-  // so recompute only when the graph or its streamed geometry changes, not per render.
+  // Memoized on [navNodes]: this is an O(N²) scan (per parent, filter all nodes), so
+  // recompute only when the node data actually changes (navNodes is itself memoized).
   const lockArc = useMemo(() => {
-    for (const parent of nodes) {
-      const pr = geoms[parent.id]?.sphereR;
+    for (const parent of navNodes) {
+      const pr = parent.sphereR;
       if (!pr) continue;
-      const pc = nodeWorldPos(parent);
+      const pc = parent.center;
       const tol = pr * 0.25;
-      const children = nodes.filter(
-        (n) => n.id !== parent.id && Math.abs(nodeWorldPos(n).distanceTo(pc) - pr) <= tol,
+      const children = navNodes.filter(
+        (n) => n.id !== parent.id && Math.abs(n.center.distanceTo(pc) - pr) <= tol,
       );
-      if (children.length >= 2) return { parent, childA: children[0], childB: children[1] };
+      if (children.length >= 2) return { parent, childA: children[0]!, childB: children[1]! };
     }
     return null;
-  }, [nodes, geoms]);
+  }, [navNodes]);
 
-  if (nodes.length < 1) return null;
+  if (navNodes.length < 1) return null;
 
   // Parent's own pole frame center — pole = world +y, parallel to the scene's. Sized
   // to ~half the scene radius.
   const node2 = lockArc?.parent;
-  const node2Center = node2 ? nodeWorldPos(node2) : null;
+  const node2Center = node2 ? node2.center : null;
   const node2Scale = radiusKey * 0.5;
 
   // θ-lock check: vertical θ meridian arcs from the parent's pole down to its two
@@ -441,7 +508,7 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
   // sphere to frame (persists through deselect), and we draw THAT node's own sphere pole
   // frame at full SPHERE scale (its Go-streamed sphereR). Every node has a sphere, so this
   // works for leaf nodes (3, 5) too — no parent remapping. Never selected ⇒ no frame.
-  const sphereCenters = latchedSel ? nodes.filter((n) => n.id === latchedSel) : [];
+  const sphereCenters = latchedSel ? navNodes.filter((n) => n.id === latchedSel) : [];
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
@@ -467,11 +534,11 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
       {/* Scene pole frame at the content-sphere center. */}
       {showScenePoles && <PolarFrame center={cs.center} scale={radiusKey} />}
       {/* Per-node pole frames — one PolarFrame per node, gated behind nodePolesVisible. */}
-      {showNodePoles && nodes.map((node) => (
+      {showNodePoles && navNodes.map((node) => (
         <PolarFrame
           key={node.id}
-          center={nodeWorldPos(node)}
-          scale={nodeRadius(node)}
+          center={node.center}
+          scale={node.radius}
           tag={`(${node.id})`}
         />
       ))}
@@ -480,25 +547,25 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
       {showSelPoles && sphereCenters.map((center) => (
         <PolarFrame
           key={`sel-${center.id}`}
-          center={nodeWorldPos(center)}
-          scale={geoms[center.id]?.sphereR ?? nodeRadius(center)}
+          center={center.center}
+          scale={center.sphereR ?? center.radius}
           tag={`(${center.id})`}
           octants
         />
       ))}
       {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
       {showAngles && node2Center && node3 && (
-        <ThetaArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
+        <ThetaArc center={node2Center} sample={node3.center} color="#ff8800" tube={thetaTube} />
       )}
       {showAngles && node2Center && node7 && (
-        <ThetaArc center={node2Center} sample={nodeWorldPos(node7)} color="#00ccff" tube={thetaTube} />
+        <ThetaArc center={node2Center} sample={node7.center} color="#00ccff" tube={thetaTube} />
       )}
       {/* Horizontal φ arcs from +x reference to node 3 (orange) and node 7 (cyan). */}
       {showAngles && node2Center && node3 && (
-        <PhiArc center={node2Center} sample={nodeWorldPos(node3)} color="#ff8800" tube={thetaTube} />
+        <PhiArc center={node2Center} sample={node3.center} color="#ff8800" tube={thetaTube} />
       )}
       {showAngles && node2Center && node7 && (
-        <PhiArc center={node2Center} sample={nodeWorldPos(node7)} color="#00ccff" tube={thetaTube} />
+        <PhiArc center={node2Center} sample={node7.center} color="#00ccff" tube={thetaTube} />
       )}
     </>
   );

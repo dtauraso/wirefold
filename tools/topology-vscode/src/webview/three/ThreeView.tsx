@@ -249,14 +249,14 @@ export function ThreeView() {
             onPositions={onPositions}
             onCameraSettle={onCameraSettle}
           />
-          {/* NavGuides (polar tori / pole frames / θ-φ angle arcs / handholds) is gated
-              OFF under the new-system flag: its geometry is computed entirely from the
-              OLD path — computeContentSphere(nodes), nodeWorldPos/nodeRadius over the
-              RFNode array, and the node-geometry store's sphereR — none of which is read
-              from the binary buffer. Driving only its visibility from the buffer while its
-              geometry stays old-path would be half-driven, so per the standalone-flag rule
-              the whole overlay is gated off and reported as a known gap. */}
-          {!USE_NEW_SYSTEM && <NavGuides nodes={nodes} selectedId={selectedId} />}
+          {/* NavGuides (polar tori / pole frames / θ-φ angle arcs / handholds). Under the
+              new-system flag its geometry now derives from the binary buffer (Go-owned
+              node centers/radii/sphereR + Go-owned selection column) via buffer-nav; the
+              flag-off path still reads the RFNode array + node-geometry store. So it is
+              mounted UNCONDITIONALLY — the data source is gated inside NavGuides, not the
+              mount. (The `nodes`/`selectedId` props are consumed only on the flag-off
+              path; flag-on ignores them and reads the buffer.) */}
+          <NavGuides nodes={nodes} selectedId={selectedId} />
           {USE_BUFFER_RENDER && <BufferScene cameraRef={cameraRef} />}
         </Canvas>
       </div>
