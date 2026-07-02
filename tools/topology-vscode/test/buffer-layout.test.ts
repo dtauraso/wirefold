@@ -23,6 +23,10 @@ import {
   readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readNodeEvRecv, readNodeEvFire, readNodeEvSend, readNodeEvArrive, readNodeEvDone,
   readNodeSelected,
+  // Interior
+  INTERIOR_COL_PRESENT, INTERIOR_COL_VALUE, INTERIOR_COL_OX, INTERIOR_COL_OY, INTERIOR_COL_OZ,
+  INTERIOR_STRIDE,
+  readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   // Edge
   EDGE_COL_SX, EDGE_COL_SY, EDGE_COL_SZ, EDGE_COL_EX, EDGE_COL_EY, EDGE_COL_EZ,
   EDGE_STRIDE,
@@ -152,6 +156,32 @@ describe("buffer-layout — Node block", () => {
   });
 });
 
+// ─ Interior block ─────────────────────────────────────────────────────────────
+
+describe("buffer-layout — Interior block", () => {
+  it("stride equals packed field sizes", () => {
+    // u8 + i32 + 3×f32 = 1 + 4 + 12 = 17
+    expect(INTERIOR_STRIDE).toBe(17);
+  });
+
+  it("read helpers decode known bytes correctly", () => {
+    const buf = new ArrayBuffer(INTERIOR_STRIDE);
+    const dv = new DataView(buf);
+
+    dv.setUint8(INTERIOR_COL_PRESENT, 1);
+    dv.setInt32(INTERIOR_COL_VALUE, 1, true);
+    dv.setFloat32(INTERIOR_COL_OX, 2.5, true);
+    dv.setFloat32(INTERIOR_COL_OY, -3.5, true);
+    dv.setFloat32(INTERIOR_COL_OZ, 4.5, true);
+
+    expect(readInteriorPresent(dv, 0)).toBe(1);
+    expect(readInteriorValue(dv, 0)).toBe(1);
+    expectF32(readInteriorOX(dv, 0), 2.5);
+    expectF32(readInteriorOY(dv, 0), -3.5);
+    expectF32(readInteriorOZ(dv, 0), 4.5);
+  });
+});
+
 // ─ Edge block ─────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — Edge block", () => {
@@ -268,8 +298,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 1", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(2);
+  it("schema version is 3", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(3);
   });
 
   it("header size is 16 bytes (4×u32)", () => {

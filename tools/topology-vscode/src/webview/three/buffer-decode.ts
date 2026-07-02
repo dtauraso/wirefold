@@ -4,21 +4,31 @@
 // returns DataView slices over each column block — zero-copy, no store writes.
 //
 // Layout (little-endian, packed):
-//   Header  16 bytes : [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]
-//   Bead    beadCount × BEAD_STRIDE bytes
-//   Node    nodeCount × NODE_STRIDE bytes
-//   Edge    edgeCount × EDGE_STRIDE bytes
-//   Camera  CAMERA_STRIDE bytes   (always 1 row)
-//   Overlay OVERLAY_STRIDE bytes  (always 1 row)
+//   Header   16 bytes : [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]
+//   Bead     beadCount × BEAD_STRIDE bytes
+//   Node     nodeCount × NODE_STRIDE bytes
+//   Interior nodeCount × INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes
+//   Edge     edgeCount × EDGE_STRIDE bytes
+//   Camera   CAMERA_STRIDE bytes   (always 1 row)
+//   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
 
 import {
   BUF_HEADER_SIZE,
   BEAD_STRIDE,
   NODE_STRIDE,
+  INTERIOR_STRIDE,
   EDGE_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
 } from "../../schema/buffer-layout";
+
+/**
+ * Fixed interior grid slots per node in the Interior block. MUST match
+ * BufInteriorSlotsPerNode in Buffer/layout.go — the Interior block carries exactly
+ * nodeCount × INTERIOR_SLOTS_PER_NODE rows (slot = gridRow*2 + gridCol), so it has no
+ * separate header count. Locked in parity by the interior-block decode test.
+ */
+export const INTERIOR_SLOTS_PER_NODE = 4;
 
 export interface DecodedSnapshot {
   tick: number;
@@ -29,6 +39,10 @@ export interface DecodedSnapshot {
   beadView: DataView;
   /** DataView over the node block only; byteLength = nodeCount × NODE_STRIDE. */
   nodeView: DataView;
+  /** Interior grid rows (nodeCount × INTERIOR_SLOTS_PER_NODE); row = nodeRow*slots + slot. */
+  interiorCount: number;
+  /** DataView over the interior block; byteLength = interiorCount × INTERIOR_STRIDE. */
+  interiorView: DataView;
   /** DataView over the edge block only; byteLength = edgeCount × EDGE_STRIDE. */
   edgeView: DataView;
   /** DataView over the single camera row. */
@@ -55,10 +69,13 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const nodeCount  = hdr.getUint32(8,  true);
   const edgeCount  = hdr.getUint32(12, true);
 
-  const beadBytes   = beadCount * BEAD_STRIDE;
-  const nodeBytes   = nodeCount * NODE_STRIDE;
-  const edgeBytes   = edgeCount * EDGE_STRIDE;
-  const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + edgeBytes +
+  const interiorCount = nodeCount * INTERIOR_SLOTS_PER_NODE;
+
+  const beadBytes     = beadCount * BEAD_STRIDE;
+  const nodeBytes     = nodeCount * NODE_STRIDE;
+  const interiorBytes = interiorCount * INTERIOR_STRIDE;
+  const edgeBytes     = edgeCount * EDGE_STRIDE;
+  const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
                       CAMERA_STRIDE + OVERLAY_STRIDE;
 
   if (buf.byteLength < expectedLen) return null;
@@ -71,6 +88,9 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const nodeView = new DataView(buf, off, nodeBytes);
   off += nodeBytes;
 
+  const interiorView = new DataView(buf, off, interiorBytes);
+  off += interiorBytes;
+
   const edgeView = new DataView(buf, off, edgeBytes);
   off += edgeBytes;
 
@@ -79,5 +99,5 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
 
   const overlayView = new DataView(buf, off, OVERLAY_STRIDE);
 
-  return { tick, beadCount, nodeCount, edgeCount, beadView, nodeView, edgeView, cameraView, overlayView };
+  return { tick, beadCount, nodeCount, edgeCount, beadView, nodeView, interiorCount, interiorView, edgeView, cameraView, overlayView };
 }

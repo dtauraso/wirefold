@@ -16,10 +16,11 @@ import {
 } from "../src/webview/three/buffer-nav";
 import { NODE_DEFS } from "../src/schema/node-defs";
 import {
-  BUF_HEADER_SIZE, NODE_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS,
   NODE_COL_SPHERE_R, NODE_COL_SELECTED,
 } from "../src/schema/buffer-layout";
+import { INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 
 // Build a snapshot with `nodeCount` node rows (no beads/edges). Returns a setter to
 // fill node fields by row.
@@ -27,7 +28,10 @@ function makeNodeSnapshot(nodeCount: number): { buf: ArrayBuffer; setNode: (row:
   cx?: number; cy?: number; cz?: number; radius?: number; sphereR?: number; selected?: number;
 }) => void } {
   const nodeBytes = nodeCount * NODE_STRIDE;
-  const total = BUF_HEADER_SIZE + nodeBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  // Interior block (fixed INTERIOR_SLOTS_PER_NODE rows per node) sits between the node
+  // and camera blocks; decodeSnapshot's length check requires it even when empty.
+  const interiorBytes = nodeCount * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
+  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
   dv.setUint32(8, nodeCount, true); // nodeCount header field

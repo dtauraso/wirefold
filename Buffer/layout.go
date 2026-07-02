@@ -24,7 +24,15 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 2
+const BufLayoutVersion = 3
+
+// BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
+// node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
+// The Interior block carries exactly nodeCount*BufInteriorSlotsPerNode rows in
+// stable node order, so it needs no separate count in the header — the decoder
+// derives its length from nodeCount. Not a generated column; kept in sync with the
+// TS INTERIOR_SLOTS_PER_NODE by the interior-block decode test.
+const BufInteriorSlotsPerNode = 4
 
 // --- Semantic event enum ------------------------------------------------
 // Transient flags stored in node rows (one u8 per event kind per node per tick).
@@ -75,6 +83,21 @@ type bufLayoutNode struct {
 	Selected uint8   `buf:"u8"`  // persistent: 1 = this node is the click-selected node
 }
 
+// bufLayoutInterior defines one row of the interior-bead column block.
+// The block carries a FIXED BufInteriorSlotsPerNode (4) rows per node, in stable
+// node order: row = nodeRow*BufInteriorSlotsPerNode + slot, slot = gridRow*2 + gridCol.
+// Matched from KindNodeBead trace events (node's 2x2 held/interior grid). OX/OY/OZ
+// are the Go-owned NODE-LOCAL slot offset (relative to the node center — the renderer
+// adds the node center to get the world position); Present=0 hides the slot even when
+// Value/offset are present (a popped/empty slot is streamed explicitly so it clears).
+type bufLayoutInterior struct {
+	Present uint8   `buf:"u8"`  // 1 = slot filled (draw); 0 = empty (hide)
+	Value   int32   `buf:"i32"` // bead value (0|1); colored via bead-style
+	OX      float32 `buf:"f32"` // node-local slot offset x
+	OY      float32 `buf:"f32"` // node-local slot offset y
+	OZ      float32 `buf:"f32"` // node-local slot offset z
+}
+
 // bufLayoutEdge defines one row of the edges column block.
 // One row per edge (wire). Matched from KindGeometry trace events.
 type bufLayoutEdge struct {
@@ -121,6 +144,7 @@ type bufLayoutOverlay struct {
 var _ = [...]any{
 	bufLayoutBead{},
 	bufLayoutNode{},
+	bufLayoutInterior{},
 	bufLayoutEdge{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},

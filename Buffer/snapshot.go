@@ -11,12 +11,13 @@
 //
 // Snapshot layout (little-endian, packed):
 //
-//	Header  16 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]
-//	Bead    beadCount × BufBeadStride bytes
-//	Node    nodeCount × BufNodeStride bytes   (persistent geom + transient event flags)
-//	Edge    edgeCount × BufEdgeStride bytes
-//	Camera  BufCameraStride bytes             (always 1 row)
-//	Overlay BufOverlayStride bytes            (always 1 row)
+//	Header   16 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]
+//	Bead     beadCount × BufBeadStride bytes
+//	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags)
+//	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
+//	Edge     edgeCount × BufEdgeStride bytes
+//	Camera   BufCameraStride bytes             (always 1 row)
+//	Overlay  BufOverlayStride bytes            (always 1 row)
 //
 // At the rollout flip (a later phase), this becomes the sole framed stdout once
 // the JSON trace is removed. For now it runs alongside JSON on a side channel.
@@ -91,6 +92,18 @@ type nodeSnapState struct {
 	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
 	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
 	selected uint8
+	// interior holds this node's 2x2 held/interior-bead grid (slot = row*2 + col).
+	// PERSISTENT — a slot keeps its state until the next KindNodeBead updates it
+	// (present=false explicitly clears a popped slot). Not touched by clearTransients.
+	interior [BufInteriorSlotsPerNode]interiorSlotState
+}
+
+// interiorSlotState holds one interior grid slot's present/value + Go-owned
+// NODE-LOCAL offset (relative to the node center).
+type interiorSlotState struct {
+	present    uint8
+	value      int32
+	ox, oy, oz float64
 }
 
 // edgeSnapState holds persistent segment endpoints for one edge.
@@ -234,6 +247,13 @@ func (s *SnapshotState) Update(ev T.Event) {
 	case T.KindDone:
 		s.setNodeEvent(ev.Node, BufEventDoneID)
 
+	case T.KindNodeBead:
+		// One interior grid slot's authoritative state (node's 2x2 held/interior
+		// grid). Persistent per-node slot state; present=false clears a popped slot.
+		// X/Y/Z are the Go-owned NODE-LOCAL offset (renderer adds the node center).
+		s.setInteriorSlot(ev.Node, ev.Row, ev.Col, ev.Present, int32(ev.Value), ev.X, ev.Y, ev.Z)
+		s.emitSnapshot() // state-change point: emit on interior-bead updates
+
 	case T.KindSelect:
 		// Go-owned selection: mark ev.Node selected, clear every other node. ev.Node==""
 		// clears the selection entirely. Persistent — survives across snapshots until the
@@ -323,6 +343,23 @@ func (s *SnapshotState) setNodeEvent(nodeID string, eventID int) {
 	}
 }
 
+// setInteriorSlot records one interior grid slot's state on a node. slot = row*2 + col;
+// out-of-range (row,col) or unknown nodes are ignored. Persistent — survives across
+// snapshots until the next node-bead updates the slot.
+func (s *SnapshotState) setInteriorSlot(nodeID string, row, col int, present bool, value int32, ox, oy, oz float64) {
+	idx, ok := s.nodeIndex[nodeID]
+	if !ok {
+		return
+	}
+	slot := row*2 + col
+	if slot < 0 || slot >= BufInteriorSlotsPerNode {
+		return
+	}
+	s.nodes[idx].interior[slot] = interiorSlotState{
+		present: boolU8(present), value: value, ox: ox, oy: oy, oz: oz,
+	}
+}
+
 // setSelected marks nodeID as the selected node and clears the flag on every other
 // node. nodeID=="" clears all selection. Persistent state — not touched by
 // clearTransients.
@@ -374,9 +411,12 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	nodeCount := uint32(len(s.nodes))
 	edgeCount := uint32(len(s.edges))
 
+	interiorCount := int(nodeCount) * BufInteriorSlotsPerNode
+
 	size := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
+		interiorCount*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride +
 		BufOverlayStride
@@ -418,6 +458,21 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected)
 	}
 	off += int(nodeCount) * BufNodeStride
+
+	// Interior block: FIXED BufInteriorSlotsPerNode rows per node, stable node order
+	// (row = nodeRow*slotsPerNode + slot). No header count — the decoder derives the
+	// length from nodeCount. Empty slots are written with present=0 so a popped bead
+	// clears on the render side.
+	interiorBuf := buf[off : off+interiorCount*BufInteriorStride]
+	for i, n := range s.nodes {
+		for slot := 0; slot < BufInteriorSlotsPerNode; slot++ {
+			it := n.interior[slot]
+			SetInteriorRow(interiorBuf, i*BufInteriorSlotsPerNode+slot,
+				it.present, it.value,
+				float32(it.ox), float32(it.oy), float32(it.oz))
+		}
+	}
+	off += interiorCount * BufInteriorStride
 
 	// Edge block: stable row order (insertion order of edge labels).
 	edgeBuf := buf[off : off+int(edgeCount)*BufEdgeStride]

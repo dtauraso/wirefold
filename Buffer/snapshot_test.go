@@ -112,6 +112,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	wantSize := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
+		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride +
 		BufOverlayStride
@@ -180,7 +181,10 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 
 	// ── Edge block ───────────────────────────────────────────────────────────
-	edgeOff := nodeOff + int(nodeCount)*BufNodeStride
+	// The Interior block (nodeCount×BufInteriorSlotsPerNode rows) sits between the
+	// node and edge blocks, so the edge offset must skip it.
+	edgeOff := nodeOff + int(nodeCount)*BufNodeStride +
+		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride
 	if readF32(snap, edgeOff+BufEdgeColSX) != float32(1.1) {
 		t.Errorf("edge.SX: got %v, want ~1.1", readF32(snap, edgeOff+BufEdgeColSX))
 	}
@@ -279,6 +283,7 @@ func TestSnapshotFraming(t *testing.T) {
 	wantSize := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
+		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride + BufOverlayStride
 	if len(payload) != wantSize {
@@ -309,6 +314,58 @@ func TestTransientFlagsCleared(t *testing.T) {
 	nodeOff := BufHeaderSize + BufBeadStride // 1 live bead
 	if snap[nodeOff+BufNodeColEvFire] != 0 {
 		t.Errorf("EvFire not cleared after snapshot: got %v, want 0", snap[nodeOff+BufNodeColEvFire])
+	}
+}
+
+// TestInteriorBeadReachesSnapshot verifies that KindNodeBead events land in the
+// Interior block: slot = row*2 + col, present/value/offset are packed at the right
+// columns, empty slots stay present=0, and a present=false event clears a popped slot.
+func TestInteriorBeadReachesSnapshot(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+
+	// (row 0, col 0) → slot 0: present value 1 at local offset (2,-3,4).
+	s.Update(T.Event{Kind: T.KindNodeBead, Node: "n1", Row: 0, Col: 0, Present: true, Value: 1, X: 2, Y: -3, Z: 4})
+	// (row 1, col 0) → slot 2: present value 0 (a valid black bead) at (1,1,1).
+	s.Update(T.Event{Kind: T.KindNodeBead, Node: "n1", Row: 1, Col: 0, Present: true, Value: 0, X: 1, Y: 1, Z: 1})
+
+	snap := s.BuildSnapshot()
+	// Interior block starts right after the single node row (no beads).
+	interiorOff := BufHeaderSize + 1*BufNodeStride
+	slot := func(i int) int { return interiorOff + i*BufInteriorStride }
+
+	if snap[slot(0)+BufInteriorColPresent] != 1 {
+		t.Errorf("slot0.Present: got %d, want 1", snap[slot(0)+BufInteriorColPresent])
+	}
+	if v := readI32(snap, slot(0)+BufInteriorColValue); v != 1 {
+		t.Errorf("slot0.Value: got %d, want 1", v)
+	}
+	if x := readF32(snap, slot(0)+BufInteriorColOX); x != 2 {
+		t.Errorf("slot0.OX: got %v, want 2", x)
+	}
+	if y := readF32(snap, slot(0)+BufInteriorColOY); y != -3 {
+		t.Errorf("slot0.OY: got %v, want -3", y)
+	}
+	if z := readF32(snap, slot(0)+BufInteriorColOZ); z != 4 {
+		t.Errorf("slot0.OZ: got %v, want 4", z)
+	}
+	// Slot 1 (row 0, col 1) was never emitted → absent.
+	if snap[slot(1)+BufInteriorColPresent] != 0 {
+		t.Errorf("slot1.Present: got %d, want 0 (never emitted)", snap[slot(1)+BufInteriorColPresent])
+	}
+	// Slot 2 (row 1, col 0): present, value 0.
+	if snap[slot(2)+BufInteriorColPresent] != 1 {
+		t.Errorf("slot2.Present: got %d, want 1", snap[slot(2)+BufInteriorColPresent])
+	}
+	if v := readI32(snap, slot(2)+BufInteriorColValue); v != 0 {
+		t.Errorf("slot2.Value: got %d, want 0", v)
+	}
+
+	// A present=false event on slot 0 clears it (popped bead disappears).
+	s.Update(T.Event{Kind: T.KindNodeBead, Node: "n1", Row: 0, Col: 0, Present: false, Value: 0, X: 2, Y: -3, Z: 4})
+	snap = s.BuildSnapshot()
+	if snap[slot(0)+BufInteriorColPresent] != 0 {
+		t.Errorf("slot0.Present after pop: got %d, want 0", snap[slot(0)+BufInteriorColPresent])
 	}
 }
 

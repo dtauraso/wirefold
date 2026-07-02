@@ -5,12 +5,13 @@
 // via the buffer-layout.ts read helpers.
 
 import { describe, it, expect } from "vitest";
-import { decodeSnapshot } from "../src/webview/three/buffer-decode";
+import { decodeSnapshot, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 import {
   BUF_HEADER_SIZE,
-  BEAD_STRIDE, NODE_STRIDE, EDGE_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   readBeadX, readBeadY, readBeadZ, readBeadFrac, readBeadLive, readBeadBeadID,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
+  readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
 } from "../src/schema/buffer-layout";
 
@@ -29,14 +30,17 @@ function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number): 
   dv: DataView;
   beadOff: number;
   nodeOff: number;
+  interiorOff: number;
   edgeOff: number;
   cameraOff: number;
   overlayOff: number;
 } {
-  const beadBytes   = beadCount  * BEAD_STRIDE;
-  const nodeBytes   = nodeCount  * NODE_STRIDE;
-  const edgeBytes   = edgeCount  * EDGE_STRIDE;
-  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + edgeBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const beadBytes     = beadCount  * BEAD_STRIDE;
+  const nodeBytes     = nodeCount  * NODE_STRIDE;
+  // Interior block: FIXED INTERIOR_SLOTS_PER_NODE rows per node (no header count).
+  const interiorBytes = nodeCount  * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
+  const edgeBytes     = edgeCount  * EDGE_STRIDE;
+  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
 
   const buf = new ArrayBuffer(totalBytes);
   const dv  = new DataView(buf);
@@ -47,13 +51,14 @@ function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number): 
   dv.setUint32(8,  nodeCount,  true);
   dv.setUint32(12, edgeCount,  true);
 
-  const beadOff   = BUF_HEADER_SIZE;
-  const nodeOff   = beadOff  + beadBytes;
-  const edgeOff   = nodeOff  + nodeBytes;
-  const cameraOff = edgeOff  + edgeBytes;
-  const overlayOff = cameraOff + CAMERA_STRIDE;
+  const beadOff    = BUF_HEADER_SIZE;
+  const nodeOff    = beadOff     + beadBytes;
+  const interiorOff = nodeOff    + nodeBytes;
+  const edgeOff    = interiorOff + interiorBytes;
+  const cameraOff  = edgeOff     + edgeBytes;
+  const overlayOff = cameraOff   + CAMERA_STRIDE;
 
-  return { buf, dv, beadOff, nodeOff, edgeOff, cameraOff, overlayOff };
+  return { buf, dv, beadOff, nodeOff, interiorOff, edgeOff, cameraOff, overlayOff };
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -95,6 +100,7 @@ describe("decodeSnapshot — empty snapshot (no beads, nodes, edges)", () => {
     const d = decodeSnapshot(buf)!;
     expect(d.beadView.byteLength).toBe(0);
     expect(d.nodeView.byteLength).toBe(0);
+    expect(d.interiorView.byteLength).toBe(0);
     expect(d.edgeView.byteLength).toBe(0);
     expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
     expect(d.overlayView.byteLength).toBe(OVERLAY_STRIDE);
@@ -156,6 +162,43 @@ describe("decodeSnapshot — node block", () => {
     expectF32(readNodeCY(nv, 0), 6.0);
     expectF32(readNodeCZ(nv, 0), 7.0);
     expectF32(readNodeRadius(nv, 0), 15.0);
+  });
+});
+
+describe("decodeSnapshot — interior block", () => {
+  it("slices the interior block after the node block and decodes slot rows", () => {
+    // 1 node → INTERIOR_SLOTS_PER_NODE interior rows. Fill node 0's slot 0 with a
+    // present bead value=1 at local offset (2,-3,0), and slot 2 with value=0 at (0,4,0).
+    const { buf, dv, interiorOff } = makeSnapshot(0, 1, 0);
+    const row0 = interiorOff + 0 * INTERIOR_STRIDE;
+    dv.setUint8(row0 + 0, 1);            // Present
+    dv.setInt32(row0 + 1, 1, true);      // Value
+    dv.setFloat32(row0 + 5, 2.0, true);  // OX
+    dv.setFloat32(row0 + 9, -3.0, true); // OY
+    dv.setFloat32(row0 + 13, 0.0, true); // OZ
+
+    const row2 = interiorOff + 2 * INTERIOR_STRIDE;
+    dv.setUint8(row2 + 0, 1);            // Present
+    dv.setInt32(row2 + 1, 0, true);      // Value=0 (valid black bead)
+    dv.setFloat32(row2 + 9, 4.0, true);  // OY
+
+    const d = decodeSnapshot(buf)!;
+    expect(d.interiorCount).toBe(INTERIOR_SLOTS_PER_NODE);
+    const iv = d.interiorView;
+
+    expect(readInteriorPresent(iv, 0)).toBe(1);
+    expect(readInteriorValue(iv, 0)).toBe(1);
+    expectF32(readInteriorOX(iv, 0), 2.0);
+    expectF32(readInteriorOY(iv, 0), -3.0);
+    expectF32(readInteriorOZ(iv, 0), 0.0);
+
+    // Slot 1 untouched → absent.
+    expect(readInteriorPresent(iv, 1)).toBe(0);
+
+    // Slot 2: present, value 0.
+    expect(readInteriorPresent(iv, 2)).toBe(1);
+    expect(readInteriorValue(iv, 2)).toBe(0);
+    expectF32(readInteriorOY(iv, 2), 4.0);
   });
 });
 
@@ -226,6 +269,8 @@ describe("decodeSnapshot — mixed counts", () => {
     expect(d.edgeCount).toBe(4);
     expect(d.beadView.byteLength).toBe(3 * BEAD_STRIDE);
     expect(d.nodeView.byteLength).toBe(2 * NODE_STRIDE);
+    expect(d.interiorCount).toBe(2 * INTERIOR_SLOTS_PER_NODE);
+    expect(d.interiorView.byteLength).toBe(2 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE);
     expect(d.edgeView.byteLength).toBe(4 * EDGE_STRIDE);
     expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
     expect(d.overlayView.byteLength).toBe(OVERLAY_STRIDE);
