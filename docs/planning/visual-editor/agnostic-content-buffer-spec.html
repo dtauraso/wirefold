@@ -65,16 +65,16 @@
 <!-- PRINCIPLE -->
 <section class="active" id="principle">
   <h2>The principle</h2>
-  <p class="lead">There is <b>one</b> representation of the render content, and it moves through Go and TS <b>seamlessly</b>. The content is <b>language-agnostic</b> &mdash; plain numbers in a fixed layout &mdash; so neither side owns a translated copy. Go <em>writes</em> the buffer; TS <em>views</em> the same bytes and renders them. No struct, no JSON object, no store in between.</p>
-  <div class="note"><b>Why "full" over a shared JSON shape:</b> a shared shape still forces each side to decode JSON into its own objects every frame. A typed binary buffer is read directly as a <code>TypedArray</code> and handed to the GPU &mdash; zero parse, zero per-entity object, zero re-copy. Agnostic at the bytes, not just at the type.</p>
+  <p class="lead">There is <b>one</b> representation of the render content, and it moves through Go and TS <b>seamlessly</b>. The content is <b>language-agnostic</b> &mdash; plain numbers in a fixed layout &mdash; so neither side owns a translated copy. Go <em>writes</em> the buffer; TS <em>views</em> the same bytes and renders them. No struct, no intermediate object, no store in between.</p>
+  <div class="note"><b>Why "full" over a shared decoded shape:</b> a shared shape still forces each side to decode text into its own objects every frame. A typed binary buffer is read directly as a <code>TypedArray</code> and handed to the GPU &mdash; zero parse, zero per-entity object, zero re-copy. Agnostic at the bytes, not just at the type.</p>
   <h3>One representation &mdash; content <em>and</em> logs</h3>
   <table>
     <tr><th>Everything Go emits</th><th>Encoding</th></tr>
     <tr><td>Bead positions, node/edge geometry, interior slots, status</td><td><span class="pill new">binary columns</span></td></tr>
     <tr><td>Semantic events (<code>recv / fire / send / arrive / done</code>) &mdash; the causal log</td><td><span class="pill new">binary records</span> (same layout family)</td></tr>
   </table>
-  <p class="muted">There is <b>no JSON anywhere</b>. Numeric content <em>and</em> the semantic/log events are the one agnostic binary representation. The human-readable <code>.probe</code> log and the tests read a <b>decode</b> of the same binary &mdash; not a separate text format.</p>
-  <div class="note"><b>Semantic names live <em>in</em> the representation.</b> Event kinds (<code>fire</code>, <code>send</code>&hellip;) and column names are declared once in the shared schema (an enum / a field table). The binary carries a small <b>id</b> into that schema; the name is resolved from the schema, identically on both sides. Names aren&rsquo;t lost by dropping JSON &mdash; they&rsquo;re part of the layout, not re-spelled as text on every message.</div>
+  <p class="muted">Numeric content <em>and</em> the semantic/log events are the one agnostic binary representation. The human-readable <code>.probe</code> log and the tests read a <b>decode</b> of the same binary.</p>
+  <div class="note"><b>Semantic names live <em>in</em> the representation.</b> Event kinds (<code>fire</code>, <code>send</code>&hellip;) and column names are declared once in the shared schema (an enum / a field table). The binary carries a small <b>id</b> into that schema; the name is resolved from the schema, identically on both sides. Names aren&rsquo;t lost &mdash; they&rsquo;re part of the layout, resolved from the shared schema, not re-spelled as text on every message.</div>
 </section>
 
 <!-- TODAY -->
@@ -124,7 +124,7 @@
     <text x="715" y="126" fill="#9aa4b2" font-size="8.5" text-anchor="middle">no store, no parse</text>
     <!-- log note -->
     <rect x="216" y="176" width="360" height="30" rx="7" fill="#1c1526" stroke="#c08bff" stroke-dasharray="4 3"/>
-    <text x="396" y="195" fill="#c08bff" font-size="9.5" text-anchor="middle">.probe log / tests = a decode of the same binary (no JSON)</text>
+    <text x="396" y="195" fill="#c08bff" font-size="9.5" text-anchor="middle">.probe log / tests = a decode of the same binary</text>
   </svg>
   <p class="lead"><b>Go writes the layout &rarr; framed binary bytes on stdout &rarr; the extension host transfers the ArrayBuffer (zero-copy) into the webview &rarr; viewed as TypedArrays &rarr; fed to instanced GPU attributes.</b> The same bytes exist once and are handed along the path.</p>
   <div class="note">The <b>transferable <code>postMessage(buf,[buf])</code></b> hands buffer ownership to the webview with no copy. With no parse and no store, the render content is touched exactly at write (Go) and at GPU-upload (TS). The log events ride the same binary stream; a decoder renders them to text only for humans.</div>
@@ -151,7 +151,7 @@ status  : <span class="b">{ maxRows, cols:[ torusRed:u8, missVal:i32, mx:f32, my
 <!-- TRANSPORT -->
 <section id="transport">
   <h2>Transport &amp; framing</h2>
-  <p>Go&rsquo;s stdout carries <b>framed binary</b> output &mdash; one representation, no JSON. Every frame&rsquo;s payload is binary; the extension host reads frames, transfers content buffers to the webview, and decodes event frames to the log.</p>
+  <p>Go&rsquo;s stdout carries <b>framed binary</b> output &mdash; one representation. Every frame&rsquo;s payload is binary; the extension host reads frames, transfers content buffers to the webview, and decodes event frames to the log.</p>
   <pre><span class="c">// each frame: [kind:u8][len:u32-LE][payload] — payload is always binary</span>
 kind 0 = content frame  <span class="c">// column bytes → transferable ArrayBuffer → webview render</span>
 kind 1 = event record   <span class="c">// binary semantic event → decoded to .probe log / tests</span></pre>
@@ -159,11 +159,11 @@ kind 1 = event record   <span class="c">// binary semantic event → decoded to 
   <table>
     <tr><th>Decision</th><th>Choice</th><th>Why</th></tr>
     <tr><td>Endianness</td><td>little-endian both sides (Go <code>binary.LittleEndian</code>; JS <code>DataView</code>/typed arrays are LE on all target platforms)</td><td>agnostic bytes require an agreed byte order</td></tr>
-    <tr><td>Framing</td><td>length-prefixed frames; the reader buffers partial frames</td><td>same class as the JSONL line-buffer we just hardened (<code>splitJsonlLines</code>) — now frame-buffering</td></tr>
+    <tr><td>Framing</td><td>length-prefixed frames; the reader buffers partial frames</td><td>the same partial-read framing class we hardened for the stdout reader — now frame-buffering</td></tr>
     <tr><td>Sizing</td><td>fixed <code>maxRows</code> per column (grow-and-refit later if needed)</td><td>stable slot indices; one allocation; simplest</td></tr>
     <tr><td>Channel model</td><td>one framed binary stdout, not a 3rd pipe</td><td>preserves the &ldquo;two channels&rdquo; bridge doctrine — still Go&rarr;TS trace + TS&rarr;Go edits</td></tr>
   </table>
-  <div class="note warn"><b>Doctrine touchpoint:</b> this re-shapes the Go&rarr;TS lane from all-JSON to <b>all-binary</b> (content <em>and</em> log). CLAUDE.md&rsquo;s &ldquo;two channels&rdquo; still holds (it&rsquo;s one Go&rarr;TS stream), but the wire format is now binary end-to-end &mdash; MODEL.md/CLAUDE.md bridge wording must be updated in the same change, and a parity guard added for the layout.</div>
+  <div class="note warn"><b>Doctrine touchpoint:</b> this makes the Go&rarr;TS lane <b>all-binary</b> (content <em>and</em> log). CLAUDE.md&rsquo;s &ldquo;two channels&rdquo; still holds (it&rsquo;s one Go&rarr;TS stream), but the wire format is now binary end-to-end &mdash; MODEL.md/CLAUDE.md bridge wording must be updated in the same change, and a parity guard added for the layout.</div>
 </section>
 
 <!-- CONSUME -->
@@ -197,7 +197,7 @@ instanced.count = liveBeadCount;</pre>
   <ul>
     <li><b>Offset accessors</b> are pure arithmetic &mdash; unit-test the row/column math directly.</li>
     <li><b>Go writer:</b> write known values, assert the bytes.</li>
-    <li><b>TS reader:</b> build a buffer of known bytes, assert the views decode to the right numbers &mdash; and the frame-demux (JSON vs binary) tested like the existing <code>splitJsonlLines</code>/<code>handleMessage</code> tests.</li>
+    <li><b>TS reader:</b> build a buffer of known bytes, assert the views decode to the right numbers &mdash; and the frame reader (content frame vs event record) tested like the existing stdout-reader / <code>handleMessage</code> tests.</li>
     <li><b>Round-trip:</b> Go writes → same layout → TS reads → equals the input (a cross-language golden test, like the trace-event fixture).</li>
   </ul>
 </section>
@@ -207,14 +207,14 @@ instanced.count = liveBeadCount;</pre>
   <h2>Scope, non-goals, open decisions</h2>
   <h3>Changes</h3>
   <ul>
-    <li><b>Go:</b> pack all output &mdash; position/geometry/status content <em>and</em> semantic event records &mdash; into the binary layout; frame stdout output. No JSON emitter.</li>
+    <li><b>Go:</b> pack all output &mdash; position/geometry/status content <em>and</em> semantic event records &mdash; into the binary layout; frame stdout output &mdash; one binary emitter.</li>
     <li><b>Bridge/ext host:</b> read framed stdout; transfer content ArrayBuffers to the webview; decode event records to the log.</li>
     <li><b>Webview:</b> hold the buffer, expose typed views, feed instanced GPU attributes; delete the 5 stores; re-route interaction to the buffer.</li>
     <li><b>Codegen + guard:</b> single layout schema → Go writer + TS reader + a layout-parity guard; docs (MODEL.md/CLAUDE.md bridge wording).</li>
   </ul>
   <h3>Non-goals</h3>
   <ul>
-    <li><span class="pill keep">no change</span> to the fire-and-forget TS&rarr;Go edit path, or to the <em>meaning</em> of the causal log &mdash; its semantics are unchanged; only its encoding moves from JSON to the shared binary.</li>
+    <li><span class="pill keep">no change</span> to the fire-and-forget TS&rarr;Go edit path, or to the <em>meaning</em> of the causal log &mdash; its semantics are unchanged; only its encoding moves to the shared binary.</li>
     <li><span class="pill keep">not</span> deleting the spec/camera (editor) stores.</li>
     <li><span class="pill keep">no</span> new request/response or awaiting on the bridge &mdash; the buffer is one-way Go&rarr;TS, like the trace.</li>
   </ul>
@@ -223,7 +223,7 @@ instanced.count = liveBeadCount;</pre>
     <li><b>Frame cadence:</b> emit a binary frame per render tick vs per Go clock event. Leaning per-tick for the moving columns; geometry columns only when they change.</li>
     <li><b>maxRows policy:</b> fixed ceiling vs grow-and-refit on overflow.</li>
     <li><b>Event-record layout:</b> fixed-width vs variable-length records for the semantic events (each carries a kind id + a few fields) &mdash; decide the record framing within the binary.</li>
-    <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current JSON output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete the 5 stores + re-route interaction, (6) remove the JSON emitter + update docs. Each step verifiable; the current JSON path stays live as a fallback until step 5 and is deleted at step 6.</li>
+    <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete the 5 stores + re-route interaction, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
   </ul>
 </section>
 
