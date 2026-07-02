@@ -27,6 +27,16 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Wirefold Topology Editor",
+      "properties": {
+        "wirefold.newSystem": {
+          "type": "boolean",
+          "default": false,
+          "description": "Master switch for the agnostic-content-buffer new path: binary buffer render + raw-input forwarding to Go's gesture FSM + Go-owned interactions (edge-create, click-select, handhold orbit, ring-move). OFF = current render/interaction path unchanged. Requires 'Developer: Reload Window' to take effect."
+        }
+      }
     }
   },
   "scripts": {

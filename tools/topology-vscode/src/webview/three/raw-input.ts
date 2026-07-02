@@ -15,9 +15,11 @@ import { vscode } from "../vscode-api";
 import type { RawInputEvent, RawHit, RawPointerKind } from "../../messages";
 import type { PickOptions } from "./interaction-controls";
 import { pixelToNDC } from "./geometry-helpers";
+import { USE_NEW_SYSTEM } from "../new-system";
 
-/** Master switch for the raw-input path. false = current interaction handlers run as today. */
-export const USE_RAW_INPUT = false;
+/** Follows the ONE master switch (USE_NEW_SYSTEM). ON = forward raw input to Go's gesture
+ *  FSM; OFF (default) = the current interaction handlers run byte-for-byte as today. */
+export const USE_RAW_INPUT = USE_NEW_SYSTEM;
 
 type PickRef = React.MutableRefObject<
   ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
