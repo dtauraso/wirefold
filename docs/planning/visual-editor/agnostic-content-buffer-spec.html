@@ -75,6 +75,7 @@
   </table>
   <p class="muted">Numeric content <em>and</em> the semantic/log events are the one agnostic binary representation. The human-readable <code>.probe</code> log and the tests read a <b>decode</b> of the same binary.</p>
   <div class="note"><b>Semantic names live <em>in</em> the representation.</b> Event kinds (<code>fire</code>, <code>send</code>&hellip;) and column names are declared once in the shared schema (an enum / a field table). The binary carries a small <b>id</b> into that schema; the name is resolved from the schema, identically on both sides. Names aren&rsquo;t lost &mdash; they&rsquo;re part of the layout, resolved from the shared schema, not re-spelled as text on every message.</div>
+  <p>The whole system is one loop: <b>input &rarr; Go (owns all state) &rarr; one binary buffer &rarr; TS renders</b>. TS renders and forwards input; it holds no domain state.</p>
 </section>
 
 <!-- TODAY -->
@@ -175,12 +176,17 @@ kind 1 = event record   <span class="c">// binary semantic event → decoded to 
 instanced.geometry.attributes.offset.array = beadsXYZ;
 instanced.geometry.attributes.offset.needsUpdate = <span class="s">true</span>;
 instanced.count = liveBeadCount;</pre>
-  <h3>Deletions</h3>
-  <p><span class="pill del">DELETE</span> the 5 render stores &mdash; <code>pulse-state</code>, <code>interior-bead-state</code>, <code>node-status-state</code>, <code>node-geometry</code>, <code>edge-geometry</code> &mdash; and their <code>useFrame</code>-poll consumers, plus the parse step for the position/geometry/status kinds (now read as binary columns).</p>
-  <h3>Interaction re-route</h3>
-  <p>Interaction (port positions during a drag) reads the <b>node columns of the buffer view</b> instead of the <code>node-geometry</code> store &mdash; same numbers, one representation.</p>
-  <h3>Kept</h3>
-  <p><span class="pill keep">KEEP</span> the spec/diagram store (editor state it mutates + sends as edits) and camera-store (user/persisted). These are TS-owned, not Go-pickup buffers.</p>
+  <h3>Deletions &mdash; every domain store</h3>
+  <p><span class="pill del">DELETE</span> all TS-held domain state, not just the render buffers:</p>
+  <ul>
+    <li>the 5 render stores &mdash; <code>pulse-state</code>, <code>interior-bead-state</code>, <code>node-status-state</code>, <code>node-geometry</code>, <code>edge-geometry</code> &mdash; and their <code>useFrame</code>-poll consumers;</li>
+    <li>the <b>overlay-visibility flags</b> (currently Go-reflected in <code>camera-store</code>) &mdash; they move into the buffer as bool/enum columns;</li>
+    <li>the <b>spec/diagram store</b> (<code>store.ts</code>) &mdash; Go owns the topology, persists it, and streams it back; the editor renders it and sends CRUD;</li>
+    <li>the <b>camera pose</b> &mdash; Go owns it too (a few columns); mouse gestures are input events to Go, the pose streams back like any other content.</li>
+  </ul>
+  <p class="muted">The only TS state that remains is <b>ephemeral in-gesture bookkeeping</b> inside the input handler (drag origin, which button is down) &mdash; not a domain store.</p>
+  <h3>Interaction</h3>
+  <p>Mouse events (orbit / zoom / drag / add / delete) are forwarded to Go <b>immediately</b> as CRUD/input; everything the renderer needs (incl. port positions during a drag) is read from the <b>buffer view</b>. TS renders + forwards; it holds nothing.</p>
 </section>
 
 <!-- CODEGEN -->
@@ -209,13 +215,13 @@ instanced.count = liveBeadCount;</pre>
   <ul>
     <li><b>Go:</b> pack all output &mdash; position/geometry/status content <em>and</em> semantic event records &mdash; into the binary layout; frame stdout output &mdash; one binary emitter.</li>
     <li><b>Bridge/ext host:</b> read framed stdout; transfer content ArrayBuffers to the webview; decode event records to the log.</li>
-    <li><b>Webview:</b> hold the buffer, expose typed views, feed instanced GPU attributes; delete the 5 stores; re-route interaction to the buffer.</li>
+    <li><b>Webview:</b> hold the buffer, expose typed views, feed instanced GPU attributes; delete <em>all</em> domain stores (render + overlay flags + spec/diagram + camera pose); forward mouse events as CRUD/input; read everything else from the buffer.</li>
     <li><b>Codegen + guard:</b> single layout schema → Go writer + TS reader + a layout-parity guard; docs (MODEL.md/CLAUDE.md bridge wording).</li>
   </ul>
   <h3>Non-goals</h3>
   <ul>
     <li><span class="pill keep">no change</span> to the fire-and-forget TS&rarr;Go edit path, or to the <em>meaning</em> of the causal log &mdash; its semantics are unchanged; only its encoding moves to the shared binary.</li>
-    <li><span class="pill keep">not</span> deleting the spec/camera (editor) stores.</li>
+    <li><span class="pill keep">no</span> client-side domain state &mdash; Go owns topology, camera, overlays, everything; TS renders + forwards input only.</li>
     <li><span class="pill keep">no</span> new request/response or awaiting on the bridge &mdash; the buffer is one-way Go&rarr;TS, like the trace.</li>
   </ul>
   <h3>Open decisions (resolve before build)</h3>
@@ -223,7 +229,7 @@ instanced.count = liveBeadCount;</pre>
     <li><b>Frame cadence:</b> emit a binary frame per render tick vs per Go clock event. Leaning per-tick for the moving columns; geometry columns only when they change.</li>
     <li><b>maxRows policy:</b> fixed ceiling vs grow-and-refit on overflow.</li>
     <li><b>Event-record layout:</b> fixed-width vs variable-length records for the semantic events (each carries a kind id + a few fields) &mdash; decide the record framing within the binary.</li>
-    <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete the 5 stores + re-route interaction, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
+    <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete all domain stores + forward input as CRUD, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
   </ul>
 </section>
 
