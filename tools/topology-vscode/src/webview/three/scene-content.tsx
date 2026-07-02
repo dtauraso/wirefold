@@ -41,7 +41,9 @@ function findNearestByTag(
     if (skip?.(obj)) continue;
     for (let i = 0; i < keys.length; i++) {
       if (results[i] !== null) continue;
-      const val = obj.userData?.[keys[i]!]; // i < keys.length
+      // THREE.Object3D.userData is typed Record<string, any>; capture as unknown
+      // and narrow rather than letting `any` propagate.
+      const val: unknown = obj.userData?.[keys[i]!]; // i < keys.length
       if (val) {
         results[i] = { id: val as string, dist: hit.distance };
         break; // one category per hit — preserves original `continue` semantics

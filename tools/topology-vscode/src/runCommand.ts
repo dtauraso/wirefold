@@ -36,18 +36,20 @@ function goErrorLine(message: string): string {
 function tryParseTraceEvent(line: string): TraceEvent | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
-    const obj = JSON.parse(line);
-    if (
-      typeof obj === "object" && obj !== null &&
-      typeof obj.step === "number" &&
-      typeof obj.kind === "string" &&
-      TRACE_EVENT_KIND_SET.has(obj.kind)
-    ) {
-      // Per-kind FIELD validation: the kind-string set only proves the discriminant.
-      // node-status carries a typed payload (generated from Trace.go); drop a
-      // malformed one rather than casting it through and painting garbage.
-      if (obj.kind === "node-status" && !validateNodeStatusFields(obj)) return undefined;
-      return obj as TraceEvent;
+    const obj: unknown = JSON.parse(line);
+    if (typeof obj === "object" && obj !== null) {
+      const rec = obj as Record<string, unknown>;
+      if (
+        typeof rec.step === "number" &&
+        typeof rec.kind === "string" &&
+        TRACE_EVENT_KIND_SET.has(rec.kind)
+      ) {
+        // Per-kind FIELD validation: the kind-string set only proves the discriminant.
+        // node-status carries a typed payload (generated from Trace.go); drop a
+        // malformed one rather than casting it through and painting garbage.
+        if (rec.kind === "node-status" && !validateNodeStatusFields(rec)) return undefined;
+        return obj as TraceEvent;
+      }
     }
   } catch { /* not JSON */ }
   return undefined;
@@ -59,14 +61,12 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
 function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
-    const obj = JSON.parse(line);
-    if (
-      typeof obj === "object" && obj !== null &&
-      obj.kind === "spec" &&
-      Array.isArray(obj.nodes) &&
-      Array.isArray(obj.edges)
-    ) {
-      return obj as { nodes: unknown[]; edges: unknown[]; view?: unknown };
+    const obj: unknown = JSON.parse(line);
+    if (typeof obj === "object" && obj !== null) {
+      const rec = obj as Record<string, unknown>;
+      if (rec.kind === "spec" && Array.isArray(rec.nodes) && Array.isArray(rec.edges)) {
+        return obj as { nodes: unknown[]; edges: unknown[]; view?: unknown };
+      }
     }
   } catch { /* not JSON */ }
   return undefined;
@@ -78,8 +78,8 @@ function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; v
 function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
-    const obj = JSON.parse(line);
-    if (typeof obj === "object" && obj !== null && obj.kind === "breadcrumb") {
+    const obj: unknown = JSON.parse(line);
+    if (typeof obj === "object" && obj !== null && (obj as Record<string, unknown>).kind === "breadcrumb") {
       return obj as Record<string, unknown>;
     }
   } catch { /* not JSON */ }
