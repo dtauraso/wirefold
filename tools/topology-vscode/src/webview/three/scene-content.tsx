@@ -240,7 +240,7 @@ export function Scene({
             new Set<string>(
               edges
                 .filter((e) => e.target === selectedId && e.source)
-                .map((e) => e.source as string),
+                .map((e) => e.source),
             ),
           );
     const ids = new Set<string>();

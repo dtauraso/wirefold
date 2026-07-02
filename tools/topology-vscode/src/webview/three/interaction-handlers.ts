@@ -255,7 +255,7 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
   ctx.portMoveRef.current = null;
 
   // Pick node under cursor.
-  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+  const rect = (e.currentTarget).getBoundingClientRect();
   const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
 
   // Check for port hit. A CONNECTED port (has an incident edge) drags to MOVE the
@@ -279,7 +279,7 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
       ctx.wiringRef.current = p;
     }
     s.phase = "pending";
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    (e.currentTarget).setPointerCapture(e.pointerId);
     return;
   }
 
@@ -294,7 +294,7 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
       beginSphereRotation(ctx, s, cam0, rect, e.clientX, e.clientY);
     }
     s.phase = "pending";
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    (e.currentTarget).setPointerCapture(e.pointerId);
     return;
   }
 
@@ -323,12 +323,12 @@ export function handlePointerDown(ctx: InteractionCtx, e: React.PointerEvent<HTM
     if (cam0) {
       // Seed the content-sphere screen mapping (pivot, pixel center, px-per-radian,
       // prevX/prevY). Shared with the handhold path — see beginSphereRotation.
-      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const rect = (e.currentTarget).getBoundingClientRect();
       beginSphereRotation(ctx, s, cam0, rect, e.clientX, e.clientY);
     }
   }
 
-  (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  (e.currentTarget).setPointerCapture(e.pointerId);
 }
 
 export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTMLDivElement>) {
@@ -399,7 +399,7 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
     // body repositions when Go re-emits node-geometry. No lattice / no zoom math.
     const nd = ctx.nodeDragRef.current;
     const cam = ctx.cameraRef.current;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = (e.currentTarget).getBoundingClientRect();
     if (cam) {
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const raycaster = new THREE.Raycaster(); // polar-nav-ok: node-drag plane hit, not rotation
@@ -425,7 +425,7 @@ export function handlePointerMove(ctx: InteractionCtx, e: React.PointerEvent<HTM
     // edge follow ~1 frame behind via Go's re-emit (node-geometry + edge-geometry
     // streams) — same optimistic-follow path node-drag uses for the node body.
     const pm = ctx.portMoveRef.current;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = (e.currentTarget).getBoundingClientRect();
     const planePoint = unprojectToPlane(ctx, e.clientX, e.clientY, rect, pm.nodeCenter.z);
     if (planePoint) {
       const anchor = pointerRingAnchor(pm.nodeCenter, planePoint);
@@ -487,7 +487,7 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
   // Edge creation runs for both "wiring" (full drag) and "pending" (short drag under MOVE_SLOP_PX).
   if (ctx.wiringRef.current !== null && (s.phase === "wiring" || s.phase === "pending")) {
     const src = ctx.wiringRef.current;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = (e.currentTarget).getBoundingClientRect();
     const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
     const targetPortId = ctx.pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
     if (targetPortId !== null) {
@@ -503,7 +503,7 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
     }
     ctx.wiringRef.current = null;
     s.phase = "idle";
-    (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    (e.currentTarget).releasePointerCapture(e.pointerId);
     return;
   }
 
@@ -511,7 +511,7 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
   // anchor round-trip through save). Reset throttle so the last frame isn't dropped.
   if (s.phase === "port-move" && ctx.portMoveRef.current) {
     const pm = ctx.portMoveRef.current;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = (e.currentTarget).getBoundingClientRect();
     const planePoint = unprojectToPlane(ctx, e.clientX, e.clientY, rect, pm.nodeCenter.z);
     if (planePoint) {
       const anchor = pointerRingAnchor(pm.nodeCenter, planePoint);
@@ -523,7 +523,7 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
     }
     ctx.portMoveRef.current = null;
     s.phase = "idle";
-    (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    (e.currentTarget).releasePointerCapture(e.pointerId);
     return;
   }
 
@@ -570,7 +570,7 @@ export function handlePointerUp(ctx: InteractionCtx, e: React.PointerEvent<HTMLD
       : elapsed < CLICK_MAX_MS && clickDist < MOVE_SLOP_PX;
     if (isClick) {
       // CLICK → pick (selects node or deselects on empty space)
-      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const rect = (e.currentTarget).getBoundingClientRect();
       const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
       const hitId = ctx.pickRequest.current?.(ndcX, ndcY) ?? null;
       // A secondary (two-finger) tap selects with the node's OWN sphere; a primary click

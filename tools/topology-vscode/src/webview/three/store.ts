@@ -103,8 +103,8 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
       const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
       const flow = specToFlow(spec, next, next.lastSelectionIds ?? []);
-      let nodes = flow.nodes as RFNode<NodeData>[];
-      let edges = flow.edges as RFEdge<EdgeData>[];
+      let nodes = flow.nodes;
+      let edges = flow.edges;
       ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
       const fadeEdgeOrder = reconcileFadeOrder(next.fadeEdgeOrder ?? [], edges);
       set({

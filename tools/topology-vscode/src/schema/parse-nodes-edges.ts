@@ -127,7 +127,7 @@ export function parseEdge(v: unknown, path: string): Edge {
   const id = str(o.id, `${path}.id`);
   const source = str(o.source, `${path}.source`);
   const target = str(o.target, `${path}.target`);
-  const label = (o as Record<string, unknown>).label;
+  const label = (o).label;
   if (label === undefined || label === null || String(label).trim() === "") {
     throw new Error(`${path}: edge "${id}" (${source}→${target}) has missing or empty label`);
   }

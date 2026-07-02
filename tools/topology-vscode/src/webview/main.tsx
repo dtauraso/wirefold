@@ -62,7 +62,7 @@ window.addEventListener("message", (e) => {
     setRunStatusImperative(msg.state === "error"
       ? { state: "error", message: msg.message ?? "" }
       : { state: (RUN_STATES as readonly string[]).includes(msg.state)
-            ? msg.state as NonErrorState
+            ? msg.state
             : "idle" });
   } else if (msg.type === "flush") {
     // Host requests immediate flush of any pending debounced saves (panel
