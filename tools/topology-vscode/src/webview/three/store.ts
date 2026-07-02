@@ -15,6 +15,7 @@ import { clearNodeStatus } from "./node-status-state";
 import { clearInteriorBeads } from "./interior-bead-state";
 import { useEdgeGeometryStore, clearAllEdgeSegments } from "./edge-geometry";
 import { clearAllNodeGeometry } from "./node-geometry";
+import { clearNavNodeIds } from "./buffer-nav";
 import { applyFade, reconcileFadeOrder, computeToggleFade } from "./fade-actions";
 import { buildEdge } from "./edge-creation";
 
@@ -86,6 +87,10 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       // for nodes/edges deleted across an edit-reload cycle must not accumulate.
       clearAllNodeGeometry();
       clearAllEdgeSegments();
+      // The buffer-nav id table is rebuilt from the fresh run's node-geometry stream
+      // in the SAME first-seen order as Go's buffer node rows; clear it here so the
+      // two orderings stay aligned across edit/reload cycles (see buffer-nav.ts).
+      clearNavNodeIds();
       const raw: unknown = JSON.parse(text);
       const spec = parseSpec(raw);
       // Diagram view: positions + fades from topology.json#view (Go reads view.nodes).

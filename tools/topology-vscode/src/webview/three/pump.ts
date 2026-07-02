@@ -38,6 +38,7 @@ import { setInteriorBead } from "./interior-bead-state";
 import { setNodeStatus } from "./node-status-state";
 import { useEdgeGeometryStore } from "./edge-geometry";
 import { useNodeGeometryStore } from "./node-geometry";
+import { recordNavNodeId } from "./buffer-nav";
 
 // assertNever enforces exhaustiveness: if a new TraceEventKind is added in Go
 // and trace-kinds.ts is regenerated, tsc will flag the missing branch here.
@@ -227,6 +228,10 @@ export function handleTraceEvent(event: TraceEvent): void {
       // (Three y-up frame; Go mirrors geometry-helpers.ts). Pure store-write — no
       // geometry math here (drift rule). The geometry helpers read this store.
       const e = event as Extract<TraceEvent, { kind: "node-geometry" }>;
+      // Record the node id in first-seen order for the buffer-nav id table (label
+      // resource keyed by buffer row). Same first-seen rule as Go's SnapshotState,
+      // over the same event stream ⇒ id index i ↔ buffer node row i. See buffer-nav.ts.
+      recordNavNodeId(e.node);
       useNodeGeometryStore.getState().setNodeGeometry(
         e.node,
         { x: e.nx, y: e.ny, z: e.nz },
