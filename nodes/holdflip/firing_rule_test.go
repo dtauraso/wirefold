@@ -296,7 +296,7 @@ func (r *pacedFlipRig) feed(t *testing.T, v int) {
 	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, v, 0) { // 0 latency: delivered on next advance
 		t.Fatal("PlaceAndDriveDeliverOnly returned false")
 	}
-	r.clk.Advance(1 * time.Millisecond)
+	r.clk.AdvanceTicks(1)
 }
 
 // expectFlip advances the shared clock in wire-latency steps, draining the
@@ -308,7 +308,7 @@ func (r *pacedFlipRig) expectFlip(t *testing.T, want int) {
 	t.Helper()
 	const latMs = 10.0
 	for i := 0; i < 5000; i++ {
-		r.clk.Advance(latMs * time.Millisecond)
+		r.clk.AdvanceTicks(int64(latMs))
 		for {
 			v, ok := r.observer.PollRecv()
 			if !ok {

@@ -11,11 +11,12 @@ import (
 // position_stream_test.go — the Phase 2 deterministic verifier (golden
 // position-sequence parity). It asserts that the wire's delivery goroutine emits,
 // for an in-flight bead, exactly the analytic straight-segment position:
-// each emitted position equals lerp(Start, End, t) at t = elapsed/inFlightTime,
+// each emitted position equals lerp(Start, End, t) at t = tick/ticksToCross,
 // with t strictly increasing, a final emit at t==1 immediately followed by
-// delivery, and a ~16 ms emit cadence. There are NO real sleeps in the timing
-// assertions — the FakeClock is advanced explicitly, so the whole stream is
-// reproducible.
+// delivery, and one emit per tick (the tick IS the animation clock). There are
+// NO real sleeps in the timing assertions — the FakeClock is advanced explicitly,
+// so the whole stream is reproducible. These wires use pulseSpeed =
+// PulseSpeedWuPerMs, so ticksToCross == inFlightMs (one tick per old ms-unit).
 //
 // "Golden" here is analytic, not a recorded file: Go's lerp IS the position eval,
 // so the expected sequence is recomputed in the test from the same formula the
@@ -37,12 +38,10 @@ func approxEq(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
 // TestPositionStreamGoldenSequence is the Phase 2 golden parity verifier.
 //
-// inFlightMs = 50, emit cadence = 16 ms ⇒ ticks at clock-elapsed 16, 32, 48 and
-// the final deadline tick at 50. So the expected t sequence is
-// 16/50, 32/50, 48/50, 1.0 — three regular ticks plus the clamped final tick.
-// A single Advance(50ms) drives the whole walk: the goroutine wakes at each tick
-// in order (WaitUntil returns as soon as Now() >= target), emitting every
-// position before delivery.
+// ticksToCross = 50, one emit per tick ⇒ positions at ticks 1,2,…,50, with the
+// tick-50 emit clamped to t==1 (the delivery tick). A single AdvanceTicks(50)
+// drives the whole walk: the goroutine wakes at each tick in order (WaitTick
+// returns as soon as Tick() >= target), emitting every position before delivery.
 func TestPositionStreamGoldenSequence(t *testing.T) {
 	const inFlightMs = 50.0
 
@@ -68,9 +67,9 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 		t.Fatal("placeAndDrive: expected the fresh wire to accept the bead")
 	}
 
-	// Drive the whole in-flight walk past the deadline in one Advance. The
-	// delivery goroutine emits each ~16 ms tick in order, then delivers at t==1.
-	clk.Advance(time.Duration(inFlightMs) * time.Millisecond)
+	// Drive the whole in-flight walk past the deadline in one advance. The
+	// delivery goroutine emits each tick's position in order, then delivers at t==1.
+	clk.AdvanceTicks(int64(inFlightMs))
 
 	// Wait (with a guard, no assertion-relevant sleep) for the goroutine to finish
 	// delivering — once inFlight clears, every position (incl. the final) has been
@@ -87,17 +86,17 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 	tr.Close()
 	positions := posEvents(tr.Events())
 
-	// Expected tick elapsed times (ms): 16, 32, 48, then the final deadline at 50.
-	expectedElapsed := []float64{16, 32, 48, 50}
-	if len(positions) != len(expectedElapsed) {
-		t.Fatalf("emitted %d position events, want %d (ticks 16/32/48 + final 50)\n got: %+v",
-			len(positions), len(expectedElapsed), positions)
+	// One emit per tick: positions at ticks 1..inFlightMs (== ticksToCross).
+	wantN := int(inFlightMs)
+	if len(positions) != wantN {
+		t.Fatalf("emitted %d position events, want %d (one per tick 1..%d)\n got: %+v",
+			len(positions), wantN, wantN, positions)
 	}
 
 	var prevT float64 = -1
 	for i, e := range positions {
-		elapsed := expectedElapsed[i]
-		wantT := elapsed / inFlightMs
+		tick := float64(i + 1)
+		wantT := tick / inFlightMs
 		if wantT > 1 {
 			wantT = 1
 		}
@@ -128,7 +127,7 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 
 	// The last emit is exactly t==1 (arrival), and it is the final event before
 	// delivery (delivery is what cleared InFlight above).
-	finalT := expectedElapsed[len(expectedElapsed)-1] / inFlightMs
+	finalT := float64(len(positions)) / inFlightMs
 	if !approxEq(finalT, 1) {
 		t.Fatalf("final tick t=%g, want 1.0 (arrival emit)", finalT)
 	}
@@ -151,11 +150,11 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 	}
 }
 
-// TestPositionStreamCadence asserts the ~16 ms emit cadence directly: with an
-// inFlightMs that is a clean multiple of the 16 ms interval, every consecutive
-// tick (including the final) is exactly 16 ms apart in clock-elapsed terms.
+// TestPositionStreamCadence asserts the per-tick emit cadence directly: every
+// consecutive emit (including the final) is exactly one tick apart, so there are
+// ticksToCross emits with t = tick/ticksToCross.
 func TestPositionStreamCadence(t *testing.T) {
-	const inFlightMs = 80.0 // 16 * 5
+	const inFlightMs = 80.0
 
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
 	clk := NewFakeClock()
@@ -169,7 +168,7 @@ func TestPositionStreamCadence(t *testing.T) {
 	if !placeAndDrive(pw, 3, bp) {
 		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
-	clk.Advance(time.Duration(inFlightMs) * time.Millisecond)
+	clk.AdvanceTicks(int64(inFlightMs))
 
 	deadline := time.Now().Add(2 * time.Second)
 	for pw.InFlight() {
@@ -181,21 +180,19 @@ func TestPositionStreamCadence(t *testing.T) {
 	tr.Close()
 	positions := posEvents(tr.Events())
 
-	// 80ms / 16ms = 5 ticks at 16,32,48,64,80; the 80 tick is the final deadline.
-	if len(positions) != 5 {
-		t.Fatalf("cadence: got %d positions, want 5 (16/32/48/64/80)", len(positions))
+	// One emit per tick: ticksToCross == inFlightMs emits at ticks 1..80.
+	wantN := int(inFlightMs)
+	if len(positions) != wantN {
+		t.Fatalf("cadence: got %d positions, want %d (one per tick)", len(positions), wantN)
 	}
-	// Reconstruct each tick's elapsed from its position by inverting against the
-	// analytic curve is overkill; instead assert the emitted positions match the
-	// expected per-tick t with exactly 16 ms spacing.
-	for i := 0; i < 5; i++ {
-		elapsed := float64((i + 1) * positionEmitIntervalMs) // 16,32,48,64,80
-		tt := elapsed / inFlightMs
+	// Each emit is exactly one tick apart: position i is at tick i+1, t=(i+1)/inFlightMs.
+	for i := 0; i < wantN; i++ {
+		tt := float64(i+1) / inFlightMs
 		want := lerp(seg.Start, seg.End, tt)
 		got := positions[i]
 		if !approxEq(got.X, want.X) || !approxEq(got.Y, want.Y) || !approxEq(got.Z, want.Z) {
-			t.Fatalf("cadence tick %d (elapsed=%gms, t=%g): got (%g,%g,%g), want (%g,%g,%g)",
-				i, elapsed, tt, got.X, got.Y, got.Z, want.X, want.Y, want.Z)
+			t.Fatalf("cadence tick %d (t=%g): got (%g,%g,%g), want (%g,%g,%g)",
+				i, tt, got.X, got.Y, got.Z, want.X, want.Y, want.Z)
 		}
 	}
 }
@@ -222,7 +219,7 @@ func TestPositionStreamHaltedNoEmit(t *testing.T) {
 	// Halt, then attempt to advance: a halted FakeClock ignores Advance, so no
 	// tick deadline is reached and no position is emitted.
 	clk.Halt()
-	clk.Advance(10 * inFlightMs * time.Millisecond)
+	clk.AdvanceTicks(int64(10 * inFlightMs))
 	// Give any (incorrectly running) goroutine a chance to emit.
 	time.Sleep(20 * time.Millisecond)
 	if !pw.InFlight() {
@@ -236,7 +233,7 @@ func TestPositionStreamHaltedNoEmit(t *testing.T) {
 
 	// Resume and advance past the deadline — the stream now completes.
 	clk.Resume()
-	clk.Advance(inFlightMs * time.Millisecond)
+	clk.AdvanceTicks(int64(inFlightMs))
 	deadline := time.Now().Add(2 * time.Second)
 	for pw.InFlight() {
 		if time.Now().After(deadline) {

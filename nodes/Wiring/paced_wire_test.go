@@ -33,7 +33,7 @@ func placeAndDrive(pw *PacedWire, val int, bp beadPlacement) bool {
 // against a missed wake.
 func waitDelivered(t *testing.T, pw *PacedWire, clk *FakeClock, want int) {
 	t.Helper()
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	deadline := time.Now().Add(time.Second)
 	for {
 		pw.mu.Lock()
@@ -66,7 +66,7 @@ func TestMultiBeadFIFO(t *testing.T) {
 	}
 
 	// Advance past every bead's deadline; all three deliver.
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	deadline := time.Now().Add(time.Second)
 	for {
 		pw.mu.Lock()
@@ -130,7 +130,7 @@ func TestSendRecvClockDelivery(t *testing.T) {
 	default:
 	}
 
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	select {
 	case v := <-recvDone:
 		if v != 42 {
@@ -200,7 +200,7 @@ func TestMultipleSendsNoDrop(t *testing.T) {
 		t.Fatalf("expected 2 in-flight (no drop), got %d", n)
 	}
 
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	v1, err1 := pw.Recv(ctx)
 	v2, err2 := pw.Recv(ctx)
 	if err1 != nil || err2 != nil || v1 != 1 || v2 != 2 {
@@ -265,7 +265,7 @@ func TestClockDeliveryGate(t *testing.T) {
 	default:
 	}
 
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	select {
 	case v := <-recvResult:
 		if v != 5 {
@@ -324,7 +324,7 @@ func TestPauseFreezesDelivery(t *testing.T) {
 	}
 
 	clk.Halt()
-	clk.Advance(10 * testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(10 * testInFlightMs)
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatal("bead delivered while clock was halted; pause must stop the arithmetic")
@@ -348,13 +348,13 @@ func TestDeliveryAtExactInFlightTime(t *testing.T) {
 		t.Fatal("placeAndDrive returned false")
 	}
 
-	clk.Advance((testInFlightMs - 1) * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs - 1)
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatalf("bead delivered before elapsed reached in-flight time (%d ms)", testInFlightMs)
 	}
 
-	clk.Advance(1 * time.Millisecond)
+	clk.AdvanceTicks(1)
 	v, err := pw.Recv(ctx)
 	if err != nil || v != 9 {
 		t.Fatalf("Recv at exact in-flight time: v=%v err=%v", v, err)
@@ -427,7 +427,7 @@ func TestDeleteCancelsClockDelivery(t *testing.T) {
 	}
 	pw.Delete()
 
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	time.Sleep(10 * time.Millisecond)
 
 	pw.mu.Lock()
@@ -450,7 +450,7 @@ func TestDeleteCancelsAllInFlight(t *testing.T) {
 	}
 	pw.Delete()
 
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	time.Sleep(10 * time.Millisecond)
 	pw.mu.Lock()
 	in, del := len(pw.inflight), len(pw.delivered)
@@ -503,7 +503,7 @@ func TestMultipleBeadsAllDelivered(t *testing.T) {
 	}
 
 	// Advance clock past all deadlines.
-	clk.Advance(testInFlightMs * time.Millisecond)
+	clk.AdvanceTicks(testInFlightMs)
 	deadline := time.Now().Add(time.Second)
 	for {
 		pw.mu.Lock()

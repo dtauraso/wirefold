@@ -99,7 +99,7 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	}
 
 	// Advance the clock past the in-flight time → the wire delivers.
-	clk.Advance(inFlightMs * time.Millisecond)
+	clk.AdvanceTicks(inFlightMs)
 
 	v, err := pw.Recv(ctx)
 	if err != nil || v != 42 {
@@ -145,7 +145,7 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 	if !placeAndDrive(pw, 33, bp) {
 		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
-	clk.Advance(20 * time.Millisecond)
+	clk.AdvanceTicks(20)
 
 	// Delete through the bridge: edit/delete keyed by the destination slot identity.
 	io.WriteString(w, `{"type":"edit","op":"delete","target":"nodeA","targetHandle":"in"}`+"\n")
@@ -160,7 +160,7 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 	}
 
 	// Advancing past the original deadline must NOT deliver — delivery was canceled.
-	clk.Advance(inFlightMs * time.Millisecond)
+	clk.AdvanceTicks(int64(inFlightMs))
 	time.Sleep(10 * time.Millisecond)
 	if _, ok := pw.PollRecv(); ok {
 		t.Fatal("edit/delete left a value in the slot; delete must cancel clock-delivery")

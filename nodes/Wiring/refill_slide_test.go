@@ -32,22 +32,21 @@ func TestRefillSlideClockPaced(t *testing.T) {
 		close(done)
 	}()
 
-	// rowPitch and duration mirror emitRefillSlide.
+	// rowPitch and duration mirror emitRefillSlide (in ticks: one tick per step).
 	rowPitch := interiorSlotOffset(0, 0).Y - interiorSlotOffset(1, 0).Y
-	durationMs := rowPitch / PulseSpeedWuPerMs
-	step := time.Duration(positionEmitIntervalMs * float64(time.Millisecond))
+	durationTicks := rowPitch / PulseSpeedWuPerTick
 
-	// Advance the clock past the full slide duration in 16ms steps. A couple extra
-	// steps guarantee the t>=1 landing frame is reached.
-	totalSteps := int(durationMs/positionEmitIntervalMs) + 3
+	// Advance the clock past the full slide duration one tick per step. A couple
+	// extra steps guarantee the t>=1 landing frame is reached.
+	totalSteps := int(durationTicks) + 3
 	advanceDone := make(chan struct{})
 	go func() {
 		for i := 0; i < totalSteps; i++ {
-			// Give the slide goroutine a chance to park in WaitUntil before each
+			// Give the slide goroutine a chance to park in WaitTick before each
 			// advance so frames are released one at a time (best-effort; correctness
 			// does not depend on it — final assertions hold regardless of batching).
 			time.Sleep(time.Millisecond)
-			clk.Advance(step)
+			clk.AdvanceTicks(1)
 		}
 		close(advanceDone)
 	}()

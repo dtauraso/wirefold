@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 	W "github.com/dtauraso/wirefold/nodes/Wiring"
@@ -110,7 +109,7 @@ func TestFiringErrorEmittedEndToEnd(t *testing.T) {
 	// Advance the fake clock in input-latency-sized steps, polling for the red
 	// event first, then the revert. The step clears an input hop each time so the
 	// Input keeps feeding beads into h's open window.
-	step := time.Duration(in.Geom().SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
+	step := hopTicks(in.Geom().SimLatencyMs)
 
 	// The FIRST real window is opened by value 0 (lastVal=0), so the missed
 	// different-color bead is value 1 — deterministic given init [0,1].

@@ -106,7 +106,9 @@ func Send(t *testing.T, pw *Wiring.PacedWire, v int) {
 	if !pw.PlaceAndDriveDeliverOnly(ctx, v, inFlightMs) {
 		t.Fatal("PlaceAndDriveDeliverOnly returned false")
 	}
-	clk.Advance(inFlightMs * time.Millisecond)
+	// ticksToCross = arc/pulseSpeed; the input wire uses pulseSpeed = PulseSpeedWuPerMs
+	// so cross == inFlightMs ticks (the worst case). Advance past it to force delivery.
+	clk.AdvanceTicks(inFlightMs + 2)
 	// Wait for the clock-delivery goroutine to fill the slot.
 	deadline := time.Now().Add(time.Second)
 	for pw.InFlight() {

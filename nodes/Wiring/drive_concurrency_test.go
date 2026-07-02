@@ -30,7 +30,9 @@ func TestDriveAllIsConcurrent(t *testing.T) {
 	clk := NewFakeClock()
 
 	mk := func(flightMs float64) *Out {
-		pw := NewPacedWire(flightMs, 1) // pulseSpeed 1 -> arc==flight ms -> deadline==flightMs
+		// pulseSpeed = PulseSpeedWuPerMs makes ticksToCross == flightMs (1 tick per
+		// old ms-unit), so deadlines are flightMs ticks — clean integer targets.
+		pw := NewPacedWire(flightMs, PulseSpeedWuPerMs)
 		pw.SetClock(clk)
 		pw.Trace = tr
 		seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{flightMs, 0, 0}}
@@ -59,7 +61,7 @@ func TestDriveAllIsConcurrent(t *testing.T) {
 	// Advance to the SHORT edge's deadline (100ms), still short of the long
 	// edge's (200ms). Concurrent drive delivers the short bead here; the long
 	// bead stays in flight.
-	clk.Advance(100 * time.Millisecond)
+	clk.AdvanceTicks(100)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for delivered(short) < 1 {
@@ -75,7 +77,7 @@ func TestDriveAllIsConcurrent(t *testing.T) {
 
 	// Advance to the long edge's deadline; both are now delivered and DriveAll
 	// returns.
-	clk.Advance(100 * time.Millisecond)
+	clk.AdvanceTicks(100)
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

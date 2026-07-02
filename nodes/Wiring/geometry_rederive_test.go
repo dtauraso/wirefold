@@ -181,7 +181,7 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 	}
 
 	// Advance to the half-way point: covered = arc0/2 ⇒ fraction t = 0.5.
-	clk.Advance(25 * time.Millisecond)
+	clk.AdvanceTicks(25)
 
 	// Revise to a LONGER arc (double). Fraction t stays 0.5; remaining =
 	// (1−t)·newArc/pulseSpeed = 0.5·8/0.08 = 50 ms.
@@ -190,14 +190,14 @@ func TestInFlightRederiveLengthen(t *testing.T) {
 	wantRemainingMs := 0.5 * newArc / PulseSpeedWuPerMs // = 50 ms
 
 	// One ms short of (revise + remaining): still in flight.
-	clk.Advance(time.Duration(wantRemainingMs-1) * time.Millisecond)
+	clk.AdvanceTicks(int64(wantRemainingMs) - 1)
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatalf("delivered early: remaining should be %.3f ms from the revise point", wantRemainingMs)
 	}
 
 	// The final ms reaches the re-derived deadline → delivery.
-	clk.Advance(1 * time.Millisecond)
+	clk.AdvanceTicks(1)
 	waitNotInFlight(t, pw)
 	v, ok := pw.PollRecv()
 	if !ok || v != 11 {
@@ -226,7 +226,7 @@ func TestInFlightRederiveShrinkPreservesFraction(t *testing.T) {
 	}
 
 	// Advance to half: fraction t = 0.5.
-	clk.Advance(25 * time.Millisecond)
+	clk.AdvanceTicks(25)
 
 	// Revise to a SHORTER arc (0.8×). Fraction t stays 0.5 (NOT delivered immediately);
 	// remaining = 0.5·newArc/pulseSpeed = 0.5·3.2/0.08 = 20 ms.
@@ -235,14 +235,14 @@ func TestInFlightRederiveShrinkPreservesFraction(t *testing.T) {
 	wantRemainingMs := 0.5 * newArc / PulseSpeedWuPerMs // = 20 ms
 
 	// One ms short of the re-derived deadline: still in flight (no immediate delivery).
-	clk.Advance(time.Duration(wantRemainingMs-1) * time.Millisecond)
+	clk.AdvanceTicks(int64(wantRemainingMs) - 1)
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatalf("shrink delivered early: fraction must be preserved, remaining %.3f ms", wantRemainingMs)
 	}
 
 	// The final ms reaches the re-derived deadline → delivery.
-	clk.Advance(1 * time.Millisecond)
+	clk.AdvanceTicks(1)
 	waitNotInFlight(t, pw)
 	v, ok := pw.PollRecv()
 	if !ok || v != 22 {
@@ -285,7 +285,7 @@ func TestDragDoesNotResetInFlightFraction(t *testing.T) {
 	}
 
 	// Advance to ~half: fraction t ≈ 0.5.
-	clk.Advance(25 * time.Millisecond)
+	clk.AdvanceTicks(25)
 	time.Sleep(5 * time.Millisecond)
 
 	// Simulate a drag: many revisions in a row with small arc changes around arc0,
@@ -303,7 +303,7 @@ func TestDragDoesNotResetInFlightFraction(t *testing.T) {
 		// Tiny clock advance every few revisions: a real drag fires far more
 		// revisions than clock-ticks, so the fraction should barely move.
 		if i%8 == 0 {
-			clk.Advance(time.Millisecond)
+			clk.AdvanceTicks(1)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
@@ -360,7 +360,7 @@ func TestReviseNoInFlightIsNoOp(t *testing.T) {
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{8, 0, 0}}
 	for i := 0; i < 10; i++ {
 		pw.ReviseInFlightGeometry(8.0, seg)
-		clk.Advance(5 * time.Millisecond)
+		clk.AdvanceTicks(5)
 	}
 	time.Sleep(10 * time.Millisecond)
 
@@ -395,11 +395,11 @@ func TestDeleteMidFlightCancels(t *testing.T) {
 	}
 
 	// Advance partway (bead in flight), then delete the edge mid-flight.
-	clk.Advance(20 * time.Millisecond)
+	clk.AdvanceTicks(20)
 	pw.Delete()
 
 	// Advancing past the ORIGINAL deadline must NOT deliver — delivery was canceled.
-	clk.Advance(inFlightMs * time.Millisecond)
+	clk.AdvanceTicks(int64(inFlightMs))
 	time.Sleep(10 * time.Millisecond)
 	pw.mu.Lock()
 	hasSend := len(pw.delivered) > 0
@@ -446,7 +446,7 @@ func TestDeleteAfterDeliveryNoCancel(t *testing.T) {
 	if !placeAndDrive(pw, 44, bp) {
 		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
-	clk.Advance(inFlightMs * time.Millisecond)
+	clk.AdvanceTicks(int64(inFlightMs))
 	waitNotInFlight(t, pw)
 	if _, ok := pw.PollRecv(); !ok {
 		t.Fatal("bead did not deliver")

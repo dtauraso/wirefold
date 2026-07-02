@@ -84,7 +84,8 @@ func (h *processHarness) statusEvents() []T.Event {
 // stepMs so the bead is delivered into the input wire's delivered queue.
 func (h *processHarness) deliverInput(ctx context.Context, v int, stepMs float64) {
 	h.inPw.PlaceAndDriveDeliverOnly(ctx, v, 0) // 0 latency: delivered on the next advance
-	h.clk.Advance(time.Duration(stepMs * float64(time.Millisecond)))
+	// Wires here use pulseSpeed = PulseSpeedWuPerMs, so one tick == one old ms-unit.
+	h.clk.AdvanceTicks(int64(stepMs))
 }
 
 // waitFor polls cond up to timeout; returns true if cond became true.
@@ -129,7 +130,7 @@ func TestProcessingSameColorIgnored(t *testing.T) {
 	}
 
 	// Complete the output transit → window finishes.
-	h.clk.Advance(2000 * time.Millisecond)
+	h.clk.AdvanceTicks(2000)
 	<-done
 
 	if got := h.statusEvents(); len(got) != 0 {
@@ -173,7 +174,7 @@ func TestProcessingDifferentColorErrors(t *testing.T) {
 	}
 
 	// Complete the output transit → window finishes → revert event.
-	h.clk.Advance(2000 * time.Millisecond)
+	h.clk.AdvanceTicks(2000)
 	<-done
 
 	got = h.statusEvents()
@@ -248,7 +249,7 @@ func TestProcessingSteadyNoSpuriousEvents(t *testing.T) {
 	done := make(chan struct{})
 	go func() { h.guard.Process(ctx, 0, []DriveItem{item}); close(done) }()
 
-	h.clk.Advance(200 * time.Millisecond)
+	h.clk.AdvanceTicks(200)
 	<-done
 
 	if got := h.statusEvents(); len(got) != 0 {

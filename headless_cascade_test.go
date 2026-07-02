@@ -30,6 +30,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -106,12 +107,18 @@ func (c *captureSink) String() string {
 	return c.buf.String()
 }
 
-// stepUntilSeen advances clk by step up to maxSteps times, polling sink for want
-// between each advance. Returns true when want appears in sink, false if exhausted.
-func stepUntilSeen(clk *W.FakeClock, sink *captureSink, step time.Duration, want string) bool {
+// hopTicks converts a per-edge in-flight time (ms) to the tick step that clears
+// one hop, plus a small margin: ticksToCross = simLatencyMs / MsPerTick.
+func hopTicks(simLatencyMs float64) int64 {
+	return int64(math.Ceil(simLatencyMs/float64(W.MsPerTick))) + 2
+}
+
+// stepUntilSeen advances clk by stepTicks up to maxSteps times, polling sink for
+// want between each advance. Returns true when want appears in sink, false if exhausted.
+func stepUntilSeen(clk *W.FakeClock, sink *captureSink, stepTicks int64, want string) bool {
 	const maxSteps = 200
 	for i := 0; i < maxSteps; i++ {
-		clk.Advance(step)
+		clk.AdvanceTicks(stepTicks)
 		deadline := time.Now().Add(50 * time.Millisecond)
 		for time.Now().Before(deadline) {
 			if sink.contains(want) {
@@ -182,7 +189,7 @@ func TestHeadlessCascadeCompletes(t *testing.T) {
 	// Advance the fake clock in steps that clear a hop each time, polling for the
 	// i1 recv. The cascade is two hops, so a handful of steps suffices; the budget
 	// is generous to absorb goroutine scheduling between placement and delivery.
-	step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
+	step := hopTicks(maxHop)
 	want := `"kind":"recv","node":"i1"`
 	got := stepUntilSeen(clk, sink, step, want)
 
@@ -241,16 +248,19 @@ func TestHeadlessDeliveryAtExactInFlightTime(t *testing.T) {
 		t.Fatal("PlaceAndDriveDeliverOnly returned false")
 	}
 
-	// One whole millisecond short of the deadline: the bead must still be in flight.
-	shortOf := time.Duration((inFlightMs-1)*float64(time.Millisecond)) - 1
-	clk.Advance(shortOf)
+	// ticksToCross = inFlightMs / MsPerTick; delivery fires at the ceil tick.
+	crossTicks := inFlightMs / float64(W.MsPerTick)
+	deliverTick := int64(math.Ceil(crossTicks))
+
+	// One tick short of the delivery tick: the bead must still be in flight.
+	clk.AdvanceTicks(deliverTick - 1)
 	time.Sleep(10 * time.Millisecond) // give the delivery goroutine a chance to (wrongly) fire
 	if !pw.InFlight() {
 		t.Fatalf("bead delivered before elapsed reached in-flight time (%.3f ms)", inFlightMs)
 	}
 
-	// Advance to elapsed == inFlightTime exactly → delivery fires.
-	clk.Advance(time.Duration(inFlightMs*float64(time.Millisecond)) - shortOf)
+	// Advance to the delivery tick → delivery fires.
+	clk.AdvanceTicks(1)
 	v, err := pw.Recv(ctx)
 	if err != nil || v != 7 {
 		t.Fatalf("Recv at exact in-flight time: v=%v err=%v", v, err)
@@ -333,7 +343,7 @@ func TestHaltedStartGeometryOnlyNoPositions(t *testing.T) {
 	// The parked delivery goroutines unblock; position events and then delivery
 	// flow through the cascade.
 	clk.Resume()
-	step := time.Duration(maxHop*float64(time.Millisecond)) + time.Millisecond
+	step := hopTicks(maxHop)
 	want := `"kind":"recv","node":"i1"`
 	got := stepUntilSeen(clk, sink, step, want)
 
@@ -392,7 +402,7 @@ func TestFeedbackRingAlternates(t *testing.T) {
 			}()
 		}
 
-		step := time.Duration(hop1.Geom().SimLatencyMs*float64(time.Millisecond)) + time.Millisecond
+		step := hopTicks(hop1.Geom().SimLatencyMs)
 		// activeNetTopo uses Init=[7]; just confirm i0 receives the value via the existing path.
 		want := `"kind":"recv","node":"i0"`
 		got := stepUntilSeen(clk, sink, step, want)

@@ -95,7 +95,7 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	fired := make(chan struct{}, 4)
 	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { fired <- struct{}{} },
-		Now:       func() time.Duration { return simClk.Now() },
+		Tick:      func() int64 { return simClk.Tick() },
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg", "ToPassed", tr),
@@ -124,7 +124,7 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	}
 
 	// Advance sim time past W (3000ms = 120wu/0.04) with one input held → must clear.
-	simClk.Advance(3500 * time.Millisecond)
+	simClk.AdvanceTicks(3500 / Wiring.MsPerTick)
 	deadline := time.Now().Add(1 * time.Second)
 	for clears.Count() == 0 {
 		if time.Now().After(deadline) {
@@ -144,7 +144,7 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 	dFired := make(chan struct{}, 4)
 	dNode := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { dFired <- struct{}{} },
-		Now:       func() time.Duration { return dClk.Now() },
+		Tick:      func() int64 { return dClk.Tick() },
 		FromLeft:  Wiring.NewInPaced(dLeft, dctx, "ilg2", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(dRight, dctx, "ilg2", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg2", "ToPassed", tr),
@@ -165,7 +165,7 @@ func TestPauseFreezesWindowAndDwell(t *testing.T) {
 		// good: dwell not satisfied while sim time held below FireDwellMs
 	}
 
-	dClk.Advance((gatecommon.FireDwellMs + 50) * time.Millisecond)
+	dClk.AdvanceTicks((gatecommon.FireDwellMs + 50) / Wiring.MsPerTick)
 	select {
 	case <-dFired:
 		// good
@@ -308,7 +308,7 @@ func TestWindowClear(t *testing.T) {
 	fired := make(chan struct{}, 4)
 	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() { fired <- struct{}{} },
-		Now:       func() time.Duration { return simClk.Now() },
+		Tick:      func() int64 { return simClk.Tick() },
 		FromLeft:  Wiring.NewInPaced(left, ctx, "ilg", "FromLeft", tr),
 		FromRight: Wiring.NewInPaced(right, ctx, "ilg", "FromRight", tr),
 		ToPassed:  Wiring.NewOut(make(chan int, 4), "ilg", "ToPassed", tr),
@@ -326,7 +326,7 @@ func TestWindowClear(t *testing.T) {
 	// AFTER the advance and the window would never time out.
 	gatetesthelper.WaitCount(t, clears.OpenCount, 1, "window_open")
 
-	simClk.Advance(3500 * time.Millisecond)
+	simClk.AdvanceTicks(3500 / Wiring.MsPerTick)
 
 	// Wait for window_clear breadcrumb (proves the node cleared rather than fired).
 	deadline := time.Now().Add(1 * time.Second)
@@ -355,7 +355,7 @@ func TestWindowClear(t *testing.T) {
 	// clock before advancing past the dwell (replaces a fixed 50ms sleep that raced
 	// the dwellStart = now() read).
 	gatetesthelper.WaitCount(t, clears.DwellCount, 1, "dwell_start")
-	simClk.Advance((gatecommon.FireDwellMs + 50) * time.Millisecond)
+	simClk.AdvanceTicks((gatecommon.FireDwellMs + 50) / Wiring.MsPerTick)
 	select {
 	case <-fired:
 	case <-time.After(2 * time.Second):

@@ -72,7 +72,7 @@ func feedbackSender(t *testing.T, pw *Wiring.PacedWire) func(v int) {
 		if !pw.PlaceAndDriveDeliverOnly(context.Background(), v, inFlightMs) {
 			t.Fatalf("PlaceAndDriveDeliverOnly returned false")
 		}
-		clk.Advance(inFlightMs * time.Millisecond)
+		clk.AdvanceTicks(inFlightMs)
 		deadline := time.Now().Add(time.Second)
 		for pw.InFlight() {
 			if time.Now().After(deadline) {
