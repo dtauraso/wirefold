@@ -116,7 +116,11 @@ type EditMsg =
 // This is a NEW top-level message kind ("raw-input"), NOT an edit op — it is INPUT, not a
 // geometry-CRUD edit. Kept in message-kind parity with stdin_reader.go's msg.Type switch.
 // RAW_INPUT_START
-export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "wheel";
+// "home" is a fit-to-content COMMAND on the raw-input channel (not a pointer/wheel
+// gesture): TS carries only the render context Go needs to size the fit (camera fov +
+// viewport aspect via rectWidth/rectHeight); Go computes the home pose from its OWN node
+// geometry. It is NOT a camera pose sent by TS — the model keeps Go owning the camera.
+export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "wheel" | "home";
 
 /** The stateless raycast hit: which rendered entity is under the pointer + its world point.
  *  kind classifies the rendered target (three.js hit-testing); id is the entity id
@@ -333,7 +337,7 @@ function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
 }
 
 const RAW_POINTER_KINDS: ReadonlySet<string> = new Set<RawPointerKind>([
-  "pointerdown", "pointermove", "pointerup", "wheel",
+  "pointerdown", "pointermove", "pointerup", "wheel", "home",
 ]);
 const RAW_HIT_KINDS: ReadonlySet<string> = new Set<RawHit["kind"]>([
   "port", "handhold", "node", "empty",

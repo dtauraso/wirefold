@@ -10,6 +10,8 @@ import type { OverlayFlag } from "../../messages";
 import { useCameraStore } from "./camera-store";
 import { postLog } from "../log/post";
 import { commitCamera } from "./interaction-handlers";
+import { USE_NEW_SYSTEM } from "../new-system";
+import { sendRawInput, buildHomeRaw } from "./raw-input";
 
 // ---------------------------------------------------------------------------
 // Shared Toggle component
@@ -336,6 +338,16 @@ export function HomeButton({
     const cam = cameraRef.current;
     const nodes = nodesRef.current;
     if (!cam || nodes.length === 0) return;
+
+    // New system: Home is a COMMAND to Go. TS sends only render context (fov + aspect);
+    // Go frames the scene from its OWN node geometry, installs the pose in the gesture
+    // FSM, and streams it back (pump → useCameraStore → CameraFromStore). Because the
+    // FSM's own pose becomes the framed pose, the next pan/zoom/rotate builds on it (no
+    // snap-back). We do NOT mutate the three.js camera or seed a computed pose here.
+    if (USE_NEW_SYSTEM) {
+      sendRawInput(buildHomeRaw(cam.fov, aspect));
+      return;
+    }
 
     const { center, sizeX, sizeY, sizeZ } = boundingBox3D(nodes);
     const dist = fitDistance(cam.fov, aspect, sizeX, sizeY) + sizeZ / 2;

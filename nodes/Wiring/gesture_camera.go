@@ -193,6 +193,54 @@ func regionFocus(v viewpoint, centers map[string]vec3) vec3 {
 }
 
 // ---------------------------------------------------------------------------
+// home fit (mirrors camera-ui.tsx HomeButton.onClick + geometry-helpers.ts
+// boundingBox3D / fitDistance) — frame all node bodies square-on.
+// ---------------------------------------------------------------------------
+
+// fitDistanceGo mirrors geometry-helpers.ts fitDistance: how far along the view axis to
+// place the camera so a width×height world view fills the viewport at (fovDeg, aspect):
+//
+//	d = max(height/2, width/2/aspect) / tan(fov/2)
+func fitDistanceGo(fovDeg, aspect, width, height float64) float64 {
+	fovRad := fovDeg * math.Pi / 180
+	halfTan := math.Tan(fovRad / 2)
+	return math.Max(height/2, width/2/aspect) / halfTan
+}
+
+// homeFitPose ports camera-ui.tsx HomeButton.onClick FORMULA-FAITHFULLY: build the AABB over
+// node centers ± body radius (geometry-helpers.ts boundingBox3D), place the camera square-on
+// in front of the content plane along +z with +y up, at a padded fit distance:
+//
+//	dist       = fitDistance(fov, aspect, sizeX, sizeY) + sizeZ/2
+//	paddedDist = dist * 1.2
+//	pivot = bbox center; r = paddedDist; pos = dir(+z); up = dir(+y)
+//
+// centers maps node id → world center; radius maps node id → body sphere radius. Returns
+// ok=false when there are no nodes (HomeButton returns early in that case). pos/up come from
+// worldDirToAngles so the resulting eye = pivot + r·(+z) and screen-up = +y, matching the
+// TS cam.position / cam.up / cam.lookAt(center).
+func homeFitPose(centers map[string]vec3, radius map[string]float64, fovDeg, aspect float64) (pivot vec3, r float64, pos, up dir, ok bool) {
+	if len(centers) == 0 {
+		return vec3{}, 0, dir{}, dir{}, false
+	}
+	minX, minY, minZ := math.Inf(1), math.Inf(1), math.Inf(1)
+	maxX, maxY, maxZ := math.Inf(-1), math.Inf(-1), math.Inf(-1)
+	for id, p := range centers {
+		rad := radius[id]
+		minX, maxX = math.Min(minX, p.X-rad), math.Max(maxX, p.X+rad)
+		minY, maxY = math.Min(minY, p.Y-rad), math.Max(maxY, p.Y+rad)
+		minZ, maxZ = math.Min(minZ, p.Z-rad), math.Max(maxZ, p.Z+rad)
+	}
+	center := vec3{X: (minX + maxX) / 2, Y: (minY + maxY) / 2, Z: (minZ + maxZ) / 2}
+	sizeX, sizeY, sizeZ := maxX-minX, maxY-minY, maxZ-minZ
+	dist := fitDistanceGo(fovDeg, aspect, sizeX, sizeY) + sizeZ/2
+	paddedDist := dist * 1.2
+	pos = worldDirToAngles(vec3{X: 0, Y: 0, Z: 1})
+	up = worldDirToAngles(vec3{X: 0, Y: 1, Z: 0})
+	return center, paddedDist, pos, up, true
+}
+
+// ---------------------------------------------------------------------------
 // projection (mirrors THREE.Vector3.project for the perspective camera) — used ONLY by
 // zoom-to-cursor to find the node nearest the pointer in NDC. Small NDC error only changes
 // which node is picked (the dolly is floored so it never reaches the target).

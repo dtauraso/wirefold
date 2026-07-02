@@ -114,7 +114,41 @@ func (md *MoveDispatch) HandleRawInput(ev rawInputMsg, slotReg SlotRegistry, tr 
 		md.gestPointerUp(ev, slotReg, tr)
 	case "wheel":
 		md.gestWheel(ev, tr)
+	case "home":
+		md.gestHome(ev, tr)
 	}
+}
+
+// gestHome handles a "home" (fit-to-content) command: Go frames ALL nodes from its OWN held
+// geometry with the SAME fit math the TS HomeButton used (homeFitPose), then installs the
+// result via SetViewpoint + EmitViewpoint — the exact path a gesture uses, so it streams out
+// (pump → useCameraStore → CameraFromStore) and persists on the polar save path. TS sent no
+// pose, only render context (fov + aspect). Because the FSM's own viewpoint now IS the framed
+// pose, the next orbit/pan/zoom builds on it (no snap-back). Does nothing when there are no
+// nodes, mirroring HomeButton's early return.
+func (md *MoveDispatch) gestHome(ev rawInputMsg, tr *T.Trace) {
+	centers := md.heldCenters()
+	radius := make(map[string]float64, len(centers))
+	for id := range centers {
+		radius[id] = md.nodeBodyRadius(id)
+	}
+	pivot, r, pos, up, ok := homeFitPose(centers, radius, ev.Fov, md.gest.rect.aspect())
+	if !ok {
+		return
+	}
+	md.SetViewpoint(pivot, r, pos, up)
+	md.EmitViewpoint(tr)
+}
+
+// nodeBodyRadius is the node's body sphere radius, mirroring geometry-helpers.ts nodeRadius
+// (Go authoritative form min(width,height)/CurveParamNodeRadiusDivisor from kindDims). Unknown
+// kinds contribute a zero radius (center-only extent), matching an unsized node.
+func (md *MoveDispatch) nodeBodyRadius(id string) float64 {
+	d, ok := kindDims[md.NodeKind(id)]
+	if !ok {
+		return 0
+	}
+	return math.Min(d.Width, d.Height) / CurveParamNodeRadiusDivisor
 }
 
 // pixelToNDC mirrors geometry-helpers.ts pixelToNDC.

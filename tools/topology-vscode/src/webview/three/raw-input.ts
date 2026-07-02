@@ -86,6 +86,24 @@ export function buildPointerRaw(
   };
 }
 
+/** Build a "home" (fit-to-content) command event. Carries ONLY the render context Go needs
+ *  to size the fit — camera fov + viewport aspect (encoded as rectWidth/rectHeight so Go's
+ *  rect.aspect() reads width/height = aspect). No pose is computed here; Go frames the scene
+ *  from its own node geometry. Pointer/hit fields are inert (unused for a home command). */
+export function buildHomeRaw(fov: number, aspect: number): RawInputEvent {
+  const hit: RawHit = { kind: "empty", id: "", isInput: false, x: 0, y: 0, z: 0 };
+  return {
+    kind: "home",
+    x: 0, y: 0,
+    rectLeft: 0, rectTop: 0, rectWidth: aspect, rectHeight: 1,
+    button: -1,
+    ctrl: false, shift: false, alt: false, meta: false,
+    deltaX: 0, deltaY: 0,
+    fov,
+    hit,
+  };
+}
+
 /** Build a RawInputEvent from a native wheel event + the raycast hit. */
 export function buildWheelRaw(
   e: WheelEvent,

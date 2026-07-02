@@ -160,7 +160,7 @@ type viewpointMsg struct {
 // state machine (gesture.go) decides what it means — TS does not interpret it. Mirrors the
 // TS RawInputEvent (messages.ts). Field names match the JSON wire format exactly.
 type rawInputMsg struct {
-	Kind       string  `json:"kind"` // pointerdown | pointermove | pointerup | wheel
+	Kind       string  `json:"kind"` // pointerdown | pointermove | pointerup | wheel | home
 	X          float64 `json:"x"`    // client pixel X
 	Y          float64 `json:"y"`    // client pixel Y
 	RectLeft   float64 `json:"rectLeft"`
