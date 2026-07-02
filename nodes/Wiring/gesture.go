@@ -55,6 +55,11 @@ type gestureState struct {
 	downX, downY float64
 	prevX, prevY float64
 	button       int
+	// secondary is true when the pointer-down was a SECONDARY (button 2) press — a
+	// two-finger trackpad tap. Mirrors interaction-handlers.ts `secondaryDown`: such a
+	// press is always a tap-select and NEVER converts to a drag/rotate, so it stays
+	// `gestPending` through any finger drift and resolves to a select on pointer-up.
+	secondary bool
 
 	// empty-space rotation gate + the entity grabbed at pointer-down
 	emptyDown bool
@@ -163,6 +168,7 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 	g.downX, g.downY = ev.X, ev.Y
 	g.prevX, g.prevY = ev.X, ev.Y
 	g.button = ev.Button
+	g.secondary = ev.Button == 2 // two-finger trackpad tap → always a tap-select
 	g.phase = gestPending
 	g.emptyDown = false
 	g.dragNode = ""
@@ -232,7 +238,10 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 	dy := ev.Y - g.downY
 	dist := math.Hypot(dx, dy)
 
-	if g.phase == gestPending && dist > gestureMoveSlopPx {
+	// A secondary (two-finger) press never becomes a drag/rotate — it is a tap-select, so
+	// it stays gestPending through any finger drift and resolves on pointer-up (mirrors
+	// interaction-handlers.ts handlePointerMove's `!s.secondaryDown` guard).
+	if g.phase == gestPending && dist > gestureMoveSlopPx && !g.secondary {
 		switch {
 		case g.wireNode != "":
 			g.phase = gestWiring
@@ -490,6 +499,7 @@ func (g *gestureState) reset() {
 	g.wireNode = ""
 	g.portMoveNode = ""
 	g.handholdDown = false
+	g.secondary = false
 }
 
 // applyRingAnchor snaps a world-space direction (node center → pointer) to the node's

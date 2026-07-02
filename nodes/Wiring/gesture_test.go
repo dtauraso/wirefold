@@ -168,6 +168,52 @@ func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 	}
 }
 
+// A SECONDARY (two-finger trackpad tap, button 2) select is a tap-select that must survive
+// finger drift PAST the move slop: two fingers don't land precisely, so the down→up path
+// jitters more than the slop. It must stay gestPending (never convert to drag/rotate) and
+// still resolve to a node select on pointer-up. Empty-space two-finger tap clears selection.
+func TestGestureSecondaryTapSelectsThroughDrift(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+
+	// Two-finger tap ON a node, with drift well past gestureMoveSlopPx between down and up.
+	down := rawEvent("pointerdown", 400, 300)
+	down.Button = 2
+	down.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(down, nil, nil)
+	if !md.gest.secondary || md.gest.phase != gestPending {
+		t.Fatalf("after secondary down: secondary=%v phase=%v", md.gest.secondary, md.gest.phase)
+	}
+	// Finger drift past the slop must NOT convert to drag/rotate — it stays a tap-select.
+	drift := rawEvent("pointermove", 400+gestureMoveSlopPx+10, 300)
+	drift.Button = 2
+	drift.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(drift, nil, nil)
+	if md.gest.phase != gestPending {
+		t.Fatalf("secondary tap converted out of pending: phase=%v", md.gest.phase)
+	}
+	up := rawEvent("pointerup", 400+gestureMoveSlopPx+10, 300)
+	up.Button = 2
+	up.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(up, nil, nil)
+	if md.selected != "N7" {
+		t.Fatalf("selected=%q want N7 after secondary tap-select through drift", md.selected)
+	}
+
+	// Two-finger tap on EMPTY space (with drift) clears the selection.
+	d2 := rawEvent("pointerdown", 400, 300) // Hit defaults to empty
+	d2.Button = 2
+	md.HandleRawInput(d2, nil, nil)
+	m2 := rawEvent("pointermove", 400+gestureMoveSlopPx+10, 300)
+	m2.Button = 2
+	md.HandleRawInput(m2, nil, nil)
+	u2 := rawEvent("pointerup", 400+gestureMoveSlopPx+10, 300)
+	u2.Button = 2
+	md.HandleRawInput(u2, nil, nil)
+	if md.selected != "" {
+		t.Fatalf("selected=%q want empty after secondary empty-space tap", md.selected)
+	}
+}
+
 // A handhold grab resolves (past the slop) to axis-locked orbit: the camera pose changes
 // (pos moves) while the pivot + radius stay fixed, just like a free orbit.
 func TestGestureHandholdOrbits(t *testing.T) {
