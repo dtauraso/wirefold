@@ -13,6 +13,7 @@ import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
 import { useCameraStore } from "./camera-store";
 import { USE_NEW_SYSTEM } from "../new-system";
 import { getLatestSnapshot } from "../snapshot-buffer";
+import { useOverlayFlags } from "./overlay-flags";
 import { decodeSnapshot } from "./buffer-decode";
 import {
   type NavNode, decodeNavNodes, getNavNodeIds, contentSphereFromCenters,
@@ -345,15 +346,24 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
   const handholdsVisible = useCameraStore((s) => s.handholdsVisible);
   const overlaysVisible = useCameraStore((s) => s.overlaysVisible);
 
+  // Under USE_NEW_SYSTEM the overlay flags are Go-owned and streamed into the buffer's
+  // Overlay columns (pump is gated off, so useCameraStore is inert on this path). Read
+  // them from the buffer so a toggle round-trips (Go flips → buffer column → this gate).
+  // Flag-off keeps the store reads above. useOverlayFlags subscribes to snapshot arrivals
+  // so a flip re-renders even when the node-position navSignature is unchanged.
+  const bufFlags = useOverlayFlags();
+  const useBuf = USE_NEW_SYSTEM && bufFlags != null;
+
   // "Overlays" master gate (Go-owned): when false, ALL polar guides are suppressed (the
   // toolbar also hides their individual buttons). It does NOT touch each guide's own
   // Go-owned visibility, so reactivating restores every guide to its prior on/off state.
-  const g = overlaysVisible;
-  const showTori = g && sceneToriVisible !== false;
-  const showScenePoles = g && scenePolesVisible !== false;
-  const showNodePoles = g && nodePolesVisible !== false;
-  const showSelPoles = g && selSpherePolesVisible !== false;
-  const showAngles = g && angleLabelsVisible !== false;
+  const g = useBuf ? bufFlags.overlays : overlaysVisible;
+  const showTori = g && (useBuf ? bufFlags.tori : sceneToriVisible !== false);
+  const showScenePoles = g && (useBuf ? bufFlags.scenePoles : scenePolesVisible !== false);
+  const showNodePoles = g && (useBuf ? bufFlags.nodePoles : nodePolesVisible !== false);
+  const showSelPoles = g && (useBuf ? bufFlags.selSpherePoles : selSpherePolesVisible !== false);
+  const showAngles = g && (useBuf ? bufFlags.angleLabels : angleLabelsVisible !== false);
+  const showHandholds = g && (useBuf ? bufFlags.handholds : handholdsVisible !== false);
 
   // ── Buffer-driven nav sampling (new-system path) ─────────────────────────────
   // Under USE_NEW_SYSTEM the overlay geometry derives from the binary buffer (Go-owned
@@ -528,8 +538,8 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
           </>
         )}
         {/* Grab handholds (4 per torus, 90° apart) — the pickable part of the overlay. Gated by both overlaysVisible (master) and handholdsVisible (per-overlay). */}
-        {g && handholdsVisible !== false && handholds()}
-        {g && handholdsVisible !== false && handholds(rotB)}
+        {showHandholds && handholds()}
+        {showHandholds && handholds(rotB)}
       </group>
       {/* Scene pole frame at the content-sphere center. */}
       {showScenePoles && <PolarFrame center={cs.center} scale={radiusKey} />}

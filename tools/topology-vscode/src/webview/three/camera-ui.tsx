@@ -11,6 +11,7 @@ import { useCameraStore } from "./camera-store";
 import { postLog } from "../log/post";
 import { commitCamera } from "./interaction-handlers";
 import { USE_NEW_SYSTEM } from "../new-system";
+import { useOverlayFlags } from "./overlay-flags";
 import { sendRawInput, buildHomeRaw } from "./raw-input";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,20 @@ type ToggleCfg = {
 function fireToggle(cfg: ToggleCfg, val: boolean) {
   postLog("guide-btn-click", cfg.payload(val));
   vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "toggle", flag: cfg.flag });
+}
+
+/** The value a toggle displays. Old path: useCameraStore (pump-fed). New path: the
+ *  Go-owned Overlay buffer columns — pump is gated off there so the store is inert, and
+ *  the buffer is the only live truth. Both hooks run unconditionally (stable order); the
+ *  buffer value wins under the flag once the first snapshot has landed, otherwise the
+ *  store default is a fine initial. cfg.flag keys the buffer record in store polarity. */
+function useToggleVal(cfg: ToggleCfg): boolean {
+  const storeVal = useCameraStore(cfg.selector);
+  const bufFlags = useOverlayFlags();
+  // ?? storeVal only guards the (impossible) missing-key case under noUncheckedIndexedAccess;
+  // every OverlayFlag is always present in the record, so `false` is preserved.
+  if (USE_NEW_SYSTEM && bufFlags) return bufFlags[cfg.flag] ?? storeVal;
+  return storeVal;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +162,7 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
  *  Styled to match the recommended mock (overlay-toggle-options.html): custom .cb checkbox
  *  that fills accent + ✓ when checked, with a subtle row-hover background. */
 function OverlayRow({ cfg, disabled }: { cfg: ToggleCfg; disabled?: boolean }) {
-  const val = useCameraStore(cfg.selector);
+  const val = useToggleVal(cfg);
   const active = cfg.active(val);
   const [hover, setHover] = useState(false);
   const onClick = useCallback(
@@ -205,7 +220,7 @@ function OverlayRow({ cfg, disabled }: { cfg: ToggleCfg; disabled?: boolean }) {
 /** OVERLAYS CONTROL: split-button (body = master toggle, caret = popover) + popover checklist. */
 export function OverlaysControl() {
   const [open, setOpen] = useState(false);
-  const val = useCameraStore(guidelinesCfg.selector);
+  const val = useToggleVal(guidelinesCfg);
   const active = guidelinesCfg.active(val);
 
   const onBodyClick = useCallback(
