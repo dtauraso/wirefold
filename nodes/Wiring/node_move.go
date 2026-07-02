@@ -411,6 +411,10 @@ type MoveDispatch struct {
 	// (overlay_state.go). Initialized to defaults by newMoveDispatch (9 true,
 	// doubleLinksVisible false). MoveDispatch exposes thin delegating methods.
 	ov overlayState
+	// gest is the gesture state machine (gesture.go): it consumes raw pointer/wheel input
+	// and produces camera (viewpoint) + topology (node-move) changes. Owned by
+	// MoveDispatch; serialized by the single-goroutine stdin reader. Zero value = idle.
+	gest gestureState
 }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
