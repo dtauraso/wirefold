@@ -5,11 +5,10 @@
 // via the buffer-layout.ts read helpers.
 
 import { describe, it, expect } from "vitest";
-import { decodeSnapshot, shouldAutoFitCamera } from "../src/webview/three/buffer-decode";
+import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
   BUF_HEADER_SIZE,
   BEAD_STRIDE, NODE_STRIDE, EDGE_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
-  CAMERA_COL_R,
   readBeadX, readBeadY, readBeadZ, readBeadFrac, readBeadLive, readBeadBeadID,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
@@ -243,27 +242,5 @@ describe("decodeSnapshot — mixed counts", () => {
 
     // The underlying buf should now reflect the mutation.
     expectF32(new DataView(buf).getFloat32(beadOff, true), 42.0);
-  });
-
-  // ── shouldAutoFitCamera ──────────────────────────────────────────────────────
-  // Guards the new-system startup camera seed: fire "home" exactly when Go has geometry
-  // (nodeCount > 0) but no viewpoint exists yet (camera R <= 0). Without this seed the
-  // FSM viewpoint stays at its degenerate zero pose (pos = up = +Y) and PAN does nothing.
-  describe("shouldAutoFitCamera", () => {
-    it("fires when nodes exist and no viewpoint is seeded (R = 0)", () => {
-      const { buf } = makeSnapshot(0, 2, 0); // 2 nodes, camera row all-zero → R = 0
-      expect(shouldAutoFitCamera(decodeSnapshot(buf)!)).toBe(true);
-    });
-
-    it("does NOT fire when a viewpoint is already seeded (R > 0)", () => {
-      const { buf, dv, cameraOff } = makeSnapshot(0, 2, 0);
-      dv.setFloat32(cameraOff + CAMERA_COL_R, 300, true);
-      expect(shouldAutoFitCamera(decodeSnapshot(buf)!)).toBe(false);
-    });
-
-    it("does NOT fire before any node geometry has landed (nodeCount = 0)", () => {
-      const { buf } = makeSnapshot(0, 0, 0);
-      expect(shouldAutoFitCamera(decodeSnapshot(buf)!)).toBe(false);
-    });
   });
 });

@@ -18,7 +18,6 @@ import {
   EDGE_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
-  readCameraR,
 } from "../../schema/buffer-layout";
 
 export interface DecodedSnapshot {
@@ -81,21 +80,4 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const overlayView = new DataView(buf, off, OVERLAY_STRIDE);
 
   return { tick, beadCount, nodeCount, edgeCount, beadView, nodeView, edgeView, cameraView, overlayView };
-}
-
-/**
- * Startup camera auto-fit gate for the new-system buffer path.
- *
- * Under USE_NEW_SYSTEM the old camera seeders (CameraFitter auto-fit, PolarCameraRestorer
- * saved-view restore) are gated OFF, so Go's gesture-FSM viewpoint stays at its zero value
- * (pos = up = θ0,φ0). That pose is DEGENERATE: pos and up both map to +Y, so the screen
- * basis (up × pole) collapses. A PAN slides the pivot within that collapsed basis and thus
- * appears to do nothing (orbit/zoom/home each rebuild a valid pose independently, so they
- * work). The fix seeds a real pose on load by sending Go a "home" command exactly when it
- * has geometry to frame (nodeCount > 0) and no viewpoint exists yet (camera R <= 0, the
- * same "uninitialized" sense BufferCamera's r > 0 guard uses). Pure for unit testing.
- */
-export function shouldAutoFitCamera(decoded: DecodedSnapshot): boolean {
-  if (decoded.nodeCount === 0) return false;
-  return !(readCameraR(decoded.cameraView) > 0);
 }
