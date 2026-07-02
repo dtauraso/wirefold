@@ -68,6 +68,35 @@ func TestGestureHomeComputesFitPoseFromGeometry(t *testing.T) {
 	}
 }
 
+// An unknown-kind node must be framed at the SAME body radius the pre-branch used
+// (geometry-helpers.ts nodeRadius → the streamed radius the buffer renders), i.e. the
+// (110,60) default → min(110,60)/CurveParamNodeRadiusDivisor, NOT a zero-size point. This
+// locks the home-fit radius to the pre-branch so an unsized node is not cut off at the frame
+// edge.
+func TestGestureHomeFramesUnknownKindAtRenderRadius(t *testing.T) {
+	stale := viewpoint{pivot: vec3{500, 500, 500}, r: 999, pos: dir{Theta: 0.3, Phi: 0.7}, up: dir{Theta: 0.1, Phi: 0.2}}
+	// A single node of an unknown kind at the origin. homeMD seeds kind "Hold"; override
+	// the mover's kind to an unrecognized one so nodeBodyRadius takes the (110,60) fallback.
+	centers := map[string]vec3{"x": {X: 0, Y: 0, Z: 0}}
+	md := homeMD(stale, centers)
+	md.nodeMovers["x"].geom.Kind = "NotAKind"
+
+	const fov, aspect = 50.0, 800.0 / 600.0
+	md.HandleRawInput(rawInputMsg{Kind: "home", Fov: fov, RectWidth: aspect, RectHeight: 1}, nil, nil)
+
+	// Expected: bbox is ±renderRadius on every axis (single node at origin).
+	renderRadius := 60.0 / float64(CurveParamNodeRadiusDivisor) // min(110,60)/4 = 15
+	if renderRadius <= 0 {
+		t.Fatalf("render radius must be positive, got %v", renderRadius)
+	}
+	size := 2 * renderRadius
+	wantDist := fitDistanceGo(fov, aspect, size, size) + size/2
+	wantR := wantDist * 1.2
+	if math.Abs(md.vp.r-wantR) > 1e-9 {
+		t.Fatalf("home r=%v want %v (unknown kind framed at render radius %v, not 0)", md.vp.r, wantR, renderRadius)
+	}
+}
+
 // After home, a subsequent empty-space drag orbits about the HOME-derived region focus at the
 // HOME radius — it does NOT reset to the pre-home (stale) pose. This is the anti-snap-back
 // invariant: the FSM's own pose is the seed for the next gesture.

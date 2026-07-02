@@ -145,15 +145,14 @@ func (md *MoveDispatch) gestHome(ev rawInputMsg, tr *T.Trace) {
 	md.EmitViewpoint(tr)
 }
 
-// nodeBodyRadius is the node's body sphere radius, mirroring geometry-helpers.ts nodeRadius
-// (Go authoritative form min(width,height)/CurveParamNodeRadiusDivisor from kindDims). Unknown
-// kinds contribute a zero radius (center-only extent), matching an unsized node.
+// nodeBodyRadius is the node's body sphere radius used to size the home fit. It reuses the
+// SAME nodeRadius the pre-branch HomeButton framed with (geometry-helpers.ts nodeRadius ←
+// getNodeGeometry(id).radius, the streamed radius the buffer also renders), i.e. the shared
+// port_geometry.go nodeRadius(kind) = min(width,height)/CurveParamNodeRadiusDivisor with the
+// (110,60) default for an unknown kind. Framing an unknown-kind node as a zero-size POINT
+// (the earlier behavior) tightened the fit vs the pre-branch, which framed it at radius 15.
 func (md *MoveDispatch) nodeBodyRadius(id string) float64 {
-	d, ok := kindDims[md.NodeKind(id)]
-	if !ok {
-		return 0
-	}
-	return math.Min(d.Width, d.Height) / CurveParamNodeRadiusDivisor
+	return nodeRadius(md.NodeKind(id))
 }
 
 // pixelToNDC mirrors geometry-helpers.ts pixelToNDC.
