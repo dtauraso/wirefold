@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 5
+const BufLayoutVersion = 6
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -70,6 +70,16 @@ type bufLayoutNode struct {
 	CZ       float32 `buf:"f32"` // node center z (world)
 	Radius   float32 `buf:"f32"` // body/ring sphere radius
 	SphereR  float32 `buf:"f32"` // sphere-chain radius (port placement)
+	// VR*/FR* are the node's two great-circle ring-plane normals (vertical vr, flat fr),
+	// the same orientation vectors the pre-branch SphereRing read from nodeGeometryStore.
+	// SphereRing draws two tori at the owner's center oriented by these; they arrive on the
+	// node-geometry trace event (Trace VRX.., FRX..).
+	VRX      float32 `buf:"f32"` // vertical ring-plane normal x
+	VRY      float32 `buf:"f32"` // vertical ring-plane normal y
+	VRZ      float32 `buf:"f32"` // vertical ring-plane normal z
+	FRX      float32 `buf:"f32"` // flat (equatorial) ring-plane normal x
+	FRY      float32 `buf:"f32"` // flat ring-plane normal y
+	FRZ      float32 `buf:"f32"` // flat ring-plane normal z
 	TorusRed uint8   `buf:"u8"`  // 1 = torus is RED (missed bead error)
 	MissVal  int32   `buf:"i32"` // missed bead value (valid when TorusRed=1)
 	MX       float32 `buf:"f32"` // missed-bead marker world x

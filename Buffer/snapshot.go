@@ -81,7 +81,11 @@ type srcPortKey struct {
 type nodeSnapState struct {
 	cx, cy, cz      float64
 	radius, sphereR float64
-	torusRed        uint8
+	// vr*/fr* are the two great-circle ring-plane normals (vertical vr, flat fr) from the
+	// node-geometry event; SphereRing orients its two tori by these.
+	vrx, vry, vrz float64
+	frx, fry, frz float64
+	torusRed      uint8
 	missVal         int32
 	mx, my, mz      float64
 	evRecv          uint8
@@ -304,6 +308,8 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	n.cx, n.cy, n.cz = ev.NX, ev.NY, ev.NZ
 	n.radius = ev.Radius
 	n.sphereR = ev.SphereR
+	n.vrx, n.vry, n.vrz = ev.VRX, ev.VRY, ev.VRZ
+	n.frx, n.fry, n.frz = ev.FRX, ev.FRY, ev.FRZ
 	// Status fields (torusRed, missVal, mx/my/mz) are preserved across geometry
 	// re-emits so a node-move does not silently clear an active error state.
 }
@@ -488,6 +494,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		SetNodeRow(nodeBuf, i,
 			float32(n.cx), float32(n.cy), float32(n.cz),
 			float32(n.radius), float32(n.sphereR),
+			float32(n.vrx), float32(n.vry), float32(n.vrz),
+			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.torusRed, n.missVal,
 			float32(n.mx), float32(n.my), float32(n.mz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected)

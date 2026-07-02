@@ -43,6 +43,8 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		Kind: T.KindNodeGeometry, Node: "node-A",
 		NX: 1.0, NY: 2.0, NZ: 3.0,
 		Radius: 0.5, SphereR: 0.25,
+		VRX: 0.0, VRY: 0.0, VRZ: 1.0,
+		FRX: 1.0, FRY: 0.0, FRZ: 0.0,
 	})
 	s.Update(T.Event{
 		Kind: T.KindNodeGeometry, Node: "node-B",
@@ -172,6 +174,13 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if snap[nA+BufNodeColEvArrive] != 0 {
 		t.Errorf("nodeA.EvArrive: got %v, want 0 (arrive routes to dest node-B)", snap[nA+BufNodeColEvArrive])
+	}
+	// Ring-plane normals (vr vertical, fr flat) reach the node columns for SphereRing.
+	if readF32(snap, nA+BufNodeColVRZ) != 1.0 {
+		t.Errorf("nodeA.VRZ: got %v, want 1.0", readF32(snap, nA+BufNodeColVRZ))
+	}
+	if readF32(snap, nA+BufNodeColFRX) != 1.0 {
+		t.Errorf("nodeA.FRX: got %v, want 1.0", readF32(snap, nA+BufNodeColFRX))
 	}
 
 	// node-B (row 1): geometry + evArrive=1 (arrive routed from node-A/out → node-B)
