@@ -106,10 +106,15 @@ type interiorSlotState struct {
 	ox, oy, oz float64
 }
 
-// edgeSnapState holds persistent segment endpoints for one edge.
+// edgeSnapState holds persistent segment endpoints for one edge, plus the edge's
+// source and destination node ids (edge-graph topology used by the on-surface
+// selection highlight). srcNode/dstNode are resolved to node-row indices at
+// buildSnapshot time (a node may register after its edges do).
 type edgeSnapState struct {
 	sx, sy, sz float64
 	ex, ey, ez float64
+	srcNode    string
+	dstNode    string
 }
 
 // beadSnapState holds current position + metadata for one in-flight bead.
@@ -304,6 +309,14 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	e := &s.edges[idx]
 	e.sx, e.sy, e.sz = ev.SX, ev.SY, ev.SZ
 	e.ex, e.ey, e.ez = ev.EX, ev.EY, ev.EZ
+	// Node (source) and Target (dest) carry the edge's endpoint node ids for the
+	// on-surface adjacency; preserve any previously-set ids if a later emit omits them.
+	if ev.Node != "" {
+		e.srcNode = ev.Node
+	}
+	if ev.Target != "" {
+		e.dstNode = ev.Target
+	}
 }
 
 func (s *SnapshotState) onNodeStatus(ev T.Event) {
@@ -377,6 +390,18 @@ func (s *SnapshotState) setSelected(nodeID string) {
 			s.nodes[i].selected = 0
 		}
 	}
+}
+
+// nodeRowIndex returns the buffer node-row index for a node id, or -1 when the id is
+// empty or not yet registered (edges can register before their endpoint nodes do).
+func (s *SnapshotState) nodeRowIndex(nodeID string) int {
+	if nodeID == "" {
+		return -1
+	}
+	if idx, ok := s.nodeIndex[nodeID]; ok {
+		return idx
+	}
+	return -1
 }
 
 // clearTransients resets all transient node event flags to 0 after snapshot emit.
@@ -479,7 +504,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	for i, e := range s.edges {
 		SetEdgeRow(edgeBuf, i,
 			float32(e.sx), float32(e.sy), float32(e.sz),
-			float32(e.ex), float32(e.ey), float32(e.ez))
+			float32(e.ex), float32(e.ey), float32(e.ez),
+			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)))
 	}
 	off += int(edgeCount) * BufEdgeStride
 

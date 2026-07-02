@@ -328,7 +328,7 @@ func (m *edgeMover) emitGeometry() {
 		return
 	}
 	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf)
-	m.tr.Geometry(m.edgeID,
+	m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
 		seg.Start.X, seg.Start.Y, seg.Start.Z,
 		seg.End.X, seg.End.Y, seg.End.Z)
 }
@@ -358,7 +358,7 @@ func (m *edgeMover) recomputeGeometry() {
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {
-		m.tr.Geometry(m.edgeID,
+		m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
 			seg.Start.X, seg.Start.Y, seg.Start.Z,
 			seg.End.X, seg.End.Y, seg.End.Z)
 	}
@@ -513,7 +513,7 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 				emCenterOf = em.centerOf
 			}
 			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, emCenterOf)
-			tr.Geometry(em.edgeID,
+			tr.Geometry(em.edgeID, em.srcID, em.dstID,
 				seg.Start.X, seg.Start.Y, seg.Start.Z,
 				seg.End.X, seg.End.Y, seg.End.Z)
 		}

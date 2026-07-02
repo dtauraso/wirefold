@@ -251,7 +251,11 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		for _, o := range sourceOuts {
 			if o != nil && o.EdgeLabel != "" {
 				g := o.Geom()
-				tr.Geometry(o.EdgeLabel,
+				dst := ""
+				if o.pw != nil {
+					dst = o.pw.Target
+				}
+				tr.Geometry(o.EdgeLabel, name, dst,
 					g.Start.X, g.Start.Y, g.Start.Z,
 					g.End.X, g.End.Y, g.End.Z)
 			}

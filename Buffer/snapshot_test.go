@@ -50,9 +50,12 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		Radius: 0.75, SphereR: 0.375,
 	})
 
-	// Register one edge via KindGeometry.
+	// Register one edge via KindGeometry. Node (source) and Target (dest) carry the
+	// edge's endpoint node ids; the builder resolves them to node-row indices
+	// (node-A=row 0, node-B=row 1).
 	s.Update(T.Event{
 		Kind: T.KindGeometry, Edge: "edge-1",
+		Node: "node-A", Target: "node-B",
 		SX: 1.1, SY: 2.2, SZ: 3.3,
 		EX: 4.4, EY: 5.5, EZ: 6.6,
 	})
@@ -190,6 +193,13 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if readF32(snap, edgeOff+BufEdgeColEZ) != float32(6.6) {
 		t.Errorf("edge.EZ: got %v, want ~6.6", readF32(snap, edgeOff+BufEdgeColEZ))
+	}
+	// Edge-graph adjacency: source node-A → row 0, dest node-B → row 1.
+	if got := readI32(snap, edgeOff+BufEdgeColSrcNodeRow); got != 0 {
+		t.Errorf("edge.SrcNodeRow: got %d, want 0 (node-A)", got)
+	}
+	if got := readI32(snap, edgeOff+BufEdgeColDstNodeRow); got != 1 {
+		t.Errorf("edge.DstNodeRow: got %d, want 1 (node-B)", got)
 	}
 
 	// ── Camera block ─────────────────────────────────────────────────────────

@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 3
+const BufLayoutVersion = 4
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -100,13 +100,21 @@ type bufLayoutInterior struct {
 
 // bufLayoutEdge defines one row of the edges column block.
 // One row per edge (wire). Matched from KindGeometry trace events.
+// SrcNodeRow/DstNodeRow are the buffer NODE-ROW indices of this edge's source and
+// destination nodes (same first-seen node order as the Node block); -1 = not yet
+// resolved. They carry the edge-graph topology the on-surface selection highlight
+// needs (the pre-branch computed this from the React edge list; the buffer path has
+// no such list, so Go streams the adjacency here). Stored as i32 (the generator has
+// no i16 tag) — node counts are small, so the width is inconsequential.
 type bufLayoutEdge struct {
-	SX float32 `buf:"f32"` // start (source OUT-port) world x
-	SY float32 `buf:"f32"` // start world y
-	SZ float32 `buf:"f32"` // start world z
-	EX float32 `buf:"f32"` // end (dest IN-port) world x
-	EY float32 `buf:"f32"` // end world y
-	EZ float32 `buf:"f32"` // end world z
+	SX         float32 `buf:"f32"` // start (source OUT-port) world x
+	SY         float32 `buf:"f32"` // start world y
+	SZ         float32 `buf:"f32"` // start world z
+	EX         float32 `buf:"f32"` // end (dest IN-port) world x
+	EY         float32 `buf:"f32"` // end world y
+	EZ         float32 `buf:"f32"` // end world z
+	SrcNodeRow int32   `buf:"i32"` // source node's buffer node-row index (-1 = unresolved)
+	DstNodeRow int32   `buf:"i32"` // destination node's buffer node-row index (-1 = unresolved)
 }
 
 // bufLayoutCamera defines the camera column block (always 1 row).

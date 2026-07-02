@@ -107,8 +107,8 @@ func TestSetNodeRow(t *testing.T) {
 
 func TestSetEdgeRow(t *testing.T) {
 	buf := make([]byte, BufEdgeStride*2)
-	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
-	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0)
+	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 2, 5)
+	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, -1, -1)
 
 	assertF32At(t, buf, BufEdgeColSX, 1.0, "row0.SX")
 	assertF32At(t, buf, BufEdgeColSY, 2.0, "row0.SY")
@@ -116,10 +116,14 @@ func TestSetEdgeRow(t *testing.T) {
 	assertF32At(t, buf, BufEdgeColEX, 4.0, "row0.EX")
 	assertF32At(t, buf, BufEdgeColEY, 5.0, "row0.EY")
 	assertF32At(t, buf, BufEdgeColEZ, 6.0, "row0.EZ")
+	assertI32At(t, buf, BufEdgeColSrcNodeRow, 2, "row0.SrcNodeRow")
+	assertI32At(t, buf, BufEdgeColDstNodeRow, 5, "row0.DstNodeRow")
 
 	base := BufEdgeStride
 	assertF32At(t, buf, base+BufEdgeColSX, 7.0, "row1.SX")
 	assertF32At(t, buf, base+BufEdgeColEZ, 12.0, "row1.EZ")
+	assertI32At(t, buf, base+BufEdgeColSrcNodeRow, -1, "row1.SrcNodeRow")
+	assertI32At(t, buf, base+BufEdgeColDstNodeRow, -1, "row1.DstNodeRow")
 }
 
 func TestSetCameraRow(t *testing.T) {
@@ -170,8 +174,8 @@ func TestNodeStrideIsPackedSize(t *testing.T) {
 }
 
 func TestEdgeStrideIsPackedSize(t *testing.T) {
-	// Edge block: 6×f32 = 24
-	want := 6 * 4
+	// Edge block: 6×f32 + 2×i32 = 32
+	want := 6*4 + 2*4
 	if BufEdgeStride != want {
 		t.Errorf("BufEdgeStride = %d, want %d (packed size)", BufEdgeStride, want)
 	}

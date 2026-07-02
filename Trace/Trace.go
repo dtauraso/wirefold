@@ -374,9 +374,13 @@ func (t *Trace) Position(node, port string, value int, x, y, z, f float64, bead 
 // keyed by edge label (== the TS edge id). (sx,sy,sz) is the source OUT-port world
 // pos (Start), (ex,ey,ez) is the dest IN-port world pos (End). Go emits this on load
 // and on each node-move; the renderer draws the wire tube as a LineCurve3 from these.
-func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
+// src/dst are the edge's source and destination NODE ids; the buffer snapshot maps
+// them to node-row indices so the on-surface selection highlight has the edge-graph
+// adjacency (the JSON/pump path ignores them — it keys segments by Edge). Carried on
+// the existing Node (source) and Target (dest) fields; unused on geometry otherwise.
+func (t *Trace) Geometry(edge, src, dst string, sx, sy, sz, ex, ey, ez float64) {
 	t.emit(Event{
-		Kind: KindGeometry, Edge: edge,
+		Kind: KindGeometry, Edge: edge, Node: src, Target: dst,
 		SX: sx, SY: sy, SZ: sz,
 		EX: ex, EY: ey, EZ: ez,
 	})
