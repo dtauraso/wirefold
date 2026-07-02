@@ -1656,12 +1656,14 @@ func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
 	}
 	strLit := regexp.MustCompile(`"([A-Za-z][A-Za-z0-9]*)"`)
 	var flags []overlayFlag
+	seen := map[string]bool{}
 	for _, l := range lines[start+1 : end] {
 		m := strLit.FindStringSubmatch(l)
 		if m == nil {
 			continue
 		}
 		name := m[1]
+		seen[name] = true
 		of := overlayFlag{
 			flag:      name,
 			field:     name + "Visible",
@@ -1685,6 +1687,15 @@ func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
 	}
 	if len(flags) == 0 {
 		return nil, fmt.Errorf("no overlay flags parsed from %s", messagesPath)
+	}
+	// Every overlayOverrides key MUST name a real flag in OVERLAY_FLAG_NAMES. A typo
+	// in an override key (e.g. "tori" mistyped "toriz") would otherwise silently fall
+	// back to the uniform derivation, generating a wrong Go field/method with a clean
+	// build. fatalf naming the bad key closes that gap.
+	for key := range overlayOverrides {
+		if !seen[key] {
+			fatalf("overlayOverrides key %q is not a real overlay flag in OVERLAY_FLAG_NAMES", key)
+		}
 	}
 	return flags, nil
 }
