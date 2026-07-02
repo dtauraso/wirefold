@@ -1,6 +1,6 @@
 // overlay-flags.ts — a row-keyed READ resource over the buffer's Overlay columns.
 //
-// Under USE_NEW_SYSTEM the overlay on/off state is Go-owned: Go flips it on the
+// The overlay on/off state is Go-owned: Go flips it on the
 // `edit op=update kind=overlays` command and streams the updated flags into the
 // buffer's Overlay block (Buffer/snapshot.go). This module REFLECTS those Go-owned
 // columns for widgets that must re-render when a flag flips (the overlay toggle

@@ -4,7 +4,7 @@
 // (see buffer-layout.ts node readers) but is NUMERIC — it has no node id/label
 // strings. This module supplies the missing label resource and the pure decode that
 // pairs the numeric node rows with their ids, so NavGuides / label-pills / occlusion
-// badges can run entirely off the buffer under USE_NEW_SYSTEM.
+// badges can run entirely off the buffer.
 //
 // ── Ordering guarantee (id table index i ↔ buffer node row i) ──────────────────
 // Go's Buffer.SnapshotState assigns each node its row on the FIRST KindNodeGeometry
@@ -12,7 +12,7 @@
 // Buffer/snapshot.go onNodeGeometry). The webview builds this id table from the SAME
 // node-geometry stream by the SAME first-seen rule, so index i maps to buffer node
 // row i by construction. Two writers, both first-seen dedup:
-//   • NEW system (USE_NEW_SYSTEM): the node-label host→webview sidecar. The host
+//   • The new system: the node-label host→webview sidecar. The host
 //     derives one {id,label} per node id — once, in first-seen node-geometry order —
 //     from the geometry stream and forwards it independent of pump.ts; main.tsx routes
 //     it to recordNavNodeLabel. This is the sole builder when the flag is on (pump is
