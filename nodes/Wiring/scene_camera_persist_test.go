@@ -144,11 +144,10 @@ func TestPersistDebounceCoalesces(t *testing.T) {
 	}
 }
 
-// TestWriteScenePreservesCameraPolarNewSystem asserts the OTHER scene.json writer
+// TestWriteScenePreservesCameraPolar asserts the OTHER scene.json writer
 // (writeScene, used by a TS fades/overlays scene-save) does not clobber the Go-owned
-// cameraPolar under the new system — the double-writer guard.
-func TestWriteScenePreservesCameraPolarNewSystem(t *testing.T) {
-	t.Setenv("WIREFOLD_NEW_SYSTEM", "true")
+// cameraPolar — the double-writer guard.
+func TestWriteScenePreservesCameraPolar(t *testing.T) {
 	td := t.TempDir()
 
 	// Go persists a camera first.
@@ -178,27 +177,5 @@ func TestWriteScenePreservesCameraPolarNewSystem(t *testing.T) {
 	}
 	if string(obj["labelsGlobalHidden"]) != "true" {
 		t.Fatalf("labelsGlobalHidden=%s want true (TS field should apply)", obj["labelsGlobalHidden"])
-	}
-}
-
-// TestWriteSceneVerbatimOldSystem asserts the old path (flag off) is unchanged: writeScene
-// writes the blob verbatim (cameraPolar included, no preservation/merge).
-func TestWriteSceneVerbatimOldSystem(t *testing.T) {
-	// Ensure the flag is off for this test regardless of ambient env.
-	t.Setenv("WIREFOLD_NEW_SYSTEM", "false")
-	td := t.TempDir()
-	// Pre-existing file with a camera Go might have written.
-	viewDir := filepath.Join(td, "view")
-	_ = os.MkdirAll(viewDir, 0o755)
-	_ = os.WriteFile(filepath.Join(viewDir, "scene.json"),
-		[]byte(`{"cameraPolar":{"pivot":[9,9,9],"r":9,"pos":[9,9],"up":[9,9]}}`), 0o644)
-
-	blob := `{"labelsGlobalHidden":true}`
-	if err := writeScene(td, json.RawMessage(blob)); err != nil {
-		t.Fatalf("writeScene: %v", err)
-	}
-	raw, _ := os.ReadFile(filepath.Join(viewDir, "scene.json"))
-	if string(raw) != blob {
-		t.Fatalf("old path not verbatim: got %s want %s", raw, blob)
 	}
 }

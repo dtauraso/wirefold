@@ -3,14 +3,9 @@
 
 import React, { useCallback, useState } from "react";
 import * as THREE from "three";
-import type { RFNode, NodeData } from "../types";
-import { boundingBox3D, fitDistance } from "./geometry-helpers";
 import { vscode } from "../vscode-api";
 import type { OverlayFlag } from "../../messages";
-import { useCameraStore } from "./camera-store";
 import { postLog } from "../log/post";
-import { commitCamera } from "./interaction-handlers";
-import { USE_NEW_SYSTEM } from "../new-system";
 import { useOverlayFlags } from "./overlay-flags";
 import { sendRawInput, buildHomeRaw } from "./raw-input";
 
@@ -20,11 +15,11 @@ import { sendRawInput, buildHomeRaw } from "./raw-input";
 
 type ToggleCfg = {
   flag: OverlayFlag;
-  /** Returns the store boolean value needed by active/label/title. */
-  selector: (s: Parameters<Parameters<typeof useCameraStore>[0]>[0]) => boolean;
-  /** Compute active (highlight) from the raw store value. */
+  /** Initial value shown before the first buffer snapshot lands (store polarity). */
+  default: boolean;
+  /** Compute active (highlight) from the raw value. */
   active: (val: boolean) => boolean;
-  /** Label string or function of raw store value. */
+  /** Label string or function of raw value. */
   label: string | ((val: boolean) => string);
   /** Title string function of active value. */
   title: (active: boolean) => string;
@@ -37,18 +32,15 @@ function fireToggle(cfg: ToggleCfg, val: boolean) {
   vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "toggle", flag: cfg.flag });
 }
 
-/** The value a toggle displays. Old path: useCameraStore (pump-fed). New path: the
- *  Go-owned Overlay buffer columns — pump is gated off there so the store is inert, and
- *  the buffer is the only live truth. Both hooks run unconditionally (stable order); the
- *  buffer value wins under the flag once the first snapshot has landed, otherwise the
- *  store default is a fine initial. cfg.flag keys the buffer record in store polarity. */
+/** The value a toggle displays: the Go-owned Overlay buffer columns (the only live truth).
+ *  cfg.flag keys the buffer record in store polarity. Falls back to cfg.default until the
+ *  first snapshot lands. */
 function useToggleVal(cfg: ToggleCfg): boolean {
-  const storeVal = useCameraStore(cfg.selector);
   const bufFlags = useOverlayFlags();
-  // ?? storeVal only guards the (impossible) missing-key case under noUncheckedIndexedAccess;
+  // ?? cfg.default only guards the (impossible) missing-key case under noUncheckedIndexedAccess;
   // every OverlayFlag is always present in the record, so `false` is preserved.
-  if (USE_NEW_SYSTEM && bufFlags) return bufFlags[cfg.flag] ?? storeVal;
-  return storeVal;
+  if (bufFlags) return bufFlags[cfg.flag] ?? cfg.default;
+  return cfg.default;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +49,7 @@ function useToggleVal(cfg: ToggleCfg): boolean {
 
 const guidelinesCfg: ToggleCfg = {
   flag: "overlays",
-  selector: (s) => s.overlaysVisible,
+  default: true,
   active: (v) => v,
   label: "▦ overlays",
   title: (a) => (a ? "Hide overlays" : "Show overlays"),
@@ -66,7 +58,7 @@ const guidelinesCfg: ToggleCfg = {
 
 const ringsCfg: ToggleCfg = {
   flag: "tori",
-  selector: (s) => s.sceneToriVisible,
+  default: true,
   active: (v) => v,
   label: "◎ rings",
   title: (a) => (a ? "Hide polar rings" : "Show polar rings"),
@@ -75,7 +67,7 @@ const ringsCfg: ToggleCfg = {
 
 const scenePolesCfg: ToggleCfg = {
   flag: "scenePoles",
-  selector: (s) => s.scenePolesVisible,
+  default: true,
   active: (v) => v,
   label: "⊹ scene poles",
   title: (a) => (a ? "Hide scene pole frame" : "Show scene pole frame"),
@@ -84,7 +76,7 @@ const scenePolesCfg: ToggleCfg = {
 
 const nodePolesCfg: ToggleCfg = {
   flag: "nodePoles",
-  selector: (s) => s.nodePolesVisible,
+  default: true,
   active: (v) => v,
   label: "⊹ node poles",
   title: (a) => (a ? "Hide node pole frames" : "Show node pole frames"),
@@ -93,7 +85,7 @@ const nodePolesCfg: ToggleCfg = {
 
 const angleLabelsCfg: ToggleCfg = {
   flag: "angleLabels",
-  selector: (s) => s.angleLabelsVisible,
+  default: true,
   active: (v) => v,
   label: "θφ 2→3/7",
   title: (a) => (a ? "Hide angle arcs+labels" : "Show angle arcs+labels"),
@@ -102,7 +94,7 @@ const angleLabelsCfg: ToggleCfg = {
 
 const selSpherePolesCfg: ToggleCfg = {
   flag: "selSpherePoles",
-  selector: (s) => s.selSpherePolesVisible,
+  default: true,
   active: (v) => v,
   label: "sel ⬡",
   title: (a) => (a ? "Hide sel-sphere poles" : "Show sel-sphere poles"),
@@ -111,7 +103,7 @@ const selSpherePolesCfg: ToggleCfg = {
 
 const handholdsCfg: ToggleCfg = {
   flag: "handholds",
-  selector: (s) => s.handholdsVisible,
+  default: true,
   active: (v) => v !== false,
   label: "⊙ grips",
   title: (a) => (a ? "Hide rotation grips" : "Show rotation grips"),
@@ -120,7 +112,7 @@ const handholdsCfg: ToggleCfg = {
 
 const globalLabelsCfg: ToggleCfg = {
   flag: "labelsGlobal",
-  selector: (s) => s.labelsGlobalHidden,
+  default: false,
   active: (v) => !v,
   label: (v) => `${v ? "▴" : "▾"} labels`,
   title: (a) => (a ? "Hide labels" : "Show labels"),
@@ -129,7 +121,7 @@ const globalLabelsCfg: ToggleCfg = {
 
 const badgesCfg: ToggleCfg = {
   flag: "badgesGlobal",
-  selector: (s) => s.badgesHidden,
+  default: false,
   active: (v) => !v,
   label: (v) => `${v ? "▴" : "▾"} +N badges`,
   title: (a) => (a ? "Hide +N badges" : "Show +N badges"),
@@ -138,7 +130,7 @@ const badgesCfg: ToggleCfg = {
 
 const doubleLinksCfg: ToggleCfg = {
   flag: "doubleLinks",
-  selector: (s) => s.doubleLinksVisible,
+  default: false,
   active: (v) => v,
   label: "⇄ double links",
   title: (a) => (a ? "Hide double-link overlay" : "Show double-link overlay"),
@@ -339,50 +331,22 @@ export function OverlaysControl() {
 /** HOME BUTTON: reframes the camera to fit all nodes in view. */
 export function HomeButton({
   cameraRef,
-  nodesRef,
-  targetRef,
   aspect,
 }: {
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
-  nodesRef: React.MutableRefObject<RFNode<NodeData>[]>;
-  targetRef: React.MutableRefObject<THREE.Vector3>;
   aspect: number;
 }) {
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const cam = cameraRef.current;
     if (!cam) return;
-
-    // New system: Home is a COMMAND to Go. TS sends only render context (fov + aspect);
-    // Go frames the scene from its OWN node geometry, installs the pose in the gesture
-    // FSM, and streams it back (pump → useCameraStore → CameraFromStore). Because the
-    // FSM's own pose becomes the framed pose, the next pan/zoom/rotate builds on it (no
-    // snap-back). We do NOT mutate the three.js camera or seed a computed pose here.
-    // NOTE: the new-system path must NOT depend on nodesRef — the old spec store is gated
-    // off under USE_NEW_SYSTEM, so nodesRef is empty; Go owns the geometry it frames from.
-    if (USE_NEW_SYSTEM) {
-      sendRawInput(buildHomeRaw(cam.fov, aspect));
-      return;
-    }
-
-    const nodes = nodesRef.current;
-    if (nodes.length === 0) return;
-    const { center, sizeX, sizeY, sizeZ } = boundingBox3D(nodes);
-    const dist = fitDistance(cam.fov, aspect, sizeX, sizeY) + sizeZ / 2;
-    const paddedDist = dist * 1.2;
-
-    // Reset to a square-on view: place the camera straight in front of the
-    // plane (along +z) and level its orientation. This clears any leftover
-    // tilt/roll so panning slides the plane uniformly (no parallax swivel).
-    const newPos = new THREE.Vector3(center.x, center.y, center.z + paddedDist);
-    cam.position.copy(newPos);
-    cam.up.set(0, 1, 0);
-    cam.lookAt(center);
-    // Seed the persistent pivot to the framed scene center so subsequent
-    // orbit/pan/dolly operate around what Fit just framed to.
-    targetRef.current.copy(center);
-    commitCamera(cam);
-  }, [cameraRef, nodesRef, targetRef, aspect]);
+    // Home is a COMMAND to Go. TS sends only render context (fov + aspect); Go frames the
+    // scene from its OWN node geometry, installs the pose in the gesture FSM, and streams it
+    // back via the buffer's Camera row (BufferCamera). Because the FSM's own pose becomes the
+    // framed pose, the next pan/zoom/rotate builds on it (no snap-back). We do NOT mutate the
+    // three.js camera or seed a computed pose here.
+    sendRawInput(buildHomeRaw(cam.fov, aspect));
+  }, [cameraRef, aspect]);
 
   return (
     <div

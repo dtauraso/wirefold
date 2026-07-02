@@ -2,11 +2,9 @@
 
 Read this before changing anything in the **Go network** (`nodes/`,
 `nodes/Wiring/paced_wire.go`, `nodes/Wiring/loader.go`,
-`nodes/Wiring/builders.go`) or the **pump**
-(`tools/topology-vscode/src/webview/three/pump.ts`), or anything that
-schedules/orders work. If your reasoning slips into retired vocabulary,
-you are in the wrong frame. Stop, re-read this file, and re-derive from
-the model.
+`nodes/Wiring/builders.go`) or anything that schedules/orders work. If
+your reasoning slips into retired vocabulary, you are in the wrong
+frame. Stop, re-read this file, and re-derive from the model.
 
 ## The network
 
@@ -112,55 +110,54 @@ re-derive from local rules that wait on ticks over channels and wires.
 
 ## Editor surface (TS)
 
-The model lives entirely in Go. The TS/React layer is **render-only**:
-it receives bead positions from Go and draws them. It never sets node
-state and never tells Go when a bead has arrived — Go owns the clock.
+The model lives entirely in Go. The TS/React layer is **render + forward
+only**: it decodes the binary content buffer Go streams and draws it, and
+forwards raw input to Go. It holds NO domain state — no render stores, no
+spec store, no camera store — never sets node state and never tells Go
+when a bead has arrived. Go owns the clock.
 
 - **Go runtime** owns all node-local held state, firing rules, wire
-  traversal timing, node positions, per-edge curve geometry, and shading
-  parameters. It emits trace events — bead positions, node events, edge
-  curves, and shading params — as JSON lines on stdout.
-- Each node's goroutine emits its own node + port world positions/dirs on
-  startup as the `node-geometry` trace event (the node owns its geometry
-  emission; wires still own bead-position emission).
-- **`pump.ts`** (`tools/topology-vscode/src/webview/three/pump.ts`) is a
-  position-stream plotter, not a delivery driver: it reads Go's trace
-  events from the extension bridge and writes them into state stores
-  (pulse-state, three/store) so the 3D renderer can draw what Go is
-  doing. It computes no positions, no geometry, and no traversal timing.
-  Pump is the boundary — no firing-rule or timing logic may live outside
-  it on the TS side.
-- **`GraphNode`** (in
-  `tools/topology-vscode/src/webview/three/scene-graph.tsx`) renders
-  all nodes generically as a sphere mesh + border ring, keyed off
-  `node.data.fill`/`node.data.stroke` from `NODE_DEFS`. There are no
-  per-kind component files.
-- **`SingleEdgeTube`** (in
-  `tools/topology-vscode/src/webview/three/scene-graph.tsx`) renders wire
-  animation driven by the positions Go emits. It owns no traversal
-  timing.
+  traversal timing, node positions, per-edge curve geometry, shading
+  parameters, camera pose, selection, and overlay visibility. It packs
+  the whole scene into a **binary content buffer** (`Buffer/`) and streams
+  it as length-prefixed frames on fd 3 every change.
+- **Go → TS is the binary content buffer** (`buffer-snapshot`), plus a
+  tiny `node-label` sidecar carrying each node's id/label/kind (derived
+  from the node-geometry event stream, host-side). The webview decodes the
+  latest snapshot (`buffer-decode.ts`) and renders it; row-keyed reflect
+  resources (`snapshot-buffer.ts`, `overlay-flags.ts`, `buffer-nav.ts`)
+  mirror Go — they author nothing. There is **no JSON-trace render path
+  and no `pump.ts`**; Go still emits the JSON trace on stdout as the
+  `.probe` log source, but the webview does not consume it for rendering.
+- **`BufferScene`** (`tools/topology-vscode/src/webview/three/buffer-scene.tsx`)
+  draws ALL geometry from the buffer: node bodies (sphere mesh + ring,
+  keyed off `node.data.fill`/`node.data.stroke` from `NODE_DEFS`), ports,
+  edge tubes, transit + interior beads, selection highlight, and the
+  camera (`BufferCamera` maps the buffer Camera row onto the three.js
+  camera). It owns no traversal timing, no positions, no geometry.
 - **Global gate** is a play/pause signal sent to the Go process (freezes
   the human-speed clock's tick advance). While halted the tick does not
   advance, so beads, in-node animations, and node windows all freeze; the
   editor reflects the last known state.
-- **Bridge surface** is two channels and nothing else. **Go → TS:** the
-  trace stream (bead positions, node events, edge curves, shading
-  params) — Go reporting what it is doing. **TS → Go:** spec I/O for
-  save/load (`save`, `view-save`, `load`) plus a single geometry-CRUD
-  `edit` message (`op` = create / update / delete — exactly three ops;
-  fading is not an op but an edge attribute set via `op=update, kind=edge,
-  attr=faded`) and the
-  play/pause control signal. The TS → Go send is fire-and-forget: the
-  editor places an edit and never blocks on Go, never asks when a bead
-  arrived, and there is no delivery signal — Go times its own delivery.
-  Nothing about node-local state or animation internals crosses the
-  bridge.
+- **Bridge surface.** **Go → TS:** the binary content buffer (+ the
+  `node-label` sidecar). **TS → Go:** `raw-input` (raw pointer/wheel events
+  + the stateless raycast hit — Go's gesture FSM decides what each gesture
+  MEANS), spec I/O for save/load (`save`, `view-save`, `load`), a single
+  geometry-CRUD `edit` message (`op` = create / update / delete — exactly
+  three ops; fading is not an op but an edge attribute set via `op=update,
+  kind=edge, attr=faded`), and the play/pause control signal. The TS → Go
+  send is fire-and-forget: the editor places a message and never blocks on
+  Go, never asks when a bead arrived, and there is no delivery signal — Go
+  times its own delivery. Nothing about node-local state or animation
+  internals crosses the bridge.
 
 ## Drift rule
 
-Traversal-timing or firing-rule logic outside the Go node
-and wire goroutines (or `pump.ts` for render translation) is drift —
-move it back into Go.
+Traversal-timing or firing-rule logic outside the Go node and wire
+goroutines is drift — move it back into Go. Likewise any domain state
+(node/edge/pulse/geometry/camera/selection) authored on the TS side, or
+any TS-side geometry/position/timing computation, is drift: Go owns the
+model and streams it as the content buffer; TS decodes and draws.
 
 ## Allowed vocabulary
 

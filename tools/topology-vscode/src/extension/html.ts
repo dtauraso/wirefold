@@ -23,12 +23,6 @@ export function buildWebviewHtml(
     .asWebviewUri(vscode.Uri.file(stylePath))
     .with({ query: `v=${mtimeMs(stylePath)}` });
   const nonce = randomNonce();
-  // Master switch for the agnostic-content-buffer new path, read at HTML-build time from
-  // the `wirefold.newSystem` VS Code setting and injected as a webview global. Reload
-  // Window re-runs this builder, so toggling the setting + reloading flips the whole new
-  // system (buffer render + raw input + new interactions) on/off — no rebuild.
-  const newSystem =
-    vscode.workspace.getConfiguration("wirefold").get<boolean>("newSystem") === true;
   // React Flow positions every node via inline `style="transform: ..."`
   // attributes, which `style-src` governs when `style-src-attr` is unset.
   // The bundled stylesheet is still served from cspSource; 'unsafe-inline'
@@ -55,7 +49,6 @@ export function buildWebviewHtml(
     <span id="run-mount"></span>
   </div>
   <div id="app"></div>
-  <script nonce="${nonce}">window.__WIREFOLD_NEW_SYSTEM__ = ${newSystem ? "true" : "false"};</script>
   <script nonce="${nonce}" src="${scriptUri.toString()}"></script>
 </body>
 </html>`;

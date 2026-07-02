@@ -94,19 +94,15 @@ func writeFades(root string, fades map[string]bool) error {
 // writeScene writes raw scene JSON to <root>/view/scene.json atomically.
 // The raw bytes are written verbatim (no re-marshal) so the scene's field order is preserved.
 //
-// Under the new system Go owns cameraPolar (scene_camera_persist.go), so this write must
-// NOT clobber the Go-persisted camera with the stale value a TS scene-save (fades/overlays)
-// carries. In that mode we merge: the on-disk cameraPolar is preserved and all other fields
-// come from the TS blob. Serialized against the camera persister via sceneFileMu. The old
-// path (flag off) is unchanged — verbatim write, field order preserved.
+// Go owns cameraPolar (scene_camera_persist.go), so this write must NOT clobber the
+// Go-persisted camera with the stale value a TS scene-save (fades/overlays) carries. We
+// merge: the on-disk cameraPolar is preserved and all other fields come from the TS blob.
+// Serialized against the camera persister via sceneFileMu.
 func writeScene(root string, raw json.RawMessage) error {
 	path := filepath.Join(root, "view", "scene.json")
-	out := []byte(raw)
-	if newSystemEnabled() {
-		sceneFileMu.Lock()
-		defer sceneFileMu.Unlock()
-		out = preserveSceneCameraPolar(path, raw)
-	}
+	sceneFileMu.Lock()
+	defer sceneFileMu.Unlock()
+	out := preserveSceneCameraPolar(path, raw)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}

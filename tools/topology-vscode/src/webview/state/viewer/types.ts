@@ -23,6 +23,14 @@ export type Camera3D = {
   quaternion: [number, number, number, number]; // x y z w
 };
 
+// Polar camera pose persisted to view/scene.json (Go-owned; read on load, written by Go).
+export type PolarCamera = {
+  pivot: [number, number, number];
+  r: number;
+  pos: [number, number];
+  up: [number, number];
+};
+
 export function isLegacyCamera(c: Camera | LegacyCameraBox): c is LegacyCameraBox {
   return typeof (c as Camera).zoom !== "number";
 }
@@ -42,7 +50,7 @@ export type EdgeView = {
 export type ViewerState = {
   camera?: Camera | LegacyCameraBox;
   camera3d?: Camera3D;
-  cameraPolar?: import("../../three/camera-store").PolarCamera;
+  cameraPolar?: PolarCamera;
   lastSelectionIds?: string[];
   nodes?: Record<string, NodeView>;
   edges?: Record<string, EdgeView>;

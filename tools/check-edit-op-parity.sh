@@ -28,11 +28,14 @@ STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
 OVERLAY_GEN="$REPO_ROOT/nodes/Wiring/overlay_gen.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
 HANDLE_MSG="$REPO_ROOT/tools/topology-vscode/src/extension/handle-message.ts"
-# pump.ts is the HAND-AUTHORED overlay renderer: its OverlayKind union + OVERLAY_TABLE
-# are the TS-side consumer that must stay in sync with the overlay flag list (axis 3).
-PUMP_TS="$REPO_ROOT/tools/topology-vscode/src/webview/three/pump.ts"
+# overlay-flags.ts is the HAND-AUTHORED overlay renderer: it reflects each Go-owned overlay
+# column out of the binary content buffer. Its per-flag bit reads (readOverlay*) + its
+# OverlayFlagVals object literal are the TS-side consumer that must stay in sync with the
+# overlay flag list (axis 3). (The old JSON-trace consumer pump.ts was removed in the
+# content-buffer erase; overlay state now round-trips through the buffer.)
+OVERLAY_FLAGS_TS="$REPO_ROOT/tools/topology-vscode/src/webview/three/overlay-flags.ts"
 
-for f in "$STDIN_READER" "$OVERLAY_GEN" "$MESSAGES_TS" "$HANDLE_MSG" "$PUMP_TS"; do
+for f in "$STDIN_READER" "$OVERLAY_GEN" "$MESSAGES_TS" "$HANDLE_MSG" "$OVERLAY_FLAGS_TS"; do
   if [[ ! -f "$f" ]]; then
     echo "edit-op-parity: MISCONFIGURED — file not found: $f" >&2
     exit 1
@@ -101,31 +104,30 @@ report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-messag
 # overlay_gen.go — circular, since the latter is generated from the former; flag→Go
 # parity is already covered by check-generated.sh regenerate+diff and the overlay
 # behavior test). The value axis 3 adds is flag→RENDERER parity: a flag added to
-# OVERLAY_FLAG_NAMES but never wired into the hand-authored pump.ts overlay renderer
-# (OverlayKind union + OVERLAY_TABLE) would silently never render. tsc's
-# Record<OverlayKind, …> exhaustiveness forces OVERLAY_TABLE ⊇ OverlayKind, but nothing
-# forces OverlayKind to track the flag list — that is this axis.
+# OVERLAY_FLAG_NAMES but never wired into the hand-authored overlay-flags.ts renderer
+# (per-flag readOverlay* bit reads + OverlayFlagVals object literal) would silently never
+# reflect out of the buffer. Nothing else forces those two lists to track the flag list —
+# that is this axis.
 #
-# CARDINALITY, not normalized-name, correspondence: the flag→trace-kind mapping is
-# non-mechanical (tori→scene-tori, overlays→overlays-vis) so a camelCase↔kebab name
-# compare would false-diverge on those two. Counts are robust and catch the dominant
-# failure (flag added/removed on one side only). The three independent hand-authored
-# lists (flags, OverlayKind members, OVERLAY_TABLE entries) must have equal cardinality.
+# CARDINALITY, not normalized-name, correspondence: the flag→buffer-column mapping is
+# non-mechanical (tori→readOverlaySceneTori, overlays→readOverlayOverlaysVis) so a
+# camelCase↔read-name compare would false-diverge. Counts are robust and catch the dominant
+# failure (flag added/removed on one side only). The three independent hand-authored lists
+# (flags, readOverlay* reads, OverlayFlagVals object keys) must have equal cardinality.
 TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted)
 assert_nonempty "$TS_FLAGS" "axis3 messages.ts overlay flags"
-# OverlayKind union members: lines shaped `  | "kebab-kind"` after the `type OverlayKind =`.
-PUMP_KINDS=$(awk '/type OverlayKind[[:space:]]*=/{p=1} p&&/^[[:space:]]*\|[[:space:]]*"[^"]+"/{print} p&&/;[[:space:]]*$/{p=0}' "$PUMP_TS" | grep -aoE '"[^"]+"' | quoted)
-# OVERLAY_TABLE entries: keys of the Record literal (lines with a setterKey field).
-# Only the leading key literal on each entry line (setterKey/field are also quoted).
-PUMP_TABLE=$(awk '/const OVERLAY_TABLE[[:space:]]*:/{p=1;next} p&&/^};/{p=0} p&&/setterKey:/{print}' "$PUMP_TS" | grep -aoE '^[[:space:]]*"[^"]+"' | quoted)
-assert_nonempty "$PUMP_KINDS" "axis3 pump.ts OverlayKind union"
-assert_nonempty "$PUMP_TABLE" "axis3 pump.ts OVERLAY_TABLE entries"
+# Per-flag buffer reads: the distinct readOverlay* function names used in overlay-flags.ts.
+RENDER_READS=$(grep -aoE 'readOverlay[A-Za-z]+\(v\)' "$OVERLAY_FLAGS_TS" | sort -u)
+# OverlayFlagVals object keys: property lines inside the `cachedVals = { … };` literal.
+RENDER_KEYS=$(awk '/cachedVals = \{/{p=1;next} p&&/^[[:space:]]*};/{p=0} p&&/^[[:space:]]*[a-zA-Z_]+:/{print}' "$OVERLAY_FLAGS_TS" | grep -aoE '^[[:space:]]*[a-zA-Z_]+:' | sort -u)
+assert_nonempty "$RENDER_READS" "axis3 overlay-flags.ts readOverlay* reads"
+assert_nonempty "$RENDER_KEYS" "axis3 overlay-flags.ts OverlayFlagVals keys"
 N_FLAGS=$(printf '%s\n' "$TS_FLAGS" | grep -c .)
-N_KINDS=$(printf '%s\n' "$PUMP_KINDS" | grep -c .)
-N_TABLE=$(printf '%s\n' "$PUMP_TABLE" | grep -c .)
-if [[ "$N_FLAGS" -ne "$N_KINDS" || "$N_FLAGS" -ne "$N_TABLE" ]]; then
-  echo "  overlay flag/renderer cardinality mismatch: OVERLAY_FLAG_NAMES=$N_FLAGS, pump OverlayKind=$N_KINDS, OVERLAY_TABLE=$N_TABLE"
-  echo "    (a flag was added/removed in messages.ts but not wired into pump.ts's renderer, or vice versa)"
+N_READS=$(printf '%s\n' "$RENDER_READS" | grep -c .)
+N_KEYS=$(printf '%s\n' "$RENDER_KEYS" | grep -c .)
+if [[ "$N_FLAGS" -ne "$N_READS" || "$N_FLAGS" -ne "$N_KEYS" ]]; then
+  echo "  overlay flag/renderer cardinality mismatch: OVERLAY_FLAG_NAMES=$N_FLAGS, overlay-flags reads=$N_READS, OverlayFlagVals keys=$N_KEYS"
+  echo "    (a flag was added/removed in messages.ts but not wired into overlay-flags.ts's renderer, or vice versa)"
   HITS=$((HITS+1))
 fi
 

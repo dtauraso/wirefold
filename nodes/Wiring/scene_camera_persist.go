@@ -14,8 +14,6 @@ package Wiring
 //     the viewpoint has been stable for a beat (viewpointPersistDebounce), off the hot path.
 //   - READ-MODIFY-WRITE: scene.json also holds camera3d, overlay flags, etc. We parse the
 //     existing file, replace ONLY `cameraPolar`, and write it back — other fields survive.
-//   - GATED to the new system (WIREFOLD_NEW_SYSTEM=="true"); the old path persists the
-//     camera via its own TS scene-save instead.
 //   - FIRE-AND-FORGET: the write runs on the debounce timer's goroutine and logs on error;
 //     it never blocks the gesture.
 //
@@ -31,12 +29,6 @@ import (
 	"sync"
 	"time"
 )
-
-// newSystemEnabled reports whether the new-system flag is on. Mirrors the gate main.go
-// uses for SeedInitialViewpoint (the read side), so read and write persist together.
-func newSystemEnabled() bool {
-	return os.Getenv("WIREFOLD_NEW_SYSTEM") == "true"
-}
 
 // sceneFileMu serializes read-modify-write cycles on view/scene.json across the two
 // writers (this camera persister and writeScene) so their field updates do not race.

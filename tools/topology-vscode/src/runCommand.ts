@@ -301,16 +301,9 @@ export class BuildAndRunRunner {
       cwd: repoRoot,
       detached: true,
       stdio: ["pipe", "pipe", "pipe", "pipe"],
-      // WIREFOLD_NEW_SYSTEM mirrors the `wirefold.newSystem` setting so Go knows to seed
-      // the initial camera viewpoint from view/scene.json itself (the new-system path reads
-      // its saved pose as file data; the old path restores it via PolarCameraRestorer).
       env: {
         ...process.env,
         WIREFOLD_BUF_OUT_FD: "3",
-        WIREFOLD_NEW_SYSTEM:
-          vscode.workspace.getConfiguration("wirefold").get<boolean>("newSystem") === true
-            ? "true"
-            : "false",
       },
     });
     // Flush any stdin lines that were buffered before this spawn (writeStdin queued them).

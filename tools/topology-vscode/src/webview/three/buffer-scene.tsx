@@ -17,7 +17,6 @@ import React, { useRef, useState, useContext, useMemo, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
-import { USE_NEW_SYSTEM } from "../new-system";
 import { decodeSnapshot } from "./buffer-decode";
 import { getNavNodeIds, getNavNodeKind } from "./buffer-nav";
 import { NODE_DEFS } from "../../schema/node-defs";
@@ -60,12 +59,6 @@ import {
 
 /** Projected label position, keyed by node id (buffer row → id via the id table). */
 export interface BufferLabelPos { id: string; px: number; py: number; cx: number; cy: number; }
-
-// ── Dev flag ──────────────────────────────────────────────────────────────────
-// Follows the ONE master switch (USE_NEW_SYSTEM). ON = mount the buffer render path;
-// OFF (default) = zero cost, the JSON render path runs unchanged. Toggle at RUNTIME via
-// the `wirefold.newSystem` VS Code setting + Reload Window — no source edit needed.
-export const USE_BUFFER_RENDER = USE_NEW_SYSTEM;
 
 // ── Sizing constants ──────────────────────────────────────────────────────────
 const INITIAL_BEAD_CAP  = 64;

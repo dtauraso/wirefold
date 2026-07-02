@@ -62,29 +62,27 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		// non-fatal; continue
 	}
 
-	// New-system initial camera viewpoint = FILE DATA. Go reads the saved camera from
+	// Initial camera viewpoint = FILE DATA. Go reads the saved camera from
 	// <topologyPath>/view/scene.json itself and installs it into the gesture-FSM viewpoint,
 	// so the buffer camera columns carry a real, non-degenerate saved pose from the first
 	// frame (pan works immediately). Absent/malformed file → a fixed non-degenerate default.
-	// This replaces the rejected on-load "home" command the webview used to send (a seed).
-	// Old path (flag off) is unchanged: it still restores via sceneText + PolarCameraRestorer.
-	if os.Getenv("WIREFOLD_NEW_SYSTEM") == "true" {
-		// Wire the buffer's port-row table into the gesture FSM so a new-system port hit
-		// (which carries only a numeric buffer PORT-ROW index) resolves back to its (node,
-		// port) here in Go — Go owns the topology and wrote the Port block in that row order.
-		md.SetPortRowResolver(snapState)
-		// Likewise the edge-row table: a new-system edge hit carries only a numeric buffer
-		// EDGE-ROW index; Go resolves it back to its edge label here (Go wrote the Edge block
-		// in that row order) to mark the Go-owned edge selection.
-		md.SetEdgeRowResolver(snapState)
-		W.SeedInitialViewpoint(topologyPath, md, tr)
-		// Arm the WRITE side AFTER the seed: from here, every gesture that changes the FSM
-		// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
-		// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
-		// Arming after the seed keeps the seed's own emit from persisting the loaded/default
-		// pose. Go owns this write; the old path persists the camera via its own TS scene-save.
-		md.EnableViewpointPersist(topologyPath)
-	}
+	//
+	// Wire the buffer's port-row table into the gesture FSM so a port hit (which carries
+	// only a numeric buffer PORT-ROW index) resolves back to its (node, port) here in Go —
+	// Go owns the topology and wrote the Port block in that row order.
+	md.SetPortRowResolver(snapState)
+	// Likewise the edge-row table: an edge hit carries only a numeric buffer EDGE-ROW index;
+	// Go resolves it back to its edge label here (Go wrote the Edge block in that row order)
+	// to mark the Go-owned edge selection.
+	md.SetEdgeRowResolver(snapState)
+	// Initial camera viewpoint = FILE DATA: Go reads the saved camera from
+	// <topologyPath>/view/scene.json and installs it into the gesture-FSM viewpoint.
+	W.SeedInitialViewpoint(topologyPath, md, tr)
+	// Arm the WRITE side AFTER the seed: from here, every gesture that changes the FSM
+	// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
+	// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
+	// Arming after the seed keeps the seed's own emit from persisting the loaded/default pose.
+	md.EnableViewpointPersist(topologyPath)
 
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).

@@ -4,9 +4,8 @@ import type { StateValue } from "../../../schema";
 import { isObj } from "../../../schema/parse-primitives";
 import type {
   Camera, Camera3D, EdgeView, LegacyCameraBox,
-  NodeView,
+  NodeView, PolarCamera,
 } from "./types";
-import type { PolarCamera } from "../../three/camera-store";
 
 export { isObj };
 

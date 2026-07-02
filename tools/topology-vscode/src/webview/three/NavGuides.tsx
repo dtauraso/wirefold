@@ -6,12 +6,7 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { RFNode, NodeData } from "../types";
-import { nodeRadius, nodeWorldPos } from "./geometry-helpers";
-import { useNodeGeometryStore } from "./node-geometry";
 import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
-import { useCameraStore } from "./camera-store";
-import { USE_NEW_SYSTEM } from "../new-system";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { useOverlayFlags } from "./overlay-flags";
 import { decodeSnapshot } from "./buffer-decode";
@@ -334,49 +329,32 @@ function PhiArc({ center, sample, color, tube }: {
 // NavGuides — decorative 3D navigation overlays (the polar-sphere tori, pole
 // frames, and θ/φ arcs). Rendered directly as the combined export; there is no
 // pass-through wrapper.
-export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; selectedId?: string | null }) {
-  // Re-derive when Go streams node geometry (positions change → content sphere moves).
-  // (Flag-off path only; the flag-on path reads the buffer instead — see below.)
-  const geoms = useNodeGeometryStore((s) => s.geoms);
-  const sceneToriVisible = useCameraStore((s) => s.sceneToriVisible);
-  const scenePolesVisible = useCameraStore((s) => s.scenePolesVisible);
-  const nodePolesVisible = useCameraStore((s) => s.nodePolesVisible);
-  const selSpherePolesVisible = useCameraStore((s) => s.selSpherePolesVisible);
-  const angleLabelsVisible = useCameraStore((s) => s.angleLabelsVisible);
-  const handholdsVisible = useCameraStore((s) => s.handholdsVisible);
-  const overlaysVisible = useCameraStore((s) => s.overlaysVisible);
-
-  // Under USE_NEW_SYSTEM the overlay flags are Go-owned and streamed into the buffer's
-  // Overlay columns (pump is gated off, so useCameraStore is inert on this path). Read
-  // them from the buffer so a toggle round-trips (Go flips → buffer column → this gate).
-  // Flag-off keeps the store reads above. useOverlayFlags subscribes to snapshot arrivals
-  // so a flip re-renders even when the node-position navSignature is unchanged.
+export function NavGuides() {
+  // Overlay flags are Go-owned and streamed into the buffer's Overlay columns. useOverlayFlags
+  // subscribes to snapshot arrivals so a flip re-renders even when the node-position
+  // navSignature is unchanged. null until the first snapshot lands (nothing to draw yet).
   const bufFlags = useOverlayFlags();
-  const useBuf = USE_NEW_SYSTEM && bufFlags != null;
 
   // "Overlays" master gate (Go-owned): when false, ALL polar guides are suppressed (the
   // toolbar also hides their individual buttons). It does NOT touch each guide's own
   // Go-owned visibility, so reactivating restores every guide to its prior on/off state.
-  const g = useBuf ? bufFlags.overlays : overlaysVisible;
-  const showTori = g && (useBuf ? bufFlags.tori : sceneToriVisible !== false);
-  const showScenePoles = g && (useBuf ? bufFlags.scenePoles : scenePolesVisible !== false);
-  const showNodePoles = g && (useBuf ? bufFlags.nodePoles : nodePolesVisible !== false);
-  const showSelPoles = g && (useBuf ? bufFlags.selSpherePoles : selSpherePolesVisible !== false);
-  const showAngles = g && (useBuf ? bufFlags.angleLabels : angleLabelsVisible !== false);
-  const showHandholds = g && (useBuf ? bufFlags.handholds : handholdsVisible !== false);
+  const g = bufFlags?.overlays ?? false;
+  const showTori = g && !!bufFlags?.tori;
+  const showScenePoles = g && !!bufFlags?.scenePoles;
+  const showNodePoles = g && !!bufFlags?.nodePoles;
+  const showSelPoles = g && !!bufFlags?.selSpherePoles;
+  const showAngles = g && !!bufFlags?.angleLabels;
+  const showHandholds = g && !!bufFlags?.handholds;
 
-  // ── Buffer-driven nav sampling (new-system path) ─────────────────────────────
-  // Under USE_NEW_SYSTEM the overlay geometry derives from the binary buffer (Go-owned
-  // node centers/radii/sphereR + Go-owned selection column) instead of the RFNode
-  // array / node-geometry store. Sample the latest snapshot each frame and bump a
-  // render tick only when the coarse signature changes, so tori/frames rebuild on real
-  // position/selection changes (a drag) — not every frame. On the flag-off path
-  // useFrame returns immediately and navTick never advances, so nothing changes.
+  // ── Buffer-driven nav sampling ───────────────────────────────────────────────
+  // The overlay geometry derives from the binary buffer (Go-owned node centers/radii/sphereR
+  // + Go-owned selection column). Sample the latest snapshot each frame and bump a render tick
+  // only when the coarse signature changes, so tori/frames rebuild on real position/selection
+  // changes (a drag) — not every frame.
   const [navTick, setNavTick] = useState(0);
   const bufNavRef = useRef<NavNode[]>([]);
   const bufSigRef = useRef("");
   useFrame(() => {
-    if (!USE_NEW_SYSTEM) return;
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
@@ -389,28 +367,16 @@ export function NavGuides({ nodes, selectedId }: { nodes: RFNode<NodeData>[]; se
     }
   });
 
-  // Node records that drive every guide below. SAME NavNode shape both paths, so the
-  // rendering body is identical — only the DATA SOURCE is gated. Flag-off builds them
-  // from the RFNode array + node-geometry store exactly as before (byte-for-byte);
-  // flag-on reads the buffer. Memoized so the O(N²) lockArc scan below recomputes only
-  // when the node data actually changes (flag-off: nodes/geoms; flag-on: navTick).
-  const navNodes = useMemo<NavNode[]>(() => {
-    if (USE_NEW_SYSTEM) return bufNavRef.current;
-    return nodes.map((n) => ({
-      id: n.id,
-      center: nodeWorldPos(n),
-      radius: nodeRadius(n),
-      sphereR: geoms[n.id]?.sphereR,
-      selected: n.id === selectedId,
-    }));
+  // Node records that drive every guide below. Memoized so the O(N²) lockArc scan below
+  // recomputes only when the node data actually changes (navTick bumps on a real change).
+  const navNodes = useMemo<NavNode[]>(
+    () => bufNavRef.current,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, geoms, selectedId, navTick]);
+    [navTick],
+  );
 
-  // Selection: Go-owned Selected column under the flag; the TS selectedId prop
-  // otherwise.
-  const effectiveSelectedId = USE_NEW_SYSTEM
-    ? (navNodes.find((n) => n.selected)?.id ?? null)
-    : (selectedId ?? null);
+  // Selection: Go-owned Selected column from the buffer.
+  const effectiveSelectedId = navNodes.find((n) => n.selected)?.id ?? null;
 
   // Latch the last selected node. Selection only DECIDES which sphere the
   // sel-highlight frames; it does not have to stay selected to keep the frame shown.

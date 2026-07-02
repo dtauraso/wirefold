@@ -1,25 +1,17 @@
-// raw-input.ts — Phase 6 RAW-INPUT forwarding (OFF by default behind USE_RAW_INPUT).
+// raw-input.ts — RAW-INPUT forwarding.
 //
-// When enabled, the editor forwards RAW pointer/wheel events plus the stateless three.js
-// raycast hit to Go, fire-and-forget; Go's gesture state machine (nodes/Wiring/gesture.go)
-// decides what the input MEANS. TS holds NO gesture state. When DISABLED (the default), this
-// module is inert and the current interaction handlers run exactly as before.
+// The editor forwards RAW pointer/wheel events plus the stateless three.js raycast hit to
+// Go, fire-and-forget; Go's gesture state machine (nodes/Wiring/gesture.go) decides what the
+// input MEANS. TS holds NO gesture state.
 //
-// This is the SAME dev-flag family as buffer-scene.ts's USE_BUFFER_RENDER: additive,
-// off-by-default scaffolding for the buffer/agnostic-content-buffer flip. The raycast + hit
-// classification (three.js hit-testing) live HERE, not in the polar-only interaction-*.ts
-// files, so the polar-nav guard is unaffected.
+// The raycast + hit classification (three.js hit-testing) live HERE, not in the polar-only
+// interaction-*.ts files, so the polar-nav guard is unaffected.
 
 import * as THREE from "three";
 import { vscode } from "../vscode-api";
 import type { RawInputEvent, RawHit, RawPointerKind } from "../../messages";
 import type { PickOptions } from "./interaction-controls";
 import { pixelToNDC } from "./geometry-helpers";
-import { USE_NEW_SYSTEM } from "../new-system";
-
-/** Follows the ONE master switch (USE_NEW_SYSTEM). ON = forward raw input to Go's gesture
- *  FSM; OFF (default) = the current interaction handlers run byte-for-byte as today. */
-export const USE_RAW_INPUT = USE_NEW_SYSTEM;
 
 type PickRef = React.MutableRefObject<
   ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
@@ -35,31 +27,17 @@ export function sendRawInput(event: RawInputEvent): void {
  *  raycast). Port ids are "nodeId:in|out:portName"; isInput is read off that id. Topology
  *  facts (connected?) are NOT decided here — Go's FSM owns those. */
 function classifyHit(pickRequest: PickRef, ndcX: number, ndcY: number): { kind: RawHit["kind"]; id: string; isInput: boolean; portRow: number; edgeRow: number } {
-  if (USE_NEW_SYSTEM) {
-    // New system: a port hit carries ONLY its numeric buffer PORT-ROW index (pickBufferPort
-    // returns the row as a string). No name/side string — Go resolves the row → (node, port,
-    // isInput) via its own port-row table, so id stays empty and isInput is irrelevant here.
-    // Priority mirrors the pre-branch pickDefault: port, then edge, then node.
-    const portStr = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
-    if (portStr !== null) return { kind: "port", id: "", isInput: false, portRow: Number(portStr), edgeRow: -1 };
-    // An edge hit carries ONLY its numeric buffer EDGE-ROW index (pickBufferEdge returns the
-    // row as a string). Go resolves the row → its edge via its own edge-row table, so id stays
-    // empty here.
-    const edgeStr = pickRequest.current?.(ndcX, ndcY, { edgeOnly: true }) ?? null;
-    if (edgeStr !== null) return { kind: "edge", id: "", isInput: false, portRow: -1, edgeRow: Number(edgeStr) };
-    const node = pickRequest.current?.(ndcX, ndcY) ?? null;
-    if (node !== null) return { kind: "node", id: node, isInput: false, portRow: -1, edgeRow: -1 };
-    return { kind: "empty", id: "", isInput: false, portRow: -1, edgeRow: -1 };
-  }
-  const port = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
-  if (port !== null) {
-    const i = port.indexOf(":");
-    const rest = port.slice(i + 1);
-    const dir = rest.slice(0, rest.indexOf(":"));
-    return { kind: "port", id: port, isInput: dir === "in", portRow: -1, edgeRow: -1 };
-  }
-  const handhold = pickRequest.current?.(ndcX, ndcY, { handholdOnly: true }) ?? null;
-  if (handhold !== null) return { kind: "handhold", id: handhold, isInput: false, portRow: -1, edgeRow: -1 };
+  // A port hit carries ONLY its numeric buffer PORT-ROW index (pickBufferPort returns the row
+  // as a string). No name/side string — Go resolves the row → (node, port, isInput) via its
+  // own port-row table, so id stays empty and isInput is irrelevant here. Priority: port,
+  // then edge, then node.
+  const portStr = pickRequest.current?.(ndcX, ndcY, { portOnly: true }) ?? null;
+  if (portStr !== null) return { kind: "port", id: "", isInput: false, portRow: Number(portStr), edgeRow: -1 };
+  // An edge hit carries ONLY its numeric buffer EDGE-ROW index (pickBufferEdge returns the
+  // row as a string). Go resolves the row → its edge via its own edge-row table, so id stays
+  // empty here.
+  const edgeStr = pickRequest.current?.(ndcX, ndcY, { edgeOnly: true }) ?? null;
+  if (edgeStr !== null) return { kind: "edge", id: "", isInput: false, portRow: -1, edgeRow: Number(edgeStr) };
   const node = pickRequest.current?.(ndcX, ndcY) ?? null;
   if (node !== null) return { kind: "node", id: node, isInput: false, portRow: -1, edgeRow: -1 };
   return { kind: "empty", id: "", isInput: false, portRow: -1, edgeRow: -1 };
