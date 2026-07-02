@@ -11,11 +11,12 @@
 //
 // Snapshot layout (little-endian, packed):
 //
-//	Header   16 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]
+//	Header   20 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32]
 //	Bead     beadCount × BufBeadStride bytes
 //	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags)
 //	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
 //	Edge     edgeCount × BufEdgeStride bytes
+//	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
 //
@@ -100,6 +101,19 @@ type nodeSnapState struct {
 	// PERSISTENT — a slot keeps its state until the next KindNodeBead updates it
 	// (present=false explicitly clears a popped slot). Not touched by clearTransients.
 	interior [BufInteriorSlotsPerNode]interiorSlotState
+	// ports holds this node's port geometry (input + output), from the node-geometry
+	// event's Ports. PERSISTENT — re-emitted on every node-move (only the dirs change;
+	// the port set/order is stable), so buildSnapshot flattens the current ports across
+	// all nodes in node-row order into the Port block. The per-port name strings ride the
+	// host→webview sidecar in this same flattened order (the numeric buffer carries no strings).
+	ports []portSnapState
+}
+
+// portSnapState holds one port's unit surface direction (node center → port) and
+// whether it is an input port. Populated from a node-geometry event's Ports.
+type portSnapState struct {
+	dx, dy, dz float64
+	isInput    bool
 }
 
 // interiorSlotState holds one interior grid slot's present/value + Go-owned
@@ -291,6 +305,15 @@ func (s *SnapshotState) EdgeCount() int { return len(s.edges) }
 // BeadCount returns the number of live in-flight beads (for tests).
 func (s *SnapshotState) BeadCount() int { return len(s.beads) }
 
+// PortCount returns the total number of port rows across all nodes (for tests).
+func (s *SnapshotState) PortCount() int {
+	n := 0
+	for i := range s.nodes {
+		n += len(s.nodes[i].ports)
+	}
+	return n
+}
+
 // BuildSnapshot exposes the snapshot builder for tests.
 func (s *SnapshotState) BuildSnapshot() []byte { return s.buildSnapshot() }
 
@@ -310,6 +333,14 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	n.sphereR = ev.SphereR
 	n.vrx, n.vry, n.vrz = ev.VRX, ev.VRY, ev.VRZ
 	n.frx, n.fry, n.frz = ev.FRX, ev.FRY, ev.FRZ
+	// Port geometry: replace this node's ports with the event's current port set/dirs
+	// (re-emit on move updates the dirs; the port set/order is stable). Kept in the
+	// event's Ports order so the buffer Port block and the host-side name sidecar stay
+	// in the same flattened row order.
+	n.ports = n.ports[:0]
+	for _, p := range ev.Ports {
+		n.ports = append(n.ports, portSnapState{dx: p.DX, dy: p.DY, dz: p.DZ, isInput: p.IsInput})
+	}
 	// Status fields (torusRed, missVal, mx/my/mz) are preserved across geometry
 	// re-emits so a node-move does not silently clear an active error state.
 }
@@ -454,17 +485,24 @@ func (s *SnapshotState) buildSnapshot() []byte {
 
 	interiorCount := int(nodeCount) * BufInteriorSlotsPerNode
 
+	// Port block is self-sizing: total port rows = sum of each node's ports.
+	portCount := 0
+	for i := range s.nodes {
+		portCount += len(s.nodes[i].ports)
+	}
+
 	size := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
 		interiorCount*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
+		portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride
 
 	buf := make([]byte, size)
 
-	// Header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32]
+	// Header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32]
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
 	off += 4
@@ -473,6 +511,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	binary.LittleEndian.PutUint32(buf[off:], nodeCount)
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], edgeCount)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(portCount))
 	off += 4
 	s.tick++
 
@@ -526,6 +566,22 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)))
 	}
 	off += int(edgeCount) * BufEdgeStride
+
+	// Port block: flattened over nodes in stable node-row order — for each node in its
+	// buffer row order, that node's ports in node-geometry Ports order. NodeRow is the
+	// owning node's row index; DX/DY/DZ is the port surface direction; IsInput marks input
+	// ports. The host-side name sidecar (buffer-nav port table) is built in this identical
+	// flattened order, so port row i ↔ sidecar entry i.
+	portBuf := buf[off : off+portCount*BufPortStride]
+	prow := 0
+	for i := range s.nodes {
+		for _, p := range s.nodes[i].ports {
+			SetPortRow(portBuf, prow,
+				int32(i), float32(p.dx), float32(p.dy), float32(p.dz), boolU8(p.isInput))
+			prow++
+		}
+	}
+	off += portCount * BufPortStride
 
 	// Camera block (always 1 row).
 	c := s.camera

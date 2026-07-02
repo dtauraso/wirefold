@@ -233,6 +233,92 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSnapshotPorts verifies the Port block: port rows are populated from the
+// node-geometry Ports, flattened over nodes in node-row order (each node's ports in
+// event order), with the correct NodeRow / dir / IsInput, and that portCount lands in
+// the header. Two nodes carry ports so the flattening + NodeRow indexing is exercised.
+func TestSnapshotPorts(t *testing.T) {
+	s := NewSnapshotState(nil)
+
+	// node-0: one input + one output port.
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "n0", Radius: 1,
+		Ports: []T.PortGeom{
+			{Name: "in", IsInput: true, DX: -1, DY: 0, DZ: 0},
+			{Name: "out", IsInput: false, DX: 1, DY: 0, DZ: 0},
+		},
+	})
+	// node-1: one output port.
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "n1", Radius: 1,
+		Ports: []T.PortGeom{
+			{Name: "out", IsInput: false, DX: 0, DY: 1, DZ: 0},
+		},
+	})
+
+	if got := s.PortCount(); got != 3 {
+		t.Fatalf("PortCount: got %d, want 3", got)
+	}
+
+	snap := s.BuildSnapshot()
+	beadCount := readU32(snap, 4)
+	nodeCount := readU32(snap, 8)
+	edgeCount := readU32(snap, 12)
+	portCount := readU32(snap, 16)
+	if portCount != 3 {
+		t.Fatalf("header portCount: got %d, want 3", portCount)
+	}
+
+	portOff := BufHeaderSize +
+		int(beadCount)*BufBeadStride +
+		int(nodeCount)*BufNodeStride +
+		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
+		int(edgeCount)*BufEdgeStride
+
+	row := func(i int) int { return portOff + i*BufPortStride }
+
+	// Row 0: n0/in (NodeRow 0, dir -1,0,0, input).
+	if got := readI32(snap, row(0)+BufPortColNodeRow); got != 0 {
+		t.Errorf("port0.NodeRow: got %d, want 0", got)
+	}
+	if got := readF32(snap, row(0)+BufPortColDX); got != -1 {
+		t.Errorf("port0.DX: got %v, want -1", got)
+	}
+	if snap[row(0)+BufPortColIsInput] != 1 {
+		t.Errorf("port0.IsInput: got %d, want 1", snap[row(0)+BufPortColIsInput])
+	}
+	// Row 1: n0/out (NodeRow 0, dir 1,0,0, output).
+	if got := readI32(snap, row(1)+BufPortColNodeRow); got != 0 {
+		t.Errorf("port1.NodeRow: got %d, want 0", got)
+	}
+	if snap[row(1)+BufPortColIsInput] != 0 {
+		t.Errorf("port1.IsInput: got %d, want 0", snap[row(1)+BufPortColIsInput])
+	}
+	// Row 2: n1/out (NodeRow 1, dir 0,1,0, output).
+	if got := readI32(snap, row(2)+BufPortColNodeRow); got != 1 {
+		t.Errorf("port2.NodeRow: got %d, want 1", got)
+	}
+	if got := readF32(snap, row(2)+BufPortColDY); got != 1 {
+		t.Errorf("port2.DY: got %v, want 1", got)
+	}
+
+	// A re-emit (node move) updates dirs but keeps the port set/order/count stable.
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "n0", Radius: 1,
+		Ports: []T.PortGeom{
+			{Name: "in", IsInput: true, DX: 0, DY: -1, DZ: 0},
+			{Name: "out", IsInput: false, DX: 0, DY: 1, DZ: 0},
+		},
+	})
+	if got := s.PortCount(); got != 3 {
+		t.Fatalf("PortCount after re-emit: got %d, want 3", got)
+	}
+	snap = s.BuildSnapshot()
+	if got := readF32(snap, row(0)+BufPortColDY); got != -1 {
+		t.Errorf("port0.DY after re-emit: got %v, want -1", got)
+	}
+}
+
 // TestSelectMode verifies that KindSelect's Value carries the select mode into the
 // overlay SelMode column (1 = own / secondary, 0 = surface / primary), and that
 // clearing the selection resets SelMode to surface.

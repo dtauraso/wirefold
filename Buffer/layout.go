@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 6
+const BufLayoutVersion = 7
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -127,6 +127,25 @@ type bufLayoutEdge struct {
 	DstNodeRow int32   `buf:"i32"` // destination node's buffer node-row index (-1 = unresolved)
 }
 
+// bufLayoutPort defines one row of the ports column block.
+// One row per node port (input or output). The block is self-sizing via a portCount
+// field in the snapshot header (like beadCount/edgeCount), then flattened across all
+// nodes in node-row order: for each node in its buffer row order, that node's ports in
+// node-geometry Ports order. NodeRow is the owning node's buffer node-row index; DX/DY/DZ
+// is the port's unit direction on the node surface (node center → port, the pre-branch
+// portDir); IsInput=1 for an input port, 0 for an output port. The port world position is
+// nodeCenter + DIR*nodeRadius, computed on the render side (mirrors the pre-branch
+// PortSphere placement). The per-port {nodeId, portName, isInput} strings ride a sidecar
+// (buffer-nav port table) in this same flattened row order — the numeric buffer carries no
+// strings.
+type bufLayoutPort struct {
+	NodeRow int32   `buf:"i32"` // owning node's buffer node-row index
+	DX      float32 `buf:"f32"` // unit dir x (node center → port)
+	DY      float32 `buf:"f32"` // unit dir y
+	DZ      float32 `buf:"f32"` // unit dir z
+	IsInput uint8   `buf:"u8"`  // 1 = input port, 0 = output port
+}
+
 // bufLayoutCamera defines the camera column block (always 1 row).
 // Matched from KindCamera trace events.
 type bufLayoutCamera struct {
@@ -170,6 +189,7 @@ var _ = [...]any{
 	bufLayoutNode{},
 	bufLayoutInterior{},
 	bufLayoutEdge{},
+	bufLayoutPort{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
 }
