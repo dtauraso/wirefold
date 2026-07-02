@@ -23,6 +23,7 @@ import { NavGuides } from "./NavGuides";
 import { PanPolarOverlay } from "./PanPolarOverlay";
 import { viewerState, patchViewerState } from "../state/viewer-state";
 import { scheduleViewSave } from "../save";
+import { USE_NEW_SYSTEM } from "../new-system";
 
 // ---------------------------------------------------------------------------
 // ThreeView: Canvas wrapper + interaction + label overlay + widgets
@@ -248,14 +249,24 @@ export function ThreeView() {
             onPositions={onPositions}
             onCameraSettle={onCameraSettle}
           />
-          <NavGuides nodes={nodes} selectedId={selectedId} />
-          {USE_BUFFER_RENDER && <BufferScene />}
+          {/* NavGuides (polar tori / pole frames / θ-φ angle arcs / handholds) is gated
+              OFF under the new-system flag: its geometry is computed entirely from the
+              OLD path — computeContentSphere(nodes), nodeWorldPos/nodeRadius over the
+              RFNode array, and the node-geometry store's sphereR — none of which is read
+              from the binary buffer. Driving only its visibility from the buffer while its
+              geometry stays old-path would be half-driven, so per the standalone-flag rule
+              the whole overlay is gated off and reported as a known gap. */}
+          {!USE_NEW_SYSTEM && <NavGuides nodes={nodes} selectedId={selectedId} />}
+          {USE_BUFFER_RENDER && <BufferScene cameraRef={cameraRef} />}
         </Canvas>
       </div>
 
       {/* Label overlay — real camera projection, updated every frame.
           All nodes with a projected position render their label (subject to the global toggle). */}
-      {!globalLabelsHidden && nodes.map((n) => {
+      {/* Node label pills — projected from the OLD path (LabelProjector over the RFNode
+          array; node labels/ids are not carried in the binary buffer). Gated OFF under
+          the new-system flag and reported as a known overlay gap. */}
+      {!USE_NEW_SYSTEM && !globalLabelsHidden && nodes.map((n) => {
         const pos = labelMap.get(n.id);
         if (!pos) return null;
         return (
@@ -285,7 +296,9 @@ export function ThreeView() {
           Only shown when N >= 1. Recomputed on camera settle (not per-frame).
           Full occlusion is allowed — layout never moves (honesty preserved).
           TODO(3d): large-count cap/format deferred */}
-      {!badgesHidden && nodes.map((n) => {
+      {/* Occlusion "+N" badges — old-path (occlusion computed over the RFNode array +
+          old label projection). Gated OFF under the new-system flag; known overlay gap. */}
+      {!USE_NEW_SYSTEM && !badgesHidden && nodes.map((n) => {
         const count = occlusionCounts.get(n.id);
         if (!count || count < 1) return null;
         const pos = labelMap.get(n.id);
