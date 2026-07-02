@@ -17,6 +17,7 @@ import { useCameraStore } from "./camera-store";
 import { useInteractionControls } from "./interaction-controls";
 import type { PickOptions } from "./interaction-controls";
 import { Scene } from "./scene-content";
+import { BufferScene, USE_BUFFER_RENDER } from "./buffer-scene";
 import { computeOcclusionCounts } from "./scene-occlusion";
 import { NavGuides } from "./NavGuides";
 import { PanPolarOverlay } from "./PanPolarOverlay";
@@ -248,6 +249,7 @@ export function ThreeView() {
             onCameraSettle={onCameraSettle}
           />
           <NavGuides nodes={nodes} selectedId={selectedId} />
+          {USE_BUFFER_RENDER && <BufferScene />}
         </Canvas>
       </div>
 
