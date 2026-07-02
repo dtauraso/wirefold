@@ -255,42 +255,62 @@ function NodeInstances({ capacity }: { capacity: number }) {
   );
 }
 
-// Highlight ring drawn around the Go-selected node (Selected column = 1). Go OWNS the
-// selection; this is pure render of the buffer's Selected column — no TS selection store.
-function SelectionHighlight({ capacity }: { capacity: number }) {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const matRef  = useRef(new THREE.Matrix4());
+// Highlight drawn around the Go-selected node (Selected column = 1). Matches the
+// scene-graph.tsx GraphNode look: a thick yellow torus ring + an orange halo sphere.
+// Go OWNS the selection; this is pure render of the buffer's Selected column — no TS
+// selection state. At most one node is selected at a time.
+function SelectionHighlight({ capacity: _capacity }: { capacity: number }) {
+  const groupRef = useRef<THREE.Group>(null);
+  // Store radius so the geometry can scale; update each frame.
+  const radiusRef = useRef<number>(NODE_SPHERE_RADIUS);
 
   useFrame(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
+    const group = groupRef.current;
+    if (!group) return;
 
     const snap = getLatestSnapshot();
-    if (!snap) { mesh.count = 0; return; }
+    if (!snap) { group.visible = false; return; }
     const decoded = decodeSnapshot(snap);
-    if (!decoded) { mesh.count = 0; return; }
+    if (!decoded) { group.visible = false; return; }
     const { nodeCount, nodeView } = decoded;
 
-    let slot = 0;
-    for (let i = 0; i < nodeCount && slot < capacity; i++) {
+    for (let i = 0; i < nodeCount; i++) {
       if (!readNodeSelected(nodeView, i)) continue;
-      matRef.current.setPosition(
+      const r = readNodeRadius(nodeView, i) || NODE_SPHERE_RADIUS;
+      group.position.set(
         readNodeCX(nodeView, i),
         readNodeCY(nodeView, i),
         readNodeCZ(nodeView, i),
       );
-      mesh.setMatrixAt(slot, matRef.current);
-      slot++;
+      // Scale the group so child geometries built at radius=1 match r.
+      // Torus: args=[1, 0.14, 8, 32]; halo sphere: args=[1.45, 16, 16].
+      group.scale.setScalar(r);
+      group.visible = true;
+      radiusRef.current = r;
+      return;
     }
-    mesh.count = slot;
-    mesh.instanceMatrix.needsUpdate = true;
+    group.visible = false;
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, capacity]}>
-      <sphereGeometry args={[NODE_SPHERE_RADIUS * 1.25, 16, 16]} />
-      <meshBasicMaterial color="#ffee44" wireframe transparent opacity={0.85} />
-    </instancedMesh>
+    <group ref={groupRef} visible={false}>
+      {/* Yellow torus ring — matches GraphNode selected border: r*0.14 thick */}
+      <mesh raycast={() => null}>
+        <torusGeometry args={[1, 0.14, 8, 32]} />
+        <meshStandardMaterial color="#ffcc00" emissive="#ffcc00" emissiveIntensity={0.3} />
+      </mesh>
+      {/* Orange halo sphere — matches GraphNode NODE_HALO_R_RATIO=1.45 */}
+      <mesh raycast={() => null}>
+        <sphereGeometry args={[1.45, 16, 16]} />
+        <meshBasicMaterial
+          color="#ff5a00"
+          transparent
+          opacity={0.5}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
   );
 }
 
