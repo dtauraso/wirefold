@@ -351,19 +351,22 @@ export function HomeButton({
   const onClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const cam = cameraRef.current;
-    const nodes = nodesRef.current;
-    if (!cam || nodes.length === 0) return;
+    if (!cam) return;
 
     // New system: Home is a COMMAND to Go. TS sends only render context (fov + aspect);
     // Go frames the scene from its OWN node geometry, installs the pose in the gesture
     // FSM, and streams it back (pump → useCameraStore → CameraFromStore). Because the
     // FSM's own pose becomes the framed pose, the next pan/zoom/rotate builds on it (no
     // snap-back). We do NOT mutate the three.js camera or seed a computed pose here.
+    // NOTE: the new-system path must NOT depend on nodesRef — the old spec store is gated
+    // off under USE_NEW_SYSTEM, so nodesRef is empty; Go owns the geometry it frames from.
     if (USE_NEW_SYSTEM) {
       sendRawInput(buildHomeRaw(cam.fov, aspect));
       return;
     }
 
+    const nodes = nodesRef.current;
+    if (nodes.length === 0) return;
     const { center, sizeX, sizeY, sizeZ } = boundingBox3D(nodes);
     const dist = fitDistance(cam.fov, aspect, sizeX, sizeY) + sizeZ / 2;
     const paddedDist = dist * 1.2;
