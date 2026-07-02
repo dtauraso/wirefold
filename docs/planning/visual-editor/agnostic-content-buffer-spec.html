@@ -213,6 +213,8 @@ instanced.count = liveBeadCount;</pre>
   <p class="muted">The only TS state that remains is <b>ephemeral in-gesture bookkeeping</b> inside the input handler (drag origin, which button is down) &mdash; not a domain store.</p>
   <h3>Interaction</h3>
   <p>Mouse events (orbit / zoom / drag / add / delete) are forwarded to Go <b>immediately</b> as CRUD/input; everything the renderer needs (incl. port positions during a drag) is read from the <b>buffer view</b>. TS renders + forwards; it holds nothing.</p>
+  <h3>Hit-testing (resolved &mdash; option a)</h3>
+  <p>three.js builds its scene from the buffer; on a pointer event its <b>raycaster computes which rendered entity is under the pointer</b> (using the buffer&rsquo;s camera). TS sends that hit &mdash; <b>entity id + world point, in the shared format</b> &mdash; directly to Go. Division of labor: <b>three.js computes the hit geometry; Go&rsquo;s gesture state machine decides what it means.</b> TS stays stateless: <em>build scene from buffer &rarr; raycast on demand &rarr; forward the hit</em>. (Go&rsquo;s data is a neutral numeric layout, not three.js&rsquo;s format &mdash; TS maps columns into three.js structures.)</p>
 </section>
 
 <!-- CODEGEN -->
@@ -255,7 +257,6 @@ instanced.count = liveBeadCount;</pre>
     <li><b>Frame cadence:</b> emit a binary frame per render tick vs per Go clock event. Leaning per-tick for the moving columns; geometry columns only when they change.</li>
     <li><b>maxRows policy:</b> fixed ceiling vs grow-and-refit on overflow.</li>
     <li><b>Event-record layout:</b> fixed-width vs variable-length records for the semantic events (each carries a kind id + a few fields) &mdash; decide the record framing within the binary.</li>
-    <li><b>Hit-testing:</b> (a) TS raycasts the rendered scene and sends <code>hit = entity + coords</code> (render-adjacent, TS-side), or (b) Go hit-tests from its own geometry + camera and TS sends only raw coords. Both keep the gesture state machine in Go; they differ only on where the raycast runs.</li>
     <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete all domain stores + forward input as CRUD, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
   </ul>
 </section>
