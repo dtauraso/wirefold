@@ -62,6 +62,16 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		// non-fatal; continue
 	}
 
+	// New-system initial camera viewpoint = FILE DATA. Go reads the saved camera from
+	// <topologyPath>/view/scene.json itself and installs it into the gesture-FSM viewpoint,
+	// so the buffer camera columns carry a real, non-degenerate saved pose from the first
+	// frame (pan works immediately). Absent/malformed file → a fixed non-degenerate default.
+	// This replaces the rejected on-load "home" command the webview used to send (a seed).
+	// Old path (flag off) is unchanged: it still restores via sceneText + PolarCameraRestorer.
+	if os.Getenv("WIREFOLD_NEW_SYSTEM") == "true" {
+		W.SeedInitialViewpoint(topologyPath, md, tr)
+	}
+
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	md.Start(ctx)
