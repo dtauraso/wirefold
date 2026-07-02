@@ -191,6 +191,8 @@ kind 1 = event record   <span class="c">// binary semantic event → decoded to 
     <tr><td>Channel model</td><td>one framed binary stdout, not a 3rd pipe</td><td>preserves the &ldquo;two channels&rdquo; bridge doctrine — still Go&rarr;TS trace + TS&rarr;Go edits</td></tr>
   </table>
   <div class="note warn"><b>Doctrine touchpoint:</b> this makes the Go&rarr;TS lane <b>all-binary</b> (content <em>and</em> log). CLAUDE.md&rsquo;s &ldquo;two channels&rdquo; still holds (it&rsquo;s one Go&rarr;TS stream), but the wire format is now binary end-to-end &mdash; MODEL.md/CLAUDE.md bridge wording must be updated in the same change, and a parity guard added for the layout.</div>
+  <h3>Clock &amp; the buffer</h3>
+  <p>Go writes the buffer as the <b>human-speed clock&rsquo;s ticks produce changes</b> &mdash; a bead stepping to its next position, a node-window transition, a geometry/camera edit. <b>The tick is the emit driver</b>; there is no separate render beat. Ticks are human-paced (the clock&rsquo;s scale), so buffer updates arrive at human-watchable speed; play/pause freezes the tick, which freezes buffer updates and thus the render. The clock model is pinned in <b>MODEL.md</b> (human-speed clock, <code>WaitTick</code>, tick-count windows) &mdash; this plan is where it meets the buffer.</p>
 </section>
 
 <!-- CONSUME -->
@@ -254,7 +256,6 @@ instanced.count = liveBeadCount;</pre>
   </ul>
   <h3>Open decisions (resolve before build)</h3>
   <ul>
-    <li><b>Frame cadence:</b> emit a binary frame per render tick vs per Go clock event. Leaning per-tick for the moving columns; geometry columns only when they change.</li>
     <li><b>maxRows policy:</b> fixed ceiling vs grow-and-refit on overflow.</li>
     <li><b>Event-record layout:</b> fixed-width vs variable-length records for the semantic events (each carries a kind id + a few fields) &mdash; decide the record framing within the binary.</li>
     <li><b>Risk:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete all domain stores + forward input as CRUD, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
