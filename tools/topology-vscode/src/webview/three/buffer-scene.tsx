@@ -51,7 +51,7 @@ import {
   readNodeSphereR, readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
-  readEdgeSrcNodeRow, readEdgeDstNodeRow,
+  readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected,
   readPortNodeRow, readPortDX, readPortDY, readPortDZ,
   readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
@@ -101,6 +101,13 @@ export const BUFFER_NODE_TAG = "bufferNode";
 // forwards that numeric row to Go, which resolves it back to a (node, port). No port-name
 // string is rendered or sent.
 export const BUFFER_PORT_TAG = "bufferPort";
+// userData key marking a per-edge wide pick-halo mesh (buffer-scene.tsx EdgeTube) as the pickable
+// EDGE target under the new system. Unlike the node/port tags (a boolean, resolved via the
+// InstancedMesh instanceId), edges are individual meshes, so this key HOLDS the numeric buffer
+// EDGE-ROW index directly. On a hit, RaycasterHelper (scene-content.tsx pickBufferEdge) reads
+// userData[BUFFER_EDGE_TAG] as the edge row and forwards it to Go, which resolves the row back to
+// its edge. No edge-label string is rendered or sent (mirrors the port-row scheme).
+export const BUFFER_EDGE_TAG = "bufferEdgeRow";
 // Port hit-sphere radius (world units): the small grabbable ball drawn at each port. Matches
 // the pre-branch PortSphere (scene-graph.tsx PORT_SPHERE_R).
 const PORT_SPHERE_R = 4;
@@ -654,6 +661,13 @@ function InteriorBeadInstances({ capacity }: { capacity: number }) {
 // Arrowhead cone dims for the core tube — mirror scene-graph.tsx.
 const ARROWHEAD_LENGTH = 6;
 const ARROWHEAD_RADIUS = 3;
+// Edge selection/pick halo radius (world units) — the pre-branch SingleEdgeTube halo
+// (TubeGeometry(curve,1,5,6)). This wide concentric tube is ALWAYS mounted per edge as the
+// raycast pick target (opacity 0 when unselected but still hittable) and painted orange
+// (#ff5a00, opacity 0.6) on the Go-selected edge.
+const EDGE_HALO_RADIUS = 5;
+const EDGE_HALO_COLOR = "#ff5a00";
+const EDGE_HALO_SELECTED_OPACITY = 0.6;
 // Arrowhead cone dims for the double-link overlay (slightly larger than the tube arrows).
 const DL_ARROWHEAD_LENGTH = 7;
 const DL_ARROWHEAD_RADIUS = 3.5;
@@ -677,28 +691,34 @@ function buildArrow(apex: THREE.Vector3, dir: THREE.Vector3, height: number): {
 }
 
 // One edge's core tube (radius 1.5) + destination arrowhead, mirroring SingleEdgeTube.
-// `dimmed` (double-links on) drops opacity to 0.25 like the JSON path.
-function EdgeTube({ seg, dimmed }: { seg: EdgeSeg; dimmed: boolean }) {
-  const { tubeGeo, arrow } = useMemo(() => {
+// `dimmed` (double-links on) drops opacity to 0.25 like the JSON path. `row` is this edge's
+// buffer EDGE-ROW index — stamped on the wide halo's userData[BUFFER_EDGE_TAG] as the pickable
+// edge target (mirrors the pre-branch SingleEdgeTube halo, which doubled as the pick tube).
+// `selected` paints that halo orange (opacity 0.6) when Go marks this edge selected; otherwise
+// the halo stays opacity 0 but remains raycast-hittable.
+function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean }) {
+  const { tubeGeo, haloGeo, arrow } = useMemo(() => {
     const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
     const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
     const curve = new THREE.LineCurve3(start, end);
     const _tubeGeo = new THREE.TubeGeometry(curve, 1, 1.5, 6, false);
+    // Wide concentric halo on the same segment — the pre-branch pick radius (5).
+    const _haloGeo = new THREE.TubeGeometry(curve, 1, EDGE_HALO_RADIUS, 6, false);
     const dir = end.clone().sub(start);
     let _arrow: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
     if (dir.length() >= 1e-6) {
       dir.normalize();
       _arrow = buildArrow(end, dir, ARROWHEAD_LENGTH);
     }
-    return { tubeGeo: _tubeGeo, arrow: _arrow };
+    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo, arrow: _arrow };
   }, [seg.sx, seg.sy, seg.sz, seg.ex, seg.ey, seg.ez]);
 
   // R3F does not auto-dispose an imperatively-passed geometry={...}; dispose on rebuild/unmount.
-  useEffect(() => () => { tubeGeo.dispose(); }, [tubeGeo]);
+  useEffect(() => () => { tubeGeo.dispose(); haloGeo.dispose(); }, [tubeGeo, haloGeo]);
 
   return (
     <>
-      <mesh geometry={tubeGeo} frustumCulled={false}>
+      <mesh geometry={tubeGeo} raycast={() => null} frustumCulled={false}>
         <meshStandardMaterial
           key={dimmed ? "dimmed" : "solid"}
           color={SHADING_PARAM_TUBE_COLOR}
@@ -706,6 +726,18 @@ function EdgeTube({ seg, dimmed }: { seg: EdgeSeg; dimmed: boolean }) {
           emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
           transparent={dimmed}
           opacity={dimmed ? 0.25 : 1}
+        />
+      </mesh>
+      {/* Selection halo doubles as the wide pick target (pre-branch SingleEdgeTube). Always
+          mounted so the raycaster can hit anywhere within the halo radius; painted only when
+          selected (opacity 0 otherwise — an opacity-0 mesh is still raycast-hittable). */}
+      <mesh geometry={haloGeo} userData={{ [BUFFER_EDGE_TAG]: row }} frustumCulled={false}>
+        <meshBasicMaterial
+          color={EDGE_HALO_COLOR}
+          transparent
+          opacity={selected ? EDGE_HALO_SELECTED_OPACITY : 0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
         />
       </mesh>
       {arrow && (
@@ -786,6 +818,10 @@ function DoubleEdgeOverlayBuf({ seg }: { seg: EdgeSeg }) {
 function EdgeTubes({ capacity }: { capacity: number }) {
   const [segs, setSegs] = useState<EdgeSeg[]>([]);
   const [showDouble, setShowDouble] = useState(false);
+  // The Go-selected edge's buffer row (-1 = none). Tracked separately from the segment set
+  // so a selection change (which does NOT move any endpoint) toggles the halo without
+  // rebuilding the tube geometries. Go OWNS the selection (Edge block Selected column).
+  const [selRow, setSelRow] = useState(-1);
   const keyRef = useRef<string>("");
 
   useFrame(() => {
@@ -799,6 +835,7 @@ function EdgeTubes({ capacity }: { capacity: number }) {
     const n = Math.min(edgeCount, capacity);
     const next: EdgeSeg[] = new Array<EdgeSeg>(n);
     let key = dbl ? "D|" : "S|";
+    let sel = -1;
     for (let i = 0; i < n; i++) {
       const s: EdgeSeg = {
         sx: readEdgeSX(edgeView, i), sy: readEdgeSY(edgeView, i), sz: readEdgeSZ(edgeView, i),
@@ -806,6 +843,7 @@ function EdgeTubes({ capacity }: { capacity: number }) {
       };
       next[i] = s;
       key += `${s.sx},${s.sy},${s.sz}:${s.ex},${s.ey},${s.ez};`;
+      if (sel < 0 && readEdgeSelected(edgeView, i)) sel = i;
     }
     // Rebuild the segment set (and thus the tube geometries) only when something moved
     // or the double-links flag flipped — not every frame.
@@ -814,13 +852,15 @@ function EdgeTubes({ capacity }: { capacity: number }) {
       setSegs(next);
       setShowDouble(dbl);
     }
+    // Selection toggles cheaply (no geometry rebuild) — update only when the row changes.
+    if (sel !== selRow) setSelRow(sel);
   });
 
   return (
     <>
       {segs.map((s, i) => (
         <React.Fragment key={i}>
-          <EdgeTube seg={s} dimmed={showDouble} />
+          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} />
           {showDouble && <DoubleEdgeOverlayBuf seg={s} />}
         </React.Fragment>
       ))}
