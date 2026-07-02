@@ -118,7 +118,7 @@ window.addEventListener("message", (e) => {
     // New-system label sidecar: record {id,label} into the row-keyed buffer-nav table
     // (first-seen order == buffer node-row order). Runs under both flags; flag-off never
     // reads this table, so the extra write is invisible there.
-    recordNavNodeLabel(msg.id, msg.label);
+    recordNavNodeLabel(msg.id, msg.label, msg.kind);
   } else if (msg.type === "buffer-snapshot") {
     // Phase 3/4: store the latest snapshot for buffer-scene rendering.
     // No render change here — the JSON trace still drives the scene.

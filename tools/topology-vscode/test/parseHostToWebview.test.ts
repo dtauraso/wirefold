@@ -63,15 +63,16 @@ describe("parseHostToWebview", () => {
     expect(parseHostToWebview(msg)).toEqual(msg);
   });
 
-  it("accepts a node-label sidecar with id + label strings", () => {
-    const msg = { type: "node-label", id: "n1", label: "Source" };
+  it("accepts a node-label sidecar with id + label + kind strings", () => {
+    const msg = { type: "node-label", id: "n1", label: "Source", kind: "Hold" };
     expect(parseHostToWebview(msg)).toEqual(msg);
   });
 
-  it("rejects a node-label missing id or label", () => {
-    expect(parseHostToWebview({ type: "node-label", id: "n1" })).toBeUndefined();
-    expect(parseHostToWebview({ type: "node-label", label: "Source" })).toBeUndefined();
-    expect(parseHostToWebview({ type: "node-label", id: 1, label: "Source" })).toBeUndefined();
+  it("rejects a node-label missing id, label, or kind", () => {
+    expect(parseHostToWebview({ type: "node-label", id: "n1", kind: "Hold" })).toBeUndefined();
+    expect(parseHostToWebview({ type: "node-label", label: "Source", kind: "Hold" })).toBeUndefined();
+    expect(parseHostToWebview({ type: "node-label", id: "n1", label: "Source" })).toBeUndefined();
+    expect(parseHostToWebview({ type: "node-label", id: 1, label: "Source", kind: "Hold" })).toBeUndefined();
   });
 
   it("rejects an unknown message type", () => {

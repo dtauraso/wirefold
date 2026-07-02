@@ -10,9 +10,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as THREE from "three";
 import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
-  recordNavNodeId, clearNavNodeIds, getNavNodeIds,
+  recordNavNodeId, recordNavNodeLabel, clearNavNodeIds, getNavNodeIds,
+  getNavNodeLabel, getNavNodeKind,
   decodeNavNodes, contentSphereFromCenters,
 } from "../src/webview/three/buffer-nav";
+import { NODE_DEFS } from "../src/schema/node-defs";
 import {
   BUF_HEADER_SIZE, NODE_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS,
@@ -57,6 +59,41 @@ describe("buffer-nav id table", () => {
     recordNavNodeId("x");
     clearNavNodeIds();
     expect(getNavNodeIds()).toEqual([]);
+  });
+});
+
+describe("node-label sidecar — label + kind by id, row order preserved", () => {
+  beforeEach(() => clearNavNodeIds());
+
+  it("records label and kind together, appending in first-seen order", () => {
+    recordNavNodeLabel("a", "Alpha", "Hold");
+    recordNavNodeLabel("b", "Beta", "Pacer");
+    recordNavNodeLabel("a", "Alpha2", "Hold"); // repeat id → not reordered, label updated
+    expect(getNavNodeIds()).toEqual(["a", "b"]);
+    expect(getNavNodeLabel("a")).toBe("Alpha2");
+    expect(getNavNodeKind("a")).toBe("Hold");
+    expect(getNavNodeKind("b")).toBe("Pacer");
+  });
+
+  it("leaves kind undefined when the sidecar omits it (empty string)", () => {
+    recordNavNodeLabel("c", "Gamma", "");
+    expect(getNavNodeKind("c")).toBeUndefined();
+    expect(getNavNodeLabel("c")).toBe("Gamma");
+  });
+
+  it("maps a node's kind to its NODE_DEFS fill/stroke (kind→color lookup)", () => {
+    recordNavNodeLabel("n", "N", "Hold");
+    const kind = getNavNodeKind("n")!;
+    const def = NODE_DEFS[kind]!;
+    // The render path uses exactly this lookup; assert the def carries fill+stroke.
+    expect(def.fill).toBe("#f3e5f5");
+    expect(def.stroke).toBe("#6a1b9a");
+  });
+
+  it("clearNavNodeIds also clears the kind map", () => {
+    recordNavNodeLabel("z", "Z", "Pulse");
+    clearNavNodeIds();
+    expect(getNavNodeKind("z")).toBeUndefined();
   });
 });
 

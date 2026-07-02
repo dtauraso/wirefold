@@ -192,7 +192,7 @@ export type TraceEvent =
   | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
   | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number; bead?: number }
   | { step: number; kind: "arrive"; node: string; port: string; value?: number; bead?: number }
-  | { step: number; kind: "node-geometry"; node: string; label?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
+  | { step: number; kind: "node-geometry"; node: string; label?: string; nodeKind?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
   | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
   | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
   | { step: number; kind: "scene-tori"; visible: boolean }
@@ -227,7 +227,9 @@ export type HostToWebviewMsg =
   // records it into the row-keyed buffer-nav label table (first-seen order == buffer
   // node-row order), so the new render path resolves pill text without the old spec
   // store. One message per node id per run (host dedups); repopulated on resend.
-  | { type: "node-label"; id: string; label: string };
+  // `kind` is the node's Go KIND (PascalCase, e.g. "Hold") so the new render path can
+  // map the row to its NODE_DEFS fill/stroke color; empty string when Go omits it.
+  | { type: "node-label"; id: string; label: string; kind: string };
 
 // Note: "resend" is host-originated (runner.resend() writes it straight to Go's
 // stdin) and is never emitted by the webview. It is kept in this set so the
@@ -460,8 +462,8 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
       // buffer must be an ArrayBuffer (transferred zero-copy from the host).
       return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;
     case "node-label":
-      // id + label are both required strings (the row-keyed sidecar payload).
-      return typeof m.id === "string" && typeof m.label === "string"
+      // id + label + kind are all required strings (the row-keyed sidecar payload).
+      return typeof m.id === "string" && typeof m.label === "string" && typeof m.kind === "string"
         ? (m as unknown as HostToWebviewMsg)
         : undefined;
     default:

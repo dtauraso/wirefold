@@ -490,7 +490,7 @@ func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir f
 	if label == "" {
 		label = nodeName
 	}
-	tr.NodeGeometry(nodeName, label, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
+	tr.NodeGeometry(nodeName, label, g.Kind, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
 		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
 		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
 }

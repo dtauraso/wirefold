@@ -270,6 +270,9 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 
 	// Expected label per node id: explicit data.label for src, id fallback for dst.
 	wantLabel := map[string]string{"src": "Source Node", "dst": "dst"}
+	// Expected Go kind per node id: the node's `type` field, carried on node-geometry
+	// for the new-system kind→color sidecar (row-keyed, re-emitted on resend).
+	wantKind := map[string]string{"src": "FanInSrc", "dst": "FanInSink"}
 
 	// First-seen node id order == buffer node-row order. Collect it and verify each
 	// node-geometry event's Label matches, and that resend re-emitted every node.
@@ -287,6 +290,9 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 		}
 		if want := wantLabel[e.Node]; e.Label != want {
 			t.Fatalf("node %q: label = %q, want %q", e.Node, e.Label, want)
+		}
+		if want := wantKind[e.Node]; e.NodeKind != want {
+			t.Fatalf("node %q: nodeKind = %q, want %q", e.Node, e.NodeKind, want)
 		}
 	}
 	if len(firstSeen) != 2 {

@@ -203,6 +203,12 @@ type Event struct {
 	// stream so the new-system webview can build a row-keyed label sidecar (buffer-nav)
 	// without reading the old spec store. Set on node-geometry events only.
 	Label string `json:"label,omitempty"`
+	// NodeKind carries the node's Go KIND (PascalCase, e.g. "Hold") on node-geometry
+	// events (KindNodeGeometry). It rides the geometry stream so the new-system webview
+	// can map each node row to its NODE_DEFS fill/stroke color without reading the old
+	// spec store. Distinct from Kind (the trace-event kind string). Set on
+	// node-geometry events only.
+	NodeKind string `json:"-"`
 	// Radius carries the node body/ring sphere radius on node-geometry events
 	// (KindNodeGeometry) — Go-owned (min(w,h)/CurveParamNodeRadiusDivisor). The
 	// renderer reads it for the body/ring instead of recomputing from node dims.
@@ -382,8 +388,8 @@ func (t *Trace) Geometry(edge string, sx, sy, sz, ex, ey, ez float64) {
 // carries each port's world position + direction. Each node's goroutine calls this
 // once on startup via its injected EmitGeometry closure (the node owns its geometry
 // emission; wires still own bead-position emission).
-func (t *Trace) NodeGeometry(nodeID, label string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
-	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, Label: label, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
+func (t *Trace) NodeGeometry(nodeID, label, nodeKind string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
+	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, Label: label, NodeKind: nodeKind, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
 		VRX: vrx, VRY: vry, VRZ: vrz, FRX: frx, FRY: fry, FRZ: frz})
 }
 
@@ -751,22 +757,23 @@ func eventValue(e Event) (any, error) {
 		DZ      float64 `json:"dz"`
 	}
 	type nodeGeometry struct {
-		Step    int            `json:"step"`
-		Kind    string         `json:"kind"`
-		Node    string         `json:"node"`
-		Label   string         `json:"label,omitempty"`
-		NX      float64        `json:"nx"`
-		NY      float64        `json:"ny"`
-		NZ      float64        `json:"nz"`
-		Radius  float64        `json:"radius"`
-		SphereR float64        `json:"sphereR,omitempty"`
-		VRX     float64        `json:"vrx"`
-		VRY     float64        `json:"vry"`
-		VRZ     float64        `json:"vrz"`
-		FRX     float64        `json:"frx"`
-		FRY     float64        `json:"fry"`
-		FRZ     float64        `json:"frz"`
-		Ports   []portGeomJSON `json:"ports"`
+		Step     int            `json:"step"`
+		Kind     string         `json:"kind"`
+		Node     string         `json:"node"`
+		Label    string         `json:"label,omitempty"`
+		NodeKind string         `json:"nodeKind,omitempty"`
+		NX       float64        `json:"nx"`
+		NY       float64        `json:"ny"`
+		NZ       float64        `json:"nz"`
+		Radius   float64        `json:"radius"`
+		SphereR  float64        `json:"sphereR,omitempty"`
+		VRX      float64        `json:"vrx"`
+		VRY      float64        `json:"vry"`
+		VRZ      float64        `json:"vrz"`
+		FRX      float64        `json:"frx"`
+		FRY      float64        `json:"fry"`
+		FRZ      float64        `json:"frz"`
+		Ports    []portGeomJSON `json:"ports"`
 	}
 	type nodeBead struct {
 		Step    int     `json:"step"`
@@ -808,7 +815,7 @@ func eventValue(e Event) (any, error) {
 		for i, p := range e.Ports {
 			ports[i] = portGeomJSON(p)
 		}
-		return nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, Label: e.Label, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR,
+		return nodeGeometry{Step: e.Step, Kind: e.Kind, Node: e.Node, Label: e.Label, NodeKind: e.NodeKind, NX: e.NX, NY: e.NY, NZ: e.NZ, Radius: e.Radius, SphereR: e.SphereR,
 			VRX: e.VRX, VRY: e.VRY, VRZ: e.VRZ, FRX: e.FRX, FRY: e.FRY, FRZ: e.FRZ, Ports: ports}, nil
 	case KindNodeBead:
 		// row/col/present/value/position always emitted (0/false is valid for each).
