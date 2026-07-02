@@ -60,13 +60,12 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   );
   panel.webview.html = buildWebviewHtml(panel.webview, context.extensionPath);
 
-  // Return void (not the postMessage Thenable) so this can be passed where VS
-  // Code expects void-returning callbacks; observe any rejection instead of
-  // letting it float silently.
+  // Fire-and-forget host→webview send (bridge doctrine: no await, no Promise
+  // chain — see check-no-await-on-bridge). `void` discards the postMessage
+  // Thenable so this returns void and can be passed where VS Code expects a
+  // void-returning callback, without floating the promise.
   const post = (msg: HostToWebviewMsg): void => {
-    void panel.webview.postMessage(msg).then(undefined, (err: unknown) => {
-      console.error("topology: postMessage failed", err);
-    });
+    void panel.webview.postMessage(msg);
   };
   // Read the scene sidecar (topology/view/scene.json) fresh at load time so the
   // navigated camera (camera3d) is delivered to the webview as `sceneText`.
