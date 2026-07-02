@@ -46,14 +46,14 @@ function BeadInstances({ capacity }: { capacity: number }) {
   const matRef  = useRef(new THREE.Matrix4());
 
   useFrame(() => {
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
-    const { beadCount, beadView } = decoded;
-
     const mesh = meshRef.current;
     if (!mesh) return;
+
+    const snap = getLatestSnapshot();
+    if (!snap) { mesh.count = 0; return; }
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) { mesh.count = 0; return; }
+    const { beadCount, beadView } = decoded;
 
     let slot = 0;
     for (let i = 0; i < beadCount && slot < capacity; i++) {
@@ -83,14 +83,14 @@ function NodeInstances({ capacity }: { capacity: number }) {
   const matRef  = useRef(new THREE.Matrix4());
 
   useFrame(() => {
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
-    const { nodeCount, nodeView } = decoded;
-
     const mesh = meshRef.current;
     if (!mesh) return;
+
+    const snap = getLatestSnapshot();
+    if (!snap) { mesh.count = 0; return; }
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) { mesh.count = 0; return; }
+    const { nodeCount, nodeView } = decoded;
 
     const n = Math.min(nodeCount, capacity);
     for (let i = 0; i < n; i++) {
@@ -120,14 +120,14 @@ function SelectionHighlight({ capacity }: { capacity: number }) {
   const matRef  = useRef(new THREE.Matrix4());
 
   useFrame(() => {
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
-    const { nodeCount, nodeView } = decoded;
-
     const mesh = meshRef.current;
     if (!mesh) return;
+
+    const snap = getLatestSnapshot();
+    if (!snap) { mesh.count = 0; return; }
+    const decoded = decodeSnapshot(snap);
+    if (!decoded) { mesh.count = 0; return; }
+    const { nodeCount, nodeView } = decoded;
 
     let slot = 0;
     for (let i = 0; i < nodeCount && slot < capacity; i++) {

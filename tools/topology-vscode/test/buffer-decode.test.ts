@@ -184,6 +184,39 @@ describe("decodeSnapshot — edge block", () => {
   });
 });
 
+describe("live-bead instance-count logic", () => {
+  it("counts only live=1 bead rows, matching BeadInstances slot-fill logic", () => {
+    // 3 beads: rows 0 and 2 live, row 1 dead. Mirrors the filter in BeadInstances.useFrame.
+    const { buf, dv, beadOff } = makeSnapshot(3, 0, 0);
+    dv.setUint8(beadOff + 0 * BEAD_STRIDE + 24, 1); // Live=1
+    dv.setUint8(beadOff + 1 * BEAD_STRIDE + 24, 0); // Live=0 (dead)
+    dv.setUint8(beadOff + 2 * BEAD_STRIDE + 24, 1); // Live=1
+
+    const d = decodeSnapshot(buf)!;
+    expect(d.beadCount).toBe(3); // header count is total rows (live + dead)
+
+    let liveSlot = 0;
+    for (let i = 0; i < d.beadCount; i++) {
+      if (readBeadLive(d.beadView, i)) liveSlot++;
+    }
+    // Only 2 live beads → only 2 instances should be drawn, not 3
+    expect(liveSlot).toBe(2);
+  });
+
+  it("all-dead beads yield zero live slots", () => {
+    const { buf, dv, beadOff } = makeSnapshot(2, 0, 0);
+    dv.setUint8(beadOff + 0 * BEAD_STRIDE + 24, 0);
+    dv.setUint8(beadOff + 1 * BEAD_STRIDE + 24, 0);
+
+    const d = decodeSnapshot(buf)!;
+    let liveSlot = 0;
+    for (let i = 0; i < d.beadCount; i++) {
+      if (readBeadLive(d.beadView, i)) liveSlot++;
+    }
+    expect(liveSlot).toBe(0);
+  });
+});
+
 describe("decodeSnapshot — mixed counts", () => {
   it("correctly slices views when beads, nodes, and edges all present", () => {
     const { buf } = makeSnapshot(3, 2, 4);
