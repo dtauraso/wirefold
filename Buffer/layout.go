@@ -57,21 +57,21 @@ type bufLayoutBead struct {
 // One row per node. Persistent geometry + status + transient event flags.
 // Matched from KindNodeGeometry, KindNodeStatus, KindRecv/Fire/Send/Arrive/Done.
 type bufLayoutNode struct {
-	CX        float32 `buf:"f32"` // node center x (world)
-	CY        float32 `buf:"f32"` // node center y (world)
-	CZ        float32 `buf:"f32"` // node center z (world)
-	Radius    float32 `buf:"f32"` // body/ring sphere radius
-	SphereR   float32 `buf:"f32"` // sphere-chain radius (port placement)
-	TorusRed  uint8   `buf:"u8"`  // 1 = torus is RED (missed bead error)
-	MissVal   int32   `buf:"i32"` // missed bead value (valid when TorusRed=1)
-	MX        float32 `buf:"f32"` // missed-bead marker world x
-	MY        float32 `buf:"f32"` // missed-bead marker world y
-	MZ        float32 `buf:"f32"` // missed-bead marker world z
-	EvRecv    uint8   `buf:"u8"`  // transient: node received a bead this tick
-	EvFire    uint8   `buf:"u8"`  // transient: node fired this tick
-	EvSend    uint8   `buf:"u8"`  // transient: node sent a bead this tick
-	EvArrive  uint8   `buf:"u8"`  // transient: a bead arrived at node this tick
-	EvDone    uint8   `buf:"u8"`  // transient: node finished consuming this tick
+	CX       float32 `buf:"f32"` // node center x (world)
+	CY       float32 `buf:"f32"` // node center y (world)
+	CZ       float32 `buf:"f32"` // node center z (world)
+	Radius   float32 `buf:"f32"` // body/ring sphere radius
+	SphereR  float32 `buf:"f32"` // sphere-chain radius (port placement)
+	TorusRed uint8   `buf:"u8"`  // 1 = torus is RED (missed bead error)
+	MissVal  int32   `buf:"i32"` // missed bead value (valid when TorusRed=1)
+	MX       float32 `buf:"f32"` // missed-bead marker world x
+	MY       float32 `buf:"f32"` // missed-bead marker world y
+	MZ       float32 `buf:"f32"` // missed-bead marker world z
+	EvRecv   uint8   `buf:"u8"`  // transient: node received a bead this tick
+	EvFire   uint8   `buf:"u8"`  // transient: node fired this tick
+	EvSend   uint8   `buf:"u8"`  // transient: node sent a bead this tick
+	EvArrive uint8   `buf:"u8"`  // transient: a bead arrived at node this tick
+	EvDone   uint8   `buf:"u8"`  // transient: node finished consuming this tick
 }
 
 // bufLayoutEdge defines one row of the edges column block.
@@ -112,4 +112,15 @@ type bufLayoutOverlay struct {
 	BadgesGlobal   uint8 `buf:"u8"` // 1 = all occlusion +N badges visible
 	OverlaysVis    uint8 `buf:"u8"` // 1 = master overlays toggle on
 	DoubleLinks    uint8 `buf:"u8"` // 1 = double-link arrow overlays visible
+}
+
+// schemaTypes prevents the bufLayout* types from being flagged as unused by
+// staticcheck. They are schema sources: the generator reads them via AST at
+// codegen time; they are not used at runtime.
+var _ = [...]any{
+	bufLayoutBead{},
+	bufLayoutNode{},
+	bufLayoutEdge{},
+	bufLayoutCamera{},
+	bufLayoutOverlay{},
 }

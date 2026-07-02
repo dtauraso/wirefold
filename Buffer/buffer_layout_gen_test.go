@@ -13,27 +13,6 @@ import (
 	"testing"
 )
 
-// f32ToBytes is a test helper that converts a float32 to its 4-byte LE representation.
-func f32ToBytes(v float32) [4]byte {
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], math.Float32bits(v))
-	return b
-}
-
-// i32ToBytes converts an int32 to its 4-byte LE representation.
-func i32ToBytes(v int32) [4]byte {
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], uint32(v))
-	return b
-}
-
-// u32ToBytes converts a uint32 to its 4-byte LE representation.
-func u32ToBytes(v uint32) [4]byte {
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], v)
-	return b
-}
-
 // assertF32At asserts that buf[offset:offset+4] equals the LE encoding of want.
 func assertF32At(t *testing.T, buf []byte, offset int, want float32, label string) {
 	t.Helper()
@@ -100,7 +79,7 @@ func TestSetNodeRow(t *testing.T) {
 	buf := make([]byte, BufNodeStride)
 	SetNodeRow(buf, 0,
 		1.0, 2.0, 3.0, // cx, cy, cz
-		0.5, 0.25,     // radius, sphereR
+		0.5, 0.25, // radius, sphereR
 		1,             // torusRed
 		-42,           // missVal
 		4.0, 5.0, 6.0, // mx, my, mz
