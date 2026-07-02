@@ -86,10 +86,13 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       // for nodes/edges deleted across an edit-reload cycle must not accumulate.
       clearAllNodeGeometry();
       clearAllEdgeSegments();
-      const raw = JSON.parse(text);
+      const raw: unknown = JSON.parse(text);
       const spec = parseSpec(raw);
       // Diagram view: positions + fades from topology.json#view (Go reads view.nodes).
-      const viewText = raw.view !== undefined ? JSON.stringify(raw.view) : undefined;
+      const rawView = typeof raw === "object" && raw !== null
+        ? (raw as Record<string, unknown>).view
+        : undefined;
+      const viewText = rawView !== undefined ? JSON.stringify(rawView) : undefined;
       const diagramView = parseViewerState(viewText);
       // Scene view: camera, camera3d, labelsGlobalHidden from topology.scene.json (optional).
       const sceneView = sceneText !== undefined ? parseViewerState(sceneText) : undefined;
@@ -103,8 +106,8 @@ export const useThreeStore = create<ThreeStoreState>((set, get) => ({
       const restoredFadedNodes = new Set<string>(next.directlyFadedNodes ?? []);
       const restoredFadedEdges = new Set<string>(next.directlyFadedEdges ?? []);
       const flow = specToFlow(spec, next, next.lastSelectionIds ?? []);
-      let nodes = flow.nodes as RFNode<NodeData>[];
-      let edges = flow.edges as RFEdge<EdgeData>[];
+      let nodes = flow.nodes;
+      let edges = flow.edges;
       ({ nodes, edges } = applyFade(nodes, edges, restoredFadedNodes, restoredFadedEdges));
       const fadeEdgeOrder = reconcileFadeOrder(next.fadeEdgeOrder ?? [], edges);
       set({

@@ -150,9 +150,9 @@ export function parseViewerState(text: string | undefined): ViewerState {
   assignStrArr(out, raw, "fadeEdgeOrder");
   if (raw.labelsGlobalHidden === true) out.labelsGlobalHidden = true;
   if (raw.badgesHidden === true) out.badgesHidden = true;
-  if (typeof (raw as Record<string, unknown>).doubleLinksVisible === "boolean") out.doubleLinksVisible = (raw as Record<string, unknown>).doubleLinksVisible as boolean;
+  if (typeof (raw).doubleLinksVisible === "boolean") out.doubleLinksVisible = (raw).doubleLinksVisible;
   for (const k of VISIBLE_SENSE_SCENE_KEYS) {
-    if ((raw as Record<string, unknown>)[k] === false) out[k] = false;
+    if ((raw)[k] === false) out[k] = false;
   }
   return out;
 }

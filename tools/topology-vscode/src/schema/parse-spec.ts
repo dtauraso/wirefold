@@ -21,7 +21,7 @@ export function parseSpec(input: unknown, view?: { edges?: Record<string, unknow
   };
   for (const key of Object.keys(TOPOLOGY_META_FIELDS) as (keyof typeof TOPOLOGY_META_FIELDS)[]) {
     const def = TOPOLOGY_META_FIELDS[key];
-    const value = def.parse((o as Record<string, unknown>)[key]);
+    const value = def.parse((o)[key]);
     if (value !== undefined) (spec as Record<string, unknown>)[key] = value;
   }
   validatePorts(spec);

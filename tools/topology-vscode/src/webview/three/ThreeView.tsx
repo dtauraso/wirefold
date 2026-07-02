@@ -179,7 +179,7 @@ export function ThreeView() {
       onPointerMove(e); // original interaction handling
       // Throttle hover raycasts via rAF.
       if (hoverRafRef.current !== null) return;
-      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const rect = (e.currentTarget).getBoundingClientRect();
       const clientX = e.clientX;
       const clientY = e.clientY;
       hoverRafRef.current = requestAnimationFrame(() => {

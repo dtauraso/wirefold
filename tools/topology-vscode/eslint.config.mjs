@@ -16,7 +16,15 @@ export default tseslint.config(
     // longer flag under the current plugin versions, but they encode intent and
     // must not be nagged about (task: honor existing disables, don't remove).
     linterOptions: { reportUnusedDisableDirectives: 'off' },
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    // Type-checked ruleset: catches the any-leak / floating-promise / misused-
+    // promise / bad-stringification correctness bug classes that the syntactic
+    // ruleset can't see. It needs the full type graph (projectService builds it
+    // from tsconfig), so it is slower — that cost is gated in stop-checks' ts-
+    // gated expensive block (check-eslint), not the fast path.
+    extends: [js.configs.recommended, ...tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
     plugins: {
       'react-hooks': reactHooks,
     },

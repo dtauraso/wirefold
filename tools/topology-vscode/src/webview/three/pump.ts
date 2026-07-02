@@ -107,7 +107,7 @@ const OVERLAY_TABLE: Record<OverlayKind, OverlayMeta> = {
 
 function applyOverlay(kind: OverlayKind, visible: boolean | undefined): void {
   const entry = OVERLAY_TABLE[kind];
-  const setter = useCameraStore.getState()[entry.setterKey] as (v: boolean) => void;
+  const setter = useCameraStore.getState()[entry.setterKey];
   if (entry.hasPostLog) {
     postLog("guide-recv", { kind, visible });
   }
@@ -168,7 +168,7 @@ function edgesBySource(node: string, port: string): RFEdge<EdgeData>[] {
 export function handleTraceEvent(event: TraceEvent): void {
   const { step, kind } = event;
   // Cast to the generated enum so tsc checks all branches are covered.
-  const k = kind as TraceEventKind;
+  const k = kind;
   switch (k) {
     case "recv":
       return;

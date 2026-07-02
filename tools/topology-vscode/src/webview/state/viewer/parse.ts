@@ -55,7 +55,7 @@ export function parsePolarCamera(v: unknown): PolarCamera | undefined {
   ) return undefined;
   return {
     pivot: [pivot[0] as number, pivot[1] as number, pivot[2] as number],
-    r: v.r as number,
+    r: v.r,
     pos: [pos[0] as number, pos[1] as number],
     up: [up[0] as number, up[1] as number],
   };

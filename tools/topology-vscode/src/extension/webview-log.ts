@@ -31,7 +31,13 @@ export async function appendWebviewLog(
   // than misdirecting the log to an arbitrary cwd.
   if (documentUri === undefined) return;
   let parsed: { label?: string } | undefined;
-  try { parsed = JSON.parse(entry); } catch { /* malformed — route to ts.jsonl */ }
+  try {
+    const raw: unknown = JSON.parse(entry);
+    if (typeof raw === "object" && raw !== null) {
+      const label = (raw as Record<string, unknown>).label;
+      parsed = typeof label === "string" ? { label } : {};
+    }
+  } catch { /* malformed — route to ts.jsonl */ }
   const isError = parsed?.label !== undefined && ERROR_LABELS.has(parsed.label);
   if (isError) {
     pendingTsErrors = pendingTsErrors.then(() => doAppend(entry, documentUri, PROBE_FILES.tsErrors));

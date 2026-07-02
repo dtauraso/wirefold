@@ -32,8 +32,8 @@ export function buildEdge(
     return null;
   }
 
-  const srcType = (srcRF.data?.type ?? srcRF.type) as string;
-  const dstType = (dstRF.data?.type ?? dstRF.type) as string;
+  const srcType = (srcRF.data?.type ?? srcRF.type);
+  const dstType = (dstRF.data?.type ?? dstRF.type);
   const srcDef = NODE_TYPES[srcType];
   const dstDef = NODE_TYPES[dstType];
 
@@ -95,7 +95,7 @@ export function buildEdge(
     targetHandle,
     type: "go",
     style: { stroke: KIND_COLORS[kind] ?? "#888", strokeWidth: 1.5 },
-    data: { kind, label, sourceHandle, targetHandle } as EdgeData,
+    data: { kind, label, sourceHandle, targetHandle },
   };
 
   return { newEdge, id };
