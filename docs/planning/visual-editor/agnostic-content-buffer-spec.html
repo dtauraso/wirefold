@@ -190,7 +190,7 @@ nodes   : <span class="b">{ ...persistent..., fired:u8, sent:u8, arrived:u8, rec
     <tr><td>Endianness</td><td>little-endian both sides (Go <code>binary.LittleEndian</code>; JS <code>DataView</code>/typed arrays are LE on all target platforms)</td><td>agnostic bytes require an agreed byte order</td></tr>
     <tr><td>Framing</td><td>length-prefixed frames; the reader buffers partial frames</td><td>the same partial-read framing class we hardened for the stdout reader — now frame-buffering</td></tr>
     <tr><td>Sizing</td><td>each snapshot <b>self-sizes</b> &mdash; row <code>count</code> in its header; no fixed ceiling</td><td>no overflow cliff / silent cap; TS grows its GPU attribute capacity on demand</td></tr>
-    <tr><td>Channel model</td><td>one framed binary stdout, not a 3rd pipe</td><td>preserves the &ldquo;two channels&rdquo; bridge doctrine — still Go&rarr;TS trace + TS&rarr;Go edits</td></tr>
+    <tr><td>Channel model</td><td>one framed binary stdout, not a 3rd pipe</td><td>preserves the &ldquo;two channels&rdquo; bridge doctrine — still Go&rarr;TS content + TS&rarr;Go raw input</td></tr>
   </table>
   <div class="note warn"><b>Doctrine touchpoint:</b> this makes the Go&rarr;TS lane <b>all-binary</b> (content <em>and</em> log). CLAUDE.md&rsquo;s &ldquo;two channels&rdquo; still holds (it&rsquo;s one Go&rarr;TS stream), but the wire format is now binary end-to-end &mdash; MODEL.md/CLAUDE.md bridge wording must be updated in the same change, and a parity guard added for the layout.</div>
   <h3>Clock &amp; the buffer</h3>
@@ -264,7 +264,7 @@ instanced.count = liveBeadCount;</pre>
   </ul>
   <h3>Rollout (design decisions all settled)</h3>
   <ul>
-    <li><b>Risk &amp; sequence:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete all domain stores + forward input as CRUD, (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
+    <li><b>Risk &amp; sequence:</b> this is the largest change in the system &mdash; it re-shapes the Go output, the bridge wire format, the ext-host reader, the log/probe decode, and the whole webview render layer. Sequence it: (1) layout schema + codegen + guard, (2) Go binary writer + framing beside the current output, (3) ext-host read + transfer + event-decode, (4) webview views + GPU, (5) flip consumers to binary &mdash; delete all domain stores + forward raw input (Go&rsquo;s FSM interprets), (6) remove the old emitter + update docs. Each step verifiable; the current path stays live as a fallback until step 5 and is deleted at step 6.</li>
   </ul>
 </section>
 
