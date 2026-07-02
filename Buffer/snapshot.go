@@ -31,9 +31,22 @@ package Buffer
 import (
 	"encoding/binary"
 	"io"
+	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
+
+// PortRowEntry is one row of the port-row resolution table: the (node, port) identity
+// that a numeric buffer PORT-ROW index resolves to. Go writes the buffer Port block in a
+// fixed flattened order (node-row order × each node's Ports order); this table is built in
+// that SAME order, so port row i ↔ table entry i. It is the authoritative row→(node,port)
+// map the gesture FSM uses to turn a raw port-row hit back into a topology edit — the
+// numeric buffer carries no port-name strings (no sidecar).
+type PortRowEntry struct {
+	Node    string
+	Port    string
+	IsInput bool
+}
 
 // SnapshotState accumulates full-world render state from trace events.
 type SnapshotState struct {
@@ -64,6 +77,12 @@ type SnapshotState struct {
 
 	// out receives framed binary snapshots. Nil = silent discard.
 	out io.Writer
+
+	// portTable publishes the current flattened port-row table (same order as the Port
+	// block) as an immutable slice. Rebuilt on node-geometry changes (the only place ports
+	// change) on the Trace-drain goroutine and read via LookupPortRow from the stdin/gesture
+	// goroutine — the atomic pointer hands off an immutable snapshot with no lock.
+	portTable atomic.Pointer[[]PortRowEntry]
 }
 
 type beadSnapKey struct {
@@ -112,6 +131,7 @@ type nodeSnapState struct {
 // portSnapState holds one port's unit surface direction (node center → port) and
 // whether it is an input port. Populated from a node-geometry event's Ports.
 type portSnapState struct {
+	name       string
 	dx, dy, dz float64
 	isInput    bool
 }
@@ -317,6 +337,36 @@ func (s *SnapshotState) PortCount() int {
 // BuildSnapshot exposes the snapshot builder for tests.
 func (s *SnapshotState) BuildSnapshot() []byte { return s.buildSnapshot() }
 
+// rebuildPortTable rebuilds and atomically publishes the port-row table in the SAME
+// flattened order buildSnapshot writes the Port block: for each node in stable node-row
+// order, that node's ports in node-geometry Ports order. Called from the Trace-drain
+// goroutine whenever a node-geometry event changes the port set. The published slice is
+// immutable — LookupPortRow reads it lock-free from another goroutine.
+func (s *SnapshotState) rebuildPortTable() {
+	tbl := make([]PortRowEntry, 0, s.PortCount())
+	for i := range s.nodes {
+		node := s.nodeIDs[i]
+		for _, p := range s.nodes[i].ports {
+			tbl = append(tbl, PortRowEntry{Node: node, Port: p.name, IsInput: p.isInput})
+		}
+	}
+	s.portTable.Store(&tbl)
+}
+
+// LookupPortRow resolves a numeric buffer PORT-ROW index to its (node, port, isInput)
+// identity via the published port-row table. ok=false for an out-of-range row or before
+// any port has been registered. Safe to call from a goroutine other than the Trace drain
+// (reads an immutable atomically-published slice). This is the row→(node,port) resolution
+// the gesture FSM uses for wiring/handhold — the numeric buffer carries no port strings.
+func (s *SnapshotState) LookupPortRow(row int) (node, port string, isInput, ok bool) {
+	tbl := s.portTable.Load()
+	if tbl == nil || row < 0 || row >= len(*tbl) {
+		return "", "", false, false
+	}
+	e := (*tbl)[row]
+	return e.Node, e.Port, e.IsInput, true
+}
+
 // --- internal helpers --------------------------------------------------------
 
 func (s *SnapshotState) onNodeGeometry(ev T.Event) {
@@ -339,8 +389,11 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	// in the same flattened row order.
 	n.ports = n.ports[:0]
 	for _, p := range ev.Ports {
-		n.ports = append(n.ports, portSnapState{dx: p.DX, dy: p.DY, dz: p.DZ, isInput: p.IsInput})
+		n.ports = append(n.ports, portSnapState{name: p.Name, dx: p.DX, dy: p.DY, dz: p.DZ, isInput: p.IsInput})
 	}
+	// Republish the port-row table: ports (and node order) just changed. Built in the SAME
+	// flattened order buildSnapshot writes the Port block, so port row i ↔ entry i.
+	s.rebuildPortTable()
 	// Status fields (torusRed, missVal, mx/my/mz) are preserved across geometry
 	// re-emits so a node-move does not silently clear an active error state.
 }

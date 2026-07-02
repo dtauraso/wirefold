@@ -319,6 +319,59 @@ func TestSnapshotPorts(t *testing.T) {
 	}
 }
 
+// TestLookupPortRow verifies the port-row resolution table the gesture FSM uses: a numeric
+// buffer PORT-ROW index maps back to its (node, port, isInput) in the SAME flattened order
+// the Port block is written (node-row order × each node's Ports order). No port name crosses
+// the buffer — the table IS the row→(node,port) authority.
+func TestLookupPortRow(t *testing.T) {
+	s := NewSnapshotState(nil)
+
+	// Out-of-range before any node registers.
+	if _, _, _, ok := s.LookupPortRow(0); ok {
+		t.Fatalf("LookupPortRow(0) before any port: want ok=false")
+	}
+
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "n0", Radius: 1,
+		Ports: []T.PortGeom{
+			{Name: "in", IsInput: true, DX: -1},
+			{Name: "out", IsInput: false, DX: 1},
+		},
+	})
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "n1", Radius: 1,
+		Ports: []T.PortGeom{
+			{Name: "in", IsInput: true, DY: 1},
+		},
+	})
+
+	cases := []struct {
+		row     int
+		node    string
+		port    string
+		isInput bool
+	}{
+		{0, "n0", "in", true},
+		{1, "n0", "out", false},
+		{2, "n1", "in", true},
+	}
+	for _, c := range cases {
+		node, port, isInput, ok := s.LookupPortRow(c.row)
+		if !ok || node != c.node || port != c.port || isInput != c.isInput {
+			t.Errorf("LookupPortRow(%d): got (%q,%q,%v,%v), want (%q,%q,%v,true)",
+				c.row, node, port, isInput, ok, c.node, c.port, c.isInput)
+		}
+	}
+
+	// Out-of-range row → ok=false.
+	if _, _, _, ok := s.LookupPortRow(3); ok {
+		t.Errorf("LookupPortRow(3) out of range: want ok=false")
+	}
+	if _, _, _, ok := s.LookupPortRow(-1); ok {
+		t.Errorf("LookupPortRow(-1): want ok=false")
+	}
+}
+
 // TestSelectMode verifies that KindSelect's Value carries the select mode into the
 // overlay SelMode column (1 = own / secondary, 0 = surface / primary), and that
 // clearing the selection resets SelMode to surface.

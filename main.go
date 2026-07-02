@@ -69,6 +69,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// This replaces the rejected on-load "home" command the webview used to send (a seed).
 	// Old path (flag off) is unchanged: it still restores via sceneText + PolarCameraRestorer.
 	if os.Getenv("WIREFOLD_NEW_SYSTEM") == "true" {
+		// Wire the buffer's port-row table into the gesture FSM so a new-system port hit
+		// (which carries only a numeric buffer PORT-ROW index) resolves back to its (node,
+		// port) here in Go — Go owns the topology and wrote the Port block in that row order.
+		md.SetPortRowResolver(snapState)
 		W.SeedInitialViewpoint(topologyPath, md, tr)
 		// Arm the WRITE side AFTER the seed: from here, every gesture that changes the FSM
 		// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to

@@ -422,7 +422,25 @@ type MoveDispatch struct {
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
 	// KindSelect so the buffer snapshot marks the node's Selected column.
 	selected string
+	// portRows resolves a numeric buffer PORT-ROW index (carried on a new-system raw hit)
+	// back to its (node, port, isInput) identity. Wired to the buffer SnapshotState's
+	// port-row table in main.go (new-system only); nil on the old path and in unit tests, in
+	// which case the gesture FSM falls back to parsing the legacy port-id string. Go owns the
+	// topology and wrote the Port block, so it — not TS — maps a port row to a (node, port).
+	portRows PortRowResolver
 }
+
+// PortRowResolver maps a numeric buffer PORT-ROW index to its (node, port, isInput)
+// identity. Implemented by Buffer.SnapshotState (which wrote the Port block in this same
+// row order). Kept as an interface here so the Wiring package needs no dependency on the
+// Buffer package — main.go injects the concrete resolver.
+type PortRowResolver interface {
+	LookupPortRow(row int) (node, port string, isInput, ok bool)
+}
+
+// SetPortRowResolver injects the port-row resolver (new-system only). Called once at
+// startup after LoadTopology.
+func (md *MoveDispatch) SetPortRowResolver(r PortRowResolver) { md.portRows = r }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
 // It creates one nodeMover per node and one edgeMover per edge, registering each in

@@ -183,8 +183,14 @@ type rawInputMsg struct {
 // "nodeId:in|out:portName" for a port). Topology facts (e.g. connected?) are NOT carried —
 // Go's FSM decides those from its own held state.
 type rawHit struct {
-	Kind    string  `json:"kind"`
-	Id      string  `json:"id"`
+	Kind string `json:"kind"`
+	Id   string `json:"id"`
+	// PortRow is the numeric buffer PORT-ROW index for a new-system port hit (the port
+	// InstancedMesh instanceId == its buffer port row). -1 (or absent) on the old path, whose
+	// port identity rides the Id string ("nodeId:in|out:portName") instead. Go resolves this
+	// row → (node, port) via its own port-row table (portFromHit); no port name crosses the
+	// bridge.
+	PortRow int     `json:"portRow"`
 	IsInput bool    `json:"isInput"`
 	X       float64 `json:"x"`
 	Y       float64 `json:"y"`

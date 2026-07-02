@@ -178,7 +178,7 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 
 	switch ev.Hit.Kind {
 	case "port":
-		node, port, isInput, ok := parseGesturePortId(ev.Hit.Id)
+		node, port, isInput, ok := md.portFromHit(ev.Hit)
 		if !ok {
 			return
 		}
@@ -395,7 +395,7 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 		// destination slot to the EXISTING create-edge path (createEdgeInSlot — the same
 		// helper op=create uses); it un-silences that wire so it carries beads again.
 		if ev.Hit.Kind == "port" {
-			tn, tp, ti, ok := parseGesturePortId(ev.Hit.Id)
+			tn, tp, ti, ok := md.portFromHit(ev.Hit)
 			if ok && tn != g.wireNode {
 				var srcNode, srcPort, dstNode, dstPort string
 				oriented := false
@@ -436,7 +436,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	case "node":
 		node = ev.Hit.Id
 	case "port":
-		if n, _, _, ok := parseGesturePortId(ev.Hit.Id); ok {
+		if n, _, _, ok := md.portFromHit(ev.Hit); ok {
 			node = n
 		}
 	}
@@ -541,6 +541,18 @@ func (md *MoveDispatch) portConnected(node, port string, isInput bool) bool {
 		}
 	}
 	return false
+}
+
+// portFromHit resolves a port hit to its (node, port, isInput) identity. On the new-system
+// path a port hit carries only a numeric buffer PORT-ROW index (no name string); Go maps it
+// back through its own port-row table (portRows), since Go owns the topology and wrote the
+// Port block in that same row order. When no resolver is wired (old path / unit tests) it
+// falls back to parsing the legacy "nodeId:in|out:portName" id string.
+func (md *MoveDispatch) portFromHit(h rawHit) (node, port string, isInput, ok bool) {
+	if md.portRows != nil && h.PortRow >= 0 {
+		return md.portRows.LookupPortRow(h.PortRow)
+	}
+	return parseGesturePortId(h.Id)
 }
 
 // parseGesturePortId splits a port id of the form "nodeId:in:portName" / "nodeId:out:portName"
