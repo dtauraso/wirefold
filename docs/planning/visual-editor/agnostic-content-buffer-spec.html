@@ -72,7 +72,7 @@
   <table>
     <tr><th>Everything Go emits</th><th>Encoding</th></tr>
     <tr><td>Bead positions, node/edge geometry, interior slots, status</td><td><span class="pill new">binary columns</span></td></tr>
-    <tr><td>Semantic events (<code>recv / fire / send / arrive / done</code>) &mdash; the causal log</td><td><span class="pill new">binary records</span> (same layout family)</td></tr>
+    <tr><td>Semantic events (<code>recv / fire / send / arrive / done</code>) &mdash; the causal log</td><td><span class="pill new">binary columns</span> (transient fields in the snapshot)</td></tr>
   </table>
   <p class="muted">Numeric content <em>and</em> the semantic/log events are the one agnostic binary representation. The human-readable <code>.probe</code> log and the tests read a <b>decode</b> of the same binary.</p>
   <div class="note"><b>Semantic names live <em>in</em> the representation.</b> Event kinds (<code>fire</code>, <code>send</code>&hellip;) and column names are declared once in the shared schema (an enum / a field table). The binary carries a small <b>id</b> into that schema; the name is resolved from the schema, identically on both sides. Names aren&rsquo;t lost &mdash; they&rsquo;re part of the layout, resolved from the shared schema, not re-spelled as text on every message.</div>
@@ -180,10 +180,10 @@ nodes   : <span class="b">{ ...persistent..., fired:u8, sent:u8, arrived:u8, rec
 <!-- TRANSPORT -->
 <section id="transport">
   <h2>Transport &amp; framing</h2>
-  <p>Go&rsquo;s stdout carries <b>framed binary</b> output &mdash; one representation. Every frame&rsquo;s payload is binary; the extension host reads frames, transfers content buffers to the webview, and decodes event frames to the log.</p>
-  <pre><span class="c">// each frame: [kind:u8][len:u32-LE][payload] — payload is always binary</span>
-kind 0 = content frame  <span class="c">// column bytes → transferable ArrayBuffer → webview render</span>
-kind 1 = event record   <span class="c">// binary semantic event → decoded to .probe log / tests</span></pre>
+  <p>Go&rsquo;s stdout carries <b>framed binary</b> output &mdash; one representation. Every frame is a snapshot; the extension host reads frames, transfers each snapshot to the webview (render), and decodes its event columns to the log &mdash; one frame serves both.</p>
+  <pre><span class="c">// each frame: [len:u32-LE][snapshot] — a self-sizing column-block, always binary</span>
+<span class="c">// the snapshot carries ALL columns, including transient event fields (fired/sent/…)</span>
+<span class="c">// no separate "event" frame — the log is decoded from the snapshot's event columns</span></pre>
   <h3>Decisions to lock (in this spec)</h3>
   <table>
     <tr><th>Decision</th><th>Choice</th><th>Why</th></tr>
@@ -196,9 +196,9 @@ kind 1 = event record   <span class="c">// binary semantic event → decoded to 
   <h3>Clock &amp; the buffer</h3>
   <p>Go writes the buffer as the <b>human-speed clock&rsquo;s ticks produce changes</b> &mdash; a bead stepping to its next position, a node-window transition, a geometry/camera edit. <b>The tick is the emit driver</b>; there is no separate render beat. Ticks are human-paced (the clock&rsquo;s scale), so buffer updates arrive at human-watchable speed; play/pause freezes the tick, which freezes buffer updates and thus the render. The clock model is pinned in <b>MODEL.md</b> (human-speed clock, <code>WaitTick</code>, tick-count windows) &mdash; this plan is where it meets the buffer.</p>
   <h3>Two buffers (SPSC) &mdash; decoupled timescales</h3>
-  <p>The bridge is <b>two double-ended queues (deques)</b>, one per direction, each single-producer / single-consumer. <b>Go&rarr;TS:</b> Go adds one end, TS reads the other &mdash; content/log records. <b>TS&rarr;Go:</b> TS adds one end, Go reads the other &mdash; input. Producer-one-end / consumer-other-end never contend, and the producer never blocks on the consumer &mdash; that <em>is</em> fire-and-forget.</p>
+  <p>The bridge is <b>two double-ended queues (deques)</b>, one per direction, each single-producer / single-consumer. <b>Go&rarr;TS:</b> Go adds one end, TS reads the other &mdash; content snapshots (the log's event columns ride inside them). <b>TS&rarr;Go:</b> TS adds one end, Go reads the other &mdash; input events. Producer-one-end / consumer-other-end never contend, and the producer never blocks on the consumer &mdash; that <em>is</em> fire-and-forget.</p>
   <p><b>Why two buffers:</b> they <b>decouple Go&rsquo;s timescale from TS&rsquo;s</b>. Go produces at the human-speed tick rate; TS consumes at the browser frame rate (rAF). Neither has to stay in sync with the other &mdash; the buffer absorbs the mismatch. (Realized over the transport &mdash; pipe &rarr; ext host &rarr; <code>postMessage</code>, each hop already FIFO &mdash; not one literal shared ring across the process boundary.)</p>
-  <p><b>Rate mismatch is absorbed by queue length, not by dropping.</b> Each buffer is a <b>deque</b>: the producer adds one end, the consumer reads the other. Producer faster &rarr; the queue lengthens (a backlog); consumer faster &rarr; it empties. <b>Nothing is dropped or coalesced</b> &mdash; the consumer reads every record, in order. Both directions use this same discipline. TS drains what&rsquo;s queued each frame and renders, so it stays current; a transient TS hiccup just grows the queue briefly, then it drains as TS recovers. Because both sides run at ~human speed (Go&rsquo;s tick rate &asymp; TS&rsquo;s frame rate), the backlog stays short in practice.</p>
+  <p><b>Rate mismatch is absorbed by queue length, not by dropping.</b> Each buffer is a <b>deque</b>: the producer adds one end, the consumer reads the other. Producer faster &rarr; the queue lengthens (a backlog); consumer faster &rarr; it empties. <b>Nothing is dropped or coalesced</b> &mdash; the consumer reads every element, in order. Both directions use this same discipline. TS drains what&rsquo;s queued each frame and renders, so it stays current; a transient TS hiccup just grows the queue briefly, then it drains as TS recovers. Because both sides run at ~human speed (Go&rsquo;s tick rate &asymp; TS&rsquo;s frame rate), the backlog stays short in practice.</p>
   <p><b>Empty is a normal state &mdash; both sides read non-blocking.</b> Either deque can be empty at any read. TS finding nothing new re-renders the <b>retained state</b>; Go finding no input just <b>continues its tick loop</b>. Neither ever <em>blocks</em> waiting for the queue to fill &mdash; blocking would re-couple the two timescales and defeat the decoupling. An empty read simply means &ldquo;nothing new this cycle,&rdquo; and each side proceeds with what it already has.</p>
   <p><b>Each deque element is a column-block snapshot</b> (the full current state, in the fixed-column layout of the Layout tab) &mdash; not a delta. Go enqueues a snapshot; TS dequeues one and views its bytes as TypedArrays straight into the GPU. The deque is the transport; the column-block is what each element is made of.</p>
 </section>
@@ -241,7 +241,7 @@ instanced.count = liveBeadCount;</pre>
   <ul>
     <li><b>Offset accessors</b> are pure arithmetic &mdash; unit-test the row/column math directly.</li>
     <li><b>Go writer:</b> write known values, assert the bytes.</li>
-    <li><b>TS reader:</b> build a buffer of known bytes, assert the views decode to the right numbers &mdash; and the frame reader (content frame vs event record) tested like the existing stdout-reader / <code>handleMessage</code> tests.</li>
+    <li><b>TS reader:</b> build a buffer of known bytes, assert the views decode to the right numbers &mdash; and the snapshot frame reader tested like the existing stdout-reader / <code>handleMessage</code> tests.</li>
     <li><b>Round-trip:</b> Go writes → same layout → TS reads → equals the input (a cross-language golden test, like the trace-event fixture).</li>
   </ul>
 </section>
@@ -251,8 +251,8 @@ instanced.count = liveBeadCount;</pre>
   <h2>Scope, non-goals, open decisions</h2>
   <h3>Changes</h3>
   <ul>
-    <li><b>Go:</b> pack all output &mdash; position/geometry/status content <em>and</em> semantic event records &mdash; into the binary layout; frame stdout output &mdash; one binary emitter.</li>
-    <li><b>Bridge/ext host:</b> read framed stdout; transfer content ArrayBuffers to the webview; decode event records to the log.</li>
+    <li><b>Go:</b> pack all output &mdash; position/geometry/status <em>and</em> the semantic events (as transient columns) &mdash; into the snapshot layout; frame stdout output &mdash; one binary emitter.</li>
+    <li><b>Bridge/ext host:</b> read framed stdout; transfer each snapshot to the webview; decode its event columns to the log.</li>
     <li><b>Webview:</b> hold the buffer, expose typed views, feed instanced GPU attributes; delete <em>all</em> domain stores (render + overlay flags + spec/diagram + camera pose); forward mouse events as CRUD/input; read everything else from the buffer.</li>
     <li><b>Codegen + guard:</b> single layout schema → Go writer + TS reader + a layout-parity guard; docs (MODEL.md/CLAUDE.md bridge wording).</li>
   </ul>
