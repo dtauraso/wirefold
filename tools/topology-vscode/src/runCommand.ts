@@ -2,11 +2,21 @@ import * as vscode from "vscode";
 import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import type { RunStatus, TraceEvent } from "./messages";
+import type { RunStatus, TraceEvent, HostToWebviewMsg } from "./messages";
 import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
 import { validateNodeStatusFields } from "./schema/trace-event-fields";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
+import {
+  BUF_HEADER_SIZE,
+  BEAD_STRIDE,
+  NODE_STRIDE,
+  NODE_COL_EV_RECV,
+  NODE_COL_EV_FIRE,
+  NODE_COL_EV_SEND,
+  NODE_COL_EV_ARRIVE,
+  NODE_COL_EV_DONE,
+} from "./schema/buffer-layout";
 
 export type { RunStatus };
 
@@ -39,6 +49,62 @@ export function splitJsonlLines(buf: string, chunk: string): { lines: string[]; 
     rest = rest.slice(nl + 1);
   }
   return { lines, rest };
+}
+
+// splitFrames is the pure length-prefix framing step for fd3: given the carried-over
+// partial Buffer and a freshly-arrived binary chunk, it returns every COMPLETE frame
+// payload (as an ArrayBuffer, ready to transfer zero-copy) and the trailing partial
+// `rest` to carry into the next call. Frames are [len:u32-LE][payload bytes]; a frame
+// split across two chunks is reassembled; multiple frames in one chunk all come out;
+// a trailing partial (len header not yet complete, or payload bytes not yet complete)
+// is buffered. handleFd3 owns dispatch; this owns only the framing.
+export function splitFrames(buf: Buffer, chunk: Buffer): { frames: ArrayBuffer[]; rest: Buffer } {
+  let rest = buf.length > 0 ? Buffer.concat([buf, chunk]) : chunk;
+  const frames: ArrayBuffer[] = [];
+  while (rest.length >= 4) {
+    const frameLen = rest.readUInt32LE(0);
+    const needed = 4 + frameLen;
+    if (rest.length < needed) break;
+    // Slice out the payload and copy into a standalone ArrayBuffer (detached from
+    // the Node.js Buffer pool so it can be transferred zero-copy to the webview).
+    const payload = rest.slice(4, needed);
+    const ab = payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength);
+    frames.push(ab);
+    rest = rest.slice(needed);
+  }
+  return { frames, rest };
+}
+
+// decodeSnapshotEvents reads the transient per-node event columns (EvRecv/Fire/Send/
+// Arrive/Done) from a snapshot payload and returns human-readable log lines — one
+// entry per set event flag across all nodes. Returns an empty array when no events
+// are flagged. Used to append to the .probe log.
+export function decodeSnapshotEvents(ab: ArrayBuffer): string[] {
+  const view = new DataView(ab);
+  if (ab.byteLength < BUF_HEADER_SIZE) return [];
+  const tick = view.getUint32(0, true);
+  const beadCount = view.getUint32(4, true);
+  const nodeCount = view.getUint32(8, true);
+  const nodeBlockOff = BUF_HEADER_SIZE + beadCount * BEAD_STRIDE;
+  const lines: string[] = [];
+  const eventCols: [number, string][] = [
+    [NODE_COL_EV_RECV, "recv"],
+    [NODE_COL_EV_FIRE, "fire"],
+    [NODE_COL_EV_SEND, "send"],
+    [NODE_COL_EV_ARRIVE, "arrive"],
+    [NODE_COL_EV_DONE, "done"],
+  ];
+  for (let i = 0; i < nodeCount; i++) {
+    const rowOff = nodeBlockOff + i * NODE_STRIDE;
+    if (rowOff + NODE_STRIDE > ab.byteLength) break;
+    for (const [col, name] of eventCols) {
+      const flag = view.getUint8(rowOff + col);
+      if (flag !== 0) {
+        lines.push(JSON.stringify({ ts_ms: Date.now(), src: "buf", kind: "buf-event", tick, node: i, event: name }) + "\n");
+      }
+    }
+  }
+  return lines;
 }
 
 // Go stdout relay: trace events are written to .probe/go.jsonl with a
@@ -159,6 +225,8 @@ export class BuildAndRunRunner {
   private channel: vscode.OutputChannel | undefined;
   // Partial line buffer for stdout — trace lines are newline-delimited.
   private stdoutBuf = "";
+  // Partial binary frame buffer for fd3 — length-prefixed binary frames.
+  private fd3Buf: Buffer = Buffer.alloc(0);
   private probeFile: string | undefined;
   private goErrorsFile: string | undefined;
   private tsFile: string | undefined;
@@ -170,6 +238,7 @@ export class BuildAndRunRunner {
     private readonly post: (s: RunStatus) => void,
     private readonly onTraceEvent?: (e: TraceEvent) => void,
     private readonly onSpecEvent?: (spec: { nodes: unknown[]; edges: unknown[]; view?: unknown }) => void,
+    private readonly onSnapshot?: (msg: HostToWebviewMsg & { type: "buffer-snapshot" }) => void,
   ) {}
 
   run(topologyPath?: string) {
@@ -225,13 +294,27 @@ export class BuildAndRunRunner {
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
-    this.proc = cp.spawn(binPath, [...topArgs], { cwd: repoRoot, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    // stdio index 3 = fd3 binary side channel: Go writes length-prefixed binary
+    // snapshot frames here (WIREFOLD_BUF_OUT_FD=3). "pipe" opens a readable pipe
+    // at proc.stdio[3]; the existing stdin(0)/stdout(1)/stderr(2) are unchanged.
+    this.proc = cp.spawn(binPath, [...topArgs], {
+      cwd: repoRoot,
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe", "pipe"],
+      env: { ...process.env, WIREFOLD_BUF_OUT_FD: "3" },
+    });
     // Flush any stdin lines that were buffered before this spawn (writeStdin queued them).
     if (this.pendingStdin.length > 0) {
       for (const l of this.pendingStdin) this.proc.stdin?.write(l + "\n");
       this.pendingStdin = [];
     }
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
+    // fd3: binary snapshot frames. Cast needed because Node's ChildProcess types
+    // only narrow stdio[0..2]; index 3 is typed as Readable|null via the array form.
+    const fd3 = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[3];
+    if (fd3) {
+      fd3.on("data", (d: Buffer) => this.handleFd3(d));
+    }
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
       this.channel!.append(msg);
@@ -321,6 +404,26 @@ export class BuildAndRunRunner {
         this.onTraceEvent(ev);
       } else {
         this.channel!.appendLine(line);
+      }
+    }
+  }
+
+  private handleFd3(chunk: Buffer) {
+    const { frames, rest } = splitFrames(this.fd3Buf, chunk);
+    this.fd3Buf = rest;
+    for (const ab of frames) {
+      // Decode transient event columns and append to the .probe log.
+      if (this.probeFile) {
+        const lines = decodeSnapshotEvents(ab);
+        if (lines.length > 0) {
+          try {
+            fs.appendFileSync(this.probeFile, lines.join(""), "utf8");
+          } catch { /* swallow */ }
+        }
+      }
+      // Transfer zero-copy to the webview (if a snapshot consumer is registered).
+      if (this.onSnapshot) {
+        this.onSnapshot({ type: "buffer-snapshot", buffer: ab });
       }
     }
   }

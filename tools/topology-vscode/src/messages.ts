@@ -166,7 +166,11 @@ export type HostToWebviewMsg =
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
   | { type: "flush" }
   | { type: "save-error"; message: string }
-  | { type: "trace-event"; event: TraceEvent };
+  | { type: "trace-event"; event: TraceEvent }
+  // Phase 3: binary snapshot from Go's fd3 side channel.
+  // The ArrayBuffer is transferred zero-copy (postMessage transferable).
+  // Phase 5 will render from it; for now the webview stubs the handler.
+  | { type: "buffer-snapshot"; buffer: ArrayBuffer };
 
 // Note: "resend" is host-originated (runner.resend() writes it straight to Go's
 // stdin) and is never emitted by the webview. It is kept in this set so the
@@ -178,7 +182,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "load", "run-status", "flush", "save-error", "trace-event",
+  "load", "run-status", "flush", "save-error", "trace-event", "buffer-snapshot",
 ]);
 
 // parseEdit validates an "edit" message by its op, mirroring the per-op payloads
@@ -363,6 +367,9 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
       if (typeof e.kind !== "string") return undefined;
       return m as unknown as HostToWebviewMsg;
     }
+    case "buffer-snapshot":
+      // buffer must be an ArrayBuffer (transferred zero-copy from the host).
+      return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;
     default:
       return undefined;
   }

@@ -23,6 +23,7 @@ type FakeProc = EventEmitter & {
   stdin: { write: ReturnType<typeof vi.fn> };
   stdout: { on: ReturnType<typeof vi.fn> };
   stderr: { on: ReturnType<typeof vi.fn> };
+  stdio: (null | { on: ReturnType<typeof vi.fn> })[];
   kill: ReturnType<typeof vi.fn>;
 };
 
@@ -34,6 +35,8 @@ function makeFakeProc(): FakeProc {
   p.stdin = { write: vi.fn() };
   p.stdout = { on: vi.fn() };
   p.stderr = { on: vi.fn() };
+  // stdio[3] = fd3 binary side channel stub (null = not available).
+  p.stdio = [null, null, null, { on: vi.fn() }];
   p.kill = vi.fn();
   return p;
 }
