@@ -98,7 +98,7 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
       // trace-events) still receives node labels.
       if (event.kind === "node-geometry" && !labelSidecarSeen.has(event.node)) {
         labelSidecarSeen.add(event.node);
-        post({ type: "node-label", id: event.node, label: event.label ?? event.node, kind: event.nodeKind ?? "" });
+        post({ type: "node-label", id: event.node, label: event.label ?? event.node });
       }
     },
     (spec) => {

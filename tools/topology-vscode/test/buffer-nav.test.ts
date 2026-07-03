@@ -11,10 +11,9 @@ import * as THREE from "three";
 import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
   recordNavNodeId, recordNavNodeLabel, clearNavNodeIds, getNavNodeIds,
-  getNavNodeLabel, getNavNodeKind,
+  getNavNodeLabel,
   decodeNavNodes, contentSphereFromCenters, instanceIdToNodeId,
 } from "../src/webview/three/buffer-nav";
-import { NODE_DEFS } from "../src/schema/node-defs";
 import {
   BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS,
@@ -66,38 +65,24 @@ describe("buffer-nav id table", () => {
   });
 });
 
-describe("node-label sidecar — label + kind by id, row order preserved", () => {
+describe("node-label sidecar — label by id, row order preserved", () => {
+  // Kind is no longer carried on the sidecar — it rides the binary buffer as KindId (u8).
+  // See nodeRowColors.test.ts for the KindId→color mapping tests.
   beforeEach(() => clearNavNodeIds());
 
-  it("records label and kind together, appending in first-seen order", () => {
-    recordNavNodeLabel("a", "Alpha", "Hold");
-    recordNavNodeLabel("b", "Beta", "Pacer");
-    recordNavNodeLabel("a", "Alpha2", "Hold"); // repeat id → not reordered, label updated
+  it("records label, appending in first-seen order; repeat id updates label but not order", () => {
+    recordNavNodeLabel("a", "Alpha");
+    recordNavNodeLabel("b", "Beta");
+    recordNavNodeLabel("a", "Alpha2"); // repeat id → not reordered, label updated
     expect(getNavNodeIds()).toEqual(["a", "b"]);
     expect(getNavNodeLabel("a")).toBe("Alpha2");
-    expect(getNavNodeKind("a")).toBe("Hold");
-    expect(getNavNodeKind("b")).toBe("Pacer");
+    expect(getNavNodeLabel("b")).toBe("Beta");
   });
 
-  it("leaves kind undefined when the sidecar omits it (empty string)", () => {
-    recordNavNodeLabel("c", "Gamma", "");
-    expect(getNavNodeKind("c")).toBeUndefined();
-    expect(getNavNodeLabel("c")).toBe("Gamma");
-  });
-
-  it("maps a node's kind to its NODE_DEFS fill/stroke (kind→color lookup)", () => {
-    recordNavNodeLabel("n", "N", "Hold");
-    const kind = getNavNodeKind("n")!;
-    const def = NODE_DEFS[kind]!;
-    // The render path uses exactly this lookup; assert the def carries fill+stroke.
-    expect(def.fill).toBe("#f3e5f5");
-    expect(def.stroke).toBe("#6a1b9a");
-  });
-
-  it("clearNavNodeIds also clears the kind map", () => {
-    recordNavNodeLabel("z", "Z", "Pulse");
+  it("clearNavNodeIds clears the label map", () => {
+    recordNavNodeLabel("z", "Z");
     clearNavNodeIds();
-    expect(getNavNodeKind("z")).toBeUndefined();
+    expect(getNavNodeLabel("z")).toBeUndefined();
   });
 });
 

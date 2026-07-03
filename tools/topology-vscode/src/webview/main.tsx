@@ -115,7 +115,7 @@ window.addEventListener("message", (e) => {
     // New-system label sidecar: record {id,label} into the row-keyed buffer-nav table
     // (first-seen order == buffer node-row order). Runs under both flags; flag-off never
     // reads this table, so the extra write is invisible there.
-    recordNavNodeLabel(msg.id, msg.label, msg.kind);
+    recordNavNodeLabel(msg.id, msg.label);
   } else if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running

@@ -235,9 +235,8 @@ export type HostToWebviewMsg =
   // records it into the row-keyed buffer-nav label table (first-seen order == buffer
   // node-row order), so the new render path resolves pill text without the old spec
   // store. One message per node id per run (host dedups); repopulated on resend.
-  // `kind` is the node's Go KIND (PascalCase, e.g. "Hold") so the new render path can
-  // map the row to its NODE_DEFS fill/stroke color; empty string when Go omits it.
-  | { type: "node-label"; id: string; label: string; kind: string };
+  // KindId is now carried in the binary buffer node block; the sidecar is id + label only.
+  | { type: "node-label"; id: string; label: string };
 
 // Note: "resend" is host-originated (runner.resend() writes it straight to Go's
 // stdin) and is never emitted by the webview. It is kept in this set so the
@@ -474,8 +473,8 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
       // buffer must be an ArrayBuffer (transferred zero-copy from the host).
       return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;
     case "node-label":
-      // id + label + kind are all required strings (the row-keyed sidecar payload).
-      return typeof m.id === "string" && typeof m.label === "string" && typeof m.kind === "string"
+      // id + label are required strings (KindId now rides the binary buffer; sidecar is text-only).
+      return typeof m.id === "string" && typeof m.label === "string"
         ? (m as unknown as HostToWebviewMsg)
         : undefined;
     default:

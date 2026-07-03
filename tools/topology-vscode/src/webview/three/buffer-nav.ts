@@ -56,10 +56,8 @@ export interface NavNode {
 let navNodeIds: string[] = [];
 const navNodeIdSet = new Set<string>();
 const navNodeLabels = new Map<string, string>();
-// Node's Go KIND (PascalCase, e.g. "Hold") keyed by id — the render path looks it up in
-// NODE_DEFS for per-node fill/stroke color. Carried on the same node-label sidecar as the
-// human label; empty/undefined until the sidecar message arrives (render falls back then).
-const navNodeKinds = new Map<string, string>();
+// Kind is no longer carried on the sidecar — it rides the binary buffer as KindId (u8).
+// The render path reads KindId from the buffer node block and indexes NODE_DEFS_ARRAY.
 
 /**
  * Record a node id in first-seen order. Called from pump.ts on every node-geometry
@@ -77,14 +75,14 @@ export function recordNavNodeId(id: string): void {
  * the id in first-seen order (same dedup/order as recordNavNodeId) AND stores the
  * label, so the new render path resolves pill text without the old spec store. The
  * label is always set (even on a repeat id) so a label change within a run is picked up.
+ * Kind is no longer carried here — it rides the binary buffer as KindId.
  */
-export function recordNavNodeLabel(id: string, label: string, kind?: string): void {
+export function recordNavNodeLabel(id: string, label: string): void {
   if (!navNodeIdSet.has(id)) {
     navNodeIdSet.add(id);
     navNodeIds.push(id);
   }
   navNodeLabels.set(id, label);
-  if (kind) navNodeKinds.set(id, kind);
 }
 
 /** Human label for a node id (undefined until its sidecar message arrives). */
@@ -92,17 +90,11 @@ export function getNavNodeLabel(id: string): string | undefined {
   return navNodeLabels.get(id);
 }
 
-/** Go KIND (PascalCase) for a node id (undefined until its sidecar message arrives). */
-export function getNavNodeKind(id: string): string | undefined {
-  return navNodeKinds.get(id);
-}
-
 /** Wipe the id table + label map at the run-start boundary (symmetric with clearAllNodeGeometry). */
 export function clearNavNodeIds(): void {
   navNodeIds = [];
   navNodeIdSet.clear();
   navNodeLabels.clear();
-  navNodeKinds.clear();
 }
 
 /** Current ordered id table; index i ↔ buffer node row i. */
