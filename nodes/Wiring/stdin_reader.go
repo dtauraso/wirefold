@@ -1,4 +1,10 @@
-// stdin_reader.go — reads JSON-line messages from stdin and dispatches them.
+// stdin_reader.go — reads FRAMED BINARY records from stdin and dispatches them.
+//
+// The editor→Go bridge is a purely BINARY buffer (symmetric with the Go→TS content
+// buffer on fd 3): each message is a binary RECORD written FRAMED as [len:u32-LE][record]
+// to stdin. input_codec.go decodes a record into the stdinMsg below; the dispatch switch
+// and every handler (applyEdit / HandleRawInput / play-pause / resend) are UNCHANGED —
+// only the wire decode moved from newline-JSON to framed binary.
 //
 // The editor→Go bridge carries two top-level message kinds:
 //
@@ -36,6 +42,7 @@ package Wiring
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -213,7 +220,7 @@ type rawHit struct {
 // to the wire owned by that destination port.
 type SlotRegistry map[string]*PacedWire
 
-// RunStdinReader reads JSON lines from r, dispatching geometry-CRUD "edit"
+// RunStdinReader reads FRAMED BINARY records from r, dispatching geometry-CRUD "edit"
 // messages and play/pause clock-gate control messages. Returns when ctx is done
 // or r reaches EOF. Call in a goroutine alongside the node run loop.
 //
@@ -223,43 +230,57 @@ type SlotRegistry map[string]*PacedWire
 // tr emits control breadcrumbs for the edit ops.
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
 func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock, treeRoot string) {
-	sc := bufio.NewScanner(r)
-	// Raise the token buffer well above the default 64 KB. A single stdin JSON line
-	// carrying a large scene/topology payload (update kind="scene") can exceed 64 KB;
-	// with the default buffer sc.Scan() would return false with bufio.ErrTooLong, the
-	// reader goroutine would close lineCh, RunStdinReader would return, and every later
-	// editor→Go message would be silently dropped (bridge deaf, no UI error). 1 MB is
-	// comfortable headroom for realistic scene blobs.
-	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
+	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
+	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the
+	// record bytes to the dispatch loop over a channel. The channel keeps the dispatch
+	// ctx-aware exactly as the old line reader did.
+	br := bufio.NewReaderSize(r, 1<<20)
 	done := ctx.Done()
-	lineCh := make(chan string, 8)
+	recCh := make(chan []byte, 8)
 	go func() {
-		for sc.Scan() {
-			// ctx-aware send: after the reader stops draining lineCh, a plain send
-			// could park this goroutine forever on a full channel. Bail on cancel.
+		var lenBuf [4]byte
+		for {
+			if _, err := io.ReadFull(br, lenBuf[:]); err != nil {
+				if err != io.EOF && err != io.ErrUnexpectedEOF {
+					fmt.Fprintf(os.Stderr, "stdin_reader: frame-length read error: %v\n", err)
+				}
+				close(recCh)
+				return
+			}
+			n := binary.LittleEndian.Uint32(lenBuf[:])
+			// Cap the frame size to the same 1 MB headroom the old line buffer had, so a
+			// corrupt/hostile length can't drive an unbounded allocation and deafen the bridge.
+			if n == 0 || n > (1<<20) {
+				fmt.Fprintf(os.Stderr, "stdin_reader: bad frame length %d; stopping reader\n", n)
+				close(recCh)
+				return
+			}
+			rec := make([]byte, n)
+			if _, err := io.ReadFull(br, rec); err != nil {
+				if err != io.EOF && err != io.ErrUnexpectedEOF {
+					fmt.Fprintf(os.Stderr, "stdin_reader: frame body read error: %v\n", err)
+				}
+				close(recCh)
+				return
+			}
 			select {
-			case lineCh <- sc.Text():
+			case recCh <- rec:
 			case <-done:
 				return
 			}
 		}
-		if err := sc.Err(); err != nil {
-			// Scan encountered an error; write to stderr (stdout is the Go→TS trace stream).
-			// The channel close below will unblock the main select loop.
-			fmt.Fprintf(os.Stderr, "stdin_reader: scan error: %v\n", err)
-		}
-		close(lineCh)
 	}()
 	for {
 		select {
 		case <-done:
 			return
-		case line, ok := <-lineCh:
+		case rec, ok := <-recCh:
 			if !ok {
 				return
 			}
-			var msg stdinMsg
-			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			msg, decoded := decodeInputRecord(rec)
+			if !decoded {
 				continue
 			}
 			// Two top-level bridge kinds:

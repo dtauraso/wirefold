@@ -8,6 +8,7 @@
 package Wiring
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -37,19 +38,16 @@ func TestRunStdinReaderLargeLineNotDropped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line, err := json.Marshal(map[string]any{
-		"type":  "edit",
-		"op":    "update",
-		"kind":  "scene",
-		"scene": json.RawMessage(blob),
-	})
+	// Binary edit/update/scene record: entity-kind byte "scene" + JSON leaf {"scene": blob}.
+	payload, err := json.Marshal(map[string]any{"scene": json.RawMessage(blob)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(line) <= 64*1024 {
-		t.Fatalf("test line only %d bytes; must exceed the 64 KB default to exercise the fix", len(line))
+	rec := encodeEditUpdate("scene", string(payload))
+	if len(rec) <= 64*1024 {
+		t.Fatalf("test record only %d bytes; must exceed 64 KB to exercise the large-payload path", len(rec))
 	}
-	io.WriteString(w, string(line)+"\n")
+	w.Write(frameRecord(rec))
 
 	scenePath := filepath.Join(root, "view", "scene.json")
 	deadline := time.Now().Add(2 * time.Second)
@@ -92,7 +90,7 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 
 	// Feed a benign "edit" fade line. No bridge message delivers a bead — the
 	// clock owns delivery — so the bead must stay in flight.
-	io.WriteString(w, `{"type":"edit","op":"update","kind":"edge","attr":"faded","edges":{}}`+"\n")
+	w.Write(frameRecord(encodeEditUpdate("edge", `{"attr":"faded","edges":{}}`)))
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatal("bead delivered by a stdin edit message; clock should own delivery")
@@ -114,7 +112,7 @@ func TestRunStdinReaderUnknownTargetIgnored(t *testing.T) {
 	defer cancel()
 
 	// Unknown slot on a delete edit → no panic, reader exits cleanly on ctx cancel.
-	r := strings.NewReader(`{"type":"edit","op":"delete","target":"unknown","targetHandle":"in"}` + "\n")
+	r := bytes.NewReader(frameRecord(encodeEditCreateDelete(inKindEditDelete, "unknown", "in")))
 	RunStdinReader(ctx, r, slotReg, nil, nil, nil, "") // should return without hanging
 }
 
@@ -148,7 +146,7 @@ func TestRunStdinReaderEditDeleteCancelsInFlight(t *testing.T) {
 	clk.AdvanceTicks(20)
 
 	// Delete through the bridge: edit/delete keyed by the destination slot identity.
-	io.WriteString(w, `{"type":"edit","op":"delete","target":"nodeA","targetHandle":"in"}`+"\n")
+	w.Write(frameRecord(encodeEditCreateDelete(inKindEditDelete, "nodeA", "in")))
 
 	// Wait for the reader to apply the delete (it drops the in-flight bead).
 	deadline := time.Now().Add(time.Second)
