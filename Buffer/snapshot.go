@@ -288,6 +288,15 @@ type ruleBuilderSnapState struct {
 	hasPending  bool
 	pendingCode int
 	terms       []ruleBuilderTermSnap
+	// pendingPortNode/pendingPortName/pendingPortIsInput/pendingTorusNode mirror the
+	// in-progress `port ∈ torus` authoring capture (gesture.go hasPendingPort/
+	// hasPendingTorus), independent of hasPending/pendingCode/terms above. Empty
+	// pendingPortNode/pendingTorusNode = that side not yet picked; resolved to buffer rows
+	// at build time (same pattern as center/terms).
+	pendingPortNode    string
+	pendingPortName    string
+	pendingPortIsInput bool
+	pendingTorusNode   string
 }
 
 // polarLockSnapState is one committed polar-equation lock mirrored from a KindPolarLocks
@@ -398,10 +407,14 @@ func (s *SnapshotState) Update(ev T.Event) {
 			terms[i] = ruleBuilderTermSnap{node: t.Node, code: t.Code}
 		}
 		s.ruleBuilder = ruleBuilderSnapState{
-			center:      ev.RuleCenter,
-			hasPending:  ev.RuleHasPending,
-			pendingCode: ev.RulePendingCode,
-			terms:       terms,
+			center:             ev.RuleCenter,
+			hasPending:         ev.RuleHasPending,
+			pendingCode:        ev.RulePendingCode,
+			terms:              terms,
+			pendingPortNode:    ev.RulePendingPortNode,
+			pendingPortName:    ev.RulePendingPortName,
+			pendingPortIsInput: ev.RulePendingPortIsInput,
+			pendingTorusNode:   ev.RulePendingTorusNode,
 		}
 		s.emitSnapshot()
 
@@ -1148,7 +1161,17 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		t1Row = int32(s.nodeRowIndex(rb.terms[1].node))
 		t1Code = uint8(rb.terms[1].code)
 	}
-	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code, int32(s.selectedLockIndex))
+	pendingPortRow := int32(-1)
+	pendingPortIsInput := boolU8(false)
+	if rb.pendingPortNode != "" {
+		pendingPortRow = int32(s.portRowIndex(rb.pendingPortNode, rb.pendingPortName, rb.pendingPortIsInput))
+		pendingPortIsInput = boolU8(rb.pendingPortIsInput)
+	}
+	pendingTorusRow := int32(-1)
+	if rb.pendingTorusNode != "" {
+		pendingTorusRow = int32(s.nodeRowIndex(rb.pendingTorusNode))
+	}
+	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code, int32(s.selectedLockIndex), pendingPortRow, pendingPortIsInput, pendingTorusRow)
 	off += BufRuleBuilderStride
 
 	// PolarLock block: one row per committed polar-equation lock, IN ORDER (block row i ==

@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 17
+const BufLayoutVersion = 18
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -254,6 +254,14 @@ type bufLayoutRuleBuilder struct {
 	// (MoveDispatch.selectedLockIndex); the panel highlights this row and the Delete key
 	// targets it.
 	SelectedLockIndex int32 `buf:"i32"` // -1 = no lock row focused
+	// Pending `port ∈ torus` authoring capture (gesture.go trySelectSphereRule's
+	// hasPendingPort/hasPendingTorus): independent of the node/node pending term above, so
+	// both may be inert at once. -1 = that side not yet picked; the panel renders whichever
+	// side IS picked plus a placeholder for the other, mirroring the node/node pending-term
+	// preview.
+	PendingPortRow     int32 `buf:"i32"` // constrained port's buffer PORT-ROW index (-1 = none)
+	PendingPortIsInput uint8 `buf:"u8"`  // 1 = input port, 0 = output port (meaningful only if PendingPortRow != -1)
+	PendingTorusRow    int32 `buf:"i32"` // pending torus-owning node's buffer NODE-ROW index (-1 = none)
 }
 
 // bufLayoutPolarLock defines one row of the COMMITTED polar-equation locks column block.

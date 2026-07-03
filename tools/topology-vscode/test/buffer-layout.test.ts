@@ -56,10 +56,12 @@ import {
   RULE_BUILDER_COL_CENTER_ROW, RULE_BUILDER_COL_PENDING_CODE, RULE_BUILDER_COL_TERM_COUNT,
   RULE_BUILDER_COL_T0ROW, RULE_BUILDER_COL_T0CODE, RULE_BUILDER_COL_T1ROW, RULE_BUILDER_COL_T1CODE,
   RULE_BUILDER_COL_SELECTED_LOCK_INDEX,
+  RULE_BUILDER_COL_PENDING_PORT_ROW, RULE_BUILDER_COL_PENDING_PORT_IS_INPUT, RULE_BUILDER_COL_PENDING_TORUS_ROW,
   RULE_BUILDER_STRIDE,
   readRuleBuilderCenterRow, readRuleBuilderPendingCode, readRuleBuilderTermCount,
   readRuleBuilderT0Row, readRuleBuilderT0Code, readRuleBuilderT1Row, readRuleBuilderT1Code,
   readRuleBuilderSelectedLockIndex,
+  readRuleBuilderPendingPortRow, readRuleBuilderPendingPortIsInput, readRuleBuilderPendingTorusRow,
   // PolarLock block
   POLAR_LOCK_COL_CENTER_ROW, POLAR_LOCK_COL_AROW, POLAR_LOCK_COL_ACODE,
   POLAR_LOCK_COL_BROW, POLAR_LOCK_COL_BCODE, POLAR_LOCK_COL_ACTIVE, POLAR_LOCK_STRIDE,
@@ -356,8 +358,9 @@ describe("buffer-layout — Overlay block", () => {
 
 describe("buffer-layout — RuleBuilder block", () => {
   it("stride equals packed field sizes", () => {
-    // i32 + u8 + u8 + i32 + u8 + i32 + u8 + i32 (SelectedLockIndex) = 4+1+1+4+1+4+1+4 = 20
-    expect(RULE_BUILDER_STRIDE).toBe(20);
+    // i32 + u8 + u8 + i32 + u8 + i32 + u8 + i32 (SelectedLockIndex) + i32 (PendingPortRow)
+    // + u8 (PendingPortIsInput) + i32 (PendingTorusRow) = 4+1+1+4+1+4+1+4+4+1+4 = 29
+    expect(RULE_BUILDER_STRIDE).toBe(29);
   });
 
   it("column offsets match the packed i32/u8 layout", () => {
@@ -369,6 +372,9 @@ describe("buffer-layout — RuleBuilder block", () => {
     expect(RULE_BUILDER_COL_T1ROW).toBe(11);
     expect(RULE_BUILDER_COL_T1CODE).toBe(15);
     expect(RULE_BUILDER_COL_SELECTED_LOCK_INDEX).toBe(16);
+    expect(RULE_BUILDER_COL_PENDING_PORT_ROW).toBe(20);
+    expect(RULE_BUILDER_COL_PENDING_PORT_IS_INPUT).toBe(24);
+    expect(RULE_BUILDER_COL_PENDING_TORUS_ROW).toBe(25);
   });
 
   it("read helpers decode a completed term + pending half-term", () => {
@@ -396,6 +402,18 @@ describe("buffer-layout — RuleBuilder block", () => {
     const dv = new DataView(buf);
     dv.setInt32(RULE_BUILDER_COL_SELECTED_LOCK_INDEX, 2, true);
     expect(readRuleBuilderSelectedLockIndex(dv)).toBe(2);
+  });
+
+  it("reads the pending port/torus authoring columns", () => {
+    const buf = new ArrayBuffer(RULE_BUILDER_STRIDE);
+    const dv = new DataView(buf);
+    dv.setInt32(RULE_BUILDER_COL_PENDING_PORT_ROW, 7, true);
+    dv.setUint8(RULE_BUILDER_COL_PENDING_PORT_IS_INPUT, 1);
+    dv.setInt32(RULE_BUILDER_COL_PENDING_TORUS_ROW, -1, true);
+
+    expect(readRuleBuilderPendingPortRow(dv)).toBe(7);
+    expect(readRuleBuilderPendingPortIsInput(dv)).toBe(1);
+    expect(readRuleBuilderPendingTorusRow(dv)).toBe(-1);
   });
 });
 
@@ -477,8 +495,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 17", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(17);
+  it("schema version is 18", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(18);
   });
 
   it("header size is 40 bytes (10×u32)", () => {

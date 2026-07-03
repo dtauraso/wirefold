@@ -6,10 +6,13 @@
 
 import { createPortal } from "react-dom";
 import { useOverlayFlags } from "./overlay-flags";
-import { useRuleBuilder, usePolarLocks, useSelectedNodeRow, type RuleBuilderTerm, type PolarLockEntry, POLAR_LOCK_KIND_PORT_TORUS } from "./rule-builder";
+import { useRuleBuilder, usePolarLocks, type RuleBuilderTerm, type RuleBuilderState, type PolarLockEntry, POLAR_LOCK_KIND_PORT_TORUS } from "./rule-builder";
 import { postGoRecord } from "../vscode-api";
 import { encodeClearRule, encodeLockToggleActive, encodeLockSelect, encodeDeleteSelectedLock } from "../../schema/input-layout";
 import { useEffect } from "react";
+import { postLog } from "../log/post";
+
+postLog("RULEPANEL:module-loaded", {});
 
 /** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=θ,
  *  1=φ, 2=−θ, 3=−φ, 4=r — positive θ/φ show no sign). */
@@ -23,17 +26,20 @@ export function RuleEquationPanel() {
   const overlays = useOverlayFlags();
   const rb = useRuleBuilder();
   const { equations, selectedLockIndex } = usePolarLocks();
-  const selectedRow = useSelectedNodeRow();
   const mount = document.getElementById("rule-eq-mount");
 
-  // The committed-equations LIST is independent of the selSpherePoles overlay: it shows
-  // whenever the selected node participates in >=1 committed equation, as ANY participant
-  // (center, term A, term B, the port's owning node, or the torus). The in-progress
+  // The committed-equations LIST keys off the rule-builder's STICKY panel Center
+  // (rb.centerRow, gesture.go md.ruleCenter) rather than the transient click highlight
+  // (Node.Selected / useSelectedNodeRow): it shows whenever the sticky center participates
+  // in >=1 committed equation, as ANY participant (center, term A, term B, the port's
+  // owning node, or the torus). This keeps the panel showing the last-selected node's
+  // equations even after an empty-space click clears the highlight ring. The in-progress
   // builder section stays gated on the overlay, as before.
+  const centerRow = rb?.centerRow;
   const rowEquations = equations.filter((eq) =>
     eq.kind === POLAR_LOCK_KIND_PORT_TORUS
-      ? eq.torusRow === selectedRow || eq.portNodeRow === selectedRow
-      : eq.centerRow === selectedRow || eq.a.row === selectedRow || eq.b.row === selectedRow,
+      ? eq.torusRow === centerRow || eq.portNodeRow === centerRow
+      : eq.centerRow === centerRow || eq.a.row === centerRow || eq.b.row === centerRow,
   );
   const showBuilder = !!overlays?.selSpherePoles && !!rb;
   const showList = rowEquations.length > 0;
@@ -41,6 +47,26 @@ export function RuleEquationPanel() {
   // emits it unconditionally now), so show a standalone Center header whenever the list
   // is showing but the builder section (which already renders its own Center line) is not.
   const showListCenter = showList && !showBuilder;
+
+  postLog("RULEPANEL:render", {
+    rbCenterRow: rb?.centerRow,
+    equationsLen: equations.length,
+    equations: equations.map((eq) => ({
+      kind: eq.kind,
+      centerRow: (eq as unknown as { centerRow?: number }).centerRow,
+      aRow: (eq as unknown as { a?: { row?: number } }).a?.row,
+      bRow: (eq as unknown as { b?: { row?: number } }).b?.row,
+      torusRow: (eq as unknown as { torusRow?: number }).torusRow,
+      portNodeRow: (eq as unknown as { portNodeRow?: number }).portNodeRow,
+    })),
+    rowEquationsLen: rowEquations.length,
+    rbPresent: !!rb,
+    rbCenterLabel: rb?.centerLabel,
+    selSpherePoles: overlays?.selSpherePoles,
+    mountPresent: !!document.getElementById("rule-eq-mount"),
+    showBuilder,
+    showList,
+  });
 
   // Delete key: only when the panel-focused row is one of THIS center's rows and is
   // deactivated. Go re-guards regardless. Listens while the list is showing.
@@ -73,8 +99,14 @@ export function RuleEquationPanel() {
   );
 }
 
-/** Renders the in-progress equation-being-authored section (the selSpherePoles session). */
-function renderBuilder(rb: { centerLabel: string; pending: { code: number } | null; terms: RuleBuilderTerm[] }) {
+/** Renders the in-progress equation-being-authored section (the selSpherePoles session).
+ *  A `port ∈ torus` authoring capture (rb.pendingPort/rb.pendingTorus) is INDEPENDENT of
+ *  the node/node pending term above — if either side is picked, render the port∈torus
+ *  in-progress form instead of the node/node builder preview. */
+function renderBuilder(rb: RuleBuilderState) {
+  if (rb.pendingPort != null || rb.pendingTorus != null) {
+    return renderPortTorusBuilder(rb);
+  }
   // Left term = the first completed term, or (when none completed yet) the pending
   // half-term itself — "show the handhold being selected" before any node is picked.
   const leftTerm = rb.terms[0] ?? null;
@@ -100,6 +132,38 @@ function renderBuilder(rb: { centerLabel: string; pending: { code: number } | nu
             {renderTerm(rightTerm, pendingSlot === "right" ? rb.pending!.code : null)}
           </>
         )}
+      </div>
+      <button
+        className="rule-eq-clear"
+        disabled={!hasInProgress}
+        title="Clear the equation being built"
+        onClick={() => postGoRecord(encodeClearRule())}
+      >
+        Clear equation
+      </button>
+    </>
+  );
+}
+
+/** Renders the in-progress `port ∈ torus` authoring capture: whichever side has been
+ *  picked (port or torus) shows its label; the other side shows the same `_` placeholder
+ *  style as the node/node pending-term preview (renderTerm's awaiting slot). Mirrors
+ *  renderPortTorus's committed syntax so the preview reads identically once it commits. */
+function renderPortTorusBuilder(rb: RuleBuilderState) {
+  const portSide = rb.pendingPort ? (rb.pendingPort.isInput ? "in" : "out") : null;
+  const hasInProgress = rb.pendingPort != null || rb.pendingTorus != null;
+  return (
+    <>
+      <div className="rule-eq-center">Center: {rb.centerLabel || "—"}</div>
+      <div className="rule-eq-equation">
+        <span className="rule-eq-term rule-eq-term--pending">
+          (
+          <span className="rule-eq-node">{rb.pendingPort ? rb.pendingPort.nodeLabel : "_"}</span>
+          ,
+          <span className="rule-eq-angle">{rb.pendingPort ? `${portSide}:${rb.pendingPort.label}` : "_"}</span>
+          ) ∈ ◯
+          <span className="rule-eq-node">{rb.pendingTorus ? rb.pendingTorus.label : "_"}</span>
+        </span>
       </div>
       <button
         className="rule-eq-clear"

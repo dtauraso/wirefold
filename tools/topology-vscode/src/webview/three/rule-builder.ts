@@ -22,6 +22,9 @@ import {
   readRuleBuilderT1Row,
   readRuleBuilderT1Code,
   readRuleBuilderSelectedLockIndex,
+  readRuleBuilderPendingPortRow,
+  readRuleBuilderPendingPortIsInput,
+  readRuleBuilderPendingTorusRow,
   readPolarLockCenterRow,
   readPolarLockARow,
   readPolarLockACode,
@@ -56,6 +59,11 @@ export interface RuleBuilderState {
   centerLabel: string;
   pending: { code: number } | null;
   terms: RuleBuilderTerm[];
+  // In-progress `port ∈ torus` authoring capture (gesture.go hasPendingPort/
+  // hasPendingTorus), independent of pending/terms above — either or both may be set at
+  // once. null = that side not yet picked.
+  pendingPort: { row: number; label: string; nodeRow: number; nodeLabel: string; isInput: boolean } | null;
+  pendingTorus: { row: number; label: string } | null;
 }
 
 /** One COMMITTED polar-equation lock (locks.go md.polarEqs, streamed via the PolarLock
@@ -185,8 +193,11 @@ export function readRuleBuilder(): RuleBuilderState | null {
   const t0Code = readRuleBuilderT0Code(v);
   const t1Row = readRuleBuilderT1Row(v);
   const t1Code = readRuleBuilderT1Code(v);
+  const pendingPortRow = readRuleBuilderPendingPortRow(v);
+  const pendingPortIsInput = readRuleBuilderPendingPortIsInput(v);
+  const pendingTorusRow = readRuleBuilderPendingTorusRow(v);
 
-  const fingerprint = `${centerRow}|${pendingCode}|${termCount}|${t0Row}|${t0Code}|${t1Row}|${t1Code}`;
+  const fingerprint = `${centerRow}|${pendingCode}|${termCount}|${t0Row}|${t0Code}|${t1Row}|${t1Code}|${pendingPortRow}|${pendingPortIsInput}|${pendingTorusRow}`;
   if (fingerprint === cachedFingerprint) return cachedVal;
   cachedFingerprint = fingerprint;
 
@@ -200,7 +211,24 @@ export function readRuleBuilder(): RuleBuilderState | null {
     terms.push({ row: t1Row, label: nodeLabel(decoded, t1Row), code: t1Code });
   }
 
-  if (!hasCenter && !hasPending && terms.length === 0) {
+  const hasPendingPort = pendingPortRow !== ROW_NONE;
+  const hasPendingTorus = pendingTorusRow !== ROW_NONE;
+  let pendingPort: RuleBuilderState["pendingPort"] = null;
+  if (hasPendingPort) {
+    const portNodeRow = readPortNodeRow(decoded.portView, pendingPortRow);
+    pendingPort = {
+      row: pendingPortRow,
+      label: portName(decoded, pendingPortRow),
+      nodeRow: portNodeRow,
+      nodeLabel: nodeLabel(decoded, portNodeRow),
+      isInput: pendingPortIsInput === 1,
+    };
+  }
+  const pendingTorus: RuleBuilderState["pendingTorus"] = hasPendingTorus
+    ? { row: pendingTorusRow, label: nodeLabel(decoded, pendingTorusRow) }
+    : null;
+
+  if (!hasCenter && !hasPending && terms.length === 0 && !hasPendingPort && !hasPendingTorus) {
     cachedVal = null;
     return null;
   }
@@ -210,6 +238,8 @@ export function readRuleBuilder(): RuleBuilderState | null {
     centerLabel: hasCenter ? nodeLabel(decoded, centerRow) : "",
     pending: hasPending ? { code: pendingCode } : null,
     terms,
+    pendingPort,
+    pendingTorus,
   };
   return cachedVal;
 }

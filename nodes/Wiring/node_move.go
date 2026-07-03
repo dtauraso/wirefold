@@ -443,6 +443,13 @@ type MoveDispatch struct {
 	// KindSelect (Edge field) so the buffer snapshot marks the edge's Selected column.
 	// Exclusive with `selected`: selecting an edge clears the node selection and vice versa.
 	selectedEdge string
+	// ruleCenter is the STICKY rule-builder panel's Center node id, owned by Go. Unlike
+	// `selected` (the transient highlight, which clears on an empty-space click), ruleCenter
+	// persists across empty-space clicks — it only changes when a DIFFERENT node is selected.
+	// emitRuleBuilder streams this (not `selected`) as the RuleBuilder block's Center, so the
+	// equation panel stays on the last-selected node while the highlight ring clears. "" =
+	// nothing has ever been selected as a rule-builder center.
+	ruleCenter string
 	// directlyFadedNodes / directlyFadedEdges are the Go-owned fade SEED sets: the node ids
 	// and edge labels the user has DIRECTLY toggled faded (pressing "f" on a selection). Go
 	// owns fade because it owns topology + selection. ToggleFadeSelection flips the currently-
