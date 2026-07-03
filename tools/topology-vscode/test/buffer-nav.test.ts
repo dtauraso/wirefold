@@ -1,41 +1,49 @@
-// Unit tests for buffer-nav.ts — the id table + pure decodeNavNodes + content sphere.
+// Unit tests for buffer-nav.ts — the pure decodeNavNodes + content sphere.
 //
 // Builds raw snapshot ArrayBuffers matching the Go node-block layout and asserts:
-//   - the ordered id table records first-seen ids and ignores repeats
-//   - decodeNavNodes pairs buffer row i with id-table entry i (ordering guarantee)
+//   - decodeNavNodes maps buffer row i to NavNode i (identity is the row index)
+//   - the per-node label decodes from the buffer's trailing label section
 //   - sphereR==0 decodes to undefined (old-path "missing" semantics)
 //   - contentSphereFromCenters matches the geometry-helpers.contentSphere formula
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import * as THREE from "three";
 import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
-  recordNavNodeId, recordNavNodeLabel, clearNavNodeIds, getNavNodeIds,
-  getNavNodeLabel,
-  decodeNavNodes, contentSphereFromCenters, instanceIdToNodeId,
+  decodeNavNodes, contentSphereFromCenters,
 } from "../src/webview/three/buffer-nav";
 import {
   BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS,
-  NODE_COL_SPHERE_R, NODE_COL_SELECTED,
+  NODE_COL_SPHERE_R, NODE_COL_SELECTED, NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
 } from "../src/schema/buffer-layout";
 import { INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 
-// Build a snapshot with `nodeCount` node rows (no beads/edges). Returns a setter to
-// fill node fields by row.
-function makeNodeSnapshot(nodeCount: number): { buf: ArrayBuffer; setNode: (row: number, f: {
-  cx?: number; cy?: number; cz?: number; radius?: number; sphereR?: number; selected?: number;
-}) => void } {
+type NodeFields = {
+  cx?: number; cy?: number; cz?: number; radius?: number; sphereR?: number;
+  selected?: number; label?: string;
+};
+
+// Build a snapshot with `nodeCount` node rows (no beads/edges). Labels are concatenated into
+// the trailing label section and each node's LabelOff/LabelLen columns point into it.
+function makeNodeSnapshot(nodeCount: number, fields: NodeFields[]): ArrayBuffer {
   const nodeBytes = nodeCount * NODE_STRIDE;
   // Interior block (fixed INTERIOR_SLOTS_PER_NODE rows per node) sits between the node
   // and camera blocks; decodeSnapshot's length check requires it even when empty.
   const interiorBytes = nodeCount * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const enc = new TextEncoder();
+  const labelChunks = fields.map((f) => enc.encode(f.label ?? ""));
+  const labelBytesCount = labelChunks.reduce((n, c) => n + c.length, 0);
+  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
-  dv.setUint32(8, nodeCount, true); // nodeCount header field
+  dv.setUint32(8, nodeCount, true);       // nodeCount header field
+  dv.setUint32(20, labelBytesCount, true); // labelBytesCount header field
   const nodeOff = BUF_HEADER_SIZE;
-  const setNode = (row: number, f: { cx?: number; cy?: number; cz?: number; radius?: number; sphereR?: number; selected?: number }) => {
+  const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const labelView = new Uint8Array(buf, labelSecOff, labelBytesCount);
+  let labelCursor = 0;
+  fields.forEach((f, row) => {
     const base = nodeOff + row * NODE_STRIDE;
     if (f.cx !== undefined) dv.setFloat32(base + NODE_COL_CX, f.cx, true);
     if (f.cy !== undefined) dv.setFloat32(base + NODE_COL_CY, f.cy, true);
@@ -43,66 +51,27 @@ function makeNodeSnapshot(nodeCount: number): { buf: ArrayBuffer; setNode: (row:
     if (f.radius !== undefined) dv.setFloat32(base + NODE_COL_RADIUS, f.radius, true);
     if (f.sphereR !== undefined) dv.setFloat32(base + NODE_COL_SPHERE_R, f.sphereR, true);
     if (f.selected !== undefined) dv.setUint8(base + NODE_COL_SELECTED, f.selected);
-  };
-  return { buf, setNode };
+    const chunk = labelChunks[row]!;
+    dv.setUint32(base + NODE_COL_LABEL_OFF, labelCursor, true);
+    dv.setUint32(base + NODE_COL_LABEL_LEN, chunk.length, true);
+    labelView.set(chunk, labelCursor);
+    labelCursor += chunk.length;
+  });
+  return buf;
 }
 
-describe("buffer-nav id table", () => {
-  beforeEach(() => clearNavNodeIds());
-
-  it("records ids in first-seen order and ignores repeats", () => {
-    recordNavNodeId("a");
-    recordNavNodeId("b");
-    recordNavNodeId("a"); // repeat (node re-emit on move) → ignored
-    recordNavNodeId("c");
-    expect(getNavNodeIds()).toEqual(["a", "b", "c"]);
-  });
-
-  it("clearNavNodeIds resets the table", () => {
-    recordNavNodeId("x");
-    clearNavNodeIds();
-    expect(getNavNodeIds()).toEqual([]);
-  });
-});
-
-describe("node-label sidecar — label by id, row order preserved", () => {
-  // Kind is no longer carried on the sidecar — it rides the binary buffer as KindId (u8).
-  // See nodeRowColors.test.ts for the KindId→color mapping tests.
-  beforeEach(() => clearNavNodeIds());
-
-  it("records label, appending in first-seen order; repeat id updates label but not order", () => {
-    recordNavNodeLabel("a", "Alpha");
-    recordNavNodeLabel("b", "Beta");
-    recordNavNodeLabel("a", "Alpha2"); // repeat id → not reordered, label updated
-    expect(getNavNodeIds()).toEqual(["a", "b"]);
-    expect(getNavNodeLabel("a")).toBe("Alpha2");
-    expect(getNavNodeLabel("b")).toBe("Beta");
-  });
-
-  it("clearNavNodeIds clears the label map", () => {
-    recordNavNodeLabel("z", "Z");
-    clearNavNodeIds();
-    expect(getNavNodeLabel("z")).toBeUndefined();
-  });
-});
-
-describe("decodeNavNodes — row ↔ id pairing (ordering guarantee)", () => {
-  beforeEach(() => clearNavNodeIds());
-
-  it("pairs buffer node row i with id-table entry i", () => {
-    // Same first-seen order as the buffer rows below.
-    recordNavNodeId("n0");
-    recordNavNodeId("n1");
-
-    const { buf, setNode } = makeNodeSnapshot(2);
-    setNode(0, { cx: 1, cy: 2, cz: 3, radius: 10, sphereR: 40, selected: 0 });
-    setNode(1, { cx: -5, cy: 6, cz: 7, radius: 12, sphereR: 0, selected: 1 });
-
+describe("decodeNavNodes — row identity + buffer-sourced label", () => {
+  it("maps buffer node row i to NavNode i with its geometry, selection, and label", () => {
+    const buf = makeNodeSnapshot(2, [
+      { cx: 1, cy: 2, cz: 3, radius: 10, sphereR: 40, selected: 0, label: "Alpha" },
+      { cx: -5, cy: 6, cz: 7, radius: 12, sphereR: 0, selected: 1, label: "β-node" },
+    ]);
     const decoded = decodeSnapshot(buf)!;
-    const nav = decodeNavNodes(decoded, getNavNodeIds());
+    const nav = decodeNavNodes(decoded);
 
     expect(nav).toHaveLength(2);
-    expect(nav[0]!.id).toBe("n0");
+    expect(nav[0]!.row).toBe(0);
+    expect(nav[0]!.label).toBe("Alpha");
     expect(nav[0]!.center.x).toBeCloseTo(1, 5);
     expect(nav[0]!.center.y).toBeCloseTo(2, 5);
     expect(nav[0]!.center.z).toBeCloseTo(3, 5);
@@ -110,38 +79,18 @@ describe("decodeNavNodes — row ↔ id pairing (ordering guarantee)", () => {
     expect(nav[0]!.sphereR).toBeCloseTo(40, 5);
     expect(nav[0]!.selected).toBe(false);
 
-    expect(nav[1]!.id).toBe("n1");
+    expect(nav[1]!.row).toBe(1);
+    expect(nav[1]!.label).toBe("β-node"); // multi-byte rune round-trips
     expect(nav[1]!.selected).toBe(true);
     // sphereR 0 → undefined (old-path "missing" semantics)
     expect(nav[1]!.sphereR).toBeUndefined();
   });
 
-  it("falls back to a synthetic #i id when the id table is short", () => {
-    recordNavNodeId("only0");
-    const { buf, setNode } = makeNodeSnapshot(2);
-    setNode(0, { cx: 0, cy: 0, cz: 0, radius: 1 });
-    setNode(1, { cx: 0, cy: 0, cz: 0, radius: 1 });
+  it("decodes an empty label as the empty string", () => {
+    const buf = makeNodeSnapshot(1, [{ cx: 0, cy: 0, cz: 0, radius: 1, label: "" }]);
     const decoded = decodeSnapshot(buf)!;
-    const nav = decodeNavNodes(decoded, getNavNodeIds());
-    expect(nav[0]!.id).toBe("only0");
-    expect(nav[1]!.id).toBe("#1");
-  });
-});
-
-describe("instanceIdToNodeId — InstancedMesh instanceId ↔ node id", () => {
-  // This is the hit-testing fix: under the new system nodes are a buffer InstancedMesh
-  // with no per-node userData.nodeId, so RaycasterHelper resolves a node hit from the
-  // ray's instanceId via this mapping (instanceId == buffer node row == id-table index).
-  it("maps instanceId to the row-aligned node id", () => {
-    const ids = ["n0", "n1", "n2"];
-    expect(instanceIdToNodeId(0, ids)).toBe("n0");
-    expect(instanceIdToNodeId(1, ids)).toBe("n1");
-    expect(instanceIdToNodeId(2, ids)).toBe("n2");
-  });
-
-  it("returns null for an out-of-range instanceId (id table not yet populated)", () => {
-    expect(instanceIdToNodeId(3, ["n0", "n1", "n2"])).toBeNull();
-    expect(instanceIdToNodeId(0, [])).toBeNull();
+    const nav = decodeNavNodes(decoded);
+    expect(nav[0]!.label).toBe("");
   });
 });
 

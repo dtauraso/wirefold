@@ -19,6 +19,7 @@ import {
   NODE_COL_EV_RECV, NODE_COL_EV_FIRE, NODE_COL_EV_SEND, NODE_COL_EV_ARRIVE, NODE_COL_EV_DONE,
   NODE_COL_SELECTED,
   NODE_COL_KIND_ID,
+  NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
   NODE_STRIDE,
   NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
@@ -27,6 +28,7 @@ import {
   readNodeEvRecv, readNodeEvFire, readNodeEvSend, readNodeEvArrive, readNodeEvDone,
   readNodeSelected,
   readNodeKindId,
+  readNodeLabelOff, readNodeLabelLen,
   // Interior
   INTERIOR_COL_PRESENT, INTERIOR_COL_VALUE, INTERIOR_COL_OX, INTERIOR_COL_OY, INTERIOR_COL_OZ,
   INTERIOR_STRIDE,
@@ -117,9 +119,10 @@ describe("buffer-layout — Bead block", () => {
 
 describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
-    // 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindId)
-    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 = 68
-    expect(NODE_STRIDE).toBe(68);
+    // 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected)
+    //   + 1×u8 (kindId) + 2×u32 (label off/len)
+    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 + 8 = 76
+    expect(NODE_STRIDE).toBe(76);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -149,6 +152,8 @@ describe("buffer-layout — Node block", () => {
     dv.setUint8(NODE_COL_EV_DONE, 1);
     dv.setUint8(NODE_COL_SELECTED, 1);
     dv.setUint8(NODE_COL_KIND_ID, 5); // Pulse = index 5
+    dv.setUint32(NODE_COL_LABEL_OFF, 7, true);
+    dv.setUint32(NODE_COL_LABEL_LEN, 4, true);
 
     expectF32(readNodeCX(dv, 0), 1.0);
     expectF32(readNodeCY(dv, 0), 2.0);
@@ -173,6 +178,8 @@ describe("buffer-layout — Node block", () => {
     expect(readNodeEvDone(dv, 0)).toBe(1);
     expect(readNodeSelected(dv, 0)).toBe(1);
     expect(readNodeKindId(dv, 0)).toBe(5);
+    expect(readNodeLabelOff(dv, 0)).toBe(7);
+    expect(readNodeLabelLen(dv, 0)).toBe(4);
   });
 });
 
@@ -326,11 +333,11 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 9", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(9);
+  it("schema version is 10", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(10);
   });
 
-  it("header size is 20 bytes (5×u32)", () => {
-    expect(BUF_HEADER_SIZE).toBe(20);
+  it("header size is 24 bytes (6×u32)", () => {
+    expect(BUF_HEADER_SIZE).toBe(24);
   });
 });

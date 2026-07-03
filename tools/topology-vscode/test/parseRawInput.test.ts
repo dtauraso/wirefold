@@ -22,7 +22,7 @@ function rawInput(hit: Record<string, unknown>) {
   };
 }
 
-const baseHit = { id: "", isInput: false, portRow: -1, edgeRow: -1, x: 0, y: 0, z: 0 };
+const baseHit = { isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, x: 0, y: 0, z: 0 };
 
 describe("parseRawInput hit kinds", () => {
   for (const kind of ["port", "handhold", "node", "edge", "empty"]) {

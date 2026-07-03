@@ -5,11 +5,12 @@
 // via the buffer-layout.ts read helpers.
 
 import { describe, it, expect } from "vitest";
-import { decodeSnapshot, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
+import { decodeSnapshot, nodeLabel, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 import {
   BUF_HEADER_SIZE,
   BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   PORT_COL_NODE_ROW, PORT_COL_DX, PORT_COL_DY, PORT_COL_DZ, PORT_COL_IS_INPUT,
+  NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
   readBeadX, readBeadY, readBeadZ, readBeadFrac, readBeadLive, readBeadBeadID,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
@@ -314,6 +315,50 @@ describe("decodeSnapshot — port block", () => {
     expect(d.portCount).toBe(2);
     expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
     expectF32(d.cameraView.getFloat32(0, true), 123.5);
+  });
+});
+
+describe("decodeSnapshot — label section", () => {
+  it("decodes the labelBytesCount header field and slices each node's label", () => {
+    // 2 nodes with labels "alpha" and "β-node" (β is 2 UTF-8 bytes → 7-byte label).
+    const enc = new TextEncoder();
+    const labels = [enc.encode("alpha"), enc.encode("β-node")];
+    const labelBytesCount = labels[0]!.length + labels[1]!.length; // 5 + 7 = 12
+    const nodeBytes = 2 * NODE_STRIDE;
+    const interiorBytes = 2 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
+    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount;
+    const buf = new ArrayBuffer(total);
+    const dv = new DataView(buf);
+    dv.setUint32(8, 2, true);                // nodeCount
+    dv.setUint32(20, labelBytesCount, true); // labelBytesCount
+    const nodeOff = BUF_HEADER_SIZE;
+    const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+    const labelView = new Uint8Array(buf, labelSecOff, labelBytesCount);
+    let cursor = 0;
+    labels.forEach((chunk, row) => {
+      const base = nodeOff + row * NODE_STRIDE;
+      dv.setUint32(base + NODE_COL_LABEL_OFF, cursor, true);
+      dv.setUint32(base + NODE_COL_LABEL_LEN, chunk.length, true);
+      labelView.set(chunk, cursor);
+      cursor += chunk.length;
+    });
+
+    const d = decodeSnapshot(buf)!;
+    expect(d.labelBytesCount).toBe(12);
+    expect(d.labelBytes.byteLength).toBe(12);
+    expect(nodeLabel(d, 0)).toBe("alpha");
+    expect(nodeLabel(d, 1)).toBe("β-node");
+  });
+
+  it("decodes an unset label (len 0) as the empty string", () => {
+    const nodeBytes = 1 * NODE_STRIDE;
+    const interiorBytes = 1 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
+    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+    const buf = new ArrayBuffer(total);
+    new DataView(buf).setUint32(8, 1, true); // nodeCount=1, labelBytesCount=0
+    const d = decodeSnapshot(buf)!;
+    expect(d.labelBytesCount).toBe(0);
+    expect(nodeLabel(d, 0)).toBe("");
   });
 });
 
