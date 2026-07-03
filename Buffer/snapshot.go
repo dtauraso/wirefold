@@ -11,14 +11,15 @@
 //
 // Snapshot layout (little-endian, packed):
 //
-//	Header   20 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32]
+//	Header   24 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32]
 //	Bead     beadCount × BufBeadStride bytes
-//	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags)
+//	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags + label off/len)
 //	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
 //	Edge     edgeCount × BufEdgeStride bytes
 //	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
+//	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //
 // At the rollout flip (a later phase), this becomes the sole framed stdout once
 // the JSON trace is removed. For now it runs alongside JSON on a side channel.
@@ -91,6 +92,14 @@ type SnapshotState struct {
 	// no lock. This is the edge analogue of portTable: a numeric edge-row hit resolves to
 	// its edge label so the gesture FSM can mark the Go-owned edge selection.
 	edgeTable atomic.Pointer[[]string]
+
+	// nodeTable publishes the current node-row table (the node ids in the SAME stable row
+	// order as the Node block) as an immutable slice. Rebuilt whenever a new node registers
+	// (onNodeGeometry) on the Trace-drain goroutine and read via LookupNodeRow from the
+	// gesture goroutine — the atomic pointer hands off an immutable snapshot with no lock.
+	// This is the node analogue of portTable/edgeTable: a numeric node-row hit resolves to
+	// its node id so the gesture FSM can drag/select the Go-owned node.
+	nodeTable atomic.Pointer[[]string]
 }
 
 type beadSnapKey struct {
@@ -116,11 +125,15 @@ type nodeSnapState struct {
 	torusRed      uint8
 	missVal       int32
 	mx, my, mz    float64
-	evRecv        uint8
-	evFire        uint8
-	evSend        uint8
-	evArrive      uint8
-	evDone        uint8
+	// label is the node's human label (from the node-geometry event's Label; data.label
+	// else the id). Streamed as UTF-8 bytes in the snapshot's trailing label section, keyed
+	// by this node's LabelOff/LabelLen columns — no sidecar.
+	label    string
+	evRecv   uint8
+	evFire   uint8
+	evSend   uint8
+	evArrive uint8
+	evDone   uint8
 	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
 	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
 	selected uint8
@@ -391,6 +404,29 @@ func (s *SnapshotState) LookupPortRow(row int) (node, port string, isInput, ok b
 	return e.Node, e.Port, e.IsInput, true
 }
 
+// rebuildNodeTable rebuilds and atomically publishes the node-row table — the node ids in
+// the SAME stable row order buildSnapshot writes the Node block (node id insertion order).
+// Called from the Trace-drain goroutine whenever a new node registers. The published slice
+// is immutable — LookupNodeRow reads it lock-free from the gesture goroutine.
+func (s *SnapshotState) rebuildNodeTable() {
+	tbl := make([]string, len(s.nodeIDs))
+	copy(tbl, s.nodeIDs)
+	s.nodeTable.Store(&tbl)
+}
+
+// LookupNodeRow resolves a numeric buffer NODE-ROW index to its node id via the published
+// node-row table. ok=false for an out-of-range row or before any node registers. This is the
+// node analogue of LookupPortRow/LookupEdgeRow: a numeric node-row hit (the node
+// InstancedMesh instanceId == its buffer node row) resolves back to the node id here in Go,
+// so the numeric buffer carries no node id strings and the webview forwards only the row.
+func (s *SnapshotState) LookupNodeRow(row int) (nodeID string, ok bool) {
+	tbl := s.nodeTable.Load()
+	if tbl == nil || row < 0 || row >= len(*tbl) {
+		return "", false
+	}
+	return (*tbl)[row], true
+}
+
 // --- internal helpers --------------------------------------------------------
 
 func (s *SnapshotState) onNodeGeometry(ev T.Event) {
@@ -399,6 +435,9 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 		s.nodeIndex[id] = len(s.nodeIDs)
 		s.nodeIDs = append(s.nodeIDs, id)
 		s.nodes = append(s.nodes, nodeSnapState{kindID: NodeKindID(ev.NodeKind)})
+		// A new node row exists: republish the node-row table (same stable row order as the
+		// Node block) so a numeric node-row hit resolves to its node id.
+		s.rebuildNodeTable()
 	}
 	idx := s.nodeIndex[id]
 	n := &s.nodes[idx]
@@ -407,6 +446,9 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	n.sphereR = ev.SphereR
 	n.vrx, n.vry, n.vrz = ev.VRX, ev.VRY, ev.VRZ
 	n.frx, n.fry, n.frz = ev.FRX, ev.FRY, ev.FRZ
+	// Label: the node's human label (stable per run; re-set on each re-emit is harmless).
+	// Streamed as bytes in the snapshot label section, keyed by this row's LabelOff/LabelLen.
+	n.label = ev.Label
 	// Port geometry: replace this node's ports with the event's current port set/dirs
 	// (re-emit on move updates the dirs; the port set/order is stable). Kept in the
 	// event's Ports order so the buffer Port block and the Go-side port-row table stay
@@ -625,6 +667,20 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		portCount += len(s.nodes[i].ports)
 	}
 
+	// Label section is self-sizing (like the Port block): concatenate every node's label
+	// UTF-8 bytes in node-row order; each node's LabelOff/LabelLen columns slice into it.
+	// labelBytes is the trailing section; labelOffs/labelLens are the per-row columns.
+	labelBytes := make([]byte, 0, int(nodeCount)*8)
+	labelOffs := make([]uint32, nodeCount)
+	labelLens := make([]uint32, nodeCount)
+	for i := range s.nodes {
+		labelOffs[i] = uint32(len(labelBytes))
+		lb := []byte(s.nodes[i].label)
+		labelLens[i] = uint32(len(lb))
+		labelBytes = append(labelBytes, lb...)
+	}
+	labelBytesCount := len(labelBytes)
+
 	size := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
@@ -632,11 +688,12 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		int(edgeCount)*BufEdgeStride +
 		portCount*BufPortStride +
 		BufCameraStride +
-		BufOverlayStride
+		BufOverlayStride +
+		labelBytesCount
 
 	buf := make([]byte, size)
 
-	// Header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32]
+	// Header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32]
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
 	off += 4
@@ -647,6 +704,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	binary.LittleEndian.PutUint32(buf[off:], edgeCount)
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], uint32(portCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(labelBytesCount))
 	off += 4
 	s.tick++
 
@@ -672,7 +731,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.torusRed, n.missVal,
 			float32(n.mx), float32(n.my), float32(n.mz),
-			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID)
+			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
+			labelOffs[i], labelLens[i])
 	}
 	off += int(nodeCount) * BufNodeStride
 
@@ -733,6 +793,12 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal, ov.badgesGlobal,
 		ov.overlaysVis, ov.doubleLinks, ov.selMode)
+	off += BufOverlayStride
+
+	// Label bytes section (self-sizing via header labelBytesCount): every node's label
+	// UTF-8 bytes concatenated in node-row order. Each node's LabelOff/LabelLen columns
+	// slice into this section; the numeric node row carries its human label with no sidecar.
+	copy(buf[off:off+labelBytesCount], labelBytes)
 
 	return buf
 }

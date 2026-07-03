@@ -2244,8 +2244,8 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "const BufLayoutVersionGenerated = %d\n", schema.version)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `// BufHeaderSize is the byte width of the snapshot header:`)
-	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32]`)
-	fmt.Fprintln(w, `const BufHeaderSize = 20`)
+	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32]`)
+	fmt.Fprintln(w, `const BufHeaderSize = 24`)
 
 	for _, blk := range schema.blocks {
 		fmt.Fprintln(w)
@@ -2331,8 +2331,8 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "/** Schema version — must match BufLayoutVersion in Buffer/layout.go. */\n")
 	fmt.Fprintf(w, "export const BUF_LAYOUT_VERSION = %d;\n", schema.version)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32] */`)
-	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 20;`)
+	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32] */`)
+	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 24;`)
 
 	for _, blk := range schema.blocks {
 		fmt.Fprintln(w)

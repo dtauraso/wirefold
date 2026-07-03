@@ -121,6 +121,11 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride +
 		BufOverlayStride
+	// No ports and no labels were injected in this fixture, so the Port and Label sections
+	// are zero-length; the header labelBytesCount reflects that.
+	if got := readU32(snap, 20); got != 0 {
+		t.Errorf("labelBytesCount: got %d, want 0 (no labels in fixture)", got)
+	}
 	if len(snap) != wantSize {
 		t.Errorf("snapshot size: got %d, want %d", len(snap), wantSize)
 	}
@@ -721,5 +726,61 @@ func TestNodeKindIDRoundTrip(t *testing.T) {
 	}
 	if n1KindId != 5 {
 		t.Errorf("n1 KindId = %d, want 5 (Pulse)", n1KindId)
+	}
+}
+
+// TestSnapshotNodeLabels verifies each node's label UTF-8 bytes are written into the
+// trailing label section and its LabelOff/LabelLen columns slice back to the exact string.
+func TestSnapshotNodeLabels(t *testing.T) {
+	s := NewSnapshotState(nil)
+	nodeGeom := func(id, label string) T.Event {
+		return T.Event{
+			Kind: T.KindNodeGeometry, Node: id, Label: label,
+			NX: 0, NY: 0, NZ: 0, Radius: 10, SphereR: 10,
+		}
+	}
+	// Distinct labels incl. a multi-byte rune to prove byte-length (not rune-count) sizing.
+	s.Update(nodeGeom("n0", "alpha"))
+	s.Update(nodeGeom("n1", "β-node")) // β is 2 UTF-8 bytes
+	s.Update(nodeGeom("n2", ""))       // empty label → len 0
+
+	snap := s.BuildSnapshot()
+
+	nodeCount := int(readU32(snap, 8))
+	if nodeCount != 3 {
+		t.Fatalf("nodeCount: got %d, want 3", nodeCount)
+	}
+	labelBytesCount := int(readU32(snap, 20))
+
+	// Label section sits after every other block. Recompute its start the same way the
+	// decoder does: header + bead + node + interior + edge + port + camera + overlay.
+	beadCount := int(readU32(snap, 4))
+	edgeCount := int(readU32(snap, 12))
+	portCount := int(readU32(snap, 16))
+	labelSecOff := BufHeaderSize +
+		beadCount*BufBeadStride +
+		nodeCount*BufNodeStride +
+		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
+		edgeCount*BufEdgeStride +
+		portCount*BufPortStride +
+		BufCameraStride +
+		BufOverlayStride
+	if labelSecOff+labelBytesCount != len(snap) {
+		t.Fatalf("label section end %d != snapshot len %d", labelSecOff+labelBytesCount, len(snap))
+	}
+
+	nodeOff := BufHeaderSize + beadCount*BufBeadStride
+	want := []string{"alpha", "β-node", ""}
+	for i := 0; i < nodeCount; i++ {
+		off := int(readU32(snap, nodeOff+i*BufNodeStride+BufNodeColLabelOff))
+		ln := int(readU32(snap, nodeOff+i*BufNodeStride+BufNodeColLabelLen))
+		got := string(snap[labelSecOff+off : labelSecOff+off+ln])
+		if got != want[i] {
+			t.Errorf("node %d label: got %q, want %q", i, got, want[i])
+		}
+	}
+	// β is 2 bytes: "β-node" = 2+1+4 = 7 bytes; total = 5 + 7 + 0 = 12.
+	if labelBytesCount != 12 {
+		t.Errorf("labelBytesCount: got %d, want 12", labelBytesCount)
 	}
 }
