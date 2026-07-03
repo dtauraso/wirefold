@@ -184,3 +184,76 @@ func TestFadePersistPreservesCameraPolar(t *testing.T) {
 		t.Fatalf("fade seeds=%v/%v want [n1]/[e0]", nodes, edges)
 	}
 }
+
+// TestPersistOverlaysRoundTrips: toggle an overlay flag → debounced flush → scene.json carries
+// the (inverted) key; a fresh MoveDispatch.SeedOverlays reads it back into md.ov.
+func TestPersistOverlaysRoundTrips(t *testing.T) {
+	root := writeTree(t)
+	md := loadTreeMD(t, root)
+	md.EnableEditPersist(root)
+
+	// Flip a visible-sense flag off (tori) and the hidden-sense flag on (labelsGlobal off).
+	md.ToggleSceneTori(nil)      // sceneToriVisible: true -> false
+	md.ToggleLabelsGlobal(nil)   // labelsGlobalVisible: true -> false
+	md.overlaysPersist.schedule(md.ov)
+	md.overlaysPersist.flush()
+
+	ov, found := loadSceneOverlays(root)
+	if !found {
+		t.Fatalf("loadSceneOverlays found no overlay keys after flush")
+	}
+	if ov.sceneToriVisible {
+		t.Fatalf("sceneToriVisible not persisted as hidden")
+	}
+	if ov.labelsGlobalVisible {
+		t.Fatalf("labelsGlobalVisible not persisted as hidden")
+	}
+	// Untouched flag keeps its default (visible).
+	if !ov.handholdsVisible {
+		t.Fatalf("handholdsVisible should default visible, got hidden")
+	}
+
+	// Seed a fresh dispatch from disk and confirm md.ov is restored.
+	fresh := &MoveDispatch{ov: defaultOverlayState()}
+	fresh.SeedOverlays(root, nil)
+	if fresh.ov.sceneToriVisible {
+		t.Fatalf("SeedOverlays did not restore sceneToriVisible=false")
+	}
+	if fresh.ov.labelsGlobalVisible {
+		t.Fatalf("SeedOverlays did not restore labelsGlobalVisible=false")
+	}
+}
+
+// TestOverlaysPersistPreservesCameraAndFade: camera + fade + overlays all coexist in
+// scene.json — the three scene.json writers must not clobber each other (sceneFileMu).
+func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
+	root := writeTree(t)
+	md := loadTreeMD(t, root)
+	md.EnableViewpointPersist(root)
+	md.SetViewpoint(vec3{X: 1, Y: 2, Z: 3}, 200, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
+	md.EmitViewpoint(nil)
+	md.vpPersist.flush()
+
+	md.EnableEditPersist(root)
+	md.fadePersist.schedule([]string{"src"}, []string{"e0"})
+	md.fadePersist.flush()
+
+	md.ToggleSceneTori(nil)
+	md.overlaysPersist.schedule(md.ov)
+	md.overlaysPersist.flush()
+
+	// Camera survives.
+	if _, _, _, _, ok := loadSceneViewpoint(root); !ok {
+		t.Fatalf("cameraPolar clobbered by overlay write")
+	}
+	// Fade survives.
+	nodes, edges := loadSceneFade(root)
+	if len(nodes) != 1 || nodes[0] != "src" || len(edges) != 1 || edges[0] != "e0" {
+		t.Fatalf("fade seeds clobbered: %v/%v", nodes, edges)
+	}
+	// Overlay landed.
+	ov, found := loadSceneOverlays(root)
+	if !found || ov.sceneToriVisible {
+		t.Fatalf("overlay not persisted alongside camera+fade (found=%v ov=%+v)", found, ov)
+	}
+}

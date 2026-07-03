@@ -90,6 +90,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Restore persisted fade: seed the FSM's directly-faded sets from scene.json and emit
 	// them so the buffer snapshot rebuilds the fade fixpoint from the first frame.
 	md.SeedFade(topologyPath, tr)
+	// Restore persisted overlay visibility: seed md.ov from scene.json and emit each flag so
+	// the buffer streams the saved overlay state from the first frame. Seed BEFORE
+	// EnableEditPersist so the seed's own emit does not write the loaded state back.
+	md.SeedOverlays(topologyPath, tr)
 	// Arm the WRITE side AFTER the seeds: from here, every gesture that changes the FSM
 	// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
 	// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
