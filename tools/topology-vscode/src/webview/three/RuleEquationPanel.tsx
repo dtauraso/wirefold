@@ -6,9 +6,10 @@
 
 import { createPortal } from "react-dom";
 import { useOverlayFlags } from "./overlay-flags";
-import { useRuleBuilder, type RuleBuilderTerm } from "./rule-builder";
+import { useRuleBuilder, usePolarLocks, useSelectedNodeRow, type RuleBuilderTerm, type PolarLockEntry } from "./rule-builder";
 import { postGoRecord } from "../vscode-api";
-import { encodeClearRule } from "../../schema/input-layout";
+import { encodeClearRule, encodeLockToggleActive, encodeLockSelect, encodeDeleteSelectedLock } from "../../schema/input-layout";
+import { useEffect } from "react";
 
 /** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=+θ,
  *  1=+φ, 2=−θ, 3=−φ, 4=r — r is unsigned). */
@@ -21,11 +22,49 @@ function angleChip(code: number): string {
 export function RuleEquationPanel() {
   const overlays = useOverlayFlags();
   const rb = useRuleBuilder();
+  const { equations, selectedLockIndex } = usePolarLocks();
+  const selectedRow = useSelectedNodeRow();
   const mount = document.getElementById("rule-eq-mount");
-  if (!mount) return null;
-  if (!overlays?.selSpherePoles) return null;
-  if (!rb) return null;
 
+  // The committed-equations LIST is independent of the selSpherePoles overlay: it shows
+  // whenever the selected node is the Center of >=1 committed equation. The in-progress
+  // builder section stays gated on the overlay, as before.
+  const rowEquations = equations.filter((eq) => eq.centerRow === selectedRow);
+  const showBuilder = !!overlays?.selSpherePoles && !!rb;
+  const showList = rowEquations.length > 0;
+
+  // Delete key: only when the panel-focused row is one of THIS center's rows and is
+  // deactivated. Go re-guards regardless. Listens while the list is showing.
+  useEffect(() => {
+    if (!showList) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const focused = rowEquations.find((eq) => eq.index === selectedLockIndex);
+      if (!focused || focused.active) return;
+      postGoRecord(encodeDeleteSelectedLock());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showList, rowEquations, selectedLockIndex]);
+
+  if (!mount) return null;
+  if (!showBuilder && !showList) return null;
+
+  return createPortal(
+    <div className="rule-eq-panel">
+      {showBuilder && rb && renderBuilder(rb)}
+      {showList && (
+        <div className="rule-eq-list">
+          {rowEquations.map((eq) => renderLockRow(eq, eq.index === selectedLockIndex))}
+        </div>
+      )}
+    </div>,
+    mount,
+  );
+}
+
+/** Renders the in-progress equation-being-authored section (the selSpherePoles session). */
+function renderBuilder(rb: { centerLabel: string; pending: { code: number } | null; terms: RuleBuilderTerm[] }) {
   // Left term = the first completed term, or (when none completed yet) the pending
   // half-term itself — "show the handhold being selected" before any node is picked.
   const leftTerm = rb.terms[0] ?? null;
@@ -40,8 +79,8 @@ export function RuleEquationPanel() {
   // sends the bare clear command (fire-and-forget).
   const hasInProgress = rb.pending != null || rb.terms.length > 0;
 
-  return createPortal(
-    <div className="rule-eq-panel">
+  return (
+    <>
       <div className="rule-eq-center">Center: {rb.centerLabel || "—"}</div>
       <div className="rule-eq-equation">
         {renderTerm(leftTerm, pendingSlot === "left" ? rb.pending!.code : null)}
@@ -60,8 +99,35 @@ export function RuleEquationPanel() {
       >
         Clear equation
       </button>
-    </div>,
-    mount,
+    </>
+  );
+}
+
+/** Renders one committed polar-equation lock row: activate/deactivate checkbox + the
+ *  symbolic equation. Clicking the row (not the checkbox) focuses it (edit-update
+ *  lock/selected); the checkbox toggles active (edit-update lock/active). */
+function renderLockRow(eq: PolarLockEntry, selected: boolean) {
+  const cls = ["rule-eq-row", selected ? "rule-eq-row--selected" : "", eq.active ? "" : "rule-eq-row--inactive"]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div
+      key={eq.index}
+      className={cls}
+      onClick={() => postGoRecord(encodeLockSelect(eq.index))}
+    >
+      <input
+        type="checkbox"
+        checked={eq.active}
+        onClick={(e) => e.stopPropagation()}
+        onChange={() => postGoRecord(encodeLockToggleActive(eq.index))}
+      />
+      <span className="rule-eq-equation">
+        {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
+        <span className="rule-eq-op"> = </span>
+        {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
+      </span>
+    </div>
   );
 }
 

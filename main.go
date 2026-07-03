@@ -103,9 +103,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// the buffer streams the saved overlay state from the first frame. Seed BEFORE
 	// EnableEditPersist so the seed's own emit does not write the loaded state back.
 	md.LoadOverlays(topologyPath, tr)
-	// Restore persisted polar rule-builder equations (locks.go) from scene.json's
-	// "polarLocks" key, so authored rules survive a reload.
-	md.LoadPolarEqs(topologyPath)
 	// Arm the WRITE side AFTER the seeds: from here, every gesture that changes the FSM
 	// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
 	// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
@@ -139,6 +136,18 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 			node.Update(ctx)
 		}()
 	}
+
+	// Restore persisted polar rule-builder equations (locks.go) from scene.json's
+	// "polarLocks" key, so authored rules survive a reload. Loaded AFTER the node
+	// goroutines start (each node's own goroutine emits its NodeGeometry on startup —
+	// gatecommon.RunGate et al) so the KindPolarLocks emit's node-row resolution
+	// (buildSnapshot's nodeRowIndex lookups) has real geometry to resolve against.
+	// Bounded poll (not a fixed sleep) on the atomically-published node-row table —
+	// concurrency-safe (NodeRowCount), gives up after 500ms so a load never hangs.
+	for i := 0; i < 500 && snapState.NodeRowCount() < len(nodes); i++ {
+		time.Sleep(time.Millisecond)
+	}
+	md.LoadPolarEqs(topologyPath)
 
 	// Wait for all nodes to exit, but never block forever: in a timed/cancelled
 	// run (e.g. -duration, or SIGINT) some nodes may be parked on paced-wire

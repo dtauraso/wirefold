@@ -61,6 +61,28 @@ func TestDecodeEditUpdateOverlaysToggle(t *testing.T) {
 	}
 }
 
+func TestDecodeClearRuleAndDeleteSelectedLock(t *testing.T) {
+	msg, ok := decodeInputRecord(encodeControl(inKindClearRule))
+	if !ok || msg.Type != "clear-rule" {
+		t.Fatalf("clear-rule decode = %+v ok=%v", msg, ok)
+	}
+	msg, ok = decodeInputRecord(encodeControl(inKindDeleteSelectedLock))
+	if !ok || msg.Type != "delete-selected-lock" {
+		t.Fatalf("delete-selected-lock decode = %+v ok=%v", msg, ok)
+	}
+}
+
+func TestDecodeEditUpdateLock(t *testing.T) {
+	msg, ok := decodeInputRecord(encodeLockUpdate(inLockAttrActive, 3))
+	if !ok || msg.Type != "edit" || msg.Op != "update" || msg.Kind != "lock" || msg.Attr != "active" || msg.Index != 3 {
+		t.Fatalf("lock active decode = %+v ok=%v", msg, ok)
+	}
+	msg, ok = decodeInputRecord(encodeLockUpdate(inLockAttrSelected, 7))
+	if !ok || msg.Kind != "lock" || msg.Attr != "selected" || msg.Index != 7 {
+		t.Fatalf("lock selected decode = %+v ok=%v", msg, ok)
+	}
+}
+
 // TestOverlayFlagOrderMatchesFingerprint guards that the derived flag order equals the
 // fingerprint's overlayFlags list (self-check on parseOverlayFlags).
 func TestOverlayFlagOrderMatchesFingerprint(t *testing.T) {

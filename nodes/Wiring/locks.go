@@ -1,5 +1,7 @@
 package Wiring
 
+import T "github.com/dtauraso/wirefold/Trace"
+
 // locks.go — the polar-equation lock engine. A lock is an EQUATION between two terms,
 // each a (node, component, sign) about a shared Center: `signA·compA(A) = signB·compB(B)`,
 // with the component being θ or φ of the node's polar coordinate on the Center's surface
@@ -36,6 +38,7 @@ type polarEq struct {
 	Center string
 	A      polarTerm
 	B      polarTerm
+	Active bool
 }
 
 // compOf reads a polar's θ, φ, or r.
@@ -71,6 +74,9 @@ func setCompOf(p *polar, c polarComp, v float64) {
 func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
 	out := map[string]vec3{}
 	for _, eq := range md.polarEqs {
+		if !eq.Active {
+			continue
+		}
 		var moved, other polarTerm
 		switch movedID {
 		case eq.A.Node:
@@ -106,4 +112,69 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 		out[other.Node] = polar2cart(np).add(c)
 	}
 	return out
+}
+
+// emitPolarLocks emits the FULL committed polar-equation lock list (KindPolarLocks). Call
+// from every mutation point: rule completion (gesture.go), ToggleLockActive, SelectLock,
+// DeleteSelectedLock, and LoadPolarEqs. No-op when tr is nil (headless tests).
+func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
+	if tr == nil {
+		return
+	}
+	locks := make([]T.PolarLockPayload, len(md.polarEqs))
+	for i, eq := range md.polarEqs {
+		locks[i] = T.PolarLockPayload{
+			Center: eq.Center,
+			ANode:  eq.A.Node,
+			ACode:  ruleTermCode(eq.A.Comp, eq.A.Sign),
+			BNode:  eq.B.Node,
+			BCode:  ruleTermCode(eq.B.Comp, eq.B.Sign),
+			Active: eq.Active,
+		}
+	}
+	tr.PolarLocks(locks, md.selectedLockIndex)
+}
+
+// SelectLock focuses md.polarEqs[i] as the panel's clicked row (selectedLockIndex). Out-of-
+// range i clears the focus (-1). Re-emits the committed list so the panel highlight follows.
+func (md *MoveDispatch) SelectLock(i int, tr *T.Trace) {
+	if i < 0 || i >= len(md.polarEqs) {
+		md.selectedLockIndex = -1
+	} else {
+		md.selectedLockIndex = i
+	}
+	md.emitPolarLocks(tr)
+}
+
+// ToggleLockActive flips md.polarEqs[i].Active (activate/deactivate). Out-of-range i is a
+// no-op. Re-emits the committed list and schedules persistence.
+func (md *MoveDispatch) ToggleLockActive(i int, tr *T.Trace) {
+	if i < 0 || i >= len(md.polarEqs) {
+		return
+	}
+	md.polarEqs[i].Active = !md.polarEqs[i].Active
+	md.emitPolarLocks(tr)
+	if md.locksPersist != nil {
+		md.locksPersist.schedule(md.polarEqs)
+	}
+}
+
+// DeleteSelectedLock deletes md.polarEqs[selectedLockIndex], but ONLY when that equation
+// exists AND is deactivated (!Active) — an active equation must be deactivated first. No-op
+// otherwise. Fixes up selectedLockIndex, re-emits the committed list, and schedules
+// persistence.
+func (md *MoveDispatch) DeleteSelectedLock(tr *T.Trace) {
+	i := md.selectedLockIndex
+	if i < 0 || i >= len(md.polarEqs) {
+		return
+	}
+	if md.polarEqs[i].Active {
+		return
+	}
+	md.polarEqs = append(md.polarEqs[:i], md.polarEqs[i+1:]...)
+	md.selectedLockIndex = -1
+	md.emitPolarLocks(tr)
+	if md.locksPersist != nil {
+		md.locksPersist.schedule(md.polarEqs)
+	}
 }

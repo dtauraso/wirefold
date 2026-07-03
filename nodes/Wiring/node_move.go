@@ -397,6 +397,11 @@ type MoveDispatch struct {
 	links []movementLink
 	// polarEqs are the polar-equation locks riding on the link graph (locks.go).
 	polarEqs []polarEq
+	// selectedLockIndex is the md.polarEqs index of the committed equation the user has
+	// clicked in the rule-panel's list (locks.go SelectLock), or -1 = none focused. Reset
+	// to -1 when it goes out of range (e.g. after DeleteSelectedLock) or on a selection
+	// change to a different node. Go-owned; streamed via KindPolarLocks.
+	selectedLockIndex int
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
@@ -524,6 +529,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		ov:                 defaultOverlayState(),
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
+		selectedLockIndex:  -1,
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)

@@ -504,7 +504,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		}
 		g.ruleTerms = append(g.ruleTerms, polarTerm{Node: node, Comp: g.pendingComp, Sign: g.pendingSign})
 		if len(g.ruleTerms) == 2 && md.selected != "" {
-			eq := polarEq{Center: md.selected, A: g.ruleTerms[0], B: g.ruleTerms[1]}
+			eq := polarEq{Center: md.selected, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
 			md.polarEqs = append(md.polarEqs, eq)
 			if tr != nil {
 				tr.Breadcrumb("polar-rule-added", md.selected, node, "")
@@ -515,6 +515,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 			g.ruleTerms = nil
 		}
 		md.emitRuleBuilder(tr)
+		md.emitPolarLocks(tr)
 		return true
 	default:
 		return false

@@ -522,6 +522,7 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 		Center: "Center1",
 		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
 		B:      polarTerm{Node: "B", Comp: compTheta, Sign: -1},
+		Active: true,
 	}
 	if eq != want {
 		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)

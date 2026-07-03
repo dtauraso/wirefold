@@ -145,13 +145,18 @@ const (
 	// 0..2 completed terms accumulated so far (mirrors gesture.go's ruleTerms). Full-mirror
 	// pattern (like KindFade) — no incremental diffing.
 	KindRuleBuilder = "rule-builder"
+	// KindPolarLocks carries the FULL committed polar-equation lock list (md.polarEqs, Go-
+	// owned) plus the currently-focused lock row (selectedLockIndex). Full-mirror pattern
+	// (like KindFade/KindRuleBuilder) — emitted whenever a rule completes, an equation's
+	// Active flag toggles, the focused row changes, or the set loads from scene.json.
+	KindPolarLocks = "polar-locks"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindSelect, KindFade, KindHover, KindRuleBuilder}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindSelect, KindFade, KindHover, KindRuleBuilder, KindPolarLocks}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -169,6 +174,19 @@ type PortGeom struct {
 type RuleTermPayload struct {
 	Node string `json:"node"`
 	Code int    `json:"code"`
+}
+
+// PolarLockPayload is one committed polar-equation lock on a KindPolarLocks event: the
+// Center node id, both terms' (node id, packed comp/sign code), and whether the equation
+// is currently active (enforced). Order in the event's PolarLocks slice IS the md.polarEqs
+// index (block row i == md.polarEqs index i).
+type PolarLockPayload struct {
+	Center string `json:"center"`
+	ANode  string `json:"aNode"`
+	ACode  int    `json:"aCode"`
+	BNode  string `json:"bNode"`
+	BCode  int    `json:"bCode"`
+	Active bool   `json:"active"`
 }
 
 type Event struct {
@@ -280,6 +298,11 @@ type Event struct {
 	RuleHasPending  bool              `json:"ruleHasPending,omitempty"`
 	RulePendingCode int               `json:"rulePendingCode,omitempty"`
 	RuleTerms       []RuleTermPayload `json:"ruleTerms,omitempty"`
+	// PolarLocks/SelectedLockIndex carry the FULL committed polar-equation lock list and the
+	// currently-focused row on KindPolarLocks events (full-mirror). SelectedLockIndex=-1 = no
+	// row focused. PolarLocks order IS the md.polarEqs index (block row = slice index).
+	PolarLocks        []PolarLockPayload `json:"polarLocks,omitempty"`
+	SelectedLockIndex int                `json:"selectedLockIndex,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -580,6 +603,19 @@ func (t *Trace) RuleBuilder(center string, hasPending bool, pendingCode int, ter
 		RuleHasPending:  hasPending,
 		RulePendingCode: pendingCode,
 		RuleTerms:       terms,
+	})
+}
+
+// PolarLocks emits the FULL committed polar-equation lock list (KindPolarLocks). Go owns
+// this state (MoveDispatch.polarEqs + selectedLockIndex, locks.go); called from every
+// mutation point (rule completion, toggle, select, delete, load) so the buffer snapshot's
+// PolarLock block always mirrors it live. selectedLockIndex=-1 = no row focused. A fresh
+// slice is passed so the drain goroutine never races the caller's slice.
+func (t *Trace) PolarLocks(locks []PolarLockPayload, selectedLockIndex int) {
+	t.emit(Event{
+		Kind:              KindPolarLocks,
+		PolarLocks:        locks,
+		SelectedLockIndex: selectedLockIndex,
 	})
 }
 
@@ -974,6 +1010,18 @@ func eventValue(e Event) (any, error) {
 			terms = []RuleTermPayload{}
 		}
 		return ruleBuilder{Step: e.Step, Kind: e.Kind, RuleCenter: e.RuleCenter, RuleHasPending: e.RuleHasPending, RulePendingCode: e.RulePendingCode, RuleTerms: terms}, nil
+	case KindPolarLocks:
+		type polarLocks struct {
+			Step              int                `json:"step"`
+			Kind              string             `json:"kind"`
+			PolarLocks        []PolarLockPayload `json:"polarLocks"`
+			SelectedLockIndex int                `json:"selectedLockIndex"`
+		}
+		locks := e.PolarLocks
+		if locks == nil {
+			locks = []PolarLockPayload{}
+		}
+		return polarLocks{Step: e.Step, Kind: e.Kind, PolarLocks: locks, SelectedLockIndex: e.SelectedLockIndex}, nil
 	default:
 		return recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value}, nil
 	}

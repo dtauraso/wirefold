@@ -79,6 +79,9 @@ type stdinMsg struct {
 	Kind string `json:"kind"`
 	Attr string `json:"attr"`
 	Flag string `json:"flag"`
+	// Index carries the md.polarEqs index for op=="update" kind=="lock" (attr active/selected;
+	// locks.go ToggleLockActive/SelectLock). Unused by every other message shape.
+	Index int `json:"index,omitempty"`
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg `json:"event,omitempty"`
 	stdinCRUDPayload
@@ -260,6 +263,12 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				if md != nil {
 					md.clearRuleBuilding(tr)
 				}
+			case "delete-selected-lock":
+				// Bare DELETE command: delete the panel-focused committed polar-equation lock
+				// (selectedLockIndex). Go re-guards (only deletes when deactivated).
+				if md != nil {
+					md.DeleteSelectedLock(tr)
+				}
 			}
 		}
 	}
@@ -368,6 +377,16 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 		// overlay snapshot so toggles survive a reload without an explicit save. No-op until
 		// EnableEditPersist arms the writer (nil-receiver / empty-treeRoot guard in schedule).
 		md.overlaysPersist.schedule(md.ov)
+	case "lock":
+		if md == nil {
+			return
+		}
+		switch msg.Attr {
+		case "active":
+			md.ToggleLockActive(msg.Index, tr)
+		case "selected":
+			md.SelectLock(msg.Index, tr)
+		}
 	}
 	// EDIT_UPDATE_KINDS_END
 }

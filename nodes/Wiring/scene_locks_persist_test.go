@@ -4,7 +4,11 @@ package Wiring
 // persister (scene_locks_persist.go): write → read back preserving sibling scene.json
 // fields (mirrors scene_edit_persist_test.go's pattern; writeTree lives there).
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
 
 func TestPolarEqsRoundTrip(t *testing.T) {
 	root := writeTree(t)
@@ -72,5 +76,57 @@ func TestPolarEqsClearedOnEmpty(t *testing.T) {
 	}
 	if _, ok := loadScenePolarEqs(scenePath); ok {
 		t.Fatalf("loadScenePolarEqs found=true after clearing, want false")
+	}
+}
+
+// TestPolarEqsActiveRoundTrip verifies the Active flag survives write → read for both
+// values.
+func TestPolarEqsActiveRoundTrip(t *testing.T) {
+	root := writeTree(t)
+	scenePath := sceneCameraPath(root)
+	eqs := []polarEq{
+		{Center: "C", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: -1}, Active: true},
+		{Center: "C", A: polarTerm{Node: "A", Comp: compPhi, Sign: 1}, B: polarTerm{Node: "B", Comp: compPhi, Sign: 1}, Active: false},
+	}
+	if err := writeScenePolarEqs(scenePath, eqs); err != nil {
+		t.Fatalf("writeScenePolarEqs: %v", err)
+	}
+	got, ok := loadScenePolarEqs(scenePath)
+	if !ok || len(got) != 2 {
+		t.Fatalf("loadScenePolarEqs: ok=%v got=%+v", ok, got)
+	}
+	if got[0].Active != true || got[1].Active != false {
+		t.Fatalf("Active round-trip mismatch: got=%+v", got)
+	}
+}
+
+// TestPolarEqsBackCompatDefaultActive verifies that an eq JSON object with no "active" key
+// (an already-saved lock from before this field existed) defaults to Active=true on load.
+func TestPolarEqsBackCompatDefaultActive(t *testing.T) {
+	root := writeTree(t)
+	scenePath := sceneCameraPath(root)
+	// Hand-write scene.json with a polarLocks entry lacking "active".
+	doc := map[string]any{
+		"polarLocks": []map[string]any{
+			{
+				"center": "C",
+				"a":      map[string]any{"node": "A", "comp": "theta", "sign": 1.0},
+				"b":      map[string]any{"node": "B", "comp": "theta", "sign": -1.0},
+			},
+		},
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(scenePath, raw, 0644); err != nil {
+		t.Fatalf("write scene.json: %v", err)
+	}
+	got, ok := loadScenePolarEqs(scenePath)
+	if !ok || len(got) != 1 {
+		t.Fatalf("loadScenePolarEqs: ok=%v got=%+v", ok, got)
+	}
+	if !got[0].Active {
+		t.Fatalf("back-compat default: Active=%v want true", got[0].Active)
 	}
 }

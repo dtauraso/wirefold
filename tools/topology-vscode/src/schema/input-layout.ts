@@ -18,9 +18,9 @@
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v5 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v6 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v5 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v6 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
@@ -29,6 +29,7 @@ export const IN_KIND_RESEND = 3;
 export const IN_KIND_SAVE = 4;
 export const IN_KIND_FADE_TOGGLE = 5;
 export const IN_KIND_CLEAR_RULE = 6;
+export const IN_KIND_DELETE_SELECTED_LOCK = 7;
 export const IN_KIND_RAW_INPUT = 10;
 export const IN_KIND_EDIT_CREATE = 20;
 export const IN_KIND_EDIT_DELETE = 21;
@@ -43,12 +44,14 @@ export const IN_HIT_KINDS = ["port", "handhold", "node", "edge", "empty"] as con
 // the sole live edit-update entity; camera/node/edge left the wire when their edits became
 // gesture-FSM-in-process (raw-input), and scene became the bare save COMMAND.
 // EDIT_UPDATE_KINDS_START
-export const IN_UPDATE_KINDS = ["overlays"] as const;
+export const IN_UPDATE_KINDS = ["overlays", "lock"] as const;
 // EDIT_UPDATE_KINDS_END
-// IN_UPDATE_ATTRS is the overlays sub-attribute vocabulary (toggle a single flag). u8 index
-// on the wire. The former "set" full-visibility-snapshot attr was removed (its only caller,
+// IN_UPDATE_ATTRS is the shared update sub-attribute vocabulary, u8 index on the wire.
+// "toggle" is overlays' single-flag toggle. "active"/"selected" are lock's two attrs (both
+// carry an i32 md.polarEqs index payload): active flips ToggleLockActive, selected calls
+// SelectLock. The former "set" full-visibility-snapshot attr was removed (its only caller,
 // the load-time main.tsx push, was deleted; no live TS sender remained).
-export const IN_UPDATE_ATTRS = ["toggle"] as const;
+export const IN_UPDATE_ATTRS = ["toggle", "active", "selected"] as const;
 
 import type { RawInputEvent, OverlayFlag } from "../messages";
 import { OVERLAY_FLAG_ORDER } from "../messages";
@@ -136,8 +139,15 @@ export const encodeFadeToggle = () => encodeControl(IN_KIND_FADE_TOGGLE);
  *  accumulated terms). Bare command — Go owns the state (gesture.go clearRuleBuilding). */
 export const encodeClearRule = () => encodeControl(IN_KIND_CLEAR_RULE);
 
-// Overlays attr indices (must match IN_UPDATE_ATTRS ordering).
+/** Delete the panel-focused committed polar-equation lock (selectedLockIndex). Bare command
+ *  — Go owns the state and re-guards (locks.go DeleteSelectedLock only deletes when that
+ *  equation is deactivated); TS only sends this when the focused row is already inactive. */
+export const encodeDeleteSelectedLock = () => encodeControl(IN_KIND_DELETE_SELECTED_LOCK);
+
+// Update attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
+const IN_LOCK_ATTR_ACTIVE = 1;
+const IN_LOCK_ATTR_SELECTED = 2;
 
 /** Build an edit create/delete record: two length-prefixed UTF-8 strings. Kept for the
  *  3-op (create/update/delete) codec concept; no live TS caller (the FSM creates/deletes
@@ -164,6 +174,28 @@ export function encodeOverlaysToggle(flag: OverlayFlag): ArrayBuffer {
   w.u8(enumIndex(IN_UPDATE_KINDS, "overlays"));
   w.u8(IN_OVERLAY_ATTR_TOGGLE);
   w.u8(enumIndex(OVERLAY_FLAG_ORDER, flag));
+  return w.toArrayBuffer();
+}
+
+/** Build a lock ACTIVE-toggle record: [22][entityKind=lock][attr=active][i32 index].
+ *  index is the md.polarEqs index the PolarLock block row carries (locks.go ToggleLockActive). */
+export function encodeLockToggleActive(index: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_ACTIVE);
+  w.i32(index);
+  return w.toArrayBuffer();
+}
+
+/** Build a lock SELECT record: [22][entityKind=lock][attr=selected][i32 index]. Focuses
+ *  md.polarEqs[index] as the panel's clicked row (locks.go SelectLock). */
+export function encodeLockSelect(index: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_SELECTED);
+  w.i32(index);
   return w.toArrayBuffer();
 }
 
@@ -250,10 +282,11 @@ class ByteReader {
 }
 
 export type DecodedInput =
-  | { kind: "play" | "pause" | "resend" | "save" | "fade-toggle" }
+  | { kind: "play" | "pause" | "resend" | "save" | "fade-toggle" | "clear-rule" | "delete-selected-lock" }
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
-  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag };
+  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag }
+  | { kind: "edit-update"; entity: "lock"; attr: "active" | "selected"; index: number };
 
 /** Decode one record body (with kind byte, without the [len] frame). */
 export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined {
@@ -271,6 +304,10 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
       return { kind: "save" };
     case IN_KIND_FADE_TOGGLE:
       return { kind: "fade-toggle" };
+    case IN_KIND_CLEAR_RULE:
+      return { kind: "clear-rule" };
+    case IN_KIND_DELETE_SELECTED_LOCK:
+      return { kind: "delete-selected-lock" };
     case IN_KIND_RAW_INPUT: {
       const event: RawInputEvent = {
         kind: IN_EVENT_KINDS[r.u8()] ?? "pointermove",
@@ -310,8 +347,19 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
         targetHandle: r.str(),
       };
     case IN_KIND_EDIT_UPDATE: {
-      // entityKind byte (only "overlays" is defined), then attr byte, then the numeric payload.
-      r.u8(); // entityKind — always overlays
+      // entityKind byte selects overlays vs lock; attr byte + numeric payload follow.
+      const entityKind = IN_UPDATE_KINDS[r.u8()];
+      if (entityKind === "lock") {
+        const attr = r.u8();
+        const index = r.i32();
+        if (attr === IN_LOCK_ATTR_ACTIVE) {
+          return { kind: "edit-update", entity: "lock", attr: "active", index };
+        }
+        if (attr === IN_LOCK_ATTR_SELECTED) {
+          return { kind: "edit-update", entity: "lock", attr: "selected", index };
+        }
+        return undefined;
+      }
       const attr = r.u8();
       if (attr === IN_OVERLAY_ATTR_TOGGLE) {
         const flag = OVERLAY_FLAG_ORDER[r.u8()];

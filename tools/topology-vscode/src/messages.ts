@@ -64,7 +64,10 @@ type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
-  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag };
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
+  // lock: active/selected both carry an i32 md.polarEqs index payload (locks.go
+  // ToggleLockActive/SelectLock).
+  | { type: "edit"; op: "update"; kind: "lock"; attr: "active" | "selected"; index: number };
 // EDIT_MSG_END
 
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel
@@ -159,6 +162,11 @@ export type WebviewToHostMsg =
   // payload. Kept here + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
   // "clear-rule".
   | { type: "clear-rule" }
+  // The bare DELETE-SELECTED-LOCK command (single kind byte in schema/input-layout.ts, sent
+  // via go-record). Deletes the panel-focused committed polar-equation lock — no payload;
+  // Go re-guards (only deletes when deactivated). Kept here + WEBVIEW_TO_HOST_TYPES so
+  // message-kind-parity tracks stdin_reader.go's "delete-selected-lock".
+  | { type: "delete-selected-lock" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
@@ -203,7 +211,11 @@ export type TraceEvent =
   | { step: number; kind: "hover"; node: string; port?: string; value?: number }
   // Go-owned polar rule-builder session state (gesture.go trySelectSphereRule); full-mirror
   // on every state change, like fade above.
-  | { step: number; kind: "rule-builder"; ruleCenter: string; ruleHasPending: boolean; rulePendingCode: number; ruleTerms: { node: string; code: number }[] };
+  | { step: number; kind: "rule-builder"; ruleCenter: string; ruleHasPending: boolean; rulePendingCode: number; ruleTerms: { node: string; code: number }[] }
+  // Go-owned COMMITTED polar-equation lock list (locks.go, md.polarEqs) + the panel's
+  // focused row (selectedLockIndex=-1 = none); full-mirror on every mutation (rule
+  // completion, toggle, select, delete, load), like rule-builder above.
+  | { step: number; kind: "polar-locks"; polarLocks: { center: string; aNode: string; aCode: number; bNode: string; bCode: number; active: boolean }[]; selectedLockIndex: number };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
@@ -225,7 +237,7 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "clear-rule", "raw-input", "go-record",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "clear-rule", "delete-selected-lock", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

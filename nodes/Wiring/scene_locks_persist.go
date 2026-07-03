@@ -36,6 +36,7 @@ type scenePolarEq struct {
 	Center string         `json:"center"`
 	A      scenePolarTerm `json:"a"`
 	B      scenePolarTerm `json:"b"`
+	Active *bool          `json:"active,omitempty"` // nil on load = back-compat default true
 }
 
 func compToString(c polarComp) string {
@@ -60,17 +61,24 @@ func compFromString(s string) polarComp {
 }
 
 func toScenePolarEq(eq polarEq) scenePolarEq {
+	active := eq.Active
 	return scenePolarEq{
 		Center: eq.Center,
 		A:      scenePolarTerm{Node: eq.A.Node, Comp: compToString(eq.A.Comp), Sign: eq.A.Sign},
 		B:      scenePolarTerm{Node: eq.B.Node, Comp: compToString(eq.B.Comp), Sign: eq.B.Sign},
+		Active: &active,
 	}
 }
 func fromScenePolarEq(s scenePolarEq) polarEq {
+	active := true // back-compat: absent key on already-saved locks defaults to active
+	if s.Active != nil {
+		active = *s.Active
+	}
 	return polarEq{
 		Center: s.Center,
 		A:      polarTerm{Node: s.A.Node, Comp: compFromString(s.A.Comp), Sign: s.A.Sign},
 		B:      polarTerm{Node: s.B.Node, Comp: compFromString(s.B.Comp), Sign: s.B.Sign},
+		Active: active,
 	}
 }
 
@@ -194,5 +202,6 @@ func (md *MoveDispatch) LoadPolarEqs(topologyPath string) {
 	scenePath := sceneCameraPath(topologyPath)
 	if eqs, ok := loadScenePolarEqs(scenePath); ok {
 		md.polarEqs = eqs
+		md.emitPolarLocks(md.tr)
 	}
 }

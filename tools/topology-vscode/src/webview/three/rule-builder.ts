@@ -11,6 +11,7 @@
 import { useSyncExternalStore } from "react";
 import { getLatestSnapshot, subscribeSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot, nodeLabel } from "./buffer-decode";
+import { readNodeSelected } from "../../schema/buffer-layout";
 import {
   readRuleBuilderCenterRow,
   readRuleBuilderPendingCode,
@@ -19,6 +20,13 @@ import {
   readRuleBuilderT0Code,
   readRuleBuilderT1Row,
   readRuleBuilderT1Code,
+  readRuleBuilderSelectedLockIndex,
+  readPolarLockCenterRow,
+  readPolarLockARow,
+  readPolarLockACode,
+  readPolarLockBRow,
+  readPolarLockBCode,
+  readPolarLockActive,
 } from "../../schema/buffer-layout";
 
 /** RULE_CODE_NONE mirrors the Go PendingCode/T{0,1}Code "absent" sentinel (255). */
@@ -37,6 +45,91 @@ export interface RuleBuilderState {
   centerLabel: string;
   pending: { code: number } | null;
   terms: RuleBuilderTerm[];
+}
+
+/** One COMMITTED polar-equation lock (locks.go md.polarEqs, streamed via the PolarLock
+ *  block): index IS the md.polarEqs index — the same value toggle/select/delete send back. */
+export interface PolarLockEntry {
+  index: number;
+  centerRow: number;
+  a: { row: number; label: string; code: number };
+  b: { row: number; label: string; code: number };
+  active: boolean;
+}
+
+// Separate cache (identity-stable like cachedVal above) for the committed-equations list +
+// focused index, decoded from the PolarLock block + RuleBuilder's SelectedLockIndex column.
+export interface PolarLocksState {
+  equations: PolarLockEntry[];
+  selectedLockIndex: number;
+}
+
+let cachedLocksFingerprint: string | null = null;
+let cachedLocksVal: PolarLocksState = { equations: [], selectedLockIndex: -1 };
+
+/** Decode the latest snapshot's committed polar-equation locks (PolarLock block) + the
+ *  focused row (RuleBuilder's SelectedLockIndex column). Pure reflect — no TS state
+ *  authority; Go owns md.polarEqs/selectedLockIndex (locks.go). Returns a STABLE object
+ *  identity while unchanged (useSyncExternalStore requirement). */
+export function readPolarLocks(): PolarLocksState {
+  const snap = getLatestSnapshot();
+  if (!snap) return cachedLocksVal;
+  const decoded = decodeSnapshot(snap);
+  if (!decoded) return cachedLocksVal;
+
+  const selectedLockIndex = readRuleBuilderSelectedLockIndex(decoded.ruleBuilderView);
+  const v = decoded.polarLockView;
+  const n = decoded.polarLockCount;
+
+  let fp = `${selectedLockIndex}|${n}`;
+  for (let i = 0; i < n; i++) {
+    fp += `|${readPolarLockCenterRow(v, i)},${readPolarLockARow(v, i)},${readPolarLockACode(v, i)},${readPolarLockBRow(v, i)},${readPolarLockBCode(v, i)},${readPolarLockActive(v, i)}`;
+  }
+  if (fp === cachedLocksFingerprint) {
+    return cachedLocksVal;
+  }
+  cachedLocksFingerprint = fp;
+
+  const equations: PolarLockEntry[] = [];
+  for (let i = 0; i < n; i++) {
+    const centerRow = readPolarLockCenterRow(v, i);
+    const aRow = readPolarLockARow(v, i);
+    const bRow = readPolarLockBRow(v, i);
+    equations.push({
+      index: i,
+      centerRow,
+      a: { row: aRow, label: aRow === ROW_NONE ? "" : nodeLabel(decoded, aRow), code: readPolarLockACode(v, i) },
+      b: { row: bRow, label: bRow === ROW_NONE ? "" : nodeLabel(decoded, bRow), code: readPolarLockBCode(v, i) },
+      active: readPolarLockActive(v, i) === 1,
+    });
+  }
+  cachedLocksVal = { equations, selectedLockIndex };
+  return cachedLocksVal;
+}
+
+/** React hook: re-renders the caller when the committed polar-equation lock list or the
+ *  focused row changes (Go-owned). */
+export function usePolarLocks(): PolarLocksState {
+  return useSyncExternalStore(subscribeSnapshot, readPolarLocks, readPolarLocks);
+}
+
+/** Buffer node-row index of the click-selected node (Node block's Selected column), or -1
+ *  if nothing is selected / no snapshot yet. Not cached to a stable identity (a plain
+ *  number is already stable-by-value for useSyncExternalStore's Object.is comparison). */
+export function readSelectedNodeRow(): number {
+  const snap = getLatestSnapshot();
+  if (!snap) return ROW_NONE;
+  const decoded = decodeSnapshot(snap);
+  if (!decoded) return ROW_NONE;
+  for (let i = 0; i < decoded.nodeCount; i++) {
+    if (readNodeSelected(decoded.nodeView, i) !== 0) return i;
+  }
+  return ROW_NONE;
+}
+
+/** React hook: re-renders the caller when the click-selected node row changes. */
+export function useSelectedNodeRow(): number {
+  return useSyncExternalStore(subscribeSnapshot, readSelectedNodeRow, readSelectedNodeRow);
 }
 
 // Cache so getSnapshot returns a STABLE object identity while the session is unchanged

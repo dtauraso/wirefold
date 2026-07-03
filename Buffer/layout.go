@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 15
+const BufLayoutVersion = 16
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -240,6 +240,26 @@ type bufLayoutRuleBuilder struct {
 	T0Code      uint8 `buf:"u8"`  // first completed term's code; 255 = absent
 	T1Row       int32 `buf:"i32"` // second completed term's node row (-1 = absent)
 	T1Code      uint8 `buf:"u8"`  // second completed term's code; 255 = absent
+	// SelectedLockIndex is the md.polarEqs index of the equation the user has clicked in
+	// the committed-equations list (PolarLock block below), or -1 = none focused. Go-owned
+	// (MoveDispatch.selectedLockIndex); the panel highlights this row and the Delete key
+	// targets it.
+	SelectedLockIndex int32 `buf:"i32"` // -1 = no lock row focused
+}
+
+// bufLayoutPolarLock defines one row of the COMMITTED polar-equation locks column block.
+// One row per md.polarEqs entry, IN ORDER — block row i == md.polarEqs index i (the same
+// index the panel sends back on toggle/select/delete). Matched from KindPolarLocks trace
+// events (full-mirror, like Edge/RuleBuilder — no incremental diffing). CenterRow/ARow/BRow
+// are buffer NODE-ROW indices (-1 = node id not found); ACode/BCode pack each term's
+// (comp,sign) with the same code as RuleBuilder's term codes (+θ=0,+φ=1,−θ=2,−φ=3,r=4).
+type bufLayoutPolarLock struct {
+	CenterRow int32 `buf:"i32"` // equation's Center node buffer row (-1 = unresolved)
+	ARow      int32 `buf:"i32"` // term A's node buffer row (-1 = unresolved)
+	ACode     uint8 `buf:"u8"`  // term A's (comp,sign) code
+	BRow      int32 `buf:"i32"` // term B's node buffer row (-1 = unresolved)
+	BCode     uint8 `buf:"u8"`  // term B's (comp,sign) code
+	Active    uint8 `buf:"u8"`  // 1 = equation currently enforced; 0 = deactivated
 }
 
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
@@ -281,5 +301,6 @@ var _ = [...]any{
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
 	bufLayoutRuleBuilder{},
+	bufLayoutPolarLock{},
 	bufLayoutEvent{},
 }
