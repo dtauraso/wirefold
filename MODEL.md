@@ -121,11 +121,12 @@ when a bead has arrived. Go owns the clock.
   parameters, camera pose, selection, and overlay visibility. It packs
   the whole scene into a **binary content buffer** (`Buffer/`) and streams
   it as length-prefixed frames on fd 3 every change.
-- **Go → TS is the binary content buffer** (`buffer-snapshot`), plus a
-  tiny `node-label` sidecar carrying each node's id/label/kind (derived
-  from the node-geometry event stream, host-side). The webview decodes the
-  latest snapshot (`buffer-decode.ts`) and renders it; row-keyed reflect
-  resources (`snapshot-buffer.ts`, `overlay-flags.ts`, `buffer-nav.ts`)
+- **Go → TS is the binary content buffer** (`buffer-snapshot`) ALONE — no
+  sidecar. Each node's kind is a numeric `KindId` column (TS maps it to
+  `NODE_DEFS` colors), its label rides the buffer's self-sizing label section,
+  and its identity is the buffer ROW INDEX (Go resolves row → node for hits).
+  The webview decodes the latest snapshot (`buffer-decode.ts`) and renders it;
+  row-keyed reflect resources (`snapshot-buffer.ts`, `overlay-flags.ts`)
   mirror Go — they author nothing. There is **no JSON-trace render path
   and no `pump.ts`**; Go still emits the JSON trace on stdout as the
   `.probe` log source, but the webview does not consume it for rendering.
@@ -139,17 +140,22 @@ when a bead has arrived. Go owns the clock.
   the human-speed clock's tick advance). While halted the tick does not
   advance, so beads, in-node animations, and node windows all freeze; the
   editor reflects the last known state.
-- **Bridge surface.** **Go → TS:** the binary content buffer (+ the
-  `node-label` sidecar). **TS → Go:** `raw-input` (raw pointer/wheel events
-  + the stateless raycast hit — Go's gesture FSM decides what each gesture
-  MEANS), spec I/O for save/load (`save`, `view-save`, `load`), a single
-  geometry-CRUD `edit` message (`op` = create / update / delete — exactly
-  three ops; fading is not an op but an edge attribute set via `op=update,
-  kind=edge, attr=faded`), and the play/pause control signal. The TS → Go
-  send is fire-and-forget: the editor places a message and never blocks on
-  Go, never asks when a bead arrived, and there is no delivery signal — Go
-  times its own delivery. Nothing about node-local state or animation
-  internals crosses the bridge.
+- **Bridge surface — binary BOTH ways.** **Go → TS:** the binary content
+  buffer ALONE (`buffer-snapshot` on fd 3; no sidecar — node id is the row
+  index, label rides the buffer's label section, kind is the numeric `KindId`
+  column). **TS → Go:** framed binary records on stdin (`[len:u32-LE][record]`,
+  symmetric with fd 3) — `raw-input` (raw pointer/wheel + the stateless raycast
+  hit as numeric rows; Go's gesture FSM decides what each gesture MEANS), the
+  geometry-CRUD `edit` (`op` = create / update / delete — exactly three ops;
+  `update` sets a numeric attribute on a typed entity, e.g. overlays toggle/set
+  as a flag-id / bitfield), a bare `save` command (Go persists its OWN current
+  state — camera + overlays — the editor sends no scene payload), a bare
+  fade-toggle command (`f` on the selected element; Go owns the selection and
+  the fade fixpoint), and the play/pause control signal. There is NO JSON on
+  either wire. The TS → Go send is fire-and-forget: the editor places a record
+  and never blocks on Go, never asks when a bead arrived, and there is no
+  delivery signal — Go times its own delivery. Nothing about node-local state
+  or animation internals crosses the bridge.
 
 ## Drift rule
 

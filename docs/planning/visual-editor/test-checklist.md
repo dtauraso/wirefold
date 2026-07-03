@@ -55,9 +55,16 @@ Use the `.probe/*.jsonl` logs to diagnose anything that misbehaves before theori
 - [ ] **Save** persists the current overlay + camera state to `scene.json` (Go writes its
       own state — the bare `save` command; verify a toggled overlay survives Reload)
 
+## Fade
+- [ ] Select a node/edge, press **`f`** → it dims (and the fade propagates: a faded
+      node dims its incident edges; a node whose edges are all faded auto-fades)
+- [ ] Press **`f`** again → un-fades
+- [ ] A **faded edge shows no transit bead**
+- [ ] Faded nodes are still **pickable/selectable** (dim ≠ gone)
+
 ## Pending — not yet built (nothing to test until implemented)
-- [ ] **Fade** (node/edge dimming, opacity 0.25) — next up (port `computeFade` into Go)
 - [ ] **Hover** state (node/port/edge hover highlight)
+- [ ] **Fade persistence** across Reload (fade state is in-memory only right now)
 - [ ] **Node-drag persistence** to disk (Go writes moved positions)
 - [ ] **Ring-move persistence** to disk
 
