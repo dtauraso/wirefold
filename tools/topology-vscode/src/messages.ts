@@ -27,8 +27,6 @@ export type RunStatus =
 // (source===moved || target===moved). Every entry carries the same moved node id +
 // new position. The webview computes the incident edges from its React Flow graph
 // (TS owns the graph; Go owns the recompute).
-export type MoveEntry = { nodeId: string; x: number; y: number; z: number };
-
 // OVERLAY_FLAG_NAMES is the SINGLE source for the overlay wire vocabulary — named
 // boolean overlay attributes shared with Go's overlayToggles map and stdinGuideVisPayload
 // (stdin_reader.go). The OverlayFlag union, the OVERLAY_FLAGS runtime set, and the
@@ -51,59 +49,28 @@ const OVERLAY_FLAG_NAMES = [
 
 export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
 
+// OVERLAY_FLAG_ORDER is the runtime array of the flag vocabulary, in the canonical wire
+// ORDER (the overlays toggle/set binary records use a flag's index here as its u8/bit id —
+// input-layout.ts). Exported so the binary codec keys off the exact same ordering.
+export const OVERLAY_FLAG_ORDER = OVERLAY_FLAG_NAMES;
+
 // OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
 // Derived from OverlayFlag so the field set can never drift from the flag vocabulary.
-type OverlayState = Record<OverlayFlag, boolean>;
-
-// VIEWPOINT_KINDS is the single source for the camera viewpoint sub-kind vocabulary,
-// shared with Go's vp.Kind switch (stdin_reader.go). Parity guarded by
-// check-edit-op-parity.sh via the VP_KINDS sentinels.
-// VP_KINDS_START
-const VIEWPOINT_KINDS = [
-  "set",
-  "orbit",
-  "orbit-locked",
-  "zoom",
-  "pan",
-] as const;
-// VP_KINDS_END
-
-type ViewpointKind = (typeof VIEWPOINT_KINDS)[number];
-
-type ViewpointPayload =
-  | {
-      kind: "set";
-      pivotX?: number; pivotY?: number; pivotZ?: number;
-      r?: number;
-      posTheta?: number; posPhi?: number;
-      upTheta?: number; upPhi?: number;
-    }
-  | { kind: "orbit"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
-  | { kind: "orbit-locked"; fromTheta: number; fromPhi: number; toTheta: number; toPhi: number }
-  | { kind: "zoom"; factor: number }
-  | { kind: "pan"; dx: number; dy: number; dz: number };
+export type OverlayState = Record<OverlayFlag, boolean>;
 
 // EDIT_MSG_START
+// The geometry-CRUD edit surface. THREE ops (create / update / delete). create/delete
+// name an edge by its destination slot (kept as the 3-op concept though the gesture FSM
+// now creates/deletes edges in-process from raw-input, so TS sends no create/delete). The
+// sole live update entity is overlays (toggle one flag / set the whole visibility snapshot);
+// node/edge/camera edits became gesture-FSM-in-process (raw-input) and scene became the
+// bare `save` command — none cross this seam any more.
 type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
-  | { type: "edit"; op: "update"; kind: "node"; attr: "move"; entries: Record<string, MoveEntry> }
-  // Port-anchor: move a port along its node's ring. node/port identify the port,
-  // isInput selects the input vs output list, anchor is the new direction offset from
-  // the node center. keys lists the routing keys Go mail-sorts to — the node id AND
-  // each incident edge id (same fan-out shape as attr="move").
-  | {
-      type: "edit"; op: "update"; kind: "node"; attr: "anchor";
-      node: string; port: string; isInput: boolean;
-      anchor: { x: number; y: number; z: number };
-      keys: string[];
-    }
-  | { type: "edit"; op: "update"; kind: "edge"; attr: "faded"; edges: Record<string, boolean> }
-  | { type: "edit"; op: "update"; kind: "camera"; viewpoint: ViewpointPayload }
   | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
-  | { type: "edit"; op: "update"; kind: "overlays"; attr: "set"; state: OverlayState }
-  | { type: "edit"; op: "update"; kind: "scene"; scene: unknown };
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "set"; state: OverlayState };
 // EDIT_MSG_END
 
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel
@@ -181,6 +148,11 @@ export type WebviewToHostMsg =
   | { type: "resume" }
   | { type: "stop" }
   | { type: "resend" }
+  // The bare SAVE command (encoded as a single kind byte in schema/input-layout.ts and
+  // sent via go-record). Go persists its OWN authoritative scene state — no payload. Kept
+  // in this union + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
+  // "save" msg.Type.
+  | { type: "save" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
@@ -246,7 +218,7 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "raw-input", "go-record",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

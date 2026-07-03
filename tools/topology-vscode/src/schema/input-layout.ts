@@ -3,26 +3,30 @@
 // The TS→Go bridge is a purely BINARY buffer, symmetric with the Go→TS content buffer
 // streamed on fd 3. The webview builds a binary RECORD per message here; the extension
 // host writes each record FRAMED as [len:u32-LE][record] to Go's stdin. Go decodes it in
-// nodes/Wiring/input_codec.go into the SAME stdinMsg the old newline-JSON path produced.
+// nodes/Wiring/input_codec.go into the SAME stdinMsg the dispatch loop consumes.
 //
 // This module is the SINGLE source of the TS-side record layout and is mirrored by the Go
 // codec. The two carry an identical fingerprint (INPUT_LAYOUT_FINGERPRINT below ==
 // InputLayoutFingerprint in input_codec.go), enforced by tools/check-input-layout-parity.sh.
 //
 // Numbers are little-endian (matching fd 3). Enum discriminators (event kind, hit kind,
-// update entity kind) are u8 indices into the shared orderings. Structural edit payloads
-// (node-move entries, edge-faded map, port-anchor keys, overlay state, scene blob) ride as
-// a length-prefixed UTF-8 JSON section — the ENVELOPE/transport is binary; only that leaf
-// CONTENT stays JSON.
+// update entity kind, update attr, overlay flag) are u8 indices into the shared orderings.
+// There is NO JSON on the wire: every record is fully numeric. The live editor→Go traffic
+// is raw-input (numeric), overlays toggle/set (numeric flag-id / bitfield), the bare save
+// COMMAND (kind byte only — Go persists its OWN authoritative scene state), and the
+// play/pause/resend control bytes. The create/delete/edit-update record kinds stay defined
+// (the 3-op create/update/delete concept) though the gesture FSM now produces edge
+// create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v1 kinds=resume:1,pause:2,resend:3,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=node,edge,camera,overlays,scene
+// INPUT_LAYOUT_FINGERPRINT: v2 kinds=resume:1,pause:2,resend:3,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v1 kinds=resume:1,pause:2,resend:3,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=node,edge,camera,overlays,scene";
+  "v2 kinds=resume:1,pause:2,resend:3,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
 export const IN_KIND_PAUSE = 2;
 export const IN_KIND_RESEND = 3;
+export const IN_KIND_SAVE = 4;
 export const IN_KIND_RAW_INPUT = 10;
 export const IN_KIND_EDIT_CREATE = 20;
 export const IN_KIND_EDIT_DELETE = 21;
@@ -33,13 +37,18 @@ export const IN_EVENT_KINDS = ["pointerdown", "pointermove", "pointerup", "wheel
 export const IN_HIT_KINDS = ["port", "handhold", "node", "edge", "empty"] as const;
 // IN_UPDATE_KINDS is the shared edit-update ENTITY vocabulary. It is the 3rd parity source
 // (with messages.ts EditMsg kinds + stdin_reader.go applyUpdate) checked by
-// check-edit-op-parity.sh axis 2 — the sentinels below bound that extraction. (It replaced
-// the old handle-message.ts update-dispatch switch, which the binary bridge removed.)
+// check-edit-op-parity.sh axis 2 — the sentinels below bound that extraction. overlays is
+// the sole live edit-update entity; camera/node/edge left the wire when their edits became
+// gesture-FSM-in-process (raw-input), and scene became the bare save COMMAND.
 // EDIT_UPDATE_KINDS_START
-export const IN_UPDATE_KINDS = ["node", "edge", "camera", "overlays", "scene"] as const;
+export const IN_UPDATE_KINDS = ["overlays"] as const;
 // EDIT_UPDATE_KINDS_END
+// IN_UPDATE_ATTRS is the overlays sub-attribute vocabulary (toggle a single flag, or set
+// the full 10-flag visibility snapshot). u8 index on the wire.
+export const IN_UPDATE_ATTRS = ["toggle", "set"] as const;
 
-import type { RawInputEvent } from "../messages";
+import type { RawInputEvent, OverlayFlag, OverlayState } from "../messages";
+import { OVERLAY_FLAG_ORDER } from "../messages";
 
 function enumIndex(list: readonly string[], s: string): number {
   const i = list.indexOf(s);
@@ -66,6 +75,11 @@ class ByteWriter {
     this.ensure(1);
     this.view.setUint8(this.pos, v);
     this.pos += 1;
+  }
+  u16(v: number): void {
+    this.ensure(2);
+    this.view.setUint16(this.pos, v, true);
+    this.pos += 2;
   }
   i32(v: number): void {
     this.ensure(4);
@@ -98,7 +112,7 @@ class ByteWriter {
   }
 }
 
-/** Build a payload-less control record (play / pause / resend). */
+/** Build a payload-less control/command record (play / pause / resend / save). */
 export function encodeControl(kind: number): ArrayBuffer {
   const w = new ByteWriter();
   w.u8(kind);
@@ -108,8 +122,17 @@ export function encodeControl(kind: number): ArrayBuffer {
 export const encodePlay = () => encodeControl(IN_KIND_RESUME);
 export const encodePause = () => encodeControl(IN_KIND_PAUSE);
 export const encodeResend = () => encodeControl(IN_KIND_RESEND);
+/** Bare SAVE command: Go persists its OWN authoritative scene state (camera + overlay
+ *  visibility). No payload — the editor holds no authoritative scene document to send. */
+export const encodeSave = () => encodeControl(IN_KIND_SAVE);
 
-/** Build an edit create/delete record: two length-prefixed UTF-8 strings. */
+// Overlays attr indices (must match IN_UPDATE_ATTRS ordering).
+const IN_OVERLAY_ATTR_TOGGLE = 0;
+const IN_OVERLAY_ATTR_SET = 1;
+
+/** Build an edit create/delete record: two length-prefixed UTF-8 strings. Kept for the
+ *  3-op (create/update/delete) codec concept; no live TS caller (the FSM creates/deletes
+ *  edges in-process from raw-input). */
 export function encodeEditCreate(target: string, targetHandle: string): ArrayBuffer {
   return encodeCreateDelete(IN_KIND_EDIT_CREATE, target, targetHandle);
 }
@@ -124,14 +147,29 @@ function encodeCreateDelete(kind: number, target: string, targetHandle: string):
   return w.toArrayBuffer();
 }
 
-/** Build an edit update record: entity-kind byte + JSON payload leaf. entityKind is one of
- *  IN_UPDATE_KINDS (node/edge/camera/overlays/scene); payload is the typed update message
- *  (its attr/flag/entries/edges/viewpoint/state/scene fields ride the JSON leaf). */
-export function encodeEditUpdate(entityKind: (typeof IN_UPDATE_KINDS)[number], payload: unknown): ArrayBuffer {
+/** Build an overlays TOGGLE record: [22][entityKind=overlays][attr=toggle][u8 flagId].
+ *  flagId is the index of `flag` in OVERLAY_FLAG_ORDER — no flag name crosses the wire. */
+export function encodeOverlaysToggle(flag: OverlayFlag): ArrayBuffer {
   const w = new ByteWriter();
   w.u8(IN_KIND_EDIT_UPDATE);
-  w.u8(enumIndex(IN_UPDATE_KINDS, entityKind));
-  w.str(JSON.stringify(payload));
+  w.u8(enumIndex(IN_UPDATE_KINDS, "overlays"));
+  w.u8(IN_OVERLAY_ATTR_TOGGLE);
+  w.u8(enumIndex(OVERLAY_FLAG_ORDER, flag));
+  return w.toArrayBuffer();
+}
+
+/** Build an overlays SET record: [22][entityKind=overlays][attr=set][u16 bitfield].
+ *  Bit i (LSB-first, matching OVERLAY_FLAG_ORDER) = the i-th flag's visibility. */
+export function encodeOverlaysSet(state: OverlayState): ArrayBuffer {
+  let bits = 0;
+  OVERLAY_FLAG_ORDER.forEach((flag, i) => {
+    if (state[flag]) bits |= 1 << i;
+  });
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "overlays"));
+  w.u8(IN_OVERLAY_ATTR_SET);
+  w.u16(bits);
   return w.toArrayBuffer();
 }
 
@@ -185,6 +223,11 @@ class ByteReader {
   u8(): number {
     return this.view.getUint8(this.pos++);
   }
+  u16(): number {
+    const v = this.view.getUint16(this.pos, true);
+    this.pos += 2;
+    return v;
+  }
   i32(): number {
     const v = this.view.getInt32(this.pos, true);
     this.pos += 4;
@@ -212,10 +255,11 @@ class ByteReader {
 }
 
 export type DecodedInput =
-  | { kind: "play" | "pause" | "resend" }
+  | { kind: "play" | "pause" | "resend" | "save" }
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
-  | { kind: "edit-update"; entity: string; payload: unknown };
+  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag }
+  | { kind: "edit-update"; entity: "overlays"; attr: "set"; state: OverlayState };
 
 /** Decode one record body (with kind byte, without the [len] frame). */
 export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined {
@@ -229,6 +273,8 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
       return { kind: "pause" };
     case IN_KIND_RESEND:
       return { kind: "resend" };
+    case IN_KIND_SAVE:
+      return { kind: "save" };
     case IN_KIND_RAW_INPUT: {
       const event: RawInputEvent = {
         kind: IN_EVENT_KINDS[r.u8()] ?? "pointermove",
@@ -267,8 +313,23 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
         targetHandle: r.str(),
       };
     case IN_KIND_EDIT_UPDATE: {
-      const entity = IN_UPDATE_KINDS[r.u8()] ?? "scene";
-      return { kind: "edit-update", entity, payload: JSON.parse(r.str()) };
+      // entityKind byte (only "overlays" is defined), then attr byte, then the numeric payload.
+      r.u8(); // entityKind — always overlays
+      const attr = r.u8();
+      if (attr === IN_OVERLAY_ATTR_TOGGLE) {
+        const flag = OVERLAY_FLAG_ORDER[r.u8()];
+        if (!flag) return undefined;
+        return { kind: "edit-update", entity: "overlays", attr: "toggle", flag };
+      }
+      if (attr === IN_OVERLAY_ATTR_SET) {
+        const bits = r.u16();
+        const state = {} as OverlayState;
+        OVERLAY_FLAG_ORDER.forEach((flag, i) => {
+          state[flag] = (bits & (1 << i)) !== 0;
+        });
+        return { kind: "edit-update", entity: "overlays", attr: "set", state };
+      }
+      return undefined;
     }
   }
   return undefined;

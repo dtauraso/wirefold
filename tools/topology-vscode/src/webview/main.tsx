@@ -1,7 +1,8 @@
 // lifecycle: bundle-eval start — this line runs as soon as the bundle is
 // evaluated by the webview, before any React or heavy side effects.
 import { vscode, postGoRecord } from "./vscode-api";
-import { encodeEditUpdate } from "../schema/input-layout";
+import { encodeOverlaysSet } from "../schema/input-layout";
+import type { OverlayState } from "../messages";
 import { postLog } from "./log/post";
 postLog("lifecycle", { phase: "bundle-eval" });
 
@@ -89,7 +90,7 @@ window.addEventListener("message", (e) => {
     // Push all Go-owned guide visibilities (including the master overlays toggle) so Go's
     // authoritative state survives a window reload; Go reflects these into the buffer
     // overlay columns the render path reads.
-    const guidePush = {
+    const guidePush: OverlayState = {
       tori: viewerState.sceneToriVisible !== false,
       scenePoles: viewerState.scenePolesVisible !== false,
       nodePoles: viewerState.nodePolesVisible !== false,
@@ -108,7 +109,7 @@ window.addEventListener("message", (e) => {
       nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
       selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, overlaysActive: viewerState.overlaysActive,
     }, pushed: guidePush });
-    postGoRecord(encodeEditUpdate("overlays", { type: "edit", op: "update", kind: "overlays", attr: "set", state: guidePush }));
+    postGoRecord(encodeOverlaysSet(guidePush));
   } else if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running

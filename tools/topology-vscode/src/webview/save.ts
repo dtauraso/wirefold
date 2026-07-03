@@ -1,7 +1,7 @@
 import { viewerState } from "./state/viewer-state";
 import { serializeSceneState } from "./state/viewer/types";
 import { postGoRecord } from "./vscode-api";
-import { encodeEditUpdate } from "../schema/input-layout";
+import { encodeSave } from "../schema/input-layout";
 import { postLog } from "./log/post";
 
 // guideSnapshot — the 6 guideline settings currently held in viewerState, for diagnostic
@@ -37,10 +37,11 @@ function _sendScene() {
     return;
   }
   lastViewSyncedText = sceneText;
-  let scene: unknown;
-  try { scene = JSON.parse(sceneText); } catch { return; }
+  // The scene text is computed ONLY to detect a change (dedupe/debounce) — it is NOT sent.
+  // Go owns the authoritative scene state (camera pose + overlay visibility) and persists
+  // ITS OWN current state on this bare command. No document crosses the bridge.
   postLog("scene-save-send", { posted: true, guides: guideSnapshot(), sceneText });
-  postGoRecord(encodeEditUpdate("scene", { type: "edit", op: "update", kind: "scene", scene }));
+  postGoRecord(encodeSave());
 }
 
 export function scheduleViewSave() {

@@ -4,7 +4,7 @@
 import React, { useCallback, useState } from "react";
 import * as THREE from "three";
 import { postGoRecord } from "../vscode-api";
-import { encodeEditUpdate } from "../../schema/input-layout";
+import { encodeOverlaysToggle } from "../../schema/input-layout";
 import type { OverlayFlag } from "../../messages";
 import { postLog } from "../log/post";
 import { useOverlayFlags } from "./overlay-flags";
@@ -30,7 +30,7 @@ type ToggleCfg = {
 
 function fireToggle(cfg: ToggleCfg, val: boolean) {
   postLog("guide-btn-click", cfg.payload(val));
-  postGoRecord(encodeEditUpdate("overlays", { type: "edit", op: "update", kind: "overlays", attr: "toggle", flag: cfg.flag }));
+  postGoRecord(encodeOverlaysToggle(cfg.flag));
 }
 
 /** The value a toggle displays: the Go-owned Overlay buffer columns (the only live truth).
