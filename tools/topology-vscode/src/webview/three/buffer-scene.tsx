@@ -35,6 +35,8 @@ import {
   SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
   SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
   SHADING_PARAM_NODE_OPACITY,
+  SHADING_PARAM_NODE_FADE_OPACITY,
+  SHADING_PARAM_NODE_FADE_BODY_MUL,
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
   SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
@@ -50,7 +52,8 @@ import {
   readNodeKindId,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
-  readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected,
+  readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected, readEdgeFaded,
+  readNodeFaded,
   readPortNodeRow, readPortDX, readPortDY, readPortDZ,
   readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
@@ -193,10 +196,34 @@ function BeadInstances({ capacity }: { capacity: number }) {
 // the buffer's node radius, so a node's world size matches the JSON path. Per-node fill/
 // stroke is driven via instanceColor (setColorAt). Kind→color is a pure NODE_DEFS lookup
 // keyed by the row-aligned id table (buffer-nav) — no color travels in the buffer.
+// Per-instance FADE: an `aFaded` instanced attribute (0|1) drives a per-node alpha multiply
+// injected into the shared material (onBeforeCompile). A single InstancedMesh keeps
+// instanceId == node row (so a faded node is still pickable to un-fade it) while faded rows
+// render dimmed. The multipliers are the pre-branch faded/solid opacity RATIOS: body target
+// = FADE_OPACITY*BODY_MUL vs solid NODE_OPACITY; ring target = FADE_OPACITY vs solid 1.
+const NODE_BODY_FADE_MUL = (SHADING_PARAM_NODE_FADE_OPACITY * SHADING_PARAM_NODE_FADE_BODY_MUL) / SHADING_PARAM_NODE_OPACITY;
+const NODE_RING_FADE_MUL = SHADING_PARAM_NODE_FADE_OPACITY;
+const glslFloat = (n: number): string => (Number.isInteger(n) ? n.toFixed(1) : String(n));
+function makeFadeAlphaPatch(mul: number) {
+  return (shader: { vertexShader: string; fragmentShader: string }) => {
+    shader.vertexShader = "attribute float aFaded;\nvarying float vFaded;\n" +
+      shader.vertexShader.replace("void main() {", "void main() {\n  vFaded = aFaded;");
+    shader.fragmentShader = "varying float vFaded;\n" +
+      shader.fragmentShader.replace(
+        "#include <dithering_fragment>",
+        `  if ( vFaded > 0.5 ) gl_FragColor.a *= ${glslFloat(mul)};\n#include <dithering_fragment>`,
+      );
+  };
+}
+const patchBodyFade = makeFadeAlphaPatch(NODE_BODY_FADE_MUL);
+const patchRingFade = makeFadeAlphaPatch(NODE_RING_FADE_MUL);
+
 function NodeInstances({ capacity }: { capacity: number }) {
   const envTex = useContext(EnvTexContext);
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const ringRef = useRef<THREE.InstancedMesh>(null);
+  const bodyFadedRef = useRef<THREE.InstancedBufferAttribute>(null);
+  const ringFadedRef = useRef<THREE.InstancedBufferAttribute>(null);
   const matRef  = useRef(new THREE.Matrix4());
   const posRef  = useRef(new THREE.Vector3());
   const quatRef = useRef(new THREE.Quaternion());
@@ -234,6 +261,13 @@ function NodeInstances({ capacity }: { capacity: number }) {
       const { fill, stroke } = nodeRowColors(nodeView, i);
       body.setColorAt(i, colRef.current.set(fill));
       ring.setColorAt(i, colRef.current.set(stroke));
+
+      // Per-instance fade flag → aFaded attribute (drives the shader alpha multiply).
+      const faded = readNodeFaded(nodeView, i) ? 1 : 0;
+      const bf = bodyFadedRef.current;
+      const rf = ringFadedRef.current;
+      if (bf) (bf.array as Float32Array)[i] = faded;
+      if (rf) (rf.array as Float32Array)[i] = faded;
     }
     body.count = n;
     ring.count = n;
@@ -241,6 +275,8 @@ function NodeInstances({ capacity }: { capacity: number }) {
     ring.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
     if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
+    if (bodyFadedRef.current) bodyFadedRef.current.needsUpdate = true;
+    if (ringFadedRef.current) ringFadedRef.current.needsUpdate = true;
     // Refresh the InstancedMesh bounding sphere so raycast picking stays accurate as
     // nodes move (three.js early-outs a ray against a cached union sphere; a dragged
     // node outside the stale sphere would otherwise be un-pickable). Cheap for the
@@ -251,7 +287,9 @@ function NodeInstances({ capacity }: { capacity: number }) {
   return (
     <>
       <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_NODE_TAG]: true }} frustumCulled={false}>
-        <sphereGeometry args={[1, 16, 16]} />
+        <sphereGeometry args={[1, 16, 16]}>
+          <instancedBufferAttribute ref={bodyFadedRef} attach="attributes-aFaded" args={[new Float32Array(capacity), 1]} />
+        </sphereGeometry>
         {/* Match GraphNode's glassy translucent body EXACTLY (scene-graph.tsx): a
             meshPhysicalMaterial with transmission + depthWrite=false + opacity 0.92 so
             the node interior (held/interior beads) shows through. Per-node fill is the
@@ -271,11 +309,16 @@ function NodeInstances({ capacity }: { capacity: number }) {
           transparent
           opacity={SHADING_PARAM_NODE_OPACITY}
           depthWrite={false}
+          onBeforeCompile={patchBodyFade}
         />
       </instancedMesh>
       <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
-        <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
-        <meshStandardMaterial roughness={0.6} metalness={0} />
+        <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]}>
+          <instancedBufferAttribute ref={ringFadedRef} attach="attributes-aFaded" args={[new Float32Array(capacity), 1]} />
+        </torusGeometry>
+        {/* transparent so faded rings (aFaded=1) blend at reduced alpha; solid rings keep
+            alpha 1 → visually opaque. */}
+        <meshStandardMaterial roughness={0.6} metalness={0} transparent depthWrite={false} onBeforeCompile={patchRingFade} />
       </instancedMesh>
     </>
   );
@@ -691,7 +734,13 @@ function buildArrow(apex: THREE.Vector3, dir: THREE.Vector3, height: number): {
 // edge target (mirrors the pre-branch SingleEdgeTube halo, which doubled as the pick tube).
 // `selected` paints that halo orange (opacity 0.6) when Go marks this edge selected; otherwise
 // the halo stays opacity 0 but remains raycast-hittable.
-function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean }) {
+function EdgeTube({ seg, dimmed, row, selected, faded }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean; faded: boolean }) {
+  // Faded edge: dim the tube (mirror pre-branch SingleEdgeTube `faded ? FADE_OPACITY : …`).
+  // Fade takes precedence over the double-links dim. The traveling bead is suppressed
+  // Go-side (a faded edge's bead rows stream Live=0), so no bead-hiding is needed here.
+  const tubeTransparent = faded || dimmed;
+  const tubeOpacity = faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1;
+  const matKey = faded ? "faded" : dimmed ? "dimmed" : "solid";
   const { tubeGeo, haloGeo, arrow } = useMemo(() => {
     const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
     const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
@@ -715,12 +764,12 @@ function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolea
     <>
       <mesh geometry={tubeGeo} raycast={() => null} frustumCulled={false}>
         <meshStandardMaterial
-          key={dimmed ? "dimmed" : "solid"}
+          key={matKey}
           color={SHADING_PARAM_TUBE_COLOR}
           emissive={TUBE_EMISSIVE_COLOR}
           emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
-          transparent={dimmed}
-          opacity={dimmed ? 0.25 : 1}
+          transparent={tubeTransparent}
+          opacity={tubeOpacity}
         />
       </mesh>
       {/* Selection halo doubles as the wide pick target (pre-branch SingleEdgeTube). Always
@@ -744,12 +793,12 @@ function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolea
         >
           <coneGeometry args={[ARROWHEAD_RADIUS, ARROWHEAD_LENGTH, 16]} />
           <meshStandardMaterial
-            key={dimmed ? "dimmed" : "solid"}
+            key={matKey}
             color={SHADING_PARAM_TUBE_COLOR}
             emissive={TUBE_EMISSIVE_COLOR}
             emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
-            transparent={dimmed}
-            opacity={dimmed ? 0.25 : 1}
+            transparent={tubeTransparent}
+            opacity={tubeOpacity}
           />
         </mesh>
       )}
@@ -817,6 +866,11 @@ function EdgeTubes({ capacity }: { capacity: number }) {
   // so a selection change (which does NOT move any endpoint) toggles the halo without
   // rebuilding the tube geometries. Go OWNS the selection (Edge block Selected column).
   const [selRow, setSelRow] = useState(-1);
+  // Faded edge rows (Go-owned fade fixpoint, Edge Faded column). Tracked separately from the
+  // segment set — a fade toggle does NOT move any endpoint, so it dims the tube without
+  // rebuilding geometry (mirrors selRow).
+  const [fadedRows, setFadedRows] = useState<boolean[]>([]);
+  const fadedKeyRef = useRef<string>("");
   const keyRef = useRef<string>("");
 
   useFrame(() => {
@@ -829,7 +883,9 @@ function EdgeTubes({ capacity }: { capacity: number }) {
     const dbl = !!readOverlayOverlaysVis(overlayView) && !!readOverlayDoubleLinks(overlayView);
     const n = Math.min(edgeCount, capacity);
     const next: EdgeSeg[] = new Array<EdgeSeg>(n);
+    const fadedNext: boolean[] = new Array<boolean>(n);
     let key = dbl ? "D|" : "S|";
+    let fkey = "";
     let sel = -1;
     for (let i = 0; i < n; i++) {
       const s: EdgeSeg = {
@@ -839,6 +895,9 @@ function EdgeTubes({ capacity }: { capacity: number }) {
       next[i] = s;
       key += `${s.sx},${s.sy},${s.sz}:${s.ex},${s.ey},${s.ez};`;
       if (sel < 0 && readEdgeSelected(edgeView, i)) sel = i;
+      const f = !!readEdgeFaded(edgeView, i);
+      fadedNext[i] = f;
+      fkey += f ? "1" : "0";
     }
     // Rebuild the segment set (and thus the tube geometries) only when something moved
     // or the double-links flag flipped — not every frame.
@@ -849,13 +908,18 @@ function EdgeTubes({ capacity }: { capacity: number }) {
     }
     // Selection toggles cheaply (no geometry rebuild) — update only when the row changes.
     if (sel !== selRow) setSelRow(sel);
+    // Fade toggles cheaply too (opacity only, no geometry rebuild).
+    if (fkey !== fadedKeyRef.current) {
+      fadedKeyRef.current = fkey;
+      setFadedRows(fadedNext);
+    }
   });
 
   return (
     <>
       {segs.map((s, i) => (
         <React.Fragment key={i}>
-          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} />
+          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} faded={!!fadedRows[i]} />
           {showDouble && <DoubleEdgeOverlayBuf seg={s} />}
         </React.Fragment>
       ))}
