@@ -69,6 +69,14 @@ type SnapshotState struct {
 	// to the correct destination node.
 	srcToDest map[srcPortKey]string
 
+	// directlyFadedNodes / directlyFadedEdges are the Go-owned fade SEED sets, mirrored
+	// from MoveDispatch via KindFade events (node ids / edge labels the user toggled faded).
+	// buildSnapshot runs the computeFade fixpoint over these seeds + the current adjacency
+	// each build and writes the resulting Faded columns; a faded edge's transit beads are
+	// written Live=0. Empty = nothing faded.
+	directlyFadedNodes map[string]bool
+	directlyFadedEdges map[string]bool
+
 	// Camera and overlay singletons (always one row each in the snapshot).
 	camera  cameraSnapState
 	overlay overlaySnapState
@@ -221,11 +229,13 @@ type overlaySnapState struct {
 // tests that only inspect state).
 func NewSnapshotState(out io.Writer) *SnapshotState {
 	return &SnapshotState{
-		nodeIndex: map[string]int{},
-		edgeIndex: map[string]int{},
-		beads:     map[beadSnapKey]beadSnapState{},
-		srcToDest: map[srcPortKey]string{},
-		out:       out,
+		nodeIndex:          map[string]int{},
+		edgeIndex:          map[string]int{},
+		beads:              map[beadSnapKey]beadSnapState{},
+		srcToDest:          map[srcPortKey]string{},
+		directlyFadedNodes: map[string]bool{},
+		directlyFadedEdges: map[string]bool{},
+		out:                out,
 	}
 }
 
@@ -350,7 +360,24 @@ func (s *SnapshotState) Update(ev T.Event) {
 			}
 		}
 		s.emitSnapshot()
+
+	case T.KindFade:
+		// Go-owned fade seeds: replace the mirrored directly-faded sets with the full seed
+		// lists MoveDispatch just emitted, then emit so buildSnapshot recomputes the fade
+		// fixpoint and refreshes the Faded columns. Empty lists clear all fade.
+		s.directlyFadedNodes = sliceToSet(ev.FadedNodes)
+		s.directlyFadedEdges = sliceToSet(ev.FadedEdges)
+		s.emitSnapshot()
 	}
+}
+
+// sliceToSet builds a membership set from a slice of ids (nil → empty set).
+func sliceToSet(ids []string) map[string]bool {
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m[id] = true
+	}
+	return m
 }
 
 // NodeCount returns the number of registered nodes (for tests).
@@ -659,6 +686,22 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	nodeCount := uint32(len(s.nodes))
 	edgeCount := uint32(len(s.edges))
 
+	// Fade fixpoint: recompute the faded node/edge sets from the Go-owned seeds + the current
+	// adjacency (computeFade). The result drives the Node/Edge Faded columns and suppresses
+	// faded edges' transit beads. fadedNodePairs indexes faded edges by (srcNode,dstNode) so a
+	// live bead (routed sourceNode→dest via srcToDest) can be matched to a faded edge.
+	fadeEdges := make([]FadeEdge, len(s.edges))
+	for i := range s.edges {
+		fadeEdges[i] = FadeEdge{ID: s.edgeLabels[i], Source: s.edges[i].srcNode, Target: s.edges[i].dstNode}
+	}
+	fadedNodes, fadedEdges := computeFade(s.nodeIDs, fadeEdges, s.directlyFadedNodes, s.directlyFadedEdges)
+	fadedNodePairs := map[srcPortKey]bool{} // reuse {node,port} as {src,dst} pair holder
+	for i := range s.edges {
+		if fadedEdges[s.edgeLabels[i]] {
+			fadedNodePairs[srcPortKey{s.edges[i].srcNode, s.edges[i].dstNode}] = true
+		}
+	}
+
 	interiorCount := int(nodeCount) * BufInteriorSlotsPerNode
 
 	// Port block is self-sizing: total port rows = sum of each node's ports.
@@ -713,10 +756,18 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	// but the consumer identifies beads by beadID, not row position).
 	beadBuf := buf[off : off+int(beadCount)*BufBeadStride]
 	row := 0
-	for _, b := range s.beads {
+	for k, b := range s.beads {
+		// Suppress a faded edge's transit bead: a faded edge shows no traveling bead
+		// (pre-branch SingleEdgeTube `!faded && <PulseBead/>`). The bead's edge is its
+		// route sourceNode→dest (dest via srcToDest); if that edge is faded, write the row
+		// Live=0 so the renderer hides it (buffer beads are edge-agnostic on the TS side).
+		live := uint8(1)
+		if dest, ok := s.srcToDest[srcPortKey{k.node, k.port}]; ok && fadedNodePairs[srcPortKey{k.node, dest}] {
+			live = 0
+		}
 		SetBeadRow(beadBuf, row,
 			float32(b.x), float32(b.y), float32(b.z),
-			int32(b.value), float32(b.frac), uint32(b.beadID), 1)
+			int32(b.value), float32(b.frac), uint32(b.beadID), live)
 		row++
 	}
 	off += int(beadCount) * BufBeadStride
@@ -732,7 +783,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			n.torusRed, n.missVal,
 			float32(n.mx), float32(n.my), float32(n.mz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
-			labelOffs[i], labelLens[i])
+			labelOffs[i], labelLens[i], boolU8(fadedNodes[s.nodeIDs[i]]))
 	}
 	off += int(nodeCount) * BufNodeStride
 
@@ -757,7 +808,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		SetEdgeRow(edgeBuf, i,
 			float32(e.sx), float32(e.sy), float32(e.sz),
 			float32(e.ex), float32(e.ey), float32(e.ez),
-			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)), e.selected)
+			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)), e.selected,
+			boolU8(fadedEdges[s.edgeLabels[i]]))
 	}
 	off += int(edgeCount) * BufEdgeStride
 

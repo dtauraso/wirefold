@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 10
+const BufLayoutVersion = 11
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -104,6 +104,10 @@ type bufLayoutNode struct {
 	// label (fall back to nothing / row index on the render side).
 	LabelOff uint32 `buf:"u32"` // byte offset into the label-bytes section
 	LabelLen uint32 `buf:"u32"` // label UTF-8 byte length
+	// Faded is the fixpoint fade mask for this node (1 = dimmed). Go owns the directly-
+	// faded seeds and recomputes the fixpoint (computeFade) each snapshot; the renderer
+	// dims a faded node's body/ring opacity. Persistent (not a transient event flag).
+	Faded uint8 `buf:"u8"` // 1 = node is faded (dimmed)
 }
 
 // bufLayoutInterior defines one row of the interior-bead column block.
@@ -139,6 +143,10 @@ type bufLayoutEdge struct {
 	SrcNodeRow int32   `buf:"i32"` // source node's buffer node-row index (-1 = unresolved)
 	DstNodeRow int32   `buf:"i32"` // destination node's buffer node-row index (-1 = unresolved)
 	Selected   uint8   `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
+	// Faded is the fixpoint fade mask for this edge (1 = dimmed). Set by Go's fade fixpoint
+	// (computeFade) each snapshot; the renderer dims a faded edge's tube. A faded edge's
+	// transit bead is suppressed Go-side (its bead rows are written Live=0).
+	Faded uint8 `buf:"u8"` // 1 = edge is faded (dimmed)
 }
 
 // bufLayoutPort defines one row of the ports column block.
