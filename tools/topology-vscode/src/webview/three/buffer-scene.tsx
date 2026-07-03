@@ -17,8 +17,7 @@ import React, { useRef, useState, useContext, useMemo, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
-import { getNavNodeIds } from "./buffer-nav";
+import { decodeSnapshot, nodeLabel } from "./buffer-decode";
 import { NODE_DEFS_ARRAY } from "../../schema/node-defs";
 import { ndcToPixel } from "./geometry-helpers";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
@@ -58,8 +57,9 @@ import {
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
 
-/** Projected label position, keyed by node id (buffer row → id via the id table). */
-export interface BufferLabelPos { id: string; px: number; py: number; cx: number; cy: number; }
+/** Projected label position for one buffer node row. `row` is the node's buffer node-row
+ *  index (identity); `label` is its human label decoded from the buffer's label section. */
+export interface BufferLabelPos { row: number; label: string; px: number; py: number; cx: number; cy: number; }
 
 // ── Sizing constants ──────────────────────────────────────────────────────────
 const INITIAL_BEAD_CAP  = 64;
@@ -213,7 +213,6 @@ function NodeInstances({ capacity }: { capacity: number }) {
     const decoded = decodeSnapshot(snap);
     if (!decoded) { body.count = 0; ring.count = 0; return; }
     const { nodeCount, nodeView } = decoded;
-    const ids = getNavNodeIds();
 
     const n = Math.min(nodeCount, capacity);
     const q = quatRef.current; // identity (no per-node rotation)
@@ -1051,12 +1050,12 @@ function BufferCamera({ cameraRef }: {
 }
 
 // ── BufferLabelProjector ────────────────────────────────────────────────────────
-// Buffer-driven node-label projector: each ~2 frames it reads the snapshot's node
+// Buffer-driven node label projector: each ~2 frames it reads the snapshot's node
 // block, projects each node's top (center.y+radius) and center to screen, and reports
-// {id,px,py,cx,cy} keyed by the buffer-nav id table (row i → ids[i]). Mirrors the old
-// JSON-path LabelProjector but sourced from the buffer + id table instead of the
-// RFNode array. The DOM pills/badges (ThreeView) render from these positions under the
-// new-system flag. Pure projection — no geometry math, no store writes.
+// {row,label,px,py,cx,cy} — the row is the node's buffer node-row index (identity) and the
+// label is decoded straight from the buffer's label section (nodeLabel). Mirrors the old
+// JSON-path LabelProjector but sourced entirely from the buffer, no id table. The DOM
+// pills/badges (ThreeView) render from these positions. Pure projection — no store writes.
 const _bufTopScratch = new THREE.Vector3();
 const _bufCenterScratch = new THREE.Vector3();
 
@@ -1074,7 +1073,6 @@ export function BufferLabelProjector({ onPositions }: {
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
     const { nodeCount, nodeView } = decoded;
-    const ids = getNavNodeIds();
     const positions: BufferLabelPos[] = [];
     for (let i = 0; i < nodeCount; i++) {
       const cx = readNodeCX(nodeView, i);
@@ -1085,7 +1083,7 @@ export function BufferLabelProjector({ onPositions }: {
       const topPx = ndcToPixel(_bufTopScratch.x, _bufTopScratch.y, size);
       _bufCenterScratch.set(cx, cy, cz).project(camera);
       const centerPx = ndcToPixel(_bufCenterScratch.x, _bufCenterScratch.y, size);
-      positions.push({ id: ids[i] ?? `#${i}`, px: topPx.px, py: topPx.py, cx: centerPx.px, cy: centerPx.py });
+      positions.push({ row: i, label: nodeLabel(decoded, i), px: topPx.px, py: topPx.py, cx: centerPx.px, cy: centerPx.py });
     }
     onPositions(positions);
   });

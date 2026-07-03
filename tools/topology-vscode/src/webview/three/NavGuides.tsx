@@ -11,7 +11,7 @@ import { getLatestSnapshot } from "../snapshot-buffer";
 import { useOverlayFlags } from "./overlay-flags";
 import { decodeSnapshot } from "./buffer-decode";
 import {
-  type NavNode, decodeNavNodes, getNavNodeIds, contentSphereFromCenters,
+  type NavNode, decodeNavNodes, contentSphereFromCenters,
 } from "./buffer-nav";
 
 // navSignature — coarse fingerprint of the buffer-derived nav nodes (rounded
@@ -22,7 +22,7 @@ import {
 function navSignature(nav: NavNode[]): string {
   let s = "";
   for (const n of nav) {
-    s += `${n.id}:${Math.round(n.center.x)},${Math.round(n.center.y)},${Math.round(n.center.z)},${Math.round(n.radius)},${Math.round(n.sphereR ?? 0)},${n.selected ? 1 : 0};`;
+    s += `${n.row}:${Math.round(n.center.x)},${Math.round(n.center.y)},${Math.round(n.center.z)},${Math.round(n.radius)},${Math.round(n.sphereR ?? 0)},${n.selected ? 1 : 0};`;
   }
   return s;
 }
@@ -359,7 +359,7 @@ export function NavGuides() {
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
-    bufNavRef.current = decodeNavNodes(decoded, getNavNodeIds());
+    bufNavRef.current = decodeNavNodes(decoded);
     const sig = navSignature(bufNavRef.current);
     if (sig !== bufSigRef.current) {
       bufSigRef.current = sig;
@@ -375,16 +375,16 @@ export function NavGuides() {
     [navTick],
   );
 
-  // Selection: Go-owned Selected column from the buffer.
-  const effectiveSelectedId = navNodes.find((n) => n.selected)?.id ?? null;
+  // Selection: Go-owned Selected column from the buffer. Identity is the node ROW.
+  const effectiveSelectedId = navNodes.find((n) => n.selected)?.row ?? null;
 
   // Latch the last selected node. Selection only DECIDES which sphere the
   // sel-highlight frames; it does not have to stay selected to keep the frame shown.
   // So DEselecting the node (clicking empty space) leaves the latched sphere framed —
   // only selecting a different node replaces it. The sel toggle still gates visibility.
-  const [latchedSel, setLatchedSel] = useState<string | null>(effectiveSelectedId);
+  const [latchedSel, setLatchedSel] = useState<number | null>(effectiveSelectedId);
   useEffect(() => {
-    if (effectiveSelectedId) setLatchedSel(effectiveSelectedId);
+    if (effectiveSelectedId !== null) setLatchedSel(effectiveSelectedId);
   }, [effectiveSelectedId]);
 
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
@@ -457,7 +457,7 @@ export function NavGuides() {
       const pc = parent.center;
       const tol = pr * 0.25;
       const children = navNodes.filter(
-        (n) => n.id !== parent.id && Math.abs(n.center.distanceTo(pc) - pr) <= tol,
+        (n) => n.row !== parent.row && Math.abs(n.center.distanceTo(pc) - pr) <= tol,
       );
       if (children.length >= 2) return { parent, childA: children[0]!, childB: children[1]! };
     }
@@ -484,7 +484,7 @@ export function NavGuides() {
   // sphere to frame (persists through deselect), and we draw THAT node's own sphere pole
   // frame at full SPHERE scale (its Go-streamed sphereR). Every node has a sphere, so this
   // works for leaf nodes (3, 5) too — no parent remapping. Never selected ⇒ no frame.
-  const sphereCenters = latchedSel ? navNodes.filter((n) => n.id === latchedSel) : [];
+  const sphereCenters = latchedSel !== null ? navNodes.filter((n) => n.row === latchedSel) : [];
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
@@ -512,20 +512,20 @@ export function NavGuides() {
       {/* Per-node pole frames — one PolarFrame per node, gated behind nodePolesVisible. */}
       {showNodePoles && navNodes.map((node) => (
         <PolarFrame
-          key={node.id}
+          key={node.row}
           center={node.center}
           scale={node.radius}
-          tag={`(${node.id})`}
+          tag={`(${node.label})`}
         />
       ))}
       {/* Selected-sphere poles (additional feature) — the center(s) of the sphere(s) the
           SELECTED node sits on, drawn at SPHERE scale. Independent of the per-node poles. */}
       {showSelPoles && sphereCenters.map((center) => (
         <PolarFrame
-          key={`sel-${center.id}`}
+          key={`sel-${center.row}`}
           center={center.center}
           scale={center.sphereR ?? center.radius}
-          tag={`(${center.id})`}
+          tag={`(${center.label})`}
           octants
         />
       ))}

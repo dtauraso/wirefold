@@ -17,7 +17,7 @@ import type { BufferLabelPos } from "./buffer-scene";
 import { computeOcclusionCountsNav } from "./scene-occlusion";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
-import { decodeNavNodes, getNavNodeIds, getNavNodeLabel } from "./buffer-nav";
+import { decodeNavNodes } from "./buffer-nav";
 import { readOverlayLabelsGlobal, readOverlayBadgesGlobal } from "../../schema/buffer-layout";
 import { NavGuides } from "./NavGuides";
 
@@ -95,14 +95,14 @@ export function ThreeView() {
 
   // Occlusion counts: recomputed only when the camera settles (not per-frame). Computed from
   // the buffer's node block (Go-owned centers/radii), never an RFNode array.
-  const [bufferOcclusionCounts, setBufferOcclusionCounts] = useState<Map<string, number>>(new Map());
+  const [bufferOcclusionCounts, setBufferOcclusionCounts] = useState<Map<number, number>>(new Map());
 
   const onCameraSettle = useCallback(() => {
     const cam = cameraRef.current;
     if (!cam) return;
     const snap = getLatestSnapshot();
     const decoded = snap ? decodeSnapshot(snap) : null;
-    const nav = decoded ? decodeNavNodes(decoded, getNavNodeIds()) : [];
+    const nav = decoded ? decodeNavNodes(decoded) : [];
     setBufferOcclusionCounts(computeOcclusionCountsNav(nav, cam, canvasSize));
   }, [cameraRef, canvasSize]);
 
@@ -155,11 +155,10 @@ export function ThreeView() {
       </div>
 
       {/* Node label pills — one pill per buffer-projected node position (BufferLabelProjector),
-          label text looked up from the buffer-nav label table (getNavNodeLabel) fed by the
-          node-label sidecar. */}
+          label text decoded straight from the buffer's label section (pos.label). No sidecar. */}
       {!bufLabelsHidden && bufferLabelPositions.map((pos) => (
         <div
-          key={pos.id}
+          key={pos.row}
           style={{
             position: "absolute",
             left: pos.px,
@@ -175,7 +174,7 @@ export function ThreeView() {
             ...PILL_STYLE,
           }}
         >
-          <div style={{ whiteSpace: "nowrap" }}>{getNavNodeLabel(pos.id) ?? pos.id}</div>
+          <div style={{ whiteSpace: "nowrap" }}>{pos.label || String(pos.row)}</div>
         </div>
       ))}
 
@@ -183,11 +182,11 @@ export function ThreeView() {
           the buffer's node block (computeOcclusionCountsNav) at the buffer projection. Only
           shown when N >= 1. Recomputed on camera settle. */}
       {!bufBadgesHidden && bufferLabelPositions.map((pos) => {
-        const count = bufferOcclusionCounts.get(pos.id);
+        const count = bufferOcclusionCounts.get(pos.row);
         if (!count || count < 1) return null;
         return (
           <div
-            key={`badge-${pos.id}`}
+            key={`badge-${pos.row}`}
             style={{
               position: "absolute",
               left: pos.px + 10,

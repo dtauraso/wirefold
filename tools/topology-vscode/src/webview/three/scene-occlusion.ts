@@ -5,7 +5,7 @@ import type { NavNode } from "./buffer-nav";
 
 // ---------------------------------------------------------------------------
 // computeOcclusionCountsNav: given buffer-derived NavNode records (Go-owned center +
-// radius), return a map from frontNodeId → count of nodes hidden directly behind it.
+// radius), return a map from front node ROW → count of nodes hidden directly behind it.
 //
 // Two nodes "overlap" if their projected screen-center distance < front node's
 // projected radius. Front = nearer to camera. N = count of farther overlapping
@@ -16,12 +16,12 @@ export function computeOcclusionCountsNav(
   nodes: NavNode[],
   camera: THREE.Camera,
   size: { w: number; h: number },
-): Map<string, number> {
+): Map<number, number> {
   if (nodes.length < 2) return new Map();
 
   const wh = { width: size.w, height: size.h };
 
-  type Proj = { id: string; px: number; py: number; dist: number; screenR: number };
+  type Proj = { row: number; px: number; py: number; dist: number; screenR: number };
   const projected: Proj[] = nodes.map((n) => {
     const worldCenter = n.center;
     const dist = worldCenter.distanceTo(camera.position);
@@ -34,10 +34,10 @@ export function computeOcclusionCountsNav(
     const offsetPx = ndcToPixel(offsetProj.x, offsetProj.y, wh).px;
     const screenR = Math.abs(offsetPx - px);
 
-    return { id: n.id, px, py, dist, screenR };
+    return { row: n.row, px, py, dist, screenR };
   });
 
-  const counts = new Map<string, number>();
+  const counts = new Map<number, number>();
 
   for (let i = 0; i < projected.length; i++) {
     for (let j = i + 1; j < projected.length; j++) {
@@ -46,7 +46,7 @@ export function computeOcclusionCountsNav(
       const screenDist = Math.hypot(a.px - b.px, a.py - b.py);
       const front = a.dist < b.dist ? a : b;
       if (screenDist < front.screenR) {
-        counts.set(front.id, (counts.get(front.id) ?? 0) + 1);
+        counts.set(front.row, (counts.get(front.row) ?? 0) + 1);
       }
     }
   }

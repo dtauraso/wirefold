@@ -1,41 +1,37 @@
-// buffer-nav.ts — buffer-driven nav-overlay data source (new-system path).
+// buffer-nav.ts — buffer-driven nav-overlay data source (buffer-only path).
 //
-// The binary snapshot's node block carries per-node cx/cy/cz/radius/sphereR/selected
-// (see buffer-layout.ts node readers) but is NUMERIC — it has no node id/label
-// strings. This module supplies the missing label resource and the pure decode that
-// pairs the numeric node rows with their ids, so NavGuides / label-pills / occlusion
-// badges can run entirely off the buffer.
+// The binary snapshot's node block carries per-node cx/cy/cz/radius/sphereR/selected AND the
+// per-node label (LabelOff/LabelLen into the trailing label section — see buffer-decode
+// nodeLabel). Identity in this system is the buffer NODE-ROW INDEX: Go resolves a row back to
+// its node id (Buffer.SnapshotState.LookupNodeRow) for any topology edit, so the webview needs
+// no node-id strings at all. This module is the pure decode that turns the numeric node rows
+// (paired with their decoded labels) into NavNode records so NavGuides / label-pills /
+// occlusion badges can run entirely off the buffer, keyed by row.
 //
-// ── Ordering guarantee (id table index i ↔ buffer node row i) ──────────────────
-// Go's Buffer.SnapshotState assigns each node its row on the FIRST KindNodeGeometry
-// event it sees for that id (insertion order; re-emits on a move do not reorder — see
-// Buffer/snapshot.go onNodeGeometry). The webview builds this id table from the SAME
-// node-geometry stream by the SAME first-seen rule, so index i maps to buffer node
-// row i by construction. Two writers, both first-seen dedup:
-//   • The new system: the node-label host→webview sidecar. The host
-//     derives one {id,label} per node id — once, in first-seen node-geometry order —
-//     from the geometry stream and forwards it independent of pump.ts; main.tsx routes
-//     it to recordNavNodeLabel. This is the sole builder when the flag is on (pump is
-//     gated off), and it also carries the human label so pills need no spec store.
-//   • OLD system (flag off): recordNavNodeId, called from pump.ts's node-geometry case.
-// Both sides start empty per run (Go re-spawns fresh; the host clears its per-run dedup
-// on the spec/new-run boundary; the webview clears this table at the load boundary next
-// to clearAllNodeGeometry), keeping the two orderings aligned across edit/reload cycles.
+// ── Ordering guarantee (row i ↔ buffer node row i) ─────────────────────────────
+// Go's Buffer.SnapshotState assigns each node its row on the FIRST KindNodeGeometry event it
+// sees for that id (insertion order; re-emits on a move do not reorder — see
+// Buffer/snapshot.go onNodeGeometry) and writes the Node block + label section in that same
+// order. decodeNavNodes walks the node block in row order, so NavNode i is buffer node row i
+// by construction — no id table, no sidecar.
 //
-// This is a RENDERING RESOURCE keyed by row, NOT a domain store of positions or
-// topology: it holds only the ordered ids. Positions/radii/sphereR/selection all come
-// from the buffer via decodeNavNodes.
+// This is a RENDERING RESOURCE keyed by row, NOT a domain store of positions or topology:
+// positions/radii/sphereR/selection/label all come from the buffer via decodeNavNodes.
 
 import * as THREE from "three";
-import type { DecodedSnapshot } from "./buffer-decode";
+import { type DecodedSnapshot, nodeLabel } from "./buffer-decode";
 import {
   readNodeCX, readNodeCY, readNodeCZ,
   readNodeRadius, readNodeSphereR, readNodeSelected,
 } from "../../schema/buffer-layout";
 
-/** One node's nav-overlay geometry, decoded from the buffer + paired with its id. */
+/** One node's nav-overlay geometry, decoded from the buffer. Identity is `row` (its buffer
+ *  node-row index); `label` is the human label decoded from the buffer's label section. */
 export interface NavNode {
-  id: string;
+  /** Buffer node-row index — the identity Go resolves back to a node id (LookupNodeRow). */
+  row: number;
+  /** Human label decoded from the buffer's label section ("" when the node has no label). */
+  label: string;
   center: THREE.Vector3;
   radius: number;
   /** Go's per-node sphere radius. 0 means "not yet populated" (pre-first-geometry). */
@@ -43,92 +39,21 @@ export interface NavNode {
   selected: boolean;
 }
 
-// ── Ordered id table + human-label map (label resource keyed by buffer row) ────
-// TWO writers feed navNodeIds, both with the identical first-seen dedup, so the row
-// order is the same either way:
-//   • recordNavNodeId  — the OLD path (pump.ts node-geometry case). Unused when the
-//     new system is on (pump is gated off in main.tsx).
-//   • recordNavNodeLabel — the NEW path (the node-label host→webview sidecar, routed
-//     in main.tsx, independent of pump). This is the sole writer under the flag and
-//     ALSO stores the node's human label so the new-path pills need no spec store.
-// navNodeIds is read only by the new render path (NavGuides / BufferLabelProjector /
-// occlusion), so the redundant flag-off double-write is invisible.
-let navNodeIds: string[] = [];
-const navNodeIdSet = new Set<string>();
-const navNodeLabels = new Map<string, string>();
-// Kind is no longer carried on the sidecar — it rides the binary buffer as KindId (u8).
-// The render path reads KindId from the buffer node block and indexes NODE_DEFS_ARRAY.
-
-/**
- * Record a node id in first-seen order. Called from pump.ts on every node-geometry
- * trace event; repeats (node re-emits on move) are ignored so the row order matches
- * Go's SnapshotState insertion order exactly.
- */
-export function recordNavNodeId(id: string): void {
-  if (navNodeIdSet.has(id)) return;
-  navNodeIdSet.add(id);
-  navNodeIds.push(id);
-}
-
-/**
- * Record a node id + its human label from the node-label sidecar (main.tsx). Appends
- * the id in first-seen order (same dedup/order as recordNavNodeId) AND stores the
- * label, so the new render path resolves pill text without the old spec store. The
- * label is always set (even on a repeat id) so a label change within a run is picked up.
- * Kind is no longer carried here — it rides the binary buffer as KindId.
- */
-export function recordNavNodeLabel(id: string, label: string): void {
-  if (!navNodeIdSet.has(id)) {
-    navNodeIdSet.add(id);
-    navNodeIds.push(id);
-  }
-  navNodeLabels.set(id, label);
-}
-
-/** Human label for a node id (undefined until its sidecar message arrives). */
-export function getNavNodeLabel(id: string): string | undefined {
-  return navNodeLabels.get(id);
-}
-
-/** Wipe the id table + label map at the run-start boundary (symmetric with clearAllNodeGeometry). */
-export function clearNavNodeIds(): void {
-  navNodeIds = [];
-  navNodeIdSet.clear();
-  navNodeLabels.clear();
-}
-
-/** Current ordered id table; index i ↔ buffer node row i. */
-export function getNavNodeIds(): string[] {
-  return navNodeIds;
-}
-
-/**
- * Resolve a buffer InstancedMesh `instanceId` to its node id. The NodeInstances
- * mesh (buffer-scene.tsx) draws one instance per buffer node row in row order, and
- * getNavNodeIds()[i] is the id of buffer node row i (the ordering invariant above),
- * so instanceId is exactly the row index. Returns null for an out-of-range instanceId
- * (id table not yet populated for that row). Pure — the id table is passed in so this
- * is unit-testable without the module-level table.
- */
-export function instanceIdToNodeId(instanceId: number, ids: string[]): string | null {
-  return ids[instanceId] ?? null;
-}
-
 // ── Pure decode ───────────────────────────────────────────────────────────────
 
 /**
- * Decode the buffer's node block into NavNode records, pairing row i with ids[i].
- * Pure — no store reads/writes. Rows past the id table's length fall back to a
- * synthetic `#i` id (only possible transiently if a geometry event's row landed in
- * the buffer before its trace event reached the webview).
+ * Decode the buffer's node block into NavNode records. NavNode i is buffer node row i (the
+ * ordering invariant above); its label is decoded from the buffer's label section. Pure — no
+ * store reads/writes.
  */
-export function decodeNavNodes(decoded: DecodedSnapshot, ids: string[]): NavNode[] {
+export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
   const { nodeCount, nodeView } = decoded;
   const out: NavNode[] = [];
   for (let i = 0; i < nodeCount; i++) {
     const sphereR = readNodeSphereR(nodeView, i);
     out.push({
-      id: ids[i] ?? `#${i}`,
+      row: i,
+      label: nodeLabel(decoded, i),
       center: new THREE.Vector3(
         readNodeCX(nodeView, i),
         readNodeCY(nodeView, i),
