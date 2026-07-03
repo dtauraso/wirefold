@@ -665,12 +665,11 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selected = node
 	md.selectedEdge = ""
 	tr.Select(node, own)
-	// A selection change can change the rule-builder's latched Center (e.g. picking the
-	// Center sphere itself while selSpherePoles is on); mirror it so the RuleBuilder block
-	// stays in sync. Cheap no-op while the overlay is off (the panel is hidden either way).
-	if md.ov.selSpherePolesVisible {
-		md.emitRuleBuilder(tr)
-	}
+	// A selection change always changes the rule-builder's latched Center (md.selected),
+	// so mirror it unconditionally to keep the buffer's RuleBuilder block (CenterRow/
+	// centerLabel) tracking selection. The in-progress builder UI itself stays gated on
+	// the selSpherePoles overlay in TS; this only keeps the data fresh underneath it.
+	md.emitRuleBuilder(tr)
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

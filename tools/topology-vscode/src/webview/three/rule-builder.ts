@@ -71,6 +71,7 @@ export interface PolarLockEntry {
   portRow: number;
   portLabel: string;
   portNodeLabel: string;
+  portNodeRow: number;
   portIsInput: boolean;
   torusRow: number;
   torusLabel: string;
@@ -116,6 +117,7 @@ export function readPolarLocks(): PolarLocksState {
     const bRow = readPolarLockBRow(v, i);
     const portRow = readPolarLockPortRow(v, i);
     const torusRow = readPolarLockTorusRow(v, i);
+    const portNodeRow = portRow === ROW_NONE ? ROW_NONE : readPortNodeRow(decoded.portView, portRow);
     equations.push({
       index: i,
       kind: readPolarLockKind(v, i),
@@ -125,7 +127,8 @@ export function readPolarLocks(): PolarLocksState {
       active: readPolarLockActive(v, i) === 1,
       portRow,
       portLabel: portRow === ROW_NONE ? "" : portName(decoded, portRow),
-      portNodeLabel: portRow === ROW_NONE ? "" : nodeLabel(decoded, readPortNodeRow(decoded.portView, portRow)),
+      portNodeLabel: portRow === ROW_NONE ? "" : nodeLabel(decoded, portNodeRow),
+      portNodeRow,
       portIsInput: readPolarLockPortIsInput(v, i) === 1,
       torusRow,
       torusLabel: torusRow === ROW_NONE ? "" : nodeLabel(decoded, torusRow),

@@ -27,13 +27,20 @@ export function RuleEquationPanel() {
   const mount = document.getElementById("rule-eq-mount");
 
   // The committed-equations LIST is independent of the selSpherePoles overlay: it shows
-  // whenever the selected node is the Center of >=1 committed equation. The in-progress
+  // whenever the selected node participates in >=1 committed equation, as ANY participant
+  // (center, term A, term B, the port's owning node, or the torus). The in-progress
   // builder section stays gated on the overlay, as before.
   const rowEquations = equations.filter((eq) =>
-    eq.kind === POLAR_LOCK_KIND_PORT_TORUS ? eq.torusRow === selectedRow : eq.centerRow === selectedRow,
+    eq.kind === POLAR_LOCK_KIND_PORT_TORUS
+      ? eq.torusRow === selectedRow || eq.portNodeRow === selectedRow
+      : eq.centerRow === selectedRow || eq.a.row === selectedRow || eq.b.row === selectedRow,
   );
   const showBuilder = !!overlays?.selSpherePoles && !!rb;
   const showList = rowEquations.length > 0;
+  // rb.centerLabel tracks md.selected regardless of the overlay (gesture.go applySelect
+  // emits it unconditionally now), so show a standalone Center header whenever the list
+  // is showing but the builder section (which already renders its own Center line) is not.
+  const showListCenter = showList && !showBuilder;
 
   // Delete key: only when the panel-focused row is one of THIS center's rows and is
   // deactivated. Go re-guards regardless. Listens while the list is showing.
@@ -55,6 +62,7 @@ export function RuleEquationPanel() {
   return createPortal(
     <div className="rule-eq-panel">
       {showBuilder && rb && renderBuilder(rb)}
+      {showListCenter && <div className="rule-eq-center">Center: {rb?.centerLabel || "—"}</div>}
       {showList && (
         <div className="rule-eq-list">
           {rowEquations.map((eq) => renderLockRow(eq, eq.index === selectedLockIndex))}
