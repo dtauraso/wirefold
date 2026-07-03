@@ -61,22 +61,6 @@ func TestDecodeEditUpdateOverlaysToggle(t *testing.T) {
 	}
 }
 
-func TestDecodeEditUpdateOverlaysSet(t *testing.T) {
-	// Bit i (LSB-first) = inOverlayFlags[i] visibility. Set only tori(0) + overlays(8).
-	bits := uint16(1<<0 | 1<<8)
-	rec := encodeOverlaysSet(bits)
-	if want := []byte{inKindEditUpdate, 0, inOverlayAttrSet, 0x01, 0x01}; !bytes.Equal(rec, want) {
-		t.Fatalf("overlays set bytes = %v, want %v", rec, want)
-	}
-	msg, ok := decodeInputRecord(rec)
-	if !ok || msg.Type != "edit" || msg.Op != "update" || msg.Kind != "overlays" || msg.Attr != "set" || msg.State == nil {
-		t.Fatalf("overlays set decode = %+v ok=%v", msg, ok)
-	}
-	if !msg.State.Tori || !msg.State.Overlays || msg.State.ScenePoles || msg.State.DoubleLinks {
-		t.Fatalf("overlays set bitfield mismatch: %+v", *msg.State)
-	}
-}
-
 // TestOverlayFlagOrderMatchesFingerprint guards that the derived flag order equals the
 // fingerprint's overlayFlags list (self-check on parseOverlayFlags).
 func TestOverlayFlagOrderMatchesFingerprint(t *testing.T) {

@@ -1804,14 +1804,12 @@ func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
 
 // writeOverlayGen emits nodes/Wiring/overlay_gen.go: the entire Go-side overlay wiring
 // mechanically derived from OVERLAY_FLAG_NAMES — the overlayState struct + flip/emit
-// methods, the defaultOverlayState constructor, the MoveDispatch delegators, the
-// overlayToggles method-expression table, the stdinGuideVisPayload wire struct, and the
-// overlayStateFromPayload mapper. Deviating flags (scene/node poles Breadcrumb, the
-// angleLabels accessor) are generated from overlayOverrides. Adding an overlay flag now
-// means editing OVERLAY_FLAG_NAMES (+ the ~4-5 TS/render sites); every Go site above is
-// regenerated. Parity of the generated table/struct is guarded by check-edit-op-parity.sh
-// (which reads this file's OVERLAY_TOGGLES / GUIDEVIS_FIELDS sentinels) and staleness by
-// check-generated.sh.
+// methods, the defaultOverlayState constructor, the MoveDispatch delegators, and the
+// overlayToggles method-expression table. Deviating flags (scene/node poles Breadcrumb,
+// the angleLabels accessor) are generated from overlayOverrides. Adding an overlay flag
+// now means editing OVERLAY_FLAG_NAMES (+ the ~4-5 TS/render sites); every Go site above
+// is regenerated. Parity of the generated table is guarded by check-edit-op-parity.sh
+// (which reads this file's OVERLAY_TOGGLES sentinel) and staleness by check-generated.sh.
 func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	var buf bytes.Buffer
 	w := bufio.NewWriter(&buf)
@@ -1932,41 +1930,12 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	fmt.Fprintln(w, `// OVERLAY_TOGGLES_END`)
 	fmt.Fprintln(w)
 
-	// stdinGuideVisPayload struct (sentinel-bounded for axis 4) + mapper.
-	fmt.Fprintln(w, `// stdinGuideVisPayload holds the explicit-visibility fields for the overlays`)
-	fmt.Fprintln(w, `// attr="set" op. The json tags are the overlay FLAG vocabulary shared with the TS`)
-	fmt.Fprintln(w, `// OverlayState.`)
-	fmt.Fprintln(w, `//`)
-	fmt.Fprintln(w, `// GUIDEVIS_FIELDS_START`)
-	fmt.Fprintln(w, `type stdinGuideVisPayload struct {`)
-	for _, f := range flags {
-		fmt.Fprintf(w, "\t%s bool `json:%q`\n", exportedName(f.flag), f.flag)
-	}
-	fmt.Fprintln(w, `}`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// GUIDEVIS_FIELDS_END`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// overlayStateFromPayload maps the wire payload onto the named overlayState (no`)
-	fmt.Fprintln(w, `// positional bool order to get wrong).`)
-	fmt.Fprintln(w, `func overlayStateFromPayload(s *stdinGuideVisPayload) overlayState {`)
-	fmt.Fprintln(w, "\treturn overlayState{")
-	for _, f := range flags {
-		fmt.Fprintf(w, "\t\t%s: s.%s,\n", f.field, exportedName(f.flag))
-	}
-	fmt.Fprintln(w, "\t}")
-	fmt.Fprintln(w, `}`)
-
 	w.Flush()
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
 		return fmt.Errorf("format overlay_gen.go: %w", err)
 	}
 	return os.WriteFile(outPath, formatted, 0644)
-}
-
-// exportedName upper-cases the first rune of a camelCase flag for a Go struct field.
-func exportedName(s string) string {
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // kebabOf converts a PascalCase method name to its kebab trace-kind string (doc only).

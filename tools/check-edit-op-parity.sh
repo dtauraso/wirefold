@@ -12,8 +12,12 @@ set -euo pipefail
 #   1. ops          — messages.ts EditMsg  vs  stdin_reader.go applyEdit op switch.
 #   2. update kinds — messages.ts EditMsg  vs  stdin_reader.go applyUpdate kind switch
 #                     vs  handle-message.ts update-dispatch switch (3-way).
-#   3. overlay flags— messages.ts OVERLAY_FLAG_NAMES  vs  the HAND-AUTHORED pump.ts
-#                     overlay renderer (OverlayKind union + OVERLAY_TABLE), by cardinality.
+#   3. overlay flags— messages.ts OVERLAY_FLAG_NAMES  vs  the HAND-AUTHORED overlay-flags.ts
+#                     renderer (readOverlay* reads + OverlayFlagVals keys), by cardinality.
+#
+# (Axis 4 — stdinGuideVisPayload fields vs OverlayState/flags — was removed when the
+# attr="set" full-visibility-install path was dropped: its only TS caller, the load-time
+# main.tsx push, was deleted and the generated stdinGuideVisPayload struct with it.)
 #
 # Sentinel comments (X_START / X_END) bound each region so the greps cannot sweep in
 # unrelated literals (viewpoint sub-kinds, attr labels, trace kinds).
@@ -23,9 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
-# The overlayToggles table + stdinGuideVisPayload struct are GENERATED into overlay_gen.go
-# from OVERLAY_FLAG_NAMES; their sentinel blocks live there.
-OVERLAY_GEN="$REPO_ROOT/nodes/Wiring/overlay_gen.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
 # The 3rd update-kind parity source moved from handle-message.ts's dispatch switch (removed
 # when the TS→Go bridge became a binary buffer) to the shared IN_UPDATE_KINDS schema, which
@@ -38,7 +39,7 @@ HANDLE_MSG="$REPO_ROOT/tools/topology-vscode/src/schema/input-layout.ts"
 # content-buffer erase; overlay state now round-trips through the buffer.)
 OVERLAY_FLAGS_TS="$REPO_ROOT/tools/topology-vscode/src/webview/three/overlay-flags.ts"
 
-for f in "$STDIN_READER" "$OVERLAY_GEN" "$MESSAGES_TS" "$HANDLE_MSG" "$OVERLAY_FLAGS_TS"; do
+for f in "$STDIN_READER" "$MESSAGES_TS" "$HANDLE_MSG" "$OVERLAY_FLAGS_TS"; do
   if [[ ! -f "$f" ]]; then
     echo "edit-op-parity: MISCONFIGURED — file not found: $f" >&2
     exit 1
@@ -134,23 +135,14 @@ if [[ "$N_FLAGS" -ne "$N_READS" || "$N_FLAGS" -ne "$N_KEYS" ]]; then
   HITS=$((HITS+1))
 fi
 
-# --- Axis 4: overlays attr="set" payload fields -----------------------------
-# The attr="set" full-visibility restore (OverlayState ↔ stdinGuideVisPayload) is a
-# DERIVED listing on the TS side (OverlayState = Record<OverlayFlag, boolean>), so its
-# field set IS the overlay flag set (TS_FLAGS). On the Go side it is the json tags of
-# stdinGuideVisPayload. Assert they agree so a flag added/removed in the set-path can't
-# silently no-op.
-GO_GUIDEVIS=$(between GUIDEVIS_FIELDS_START GUIDEVIS_FIELDS_END "$OVERLAY_GEN" | grep -aoE 'json:"[^"]+"' | sed 's/json://' | tr -d '"' | sort -u)
-assert_nonempty "$GO_GUIDEVIS" "axis4 stdinGuideVisPayload fields"
-report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuideVisPayload fields" \
-            "$(comm -23 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "messages.ts OverlayState/flags"
-
 # (Camera viewpoint sub-kinds axis removed: camera edits are produced in-process by the
 # gesture FSM from raw-input and no longer cross the editor→Go seam, so there is no vp.Kind
 # TS↔Go vocabulary left to keep in parity.)
+# (Axis 4 — stdinGuideVisPayload fields — removed: the attr="set" path was dropped; see
+# header comment above.)
 
 if [[ $HITS -eq 0 ]]; then
-  echo "edit-op-parity: clean (ops + update kinds + overlay flags + set-payload in parity)"
+  echo "edit-op-parity: clean (ops + update kinds + overlay flags in parity)"
   exit 0
 fi
 echo ""

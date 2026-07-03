@@ -20,11 +20,10 @@ import {
   encodeEditCreate,
   encodeEditDelete,
   encodeOverlaysToggle,
-  encodeOverlaysSet,
   decodeInputRecord,
   frameRecord,
 } from "../src/schema/input-layout";
-import { OVERLAY_FLAG_ORDER, type OverlayState } from "../src/messages";
+import { OVERLAY_FLAG_ORDER } from "../src/messages";
 
 describe("control records — exact bytes", () => {
   it("play/pause/resend/save are a single kind byte", () => {
@@ -78,20 +77,6 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
     expect(new Uint8Array(encodeOverlaysToggle("doubleLinks"))[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("doubleLinks"));
   });
 
-  it("set: [22][entityKind=overlays][attr=set=1][u16 bitfield] + round-trip", () => {
-    const state = Object.fromEntries(OVERLAY_FLAG_ORDER.map((f) => [f, false])) as OverlayState;
-    state.tori = true;
-    state.overlays = true;
-    const rec = encodeOverlaysSet(state);
-    const b = new Uint8Array(rec);
-    expect(b[0]).toBe(IN_KIND_EDIT_UPDATE);
-    expect(b[2]).toBe(1); // attr=set
-    // bits: tori(0) + overlays(8) → 0x0101 LE
-    expect(b[3]).toBe(0x01);
-    expect(b[4]).toBe(0x01);
-    const decoded = decodeInputRecord(rec);
-    expect(decoded).toEqual({ kind: "edit-update", entity: "overlays", attr: "set", state });
-  });
 });
 
 describe("fingerprint self-consistency", () => {
