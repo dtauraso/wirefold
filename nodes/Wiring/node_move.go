@@ -30,6 +30,7 @@ package Wiring
 
 import (
 	"context"
+	"os"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -418,6 +419,12 @@ type MoveDispatch struct {
 	// vpPersist is the debounced camera-viewpoint persister (scene_camera_persist.go), armed
 	// by EnableViewpointPersist after the startup seed. nil until armed (old path / tests).
 	vpPersist *viewpointPersister
+	// posPersist / anchorPersist / fadePersist are the debounced disk persisters for the
+	// three FSM-applied edits (node-drag position, ring-move anchor, fade). Armed by
+	// EnableEditPersist after the startup seed; nil until armed (tests that never arm).
+	posPersist    *nodePosPersister
+	anchorPersist *anchorPersister
+	fadePersist   *fadePersister
 	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
 	// KindSelect so the buffer snapshot marks the node's Selected column.
@@ -819,6 +826,15 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	}
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
+
+	// Persist every moved node's new center (the dragged node plus any lock followers) to
+	// disk. Debounced + fire-and-forget: a drag re-arms per pointermove and writes once it
+	// settles, off the hot path.
+	if md.posPersist != nil {
+		for id, w := range emit {
+			md.posPersist.schedule(id, w)
+		}
+	}
 	return true
 }
 
@@ -874,6 +890,25 @@ func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
 	p := &viewpointPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.vpPersist = p
 	md.vp.persist = p.schedule
+}
+
+// EnableEditPersist arms disk persistence for the three FSM-applied topology edits:
+//   - node-drag (RootMove) → the moved node's x/y/z in <root>/nodes/<id>/meta.json
+//   - ring-move (applyRingAnchor) → the port's anchorId in the port json file
+//   - fade (ToggleFadeSelection) → fadedNodes/fadedEdges in view/scene.json
+//
+// Node-position + anchor persistence needs the per-node/per-port files of the directory-tree
+// form; for a monolithic topology.json (no per-node files) their root is "" and those two
+// persisters no-op. Fade rides scene.json, which exists for both forms. Call AFTER
+// SeedInitialViewpoint + SeedFade so the seed emits do not write the loaded state back.
+func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
+	root := ""
+	if info, err := os.Stat(topologyPath); err == nil && info.IsDir() {
+		root = topologyPath
+	}
+	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
+	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
+	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

@@ -82,11 +82,18 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Initial camera viewpoint = FILE DATA: Go reads the saved camera from
 	// <topologyPath>/view/scene.json and installs it into the gesture-FSM viewpoint.
 	W.SeedInitialViewpoint(topologyPath, md, tr)
-	// Arm the WRITE side AFTER the seed: from here, every gesture that changes the FSM
+	// Restore persisted fade: seed the FSM's directly-faded sets from scene.json and emit
+	// them so the buffer snapshot rebuilds the fade fixpoint from the first frame.
+	md.SeedFade(topologyPath, tr)
+	// Arm the WRITE side AFTER the seeds: from here, every gesture that changes the FSM
 	// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
 	// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
 	// Arming after the seed keeps the seed's own emit from persisting the loaded/default pose.
 	md.EnableViewpointPersist(topologyPath)
+	// Arm disk persistence for the three FSM-applied edits (node-drag position, ring-move
+	// anchor, fade) — debounced Go-side read-modify-writes, armed after the seeds so their
+	// own emits do not write loaded state back.
+	md.EnableEditPersist(topologyPath)
 
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
