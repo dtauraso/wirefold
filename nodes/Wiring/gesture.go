@@ -509,6 +509,12 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 			// Guarantee the Center↔term movement links exist so the equation is enforced
 			// even when no topology edge connects the picked nodes to the Center.
 			md.ensureEqLinks(eq)
+			// Enforce the equation IMMEDIATELY (don't wait for the next drag): settle term A
+			// in place so its lock write flows to term B — the just-set side snaps to satisfy
+			// the equation now. RootMove runs the full refresh→applyPolarEqs→fan pipeline.
+			if c, ok := md.centerOfNode(eq.A.Node); ok {
+				md.RootMove(eq.A.Node, c)
+			}
 			if tr != nil {
 				tr.Breadcrumb("polar-rule-added", md.selected, node, "")
 			}
