@@ -11,9 +11,9 @@ import { postGoRecord } from "../vscode-api";
 import { encodeClearRule, encodeLockToggleActive, encodeLockSelect, encodeDeleteSelectedLock } from "../../schema/input-layout";
 import { useEffect } from "react";
 
-/** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=+θ,
- *  1=+φ, 2=−θ, 3=−φ, 4=r — r is unsigned). */
-const ANGLE_CHIPS = ["+θ", "+φ", "−θ", "−φ", "r"];
+/** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=θ,
+ *  1=φ, 2=−θ, 3=−φ, 4=r — positive θ/φ show no sign). */
+const ANGLE_CHIPS = ["θ", "φ", "−θ", "−φ", "r"];
 
 function angleChip(code: number): string {
   return ANGLE_CHIPS[code] ?? "?";
@@ -137,16 +137,16 @@ function renderTerm(term: RuleBuilderTerm | null, pendingCode: number | null) {
   if (term != null) {
     return (
       <span className="rule-eq-term">
-        ( <span className="rule-eq-node">{term.label}</span>{" "}
-        <span className="rule-eq-angle">{angleChip(term.code)}</span> )
+        (<span className="rule-eq-node">{term.label}</span>,
+        <span className="rule-eq-angle">{angleChip(term.code)}</span>)
       </span>
     );
   }
   if (pendingCode != null) {
     return (
       <span className="rule-eq-term rule-eq-term--pending">
-        ( <span className="rule-eq-node rule-eq-node--awaiting">_</span>{" "}
-        <span className="rule-eq-angle rule-eq-angle--pending">{angleChip(pendingCode)}</span> )
+        (<span className="rule-eq-node rule-eq-node--awaiting">_</span>,
+        <span className="rule-eq-angle rule-eq-angle--pending">{angleChip(pendingCode)}</span>)
       </span>
     );
   }
