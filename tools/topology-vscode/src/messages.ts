@@ -154,6 +154,11 @@ export type WebviewToHostMsg =
   // go-record). Toggles fade on Go's OWN current selection — no payload. Kept in this union
   // + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's "fade-toggle".
   | { type: "fade-toggle" }
+  // The bare CLEAR-RULE command (single kind byte in schema/input-layout.ts, sent via
+  // go-record). Clears the in-progress polar equation the rule-builder is authoring — no
+  // payload. Kept here + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
+  // "clear-rule".
+  | { type: "clear-rule" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
@@ -220,7 +225,7 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "raw-input", "go-record",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "clear-rule", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

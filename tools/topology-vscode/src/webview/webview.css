@@ -41,6 +41,13 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .rule-eq-angle--pending {
   color: #fff; background: #1976d2; border-radius: 3px; padding: 0 4px;
 }
+.rule-eq-clear {
+  align-self: flex-start; margin-top: 2px;
+  font-size: 11px; padding: 2px 8px; cursor: pointer;
+  background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; color: #333;
+}
+.rule-eq-clear:hover:not(:disabled) { background: #eee; }
+.rule-eq-clear:disabled { opacity: 0.4; cursor: default; }
 
 
 .timeline-panel {

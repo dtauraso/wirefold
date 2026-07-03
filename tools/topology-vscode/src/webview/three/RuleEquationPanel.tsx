@@ -7,6 +7,8 @@
 import { createPortal } from "react-dom";
 import { useOverlayFlags } from "./overlay-flags";
 import { useRuleBuilder, type RuleBuilderTerm } from "./rule-builder";
+import { postGoRecord } from "../vscode-api";
+import { encodeClearRule } from "../../schema/input-layout";
 
 /** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=+θ,
  *  1=+φ, 2=−θ, 3=−φ, 4=r — r is unsigned). */
@@ -33,6 +35,11 @@ export function RuleEquationPanel() {
   const pendingSlot: "left" | "right" | null =
     rb.pending == null ? null : leftTerm == null ? "left" : rightTerm == null ? "right" : null;
 
+  // The clear button is armed only when there is an in-progress equation to discard (a
+  // pending half-term or at least one completed term). Go owns the state; the button just
+  // sends the bare clear command (fire-and-forget).
+  const hasInProgress = rb.pending != null || rb.terms.length > 0;
+
   return createPortal(
     <div className="rule-eq-panel">
       <div className="rule-eq-center">Center: {rb.centerLabel || "—"}</div>
@@ -45,6 +52,14 @@ export function RuleEquationPanel() {
           </>
         )}
       </div>
+      <button
+        className="rule-eq-clear"
+        disabled={!hasInProgress}
+        title="Clear the equation being built"
+        onClick={() => postGoRecord(encodeClearRule())}
+      >
+        Clear equation
+      </button>
     </div>,
     mount,
   );

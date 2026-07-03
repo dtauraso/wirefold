@@ -253,6 +253,13 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				if md != nil {
 					md.ToggleFadeSelection(tr)
 				}
+			case "clear-rule":
+				// Bare CLEAR command: discard the in-progress polar equation (pending term +
+				// accumulated terms) the rule-builder is authoring. Go owns the state; it
+				// resets it and re-emits the RuleBuilder block so the panel clears.
+				if md != nil {
+					md.clearRuleBuilding(tr)
+				}
 			}
 		}
 	}

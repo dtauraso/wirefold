@@ -18,9 +18,9 @@
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v4 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v5 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v4 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v5 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
@@ -28,6 +28,7 @@ export const IN_KIND_PAUSE = 2;
 export const IN_KIND_RESEND = 3;
 export const IN_KIND_SAVE = 4;
 export const IN_KIND_FADE_TOGGLE = 5;
+export const IN_KIND_CLEAR_RULE = 6;
 export const IN_KIND_RAW_INPUT = 10;
 export const IN_KIND_EDIT_CREATE = 20;
 export const IN_KIND_EDIT_DELETE = 21;
@@ -130,6 +131,10 @@ export const encodeSave = () => encodeControl(IN_KIND_SAVE);
 /** Bare FADE-TOGGLE command: toggle fade on Go's CURRENT selection (the "f" key press).
  *  Go owns selection + topology, so no id crosses the wire — just the kind byte. */
 export const encodeFadeToggle = () => encodeControl(IN_KIND_FADE_TOGGLE);
+
+/** Clear the in-progress polar equation the rule-builder is authoring (pending term +
+ *  accumulated terms). Bare command — Go owns the state (gesture.go clearRuleBuilding). */
+export const encodeClearRule = () => encodeControl(IN_KIND_CLEAR_RULE);
 
 // Overlays attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
