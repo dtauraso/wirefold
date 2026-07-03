@@ -65,6 +65,31 @@ func setCompOf(p *polar, c polarComp, v float64) {
 	}
 }
 
+// ensureEqLinks guarantees a movement link exists between an equation's Center and EACH of
+// its term nodes, so applyPolarEqs has link-polar state to ride even when no topology EDGE
+// connects them. Movement links are consumed only by the lock engine, so an extra link is
+// inert until an equation references it. Called when an equation is authored (gesture.go)
+// and at load (LoadPolarEqs). A freshly-added link is seeded from the two nodes' current
+// world centers; if either center isn't resolvable yet, it is left unseeded and gets its
+// polar on the first drag-edge refresh (refreshLinksTouching). A degenerate Center==node
+// term is skipped — a node has no polar coordinate about itself.
+func (md *MoveDispatch) ensureEqLinks(eq polarEq) {
+	md.ensureLink(eq.Center, eq.A.Node)
+	md.ensureLink(eq.Center, eq.B.Node)
+}
+
+func (md *MoveDispatch) ensureLink(a, b string) {
+	if a == "" || b == "" || a == b || md.linkBetween(a, b) != nil {
+		return
+	}
+	md.addLink(a, b)
+	pa, oka := md.centerOfNode(a)
+	pb, okb := md.centerOfNode(b)
+	if oka && okb {
+		refreshLink(md.linkBetween(a, b), pa, pb)
+	}
+}
+
 // applyPolarEqs returns the new world positions of the nodes written to satisfy every
 // equation that touches movedID. For each such equation the moved node's term is the
 // input; the OTHER term's constrained component is solved for and written on its link,

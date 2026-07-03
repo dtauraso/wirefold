@@ -47,6 +47,43 @@ func TestApplyPolarEqsSkipsInactive(t *testing.T) {
 	}
 }
 
+// TestEnsureEqLinksMakesUnlinkedEquationApply reproduces the "equation doesn't apply after
+// the second side is set" report: an equation whose Center↔term pairs have no movement link
+// (no topology edge) silently no-ops, and ensureEqLinks fixes it by creating those links.
+func TestEnsureEqLinksMakesUnlinkedEquationApply(t *testing.T) {
+	md := &MoveDispatch{selectedLockIndex: -1}
+	eq := polarEq{
+		Center: "C",
+		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
+		B:      polarTerm{Node: "B", Comp: compTheta, Sign: 1},
+		Active: true,
+	}
+	md.polarEqs = []polarEq{eq}
+	center := func(id string) (vec3, bool) { return vec3{}, id == "C" }
+
+	// Before: no links → nothing is written even though the equation is active.
+	if out := md.applyPolarEqs("A", center); len(out) != 0 {
+		t.Fatalf("expected no writes without links, got %v", out)
+	}
+
+	md.ensureEqLinks(eq)
+	if md.linkBetween("C", "A") == nil || md.linkBetween("C", "B") == nil {
+		t.Fatal("ensureEqLinks did not create the Center↔term links")
+	}
+	// Seed the links' polar as a drag-edge refresh would, then the equation applies.
+	md.linkBetween("C", "A").setPolar("C", "A", polar{R: 10, Theta: 1.0})
+	md.linkBetween("C", "B").setPolar("C", "B", polar{R: 10, Theta: 0.4})
+	if out := md.applyPolarEqs("A", center); out["B"] == (vec3{}) && len(out) == 0 {
+		t.Fatalf("equation still did not apply after ensureEqLinks: %v", out)
+	}
+
+	// A degenerate Center==term must not create a self-link.
+	md.ensureLink("C", "C")
+	if md.linkBetween("C", "C") != nil {
+		t.Fatal("ensureLink created a Center==node self-link")
+	}
+}
+
 func TestToggleLockActive(t *testing.T) {
 	md := polarLockTestMD()
 	md.polarEqs = []polarEq{{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true}}
