@@ -167,6 +167,78 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 	return out
 }
 
+// portTorusLocked returns true if there is an ACTIVE eqPortTorus lock on the given
+// (node, port, isInput). Used by applyPortTorusColinearity to find coupled edges.
+func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
+	for _, eq := range md.polarEqs {
+		if eq.Kind == eqPortTorus && eq.Active &&
+			eq.PortNode == node && eq.PortName == port && eq.PortIsInput == isInput {
+			return true
+		}
+	}
+	return false
+}
+
+// applyPortTorusColinearity implements STAGE 2 of the `port ∈ torus` lock: when both
+// endpoints of an edge have an ACTIVE eqPortTorus lock on their respective ports (the
+// source's out-port pinned to its own node's border ring, the destination's in-port
+// pinned to its own node's border ring), the edge S.out→D.in is colinear (S_center,
+// S.port, D.port, D_center on one line) IFF S_center.z == D_center.z — because the
+// node-border ring is drawn in the world X-Y plane (identity rotation, unit-scaled
+// TorusGeometry — buffer-scene.tsx ~251-265) and the aimed port sits on that ring
+// exactly when the aim direction (unit(otherCenter-thisCenter)) has zero z, i.e. when
+// the two centers share a z.
+//
+// So the solve is: for each coupled edge with movedID as one endpoint, set the OTHER
+// endpoint's z to movedID's z (x/y unchanged) and emit that as its new world center.
+// The existing portWorldPosAimed recompute (driven by the emitted center) then places
+// both ports back on their rings, colinear — no separate port write needed.
+//
+// Edge list: reused from md.edgeMovers (srcID/srcH/dstID/dstH), the same live
+// edge-endpoint state RootMove already reads via heldEdges — no new adjacency was
+// added.
+//
+// ONE-HOP ONLY (matching applyPolarEqs): if the dependent node is itself an endpoint
+// of another port-torus-coupled edge, that second edge is NOT solved this pass. A
+// drag that should ripple through a chain of torus-coupled edges needs a future
+// multi-hop pass; today's caller (RootMove) calls this once per drag frame.
+func (md *MoveDispatch) applyPortTorusColinearity(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
+	out := map[string]vec3{}
+	moved, ok := pos(movedID)
+	if !ok {
+		return out
+	}
+	for _, em := range md.edgeMovers {
+		if em.srcID == em.dstID {
+			continue // guard against a degenerate self-edge
+		}
+		coupled := md.portTorusLocked(em.srcID, em.srcH, false) &&
+			md.portTorusLocked(em.dstID, em.dstH, true)
+		if !coupled {
+			continue
+		}
+		var depID string
+		switch movedID {
+		case em.srcID:
+			depID = em.dstID
+		case em.dstID:
+			depID = em.srcID
+		default:
+			continue
+		}
+		if depID == movedID {
+			continue // guard against moving the dragged node itself
+		}
+		dep, ok := pos(depID)
+		if !ok {
+			continue
+		}
+		dep.Z = moved.Z
+		out[depID] = dep
+	}
+	return out
+}
+
 // emitPolarLocks emits the FULL committed polar-equation lock list (KindPolarLocks). Call
 // from every mutation point: rule completion (gesture.go), ToggleLockActive, SelectLock,
 // DeleteSelectedLock, and LoadPolarEqs. No-op when tr is nil (headless tests).

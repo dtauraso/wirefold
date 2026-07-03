@@ -837,6 +837,12 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	for id, w := range md.applyPolarEqs(nodeID, pos) {
 		emit[id] = w
 	}
+	// Stage 2 of the `port ∈ torus` lock: keep any edge whose both ports are pinned
+	// to their own node's border ring colinear by coupling the dependent node's z to
+	// the dragged node's z. Runs after applyPolarEqs so pos() sees its writes too.
+	for id, w := range md.applyPortTorusColinearity(nodeID, pos) {
+		emit[id] = w
+	}
 
 	// Recompute every center's reach over the updated positions and fan all movers ONCE.
 	centers := md.heldCenters()
