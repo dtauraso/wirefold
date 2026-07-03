@@ -71,12 +71,12 @@ Use the `.probe/*.jsonl` logs to diagnose anything that misbehaves before theori
 - [ ] **Ring-move** (port anchor) persists (`nodes/<id>/{inputs,outputs}/<port>.json`)
 - [ ] **Fade** state persists (`view/scene.json` fadedNodes/fadedEdges)
 
-## Pending — not yet built
-- [ ] **JSON-emitter removal** — enrich buffer for full-fidelity logs, then drop Go's
-      JSON trace (in progress; buffer becomes the sole output incl. `.probe` logs)
-- [ ] **Node-drag persistence** to disk (Go writes moved positions)
-- [ ] **Ring-move persistence** to disk
+## Logs (JSON emitter removed)
+- [ ] `.probe/go.jsonl` still populates during a run — now decoded from the buffer's
+      EVENT block, not Go's stdout JSON (verified equivalent on a playing sim)
+- Note: Go-side stdout *breadcrumbs* no longer reach `.probe` (one flagged tradeoff);
+  TS breadcrumbs (postLog) and all trace events are preserved.
 
-## Cleanup remaining before merge
-- [ ] Full Go **JSON-emitter removal** (once `.probe` decodes from the buffer)
-- [ ] Merge `task/agnostic-content-buffer` → `main` on sign-off
+## All build items complete — remaining is live verification + merge
+- [ ] Run through this whole checklist live (Reload Window) and confirm
+- [ ] Merge `task/agnostic-content-buffer` → `main` on sign-off (strips branch-local docs)
