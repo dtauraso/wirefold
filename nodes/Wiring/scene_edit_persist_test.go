@@ -8,6 +8,7 @@ package Wiring
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -15,6 +16,31 @@ import (
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
+
+// TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys guards the regression where an empty
+// scene.json (no overlay keys — everything at its default) made LoadOverlays skip emitting
+// entirely, so the buffer streamed all-zero (every overlay OFF) instead of the default-visible
+// state. LoadOverlays must ALWAYS stream the resolved state (file data or defaults).
+func TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys(t *testing.T) {
+	root := writeTree(t) // no view/scene.json → loadSceneOverlays returns found=false
+	md := &MoveDispatch{ov: defaultOverlayState()}
+	var kinds []string
+	tr := T.NewWithSinkHook(256, io.Discard, func(e T.Event) { kinds = append(kinds, e.Kind) })
+	md.LoadOverlays(root, tr)
+	// The default-visible overlay flags must have been emitted, not skipped.
+	for _, want := range []string{"scene-tori", "overlays-vis", "double-links"} {
+		seen := false
+		for _, k := range kinds {
+			if k == want {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			t.Fatalf("LoadOverlays emitted no %q event (emitted: %v) — an empty scene.json must still stream the default overlay state", want, kinds)
+		}
+	}
+}
 
 // writeTree lays down a minimal directory-tree topology (two nodes + one edge) so
 // LoadTopology can build a real MoveDispatch. Positions come from meta.json x/y/z.
