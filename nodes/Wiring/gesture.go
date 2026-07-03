@@ -498,11 +498,13 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 			g.pendingSign = -1
 		}
 		g.hasPending = true
+		md.emitRuleBuilder(tr)
 		return true
 	case ev.Hit.Kind == "node" && g.hasPending:
 		node, ok := md.nodeFromHit(ev.Hit)
 		g.hasPending = false
 		if !ok {
+			md.emitRuleBuilder(tr)
 			return true // suppress select even when the hit is unresolvable
 		}
 		g.ruleTerms = append(g.ruleTerms, polarTerm{Node: node, Comp: g.pendingComp, Sign: g.pendingSign})
@@ -517,19 +519,57 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 			}
 			g.ruleTerms = nil
 		}
+		md.emitRuleBuilder(tr)
 		return true
 	default:
 		return false
 	}
 }
 
+// ruleTermCode packs a completed/pending term's (comp, sign) to a single 0..3 code —
+// matches the handhold hit's HandholdTerm encoding: +θ=0, +φ=1, −θ=2, −φ=3, i.e.
+// code = (sign<0 ? 2 : 0) + (comp==compPhi ? 1 : 0).
+func ruleTermCode(comp polarComp, sign float64) int {
+	code := 0
+	if sign < 0 {
+		code += 2
+	}
+	if comp == compPhi {
+		code++
+	}
+	return code
+}
+
+// emitRuleBuilder emits the FULL current rule-builder session state (KindRuleBuilder):
+// the latched Center (md.selected), any half-finished pending term, and the accumulated
+// completed terms. Called from every rule-builder state-change point (gesture.go +
+// clearRuleBuilding + applySelect) so the buffer snapshot's RuleBuilder block always
+// mirrors the session live. No-op when tr is nil (headless tests that don't wire Trace).
+func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
+	if tr == nil {
+		return
+	}
+	g := &md.gest
+	terms := make([]T.RuleTermPayload, len(g.ruleTerms))
+	for i, t := range g.ruleTerms {
+		terms[i] = T.RuleTermPayload{Node: t.Node, Code: ruleTermCode(t.Comp, t.Sign)}
+	}
+	pendingCode := 0
+	if g.hasPending {
+		pendingCode = ruleTermCode(g.pendingComp, g.pendingSign)
+	}
+	tr.RuleBuilder(md.selected, g.hasPending, pendingCode, terms)
+}
+
 // clearRuleBuilding ends any in-progress polar rule-building session: half-finished
 // pending term + accumulated ruleTerms. Called when the selSpherePoles overlay turns OFF
 // (stdin_reader.go applyUpdate) so a stale pending/half-formed pair doesn't leak into the
-// next session.
-func (md *MoveDispatch) clearRuleBuilding() {
+// next session. Emits the cleared state so the buffer's RuleBuilder block drops the stale
+// pending/terms immediately.
+func (md *MoveDispatch) clearRuleBuilding(tr *T.Trace) {
 	md.gest.hasPending = false
 	md.gest.ruleTerms = nil
+	md.emitRuleBuilder(tr)
 }
 
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is
@@ -561,6 +601,12 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selected = node
 	md.selectedEdge = ""
 	tr.Select(node, own)
+	// A selection change can change the rule-builder's latched Center (e.g. picking the
+	// Center sphere itself while selSpherePoles is on); mirror it so the RuleBuilder block
+	// stays in sync. Cheap no-op while the overlay is off (the panel is hidden either way).
+	if md.ov.selSpherePolesVisible {
+		md.emitRuleBuilder(tr)
+	}
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

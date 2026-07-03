@@ -12,6 +12,7 @@
 //   Port     portCount × PORT_STRIDE bytes   (flattened over nodes in node-row order)
 //   Camera   CAMERA_STRIDE bytes   (always 1 row)
 //   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
+//   RuleBuilder RULE_BUILDER_STRIDE bytes (always 1 row)
 //   Label    labelBytesCount bytes (node labels' UTF-8 bytes, node-row order)
 //   Event    eventCount × EVENT_STRIDE bytes (per-tick causal trace events; .probe log only)
 //   PortName portNameBytesCount bytes (port names' UTF-8 bytes, flattened port-row order)
@@ -26,6 +27,7 @@ import {
   PORT_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
+  RULE_BUILDER_STRIDE,
   EVENT_STRIDE,
   readNodeLabelOff,
   readNodeLabelLen,
@@ -70,6 +72,8 @@ export interface DecodedSnapshot {
   cameraView: DataView;
   /** DataView over the single overlay row. */
   overlayView: DataView;
+  /** DataView over the single rule-builder row (in-progress polar-equation authoring). */
+  ruleBuilderView: DataView;
   /** Total bytes in the trailing label section (self-sizing via the header labelBytesCount). */
   labelBytesCount: number;
   /** Uint8 view over the label-bytes section: every node's label UTF-8 bytes concatenated in
@@ -117,8 +121,8 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const portBytes      = portCount * PORT_STRIDE;
   const eventBytes     = eventCount * EVENT_STRIDE;
   const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
-                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount +
-                      eventBytes + portNameBytesCount + edgeLabelBytesCount;
+                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE +
+                      labelBytesCount + eventBytes + portNameBytesCount + edgeLabelBytesCount;
 
   if (buf.byteLength < expectedLen) return null;
 
@@ -145,6 +149,9 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const overlayView = new DataView(buf, off, OVERLAY_STRIDE);
   off += OVERLAY_STRIDE;
 
+  const ruleBuilderView = new DataView(buf, off, RULE_BUILDER_STRIDE);
+  off += RULE_BUILDER_STRIDE;
+
   const labelBytes = new Uint8Array(buf, off, labelBytesCount);
   off += labelBytesCount;
 
@@ -158,8 +165,8 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
 
   return {
     tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount,
-    interiorView, edgeView, portView, cameraView, overlayView, labelBytesCount, labelBytes,
-    eventCount, eventView, portNameBytes, edgeLabelBytes,
+    interiorView, edgeView, portView, cameraView, overlayView, ruleBuilderView, labelBytesCount,
+    labelBytes, eventCount, eventView, portNameBytes, edgeLabelBytes,
   };
 }
 

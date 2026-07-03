@@ -19,6 +19,7 @@
 //	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
+//	RuleBuilder BufRuleBuilderStride bytes     (always 1 row; in-progress polar-eq authoring)
 //	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
 //	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
@@ -80,9 +81,10 @@ type SnapshotState struct {
 	directlyFadedNodes map[string]bool
 	directlyFadedEdges map[string]bool
 
-	// Camera and overlay singletons (always one row each in the snapshot).
-	camera  cameraSnapState
-	overlay overlaySnapState
+	// Camera, overlay, and rule-builder singletons (always one row each in the snapshot).
+	camera      cameraSnapState
+	overlay     overlaySnapState
+	ruleBuilder ruleBuilderSnapState
 
 	// tick is the monotonic snapshot sequence counter.
 	tick uint32
@@ -260,6 +262,26 @@ type overlaySnapState struct {
 	selMode uint8
 }
 
+// ruleBuilderTermSnap is one completed term's identity mirrored from the gesture FSM:
+// the node id and its packed (comp,sign) code (matches T.RuleTermPayload.Code — +θ=0,
+// +φ=1, −θ=2, −φ=3).
+type ruleBuilderTermSnap struct {
+	node string
+	code int
+}
+
+// ruleBuilderSnapState mirrors the rule-builder block (single row): the polar-equation
+// authoring session currently in progress under the selSpherePoles overlay (gesture.go
+// trySelectSphereRule). center/hasPending/pendingCode/terms are mirrored verbatim from
+// KindRuleBuilder events; node ids are resolved to buffer node-row indices at
+// buildSnapshot time (the same pattern edges' srcNode/dstNode use).
+type ruleBuilderSnapState struct {
+	center      string
+	hasPending  bool
+	pendingCode int
+	terms       []ruleBuilderTermSnap
+}
+
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
 // to out. Pass nil for out to build snapshots without emitting them (useful in
 // tests that only inspect state).
@@ -337,6 +359,22 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot()
 	case T.KindDoubleLinks:
 		s.overlay.doubleLinks = boolU8(ev.Visible)
+		s.emitSnapshot()
+
+	case T.KindRuleBuilder:
+		// Mirror the FULL current rule-builder session state (same full-mirror pattern as
+		// KindFade): Go owns the gesture FSM's in-progress polar-equation authoring; the
+		// snapshot just reflects it. Node ids are resolved to buffer rows at build time.
+		terms := make([]ruleBuilderTermSnap, len(ev.RuleTerms))
+		for i, t := range ev.RuleTerms {
+			terms[i] = ruleBuilderTermSnap{node: t.Node, code: t.Code}
+		}
+		s.ruleBuilder = ruleBuilderSnapState{
+			center:      ev.RuleCenter,
+			hasPending:  ev.RuleHasPending,
+			pendingCode: ev.RulePendingCode,
+			terms:       terms,
+		}
 		s.emitSnapshot()
 
 	case T.KindPosition:
@@ -878,6 +916,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
+		BufRuleBuilderStride +
 		labelBytesCount +
 		eventCount*BufEventStride +
 		portNameBytesCount +
@@ -1000,6 +1039,28 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		ov.labelsGlobal, ov.badgesGlobal,
 		ov.overlaysVis, ov.doubleLinks, ov.selMode)
 	off += BufOverlayStride
+
+	// RuleBuilder block (always 1 row): the in-progress polar-equation authoring session.
+	// PendingCode/T0Code/T1Code use 255 for "absent" (matches the TS RULE_BUILDER_* decode
+	// sentinel); Row fields use -1 (matches every other row-index column in the buffer).
+	rb := s.ruleBuilder
+	centerRow := int32(s.nodeRowIndex(rb.center))
+	pendingCode := uint8(255)
+	if rb.hasPending {
+		pendingCode = uint8(rb.pendingCode)
+	}
+	t0Row, t0Code := int32(-1), uint8(255)
+	if len(rb.terms) > 0 {
+		t0Row = int32(s.nodeRowIndex(rb.terms[0].node))
+		t0Code = uint8(rb.terms[0].code)
+	}
+	t1Row, t1Code := int32(-1), uint8(255)
+	if len(rb.terms) > 1 {
+		t1Row = int32(s.nodeRowIndex(rb.terms[1].node))
+		t1Code = uint8(rb.terms[1].code)
+	}
+	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code)
+	off += BufRuleBuilderStride
 
 	// Label bytes section (self-sizing via header labelBytesCount): every node's label
 	// UTF-8 bytes concatenated in node-row order. Each node's LabelOff/LabelLen columns

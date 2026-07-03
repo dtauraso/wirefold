@@ -52,6 +52,12 @@ import {
   readOverlayAngleLabels, readOverlaySelSpherePoles, readOverlayHandholds,
   readOverlayLabelsGlobal, readOverlayBadgesGlobal, readOverlayOverlaysVis,
   readOverlayDoubleLinks, readOverlaySelMode,
+  // RuleBuilder block
+  RULE_BUILDER_COL_CENTER_ROW, RULE_BUILDER_COL_PENDING_CODE, RULE_BUILDER_COL_TERM_COUNT,
+  RULE_BUILDER_COL_T0ROW, RULE_BUILDER_COL_T0CODE, RULE_BUILDER_COL_T1ROW, RULE_BUILDER_COL_T1CODE,
+  RULE_BUILDER_STRIDE,
+  readRuleBuilderCenterRow, readRuleBuilderPendingCode, readRuleBuilderTermCount,
+  readRuleBuilderT0Row, readRuleBuilderT0Code, readRuleBuilderT1Row, readRuleBuilderT1Code,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -336,6 +342,45 @@ describe("buffer-layout — Overlay block", () => {
   });
 });
 
+// ─ RuleBuilder block ────────────────────────────────────────────────────────────
+
+describe("buffer-layout — RuleBuilder block", () => {
+  it("stride equals packed field sizes", () => {
+    // i32 + u8 + u8 + i32 + u8 + i32 + u8 = 4+1+1+4+1+4+1 = 16
+    expect(RULE_BUILDER_STRIDE).toBe(16);
+  });
+
+  it("column offsets match the packed i32/u8 layout", () => {
+    expect(RULE_BUILDER_COL_CENTER_ROW).toBe(0);
+    expect(RULE_BUILDER_COL_PENDING_CODE).toBe(4);
+    expect(RULE_BUILDER_COL_TERM_COUNT).toBe(5);
+    expect(RULE_BUILDER_COL_T0ROW).toBe(6);
+    expect(RULE_BUILDER_COL_T0CODE).toBe(10);
+    expect(RULE_BUILDER_COL_T1ROW).toBe(11);
+    expect(RULE_BUILDER_COL_T1CODE).toBe(15);
+  });
+
+  it("read helpers decode a completed term + pending half-term", () => {
+    const buf = new ArrayBuffer(RULE_BUILDER_STRIDE);
+    const dv = new DataView(buf);
+    dv.setInt32(RULE_BUILDER_COL_CENTER_ROW, 3, true); // Center = node row 3
+    dv.setUint8(RULE_BUILDER_COL_PENDING_CODE, 2);     // pending: −θ
+    dv.setUint8(RULE_BUILDER_COL_TERM_COUNT, 1);
+    dv.setInt32(RULE_BUILDER_COL_T0ROW, 5, true);      // term 0 = node row 5
+    dv.setUint8(RULE_BUILDER_COL_T0CODE, 1);           // +φ
+    dv.setInt32(RULE_BUILDER_COL_T1ROW, -1, true);     // absent
+    dv.setUint8(RULE_BUILDER_COL_T1CODE, 255);         // absent
+
+    expect(readRuleBuilderCenterRow(dv)).toBe(3);
+    expect(readRuleBuilderPendingCode(dv)).toBe(2);
+    expect(readRuleBuilderTermCount(dv)).toBe(1);
+    expect(readRuleBuilderT0Row(dv)).toBe(5);
+    expect(readRuleBuilderT0Code(dv)).toBe(1);
+    expect(readRuleBuilderT1Row(dv)).toBe(-1);
+    expect(readRuleBuilderT1Code(dv)).toBe(255);
+  });
+});
+
 // ─ Event enum ─────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — event enum", () => {
@@ -351,8 +396,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 14", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(14);
+  it("schema version is 15", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(15);
   });
 
   it("header size is 36 bytes (9×u32)", () => {

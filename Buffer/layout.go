@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 14
+const BufLayoutVersion = 15
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -225,6 +225,23 @@ type bufLayoutOverlay struct {
 	SelMode uint8 `buf:"u8"`
 }
 
+// bufLayoutRuleBuilder defines the polar rule-builder session column block (always 1 row).
+// Mirrors the in-progress polar-equation rule being authored by the gesture FSM's
+// selSpherePoles session (gesture.go trySelectSphereRule): the latched Center node, any
+// half-finished pending term (a clicked handhold awaiting a node), and the 0..2 completed
+// terms accumulated so far. Matched from KindRuleBuilder trace events. Rows are buffer
+// NODE-ROW indices (-1 = none); a term code packs (comp,sign) to a single u8 (matches
+// handholdTerm): +θ=0, +φ=1, −θ=2, −φ=3; 255 = no term at that slot.
+type bufLayoutRuleBuilder struct {
+	CenterRow   int32 `buf:"i32"` // selected Center node's buffer row (-1 = none)
+	PendingCode uint8 `buf:"u8"`  // half-finished pending term's (comp,sign) code; 255 = none
+	TermCount   uint8 `buf:"u8"`  // number of completed terms accumulated (0..2)
+	T0Row       int32 `buf:"i32"` // first completed term's node row (-1 = absent)
+	T0Code      uint8 `buf:"u8"`  // first completed term's code; 255 = absent
+	T1Row       int32 `buf:"i32"` // second completed term's node row (-1 = absent)
+	T1Code      uint8 `buf:"u8"`  // second completed term's code; 255 = absent
+}
+
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
 // the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
@@ -263,5 +280,6 @@ var _ = [...]any{
 	bufLayoutPort{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
+	bufLayoutRuleBuilder{},
 	bufLayoutEvent{},
 }

@@ -22,6 +22,26 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .run-error { color: #c62828; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-probe-stuck { color: #c62828; font-weight: 600; margin-left: 8px; cursor: text; user-select: text; }
 
+/* Symbolic readout of the polar equation the rule-builder (gesture.go trySelectSphereRule)
+   is currently authoring. Positioned directly below the run/pause/stop toolbar, same
+   look-and-feel as .toolbar. */
+.rule-eq-panel {
+  position: fixed; top: 44px; left: 8px;
+  padding: 6px 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;
+  font-size: 12px; display: flex; flex-direction: column; gap: 4px;
+  z-index: 10; color: #333;
+}
+.rule-eq-center { color: #666; }
+.rule-eq-equation { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.rule-eq-op { color: #666; padding: 0 2px; }
+.rule-eq-term { display: inline-flex; align-items: center; gap: 2px; }
+.rule-eq-node { color: #222; font-weight: 600; }
+.rule-eq-node--awaiting { color: #999; font-style: italic; font-weight: 400; }
+.rule-eq-angle { color: #1976d2; }
+.rule-eq-angle--pending {
+  color: #fff; background: #1976d2; border-radius: 3px; padding: 0 4px;
+}
+
 
 .timeline-panel {
   position: fixed; bottom: 8px; left: 8px;

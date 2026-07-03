@@ -193,7 +193,12 @@ export type TraceEvent =
   | { step: number; kind: "overlays-vis"; visible: boolean }
   | { step: number; kind: "double-links"; visible: boolean }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
-  | { step: number; kind: "select"; node: string };
+  | { step: number; kind: "select"; node: string }
+  | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
+  | { step: number; kind: "hover"; node: string; port?: string; value?: number }
+  // Go-owned polar rule-builder session state (gesture.go trySelectSphereRule); full-mirror
+  // on every state change, like fade above.
+  | { step: number; kind: "rule-builder"; ruleCenter: string; ruleHasPending: boolean; rulePendingCode: number; ruleTerms: { node: string; code: number }[] };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }

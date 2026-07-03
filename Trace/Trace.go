@@ -136,13 +136,22 @@ const (
 	// Emitted only when the hovered entity CHANGES (the FSM dedupes) so pointer-move does not
 	// flood the snapshot stream. Keyed by node id / (node,port); the renderer highlights it.
 	KindHover = "hover"
+	// KindRuleBuilder carries the FULL current polar rule-builder session state (Go owns it:
+	// gesture.go's trySelectSphereRule/clearRuleBuilding). Emitted on every state change while
+	// the selSpherePoles overlay authoring session is live — a handhold click latches a pending
+	// half-term, a node click completes/accumulates a term, an overlay-off or completed-equation
+	// event clears the session, and a Center reselect changes RuleCenter. RuleCenter="" means no
+	// Center latched; RuleHasPending=false means no half-finished term; RuleTerms carries the
+	// 0..2 completed terms accumulated so far (mirrors gesture.go's ruleTerms). Full-mirror
+	// pattern (like KindFade) — no incremental diffing.
+	KindRuleBuilder = "rule-builder"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindSelect, KindFade, KindHover}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindSelect, KindFade, KindHover, KindRuleBuilder}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -152,6 +161,14 @@ type PortGeom struct {
 	IsInput    bool
 	PX, PY, PZ float64
 	DX, DY, DZ float64
+}
+
+// RuleTermPayload is one completed polar rule-builder term on a KindRuleBuilder event: the
+// node id and its packed (comp,sign) code (matches gesture.go's handhold term encoding:
+// +θ=0, +φ=1, −θ=2, −φ=3).
+type RuleTermPayload struct {
+	Node string `json:"node"`
+	Code int    `json:"code"`
 }
 
 type Event struct {
@@ -254,6 +271,15 @@ type Event struct {
 	// (computeFade) from these seeds + its own adjacency each build. Set on fade events only.
 	FadedNodes []string `json:"fadedNodes,omitempty"`
 	FadedEdges []string `json:"fadedEdges,omitempty"`
+	// RuleCenter/RuleHasPending/RulePendingCode/RuleTerms carry the FULL current polar
+	// rule-builder session state on KindRuleBuilder events (full-mirror, like FadedNodes/
+	// FadedEdges above). RuleCenter="" = no Center latched. RuleHasPending=false = no
+	// half-finished pending term (RulePendingCode is only meaningful when true). RuleTerms
+	// holds the 0..2 completed terms accumulated so far.
+	RuleCenter      string            `json:"ruleCenter,omitempty"`
+	RuleHasPending  bool              `json:"ruleHasPending,omitempty"`
+	RulePendingCode int               `json:"rulePendingCode,omitempty"`
+	RuleTerms       []RuleTermPayload `json:"ruleTerms,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -538,6 +564,23 @@ func (t *Trace) Hover(node, port string, isInput bool) {
 // passed so the drain goroutine never races the caller's maps.
 func (t *Trace) Fade(nodes, edges []string) {
 	t.emit(Event{Kind: KindFade, FadedNodes: nodes, FadedEdges: edges})
+}
+
+// RuleBuilder emits the FULL current polar rule-builder session state (KindRuleBuilder).
+// Go owns this state (gesture.go's gestureState.hasPending/pendingComp/pendingSign/
+// ruleTerms + the latched Center = MoveDispatch.selected); the gesture FSM calls this on
+// every state change while the selSpherePoles authoring session is live so the buffer
+// snapshot mirrors it. center="" = no Center latched; hasPending=false = no half-finished
+// term (pendingCode is ignored then); terms carries the 0..2 completed terms so far. Fresh
+// slices are passed so the drain goroutine never races the caller's slice.
+func (t *Trace) RuleBuilder(center string, hasPending bool, pendingCode int, terms []RuleTermPayload) {
+	t.emit(Event{
+		Kind:            KindRuleBuilder,
+		RuleCenter:      center,
+		RuleHasPending:  hasPending,
+		RulePendingCode: pendingCode,
+		RuleTerms:       terms,
+	})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -917,6 +960,20 @@ func eventValue(e Event) (any, error) {
 			FadedEdges []string `json:"fadedEdges"`
 		}
 		return fade{Step: e.Step, Kind: e.Kind, FadedNodes: e.FadedNodes, FadedEdges: e.FadedEdges}, nil
+	case KindRuleBuilder:
+		type ruleBuilder struct {
+			Step            int               `json:"step"`
+			Kind            string            `json:"kind"`
+			RuleCenter      string            `json:"ruleCenter"`
+			RuleHasPending  bool              `json:"ruleHasPending"`
+			RulePendingCode int               `json:"rulePendingCode"`
+			RuleTerms       []RuleTermPayload `json:"ruleTerms"`
+		}
+		terms := e.RuleTerms
+		if terms == nil {
+			terms = []RuleTermPayload{}
+		}
+		return ruleBuilder{Step: e.Step, Kind: e.Kind, RuleCenter: e.RuleCenter, RuleHasPending: e.RuleHasPending, RulePendingCode: e.RulePendingCode, RuleTerms: terms}, nil
 	default:
 		return recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value}, nil
 	}

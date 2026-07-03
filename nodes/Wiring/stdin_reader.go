@@ -353,7 +353,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 				// Turning the rule-builder's overlay off ends the authoring session:
 				// clear any half-finished pending term / accumulated ruleTerms.
 				if msg.Flag == "selSpherePoles" && !md.ov.selSpherePolesVisible {
-					md.clearRuleBuilding()
+					md.clearRuleBuilding(tr)
 				}
 			}
 		}
