@@ -89,7 +89,7 @@ func TestSetNodeRow(t *testing.T) {
 		1,    // selected
 		3,    // kindID (Input = index 3 in NODE_DEFS_ARRAY)
 		7, 4, // labelOff, labelLen
-		1,    // faded
+		1, // faded
 	)
 
 	assertF32At(t, buf, BufNodeColCX, 1.0, "CX")
