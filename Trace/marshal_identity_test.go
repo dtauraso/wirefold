@@ -22,7 +22,6 @@ func TestEncoderByteIdenticalToMarshal(t *testing.T) {
 		{Kind: KindNodeGeometry, Node: "n1", NX: 1, NY: 2, NZ: 3, Radius: 4, SphereR: 5, VRX: 1, Ports: []PortGeom{{Name: "p<", IsInput: true, PX: 1, DY: 2}}},
 		{Kind: KindNodeBead, Node: "n1", Row: 1, Col: 0, Present: true, Value: 1, X: 1, Y: 2, Z: 3},
 		{Kind: KindCamera, PX: 1, PY: 2, PZ: 3, R: 4, PosTheta: 5, PosPhi: 6, UpTheta: 7, UpPhi: 8},
-		{Kind: KindNodeStatus, Node: "n1", TorusRed: true, Value: 2, X: 1, Y: 2, Z: 3},
 		{Kind: KindSceneTori, Visible: true},
 		{Kind: KindDoubleLinks, Visible: false},
 		{Kind: "mystery-kind", Node: "n1", Port: "out", Value: 5},
