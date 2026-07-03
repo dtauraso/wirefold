@@ -27,7 +27,10 @@ STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
 # from OVERLAY_FLAG_NAMES; their sentinel blocks live there.
 OVERLAY_GEN="$REPO_ROOT/nodes/Wiring/overlay_gen.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
-HANDLE_MSG="$REPO_ROOT/tools/topology-vscode/src/extension/handle-message.ts"
+# The 3rd update-kind parity source moved from handle-message.ts's dispatch switch (removed
+# when the TS→Go bridge became a binary buffer) to the shared IN_UPDATE_KINDS schema, which
+# is the single TS list of edit-update entity kinds the encoders key off.
+HANDLE_MSG="$REPO_ROOT/tools/topology-vscode/src/schema/input-layout.ts"
 # overlay-flags.ts is the HAND-AUTHORED overlay renderer: it reflects each Go-owned overlay
 # column out of the binary content buffer. Its per-flag bit reads (readOverlay*) + its
 # OverlayFlagVals object literal are the TS-side consumer that must stay in sync with the
@@ -90,7 +93,7 @@ report_diff "$(comm -13 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "stdin_reader.go o
 # --- Axis 2: update entity kinds (3-way) ------------------------------------
 TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'kind: "[^"]+"' | quoted)
 GO_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$STDIN_READER" | toplevel_case | quoted)
-HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | grep -aoE 'case "[^"]+"' | quoted)
+HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | quoted)
 assert_nonempty "$TS_KINDS" "axis2 messages.ts update kinds"
 assert_nonempty "$GO_KINDS" "axis2 stdin_reader.go update kinds"
 assert_nonempty "$HM_KINDS" "axis2 handle-message.ts update kinds"

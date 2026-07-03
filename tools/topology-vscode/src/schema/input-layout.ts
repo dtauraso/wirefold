@@ -31,7 +31,13 @@ export const IN_KIND_EDIT_UPDATE = 22;
 // Enum orderings (u8 index → string), shared with input_codec.go.
 export const IN_EVENT_KINDS = ["pointerdown", "pointermove", "pointerup", "wheel", "home"] as const;
 export const IN_HIT_KINDS = ["port", "handhold", "node", "edge", "empty"] as const;
+// IN_UPDATE_KINDS is the shared edit-update ENTITY vocabulary. It is the 3rd parity source
+// (with messages.ts EditMsg kinds + stdin_reader.go applyUpdate) checked by
+// check-edit-op-parity.sh axis 2 — the sentinels below bound that extraction. (It replaced
+// the old handle-message.ts update-dispatch switch, which the binary bridge removed.)
+// EDIT_UPDATE_KINDS_START
 export const IN_UPDATE_KINDS = ["node", "edge", "camera", "overlays", "scene"] as const;
+// EDIT_UPDATE_KINDS_END
 
 import type { RawInputEvent } from "../messages";
 
