@@ -164,9 +164,10 @@ type bufLayoutEdge struct {
 // nodes in node-row order: for each node in its buffer row order, that node's ports in
 // node-geometry Ports order. NodeRow is the owning node's buffer node-row index; DX/DY/DZ
 // is the port's unit direction on the node surface (node center → port, the pre-branch
-// portDir); IsInput=1 for an input port, 0 for an output port. The port world position is
-// nodeCenter + DIR*nodeRadius, computed on the render side (mirrors the pre-branch
-// PortSphere placement). The numeric buffer carries NO port strings: a port HIT is resolved
+// portDir); IsInput=1 for an input port, 0 for an output port. PX/PY/PZ is the port's
+// AUTHORITATIVE world position (Go-computed, the same point the connected edge's endpoint
+// uses) — the renderer plots the marker there directly, no client-side recompute. The
+// numeric buffer carries NO port strings: a port HIT is resolved
 // by its port-row index, which Go maps back to its own (node, port) via the Go-side port-row
 // table (LookupPortRow), built in this same flattened row order — so port row i ↔ (node,port) i.
 type bufLayoutPort struct {
@@ -174,6 +175,14 @@ type bufLayoutPort struct {
 	DX      float32 `buf:"f32"` // unit dir x (node center → port)
 	DY      float32 `buf:"f32"` // unit dir y
 	DZ      float32 `buf:"f32"` // unit dir z
+	// PX/PY/PZ are the port's AUTHORITATIVE world position — the same point the
+	// connected edge's endpoint uses (portWorldPosAimed: aimed dir × per-port PortR).
+	// The renderer plots the port marker directly at PX/PY/PZ (no nodeCenter+DIR*radius
+	// recompute on the TS side), so the marker, the edge endpoint, and the node center
+	// are guaranteed polar-colinear by construction.
+	PX      float32 `buf:"f32"` // world x
+	PY      float32 `buf:"f32"` // world y
+	PZ      float32 `buf:"f32"` // world z
 	IsInput uint8   `buf:"u8"`  // 1 = input port, 0 = output port
 	// Hovered is the Go-owned pointer-hover flag for this port: 1 marks the port currently
 	// under the pointer (the gesture FSM tracks it from the raycast port hit and emits

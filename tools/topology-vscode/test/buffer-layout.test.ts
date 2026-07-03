@@ -196,8 +196,9 @@ describe("buffer-layout — Node block", () => {
 
 describe("buffer-layout — Port block", () => {
   it("stride equals packed field sizes", () => {
-    // i32 + 3×f32 + u8 (isInput) + u8 (hovered) + 2×u32 (port-name off/len) = 4 + 12 + 1 + 1 + 8 = 26
-    expect(PORT_STRIDE).toBe(26);
+    // i32 (nodeRow) + 3×f32 (DX/DY/DZ) + 3×f32 (PX/PY/PZ) + u8 (isInput) + u8 (hovered)
+    // + 2×u32 (port-name off/len) = 4 + 12 + 12 + 1 + 1 + 8 = 38
+    expect(PORT_STRIDE).toBe(38);
   });
 
   it("read helpers decode isInput + hovered", () => {

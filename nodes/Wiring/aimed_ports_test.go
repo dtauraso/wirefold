@@ -174,6 +174,63 @@ func TestPortDirAimed_NonRegisteredPort(t *testing.T) {
 	}
 }
 
+// TestPortWorldPosAimed_MatchesEdgeEndpoint_AndColinear verifies the core
+// per-port-radius invariant: a connected port's WORLD position (what is now
+// streamed to the buffer as PX/PY/PZ, drawn as the port marker) is IDENTICAL
+// to the edge segment endpoint computed by segmentBetweenPortsAimed for the
+// same edge, and that node center, port, and edge endpoint are colinear
+// (radial from center through the port to the connected node).
+func TestPortWorldPosAimed_MatchesEdgeEndpoint_AndColinear(t *testing.T) {
+	registry := buildAimedFixture()
+
+	node1Center := vec3{X: 0, Y: 0, Z: 0}
+	node2Center := vec3{X: 5, Y: 2, Z: -3}
+
+	geom1 := buildGeom("HoldNewSendOld", node1Center)
+	geom2 := buildGeom("HoldNewSendOld", node2Center)
+
+	centers := map[string]vec3{"1": node1Center, "2": node2Center}
+	centerOf := func(id string) (vec3, bool) {
+		c, ok := centers[id]
+		return c, ok
+	}
+
+	// The source (output) port's world position must equal the edge segment Start,
+	// and the dest (input) port's world position must equal the edge segment End —
+	// they are the SAME point by construction (both computed via portWorldPosAimed).
+	srcPortPos := portWorldPosAimed(geom1, "ToHoldNewSendOld", false, "1", registry, centerOf)
+	dstPortPos := portWorldPosAimed(geom2, "FromPrevHoldNewSendOldNode", true, "2", registry, centerOf)
+
+	seg := segmentBetweenPortsAimed(
+		geom1, "ToHoldNewSendOld", "1",
+		geom2, "FromPrevHoldNewSendOldNode", "2",
+		registry, centerOf,
+	)
+
+	const eps = 1e-9
+	if !approxVec3(srcPortPos, seg.Start, eps) {
+		t.Errorf("source port world position %+v != edge segment Start %+v", srcPortPos, seg.Start)
+	}
+	if !approxVec3(dstPortPos, seg.End, eps) {
+		t.Errorf("dest port world position %+v != edge segment End %+v", dstPortPos, seg.End)
+	}
+
+	// Colinearity: center, port, and edge endpoint must lie on the same ray from
+	// the node's center (the port radius is just a scaled step along that ray).
+	// Cross product of (port-center) and (edgeEnd-center) must be ~0.
+	assertColinear := func(t *testing.T, center, port, edgeEnd vec3) {
+		t.Helper()
+		a := port.sub(center)
+		b := edgeEnd.sub(center)
+		cr := a.cross(b)
+		if cr.length() > eps {
+			t.Errorf("center %+v, port %+v, edge endpoint %+v are NOT colinear (cross=%+v)", center, port, edgeEnd, cr)
+		}
+	}
+	assertColinear(t, node1Center, srcPortPos, seg.Start)
+	assertColinear(t, node2Center, dstPortPos, seg.End)
+}
+
 // aimedSrc / aimedSink / aimedPacer are minimal node kinds registered once for
 // TestAimedPortRegistry_DerivedFromEdges.
 type aimedSrc struct {

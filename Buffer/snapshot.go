@@ -207,6 +207,7 @@ type nodeSnapState struct {
 type portSnapState struct {
 	name       string
 	dx, dy, dz float64
+	px, py, pz float64
 	isInput    bool
 	// hovered is PERSISTENT: 1 marks this port as the one under the pointer. Set/cleared by
 	// KindHover; NOT reset in clearTransients. Preserved across node-geometry re-emits below.
@@ -630,7 +631,8 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	n.ports = n.ports[:0]
 	for _, p := range ev.Ports {
 		n.ports = append(n.ports, portSnapState{
-			name: p.Name, dx: p.DX, dy: p.DY, dz: p.DZ, isInput: p.IsInput,
+			name: p.Name, dx: p.DX, dy: p.DY, dz: p.DZ,
+			px: p.PX, py: p.PY, pz: p.PZ, isInput: p.IsInput,
 			hovered: prevHover[[2]any{p.Name, p.IsInput}],
 		})
 	}
@@ -1066,7 +1068,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	for i := range s.nodes {
 		for _, p := range s.nodes[i].ports {
 			SetPortRow(portBuf, prow,
-				int32(i), float32(p.dx), float32(p.dy), float32(p.dz), boolU8(p.isInput), p.hovered,
+				int32(i), float32(p.dx), float32(p.dy), float32(p.dz),
+				float32(p.px), float32(p.py), float32(p.pz), boolU8(p.isInput), p.hovered,
 				portNameOffs[prow], portNameLens[prow])
 			prow++
 		}

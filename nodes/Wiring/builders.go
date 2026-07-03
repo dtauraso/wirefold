@@ -228,7 +228,7 @@ func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node. ctx is required when pb contains PacedWire
 // bindings (paced mode); it is passed into the In/Out wrappers.
-func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace, geom nodeGeom) (Node, error) {
+func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace, geom nodeGeom, aimedPorts AimedPortRegistry, centerOf func(string) (vec3, bool)) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
@@ -246,7 +246,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	// startup), so it sees the completed slice.
 	var sourceOuts []*Out
 	injectFunc(v, "EmitGeometry", tFireFunc, func() {
-		emitNodeGeometry(tr, name, geom)
+		emitNodeGeometryAimed(tr, name, geom, aimedPorts, centerOf)
 		for _, o := range sourceOuts {
 			if o != nil && o.EdgeLabel != "" {
 				g := o.Geom()
@@ -599,7 +599,7 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 type NodeBuilder struct {
 	Ports     []PortSpec
 	StateKeys []string // required keys in NodeData.State; nil means none required
-	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error)
+	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, aimedPorts AimedPortRegistry, centerOf func(string) (vec3, bool)) (Node, error)
 }
 
 // Registry is the loader-facing map, built once at init from kindRegistry.
@@ -614,8 +614,8 @@ func init() {
 		Registry[kind] = NodeBuilder{
 			Ports:     ports,
 			StateKeys: stateKeys,
-			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error) {
-				return reflectBuild(ctx, name, data, pb, e, tr, geom)
+			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, aimedPorts AimedPortRegistry, centerOf func(string) (vec3, bool)) (Node, error) {
+				return reflectBuild(ctx, name, data, pb, e, tr, geom, aimedPorts, centerOf)
 			},
 		}
 	}

@@ -483,7 +483,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			}
 		}
 
-		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID])
+		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID], aimedPorts, centerOf)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

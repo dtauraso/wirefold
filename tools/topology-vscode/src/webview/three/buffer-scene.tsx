@@ -53,7 +53,7 @@ import {
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected, readEdgeFaded,
   readNodeFaded, readNodeHovered,
-  readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortHovered,
+  readPortNodeRow, readPortPX, readPortPY, readPortPZ, readPortHovered,
   readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
@@ -367,17 +367,18 @@ function PortInstances({ capacity }: { capacity: number }) {
         sclRef.current.setScalar(0); // hide until the owning node resolves
         posRef.current.set(0, 0, 0);
       } else {
-        const r = readNodeRadius(nodeView, nodeRow) || NODE_SPHERE_RADIUS;
         // Pointer hover (Go-owned Hovered column): pre-branch PortSphere isHov look — the
         // port sphere grows (scale 1.3) and turns #aaddff. Unhovered stays scale 1 + owner
         // stroke. (No port-selected concept in the buffer path, so selected-1.5 is n/a.)
         const hov = readPortHovered(portView, i) !== 0;
         sclRef.current.setScalar(hov ? PORT_HOVER_SCALE : 1);
-        // World placement = node center + surface dir * node radius (pre-branch PortSphere).
+        // World placement = Go's streamed authoritative port world position (PX/PY/PZ) —
+        // the SAME point the connected edge's endpoint uses (portWorldPosAimed), so the
+        // marker IS the edge endpoint by construction (no client-side recompute).
         posRef.current.set(
-          readNodeCX(nodeView, nodeRow) + readPortDX(portView, i) * r,
-          readNodeCY(nodeView, nodeRow) + readPortDY(portView, i) * r,
-          readNodeCZ(nodeView, nodeRow) + readPortDZ(portView, i) * r,
+          readPortPX(portView, i),
+          readPortPY(portView, i),
+          readPortPZ(portView, i),
         );
         mesh.setColorAt(i, colRef.current.set(hov ? PORT_HOVER_COLOR : nodeRowColors(nodeView, nodeRow).stroke));
       }
