@@ -19,7 +19,7 @@ import {
   NODE_COL_EV_RECV, NODE_COL_EV_FIRE, NODE_COL_EV_SEND, NODE_COL_EV_ARRIVE, NODE_COL_EV_DONE,
   NODE_COL_SELECTED,
   NODE_COL_KIND_ID,
-  NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN, NODE_COL_FADED,
+  NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN, NODE_COL_FADED, NODE_COL_HOVERED,
   NODE_STRIDE,
   NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
@@ -28,7 +28,7 @@ import {
   readNodeEvRecv, readNodeEvFire, readNodeEvSend, readNodeEvArrive, readNodeEvDone,
   readNodeSelected,
   readNodeKindId,
-  readNodeLabelOff, readNodeLabelLen, readNodeFaded,
+  readNodeLabelOff, readNodeLabelLen, readNodeFaded, readNodeHovered,
   // Interior
   INTERIOR_COL_PRESENT, INTERIOR_COL_VALUE, INTERIOR_COL_OX, INTERIOR_COL_OY, INTERIOR_COL_OZ,
   INTERIOR_STRIDE,
@@ -54,6 +54,9 @@ import {
   readOverlayAngleLabels, readOverlaySelSpherePoles, readOverlayHandholds,
   readOverlayLabelsGlobal, readOverlayBadgesGlobal, readOverlayOverlaysVis,
   readOverlayDoubleLinks, readOverlaySelMode,
+  // Port block
+  PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
+  readPortNodeRow, readPortIsInput, readPortHovered,
   // Event enum
   BUF_EVENT_RECV, BUF_EVENT_FIRE, BUF_EVENT_SEND, BUF_EVENT_ARRIVE, BUF_EVENT_DONE,
 } from "../src/schema/buffer-layout";
@@ -121,9 +124,9 @@ describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
     // 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected)
     //   + 1×u8 (kindId) + 2×u32 (label off/len)
-    //   + 1×u8 (faded)
-    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 + 8 + 1 = 77
-    expect(NODE_STRIDE).toBe(77);
+    //   + 1×u8 (faded) + 1×u8 (hovered)
+    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 + 8 + 1 + 1 = 78
+    expect(NODE_STRIDE).toBe(78);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -156,6 +159,7 @@ describe("buffer-layout — Node block", () => {
     dv.setUint32(NODE_COL_LABEL_OFF, 7, true);
     dv.setUint32(NODE_COL_LABEL_LEN, 4, true);
     dv.setUint8(NODE_COL_FADED, 1);
+    dv.setUint8(NODE_COL_HOVERED, 1);
 
     expectF32(readNodeCX(dv, 0), 1.0);
     expectF32(readNodeCY(dv, 0), 2.0);
@@ -183,6 +187,27 @@ describe("buffer-layout — Node block", () => {
     expect(readNodeLabelOff(dv, 0)).toBe(7);
     expect(readNodeLabelLen(dv, 0)).toBe(4);
     expect(readNodeFaded(dv, 0)).toBe(1);
+    expect(readNodeHovered(dv, 0)).toBe(1);
+  });
+});
+
+// ─ Port block ─────────────────────────────────────────────────────────────────
+
+describe("buffer-layout — Port block", () => {
+  it("stride equals packed field sizes", () => {
+    // i32 + 3×f32 + u8 (isInput) + u8 (hovered) = 4 + 12 + 1 + 1 = 18
+    expect(PORT_STRIDE).toBe(18);
+  });
+
+  it("read helpers decode isInput + hovered", () => {
+    const buf = new ArrayBuffer(PORT_STRIDE);
+    const dv = new DataView(buf);
+    dv.setInt32(PORT_COL_NODE_ROW, 2, true);
+    dv.setUint8(PORT_COL_IS_INPUT, 1);
+    dv.setUint8(PORT_COL_HOVERED, 1);
+    expect(readPortNodeRow(dv, 0)).toBe(2);
+    expect(readPortIsInput(dv, 0)).toBe(1);
+    expect(readPortHovered(dv, 0)).toBe(1);
   });
 });
 
@@ -339,7 +364,7 @@ describe("buffer-layout — event enum", () => {
 
 describe("buffer-layout — meta", () => {
   it("schema version is 11", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(11);
+    expect(BUF_LAYOUT_VERSION).toBe(12);
   });
 
   it("header size is 24 bytes (6×u32)", () => {

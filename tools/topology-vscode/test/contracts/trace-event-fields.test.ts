@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "double-links", "node-status", "select", "fade"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "double-links", "node-status", "select", "fade", "hover"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {

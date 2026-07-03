@@ -53,8 +53,8 @@ import {
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected, readEdgeFaded,
-  readNodeFaded,
-  readPortNodeRow, readPortDX, readPortDY, readPortDZ,
+  readNodeFaded, readNodeHovered,
+  readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortHovered,
   readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
@@ -111,6 +111,13 @@ const PORT_SPHERE_R = 4;
 // Border-ring tube thickness as a fraction of the node radius (mirrors GraphNode's
 // resting torusThick = r * 0.08).
 const NODE_RING_TUBE_RATIO = 0.08;
+// Pointer-hover highlight (pre-branch scene-graph.tsx): the hovered node's border ring turns
+// #aaddff and thickens to r*0.14 (HOVER_RING_TUBE_RATIO); a hovered port sphere turns #aaddff
+// and grows to 1.3× (PortSphere isHov). Go OWNS hover (the Hovered columns); this is render-only.
+const HOVER_COLOR = "#aaddff";
+const HOVER_RING_TUBE_RATIO = 0.14;
+const PORT_HOVER_COLOR = HOVER_COLOR;
+const PORT_HOVER_SCALE = 1.3;
 
 /**
  * Resolve a node row's fill/stroke from its KindId column in the buffer.
@@ -362,14 +369,18 @@ function PortInstances({ capacity }: { capacity: number }) {
         posRef.current.set(0, 0, 0);
       } else {
         const r = readNodeRadius(nodeView, nodeRow) || NODE_SPHERE_RADIUS;
-        sclRef.current.setScalar(1);
+        // Pointer hover (Go-owned Hovered column): pre-branch PortSphere isHov look — the
+        // port sphere grows (scale 1.3) and turns #aaddff. Unhovered stays scale 1 + owner
+        // stroke. (No port-selected concept in the buffer path, so selected-1.5 is n/a.)
+        const hov = readPortHovered(portView, i) !== 0;
+        sclRef.current.setScalar(hov ? PORT_HOVER_SCALE : 1);
         // World placement = node center + surface dir * node radius (pre-branch PortSphere).
         posRef.current.set(
           readNodeCX(nodeView, nodeRow) + readPortDX(portView, i) * r,
           readNodeCY(nodeView, nodeRow) + readPortDY(portView, i) * r,
           readNodeCZ(nodeView, nodeRow) + readPortDZ(portView, i) * r,
         );
-        mesh.setColorAt(i, colRef.current.set(nodeRowColors(nodeView, nodeRow).stroke));
+        mesh.setColorAt(i, colRef.current.set(hov ? PORT_HOVER_COLOR : nodeRowColors(nodeView, nodeRow).stroke));
       }
       matRef.current.compose(posRef.current, q, sclRef.current);
       mesh.setMatrixAt(i, matRef.current);
@@ -477,6 +488,75 @@ function SelectionHighlight({ capacity }: { capacity: number }) {
         </group>
       ))}
     </>
+  );
+}
+
+// Hover highlight drawn around the Go-hovered node (the Hovered column). Mirrors the
+// pre-branch GraphNode hover look: a #aaddff border ring thickened to r*0.14 (same thickness
+// the selection/on-surface rings use). Go OWNS hover; this reads the Hovered column and draws
+// a single ring — no TS hover state. SELECTION TAKES PRECEDENCE: when the hovered node is the
+// selected node OR one of its on-surface highlighted nodes (which SelectionHighlight already
+// rings in yellow), the hover ring is suppressed so the selection color wins. Only one node
+// can be hovered at a time, so a single mesh (no pool) suffices.
+function HoverHighlight() {
+  const ringRef = useRef<THREE.Mesh>(null);
+  const edgesRef = useRef<EdgeAdj[]>([]);
+
+  useFrame(() => {
+    const ring = ringRef.current;
+    if (!ring) return;
+
+    const snap = getLatestSnapshot();
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    let show = false;
+    if (decoded) {
+      const { nodeCount, nodeView, edgeCount, edgeView, overlayView } = decoded;
+
+      // Hovered node row (at most one).
+      let hoveredRow = -1;
+      for (let i = 0; i < nodeCount; i++) {
+        if (readNodeHovered(nodeView, i)) { hoveredRow = i; break; }
+      }
+      // Selected row (at most one) — selection styling wins over hover.
+      let selectedRow = -1;
+      for (let i = 0; i < nodeCount; i++) {
+        if (readNodeSelected(nodeView, i)) { selectedRow = i; break; }
+      }
+
+      if (hoveredRow >= 0) {
+        // Suppress if the hovered node is already highlighted by the selection (selected
+        // node or one of its on-surface nodes — the exact set SelectionHighlight rings).
+        let suppressed = false;
+        if (selectedRow >= 0) {
+          const edges = edgesRef.current;
+          edges.length = 0;
+          for (let e = 0; e < edgeCount; e++) {
+            edges.push({ src: readEdgeSrcNodeRow(edgeView, e), dst: readEdgeDstNodeRow(edgeView, e) });
+          }
+          const mode: SelMode = readOverlaySelMode(overlayView) ? "own" : "surface";
+          suppressed = surfaceRowSet(selectedRow, mode, edges).has(hoveredRow);
+        }
+        if (!suppressed) {
+          const r = readNodeRadius(nodeView, hoveredRow) || NODE_SPHERE_RADIUS;
+          ring.position.set(
+            readNodeCX(nodeView, hoveredRow),
+            readNodeCY(nodeView, hoveredRow),
+            readNodeCZ(nodeView, hoveredRow),
+          );
+          ring.scale.setScalar(r); // child torus built at major radius 1 → scales to r
+          show = true;
+        }
+      }
+    }
+    ring.visible = show;
+  });
+
+  return (
+    <mesh ref={ringRef} visible={false} raycast={() => null} frustumCulled={false}>
+      {/* #aaddff torus ring — pre-branch hover border: r*0.14 thick */}
+      <torusGeometry args={[1, HOVER_RING_TUBE_RATIO, 8, 32]} />
+      <meshStandardMaterial color={HOVER_COLOR} emissive={HOVER_COLOR} emissiveIntensity={0.3} />
+    </mesh>
   );
 }
 
@@ -1197,6 +1277,7 @@ export function BufferScene({ cameraRef }: {
       <PortInstances capacity={portCap} />
       <InteriorBeadInstances capacity={nodeCap * INTERIOR_SLOTS_PER_NODE} />
       <SelectionHighlight capacity={nodeCap} />
+      <HoverHighlight />
       <SphereRings />
       <EdgeTubes     capacity={edgeCap} />
       <MissedBeadMarkersBuf />
