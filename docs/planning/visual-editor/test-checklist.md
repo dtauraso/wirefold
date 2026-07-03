@@ -62,9 +62,18 @@ Use the `.probe/*.jsonl` logs to diagnose anything that misbehaves before theori
 - [ ] A **faded edge shows no transit bead**
 - [ ] Faded nodes are still **pickable/selectable** (dim ≠ gone)
 
-## Pending — not yet built (nothing to test until implemented)
-- [ ] **Hover** state (node/port/edge hover highlight)
-- [ ] **Fade persistence** across Reload (fade state is in-memory only right now)
+## Hover
+- [ ] Pointer over a node → its ring turns `#aaddff` and thickens (selection still wins)
+- [ ] Pointer over a port → the port sphere highlights (`#aaddff`, larger)
+
+## Persistence (Go writes to disk; verify each survives Reload)
+- [ ] **Node-drag** → moved position persists (`nodes/<id>/meta.json`)
+- [ ] **Ring-move** (port anchor) persists (`nodes/<id>/{inputs,outputs}/<port>.json`)
+- [ ] **Fade** state persists (`view/scene.json` fadedNodes/fadedEdges)
+
+## Pending — not yet built
+- [ ] **JSON-emitter removal** — enrich buffer for full-fidelity logs, then drop Go's
+      JSON trace (in progress; buffer becomes the sole output incl. `.probe` logs)
 - [ ] **Node-drag persistence** to disk (Go writes moved positions)
 - [ ] **Ring-move persistence** to disk
 
