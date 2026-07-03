@@ -6,7 +6,7 @@
 
 import { createPortal } from "react-dom";
 import { useOverlayFlags } from "./overlay-flags";
-import { useRuleBuilder, usePolarLocks, useSelectedNodeRow, type RuleBuilderTerm, type PolarLockEntry } from "./rule-builder";
+import { useRuleBuilder, usePolarLocks, useSelectedNodeRow, type RuleBuilderTerm, type PolarLockEntry, POLAR_LOCK_KIND_PORT_TORUS } from "./rule-builder";
 import { postGoRecord } from "../vscode-api";
 import { encodeClearRule, encodeLockToggleActive, encodeLockSelect, encodeDeleteSelectedLock } from "../../schema/input-layout";
 import { useEffect } from "react";
@@ -29,7 +29,9 @@ export function RuleEquationPanel() {
   // The committed-equations LIST is independent of the selSpherePoles overlay: it shows
   // whenever the selected node is the Center of >=1 committed equation. The in-progress
   // builder section stays gated on the overlay, as before.
-  const rowEquations = equations.filter((eq) => eq.centerRow === selectedRow);
+  const rowEquations = equations.filter((eq) =>
+    eq.kind === POLAR_LOCK_KIND_PORT_TORUS ? eq.torusRow === selectedRow : eq.centerRow === selectedRow,
+  );
   const showBuilder = !!overlays?.selSpherePoles && !!rb;
   const showList = rowEquations.length > 0;
 
@@ -123,11 +125,31 @@ function renderLockRow(eq: PolarLockEntry, selected: boolean) {
         onChange={() => postGoRecord(encodeLockToggleActive(eq.index))}
       />
       <span className="rule-eq-equation">
-        {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
-        <span className="rule-eq-op"> = </span>
-        {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
+        {eq.kind === POLAR_LOCK_KIND_PORT_TORUS
+          ? renderPortTorus(eq)
+          : (
+            <>
+              {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
+              <span className="rule-eq-op"> = </span>
+              {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
+            </>
+          )}
       </span>
     </div>
+  );
+}
+
+/** Renders a `port ∈ torus` membership lock: (nodeLabel,side) ∈ ◯torusLabel. Rendered
+ *  distinctly from the (node,comp)=(node,comp) tuple form above — there is no equals sign,
+ *  this is a membership relation, not an equation between two terms. STAGE 1 display only
+ *  (no geometric effect). */
+function renderPortTorus(eq: PolarLockEntry) {
+  const side = eq.portIsInput ? "in" : "out";
+  return (
+    <span className="rule-eq-term">
+      (<span className="rule-eq-node">{eq.portNodeLabel || "?"}</span>,{side}:{eq.portLabel || "?"}) ∈ ◯
+      <span className="rule-eq-node">{eq.torusLabel || "?"}</span>
+    </span>
   );
 }
 

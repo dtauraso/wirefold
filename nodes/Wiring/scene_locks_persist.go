@@ -37,6 +37,15 @@ type scenePolarEq struct {
 	A      scenePolarTerm `json:"a"`
 	B      scenePolarTerm `json:"b"`
 	Active *bool          `json:"active,omitempty"` // nil on load = back-compat default true
+	// Kind discriminates the equation: absent/"" (back-compat default) or "nodeNode" = today's
+	// (node,comp)=(node,comp) equation using Center/A/B above; "portTorus" = a `port ∈ torus`
+	// membership lock using the fields below (Center/A/B unused for that kind).
+	Kind string `json:"kind,omitempty"`
+	// portTorus fields (Kind=="portTorus"). Inert this stage — no geometric effect.
+	PortNode    string `json:"portNode,omitempty"`
+	PortName    string `json:"portName,omitempty"`
+	PortIsInput bool   `json:"portIsInput,omitempty"`
+	TorusNode   string `json:"torusNode,omitempty"`
 }
 
 func compToString(c polarComp) string {
@@ -62,11 +71,22 @@ func compFromString(s string) polarComp {
 
 func toScenePolarEq(eq polarEq) scenePolarEq {
 	active := eq.Active
+	if eq.Kind == eqPortTorus {
+		return scenePolarEq{
+			Active:      &active,
+			Kind:        "portTorus",
+			PortNode:    eq.PortNode,
+			PortName:    eq.PortName,
+			PortIsInput: eq.PortIsInput,
+			TorusNode:   eq.TorusNode,
+		}
+	}
 	return scenePolarEq{
 		Center: eq.Center,
 		A:      scenePolarTerm{Node: eq.A.Node, Comp: compToString(eq.A.Comp), Sign: eq.A.Sign},
 		B:      scenePolarTerm{Node: eq.B.Node, Comp: compToString(eq.B.Comp), Sign: eq.B.Sign},
 		Active: &active,
+		Kind:   "nodeNode",
 	}
 }
 func fromScenePolarEq(s scenePolarEq) polarEq {
@@ -74,7 +94,18 @@ func fromScenePolarEq(s scenePolarEq) polarEq {
 	if s.Active != nil {
 		active = *s.Active
 	}
+	if s.Kind == "portTorus" {
+		return polarEq{
+			Kind:        eqPortTorus,
+			Active:      active,
+			PortNode:    s.PortNode,
+			PortName:    s.PortName,
+			PortIsInput: s.PortIsInput,
+			TorusNode:   s.TorusNode,
+		}
+	}
 	return polarEq{
+		Kind:   eqNodeNode,
 		Center: s.Center,
 		A:      polarTerm{Node: s.A.Node, Comp: compFromString(s.A.Comp), Sign: s.A.Sign},
 		B:      polarTerm{Node: s.B.Node, Comp: compFromString(s.B.Comp), Sign: s.B.Sign},

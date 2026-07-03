@@ -97,6 +97,11 @@ export const BUFFER_NODE_TAG = "bufferNode";
 // forwards that numeric row to Go, which resolves it back to a (node, port). No port-name
 // string is rendered or sent.
 export const BUFFER_PORT_TAG = "bufferPort";
+// userData tag marking the NodeInstances border-ring InstancedMesh as the pickable TORUS
+// target (a `port ∈ torus` lock is captured by picking a port then this ring). Instance i
+// IS the node row (same loop that draws the body mesh), so a hit's instanceId resolves to
+// the owning node id exactly like BUFFER_NODE_TAG.
+export const BUFFER_RING_TAG = "bufferRing";
 // userData key marking a per-edge wide pick-halo mesh (buffer-scene.tsx EdgeTube) as the pickable
 // EDGE target under the new system. Unlike the node/port tags (a boolean, resolved via the
 // InstancedMesh instanceId), edges are individual meshes, so this key HOLDS the numeric buffer
@@ -318,7 +323,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
           onBeforeCompile={patchBodyFade}
         />
       </instancedMesh>
-      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} frustumCulled={false}>
+      <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_RING_TAG]: true }} frustumCulled={false}>
         <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]}>
           <instancedBufferAttribute ref={ringFadedRef} attach="attributes-aFaded" args={[new Float32Array(capacity), 1]} />
         </torusGeometry>

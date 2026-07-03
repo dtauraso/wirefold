@@ -187,6 +187,15 @@ type PolarLockPayload struct {
 	BNode  string `json:"bNode"`
 	BCode  int    `json:"bCode"`
 	Active bool   `json:"active"`
+	// Kind discriminates what the lock constrains: 0 = node/node (Center/A/B above),
+	// 1 = port∈torus (PortNode/PortName/PortIsInput/TorusNode below). Zero value keeps every
+	// existing node/node lock's wire shape unchanged.
+	Kind int `json:"kind,omitempty"`
+	// eqPortTorus fields (Kind==1). Inert this stage — no geometric effect, display only.
+	PortNode    string `json:"portNode,omitempty"`
+	PortName    string `json:"portName,omitempty"`
+	PortIsInput bool   `json:"portIsInput,omitempty"`
+	TorusNode   string `json:"torusNode,omitempty"`
 }
 
 type Event struct {

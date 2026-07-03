@@ -33,12 +33,34 @@ type polarTerm struct {
 	Sign float64 // +1 or -1
 }
 
-// polarEq is one polar equation about a Center: A and B held equal after their signs.
+// eqKind discriminates what a polarEq constrains. The zero value (eqNodeNode) is today's
+// (node,comp)=(node,comp) equation, so existing/loaded equations that never set Kind decode
+// as eqNodeNode unchanged. eqPortTorus is a `port ∈ torus` membership lock: STAGE 1 is
+// author/persist/display only — applyPolarEqs skips it (no geometric effect yet; that is a
+// later stage's solve).
+type eqKind int
+
+const (
+	eqNodeNode  eqKind = iota // A.Comp = B.Comp about Center (today's equation)
+	eqPortTorus               // PortNode/PortName/PortIsInput's port lies on TorusNode's border ring
+)
+
+// polarEq is one polar equation. eqNodeNode uses Center/A/B (A and B held equal after their
+// signs). eqPortTorus uses PortNode/PortName/PortIsInput (the constrained port) and TorusNode
+// (the ring it must lie on); Center/A/B are unused for that kind.
 type polarEq struct {
+	Kind   eqKind
 	Center string
 	A      polarTerm
 	B      polarTerm
 	Active bool
+
+	// eqPortTorus fields (Kind == eqPortTorus). Inert this stage: applyPolarEqs never writes
+	// through a port∈torus entry, so authoring one moves nothing.
+	PortNode    string
+	PortName    string
+	PortIsInput bool
+	TorusNode   string
 }
 
 // compOf reads a polar's θ, φ, or r.
@@ -74,6 +96,9 @@ func setCompOf(p *polar, c polarComp, v float64) {
 // polar on the first drag-edge refresh (refreshLinksTouching). A degenerate Center==node
 // term is skipped — a node has no polar coordinate about itself.
 func (md *MoveDispatch) ensureEqLinks(eq polarEq) {
+	if eq.Kind == eqPortTorus {
+		return // inert this stage: no solve rides a link for a port∈torus lock yet
+	}
 	md.ensureLink(eq.Center, eq.A.Node)
 	md.ensureLink(eq.Center, eq.B.Node)
 }
@@ -101,6 +126,9 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 	for _, eq := range md.polarEqs {
 		if !eq.Active {
 			continue
+		}
+		if eq.Kind == eqPortTorus {
+			continue // STAGE 1: authorable/persisted/displayed only — no solve yet
 		}
 		var moved, other polarTerm
 		switch movedID {
@@ -148,6 +176,17 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 	}
 	locks := make([]T.PolarLockPayload, len(md.polarEqs))
 	for i, eq := range md.polarEqs {
+		if eq.Kind == eqPortTorus {
+			locks[i] = T.PolarLockPayload{
+				Active:      eq.Active,
+				Kind:        int(eqPortTorus),
+				PortNode:    eq.PortNode,
+				PortName:    eq.PortName,
+				PortIsInput: eq.PortIsInput,
+				TorusNode:   eq.TorusNode,
+			}
+			continue
+		}
 		locks[i] = T.PolarLockPayload{
 			Center: eq.Center,
 			ANode:  eq.A.Node,
@@ -155,6 +194,7 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 			BNode:  eq.B.Node,
 			BCode:  ruleTermCode(eq.B.Comp, eq.B.Sign),
 			Active: eq.Active,
+			Kind:   int(eqNodeNode),
 		}
 	}
 	tr.PolarLocks(locks, md.selectedLockIndex)

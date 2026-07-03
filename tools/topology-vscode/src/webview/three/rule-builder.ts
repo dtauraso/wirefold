@@ -10,7 +10,8 @@
 
 import { useSyncExternalStore } from "react";
 import { getLatestSnapshot, subscribeSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot, nodeLabel } from "./buffer-decode";
+import { decodeSnapshot, nodeLabel, portName } from "./buffer-decode";
+import { readPortNodeRow } from "../../schema/buffer-layout";
 import { readNodeSelected } from "../../schema/buffer-layout";
 import {
   readRuleBuilderCenterRow,
@@ -27,7 +28,17 @@ import {
   readPolarLockBRow,
   readPolarLockBCode,
   readPolarLockActive,
+  readPolarLockKind,
+  readPolarLockPortRow,
+  readPolarLockPortIsInput,
+  readPolarLockTorusRow,
 } from "../../schema/buffer-layout";
+
+/** POLAR_LOCK_KIND_NODE_NODE / POLAR_LOCK_KIND_PORT_TORUS mirror the Go eqKind ordering
+ *  (locks.go): 0 = node/node equation (Center/A/B), 1 = `port ∈ torus` membership lock
+ *  (portNode/portName/portIsInput/torusRow). */
+export const POLAR_LOCK_KIND_NODE_NODE = 0;
+export const POLAR_LOCK_KIND_PORT_TORUS = 1;
 
 /** RULE_CODE_NONE mirrors the Go PendingCode/T{0,1}Code "absent" sentinel (255). */
 const RULE_CODE_NONE = 255;
@@ -51,10 +62,18 @@ export interface RuleBuilderState {
  *  block): index IS the md.polarEqs index — the same value toggle/select/delete send back. */
 export interface PolarLockEntry {
   index: number;
+  kind: number; // POLAR_LOCK_KIND_NODE_NODE | POLAR_LOCK_KIND_PORT_TORUS
   centerRow: number;
   a: { row: number; label: string; code: number };
   b: { row: number; label: string; code: number };
   active: boolean;
+  // eqPortTorus fields (kind === POLAR_LOCK_KIND_PORT_TORUS). Unused for a node/node row.
+  portRow: number;
+  portLabel: string;
+  portNodeLabel: string;
+  portIsInput: boolean;
+  torusRow: number;
+  torusLabel: string;
 }
 
 // Separate cache (identity-stable like cachedVal above) for the committed-equations list +
@@ -83,7 +102,7 @@ export function readPolarLocks(): PolarLocksState {
 
   let fp = `${selectedLockIndex}|${n}`;
   for (let i = 0; i < n; i++) {
-    fp += `|${readPolarLockCenterRow(v, i)},${readPolarLockARow(v, i)},${readPolarLockACode(v, i)},${readPolarLockBRow(v, i)},${readPolarLockBCode(v, i)},${readPolarLockActive(v, i)}`;
+    fp += `|${readPolarLockKind(v, i)},${readPolarLockCenterRow(v, i)},${readPolarLockARow(v, i)},${readPolarLockACode(v, i)},${readPolarLockBRow(v, i)},${readPolarLockBCode(v, i)},${readPolarLockActive(v, i)},${readPolarLockPortRow(v, i)},${readPolarLockPortIsInput(v, i)},${readPolarLockTorusRow(v, i)}`;
   }
   if (fp === cachedLocksFingerprint) {
     return cachedLocksVal;
@@ -95,12 +114,21 @@ export function readPolarLocks(): PolarLocksState {
     const centerRow = readPolarLockCenterRow(v, i);
     const aRow = readPolarLockARow(v, i);
     const bRow = readPolarLockBRow(v, i);
+    const portRow = readPolarLockPortRow(v, i);
+    const torusRow = readPolarLockTorusRow(v, i);
     equations.push({
       index: i,
+      kind: readPolarLockKind(v, i),
       centerRow,
       a: { row: aRow, label: aRow === ROW_NONE ? "" : nodeLabel(decoded, aRow), code: readPolarLockACode(v, i) },
       b: { row: bRow, label: bRow === ROW_NONE ? "" : nodeLabel(decoded, bRow), code: readPolarLockBCode(v, i) },
       active: readPolarLockActive(v, i) === 1,
+      portRow,
+      portLabel: portRow === ROW_NONE ? "" : portName(decoded, portRow),
+      portNodeLabel: portRow === ROW_NONE ? "" : nodeLabel(decoded, readPortNodeRow(decoded.portView, portRow)),
+      portIsInput: readPolarLockPortIsInput(v, i) === 1,
+      torusRow,
+      torusLabel: torusRow === ROW_NONE ? "" : nodeLabel(decoded, torusRow),
     });
   }
   cachedLocksVal = { equations, selectedLockIndex };

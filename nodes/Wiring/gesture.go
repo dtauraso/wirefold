@@ -101,6 +101,14 @@ type gestureState struct {
 	pendingComp polarComp
 	pendingSign float64
 	ruleTerms   []polarTerm
+
+	// `port ∈ torus` lock capture (independent of the node/node hasPending/ruleTerms above):
+	// a PORT click latches the port; a subsequent TORUS click completes the lock and appends
+	// an eqPortTorus entry to md.polarEqs. Does not touch pendingComp/pendingSign/ruleTerms.
+	hasPendingPort  bool
+	pendingPortNode string
+	pendingPortName string
+	pendingPortIn   bool
 }
 
 type gestureRect struct{ left, top, width, height float64 }
@@ -524,6 +532,41 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 			g.ruleTerms = nil
 		}
 		md.emitRuleBuilder(tr)
+		md.emitPolarLocks(tr)
+		return true
+	case ev.Hit.Kind == "port":
+		// Latch the clicked port; a subsequent torus click completes a `port ∈ torus` lock.
+		// Independent of the handhold/node term-pair path above (own pending flag).
+		if node, port, isInput, ok := md.portFromHit(ev.Hit); ok {
+			g.hasPendingPort = true
+			g.pendingPortNode = node
+			g.pendingPortName = port
+			g.pendingPortIn = isInput
+		}
+		return true
+	case ev.Hit.Kind == "torus" && g.hasPendingPort:
+		torusNode, ok := md.nodeFromHit(ev.Hit)
+		g.hasPendingPort = false
+		if !ok {
+			return true // suppress select even when the hit is unresolvable
+		}
+		eq := polarEq{
+			Kind:        eqPortTorus,
+			PortNode:    g.pendingPortNode,
+			PortName:    g.pendingPortName,
+			PortIsInput: g.pendingPortIn,
+			TorusNode:   torusNode,
+			Active:      true,
+		}
+		md.polarEqs = append(md.polarEqs, eq)
+		// STAGE 1: no ensureEqLinks call (ensureEqLinks itself skips eqPortTorus) and no
+		// RootMove/solve — authoring the lock moves nothing yet.
+		if tr != nil {
+			tr.Breadcrumb("port-torus-lock-added", g.pendingPortNode, torusNode, g.pendingPortName)
+		}
+		if md.locksPersist != nil {
+			md.locksPersist.schedule(md.polarEqs)
+		}
 		md.emitPolarLocks(tr)
 		return true
 	default:
