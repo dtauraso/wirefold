@@ -2,8 +2,6 @@
 // Both sides import from here so unknown / malformed messages are caught
 // at type-narrow time rather than silently writing `[object Object]` to disk.
 
-import type { NodeStatusEvent } from "./schema/trace-event-fields";
-
 export type RunStatus =
   | { state: "running" }
   | { state: "paused" }
@@ -192,11 +190,7 @@ export type TraceEvent =
   | { step: number; kind: "overlays-vis"; visible: boolean }
   | { step: number; kind: "double-links"; visible: boolean }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
-  | { step: number; kind: "select"; node: string }
-  // node-status payload is GENERATED from Trace.go (schema/trace-event-fields.ts):
-  // a Go field rename/retype regenerates NodeStatusEvent and breaks tsc here +
-  // at pump.ts, closing the hand-authored field-drift gap.
-  | NodeStatusEvent;
+  | { step: number; kind: "select"; node: string };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }

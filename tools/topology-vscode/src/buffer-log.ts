@@ -24,7 +24,7 @@ import {
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
   readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
-  readNodeKindId, readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ, readNodeFaded,
+  readNodeKindId, readNodeFaded,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ, readEdgeFaded,
   readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortIsInput,
@@ -156,15 +156,6 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
         px: readCameraPX(c), py: readCameraPY(c), pz: readCameraPZ(c), r: readCameraR(c),
         posTheta: readCameraPosTheta(c), posPhi: readCameraPosPhi(c),
         upTheta: readCameraUpTheta(c), upPhi: readCameraUpPhi(c),
-      };
-    }
-    case "node-status": {
-      const n = d.nodeView;
-      return {
-        kind, node,
-        torusRed: readNodeTorusRed(n, nodeRow) === 1,
-        missedValue: readNodeMissVal(n, nodeRow),
-        x: readNodeMX(n, nodeRow), y: readNodeMY(n, nodeRow), z: readNodeMZ(n, nodeRow),
       };
     }
     case "select":
