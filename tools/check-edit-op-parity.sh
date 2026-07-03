@@ -145,19 +145,12 @@ assert_nonempty "$GO_GUIDEVIS" "axis4 stdinGuideVisPayload fields"
 report_diff "$(comm -13 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "stdinGuideVisPayload fields" \
             "$(comm -23 <(echo "$GO_GUIDEVIS") <(echo "$TS_FLAGS"))" "messages.ts OverlayState/flags"
 
-# --- Axis 5: camera viewpoint sub-kinds -------------------------------------
-# vp.Kind discriminates the camera sub-op (set/orbit/orbit-locked/zoom/pan). TS lists
-# them once in the VIEWPOINT_KINDS const (VP_KINDS sentinels); Go switches on vp.Kind
-# inside its own VP_KINDS sentinels. A kind on one side only silently no-ops.
-TS_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$MESSAGES_TS" | quoted)
-GO_VPKINDS=$(between VP_KINDS_START VP_KINDS_END "$STDIN_READER" | grep -aoE 'case "[^"]+"' | quoted)
-assert_nonempty "$TS_VPKINDS" "axis5 messages.ts vp kinds"
-assert_nonempty "$GO_VPKINDS" "axis5 stdin_reader.go vp kinds"
-report_diff "$(comm -13 <(echo "$GO_VPKINDS") <(echo "$TS_VPKINDS"))" "stdin_reader.go vp kinds" \
-            "$(comm -23 <(echo "$GO_VPKINDS") <(echo "$TS_VPKINDS"))" "messages.ts vp kinds"
+# (Camera viewpoint sub-kinds axis removed: camera edits are produced in-process by the
+# gesture FSM from raw-input and no longer cross the editor→Go seam, so there is no vp.Kind
+# TS↔Go vocabulary left to keep in parity.)
 
 if [[ $HITS -eq 0 ]]; then
-  echo "edit-op-parity: clean (ops + update kinds + overlay flags + set-payload + vp kinds in parity)"
+  echo "edit-op-parity: clean (ops + update kinds + overlay flags + set-payload in parity)"
   exit 0
 fi
 echo ""

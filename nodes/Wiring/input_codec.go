@@ -13,11 +13,13 @@
 // InputLayoutFingerprint, enforced by tools/check-input-layout-parity.sh.
 //
 // Numbers are little-endian (matching the fd-3 content buffer). Enum discriminators
-// (event kind, hit kind, update entity kind) are u8 indices into the shared orderings.
-// Irreducibly-structural edit payloads (node-move entries, edge-faded map, port-anchor
-// keys, overlay state, scene blob) ride as a length-prefixed UTF-8 JSON section — the
-// message ENVELOPE/transport is binary; only that leaf CONTENT stays JSON (allowed by
-// CLAUDE.md's bridge-surface note for spec-TEXT payloads).
+// (event kind, hit kind, update entity kind, update attr, overlay flag) are u8 indices
+// into the shared orderings. There is NO JSON on the wire: every record is fully numeric.
+// The live editor→Go traffic is raw-input, overlays toggle/set (numeric flag-id / bitfield),
+// the bare `save` COMMAND (Go persists its OWN authoritative scene state), and the
+// play/pause/resend control bytes. create/delete/edit-update record kinds stay defined (the
+// 3-op create/update/delete concept), though the gesture FSM now produces edge create/delete
+// in-process from raw-input.
 
 package Wiring
 
@@ -26,30 +28,58 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 )
 
 // InputLayoutFingerprint pins the binary input-record layout. It MUST be byte-identical
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v1 kinds=resume:1,pause:2,resend:3,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=node,edge,camera,overlays,scene
-const InputLayoutFingerprint = "v1 kinds=resume:1,pause:2,resend:3,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=node,edge,camera,overlays,scene"
+// INPUT_LAYOUT_FINGERPRINT: v2 kinds=resume:1,pause:2,resend:3,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v2 kinds=resume:1,pause:2,resend:3,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
 	inKindResume     = 1  // play  — resume the clock gate
 	inKindPause      = 2  // pause — halt the clock gate
 	inKindResend     = 3  // resend — re-emit full geometry
+	inKindSave       = 4  // save  — Go persists its OWN scene state (bare command)
 	inKindRawInput   = 10 // raw pointer/wheel/home event
 	inKindEditCreate = 20 // edit op=create (2 strings)
 	inKindEditDelete = 21 // edit op=delete (2 strings)
-	inKindEditUpdate = 22 // edit op=update (kind byte + JSON leaf)
+	inKindEditUpdate = 22 // edit op=update (entity byte + attr byte + numeric payload)
+)
+
+// Overlays attr indices (must match IN_UPDATE_ATTRS ordering in input-layout.ts).
+const (
+	inOverlayAttrToggle = 0
+	inOverlayAttrSet    = 1
 )
 
 // Enum orderings (u8 index → string), shared with input-layout.ts.
 var inEventKinds = []string{"pointerdown", "pointermove", "pointerup", "wheel", "home"}
 var inHitKinds = []string{"port", "handhold", "node", "edge", "empty"}
-var inUpdateKinds = []string{"node", "edge", "camera", "overlays", "scene"}
+var inUpdateKinds = []string{"overlays"}
+
+// inOverlayFlags is the overlay FLAG order used by the overlays toggle/set binary records
+// (a flag's index here is its wire id / bit position). It is DERIVED from the
+// fingerprint's `overlayFlags=` token so it cannot drift from the pinned layout; the
+// fingerprint is byte-identical to input-layout.ts (guarded), whose encoder keys off
+// OVERLAY_FLAG_ORDER — so all three stay in lockstep.
+var inOverlayFlags = parseOverlayFlags(InputLayoutFingerprint)
+
+func parseOverlayFlags(fp string) []string {
+	const marker = "overlayFlags="
+	i := strings.Index(fp, marker)
+	if i < 0 {
+		return nil
+	}
+	rest := fp[i+len(marker):]
+	if sp := strings.IndexByte(rest, ' '); sp >= 0 {
+		rest = rest[:sp]
+	}
+	return strings.Split(rest, ",")
+}
 
 var errShortRecord = errors.New("input record truncated")
 
@@ -74,6 +104,15 @@ func (r *recReader) i32() (int32, error) {
 	}
 	v := int32(binary.LittleEndian.Uint32(r.b[r.pos:]))
 	r.pos += 4
+	return v, nil
+}
+
+func (r *recReader) u16() (uint16, error) {
+	if r.pos+2 > len(r.b) {
+		return 0, errShortRecord
+	}
+	v := binary.LittleEndian.Uint16(r.b[r.pos:])
+	r.pos += 2
 	return v, nil
 }
 
@@ -135,6 +174,8 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 		return stdinMsg{Type: "pause"}, true
 	case inKindResend:
 		return stdinMsg{Type: "resend"}, true
+	case inKindSave:
+		return stdinMsg{Type: "save"}, true
 	case inKindRawInput:
 		ev, ok := decodeRawInput(r)
 		if !ok {
@@ -157,27 +198,51 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 			stdinCRUDPayload: stdinCRUDPayload{Target: target, TargetHandle: handle},
 		}, true
 	case inKindEditUpdate:
-		kindByte, err := r.u8()
-		if err != nil {
+		// [entityKind][attr][numeric payload]. Only entity="overlays" is defined; attr
+		// selects toggle (u8 flag-id) or set (u16 visibility bitfield).
+		kindByte, err1 := r.u8()
+		attr, err2 := r.u8()
+		if err1 != nil || err2 != nil || enumAt(inUpdateKinds, kindByte) != "overlays" {
 			return stdinMsg{}, false
 		}
-		payload, err := r.str()
-		if err != nil {
-			return stdinMsg{}, false
+		msg := stdinMsg{Type: "edit", Op: "update", Kind: "overlays"}
+		switch attr {
+		case inOverlayAttrToggle:
+			flagID, err := r.u8()
+			if err != nil || int(flagID) >= len(inOverlayFlags) {
+				return stdinMsg{}, false
+			}
+			msg.Attr = "toggle"
+			msg.Flag = inOverlayFlags[flagID]
+			return msg, true
+		case inOverlayAttrSet:
+			bits, err := r.u16()
+			if err != nil {
+				return stdinMsg{}, false
+			}
+			msg.Attr = "set"
+			msg.State = overlayPayloadFromBits(bits)
+			return msg, true
 		}
-		msg := stdinMsg{}
-		// The JSON leaf carries the full typed update object (kind/attr + payload
-		// fields). Unmarshal it into the union struct, then force Type/Op and the
-		// entity Kind from the binary discriminators (authoritative on the wire).
-		if err := json.Unmarshal([]byte(payload), &msg); err != nil {
-			return stdinMsg{}, false
-		}
-		msg.Type = "edit"
-		msg.Op = "update"
-		msg.Kind = enumAt(inUpdateKinds, kindByte)
-		return msg, true
+		return stdinMsg{}, false
 	}
 	return stdinMsg{}, false
+}
+
+// overlayPayloadFromBits builds the stdinGuideVisPayload from the overlays-set bitfield.
+// Bit i (LSB-first) is the visibility of inOverlayFlags[i]. The mapping flag-name → struct
+// field reuses stdinGuideVisPayload's json tags (the single flag-name source, generated
+// from OVERLAY_FLAG_NAMES) via an internal (off-wire) json round-trip, so no hand-written
+// name→field table can drift.
+func overlayPayloadFromBits(bits uint16) *stdinGuideVisPayload {
+	m := make(map[string]bool, len(inOverlayFlags))
+	for i, f := range inOverlayFlags {
+		m[f] = bits&(1<<uint(i)) != 0
+	}
+	raw, _ := json.Marshal(m)
+	var gv stdinGuideVisPayload
+	_ = json.Unmarshal(raw, &gv)
+	return &gv
 }
 
 func decodeRawInput(r *recReader) (rawInputMsg, bool) {
@@ -246,6 +311,7 @@ func decodeRawInput(r *recReader) (rawInputMsg, bool) {
 type recWriter struct{ b []byte }
 
 func (w *recWriter) u8(v byte)     { w.b = append(w.b, v) }
+func (w *recWriter) u16(v uint16)  { w.b = binary.LittleEndian.AppendUint16(w.b, v) }
 func (w *recWriter) i32(v int32)   { w.b = binary.LittleEndian.AppendUint32(w.b, uint32(v)) }
 func (w *recWriter) f64(v float64) { w.b = binary.LittleEndian.AppendUint64(w.b, math.Float64bits(v)) }
 func (w *recWriter) str(s string) {
@@ -281,12 +347,23 @@ func encodeEditCreateDelete(kind byte, target, handle string) []byte {
 	return w.b
 }
 
-// encodeEditUpdate builds an edit update record: entity-kind byte + JSON payload leaf.
-func encodeEditUpdate(entityKind string, payloadJSON string) []byte {
+// encodeOverlaysToggle builds an overlays TOGGLE record (test helper).
+func encodeOverlaysToggle(flag string) []byte {
 	w := &recWriter{}
 	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, entityKind))
-	w.str(payloadJSON)
+	w.u8(enumIndex(inUpdateKinds, "overlays"))
+	w.u8(inOverlayAttrToggle)
+	w.u8(enumIndex(inOverlayFlags, flag))
+	return w.b
+}
+
+// encodeOverlaysSet builds an overlays SET record from a visibility bitfield (test helper).
+func encodeOverlaysSet(bits uint16) []byte {
+	w := &recWriter{}
+	w.u8(inKindEditUpdate)
+	w.u8(enumIndex(inUpdateKinds, "overlays"))
+	w.u8(inOverlayAttrSet)
+	w.u16(bits)
 	return w.b
 }
 

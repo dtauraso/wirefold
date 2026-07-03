@@ -10,65 +10,12 @@ package Wiring
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
-
-// TestRunStdinReaderLargeLineNotDropped feeds a single stdin line well over the
-// default 64 KB bufio.Scanner token limit and asserts the message is parsed (its
-// side effect — a scene write — lands) rather than silently dropped. Without the
-// raised sc.Buffer, bufio.ErrTooLong would close lineCh and deafen the bridge.
-func TestRunStdinReaderLargeLineNotDropped(t *testing.T) {
-	root := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	r, w := io.Pipe()
-	go RunStdinReader(ctx, r, SlotRegistry{}, nil, nil, nil, root)
-
-	// Build a scene blob whose serialized line exceeds 64 KB (~200 KB payload).
-	big := strings.Repeat("x", 200*1024)
-	blob, err := json.Marshal(map[string]any{"note": big})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Binary edit/update/scene record: entity-kind byte "scene" + JSON leaf {"scene": blob}.
-	payload, err := json.Marshal(map[string]any{"scene": json.RawMessage(blob)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := encodeEditUpdate("scene", string(payload))
-	if len(rec) <= 64*1024 {
-		t.Fatalf("test record only %d bytes; must exceed 64 KB to exercise the large-payload path", len(rec))
-	}
-	w.Write(frameRecord(rec))
-
-	scenePath := filepath.Join(root, "view", "scene.json")
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, err := os.Stat(scenePath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("large scene line was dropped: scene.json never written (bridge deafened by 64 KB limit)")
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	got, err := os.ReadFile(scenePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) < 200*1024 {
-		t.Fatalf("scene.json is %d bytes; large payload not fully written", len(got))
-	}
-	w.Close()
-}
 
 func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	pw := NewPacedWire(100, PulseSpeedWuPerMs)
@@ -88,9 +35,9 @@ func TestRunStdinReaderClockOwnsDelivery(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	// Feed a benign "edit" fade line. No bridge message delivers a bead — the
-	// clock owns delivery — so the bead must stay in flight.
-	w.Write(frameRecord(encodeEditUpdate("edge", `{"attr":"faded","edges":{}}`)))
+	// Feed a benign "edit" line (an overlays toggle; md is nil so it no-ops). No bridge
+	// message delivers a bead — the clock owns delivery — so the bead must stay in flight.
+	w.Write(frameRecord(encodeOverlaysToggle("tori")))
 	time.Sleep(10 * time.Millisecond)
 	if !pw.InFlight() {
 		t.Fatal("bead delivered by a stdin edit message; clock should own delivery")

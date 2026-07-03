@@ -144,10 +144,11 @@ func TestPersistDebounceCoalesces(t *testing.T) {
 	}
 }
 
-// TestWriteScenePreservesCameraPolar asserts the OTHER scene.json writer
-// (writeScene, used by a TS fades/overlays scene-save) does not clobber the Go-owned
-// cameraPolar — the double-writer guard.
-func TestWriteScenePreservesCameraPolar(t *testing.T) {
+// TestWriteSceneOverlaysPreservesCameraPolar asserts the OTHER scene.json writer
+// (writeSceneOverlays, the bare `save` command's overlay persister) does not clobber the
+// Go-owned cameraPolar — the double-writer guard — while it DOES persist the current
+// overlay-visibility snapshot.
+func TestWriteSceneOverlaysPreservesCameraPolar(t *testing.T) {
 	td := t.TempDir()
 
 	// Go persists a camera first.
@@ -157,13 +158,15 @@ func TestWriteScenePreservesCameraPolar(t *testing.T) {
 	md.EmitViewpoint(nil)
 	md.vpPersist.flush()
 
-	// TS scene-save arrives carrying a STALE cameraPolar plus other fields.
-	tsScene := `{"labelsGlobalHidden": true, "cameraPolar": {"pivot":[0,0,0],"r":5,"pos":[0,0],"up":[0,0]}}`
-	if err := writeScene(td, json.RawMessage(tsScene)); err != nil {
-		t.Fatalf("writeScene: %v", err)
+	// A save persists Go's OWN overlay state. Here labelsGlobal is hidden (visible=false),
+	// which must land as labelsGlobalHidden:true in scene.json.
+	ov := defaultOverlayState()
+	ov.labelsGlobalVisible = false
+	if err := writeSceneOverlays(td, ov); err != nil {
+		t.Fatalf("writeSceneOverlays: %v", err)
 	}
 
-	// The Go-owned camera survives; the TS non-camera field is applied.
+	// The Go-owned camera survives; the overlay field is applied.
 	pivot, r, pos, up, ok := loadSceneViewpoint(td)
 	if !ok {
 		t.Fatalf("loadSceneViewpoint: ok=false")
@@ -176,6 +179,6 @@ func TestWriteScenePreservesCameraPolar(t *testing.T) {
 		t.Fatalf("scene.json invalid: %v", err)
 	}
 	if string(obj["labelsGlobalHidden"]) != "true" {
-		t.Fatalf("labelsGlobalHidden=%s want true (TS field should apply)", obj["labelsGlobalHidden"])
+		t.Fatalf("labelsGlobalHidden=%s want true (overlay field should persist)", obj["labelsGlobalHidden"])
 	}
 }
