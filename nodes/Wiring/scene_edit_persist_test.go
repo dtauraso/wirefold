@@ -258,6 +258,100 @@ func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
 	}
 }
 
+// TestPersistFileTopologyPathInTree pins BUG 1: the live editor passes the topology.json
+// FILE inside the tree dir (not the dir itself), so os.Stat(topologyPath).IsDir() is false.
+// EnableEditPersist must still resolve the tree root to the file's PARENT dir (which contains
+// nodes/), or posPersist/anchorPersist no-op and node-drag / ring-move never reach disk.
+// This exercises the full EnableEditPersist wiring with a FILE topologyPath + a real tree.
+func TestPersistFileTopologyPathInTree(t *testing.T) {
+	root := writeTree(t)
+	md := loadTreeMD(t, root)
+
+	// The path form the editor hands Go: the topology.json FILE inside the tree dir.
+	topoFile := filepath.Join(root, "topology.json")
+	if err := os.WriteFile(topoFile, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	md.EnableEditPersist(topoFile)
+
+	// Root must resolve to the parent dir (the one containing nodes/), NOT "".
+	if md.posPersist.root != root {
+		t.Fatalf("posPersist.root=%q want %q (FILE topologyPath should resolve to parent-with-nodes)", md.posPersist.root, root)
+	}
+	if md.anchorPersist.root != root {
+		t.Fatalf("anchorPersist.root=%q want %q", md.anchorPersist.root, root)
+	}
+
+	// Node-drag → meta.json x/y/z land on disk.
+	target := vec3{X: 111, Y: 222, Z: 333}
+	if !md.RootMove("src", target) {
+		t.Fatalf("RootMove returned false")
+	}
+	md.posPersist.flush()
+	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("meta.json invalid: %v", err)
+	}
+	if string(obj["x"]) != "111" || string(obj["y"]) != "222" || string(obj["z"]) != "333" {
+		t.Fatalf("node pos not persisted via FILE topologyPath: x=%s y=%s z=%s", obj["x"], obj["y"], obj["z"])
+	}
+
+	// Ring-move → port json anchorId lands on disk.
+	adir := vec3{X: 1, Y: 0, Z: 0}
+	want := snapToRingAnchorIndex(md.NodeKind("src"), adir)
+	md.applyRingAnchor("src", "Out", false, adir)
+	md.anchorPersist.flush()
+	praw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "outputs", "Out.json"))
+	if err != nil {
+		t.Fatalf("read port json: %v", err)
+	}
+	var pobj map[string]json.RawMessage
+	_ = json.Unmarshal(praw, &pobj)
+	var gotAnchor int
+	if err := json.Unmarshal(pobj["anchorId"], &gotAnchor); err != nil {
+		t.Fatalf("anchorId not persisted via FILE topologyPath: %v", err)
+	}
+	if gotAnchor != want {
+		t.Fatalf("persisted anchorId=%d want %d", gotAnchor, want)
+	}
+
+	// Overlays round-trip through Go on the same FILE path (SeedOverlays reads the sibling
+	// view/scene.json): toggle → flush → fresh SeedOverlays restores.
+	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topoFile), debounce: viewpointPersistDebounce}
+	md.ToggleSceneTori(nil)
+	md.overlaysPersist.schedule(md.ov)
+	md.overlaysPersist.flush()
+	fresh := &MoveDispatch{ov: defaultOverlayState()}
+	fresh.SeedOverlays(topoFile, nil)
+	if fresh.ov.sceneToriVisible {
+		t.Fatalf("SeedOverlays did not restore sceneToriVisible=false via FILE topologyPath")
+	}
+}
+
+// TestEnableEditPersistTrueMonolithicNoTree pins the guard: a genuine monolithic topology.json
+// with NO sibling nodes/ dir must keep root == "" so the position/anchor persisters no-op
+// (instead of spraying empty <parent>/nodes/<id> dirs).
+func TestEnableEditPersistTrueMonolithicNoTree(t *testing.T) {
+	dir := t.TempDir()
+	topoFile := filepath.Join(dir, "topology.json")
+	if err := os.WriteFile(topoFile, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := &MoveDispatch{ov: defaultOverlayState(), directlyFadedNodes: map[string]bool{}, directlyFadedEdges: map[string]bool{}}
+	md.EnableEditPersist(topoFile)
+	if md.posPersist.root != "" {
+		t.Fatalf("posPersist.root=%q want empty (no nodes/ subdir → true monolithic)", md.posPersist.root)
+	}
+	if md.anchorPersist.root != "" {
+		t.Fatalf("anchorPersist.root=%q want empty", md.anchorPersist.root)
+	}
+}
+
 // TestOverlaysPersistMonolithicForm: overlays persist correctly when topologyPath is a
 // monolithic file (not a directory), the form that caused the original treeRoot="" no-op bug.
 // sceneCameraPath resolves to the sibling view/scene.json; EnableEditPersist + SeedOverlays
