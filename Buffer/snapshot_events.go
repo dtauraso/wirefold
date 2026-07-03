@@ -38,9 +38,6 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		r.edge = ev.Edge
 	case T.KindNodeBead:
 		r.slot = ev.Row*2 + ev.Col
-	case T.KindNodeStatus:
-		r.flag = ev.TorusRed
-		r.x, r.y, r.z = ev.X, ev.Y, ev.Z
 	case T.KindCamera:
 		// All fields read from the Camera block at decode time.
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,

@@ -190,7 +190,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 // or building. Shared by LoadTopology (which then validates + builds) and
 // EmitSpecLine (which only needs the parsed spec).
 func parseSpec(path string) (topoSpec, error) {
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
+	if info, err := os.Stat(path); err == nil && info.IsDir() { // path-resolution-ok: loader dispatch, not scene path resolution
 		return loadTree(path)
 	}
 	raw, err := os.ReadFile(path)

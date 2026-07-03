@@ -105,6 +105,18 @@ docs, and the auto-memory dir, costing tokens and time.
 - Channel names encode which two nodes are connected — preserve this convention.
 - **Medium vs. substance.** Before adopting a **medium** dependency (rendering library, framework, parser, bundler, file watcher, test runner, package manager, language/runtime version, editor integration), explicitly ask "what's the dominant choice the rest of the world converged on for this category?" and justify deviating if not adopting it. The medium is where industry has solved your problem; being weird there is pure overhead. Do **not** apply this heuristic to the **substance** of the system — the execution model, what a node is, how time/ticks work, what a wire is, how nodes coordinate, the Go network that runs nodes. Industry defaults there encode "logic in procedures, topology as plumbing," which is the inversion this project exists to challenge. For substance, ask "what does this system actually need?" and ignore industry — the whole point is that the answer is different. (Prior failure: the await/Promise execution model was the industry-correct JS translation of goroutines+channels, and it hid pacing inside the event loop, coupling nodes that should have been independent. Right answer for the medium, wrong answer for the substance.)
 
+## Debugging the Go layer (probe breadcrumbs)
+
+Go-side runtime debugging goes through the **DEBUG BREADCRUMB channel** — the Go analogue
+of the webview's `postLog`. Call `tr.Breadcrumb(label, node, port, value string)` at a debug
+site: it emits ONE structured `{"kind":"breadcrumb",...}` line on stdout (production wires
+`tr.SetDebugSink(os.Stdout)` in `main.go`), and the ext host (`runCommand.ts` `tryParseBreadcrumb`)
+routes it to `.probe/go-debug.jsonl` with `src:"go-debug"` — kept separate from buffer-decoded
+trace events (`go.jsonl`) and genuine stderr errors (`go-errors.jsonl`). Read it with
+`tools/probe-merge.sh --debug`. Do NOT scatter `fmt.Fprintf(os.Stderr, ...)` for diagnosis;
+use a breadcrumb. Keep it SPARSE — it is a debug tool for control events, not a per-tick
+firehose (see the log-flood lesson). It is a cheap no-op when the sink is unwired (headless tests).
+
 ## Planning docs are branch-local
 
 Planning docs (anything under `docs/planning/` except `session-log.md`) are authored on the

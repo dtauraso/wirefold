@@ -179,7 +179,6 @@ func main() {
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d entries)\n", wireDefsPath, len(wireProps))
 
 	traceDir := filepath.Join(repoRoot, "Trace")
-	traceGoPath := filepath.Join(traceDir, "Trace.go")
 	traceKinds, err := parseTraceKinds(traceDir)
 	if err != nil {
 		fatalf("parse trace kinds: %v", err)
@@ -190,19 +189,11 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d kinds)\n", traceKindsPath, len(traceKinds))
 
-	// Field-level parity for the node-status trace event: parse the local struct
-	// Trace.go's MarshalJSON marshals for KindNodeStatus and emit a generated TS
-	// payload type + runtime validator, so a Go field rename/retype regenerates and
-	// breaks tsc (via messages.ts) instead of silently casting through.
-	nodeStatusFields, err := parseNodeStatusFields(traceGoPath)
-	if err != nil {
-		fatalf("parse node-status fields: %v", err)
-	}
 	traceFieldsPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "trace-event-fields.ts")
-	if err := writeTraceEventFields(traceFieldsPath, nodeStatusFields); err != nil {
+	if err := writeTraceEventFields(traceFieldsPath); err != nil {
 		fatalf("write %s: %v", traceFieldsPath, err)
 	}
-	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d node-status fields)\n", traceFieldsPath, len(nodeStatusFields))
+	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s\n", traceFieldsPath)
 
 	nodeDimsGoPath := filepath.Join(repoRoot, "nodes", "Wiring", "node_dims_gen.go")
 	if err := writeNodeDims(nodeDimsGoPath, kinds); err != nil {
@@ -1308,126 +1299,14 @@ func writeTraceKinds(outPath string, kinds []string) error {
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }
 
-// traceField is one field of a trace event's JSON payload struct.
-type traceField struct {
-	jsonName   string // from json:"..." tag
-	tsType     string // TS type: "number" | "string" | "boolean"
-	typeofName string // JS typeof result: "number" | "string" | "boolean"
-}
-
-// goTypeToTraceTS maps a Go scalar type (as used in the Trace.go MarshalJSON
-// payload structs) to its TS type + JS typeof string. Only the scalar types the
-// trace payloads actually use are supported; anything else is a hard error so a
-// new field type is caught at generate time rather than silently skipped.
-func goTypeToTraceTS(goType string) (tsType, typeofName string, err error) {
-	switch goType {
-	case "int", "float64":
-		return "number", "number", nil
-	case "string":
-		return "string", "string", nil
-	case "bool":
-		return "boolean", "boolean", nil
-	}
-	return "", "", fmt.Errorf("unsupported trace field Go type %q — add it to goTypeToTraceTS", goType)
-}
-
-// parseNodeStatusFields reads Trace.go and returns the fields of the local
-// `nodeStatus` struct declared inside MarshalJSON's `case KindNodeStatus:` block,
-// in declaration order. This is the authoritative wire shape of the node-status
-// trace event.
-func parseNodeStatusFields(traceGoPath string) ([]traceField, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, traceGoPath, nil, 0)
-	if err != nil {
-		return nil, err
-	}
-	var fields []traceField
-	var found bool
-	ast.Inspect(f, func(n ast.Node) bool {
-		ts, ok := n.(*ast.TypeSpec)
-		if !ok || ts.Name == nil || ts.Name.Name != "nodeStatus" {
-			return true
-		}
-		st, ok := ts.Type.(*ast.StructType)
-		if !ok {
-			return true
-		}
-		found = true
-		for _, field := range st.Fields.List {
-			if field.Tag == nil || len(field.Names) == 0 {
-				continue
-			}
-			tag := strings.Trim(field.Tag.Value, "`")
-			_, after, ok := strings.Cut(tag, `json:"`)
-			if !ok {
-				continue
-			}
-			jsonName, _, _ := strings.Cut(after, `"`)
-			jsonName, _, _ = strings.Cut(jsonName, ",")
-			if jsonName == "" {
-				continue
-			}
-			goType, ok := goTypeExprStr(field.Type)
-			if !ok {
-				continue
-			}
-			tsType, typeofName, err2 := goTypeToTraceTS(goType)
-			if err2 != nil {
-				err = err2
-				return false
-			}
-			fields = append(fields, traceField{jsonName: jsonName, tsType: tsType, typeofName: typeofName})
-		}
-		return false
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, fmt.Errorf("nodeStatus struct not found in %s (MarshalJSON case KindNodeStatus)", traceGoPath)
-	}
-	return fields, nil
-}
-
-// writeTraceEventFields emits trace-event-fields.ts: the generated node-status
-// payload interface + a runtime field-level validator. Generated from Trace.go so
-// a Go field change regenerates the TS shape (breaking tsc where messages.ts /
-// pump.ts reference the fields) and the validator drops malformed Go payloads.
-func writeTraceEventFields(outPath string, fields []traceField) error {
+// writeTraceEventFields emits trace-event-fields.ts as an empty generated stub.
+// The node-status viz was removed; this file is kept as a generated placeholder so
+// check-generated stays green without requiring consumers to update imports.
+func writeTraceEventFields(outPath string) error {
 	var buf bytes.Buffer
 	w := bufio.NewWriter(&buf)
-
 	fmt.Fprintln(w, `// GENERATED by tools/gen-node-defs — do not edit.`)
-	fmt.Fprintln(w, `// Source: Trace/Trace.go MarshalJSON node-status payload struct.`)
 	fmt.Fprintln(w, `// Regenerate with: npm run gen:node-defs`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `export interface NodeStatusEvent {`)
-	for _, fld := range fields {
-		if fld.jsonName == "kind" {
-			fmt.Fprintln(w, `  kind: "node-status";`)
-			continue
-		}
-		fmt.Fprintf(w, "  %s: %s;\n", fld.jsonName, fld.tsType)
-	}
-	fmt.Fprintln(w, `}`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "/** Field-level validator for the node-status trace payload, generated from")
-	fmt.Fprintln(w, " *  Trace.go field-for-field. `step` is validated by the caller (numeric")
-	fmt.Fprintln(w, " *  envelope) and `kind` by the TRACE_EVENT_KINDS set, so only the payload")
-	fmt.Fprintln(w, " *  fields are checked here. Malformed Go payloads are dropped, not cast. */")
-	fmt.Fprintln(w, `export function validateNodeStatusFields(obj: Record<string, unknown>): boolean {`)
-	fmt.Fprintln(w, `  return (`)
-	var checks []string
-	for _, fld := range fields {
-		if fld.jsonName == "step" || fld.jsonName == "kind" {
-			continue
-		}
-		checks = append(checks, fmt.Sprintf(`    typeof obj[%q] === %q`, fld.jsonName, fld.typeofName))
-	}
-	fmt.Fprintln(w, strings.Join(checks, " &&\n"))
-	fmt.Fprintln(w, `  );`)
-	fmt.Fprintln(w, `}`)
-
 	w.Flush()
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }
@@ -1804,14 +1683,12 @@ func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
 
 // writeOverlayGen emits nodes/Wiring/overlay_gen.go: the entire Go-side overlay wiring
 // mechanically derived from OVERLAY_FLAG_NAMES — the overlayState struct + flip/emit
-// methods, the defaultOverlayState constructor, the MoveDispatch delegators, the
-// overlayToggles method-expression table, the stdinGuideVisPayload wire struct, and the
-// overlayStateFromPayload mapper. Deviating flags (scene/node poles Breadcrumb, the
-// angleLabels accessor) are generated from overlayOverrides. Adding an overlay flag now
-// means editing OVERLAY_FLAG_NAMES (+ the ~4-5 TS/render sites); every Go site above is
-// regenerated. Parity of the generated table/struct is guarded by check-edit-op-parity.sh
-// (which reads this file's OVERLAY_TOGGLES / GUIDEVIS_FIELDS sentinels) and staleness by
-// check-generated.sh.
+// methods, the defaultOverlayState constructor, the MoveDispatch delegators, and the
+// overlayToggles method-expression table. Deviating flags (scene/node poles Breadcrumb,
+// the angleLabels accessor) are generated from overlayOverrides. Adding an overlay flag
+// now means editing OVERLAY_FLAG_NAMES (+ the ~4-5 TS/render sites); every Go site above
+// is regenerated. Parity of the generated table is guarded by check-edit-op-parity.sh
+// (which reads this file's OVERLAY_TOGGLES sentinel) and staleness by check-generated.sh.
 func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	var buf bytes.Buffer
 	w := bufio.NewWriter(&buf)
@@ -1932,41 +1809,12 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	fmt.Fprintln(w, `// OVERLAY_TOGGLES_END`)
 	fmt.Fprintln(w)
 
-	// stdinGuideVisPayload struct (sentinel-bounded for axis 4) + mapper.
-	fmt.Fprintln(w, `// stdinGuideVisPayload holds the explicit-visibility fields for the overlays`)
-	fmt.Fprintln(w, `// attr="set" op. The json tags are the overlay FLAG vocabulary shared with the TS`)
-	fmt.Fprintln(w, `// OverlayState.`)
-	fmt.Fprintln(w, `//`)
-	fmt.Fprintln(w, `// GUIDEVIS_FIELDS_START`)
-	fmt.Fprintln(w, `type stdinGuideVisPayload struct {`)
-	for _, f := range flags {
-		fmt.Fprintf(w, "\t%s bool `json:%q`\n", exportedName(f.flag), f.flag)
-	}
-	fmt.Fprintln(w, `}`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// GUIDEVIS_FIELDS_END`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// overlayStateFromPayload maps the wire payload onto the named overlayState (no`)
-	fmt.Fprintln(w, `// positional bool order to get wrong).`)
-	fmt.Fprintln(w, `func overlayStateFromPayload(s *stdinGuideVisPayload) overlayState {`)
-	fmt.Fprintln(w, "\treturn overlayState{")
-	for _, f := range flags {
-		fmt.Fprintf(w, "\t\t%s: s.%s,\n", f.field, exportedName(f.flag))
-	}
-	fmt.Fprintln(w, "\t}")
-	fmt.Fprintln(w, `}`)
-
 	w.Flush()
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
 		return fmt.Errorf("format overlay_gen.go: %w", err)
 	}
 	return os.WriteFile(outPath, formatted, 0644)
-}
-
-// exportedName upper-cases the first rune of a camelCase flag for a Go struct field.
-func exportedName(s string) string {
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // kebabOf converts a PascalCase method name to its kebab trace-kind string (doc only).

@@ -10,6 +10,7 @@ export const PROBE_DIR = ".probe";
 export const PROBE_FILES = {
   go: "go.jsonl",
   goErrors: "go-errors.jsonl",
+  goDebug: "go-debug.jsonl",
   ts: "ts.jsonl",
   tsErrors: "ts-errors.jsonl",
   handlerErrorLast: "handler-error-last.json",

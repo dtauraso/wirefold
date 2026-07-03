@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"math"
 	"os"
-	"path/filepath"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -60,18 +59,6 @@ type scenePolarCamera struct {
 // Other scene fields (camera3d, guide-visibility flags) are ignored here.
 type sceneFile struct {
 	CameraPolar *scenePolarCamera `json:"cameraPolar"`
-}
-
-// sceneCameraPath returns the path to the scene sidecar for a topology path. When the
-// topology is a directory tree the sidecar is `<dir>/view/scene.json`; when it is a
-// monolithic file the sidecar is `<parentDir>/view/scene.json` (a sibling), matching the
-// editor's `readSceneText` (topologyPath dir + view/scene.json).
-func sceneCameraPath(topologyPath string) string {
-	base := topologyPath
-	if info, err := os.Stat(topologyPath); err == nil && !info.IsDir() {
-		base = filepath.Dir(topologyPath)
-	}
-	return filepath.Join(base, "view", "scene.json")
 }
 
 // loadSceneViewpoint reads the saved polar camera from the scene sidecar and converts it

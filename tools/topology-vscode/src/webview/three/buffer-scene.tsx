@@ -47,7 +47,6 @@ import {
 import {
   readBeadX, readBeadY, readBeadZ, readBeadLive, readBeadValue,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
-  readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readNodeSphereR, readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
   readNodeKindId,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
@@ -1007,139 +1006,6 @@ function EdgeTubes({ capacity }: { capacity: number }) {
   );
 }
 
-// ── Missed-bead markers ─────────────────────────────────────────────────────────
-// Renders the missed/ignored bead just outside a node while Go reports a firing error
-// (node TorusRed=1). World position (MX/MY/MZ) and the missed value (MissVal) come from
-// the buffer's Node block. Mirrors MissedBeadMarkers (scene-beads.tsx): a pooled sphere+
-// ring per active node, colored by beadStyleForValue(MissVal), self-glowing with a
-// cosmetic render-clock pulse. TorusRed=0 → the node's marker hides. Nodes whose MissVal
-// has no bead-style are hidden (never a fallback color), matching the JSON path.
-const MISSED_POOL = 16;
-const MISSED_BEAD_R = 9;
-
-function MissedBeadMarkersBuf() {
-  const slotRefs = useRef<(THREE.Group | null)[]>([]);
-  const sphereMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
-  const torusMatRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
-
-  useFrame((state) => {
-    const slots = slotRefs.current;
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    // Cosmetic pulse (0..1) from the render clock, shared by all active markers.
-    const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
-    let slot = 0;
-    if (decoded) {
-      const { nodeCount, nodeView } = decoded;
-      for (let i = 0; i < nodeCount && slot < MISSED_POOL; i++) {
-        if (!readNodeTorusRed(nodeView, i)) continue;
-        const g = slots[slot];
-        if (!g) { slot++; continue; }
-        const style = beadStyleForValue(readNodeMissVal(nodeView, i));
-        if (!style) { g.visible = false; slot++; continue; }
-        g.position.set(readNodeMX(nodeView, i), readNodeMY(nodeView, i), readNodeMZ(nodeView, i));
-        g.scale.setScalar(1.0 + 0.25 * pulse);
-        const sm = sphereMatRefs.current[slot];
-        if (sm) {
-          sm.color.set(style.fill);
-          sm.emissive.set(style.fill);
-          sm.emissiveIntensity = 0.5 + 1.2 * pulse;
-        }
-        torusMatRefs.current[slot]?.color.set(style.ring);
-        g.visible = true;
-        slot++;
-      }
-    }
-    for (let i = slot; i < MISSED_POOL; i++) {
-      const g = slots[i];
-      if (g) g.visible = false;
-    }
-  });
-
-  return (
-    <>
-      {Array.from({ length: MISSED_POOL }, (_, i) => (
-        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
-          <mesh raycast={() => null} frustumCulled={false}>
-            <sphereGeometry args={[MISSED_BEAD_R, 16, 16]} />
-            <meshStandardMaterial ref={(el) => { sphereMatRefs.current[i] = el; }} emissiveIntensity={0} />
-          </mesh>
-          <mesh raycast={() => null} frustumCulled={false}>
-            <torusGeometry args={[MISSED_BEAD_R, MISSED_BEAD_R * 0.12, 8, 24]} />
-            <meshStandardMaterial ref={(el) => { torusMatRefs.current[i] = el; }} emissiveIntensity={0} />
-          </mesh>
-        </group>
-      ))}
-    </>
-  );
-}
-
-// ── Node status-red pulse rings ───────────────────────────────────────────────────
-// Per-node RED alarm ring drawn OVER every node whose buffer TorusRed=1. The shared-
-// material NodeInstances ring can't do a per-instance emissive/scale pulse, so this draws
-// a SEPARATE pulsing red ring per active node (a pooled group per node, like
-// SelectionHighlight). Mirrors the pre-branch GraphNode useFrame status pulse EXACTLY:
-// color+emissive #ff1a1a, emissiveIntensity 0.6 + 1.9*pulse, scale 1.18 + 0.14*pulse,
-// pulse = 0.5 + 0.5*sin(elapsedTime*8) (~8Hz, cosmetic render-clock only — decides NO
-// model state). The ring geometry is the unit border torus (major radius 1, tube ratio
-// NODE_RING_TUBE_RATIO) scaled by the node radius × pulse scale, matching NodeInstances'
-// ring. TorusRed=0 nodes get no red ring (their pool slot hides).
-const NODE_STATUS_RED = "#ff1a1a";
-const STATUS_RED_POOL = 16;
-
-function NodeStatusRedRings() {
-  const slotRefs = useRef<(THREE.Group | null)[]>([]);
-  const matRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
-
-  useFrame((state) => {
-    const slots = slotRefs.current;
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    // Cosmetic 0..1 pulse from the render clock (~8Hz), shared by all active rings.
-    const pulse = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 8);
-    let slot = 0;
-    if (decoded) {
-      const { nodeCount, nodeView } = decoded;
-      for (let i = 0; i < nodeCount && slot < STATUS_RED_POOL; i++) {
-        if (!readNodeTorusRed(nodeView, i)) continue;
-        const g = slots[slot];
-        if (!g) { slot++; continue; }
-        const r = readNodeRadius(nodeView, i) || NODE_SPHERE_RADIUS;
-        g.position.set(readNodeCX(nodeView, i), readNodeCY(nodeView, i), readNodeCZ(nodeView, i));
-        // Scale: node radius × the pre-branch pulse scale (1.18 + 0.14*pulse). The child
-        // torus is built at major radius 1, so this lands the red ring on the node border.
-        g.scale.setScalar(r * (1.18 + 0.14 * pulse));
-        const mat = matRefs.current[slot];
-        if (mat) mat.emissiveIntensity = 0.6 + 1.9 * pulse;
-        g.visible = true;
-        slot++;
-      }
-    }
-    for (let i = slot; i < STATUS_RED_POOL; i++) {
-      const g = slots[i];
-      if (g) g.visible = false;
-    }
-  });
-
-  return (
-    <>
-      {Array.from({ length: STATUS_RED_POOL }, (_, i) => (
-        <group key={i} ref={(el) => { slotRefs.current[i] = el; }} visible={false}>
-          <mesh raycast={() => null} frustumCulled={false}>
-            <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
-            <meshStandardMaterial
-              ref={(el) => { matRefs.current[i] = el; }}
-              color={NODE_STATUS_RED}
-              emissive={NODE_STATUS_RED}
-              emissiveIntensity={0.6}
-            />
-          </mesh>
-        </group>
-      ))}
-    </>
-  );
-}
-
 // ── BufferCamera ───────────────────────────────────────────────────────────────
 // Buffer-driven camera: each frame reads the snapshot's single Camera row and drives
 // the three.js camera (position / up / lookAt) from it. This REPLACES the old
@@ -1280,8 +1146,6 @@ export function BufferScene({ cameraRef }: {
       <HoverHighlight />
       <SphereRings />
       <EdgeTubes     capacity={edgeCap} />
-      <MissedBeadMarkersBuf />
-      <NodeStatusRedRings />
     </>
   );
 }

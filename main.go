@@ -49,6 +49,12 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// buffer (buffer-log.ts) — the spec's "one representation including logs". Nothing writes
 	// trace-event JSON to stdout; the ext host no longer parses trace lines from stdout.
 	tr := T.NewWithSinkHook(0, nil, snapState.Update)
+	// DEBUG BREADCRUMB channel: production breadcrumbs ride stdout as {"kind":"breadcrumb",...}
+	// lines; the ext host routes them to .probe/go-debug.jsonl (see runCommand.ts). This is the
+	// Go analogue of the webview's postLog — a cheap, structured, one-call diagnostic that lands
+	// in .probe/ without scattering fmt.Fprintf(os.Stderr, ...). It is sparse (control events,
+	// not a per-tick firehose) and fire-and-forget.
+	tr.SetDebugSink(os.Stdout)
 
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()
@@ -58,6 +64,9 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
+	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
+	// useful (which topology loaded, how many nodes). Sparse: once per run.
+	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
 
 	// Emit the full spec to the TS webview before nodes start (Go startup message).
 	// TS intercepts this line and sends { type: "load", text } to the webview — it

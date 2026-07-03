@@ -12,15 +12,15 @@
 // Numbers are little-endian (matching fd 3). Enum discriminators (event kind, hit kind,
 // update entity kind, update attr, overlay flag) are u8 indices into the shared orderings.
 // There is NO JSON on the wire: every record is fully numeric. The live editor→Go traffic
-// is raw-input (numeric), overlays toggle/set (numeric flag-id / bitfield), the bare save
+// is raw-input (numeric), overlays toggle (numeric flag-id), the bare save
 // COMMAND (kind byte only — Go persists its OWN authoritative scene state), and the
 // play/pause/resend control bytes. The create/delete/edit-update record kinds stay defined
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v2 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v3 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v2 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v3 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
@@ -44,11 +44,12 @@ export const IN_HIT_KINDS = ["port", "handhold", "node", "edge", "empty"] as con
 // EDIT_UPDATE_KINDS_START
 export const IN_UPDATE_KINDS = ["overlays"] as const;
 // EDIT_UPDATE_KINDS_END
-// IN_UPDATE_ATTRS is the overlays sub-attribute vocabulary (toggle a single flag, or set
-// the full 10-flag visibility snapshot). u8 index on the wire.
-export const IN_UPDATE_ATTRS = ["toggle", "set"] as const;
+// IN_UPDATE_ATTRS is the overlays sub-attribute vocabulary (toggle a single flag). u8 index
+// on the wire. The former "set" full-visibility-snapshot attr was removed (its only caller,
+// the load-time main.tsx push, was deleted; no live TS sender remained).
+export const IN_UPDATE_ATTRS = ["toggle"] as const;
 
-import type { RawInputEvent, OverlayFlag, OverlayState } from "../messages";
+import type { RawInputEvent, OverlayFlag } from "../messages";
 import { OVERLAY_FLAG_ORDER } from "../messages";
 
 function enumIndex(list: readonly string[], s: string): number {
@@ -132,7 +133,6 @@ export const encodeFadeToggle = () => encodeControl(IN_KIND_FADE_TOGGLE);
 
 // Overlays attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
-const IN_OVERLAY_ATTR_SET = 1;
 
 /** Build an edit create/delete record: two length-prefixed UTF-8 strings. Kept for the
  *  3-op (create/update/delete) codec concept; no live TS caller (the FSM creates/deletes
@@ -159,21 +159,6 @@ export function encodeOverlaysToggle(flag: OverlayFlag): ArrayBuffer {
   w.u8(enumIndex(IN_UPDATE_KINDS, "overlays"));
   w.u8(IN_OVERLAY_ATTR_TOGGLE);
   w.u8(enumIndex(OVERLAY_FLAG_ORDER, flag));
-  return w.toArrayBuffer();
-}
-
-/** Build an overlays SET record: [22][entityKind=overlays][attr=set][u16 bitfield].
- *  Bit i (LSB-first, matching OVERLAY_FLAG_ORDER) = the i-th flag's visibility. */
-export function encodeOverlaysSet(state: OverlayState): ArrayBuffer {
-  let bits = 0;
-  OVERLAY_FLAG_ORDER.forEach((flag, i) => {
-    if (state[flag]) bits |= 1 << i;
-  });
-  const w = new ByteWriter();
-  w.u8(IN_KIND_EDIT_UPDATE);
-  w.u8(enumIndex(IN_UPDATE_KINDS, "overlays"));
-  w.u8(IN_OVERLAY_ATTR_SET);
-  w.u16(bits);
   return w.toArrayBuffer();
 }
 
@@ -262,8 +247,7 @@ export type DecodedInput =
   | { kind: "play" | "pause" | "resend" | "save" | "fade-toggle" }
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
-  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag }
-  | { kind: "edit-update"; entity: "overlays"; attr: "set"; state: OverlayState };
+  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag };
 
 /** Decode one record body (with kind byte, without the [len] frame). */
 export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined {
@@ -326,14 +310,6 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
         const flag = OVERLAY_FLAG_ORDER[r.u8()];
         if (!flag) return undefined;
         return { kind: "edit-update", entity: "overlays", attr: "toggle", flag };
-      }
-      if (attr === IN_OVERLAY_ATTR_SET) {
-        const bits = r.u16();
-        const state = {} as OverlayState;
-        OVERLAY_FLAG_ORDER.forEach((flag, i) => {
-          state[flag] = (bits & (1 << i)) !== 0;
-        });
-        return { kind: "edit-update", entity: "overlays", attr: "set", state };
       }
       return undefined;
     }

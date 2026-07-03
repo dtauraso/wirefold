@@ -15,7 +15,6 @@
 //       create (record 20): un-silence the destination slot's wire.
 //       delete (record 21): silence it + cancel any in-flight bead.
 //       update overlays attr=toggle: flip one named overlay flag.
-//       update overlays attr=set:    install the whole 10-flag visibility snapshot.
 //     (Camera / node-move / port-anchor / edge-fade edits are produced in-process by the
 //     gesture FSM from raw-input, so they no longer cross this seam.)
 //
@@ -69,17 +68,11 @@ type stdinCRUDPayload struct {
 	TargetHandle string `json:"targetHandle"`
 }
 
-// stdinGuideVisPayload (the overlays attr="set" wire struct) is GENERATED into
-// overlay_gen.go from OVERLAY_FLAG_NAMES; its json tags are the overlay FLAG vocabulary
-// shared with the TS OverlayState. Parity guarded by check-edit-op-parity.sh via the
-// GUIDEVIS_FIELDS sentinels in overlay_gen.go.
-
 // stdinMsg is the single editor→Go bridge shape. For type=="edit", op is one of exactly
 // three values (create/update/delete). create/delete name a destination slot (Target/
 // TargetHandle). op=="update" sets an attribute on a typed entity — the sole live entity is
-// overlays: Attr=="toggle" (Flag names one overlay) or Attr=="set" (State is the full
-// 10-flag visibility snapshot). The other top-level types are raw-input (Event), the bare
-// save command, and play/pause/resend.
+// overlays: Attr=="toggle" (Flag names one overlay). The other top-level types are
+// raw-input (Event), the bare save command, and play/pause/resend.
 type stdinMsg struct {
 	Type string `json:"type"`
 	Op   string `json:"op"`
@@ -88,8 +81,6 @@ type stdinMsg struct {
 	Flag string `json:"flag"`
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg `json:"event,omitempty"`
-	// State is the explicit-visibility payload for kind=="overlays" attr=="set"; nil otherwise.
-	State *stdinGuideVisPayload `json:"state,omitempty"`
 	stdinCRUDPayload
 }
 
@@ -276,9 +267,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 //   - update: set an ATTRIBUTE on a typed entity (msg.Kind). The sole live entity is
 //     overlays:
 //       overlays + attr "toggle": flip the named flag via overlayToggles.
-//       overlays + attr "set":    set all overlay visibilities to explicit values.
 //     (Camera / node-move / port-anchor / edge-fade edits are now produced in-process by
-//     the gesture FSM from raw-input, so they no longer cross this seam.)
+//     the gesture FSM from raw-input, so they no longer cross this seam.
+//     The former attr="set" full-visibility install was removed: its only caller, the
+//     load-time main.tsx push, was deleted; no live TS sender remains.)
 //
 // Unknown ops/kinds/attrs are ignored (forward-compat).
 
@@ -338,8 +330,8 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 }
 
 // applyUpdate routes an op=="update" edit to the entity named by msg.Kind, setting the
-// requested attribute. The sole live entity is overlays (toggle one flag / set the whole
-// visibility snapshot). Unknown kinds/attrs are ignored (forward-compat).
+// requested attribute. The sole live entity is overlays (toggle one flag).
+// Unknown kinds/attrs are ignored (forward-compat).
 func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 	_ = treeRoot // overlay persistence rides the armed overlaysPersist writer, not treeRoot here.
 	// EDIT_UPDATE_KINDS_START
@@ -354,15 +346,6 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			if fn, ok := overlayToggles[msg.Flag]; ok {
 				fn(md, tr)
 			}
-		case "set":
-			// Set all overlay visibilities to explicit values. Sent by TS on window reload
-			// so Go's authoritative state matches persisted scene settings.
-			if msg.State == nil {
-				return
-			}
-			// overlayStateFromPayload (generated) maps the wire fields onto the named
-			// overlayState struct; SetGuideVisibility installs it wholesale.
-			md.SetGuideVisibility(overlayStateFromPayload(msg.State), tr)
 		}
 		// Persist ON CHANGE (mirrors fade/camera): schedule a debounced write of the new
 		// overlay snapshot so toggles survive a reload without an explicit save. No-op until

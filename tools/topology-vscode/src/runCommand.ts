@@ -4,7 +4,6 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, TraceEvent, HostToWebviewMsg } from "./messages";
 import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
-import { validateNodeStatusFields } from "./schema/trace-event-fields";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { encodePlay, encodePause, encodeResend, frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
@@ -129,10 +128,6 @@ function tryParseTraceEvent(line: string): TraceEvent | undefined {
         typeof rec.kind === "string" &&
         TRACE_EVENT_KIND_SET.has(rec.kind)
       ) {
-        // Per-kind FIELD validation: the kind-string set only proves the discriminant.
-        // node-status carries a typed payload (generated from Trace.go); drop a
-        // malformed one rather than casting it through and painting garbage.
-        if (rec.kind === "node-status" && !validateNodeStatusFields(rec)) return undefined;
         return obj as TraceEvent;
       }
     }
@@ -160,7 +155,7 @@ function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; v
 // tryParseBreadcrumb recognizes the Go Trace.Breadcrumb line shape
 // ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only and
 // carry no step ordinal, so tryParseTraceEvent rejects them.
-function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
+export function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
     const obj: unknown = JSON.parse(line);
@@ -231,6 +226,7 @@ export class BuildAndRunRunner {
   private fd3Buf: Buffer = Buffer.alloc(0);
   private probeFile: string | undefined;
   private goErrorsFile: string | undefined;
+  private goDebugFile: string | undefined;
   private tsFile: string | undefined;
   private tsErrorsFile: string | undefined;
 
@@ -252,6 +248,7 @@ export class BuildAndRunRunner {
     fs.mkdirSync(probeDir, { recursive: true });
     this.probeFile = path.join(probeDir, PROBE_FILES.go);
     this.goErrorsFile = path.join(probeDir, PROBE_FILES.goErrors);
+    this.goDebugFile = path.join(probeDir, PROBE_FILES.goDebug);
     this.tsFile = path.join(probeDir, PROBE_FILES.ts);
     this.tsErrorsFile = path.join(probeDir, PROBE_FILES.tsErrors);
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
@@ -379,14 +376,17 @@ export class BuildAndRunRunner {
         this.onSpecEvent?.(spec);
         continue;
       }
-      // Breadcrumb lines (logging-only; no step ordinal, outside the closed
-      // trace vocabulary) are relayed to go.jsonl but never dispatched to the
-      // pump — the pump's assertNever would throw on an unknown kind.
+      // Breadcrumb lines are the Go-side DEBUG BREADCRUMB channel (Trace.Breadcrumb →
+      // stdout {"kind":"breadcrumb",...}). They are logging-only (no step ordinal, outside
+      // the closed trace vocabulary), so they are NEVER dispatched to the pump (its
+      // assertNever would throw). They land in a DEDICATED .probe/go-debug.jsonl with a
+      // distinct src="go-debug" so they are not conflated with buffer-decoded trace events
+      // (.probe/go.jsonl) or genuine stderr errors (.probe/go-errors.jsonl).
       const crumb = tryParseBreadcrumb(line);
       if (crumb) {
-        if (this.probeFile) {
+        if (this.goDebugFile) {
           try {
-            fs.appendFileSync(this.probeFile, JSON.stringify({ ts_ms: Date.now(), src: "go", ...crumb }) + "\n", "utf8");
+            fs.appendFileSync(this.goDebugFile, JSON.stringify({ ts_ms: Date.now(), src: "go-debug", ...crumb }) + "\n", "utf8");
           } catch { /* swallow */ }
         }
         continue;

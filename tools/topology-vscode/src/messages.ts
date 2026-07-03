@@ -2,8 +2,6 @@
 // Both sides import from here so unknown / malformed messages are caught
 // at type-narrow time rather than silently writing `[object Object]` to disk.
 
-import type { NodeStatusEvent } from "./schema/trace-event-fields";
-
 export type RunStatus =
   | { state: "running" }
   | { state: "paused" }
@@ -28,9 +26,9 @@ export type RunStatus =
 // new position. The webview computes the incident edges from its React Flow graph
 // (TS owns the graph; Go owns the recompute).
 // OVERLAY_FLAG_NAMES is the SINGLE source for the overlay wire vocabulary — named
-// boolean overlay attributes shared with Go's overlayToggles map and stdinGuideVisPayload
-// (stdin_reader.go). The OverlayFlag union, the OVERLAY_FLAGS runtime set, and the
-// OverlayState snapshot type are ALL derived from it, so the field set is listed once.
+// boolean overlay attributes shared with Go's overlayToggles map (stdin_reader.go).
+// The OverlayFlag union and the OVERLAY_FLAGS runtime set are ALL derived from it, so
+// the field set is listed once.
 // Guarded by check-edit-op-parity.sh.
 // OVERLAY_FLAGS_START
 const OVERLAY_FLAG_NAMES = [
@@ -54,23 +52,19 @@ export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
 // input-layout.ts). Exported so the binary codec keys off the exact same ordering.
 export const OVERLAY_FLAG_ORDER = OVERLAY_FLAG_NAMES;
 
-// OverlayState is the full explicit-visibility snapshot pushed on load (attr="set").
-// Derived from OverlayFlag so the field set can never drift from the flag vocabulary.
-export type OverlayState = Record<OverlayFlag, boolean>;
-
 // EDIT_MSG_START
 // The geometry-CRUD edit surface. THREE ops (create / update / delete). create/delete
 // name an edge by its destination slot (kept as the 3-op concept though the gesture FSM
 // now creates/deletes edges in-process from raw-input, so TS sends no create/delete). The
-// sole live update entity is overlays (toggle one flag / set the whole visibility snapshot);
-// node/edge/camera edits became gesture-FSM-in-process (raw-input) and scene became the
-// bare `save` command — none cross this seam any more.
+// sole live update entity is overlays (toggle one flag); node/edge/camera edits became
+// gesture-FSM-in-process (raw-input) and scene became the bare `save` command — none cross
+// this seam any more. The former attr="set" full-visibility install was dead (its only
+// caller, the load-time main.tsx push, was removed); only attr="toggle" is live.
 type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
-  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
-  | { type: "edit"; op: "update"; kind: "overlays"; attr: "set"; state: OverlayState };
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag };
 // EDIT_MSG_END
 
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel
@@ -196,11 +190,7 @@ export type TraceEvent =
   | { step: number; kind: "overlays-vis"; visible: boolean }
   | { step: number; kind: "double-links"; visible: boolean }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
-  | { step: number; kind: "select"; node: string }
-  // node-status payload is GENERATED from Trace.go (schema/trace-event-fields.ts):
-  // a Go field rename/retype regenerates NodeStatusEvent and breaks tsc here +
-  // at pump.ts, closing the hand-authored field-drift gap.
-  | NodeStatusEvent;
+  | { step: number; kind: "select"; node: string };
 
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }

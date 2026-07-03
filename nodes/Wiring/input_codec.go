@@ -15,7 +15,7 @@
 // Numbers are little-endian (matching the fd-3 content buffer). Enum discriminators
 // (event kind, hit kind, update entity kind, update attr, overlay flag) are u8 indices
 // into the shared orderings. There is NO JSON on the wire: every record is fully numeric.
-// The live editor→Go traffic is raw-input, overlays toggle/set (numeric flag-id / bitfield),
+// The live editor→Go traffic is raw-input, overlays toggle (numeric flag-id),
 // the bare `save` COMMAND (Go persists its OWN authoritative scene state), and the
 // play/pause/resend control bytes. create/delete/edit-update record kinds stay defined (the
 // 3-op create/update/delete concept), though the gesture FSM now produces edge create/delete
@@ -25,7 +25,6 @@ package Wiring
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -35,8 +34,8 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v2 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v2 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v3 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v3 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
@@ -54,7 +53,6 @@ const (
 // Overlays attr indices (must match IN_UPDATE_ATTRS ordering in input-layout.ts).
 const (
 	inOverlayAttrToggle = 0
-	inOverlayAttrSet    = 1
 )
 
 // Enum orderings (u8 index → string), shared with input-layout.ts.
@@ -62,8 +60,8 @@ var inEventKinds = []string{"pointerdown", "pointermove", "pointerup", "wheel", 
 var inHitKinds = []string{"port", "handhold", "node", "edge", "empty"}
 var inUpdateKinds = []string{"overlays"}
 
-// inOverlayFlags is the overlay FLAG order used by the overlays toggle/set binary records
-// (a flag's index here is its wire id / bit position). It is DERIVED from the
+// inOverlayFlags is the overlay FLAG order used by the overlays toggle binary records
+// (a flag's index here is its wire id). It is DERIVED from the
 // fingerprint's `overlayFlags=` token so it cannot drift from the pinned layout; the
 // fingerprint is byte-identical to input-layout.ts (guarded), whose encoder keys off
 // OVERLAY_FLAG_ORDER — so all three stay in lockstep.
@@ -105,15 +103,6 @@ func (r *recReader) i32() (int32, error) {
 	}
 	v := int32(binary.LittleEndian.Uint32(r.b[r.pos:]))
 	r.pos += 4
-	return v, nil
-}
-
-func (r *recReader) u16() (uint16, error) {
-	if r.pos+2 > len(r.b) {
-		return 0, errShortRecord
-	}
-	v := binary.LittleEndian.Uint16(r.b[r.pos:])
-	r.pos += 2
 	return v, nil
 }
 
@@ -218,34 +207,10 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 			msg.Attr = "toggle"
 			msg.Flag = inOverlayFlags[flagID]
 			return msg, true
-		case inOverlayAttrSet:
-			bits, err := r.u16()
-			if err != nil {
-				return stdinMsg{}, false
-			}
-			msg.Attr = "set"
-			msg.State = overlayPayloadFromBits(bits)
-			return msg, true
 		}
 		return stdinMsg{}, false
 	}
 	return stdinMsg{}, false
-}
-
-// overlayPayloadFromBits builds the stdinGuideVisPayload from the overlays-set bitfield.
-// Bit i (LSB-first) is the visibility of inOverlayFlags[i]. The mapping flag-name → struct
-// field reuses stdinGuideVisPayload's json tags (the single flag-name source, generated
-// from OVERLAY_FLAG_NAMES) via an internal (off-wire) json round-trip, so no hand-written
-// name→field table can drift.
-func overlayPayloadFromBits(bits uint16) *stdinGuideVisPayload {
-	m := make(map[string]bool, len(inOverlayFlags))
-	for i, f := range inOverlayFlags {
-		m[f] = bits&(1<<uint(i)) != 0
-	}
-	raw, _ := json.Marshal(m)
-	var gv stdinGuideVisPayload
-	_ = json.Unmarshal(raw, &gv)
-	return &gv
 }
 
 func decodeRawInput(r *recReader) (rawInputMsg, bool) {
@@ -314,7 +279,6 @@ func decodeRawInput(r *recReader) (rawInputMsg, bool) {
 type recWriter struct{ b []byte }
 
 func (w *recWriter) u8(v byte)     { w.b = append(w.b, v) }
-func (w *recWriter) u16(v uint16)  { w.b = binary.LittleEndian.AppendUint16(w.b, v) }
 func (w *recWriter) i32(v int32)   { w.b = binary.LittleEndian.AppendUint32(w.b, uint32(v)) }
 func (w *recWriter) f64(v float64) { w.b = binary.LittleEndian.AppendUint64(w.b, math.Float64bits(v)) }
 func (w *recWriter) str(s string) {
@@ -357,16 +321,6 @@ func encodeOverlaysToggle(flag string) []byte {
 	w.u8(enumIndex(inUpdateKinds, "overlays"))
 	w.u8(inOverlayAttrToggle)
 	w.u8(enumIndex(inOverlayFlags, flag))
-	return w.b
-}
-
-// encodeOverlaysSet builds an overlays SET record from a visibility bitfield (test helper).
-func encodeOverlaysSet(bits uint16) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "overlays"))
-	w.u8(inOverlayAttrSet)
-	w.u16(bits)
 	return w.b
 }
 

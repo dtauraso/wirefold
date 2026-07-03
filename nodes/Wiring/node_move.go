@@ -30,8 +30,6 @@ package Wiring
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -913,23 +911,10 @@ func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
 // persisters no-op. Fade rides scene.json, which exists for both forms. Call AFTER
 // SeedInitialViewpoint + SeedFade so the seed emits do not write the loaded state back.
 func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
-	// Resolve the tree root robustly. The live editor passes the topology.json FILE inside
-	// the tree dir, so os.Stat(topologyPath).IsDir() is false and we must fall back to the
-	// file's parent directory (the same dir whose view/scene.json the camera persists to).
-	// Guard: only adopt the parent as root when a `nodes/` subdir actually exists there, so a
-	// true monolithic topology.json with no per-node tree still no-ops (root == "") instead of
-	// spraying empty <parent>/nodes/<id> dirs.
-	root := ""
-	if info, err := os.Stat(topologyPath); err == nil {
-		if info.IsDir() {
-			root = topologyPath
-		} else {
-			parent := filepath.Dir(topologyPath)
-			if ni, err := os.Stat(filepath.Join(parent, "nodes")); err == nil && ni.IsDir() {
-				root = parent
-			}
-		}
-	}
+	// sceneTreeRoot handles both the directory form and the file-inside-tree form (and
+	// returns "" for a true monolithic topology with no tree), making the two-form bug
+	// class unrepresentable here. Do not hand-roll os.Stat/IsDir — use sceneTreeRoot.
+	root := sceneTreeRoot(topologyPath)
 	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
