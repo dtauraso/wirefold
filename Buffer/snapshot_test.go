@@ -673,3 +673,53 @@ func TestEdgeSelectionExclusiveWithNode(t *testing.T) {
 		t.Fatalf("after select node n2: e1.Selected=%d want 0 (node select clears edge)", snap[e1Sel])
 	}
 }
+
+// TestNodeKindIDRoundTrip verifies that NodeKindID maps each known runtime kind to a
+// stable index, and that the index is written into the buffer's KindId column and
+// read back correctly via buildSnapshot. The expected indices match NODE_DEFS_ARRAY
+// order (alphabetical by Go kind name) in node-defs.ts.
+func TestNodeKindIDRoundTrip(t *testing.T) {
+	// Verify the index produced by NodeKindID matches the known alphabetical order.
+	want := map[string]uint8{
+		"Hold":                      0,
+		"HoldFlip":                  1,
+		"HoldNewSendOld":            2,
+		"Input":                     3,
+		"Pacer":                     4,
+		"Pulse":                     5,
+		"WindowAndInhibitLeftGate":  6,
+		"WindowAndInhibitRightGate": 7,
+	}
+	for kind, wantID := range want {
+		if got := NodeKindID(kind); got != wantID {
+			t.Errorf("NodeKindID(%q) = %d, want %d", kind, got, wantID)
+		}
+	}
+	if got := NodeKindID("UnknownKind"); got != KindIDUnknown {
+		t.Errorf("NodeKindID(%q) = %d, want KindIDUnknown (%d)", "UnknownKind", got, KindIDUnknown)
+	}
+
+	// Verify KindId is written into the buffer snapshot correctly.
+	s := NewSnapshotState(nil)
+	nodeGeom := func(id, kind string) T.Event {
+		return T.Event{
+			Kind: T.KindNodeGeometry, Node: id, NodeKind: kind,
+			NX: 0, NY: 0, NZ: 0, Radius: 10, SphereR: 10,
+			VRX: 0, VRY: 1, VRZ: 0, FRX: 1, FRY: 0, FRZ: 0,
+		}
+	}
+	s.Update(nodeGeom("n0", "Input")) // KindId = 3
+	s.Update(nodeGeom("n1", "Pulse")) // KindId = 5
+	snap := s.BuildSnapshot()
+
+	// Skip the 20-byte header. Node block starts there.
+	nodeOff := BufHeaderSize
+	n0KindId := snap[nodeOff+0*BufNodeStride+BufNodeColKindId]
+	n1KindId := snap[nodeOff+1*BufNodeStride+BufNodeColKindId]
+	if n0KindId != 3 {
+		t.Errorf("n0 KindId = %d, want 3 (Input)", n0KindId)
+	}
+	if n1KindId != 5 {
+		t.Errorf("n1 KindId = %d, want 5 (Pulse)", n1KindId)
+	}
+}

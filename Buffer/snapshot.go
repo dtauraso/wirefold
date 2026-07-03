@@ -124,6 +124,9 @@ type nodeSnapState struct {
 	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
 	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
 	selected uint8
+	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
+	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
+	kindID uint8
 	// interior holds this node's 2x2 held/interior-bead grid (slot = row*2 + col).
 	// PERSISTENT — a slot keeps its state until the next KindNodeBead updates it
 	// (present=false explicitly clears a popped slot). Not touched by clearTransients.
@@ -395,7 +398,7 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	if _, exists := s.nodeIndex[id]; !exists {
 		s.nodeIndex[id] = len(s.nodeIDs)
 		s.nodeIDs = append(s.nodeIDs, id)
-		s.nodes = append(s.nodes, nodeSnapState{})
+		s.nodes = append(s.nodes, nodeSnapState{kindID: NodeKindID(ev.NodeKind)})
 	}
 	idx := s.nodeIndex[id]
 	n := &s.nodes[idx]
@@ -669,7 +672,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.torusRed, n.missVal,
 			float32(n.mx), float32(n.my), float32(n.mz),
-			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected)
+			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID)
 	}
 	off += int(nodeCount) * BufNodeStride
 

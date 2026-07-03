@@ -27,7 +27,8 @@ stale=$(git status --porcelain \
   tools/topology-vscode/src/schema/buffer-layout.ts \
   nodes/Wiring/node_dims_gen.go \
   nodes/Wiring/overlay_gen.go \
-  Buffer/buffer_layout_gen.go 2>/dev/null)
+  Buffer/buffer_layout_gen.go \
+  Buffer/node_kind_id_gen.go 2>/dev/null)
 
 if [ -n "$stale" ]; then
   echo "check-generated: stale generated file(s) — commit the regenerated output:"

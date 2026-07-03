@@ -87,6 +87,7 @@ func TestSetNodeRow(t *testing.T) {
 		4.0, 5.0, 6.0, // mx, my, mz
 		1, 0, 1, 0, 1, // evRecv, evFire, evSend, evArrive, evDone
 		1, // selected
+		3, // kindID (Input = index 3 in NODE_DEFS_ARRAY)
 	)
 
 	assertF32At(t, buf, BufNodeColCX, 1.0, "CX")
@@ -111,6 +112,7 @@ func TestSetNodeRow(t *testing.T) {
 	assertU8At(t, buf, BufNodeColEvArrive, 0, "EvArrive")
 	assertU8At(t, buf, BufNodeColEvDone, 1, "EvDone")
 	assertU8At(t, buf, BufNodeColSelected, 1, "Selected")
+	assertU8At(t, buf, BufNodeColKindId, 3, "KindId")
 }
 
 func TestSetEdgeRow(t *testing.T) {
@@ -175,9 +177,9 @@ func TestBeadStrideIsPackedSize(t *testing.T) {
 }
 
 func TestNodeStrideIsPackedSize(t *testing.T) {
-	// Node block: 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected)
-	//           = (5+6+3)×4 + 1 + 4 + 5 + 1 = 56+11 = 67
-	want := 5*4 + 6*4 + 1 + 4 + 3*4 + 5*1 + 1*1
+	// Node block: 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID)
+	//           = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 = 56+12 = 68
+	want := 5*4 + 6*4 + 1 + 4 + 3*4 + 5*1 + 1*1 + 1*1
 	if BufNodeStride != want {
 		t.Errorf("BufNodeStride = %d, want %d (packed size)", BufNodeStride, want)
 	}
