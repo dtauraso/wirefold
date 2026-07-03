@@ -34,31 +34,35 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v3 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v3 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v6 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v6 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
-	inKindResume     = 1  // play  — resume the clock gate
-	inKindPause      = 2  // pause — halt the clock gate
-	inKindResend     = 3  // resend — re-emit full geometry
-	inKindSave       = 4  // save  — Go persists its OWN scene state (bare command)
-	inKindFadeToggle = 5  // fade  — toggle fade on the Go-owned current selection (bare command)
-	inKindRawInput   = 10 // raw pointer/wheel/home event
-	inKindEditCreate = 20 // edit op=create (2 strings)
-	inKindEditDelete = 21 // edit op=delete (2 strings)
-	inKindEditUpdate = 22 // edit op=update (entity byte + attr byte + numeric payload)
+	inKindResume             = 1  // play  — resume the clock gate
+	inKindPause              = 2  // pause — halt the clock gate
+	inKindResend             = 3  // resend — re-emit full geometry
+	inKindSave               = 4  // save  — Go persists its OWN scene state (bare command)
+	inKindFadeToggle         = 5  // fade  — toggle fade on the Go-owned current selection (bare command)
+	inKindClearRule          = 6  // clear — clear the in-progress polar equation (bare command)
+	inKindDeleteSelectedLock = 7  // delete the panel-focused committed polar-equation lock (bare command)
+	inKindRawInput           = 10 // raw pointer/wheel/home event
+	inKindEditCreate         = 20 // edit op=create (2 strings)
+	inKindEditDelete         = 21 // edit op=delete (2 strings)
+	inKindEditUpdate         = 22 // edit op=update (entity byte + attr byte + numeric payload)
 )
 
-// Overlays attr indices (must match IN_UPDATE_ATTRS ordering in input-layout.ts).
+// Update attr indices (must match IN_UPDATE_ATTRS ordering in input-layout.ts).
 const (
 	inOverlayAttrToggle = 0
+	inLockAttrActive    = 1
+	inLockAttrSelected  = 2
 )
 
 // Enum orderings (u8 index → string), shared with input-layout.ts.
 var inEventKinds = []string{"pointerdown", "pointermove", "pointerup", "wheel", "home"}
 var inHitKinds = []string{"port", "handhold", "node", "edge", "empty"}
-var inUpdateKinds = []string{"overlays"}
+var inUpdateKinds = []string{"overlays", "lock"}
 
 // inOverlayFlags is the overlay FLAG order used by the overlays toggle binary records
 // (a flag's index here is its wire id). It is DERIVED from the
@@ -168,6 +172,10 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 		return stdinMsg{Type: "save"}, true
 	case inKindFadeToggle:
 		return stdinMsg{Type: "fade-toggle"}, true
+	case inKindClearRule:
+		return stdinMsg{Type: "clear-rule"}, true
+	case inKindDeleteSelectedLock:
+		return stdinMsg{Type: "delete-selected-lock"}, true
 	case inKindRawInput:
 		ev, ok := decodeRawInput(r)
 		if !ok {
@@ -190,11 +198,32 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 			stdinCRUDPayload: stdinCRUDPayload{Target: target, TargetHandle: handle},
 		}, true
 	case inKindEditUpdate:
-		// [entityKind][attr][numeric payload]. Only entity="overlays" is defined; attr
-		// selects toggle (u8 flag-id) or set (u16 visibility bitfield).
+		// [entityKind][attr][numeric payload]. entity="overlays" (attr toggle, u8 flag-id) or
+		// entity="lock" (attr active/selected, i32 md.polarEqs index).
 		kindByte, err1 := r.u8()
+		if err1 != nil {
+			return stdinMsg{}, false
+		}
+		entity := enumAt(inUpdateKinds, kindByte)
+		if entity == "lock" {
+			attr, errA := r.u8()
+			index, errI := r.i32()
+			if errA != nil || errI != nil {
+				return stdinMsg{}, false
+			}
+			switch attr {
+			case inLockAttrActive:
+				return stdinMsg{Type: "edit", Op: "update", Kind: "lock", Attr: "active", Index: int(index)}, true
+			case inLockAttrSelected:
+				return stdinMsg{Type: "edit", Op: "update", Kind: "lock", Attr: "selected", Index: int(index)}, true
+			}
+			return stdinMsg{}, false
+		}
+		if entity != "overlays" {
+			return stdinMsg{}, false
+		}
 		attr, err2 := r.u8()
-		if err1 != nil || err2 != nil || enumAt(inUpdateKinds, kindByte) != "overlays" {
+		if err2 != nil {
 			return stdinMsg{}, false
 		}
 		msg := stdinMsg{Type: "edit", Op: "update", Kind: "overlays"}
@@ -265,6 +294,7 @@ func decodeRawInput(r *recReader) (rawInputMsg, bool) {
 	ev.Hit.NodeRow = i()
 	ev.Hit.PortRow = i()
 	ev.Hit.EdgeRow = i()
+	ev.Hit.HandholdTerm = i()
 	ev.Hit.X = f()
 	ev.Hit.Y = f()
 	ev.Hit.Z = f()
@@ -324,6 +354,16 @@ func encodeOverlaysToggle(flag string) []byte {
 	return w.b
 }
 
+// encodeLockUpdate builds a lock active/selected update record (test helper).
+func encodeLockUpdate(attr byte, index int32) []byte {
+	w := &recWriter{}
+	w.u8(inKindEditUpdate)
+	w.u8(enumIndex(inUpdateKinds, "lock"))
+	w.u8(attr)
+	w.i32(index)
+	return w.b
+}
+
 // encodeRawInput builds a raw-input record from a rawInputMsg (test helper).
 func encodeRawInput(ev rawInputMsg) []byte {
 	w := &recWriter{}
@@ -348,6 +388,7 @@ func encodeRawInput(ev rawInputMsg) []byte {
 	w.i32(int32(ev.Hit.NodeRow))
 	w.i32(int32(ev.Hit.PortRow))
 	w.i32(int32(ev.Hit.EdgeRow))
+	w.i32(int32(ev.Hit.HandholdTerm))
 	w.f64(ev.Hit.X)
 	w.f64(ev.Hit.Y)
 	w.f64(ev.Hit.Z)

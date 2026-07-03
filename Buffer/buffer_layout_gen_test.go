@@ -232,6 +232,35 @@ func TestEventEnumValues(t *testing.T) {
 	}
 }
 
+func TestSetPolarLockRow(t *testing.T) {
+	buf := make([]byte, BufPolarLockStride*2)
+	SetPolarLockRow(buf, 0, 3, 1, 0, 2, 2, 1)        // active
+	SetPolarLockRow(buf, 1, -1, -1, 255, -1, 255, 0) // inactive, all unresolved
+
+	assertI32At(t, buf, BufPolarLockColCenterRow, 3, "row0.CenterRow")
+	assertI32At(t, buf, BufPolarLockColARow, 1, "row0.ARow")
+	assertU8At(t, buf, BufPolarLockColACode, 0, "row0.ACode")
+	assertI32At(t, buf, BufPolarLockColBRow, 2, "row0.BRow")
+	assertU8At(t, buf, BufPolarLockColBCode, 2, "row0.BCode")
+	assertU8At(t, buf, BufPolarLockColActive, 1, "row0.Active")
+
+	base := BufPolarLockStride
+	assertI32At(t, buf, base+BufPolarLockColCenterRow, -1, "row1.CenterRow")
+	assertI32At(t, buf, base+BufPolarLockColARow, -1, "row1.ARow")
+	assertU8At(t, buf, base+BufPolarLockColACode, 255, "row1.ACode")
+	assertI32At(t, buf, base+BufPolarLockColBRow, -1, "row1.BRow")
+	assertU8At(t, buf, base+BufPolarLockColBCode, 255, "row1.BCode")
+	assertU8At(t, buf, base+BufPolarLockColActive, 0, "row1.Active")
+}
+
+func TestPolarLockStrideIsPackedSize(t *testing.T) {
+	// PolarLock block: 3×i32 (CenterRow/ARow/BRow) + 3×u8 (ACode/BCode/Active) = 15
+	want := 3*4 + 3
+	if BufPolarLockStride != want {
+		t.Errorf("BufPolarLockStride = %d, want %d (packed size)", BufPolarLockStride, want)
+	}
+}
+
 func TestVersionGenerated(t *testing.T) {
 	if BufLayoutVersionGenerated != BufLayoutVersion {
 		t.Errorf("BufLayoutVersionGenerated (%d) != BufLayoutVersion (%d) — regenerate", BufLayoutVersionGenerated, BufLayoutVersion)

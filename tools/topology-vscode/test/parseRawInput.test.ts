@@ -21,7 +21,7 @@ function rawInput(hit: RawHit): RawInputEvent {
   };
 }
 
-const baseHit = { isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, x: 0, y: 0, z: 0 };
+const baseHit = { isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, handholdTerm: -1, x: 0, y: 0, z: 0 };
 
 describe("raw-input binary round-trip — hit kinds", () => {
   for (const kind of ["port", "handhold", "node", "edge", "empty"] as const) {
@@ -39,7 +39,7 @@ describe("raw-input binary round-trip — hit kinds", () => {
   });
 
   it("preserves numeric hit rows + flags exactly", () => {
-    const ev = rawInput({ kind: "node", isInput: true, nodeRow: 7, portRow: -1, edgeRow: -1, x: 1.5, y: -2.25, z: 3 });
+    const ev = rawInput({ kind: "node", isInput: true, nodeRow: 7, portRow: -1, edgeRow: -1, handholdTerm: -1, x: 1.5, y: -2.25, z: 3 });
     const decoded = decodeInputRecord(encodeRawInput(ev));
     expect(decoded).toEqual({ kind: "raw-input", event: ev });
   });

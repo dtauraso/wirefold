@@ -36,6 +36,8 @@ import {
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
+  readRuleBuilderSelectedLockIndex,
+  readPolarLockCenterRow, readPolarLockARow, readPolarLockACode, readPolarLockBRow, readPolarLockBCode, readPolarLockActive,
 } from "./schema/buffer-layout";
 
 /** KindId sentinel for an unknown node kind (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */
@@ -176,6 +178,26 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
         if (readEdgeFaded(d.edgeView, r) === 1) edges.push(edgeLabel(d, r));
       }
       return { kind, fadedNodes: nodes, fadedEdges: edges };
+    }
+    case "polar-locks": {
+      // Full-mirror (like fade above): reconstruct the committed polar-equation lock list +
+      // focused row from the PolarLock block + RuleBuilder's SelectedLockIndex column.
+      const v = d.polarLockView;
+      const polarLocks: Line[] = [];
+      for (let r = 0; r < d.polarLockCount; r++) {
+        const centerRow = readPolarLockCenterRow(v, r);
+        const aRow = readPolarLockARow(v, r);
+        const bRow = readPolarLockBRow(v, r);
+        polarLocks.push({
+          center: centerRow >= 0 ? nodeLabel(d, centerRow) : "",
+          aNode: aRow >= 0 ? nodeLabel(d, aRow) : "",
+          aCode: readPolarLockACode(v, r),
+          bNode: bRow >= 0 ? nodeLabel(d, bRow) : "",
+          bCode: readPolarLockBCode(v, r),
+          active: readPolarLockActive(v, r) === 1,
+        });
+      }
+      return { kind, polarLocks, selectedLockIndex: readRuleBuilderSelectedLockIndex(d.ruleBuilderView) };
     }
     default:
       if (OVERLAY_KINDS.has(kind)) return { kind, visible: overlayFlag(d, kind) === 1 };

@@ -70,6 +70,8 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 21, Kind: KindSelect, Node: "A"},
 		{Step: 22, Kind: KindFade, FadedNodes: []string{"A"}, FadedEdges: []string{"e1"}},
 		{Step: 23, Kind: KindHover, Node: "A"},
+		{Step: 24, Kind: KindRuleBuilder, RuleCenter: "C", RuleHasPending: true, RulePendingCode: 2, RuleTerms: []RuleTermPayload{{Node: "A", Code: 0}}},
+		{Step: 25, Kind: KindPolarLocks, PolarLocks: []PolarLockPayload{{Center: "C", ANode: "A", ACode: 0, BNode: "B", BCode: 2, Active: true}}, SelectedLockIndex: 0},
 	}
 
 	fixture := fixtureLines(t)

@@ -6,8 +6,10 @@ Before changing anything in the **Go network** (`nodes/`, `nodes/Wiring/paced_wi
 `nodes/Wiring/loader.go`, `nodes/Wiring/builders.go`) or the **content buffer**
 (`Buffer/`, `tools/topology-vscode/src/webview/three/buffer-scene.tsx`),
 read [MODEL.md](MODEL.md). It pins the model. Do not propose multi-step
-plans with options for network/wire work; state the next single concrete
-step and wait.
+plans with options for network/wire work; name the single concrete next
+step and get the model agreed first. "Agreed first" gates the START of the
+work, not each step of it — once the model is settled, build the feature
+through to done; do not halt after every step to re-ask.
 
 Go owns the one clock and times its own bead delivery. It packs the whole scene (bead
 positions, node/port geometry, edge curves, shading params, camera pose, selection,

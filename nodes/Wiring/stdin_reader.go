@@ -79,6 +79,9 @@ type stdinMsg struct {
 	Kind string `json:"kind"`
 	Attr string `json:"attr"`
 	Flag string `json:"flag"`
+	// Index carries the md.polarEqs index for op=="update" kind=="lock" (attr active/selected;
+	// locks.go ToggleLockActive/SelectLock). Unused by every other message shape.
+	Index int `json:"index,omitempty"`
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg `json:"event,omitempty"`
 	stdinCRUDPayload
@@ -130,11 +133,15 @@ type rawHit struct {
 	// unit tests, which carry the node id in the Id string instead. Go resolves this row →
 	// node id via its own node-row table (nodeFromHit); no node id crosses the bridge on the
 	// new-system path.
-	NodeRow int     `json:"nodeRow"`
-	IsInput bool    `json:"isInput"`
-	X       float64 `json:"x"`
-	Y       float64 `json:"y"`
-	Z       float64 `json:"z"`
+	NodeRow int `json:"nodeRow"`
+	// HandholdTerm is the term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; see
+	// NavGuides.tsx HANDHOLD_TERM_TAG); -1 (or absent) when not a handhold hit. Decoded into
+	// (comp, sign) by the gesture FSM's rule-builder (gesture.go).
+	HandholdTerm int     `json:"handholdTerm"`
+	IsInput      bool    `json:"isInput"`
+	X            float64 `json:"x"`
+	Y            float64 `json:"y"`
+	Z            float64 `json:"z"`
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
@@ -240,6 +247,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				// persister so it uses the correct sceneCameraPath-resolved path.
 				if md != nil {
 					md.overlaysPersist.schedule(md.ov)
+					md.locksPersist.schedule(md.polarEqs)
 				}
 			case "fade-toggle":
 				// Bare FADE command: toggle fade on the Go-owned current selection. Go owns
@@ -247,6 +255,19 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				// node/edge, flips its fade seed, and emits the new faded sets. Fire-and-forget.
 				if md != nil {
 					md.ToggleFadeSelection(tr)
+				}
+			case "clear-rule":
+				// Bare CLEAR command: discard the in-progress polar equation (pending term +
+				// accumulated terms) the rule-builder is authoring. Go owns the state; it
+				// resets it and re-emits the RuleBuilder block so the panel clears.
+				if md != nil {
+					md.clearRuleBuilding(tr)
+				}
+			case "delete-selected-lock":
+				// Bare DELETE command: delete the panel-focused committed polar-equation lock
+				// (selectedLockIndex). Go re-guards (only deletes when deactivated).
+				if md != nil {
+					md.DeleteSelectedLock(tr)
 				}
 			}
 		}
@@ -345,12 +366,27 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			// Flip the named flag — Go owns the state; TS just signals the flip.
 			if fn, ok := overlayToggles[msg.Flag]; ok {
 				fn(md, tr)
+				// Turning the rule-builder's overlay off ends the authoring session:
+				// clear any half-finished pending term / accumulated ruleTerms.
+				if msg.Flag == "selSpherePoles" && !md.ov.selSpherePolesVisible {
+					md.clearRuleBuilding(tr)
+				}
 			}
 		}
 		// Persist ON CHANGE (mirrors fade/camera): schedule a debounced write of the new
 		// overlay snapshot so toggles survive a reload without an explicit save. No-op until
 		// EnableEditPersist arms the writer (nil-receiver / empty-treeRoot guard in schedule).
 		md.overlaysPersist.schedule(md.ov)
+	case "lock":
+		if md == nil {
+			return
+		}
+		switch msg.Attr {
+		case "active":
+			md.ToggleLockActive(msg.Index, tr)
+		case "selected":
+			md.SelectLock(msg.Index, tr)
+		}
 	}
 	// EDIT_UPDATE_KINDS_END
 }

@@ -14,6 +14,12 @@ import {
   type NavNode, decodeNavNodes, contentSphereFromCenters,
 } from "./buffer-nav";
 
+// HANDHOLD_TERM_TAG — userData key stamped on the octant angle handhold meshes and the
+// pole-crossing radius handholds with their term-id (+θ=0, +φ=1, -θ=2, -φ=3, r=4; see
+// nodes/Wiring/gesture.go). Mirrors
+// BUFFER_EDGE_TAG (buffer-scene.tsx) as the pattern for a numeric pick-payload tag.
+export const HANDHOLD_TERM_TAG = "handholdTerm";
+
 // navSignature — coarse fingerprint of the buffer-derived nav nodes (rounded
 // positions/radii/sphereR/selection). NavGuides bumps a render tick only when this
 // changes, so the tori/frames rebuild on real position/selection changes (a drag)
@@ -230,29 +236,39 @@ function PolarFrame({ center, scale, tag, octants }: {
       <AxisLabel text="φ" color="#dddd22" position={[arcMid, 0, arcMid]} size={poleLen * 0.14} />
       </>)}
       {octants && THETA_CIRCLES.map((t) => (
-        <AxisLabel key={`tl-${t.n}`} text={`${t.n}`} color={t.c} position={[t.sx * arcMid, t.sy * arcMid, 0]} size={poleLen * 0.11} />
+        <AxisLabel key={`tl-${t.n}`} text={`${t.sy > 0 ? "+" : "−"}θ`} color={t.c} position={[t.sx * arcMid, t.sy * arcMid, 0]} size={poleLen * 0.11} />
       ))}
       {octants && PHI_CIRCLES.map((p) => (
-        <AxisLabel key={`pl-${p.n}`} text={`${p.n}`} color={p.c} position={[p.sx * arcMid, 0, p.sz * arcMid]} size={poleLen * 0.11} />
+        <AxisLabel key={`pl-${p.n}`} text={`${p.sz > 0 ? "+" : "−"}φ`} color={p.c} position={[p.sx * arcMid, 0, p.sz * arcMid]} size={poleLen * 0.11} />
       ))}
       {octants && (<>
-        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere where each
-            pole crosses the arc circles (±arcR on each axis) and at each quarter-arc
-            midpoint. raycast off, no userData.handhold. Opaque so the color is stable. */}
+        {/* Radius (r) handholds: the six pole-crossing grab-spheres (±arcR on each axis).
+            All pickable and stamped with the r term-id (code 4, unsigned), so grabbing any
+            of them selects the node's RADIUS component for the rule-builder. */}
         {([[arcR, 0, 0], [-arcR, 0, 0], [0, arcR, 0], [0, -arcR, 0], [0, 0, arcR], [0, 0, -arcR]] as [number, number, number][]).map((p, i) => (
-          <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
+          <mesh key={`hhp-${i}`} position={p} userData={{ [HANDHOLD_TERM_TAG]: 4 }}>
             <sphereGeometry args={[hhR, 12, 12]} />
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
           </mesh>
         ))}
+        {/* θ/φ angle handholds: pickable, stamped with their term-id so the rule-builder
+            (nodes/Wiring/gesture.go) can decode which (comp, sign) term was clicked. */}
         {THETA_CIRCLES.map((t) => (
-          <mesh key={`th-${t.n}`} position={[t.sx * arcHH, t.sy * arcHH, 0]} raycast={() => null}>
+          <mesh
+            key={`th-${t.n}`}
+            position={[t.sx * arcHH, t.sy * arcHH, 0]}
+            userData={{ [HANDHOLD_TERM_TAG]: (t.sy < 0 ? 2 : 0) + 0 }}
+          >
             <sphereGeometry args={[hhR, 12, 12]} />
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
           </mesh>
         ))}
         {PHI_CIRCLES.map((p) => (
-          <mesh key={`ph-${p.n}`} position={[p.sx * arcHH, 0, p.sz * arcHH]} raycast={() => null}>
+          <mesh
+            key={`ph-${p.n}`}
+            position={[p.sx * arcHH, 0, p.sz * arcHH]}
+            userData={{ [HANDHOLD_TERM_TAG]: (p.sz < 0 ? 2 : 0) + 1 }}
+          >
             <sphereGeometry args={[hhR, 12, 12]} />
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
           </mesh>

@@ -15,6 +15,7 @@ import {
 import { ProceduralEnvProvider } from "./scene-env";
 import { CameraSettleDetector } from "./scene-camera";
 import { BUFFER_NODE_TAG, BUFFER_PORT_TAG, BUFFER_EDGE_TAG } from "./buffer-scene";
+import { HANDHOLD_TERM_TAG } from "./NavGuides";
 
 // ---------------------------------------------------------------------------
 // Buffer-backed pick helpers. Nodes/ports/edges are InstancedMesh / halo meshes
@@ -47,6 +48,20 @@ function pickBufferEdge(hits: THREE.Intersection[]): string | null {
     const row: unknown = (hit.object as THREE.Mesh).userData?.[BUFFER_EDGE_TAG];
     if (typeof row !== "number") continue;
     return String(row);
+  }
+  return null;
+}
+
+/**
+ * HANDHOLD pick: octant θ/φ angle handhold meshes (NavGuides.tsx PolarFrame) carry
+ * userData[HANDHOLD_TERM_TAG] with their term-id (+θ=0, +φ=1, -θ=2, -φ=3). Returns the
+ * nearest hit's term-id as a decimal STRING so classifyHit can forward it to Go.
+ */
+function pickBufferHandhold(hits: THREE.Intersection[]): string | null {
+  for (const hit of hits) {
+    const term: unknown = (hit.object as THREE.Mesh).userData?.[HANDHOLD_TERM_TAG];
+    if (typeof term !== "number") continue;
+    return String(term);
   }
   return null;
 }
@@ -94,9 +109,9 @@ function RaycasterHelper({
       if (hits.length === 0) return null;
 
       // Nodes are the buffer InstancedMesh; ports/edges are buffer meshes carrying their
-      // row index. Handholds are not pickable meshes in the buffer, so that mode returns null;
+      // row index. Handholds (NavGuides.tsx octant θ/φ angle grips) carry a term-id;
       // node-oriented modes (default / nodesOnly / ringOnly) resolve the nearest buffer node.
-      if (opts?.handholdOnly) return null;
+      if (opts?.handholdOnly) return pickBufferHandhold(hits);
       if (opts?.portOnly) return pickBufferPort(hits);
       if (opts?.edgeOnly) return pickBufferEdge(hits);
       return pickBufferNode(hits, opts?.nodesOnly ? opts.excludeId : undefined);

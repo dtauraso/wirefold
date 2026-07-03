@@ -91,6 +91,16 @@ type gestureState struct {
 	// per-gesture render params captured from the raw events
 	fov  float64
 	rect gestureRect
+
+	// Polar rule-builder session state (active only while the selSpherePoles overlay is
+	// ON — see trySelectSphereRule / clearRuleBuilding). A handhold click latches a
+	// pending half-term (comp, sign); a subsequent node click completes it. Every
+	// consecutive PAIR of completed terms forms one polarEq about md.selected (the
+	// latched Center), appended to md.polarEqs.
+	hasPending  bool
+	pendingComp polarComp
+	pendingSign float64
+	ruleTerms   []polarTerm
 }
 
 type gestureRect struct{ left, top, width, height float64 }
@@ -454,9 +464,133 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 		// selection. md.selected is the authoritative selection; Select() emits it so the
 		// buffer snapshot marks the node's Selected column. g.secondary (two-finger tap)
 		// picks the "own" select mode; a primary click picks "surface".
-		md.applySelect(ev, tr, g.secondary)
+		if !md.trySelectSphereRule(ev, tr) {
+			md.applySelect(ev, tr, g.secondary)
+		}
 	}
 	g.reset()
+}
+
+// trySelectSphereRule handles a click while the selSpherePoles overlay is ON: node clicks
+// author a polar rule instead of changing selection. Returns true when it handled the
+// click (suppressing the normal click-select); false when the overlay is off or the hit
+// doesn't participate in rule-building (falls through to applySelect, e.g. to pick the
+// Center sphere itself).
+//
+//   - A handhold hit (Hit.Kind=="handhold", HandholdTerm>=0) latches a pending half-term
+//     decoded from the term-id (+θ=0, +φ=1, -θ=2, -φ=3, r=4; see decodeTermCode) WITHOUT
+//     touching md.selected.
+//   - A node hit while a half-term is pending completes the term {Node, comp, sign} and
+//     appends it to ruleTerms. Once two terms have accumulated (a full equation) and
+//     md.selected names a Center, they form one polarEq appended to md.polarEqs and the
+//     accumulator resets for the next equation (e.g. a mirror's θ-pair then φ-pair).
+func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
+	if !md.ov.selSpherePolesVisible {
+		return false
+	}
+	g := &md.gest
+	switch {
+	case ev.Hit.Kind == "handhold" && ev.Hit.HandholdTerm >= 0:
+		g.pendingComp, g.pendingSign = decodeTermCode(ev.Hit.HandholdTerm)
+		g.hasPending = true
+		md.emitRuleBuilder(tr)
+		return true
+	case ev.Hit.Kind == "node" && g.hasPending:
+		node, ok := md.nodeFromHit(ev.Hit)
+		g.hasPending = false
+		if !ok {
+			md.emitRuleBuilder(tr)
+			return true // suppress select even when the hit is unresolvable
+		}
+		g.ruleTerms = append(g.ruleTerms, polarTerm{Node: node, Comp: g.pendingComp, Sign: g.pendingSign})
+		if len(g.ruleTerms) == 2 && md.selected != "" {
+			eq := polarEq{Center: md.selected, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
+			md.polarEqs = append(md.polarEqs, eq)
+			// Guarantee the Center↔term movement links exist so the equation is enforced
+			// even when no topology edge connects the picked nodes to the Center.
+			md.ensureEqLinks(eq)
+			// Enforce the equation IMMEDIATELY (don't wait for the next drag): settle term A
+			// in place so its lock write flows to term B — the just-set side snaps to satisfy
+			// the equation now. RootMove runs the full refresh→applyPolarEqs→fan pipeline.
+			if c, ok := md.centerOfNode(eq.A.Node); ok {
+				md.RootMove(eq.A.Node, c)
+			}
+			if tr != nil {
+				tr.Breadcrumb("polar-rule-added", md.selected, node, "")
+			}
+			if md.locksPersist != nil {
+				md.locksPersist.schedule(md.polarEqs)
+			}
+			g.ruleTerms = nil
+		}
+		md.emitRuleBuilder(tr)
+		md.emitPolarLocks(tr)
+		return true
+	default:
+		return false
+	}
+}
+
+// ruleTermCode packs a completed/pending term's (comp, sign) to a single code — matches the
+// handhold hit's HandholdTerm encoding: +θ=0, +φ=1, −θ=2, −φ=3, r=4 (r is unsigned), i.e.
+// the angles use code = (sign<0 ? 2 : 0) + (comp==compPhi ? 1 : 0); r is the fixed code 4.
+func ruleTermCode(comp polarComp, sign float64) int {
+	if comp == compR {
+		return 4
+	}
+	code := 0
+	if sign < 0 {
+		code += 2
+	}
+	if comp == compPhi {
+		code++
+	}
+	return code
+}
+
+// decodeTermCode is the inverse of ruleTermCode: a handhold/term code → (comp, sign). Code 4
+// is r (unsigned, sign +1); codes 0..3 are the signed angles (comp = code&1, sign = code&2).
+func decodeTermCode(code int) (polarComp, float64) {
+	if code == 4 {
+		return compR, 1
+	}
+	sign := 1.0
+	if code&2 != 0 {
+		sign = -1
+	}
+	return polarComp(code & 1), sign
+}
+
+// emitRuleBuilder emits the FULL current rule-builder session state (KindRuleBuilder):
+// the latched Center (md.selected), any half-finished pending term, and the accumulated
+// completed terms. Called from every rule-builder state-change point (gesture.go +
+// clearRuleBuilding + applySelect) so the buffer snapshot's RuleBuilder block always
+// mirrors the session live. No-op when tr is nil (headless tests that don't wire Trace).
+func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
+	if tr == nil {
+		return
+	}
+	g := &md.gest
+	terms := make([]T.RuleTermPayload, len(g.ruleTerms))
+	for i, t := range g.ruleTerms {
+		terms[i] = T.RuleTermPayload{Node: t.Node, Code: ruleTermCode(t.Comp, t.Sign)}
+	}
+	pendingCode := 0
+	if g.hasPending {
+		pendingCode = ruleTermCode(g.pendingComp, g.pendingSign)
+	}
+	tr.RuleBuilder(md.selected, g.hasPending, pendingCode, terms)
+}
+
+// clearRuleBuilding ends any in-progress polar rule-building session: half-finished
+// pending term + accumulated ruleTerms. Called when the selSpherePoles overlay turns OFF
+// (stdin_reader.go applyUpdate) so a stale pending/half-formed pair doesn't leak into the
+// next session. Emits the cleared state so the buffer's RuleBuilder block drops the stale
+// pending/terms immediately.
+func (md *MoveDispatch) clearRuleBuilding(tr *T.Trace) {
+	md.gest.hasPending = false
+	md.gest.ruleTerms = nil
+	md.emitRuleBuilder(tr)
 }
 
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is
@@ -488,6 +622,12 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selected = node
 	md.selectedEdge = ""
 	tr.Select(node, own)
+	// A selection change can change the rule-builder's latched Center (e.g. picking the
+	// Center sphere itself while selSpherePoles is on); mirror it so the RuleBuilder block
+	// stays in sync. Cheap no-op while the overlay is off (the panel is hidden either way).
+	if md.ov.selSpherePolesVisible {
+		md.emitRuleBuilder(tr)
+	}
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

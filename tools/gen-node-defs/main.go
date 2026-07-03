@@ -2102,8 +2102,8 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "const BufLayoutVersionGenerated = %d\n", schema.version)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `// BufHeaderSize is the byte width of the snapshot header:`)
-	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32]`)
-	fmt.Fprintln(w, `const BufHeaderSize = 36`)
+	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32][polarLockCount:u32]`)
+	fmt.Fprintln(w, `const BufHeaderSize = 40`)
 
 	for _, blk := range schema.blocks {
 		fmt.Fprintln(w)
@@ -2119,7 +2119,7 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 
 		// Writer function.
 		var params []string
-		if blk.name == "Camera" || blk.name == "Overlay" {
+		if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" {
 			// Camera and Overlay always have exactly 1 row; omit row param.
 			for _, c := range blk.columns {
 				pname := strings.ToLower(c.name[:1]) + c.name[1:]
@@ -2189,8 +2189,8 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "/** Schema version — must match BufLayoutVersion in Buffer/layout.go. */\n")
 	fmt.Fprintf(w, "export const BUF_LAYOUT_VERSION = %d;\n", schema.version)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32] */`)
-	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 36;`)
+	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32][polarLockCount:u32] */`)
+	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 40;`)
 
 	for _, blk := range schema.blocks {
 		fmt.Fprintln(w)
@@ -2209,7 +2209,7 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 			getter := tsDataViewGetter(c.bufType)
 			le := tsDataViewLE(c.bufType)
 			fnName := readerFnTSName(blk.name, c.name)
-			if blk.name == "Camera" || blk.name == "Overlay" {
+			if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" {
 				// Single-row blocks: no row param.
 				fmt.Fprintf(w, "export function %s(view: DataView): number { return view.%s(%s%s); }\n",
 					fnName, getter, colConst, le)

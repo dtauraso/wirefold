@@ -15,6 +15,7 @@ import type { RunStatusUI } from "./state/run-status";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./three/RunButton";
+import { RuleEquationPanel } from "./three/RuleEquationPanel";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { setLatestSnapshot } from "./snapshot-buffer";
 
@@ -35,6 +36,7 @@ function Root() {
       {/* SaveLifecycle and RunButton are mounted once here for all views. */}
       <SaveLifecycle />
       <RunButton />
+      <RuleEquationPanel />
       <ThreeView />
     </RunStatusCtx.Provider>
   );

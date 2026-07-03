@@ -476,3 +476,58 @@ func TestGestureClickNoCameraChange(t *testing.T) {
 		t.Fatalf("after click phase=%v want idle", md.gest.phase)
 	}
 }
+
+// While the selSpherePoles overlay is ON, a handhold click followed by a node click
+// authors a polarTerm without touching selection; a second (handhold, node) pair completes
+// one polarEq about the latched Center (md.selected).
+func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+	md.ov.selSpherePolesVisible = true
+	md.selected = "Center1" // latched Center for the session
+
+	click := func(hit rawHit) {
+		down := rawEvent("pointerdown", 400, 300)
+		down.Hit = hit
+		md.HandleRawInput(down, nil, nil)
+		up := rawEvent("pointerup", 401, 300) // <6px → click, not a drag
+		up.Hit = hit
+		md.HandleRawInput(up, nil, nil)
+	}
+
+	// +θ handhold (term-id 0) → node A.
+	click(rawHit{Kind: "handhold", HandholdTerm: 0})
+	if !md.gest.hasPending {
+		t.Fatalf("after handhold click: hasPending=false, want true")
+	}
+	click(rawHit{Kind: "node", Id: "A"})
+	if md.gest.hasPending {
+		t.Fatalf("after node click: hasPending=true, want false (term completed)")
+	}
+	if len(md.polarEqs) != 0 {
+		t.Fatalf("polarEqs=%v after ONE term, want none yet", md.polarEqs)
+	}
+	if md.selected != "Center1" {
+		t.Fatalf("selected changed to %q by rule-building clicks, want unchanged Center1", md.selected)
+	}
+
+	// -θ handhold (term-id 2) → node B completes the pair.
+	click(rawHit{Kind: "handhold", HandholdTerm: 2})
+	click(rawHit{Kind: "node", Id: "B"})
+
+	if len(md.polarEqs) != 1 {
+		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqs)
+	}
+	eq := md.polarEqs[0]
+	want := polarEq{
+		Center: "Center1",
+		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
+		B:      polarTerm{Node: "B", Comp: compTheta, Sign: -1},
+		Active: true,
+	}
+	if eq != want {
+		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
+	}
+	if md.selected != "Center1" {
+		t.Fatalf("selected=%q after rule completed, want unchanged Center1", md.selected)
+	}
+}

@@ -97,8 +97,8 @@ const selSpherePolesCfg: ToggleCfg = {
   flag: "selSpherePoles",
   default: true,
   active: (v) => v,
-  label: "sel ⬡",
-  title: (a) => (a ? "Hide sel-sphere poles" : "Show sel-sphere poles"),
+  label: "select ⬡",
+  title: (a) => (a ? "Hide select-sphere poles" : "Show select-sphere poles"),
   payload: (v) => ({ flag: "selSpherePoles", was: v }),
 };
 
