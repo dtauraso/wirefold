@@ -8,7 +8,7 @@
 // scene document crosses the TS→Go bridge — Go writes ITS OWN current snapshot.
 //
 // LOAD side: loadSceneOverlays reads the keys back (inverting the *Hidden polarity) and
-// MoveDispatch.SeedOverlays installs them into md.ov on startup + emits them so the first
+// MoveDispatch.LoadOverlays installs them into md.ov on startup + emits them so the first
 // snapshot reflects the saved state — closing the toggle→reload→still-toggled round trip.
 //
 // Read-modify-write, serialized against writeSceneCameraPolar via sceneFileMu, so the
@@ -218,20 +218,19 @@ func loadSceneOverlays(scenePath string) (overlayState, bool) {
 	return ov, found
 }
 
-// SeedOverlays installs the persisted overlay-visibility snapshot from scene.json into md.ov
-// on startup and emits each flag so the first buffer snapshot streams the loaded values (the
-// UI shows them after a reload). Call after LoadTopology (which builds MoveDispatch) and, like
-// SeedFade, BEFORE EnableEditPersist so the seed's own emit does not write the loaded state
-// back. topologyPath is passed to sceneCameraPath, which handles both the directory-tree and
-// monolithic forms. A scene.json with no overlay keys keeps the code defaults.
-func (md *MoveDispatch) SeedOverlays(topologyPath string, tr *T.Trace) {
+// LoadOverlays reads the overlay-visibility state from scene.json (FILE DATA) into md.ov and
+// streams it so the buffer reflects the current overlay state from the first frame. A scene.json
+// with no overlay keys resolves to the code defaults (loadSceneOverlays starts from
+// defaultOverlayState and applies any present keys) — and those defaults are STILL emitted, so
+// the UI shows the default-visible overlays instead of an all-off buffer. Call after LoadTopology
+// (which builds MoveDispatch) and BEFORE EnableEditPersist so this emit does not write the
+// loaded/default state back. topologyPath is passed to sceneCameraPath, which handles both the
+// directory-tree and monolithic forms.
+func (md *MoveDispatch) LoadOverlays(topologyPath string, tr *T.Trace) {
 	scenePath := sceneCameraPath(topologyPath)
-	ov, found := loadSceneOverlays(scenePath)
-	if !found {
-		return
-	}
+	ov, _ := loadSceneOverlays(scenePath) // ov = defaults with any persisted keys applied
 	if tr != nil {
-		md.ov.SetGuideVisibility(ov, tr)
+		md.ov.SetGuideVisibility(ov, tr) // ALWAYS emit so the buffer reflects the state
 	} else {
 		md.ov = ov
 	}

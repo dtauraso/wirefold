@@ -186,7 +186,7 @@ func TestFadePersistPreservesCameraPolar(t *testing.T) {
 }
 
 // TestPersistOverlaysRoundTrips: toggle an overlay flag → debounced flush → scene.json carries
-// the (inverted) key; a fresh MoveDispatch.SeedOverlays reads it back into md.ov.
+// the (inverted) key; a fresh MoveDispatch.LoadOverlays reads it back into md.ov.
 func TestPersistOverlaysRoundTrips(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -215,12 +215,12 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 
 	// Seed a fresh dispatch from disk and confirm md.ov is restored.
 	fresh := &MoveDispatch{ov: defaultOverlayState()}
-	fresh.SeedOverlays(root, nil)
+	fresh.LoadOverlays(root, nil)
 	if fresh.ov.sceneToriVisible {
-		t.Fatalf("SeedOverlays did not restore sceneToriVisible=false")
+		t.Fatalf("LoadOverlays did not restore sceneToriVisible=false")
 	}
 	if fresh.ov.labelsGlobalVisible {
-		t.Fatalf("SeedOverlays did not restore labelsGlobalVisible=false")
+		t.Fatalf("LoadOverlays did not restore labelsGlobalVisible=false")
 	}
 }
 
@@ -320,16 +320,16 @@ func TestPersistFileTopologyPathInTree(t *testing.T) {
 		t.Fatalf("persisted anchorId=%d want %d", gotAnchor, want)
 	}
 
-	// Overlays round-trip through Go on the same FILE path (SeedOverlays reads the sibling
-	// view/scene.json): toggle → flush → fresh SeedOverlays restores.
+	// Overlays round-trip through Go on the same FILE path (LoadOverlays reads the sibling
+	// view/scene.json): toggle → flush → fresh LoadOverlays restores.
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topoFile), debounce: viewpointPersistDebounce}
 	md.ToggleSceneTori(nil)
 	md.overlaysPersist.schedule(md.ov)
 	md.overlaysPersist.flush()
 	fresh := &MoveDispatch{ov: defaultOverlayState()}
-	fresh.SeedOverlays(topoFile, nil)
+	fresh.LoadOverlays(topoFile, nil)
 	if fresh.ov.sceneToriVisible {
-		t.Fatalf("SeedOverlays did not restore sceneToriVisible=false via FILE topologyPath")
+		t.Fatalf("LoadOverlays did not restore sceneToriVisible=false via FILE topologyPath")
 	}
 }
 
@@ -354,7 +354,7 @@ func TestEnableEditPersistTrueMonolithicNoTree(t *testing.T) {
 
 // TestOverlaysPersistMonolithicForm: overlays persist correctly when topologyPath is a
 // monolithic file (not a directory), the form that caused the original treeRoot="" no-op bug.
-// sceneCameraPath resolves to the sibling view/scene.json; EnableEditPersist + SeedOverlays
+// sceneCameraPath resolves to the sibling view/scene.json; EnableEditPersist + LoadOverlays
 // must both land on that same path.
 func TestOverlaysPersistMonolithicForm(t *testing.T) {
 	// Build a tmp directory that looks like a monolithic topology: the "topology file"
@@ -387,10 +387,10 @@ func TestOverlaysPersistMonolithicForm(t *testing.T) {
 		t.Fatal("sceneToriVisible not persisted on monolithic form")
 	}
 
-	// SeedOverlays must restore into a fresh dispatch.
+	// LoadOverlays must restore into a fresh dispatch.
 	fresh := &MoveDispatch{ov: defaultOverlayState()}
-	fresh.SeedOverlays(topoFile, nil)
+	fresh.LoadOverlays(topoFile, nil)
 	if fresh.ov.sceneToriVisible {
-		t.Fatal("SeedOverlays did not restore sceneToriVisible=false on monolithic form")
+		t.Fatal("LoadOverlays did not restore sceneToriVisible=false on monolithic form")
 	}
 }
