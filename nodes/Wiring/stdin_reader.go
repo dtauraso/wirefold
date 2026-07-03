@@ -249,6 +249,13 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				if md != nil && treeRoot != "" {
 					_ = writeSceneOverlays(treeRoot, md.ov)
 				}
+			case "fade-toggle":
+				// Bare FADE command: toggle fade on the Go-owned current selection. Go owns
+				// selection + topology, so TS sends no id — MoveDispatch resolves the selected
+				// node/edge, flips its fade seed, and emits the new faded sets. Fire-and-forget.
+				if md != nil {
+					md.ToggleFadeSelection(tr)
+				}
 			}
 		}
 	}

@@ -35,8 +35,8 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v2 kinds=resume:1,pause:2,resend:3,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v2 kinds=resume:1,pause:2,resend:3,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v2 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v2 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,empty updateKinds=overlays updateAttrs=toggle,set overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
@@ -44,6 +44,7 @@ const (
 	inKindPause      = 2  // pause — halt the clock gate
 	inKindResend     = 3  // resend — re-emit full geometry
 	inKindSave       = 4  // save  — Go persists its OWN scene state (bare command)
+	inKindFadeToggle = 5  // fade  — toggle fade on the Go-owned current selection (bare command)
 	inKindRawInput   = 10 // raw pointer/wheel/home event
 	inKindEditCreate = 20 // edit op=create (2 strings)
 	inKindEditDelete = 21 // edit op=delete (2 strings)
@@ -176,6 +177,8 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 		return stdinMsg{Type: "resend"}, true
 	case inKindSave:
 		return stdinMsg{Type: "save"}, true
+	case inKindFadeToggle:
+		return stdinMsg{Type: "fade-toggle"}, true
 	case inKindRawInput:
 		ev, ok := decodeRawInput(r)
 		if !ok {

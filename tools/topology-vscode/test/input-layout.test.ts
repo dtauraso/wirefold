@@ -7,6 +7,7 @@ import {
   IN_KIND_PAUSE,
   IN_KIND_RESEND,
   IN_KIND_SAVE,
+  IN_KIND_FADE_TOGGLE,
   IN_KIND_EDIT_CREATE,
   IN_KIND_EDIT_UPDATE,
   IN_UPDATE_KINDS,
@@ -15,6 +16,7 @@ import {
   encodePause,
   encodeResend,
   encodeSave,
+  encodeFadeToggle,
   encodeEditCreate,
   encodeEditDelete,
   encodeOverlaysToggle,
@@ -30,6 +32,7 @@ describe("control records — exact bytes", () => {
     expect(new Uint8Array(encodePause())).toEqual(new Uint8Array([IN_KIND_PAUSE]));
     expect(new Uint8Array(encodeResend())).toEqual(new Uint8Array([IN_KIND_RESEND]));
     expect(new Uint8Array(encodeSave())).toEqual(new Uint8Array([IN_KIND_SAVE]));
+    expect(new Uint8Array(encodeFadeToggle())).toEqual(new Uint8Array([IN_KIND_FADE_TOGGLE]));
   });
 
   it("decode control", () => {
@@ -37,6 +40,7 @@ describe("control records — exact bytes", () => {
     expect(decodeInputRecord(encodePause())).toEqual({ kind: "pause" });
     expect(decodeInputRecord(encodeResend())).toEqual({ kind: "resend" });
     expect(decodeInputRecord(encodeSave())).toEqual({ kind: "save" });
+    expect(decodeInputRecord(encodeFadeToggle())).toEqual({ kind: "fade-toggle" });
   });
 });
 

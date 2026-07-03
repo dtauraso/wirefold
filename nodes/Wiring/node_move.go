@@ -427,6 +427,14 @@ type MoveDispatch struct {
 	// KindSelect (Edge field) so the buffer snapshot marks the edge's Selected column.
 	// Exclusive with `selected`: selecting an edge clears the node selection and vice versa.
 	selectedEdge string
+	// directlyFadedNodes / directlyFadedEdges are the Go-owned fade SEED sets: the node ids
+	// and edge labels the user has DIRECTLY toggled faded (pressing "f" on a selection). Go
+	// owns fade because it owns topology + selection. ToggleFadeSelection flips the currently-
+	// selected entity's membership and emits the full seeds via KindFade; the buffer snapshot
+	// mirrors them and recomputes the fade fixpoint (computeFade) each build. Fade STATE is
+	// in-memory only — persistence to disk is a separate (pending) batch.
+	directlyFadedNodes map[string]bool
+	directlyFadedEdges map[string]bool
 	// portRows resolves a numeric buffer PORT-ROW index (carried on a new-system raw hit)
 	// back to its (node, port, isInput) identity. Wired to the buffer SnapshotState's
 	// port-row table in main.go (new-system only); nil on the old path and in unit tests, in
@@ -489,12 +497,14 @@ func (md *MoveDispatch) SetPortRowResolver(r PortRowResolver) { md.portRows = r 
 // later by Bind once node construction has populated them.
 func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace) *MoveDispatch {
 	md := &MoveDispatch{
-		dispatch:   map[string]chan moveMsg{},
-		nodeMovers: map[string]*nodeMover{},
-		edgeMovers: map[string]*edgeMover{},
-		edgeOut:    map[string]*Out{},
-		tr:         tr,
-		ov:         defaultOverlayState(),
+		dispatch:           map[string]chan moveMsg{},
+		nodeMovers:         map[string]*nodeMover{},
+		edgeMovers:         map[string]*edgeMover{},
+		edgeOut:            map[string]*Out{},
+		tr:                 tr,
+		ov:                 defaultOverlayState(),
+		directlyFadedNodes: map[string]bool{},
+		directlyFadedEdges: map[string]bool{},
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
