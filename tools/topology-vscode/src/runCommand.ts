@@ -6,6 +6,7 @@ import type { RunStatus, TraceEvent, HostToWebviewMsg } from "./messages";
 import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
 import { validateNodeStatusFields } from "./schema/trace-event-fields";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
+import { encodePlay, encodePause, encodeResend, frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import {
   BUF_HEADER_SIZE,
@@ -306,9 +307,9 @@ export class BuildAndRunRunner {
         WIREFOLD_BUF_OUT_FD: "3",
       },
     });
-    // Flush any stdin lines that were buffered before this spawn (writeStdin queued them).
+    // Flush any framed binary records buffered before this spawn (writeStdin queued them).
     if (this.pendingStdin.length > 0) {
-      for (const l of this.pendingStdin) this.proc.stdin?.write(l + "\n");
+      for (const rec of this.pendingStdin) this.proc.stdin?.write(rec);
       this.pendingStdin = [];
     }
     this.proc.stdout?.on("data", (d: Buffer) => this.handleStdout(d.toString()));
@@ -452,14 +453,14 @@ export class BuildAndRunRunner {
   /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. */
   play(): void {
     if (!this.proc) return;
-    this.writeStdin(JSON.stringify({ type: "play" }));
+    this.writeStdin(encodePlay());
     this.post({ state: "running" });
   }
 
   /** Send pause to Go's stdin — halts the clock gate. Fire-and-forget. */
   pause(): void {
     if (!this.proc) return;
-    this.writeStdin(JSON.stringify({ type: "pause" }));
+    this.writeStdin(encodePause());
     this.post({ state: "paused" });
   }
 
@@ -477,7 +478,7 @@ export class BuildAndRunRunner {
    *  leaves Go running. Fire-and-forget; no-op if not running. */
   resend(): void {
     if (!this.proc) return;
-    this.writeStdin(JSON.stringify({ type: "resend" }));
+    this.writeStdin(encodeResend());
   }
 
   stop() {
@@ -486,21 +487,26 @@ export class BuildAndRunRunner {
     this.cancel();
   }
 
-  /** Lines written before Go's stdin exists, flushed on spawn (see writeStdin/run). */
-  private pendingStdin: string[] = [];
+  /** Framed binary records written before Go's stdin exists, flushed on spawn (see writeStdin/run). */
+  private pendingStdin: Uint8Array[] = [];
 
   /**
-   * Write a JSON line to Go's stdin. If the process is not yet spawned, BUFFER the line
-   * and flush it once stdin exists (in run()). Previously this silently dropped early
-   * writes, which lost the load-time guide-vis settings push (it races the spawn) — so
-   * restored guideline visibilities never reached Go on a window reload.
+   * Write a BINARY editor→Go record to Go's stdin, FRAMED as [len:u32-LE][record]
+   * (symmetric with the fd-3 content buffer). Accepts either a bare record ArrayBuffer
+   * (framed here) or an already-framed Uint8Array. If the process is not yet spawned,
+   * BUFFER the framed bytes and flush once stdin exists (in run()) — early writes must not
+   * be dropped (that lost the load-time guide-vis push, which races the spawn).
+   *
+   * Returns void: the TS→Go send is FIRE-AND-FORGET — no await, no request/response
+   * (guard: check-no-await-on-bridge.sh).
    */
-  writeStdin(line: string): void {
+  writeStdin(record: ArrayBuffer | Uint8Array): void {
+    const framed = record instanceof Uint8Array ? record : frameRecord(record);
     if (!this.proc?.stdin) {
-      this.pendingStdin.push(line);
+      this.pendingStdin.push(framed);
       return;
     }
-    this.proc.stdin.write(line + "\n");
+    this.proc.stdin.write(framed);
   }
 
   dispose() {

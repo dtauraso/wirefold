@@ -14,3 +14,11 @@ declare function acquireVsCodeApi(): {
 type VsCodeApi = ReturnType<typeof acquireVsCodeApi>;
 const w = window as unknown as { __vscodeApi?: VsCodeApi };
 export const vscode: VsCodeApi = w.__vscodeApi ?? (w.__vscodeApi = acquireVsCodeApi());
+
+/** Place a BINARY editor→Go record on the TS→Go bridge, fire-and-forget. The webview
+ *  encodes the record (schema/input-layout.ts); the host writes it FRAMED to Go's stdin.
+ *  This is the TS→Go binary buffer, symmetric with the fd-3 content buffer. No await, no
+ *  response, no delivery signal (CLAUDE.md "TS → Go is fire-and-forget"). */
+export function postGoRecord(record: ArrayBuffer): void {
+  vscode.postMessage({ type: "go-record", record });
+}

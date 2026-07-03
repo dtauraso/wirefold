@@ -1,6 +1,7 @@
 import { viewerState } from "./state/viewer-state";
 import { serializeSceneState } from "./state/viewer/types";
-import { vscode } from "./vscode-api";
+import { postGoRecord } from "./vscode-api";
+import { encodeEditUpdate } from "../schema/input-layout";
 import { postLog } from "./log/post";
 
 // guideSnapshot — the 6 guideline settings currently held in viewerState, for diagnostic
@@ -39,7 +40,7 @@ function _sendScene() {
   let scene: unknown;
   try { scene = JSON.parse(sceneText); } catch { return; }
   postLog("scene-save-send", { posted: true, guides: guideSnapshot(), sceneText });
-  vscode.postMessage({ type: "edit", op: "update", kind: "scene", scene });
+  postGoRecord(encodeEditUpdate("scene", { type: "edit", op: "update", kind: "scene", scene }));
 }
 
 export function scheduleViewSave() {

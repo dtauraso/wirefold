@@ -8,7 +8,8 @@
 // interaction-*.ts files, so the polar-nav guard is unaffected.
 
 import * as THREE from "three";
-import { vscode } from "../vscode-api";
+import { postGoRecord } from "../vscode-api";
+import { encodeRawInput } from "../../schema/input-layout";
 import type { RawInputEvent, RawHit, RawPointerKind } from "../../messages";
 import type { PickOptions } from "./interaction-controls";
 import { pixelToNDC } from "./geometry-helpers";
@@ -18,9 +19,10 @@ type PickRef = React.MutableRefObject<
 >;
 type CamRef = React.MutableRefObject<THREE.PerspectiveCamera | null>;
 
-/** Fire-and-forget: place a raw-input event on the TS→Go bridge. No await, no response. */
+/** Fire-and-forget: encode a raw-input event as a BINARY record and place it on the TS→Go
+ *  bridge. No await, no response. */
 export function sendRawInput(event: RawInputEvent): void {
-  vscode.postMessage({ type: "raw-input", event });
+  postGoRecord(encodeRawInput(event));
 }
 
 /** Classify the rendered entity under the pointer via the existing pick callback (three.js

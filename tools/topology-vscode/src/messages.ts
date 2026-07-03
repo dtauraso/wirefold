@@ -165,6 +165,14 @@ export type RawInputEvent = {
 
 export type WebviewToHostMsg =
   | { type: "ready" }
+  // BINARY bridge envelope: a fully-encoded editor→Go record (raw-input or edit). The
+  // webview builds the binary record via schema/input-layout.ts and posts it here; the
+  // host writes it FRAMED to Go's stdin. This is the TS→Go binary buffer (symmetric with
+  // the fd-3 content buffer). The logical Go-bound kinds ("raw-input", "edit") are no
+  // longer posted as JSON objects — they are encoded into this record (and the host builds
+  // play/pause/resend records directly) — but stay declared below (and EditMsg is kept in
+  // this union) as the shared vocabulary the message-kind + edit-op parity guards check.
+  | { type: "go-record"; record: ArrayBuffer }
   | { type: "raw-input"; event: RawInputEvent }
   | { type: "run" }
   | { type: "run-cancel" }
@@ -172,9 +180,6 @@ export type WebviewToHostMsg =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "stop" }
-  // Host-originated control re-sent to Go's stdin (geometry resend on webview remount).
-  // Declared here for seam parity with stdin_reader.go's "resend" kind; the webview
-  // itself does not emit it (the host triggers it in the "ready" handler).
   | { type: "resend" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
@@ -241,160 +246,20 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "raw-input",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
   "load", "run-status", "flush", "save-error", "trace-event", "buffer-snapshot",
 ]);
 
-// parseEdit validates an "edit" message by its op, mirroring the per-op payloads
-// in EditMsg (and Go's applyEdit). Returns undefined for an unknown op or a payload
-// missing required fields, so a malformed edit is dropped rather than forwarded.
-const OVERLAY_FLAGS: ReadonlySet<string> = new Set<OverlayFlag>(OVERLAY_FLAG_NAMES);
-
-// Allowed camera viewpoint sub-kinds (derived from the single VIEWPOINT_KINDS source).
-const VP_KIND_SET: ReadonlySet<string> = new Set<ViewpointKind>(VIEWPOINT_KINDS);
-
-// Validates that v is a full OverlayState (every flag a boolean).
-function isOverlayState(v: unknown): boolean {
-  if (!v || typeof v !== "object") return false;
-  const s = v as Record<string, unknown>;
-  for (const flag of OVERLAY_FLAGS) {
-    if (typeof s[flag] !== "boolean") return false;
-  }
-  return true;
-}
-
-// Validates the op="update" payload by entity kind (and attr where present).
-function parseUpdate(m: Record<string, unknown>): WebviewToHostMsg | undefined {
-  switch (m.kind) {
-    case "node": {
-      if (m.attr === "move") {
-        // Entries-shaped node-move (decentralized): a non-empty map of routing key →
-        // MoveEntry{nodeId,x,y,z}. Validate the map and every entry.
-        const entries = m.entries;
-        if (!entries || typeof entries !== "object") return undefined;
-        const vals = Object.values(entries as Record<string, unknown>);
-        if (vals.length === 0) return undefined;
-        const ok = vals.every((v) => {
-          if (!v || typeof v !== "object") return false;
-          const e = v as Record<string, unknown>;
-          return (
-            typeof e.nodeId === "string" &&
-            typeof e.x === "number" && Number.isFinite(e.x) &&
-            typeof e.y === "number" && Number.isFinite(e.y) &&
-            typeof e.z === "number" && Number.isFinite(e.z)
-          );
-        });
-        return ok ? (m as unknown as WebviewToHostMsg) : undefined;
-      }
-      if (m.attr === "anchor") {
-        // node/port strings, isInput boolean, anchor {x,y,z} numbers, keys non-empty string[].
-        const a = m.anchor;
-        const okAnchor =
-          !!a &&
-          typeof a === "object" &&
-          typeof (a as Record<string, unknown>).x === "number" &&
-          typeof (a as Record<string, unknown>).y === "number" &&
-          typeof (a as Record<string, unknown>).z === "number";
-        const keys = m.keys;
-        const okKeys =
-          Array.isArray(keys) && keys.length > 0 && keys.every((k) => typeof k === "string");
-        return typeof m.node === "string" &&
-          typeof m.port === "string" &&
-          typeof m.isInput === "boolean" &&
-          okAnchor &&
-          okKeys
-          ? (m as unknown as WebviewToHostMsg)
-          : undefined;
-      }
-      return undefined;
-    }
-    case "edge": {
-      // attr="faded": edges is Record<string, boolean>: edgeId → desired faded state.
-      if (m.attr !== "faded") return undefined;
-      const edgesMap = m.edges;
-      if (!edgesMap || typeof edgesMap !== "object" || Array.isArray(edgesMap)) return undefined;
-      const ok = Object.entries(edgesMap as Record<string, unknown>).every(
-        ([k, v]) => typeof k === "string" && typeof v === "boolean",
-      );
-      return ok ? (m as unknown as WebviewToHostMsg) : undefined;
-    }
-    case "camera": {
-      // viewpoint must be a nested object with a kind in the allowed VIEWPOINT_KINDS set;
-      // an unknown kind is dropped rather than forwarded to Go (where it would no-op).
-      const vp = m.viewpoint;
-      if (!vp || typeof vp !== "object") return undefined;
-      const vk = (vp as Record<string, unknown>).kind;
-      if (typeof vk !== "string" || !VP_KIND_SET.has(vk)) return undefined;
-      return (m as unknown as WebviewToHostMsg);
-    }
-    case "overlays": {
-      if (m.attr === "toggle") {
-        return typeof m.flag === "string" && OVERLAY_FLAGS.has(m.flag)
-          ? (m as unknown as WebviewToHostMsg)
-          : undefined;
-      }
-      if (m.attr === "set") {
-        return isOverlayState(m.state) ? (m as unknown as WebviewToHostMsg) : undefined;
-      }
-      return undefined;
-    }
-    case "scene":
-      return m.scene !== undefined ? (m as unknown as WebviewToHostMsg) : undefined;
-    default:
-      return undefined;
-  }
-}
-
-const RAW_POINTER_KINDS: ReadonlySet<string> = new Set<RawPointerKind>([
-  "pointerdown", "pointermove", "pointerup", "wheel", "home",
-]);
-// Every variant of RawHit["kind"] MUST appear here — parseRawInput DROPS any raw-input
-// event whose hit.kind is absent, which silently kills EVERY gesture (pan/orbit/select)
-// while the cursor is over that entity. An earlier omission of "edge" broke plain-wheel
-// pan over edges (and over nodes, whose incident edge pick-halos classify as "edge" first).
-const RAW_HIT_KINDS: ReadonlySet<string> = new Set<RawHit["kind"]>([
-  "port", "handhold", "node", "edge", "empty",
-]);
-
-// parseRawInput validates a "raw-input" message: a raw pointer/wheel event with a
-// classified raycast hit. All numeric fields must be finite; kind and hit.kind must be
-// in their allowed sets. A malformed event is dropped rather than forwarded to Go.
-function parseRawInput(m: Record<string, unknown>): WebviewToHostMsg | undefined {
-  const ev = m.event;
-  if (!ev || typeof ev !== "object") return undefined;
-  const e = ev as Record<string, unknown>;
-  const num = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v);
-  const bool = (v: unknown): boolean => typeof v === "boolean";
-  if (typeof e.kind !== "string" || !RAW_POINTER_KINDS.has(e.kind)) return undefined;
-  if (![e.x, e.y, e.rectLeft, e.rectTop, e.rectWidth, e.rectHeight, e.button, e.deltaX, e.deltaY, e.fov].every(num)) {
-    return undefined;
-  }
-  if (![e.ctrl, e.shift, e.alt, e.meta].every(bool)) return undefined;
-  const h = e.hit;
-  if (!h || typeof h !== "object") return undefined;
-  const hit = h as Record<string, unknown>;
-  if (typeof hit.kind !== "string" || !RAW_HIT_KINDS.has(hit.kind)) return undefined;
-  if (!bool(hit.isInput)) return undefined;
-  if (![hit.nodeRow, hit.portRow, hit.edgeRow, hit.x, hit.y, hit.z].every(num)) return undefined;
-  return m as unknown as WebviewToHostMsg;
-}
-
-function parseEdit(m: Record<string, unknown>): WebviewToHostMsg | undefined {
-  switch (m.op) {
-    case "create":
-    case "delete":
-      return typeof m.target === "string" && typeof m.targetHandle === "string"
-        ? (m as unknown as WebviewToHostMsg)
-        : undefined;
-    case "update":
-      return parseUpdate(m);
-    default:
-      return undefined;
-  }
-}
+// The editor→Go payload validators (parseEdit / parseUpdate / parseRawInput) were removed
+// when the TS→Go bridge became a purely BINARY buffer: Go-bound messages are now built as
+// typed binary records in schema/input-layout.ts (compile-time shape safety from EditMsg /
+// RawInputEvent) and decoded + bounds-checked in Go (input_codec.go). The host no longer
+// sees a JSON edit/raw-input envelope to validate — it receives an opaque "go-record"
+// ArrayBuffer and writes it framed to Go. parseWebviewToHost below validates only the
+// remaining host-CONTROL messages (run/stop/…/webview-log) plus the go-record envelope.
 
 export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -408,10 +273,10 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
       return m as unknown as WebviewToHostMsg;
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
-    case "edit":
-      return parseEdit(m);
-    case "raw-input":
-      return parseRawInput(m);
+    case "go-record":
+      // The BINARY editor→Go record envelope. Only the ArrayBuffer wrapper is validated
+      // here; the record's own layout is decoded + bounds-checked in Go (input_codec.go).
+      return m.record instanceof ArrayBuffer ? (m as unknown as WebviewToHostMsg) : undefined;
     default:
       return m as unknown as WebviewToHostMsg;
   }

@@ -3,7 +3,8 @@
 // See CLAUDE.md §Bridge surface.
 
 import * as THREE from "three";
-import { vscode } from "../vscode-api";
+import { postGoRecord } from "../vscode-api";
+import { encodeEditUpdate } from "../../schema/input-layout";
 import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
 
 // ---------------------------------------------------------------------------
@@ -45,12 +46,12 @@ export function sendViewpointSet(
   const [pivotX, pivotY, pivotZ] = pivot;
   const [posTheta, posPhi] = pos;
   const [upTheta, upPhi] = up;
-  vscode.postMessage({
+  postGoRecord(encodeEditUpdate("camera", {
     type: "edit",
     op: "update",
     kind: "camera",
     viewpoint: { kind: "set", pivotX, pivotY, pivotZ, r, posTheta, posPhi, upTheta, upPhi },
-  });
+  }));
 }
 
 /** Tell Go to orbit from one spherical position to another. The locked variant
@@ -62,12 +63,12 @@ function sendViewpointOrbitKind(
 ): void {
   const [fromTheta, fromPhi] = from;
   const [toTheta, toPhi] = to;
-  vscode.postMessage({
+  postGoRecord(encodeEditUpdate("camera", {
     type: "edit",
     op: "update",
     kind: "camera",
     viewpoint: { kind, fromTheta, fromPhi, toTheta, toPhi },
-  });
+  }));
 }
 
 /** Tell Go to orbit from one spherical position to another. */
@@ -88,10 +89,10 @@ export function sendViewpointOrbitLocked(
 
 /** Tell Go to pan the pivot point by a world-space delta. */
 export function sendViewpointPan(dx: number, dy: number, dz: number): void {
-  vscode.postMessage({
+  postGoRecord(encodeEditUpdate("camera", {
     type: "edit",
     op: "update",
     kind: "camera",
     viewpoint: { kind: "pan", dx, dy, dz },
-  });
+  }));
 }

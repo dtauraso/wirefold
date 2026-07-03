@@ -91,49 +91,25 @@ describe("handleMessage dispatch — control signals", () => {
   });
 });
 
-describe("handleMessage dispatch — edit ops (running)", () => {
-  it("edit create → writeStdin with the verbatim message", async () => {
+describe("handleMessage dispatch — go-record (binary editor→Go bridge, running)", () => {
+  // The webview now encodes raw-input / edit messages into a BINARY record and posts a
+  // { type: "go-record", record } envelope. The host writes the record's ArrayBuffer to
+  // Go's stdin VERBATIM (framed inside writeStdin) — it does not inspect or re-encode it.
+  it("go-record → writeStdin with the record's ArrayBuffer", async () => {
     const r = fakeRunner(true);
-    const msg = { type: "edit", op: "create", target: "n1", targetHandle: "out" };
-    await handleMessage(msg, ctxFor(r));
+    const record = new Uint8Array([20, 0, 0, 0, 0]).buffer; // a stand-in edit record
+    await handleMessage({ type: "go-record", record }, ctxFor(r));
     const w = r.calls.filter((c) => c.method === "writeStdin");
     expect(w).toHaveLength(1);
-    expect(w[0].args[0]).toBe(JSON.stringify(msg));
-  });
-
-  it("edit delete → writeStdin with the verbatim message", async () => {
-    const r = fakeRunner(true);
-    const msg = { type: "edit", op: "delete", target: "e1", targetHandle: "in" };
-    await handleMessage(msg, ctxFor(r));
-    const w = r.calls.filter((c) => c.method === "writeStdin");
-    expect(w).toHaveLength(1);
-    expect(w[0].args[0]).toBe(JSON.stringify(msg));
-  });
-
-  it("edit update (edge/faded) → writeStdin with the verbatim message", async () => {
-    const r = fakeRunner(true);
-    const msg = { type: "edit", op: "update", kind: "edge", attr: "faded", edges: { e1: true } };
-    await handleMessage(msg, ctxFor(r));
-    const w = r.calls.filter((c) => c.method === "writeStdin");
-    expect(w).toHaveLength(1);
-    expect(w[0].args[0]).toBe(JSON.stringify(msg));
+    expect(w[0].args[0]).toBe(record);
   });
 });
 
-describe("handleMessage dispatch — edit while stopped is DROPPED, not buffered", () => {
-  it("edit create while !isRunning → writeStdin NOT called", async () => {
+describe("handleMessage dispatch — go-record while stopped is DROPPED, not buffered", () => {
+  it("go-record while !isRunning → writeStdin NOT called", async () => {
     const r = fakeRunner(false);
     await handleMessage(
-      { type: "edit", op: "create", target: "n1", targetHandle: "out" },
-      ctxFor(r),
-    );
-    expect(r.calls.filter((c) => c.method === "writeStdin")).toHaveLength(0);
-  });
-
-  it("edit update while !isRunning → writeStdin NOT called", async () => {
-    const r = fakeRunner(false);
-    await handleMessage(
-      { type: "edit", op: "update", kind: "edge", attr: "faded", edges: { e1: true } },
+      { type: "go-record", record: new Uint8Array([1]).buffer },
       ctxFor(r),
     );
     expect(r.calls.filter((c) => c.method === "writeStdin")).toHaveLength(0);

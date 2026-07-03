@@ -99,54 +99,18 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "webview-log":
       await appendWebviewLog(msg.entry, logUri);
       return;
-    case "raw-input":
-      // Raw-input bridge (Phase 6): forward the (already parseRawInput-validated) raw
-      // pointer/wheel event + raycast hit to Go's stdin VERBATIM. Fire-and-forget — Go's
-      // gesture state machine interprets it; we never await Go. Gated on a running Go
-      // (same rationale as "edit": a buffered event would replay on the next spawn).
+    case "go-record":
+      // BINARY editor→Go bridge: the webview already encoded the raw-input / edit message
+      // into a binary record (schema/input-layout.ts). Write it FRAMED to Go's stdin
+      // VERBATIM. Fire-and-forget — Go owns the clock; we never await Go (no request/
+      // response). The record's layout is decoded + bounds-checked in Go (input_codec.go).
+      // Gated on a running Go: writeStdin buffers when proc is null and that buffer flushes
+      // onto the NEXT spawned process — which re-reads the graph from disk — so a record
+      // sent while Go is stopped could replay/double-apply. Go is always spawned on "ready"
+      // before any editor input, so this drops stale records rather than buffering them.
       if (!runner.isRunning()) return;
-      runner.writeStdin(JSON.stringify(msg));
+      runner.writeStdin(msg.record);
       return;
-    case "edit": {
-      // Geometry-CRUD bridge: forward the (already parseEdit-validated) edit to Go's
-      // stdin VERBATIM. Fire-and-forget — Go owns the clock; we never await Go (no
-      // request/response). Forwarding the validated message wholesale (rather than
-      // reconstructing it field-by-field per op) means a new attribute can never be
-      // silently dropped here. There are exactly three ops: create / update / delete.
-      // Gate every edit write on a running Go. writeStdin buffers when proc is null
-      // and that buffer flushes onto the NEXT spawned process — which re-reads the
-      // graph from disk — so an edit sent while Go is stopped would replay and
-      // double-apply. Go is always spawned on "ready" before any edit, so a running
-      // check here drops stale edits rather than buffering them. (play/pause/resume/
-      // resend already guard on this.proc.)
-      if (!runner.isRunning()) return;
-      if (msg.op === "create" || msg.op === "delete") {
-        // The create/delete breadcrumb log is awaited BEFORE the write (diagnostics
-        // only); the writeStdin send itself is non-blocking.
-        await appendWebviewLog(JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: `edit-${msg.op}-forward`, target: msg.target, targetHandle: msg.targetHandle }), logUri);
-        runner.writeStdin(JSON.stringify(msg));
-      } else if (msg.op === "update") {
-        // Route by entity kind. Every kind forwards verbatim; the switch exists so an
-        // unknown kind is LOGGED (exhaustive default) rather than silently no-op'd, and
-        // so tsc flags any new EditMsg update kind that is not handled here.
-        // EDIT_UPDATE_KINDS_START
-        switch (msg.kind) {
-          case "node":
-          case "edge":
-          case "camera":
-          case "overlays":
-          case "scene":
-            runner.writeStdin(JSON.stringify(msg));
-            break;
-          default: {
-            const unknown: never = msg;
-            console.warn("topology editor: edit update with unhandled entity kind", unknown);
-          }
-        }
-        // EDIT_UPDATE_KINDS_END
-      }
-      return;
-    }
   }
 }
 

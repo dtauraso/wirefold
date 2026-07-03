@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { parseSpec } from "../src/schema";
-import { parseWebviewToHost } from "../src/messages";
+import { encodeEditUpdate, decodeInputRecord } from "../src/schema/input-layout";
 import type { Spec } from "../src/schema";
 
 const anchor = { x: 0, y: 1, z: 0 }; // used by the IPC edit op (not Port schema)
@@ -49,8 +49,12 @@ describe("Port.anchorId persistence", () => {
   });
 });
 
-describe("port-anchor IPC edit (op=update kind=node attr=anchor)", () => {
-  it("parseWebviewToHost validates the port-anchor edit", () => {
+describe("port-anchor binary edit (op=update kind=node attr=anchor)", () => {
+  // The port-anchor edit is now encoded as a BINARY edit-update record: entity-kind byte
+  // "node" + a JSON payload leaf carrying the structural fields (node/port/isInput/anchor/
+  // keys). Round-trip it through encode/decode and assert the entity + payload survive
+  // (Go decodes the same record via input_codec.go and mail-sorts by keys).
+  it("round-trips the port-anchor edit through the binary codec", () => {
     const msg = {
       type: "edit",
       op: "update",
@@ -62,36 +66,7 @@ describe("port-anchor IPC edit (op=update kind=node attr=anchor)", () => {
       anchor,
       keys: ["n", "n→n"],
     };
-    expect(parseWebviewToHost(msg)).toEqual(msg);
-  });
-
-  it("rejects a port-anchor edit with a malformed anchor", () => {
-    const msg = {
-      type: "edit",
-      op: "update",
-      kind: "node",
-      attr: "anchor",
-      node: "n",
-      port: "in",
-      isInput: true,
-      anchor: { x: 0, y: 1 }, // missing z
-      keys: ["n"],
-    };
-    expect(parseWebviewToHost(msg)).toBeUndefined();
-  });
-
-  it("rejects a port-anchor edit with empty keys", () => {
-    const msg = {
-      type: "edit",
-      op: "update",
-      kind: "node",
-      attr: "anchor",
-      node: "n",
-      port: "in",
-      isInput: true,
-      anchor,
-      keys: [],
-    };
-    expect(parseWebviewToHost(msg)).toBeUndefined();
+    const decoded = decodeInputRecord(encodeEditUpdate("node", msg));
+    expect(decoded).toEqual({ kind: "edit-update", entity: "node", payload: msg });
   });
 });

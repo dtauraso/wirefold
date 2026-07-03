@@ -1,6 +1,7 @@
 // lifecycle: bundle-eval start — this line runs as soon as the bundle is
 // evaluated by the webview, before any React or heavy side effects.
-import { vscode } from "./vscode-api";
+import { vscode, postGoRecord } from "./vscode-api";
+import { encodeEditUpdate } from "../schema/input-layout";
 import { postLog } from "./log/post";
 postLog("lifecycle", { phase: "bundle-eval" });
 
@@ -107,7 +108,7 @@ window.addEventListener("message", (e) => {
       nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
       selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, overlaysActive: viewerState.overlaysActive,
     }, pushed: guidePush });
-    vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "set", state: guidePush });
+    postGoRecord(encodeEditUpdate("overlays", { type: "edit", op: "update", kind: "overlays", attr: "set", state: guidePush }));
   } else if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running

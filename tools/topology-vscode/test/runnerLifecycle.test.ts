@@ -12,6 +12,7 @@
 //   - looping respawns only on a NATURAL exit; cancel()/stop() must not respawn.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { frameRecord } from "../src/schema/input-layout";
 import { EventEmitter } from "node:events";
 import * as fs from "fs";
 import * as os from "os";
@@ -85,20 +86,25 @@ function newRunner() {
 }
 
 describe("pendingStdin drain", () => {
+  // writeStdin now takes a BINARY record; it FRAMES it as [len:u32-LE][record] and buffers
+  // the framed bytes before spawn, flushing them on run().
+  const rec1 = new Uint8Array([1]).buffer; // a stand-in control record
+  const rec2 = new Uint8Array([2]).buffer;
+
   it("flushes stdin buffered before spawn (control — proves the drop is deliberate)", () => {
     const r = newRunner();
-    r.writeStdin("L1");
-    r.writeStdin("L2");
+    r.writeStdin(rec1);
+    r.writeStdin(rec2);
     r.run();
     const proc = spawned[0];
-    expect(proc.stdin.write).toHaveBeenCalledWith("L1\n");
-    expect(proc.stdin.write).toHaveBeenCalledWith("L2\n");
+    expect(proc.stdin.write).toHaveBeenCalledWith(frameRecord(rec1));
+    expect(proc.stdin.write).toHaveBeenCalledWith(frameRecord(rec2));
   });
 
   it("cancel() clears pendingStdin — not replayed onto the next spawned Go", () => {
     const r = newRunner();
-    r.writeStdin("L1");
-    r.writeStdin("L2");
+    r.writeStdin(rec1);
+    r.writeStdin(rec2);
     r.cancel(); // proc is undefined here; cancel still drops the buffer
     r.run();
     const proc = spawned[0];
@@ -107,7 +113,7 @@ describe("pendingStdin drain", () => {
 
   it("stop() clears pendingStdin — not replayed onto the next spawned Go", () => {
     const r = newRunner();
-    r.writeStdin("L1");
+    r.writeStdin(rec1);
     r.stop();
     r.run();
     const proc = spawned[0];
