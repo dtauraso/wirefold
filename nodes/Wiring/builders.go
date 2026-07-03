@@ -157,7 +157,6 @@ var (
 	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
-	tNodeStatusFunc     = reflect.TypeFor[func(torusRed bool, missedValue int)]()
 	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
 	tTickFunc           = reflect.TypeFor[func() int64]()
 )
@@ -283,14 +282,6 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	// on the left of the node, RIGHT on the right; -1 = not held → present=false.
 	injectFunc(v, "EmitInputBeads", tEmitInputBeadsFunc, func(left, right int) {
 		emitInputBeads(tr, name, left, right)
-	})
-
-	// Inject EmitNodeStatus closure if the struct has an
-	// `EmitNodeStatus func(torusRed bool, missedValue int)` field (the shared
-	// processing-window error reporting). The closure owns the geometry: it derives a
-	// world position just OUTSIDE the node from geom and emits the node-status event.
-	injectFunc(v, "EmitNodeStatus", tNodeStatusFunc, func(torusRed bool, missedValue int) {
-		emitNodeStatus(tr, name, geom, torusRed, missedValue)
 	})
 
 	// The remaining injections require the loader's shared clock; a test build
@@ -458,7 +449,7 @@ func emitNodeGeometryAimed(tr *T.Trace, nodeName string, g nodeGeom, registry Ai
 // ring normals — is identical and lives here.
 // effectiveRadius returns the node's REACH radius (max distance to a surface child),
 // falling back to nodeR for childless nodes (ReachR == 0) so the value stays sane.
-// Shared by emitNodeGeometryWith (sphereR) and emitNodeStatus (missed-bead offset).
+// Used by emitNodeGeometryWith (sphereR).
 func effectiveRadius(g nodeGeom) float64 {
 	if g.ReachR > 0 {
 		return g.ReachR
@@ -535,23 +526,6 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int) {
 // only when the held value changes.
 func emitHeldBead(tr *T.Trace, nodeName string, held int) {
 	tr.NodeBead(nodeName, 0, 0, held != -1, held, 0, 0, 0)
-}
-
-// nodeStatusMissedOffsetMul scales the node's reach radius to place the "missed"
-// bead marker JUST OUTSIDE the node body, so the renderer can show the discarded
-// different-color bead clearly separated from the node sphere.
-const nodeStatusMissedOffsetMul = 1.5
-
-// emitNodeStatus streams a node-status event: torusRed marks the node's torus RED on a
-// processing error (a different-color bead missed mid-processing), missedValue is that
-// discarded bead's value, and the position is computed JUST OUTSIDE the node center
-// (world units) so the renderer can show the missed bead. torusRed=false reverts to
-// normal (missedValue/pos are unused by the renderer then). Go owns the geometry here —
-// the node body computes no positions, matching emitHeldBead/emitNodeBeads.
-func emitNodeStatus(tr *T.Trace, nodeName string, g nodeGeom, torusRed bool, missedValue int) {
-	center := nodeWorldPos(g)
-	off := effectiveRadius(g) * nodeStatusMissedOffsetMul
-	tr.NodeStatus(nodeName, torusRed, missedValue, center.X+off, center.Y, center.Z)
 }
 
 // emitInputBeads streams a gate's two held inputs as interior beads: the LEFT

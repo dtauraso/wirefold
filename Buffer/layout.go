@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 13
+const BufLayoutVersion = 14
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -62,8 +62,8 @@ type bufLayoutBead struct {
 }
 
 // bufLayoutNode defines one row of the nodes column block.
-// One row per node. Persistent geometry + status + transient event flags.
-// Matched from KindNodeGeometry, KindNodeStatus, KindRecv/Fire/Send/Arrive/Done.
+// One row per node. Persistent geometry + transient event flags.
+// Matched from KindNodeGeometry, KindRecv/Fire/Send/Arrive/Done.
 type bufLayoutNode struct {
 	CX      float32 `buf:"f32"` // node center x (world)
 	CY      float32 `buf:"f32"` // node center y (world)
@@ -80,11 +80,6 @@ type bufLayoutNode struct {
 	FRX      float32 `buf:"f32"` // flat (equatorial) ring-plane normal x
 	FRY      float32 `buf:"f32"` // flat ring-plane normal y
 	FRZ      float32 `buf:"f32"` // flat ring-plane normal z
-	TorusRed uint8   `buf:"u8"`  // 1 = torus is RED (missed bead error)
-	MissVal  int32   `buf:"i32"` // missed bead value (valid when TorusRed=1)
-	MX       float32 `buf:"f32"` // missed-bead marker world x
-	MY       float32 `buf:"f32"` // missed-bead marker world y
-	MZ       float32 `buf:"f32"` // missed-bead marker world z
 	EvRecv   uint8   `buf:"u8"`  // transient: node received a bead this tick
 	EvFire   uint8   `buf:"u8"`  // transient: node fired this tick
 	EvSend   uint8   `buf:"u8"`  // transient: node sent a bead this tick

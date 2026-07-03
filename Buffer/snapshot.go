@@ -138,7 +138,7 @@ type eventRec struct {
 	bead         uint64
 	arc, lat     float64
 	x, y, z, f   float64
-	flag         bool     // torusRed (node-status) / visible (overlay toggles)
+	flag         bool     // visible (overlay toggles)
 	fadedNodes   []string // fade: directly-faded node seeds
 	fadedEdges   []string // fade: directly-faded edge seeds
 }
@@ -163,9 +163,6 @@ type nodeSnapState struct {
 	// node-geometry event; SphereRing orients its two tori by these.
 	vrx, vry, vrz float64
 	frx, fry, frz float64
-	torusRed      uint8
-	missVal       int32
-	mx, my, mz    float64
 	// label is the node's human label (from the node-geometry event's Label; data.label
 	// else the id). Streamed as UTF-8 bytes in the snapshot's trailing label section, keyed
 	// by this node's LabelOff/LabelLen columns — no sidecar.
@@ -303,9 +300,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 	case T.KindGeometry:
 		s.onEdgeGeometry(ev)
 		s.emitSnapshot() // state-change point: emit on edge geometry updates
-	case T.KindNodeStatus:
-		s.onNodeStatus(ev)
-		s.emitSnapshot() // state-change point: emit on status changes
 	case T.KindCamera:
 		s.camera = cameraSnapState{
 			px: ev.PX, py: ev.PY, pz: ev.PZ,
@@ -558,8 +552,6 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	// Republish the port-row table: ports (and node order) just changed. Built in the SAME
 	// flattened order buildSnapshot writes the Port block, so port row i ↔ entry i.
 	s.rebuildPortTable()
-	// Status fields (torusRed, missVal, mx/my/mz) are preserved across geometry
-	// re-emits so a node-move does not silently clear an active error state.
 }
 
 func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
@@ -583,22 +575,6 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	}
 	if ev.Target != "" {
 		e.dstNode = ev.Target
-	}
-}
-
-func (s *SnapshotState) onNodeStatus(ev T.Event) {
-	idx, ok := s.nodeIndex[ev.Node]
-	if !ok {
-		return
-	}
-	n := &s.nodes[idx]
-	n.torusRed = boolU8(ev.TorusRed)
-	if ev.TorusRed {
-		n.missVal = int32(ev.Value)
-		n.mx, n.my, n.mz = ev.X, ev.Y, ev.Z
-	} else {
-		n.missVal = 0
-		n.mx, n.my, n.mz = 0, 0, 0
 	}
 }
 
@@ -959,8 +935,6 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			float32(n.radius), float32(n.sphereR),
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
-			n.torusRed, n.missVal,
-			float32(n.mx), float32(n.my), float32(n.mz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
 			labelOffs[i], labelLens[i], boolU8(fadedNodes[s.nodeIDs[i]]), n.hovered)
 	}
