@@ -145,6 +145,9 @@ type nodeSnapState struct {
 	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
 	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
 	selected uint8
+	// hovered is PERSISTENT (not a transient event flag): 1 marks this node as the one under
+	// the pointer. Set/cleared by KindHover; NOT reset in clearTransients.
+	hovered uint8
 	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
 	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
 	kindID uint8
@@ -166,6 +169,9 @@ type portSnapState struct {
 	name       string
 	dx, dy, dz float64
 	isInput    bool
+	// hovered is PERSISTENT: 1 marks this port as the one under the pointer. Set/cleared by
+	// KindHover; NOT reset in clearTransients. Preserved across node-geometry re-emits below.
+	hovered uint8
 }
 
 // interiorSlotState holds one interior grid slot's present/value + Go-owned
@@ -361,6 +367,14 @@ func (s *SnapshotState) Update(ev T.Event) {
 		}
 		s.emitSnapshot()
 
+	case T.KindHover:
+		// Go-owned hover: a hover event marks EITHER one port (ev.Port != "", on node
+		// ev.Node, ev.Value=1 for an input port) OR one node (ev.Node), never both. It clears
+		// all other node/port hover flags. ev.Node=="" && ev.Port=="" clears all hover.
+		// Persistent until the next hover; emit so the change reflects in the buffer.
+		s.setHovered(ev.Node, ev.Port, ev.Value == 1)
+		s.emitSnapshot()
+
 	case T.KindFade:
 		// Go-owned fade seeds: replace the mirrored directly-faded sets with the full seed
 		// lists MoveDispatch just emitted, then emit so buildSnapshot recomputes the fade
@@ -480,9 +494,19 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	// (re-emit on move updates the dirs; the port set/order is stable). Kept in the
 	// event's Ports order so the buffer Port block and the Go-side port-row table stay
 	// in the same flattened row order.
+	// Preserve any per-port hover flag across this re-emit: a node-move re-emits geometry
+	// (only the dirs change; the port set/order is stable), and hover must not flicker off
+	// mid-hover. Key by (name, isInput) since name alone can repeat across in/out.
+	prevHover := make(map[[2]any]uint8, len(n.ports))
+	for _, p := range n.ports {
+		prevHover[[2]any{p.name, p.isInput}] = p.hovered
+	}
 	n.ports = n.ports[:0]
 	for _, p := range ev.Ports {
-		n.ports = append(n.ports, portSnapState{name: p.Name, dx: p.DX, dy: p.DY, dz: p.DZ, isInput: p.IsInput})
+		n.ports = append(n.ports, portSnapState{
+			name: p.Name, dx: p.DX, dy: p.DY, dz: p.DZ, isInput: p.IsInput,
+			hovered: prevHover[[2]any{p.Name, p.IsInput}],
+		})
 	}
 	// Republish the port-row table: ports (and node order) just changed. Built in the SAME
 	// flattened order buildSnapshot writes the Port block, so port row i ↔ entry i.
@@ -610,6 +634,34 @@ func (s *SnapshotState) setSelectedEdge(label string) {
 	for i := range s.nodes {
 		s.nodes[i].selected = 0
 	}
+}
+
+// setHovered marks the hovered entity and clears hover on every other node and port. A
+// non-empty port hovers that (node, port, isInput); otherwise a non-empty node hovers that
+// node; both empty clears all hover. Persistent — not touched by clearTransients.
+func (s *SnapshotState) setHovered(nodeID, port string, isInput bool) {
+	// Clear all hover first.
+	for i := range s.nodes {
+		s.nodes[i].hovered = 0
+		for j := range s.nodes[i].ports {
+			s.nodes[i].ports[j].hovered = 0
+		}
+	}
+	idx, ok := s.nodeIndex[nodeID]
+	if !ok {
+		return // unknown/empty node → nothing to set (already cleared)
+	}
+	if port != "" {
+		for j := range s.nodes[idx].ports {
+			p := &s.nodes[idx].ports[j]
+			if p.name == port && p.isInput == isInput {
+				p.hovered = 1
+				return
+			}
+		}
+		return // port not found → leave node unhovered (a port hover is not a node hover)
+	}
+	s.nodes[idx].hovered = 1
 }
 
 // clearSelectedEdges clears the selected flag on every edge.
@@ -783,7 +835,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			n.torusRed, n.missVal,
 			float32(n.mx), float32(n.my), float32(n.mz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
-			labelOffs[i], labelLens[i], boolU8(fadedNodes[s.nodeIDs[i]]))
+			labelOffs[i], labelLens[i], boolU8(fadedNodes[s.nodeIDs[i]]), n.hovered)
 	}
 	off += int(nodeCount) * BufNodeStride
 
@@ -823,7 +875,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	for i := range s.nodes {
 		for _, p := range s.nodes[i].ports {
 			SetPortRow(portBuf, prow,
-				int32(i), float32(p.dx), float32(p.dy), float32(p.dz), boolU8(p.isInput))
+				int32(i), float32(p.dx), float32(p.dy), float32(p.dz), boolU8(p.isInput), p.hovered)
 			prow++
 		}
 	}

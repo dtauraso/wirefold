@@ -114,6 +114,7 @@ func (md *MoveDispatch) HandleRawInput(ev rawInputMsg, slotReg SlotRegistry, tr 
 	case "pointerdown":
 		md.gestPointerDown(ev, tr)
 	case "pointermove":
+		md.updateHover(ev, tr)
 		md.gestPointerMove(ev, tr)
 	case "pointerup":
 		md.gestPointerUp(ev, slotReg, tr)
@@ -280,6 +281,35 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 	case gestPortMove:
 		md.applyPortMove(ev)
 		g.prevX, g.prevY = ev.X, ev.Y
+	}
+}
+
+// updateHover resolves the entity under the pointer from the raycast hit and, WHEN IT
+// CHANGES, records it as the Go-owned hover and emits KindHover so the buffer snapshot marks
+// the node's / port's Hovered column. Hover is node+port only (edges do not hover on the
+// pre-branch path). Deduping on the (node, port, isInput) triple keeps a still pointer and a
+// same-entity drag from re-emitting a snapshot each pointer-move (no new flood — Go already
+// emits per raw-input; a hover only fires on a genuine target change). An empty / edge / other
+// hit clears hover.
+func (md *MoveDispatch) updateHover(ev rawInputMsg, tr *T.Trace) {
+	var node, port string
+	var isInput bool
+	switch ev.Hit.Kind {
+	case "port":
+		if n, p, in, ok := md.portFromHit(ev.Hit); ok {
+			node, port, isInput = n, p, in
+		}
+	case "node":
+		if n, ok := md.nodeFromHit(ev.Hit); ok {
+			node = n
+		}
+	}
+	if node == md.hoverNode && port == md.hoverPort && isInput == md.hoverInput {
+		return // no change → no re-emit (dedupe)
+	}
+	md.hoverNode, md.hoverPort, md.hoverInput = node, port, isInput
+	if tr != nil {
+		tr.Hover(node, port, isInput)
 	}
 }
 

@@ -460,6 +460,14 @@ type MoveDispatch struct {
 	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Node
 	// block, so it — not TS — maps a node row to its id.
 	nodeRows NodeRowResolver
+	// hoverNode / hoverPort / hoverInput are the CURRENTLY-HOVERED entity (pointer hover),
+	// owned by Go. The gesture FSM tracks them from the raycast hit on each pointer-move and
+	// emits KindHover ONLY when they change (dedupe) so pointer-move doesn't flood the
+	// snapshot. hoverPort != "" means a port is hovered (on hoverNode); otherwise hoverNode
+	// (possibly "") is the hovered node. "" / "" = nothing hovered.
+	hoverNode  string
+	hoverPort  string
+	hoverInput bool
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by

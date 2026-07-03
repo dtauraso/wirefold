@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 11
+const BufLayoutVersion = 12
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -108,6 +108,12 @@ type bufLayoutNode struct {
 	// faded seeds and recomputes the fixpoint (computeFade) each snapshot; the renderer
 	// dims a faded node's body/ring opacity. Persistent (not a transient event flag).
 	Faded uint8 `buf:"u8"` // 1 = node is faded (dimmed)
+	// Hovered is the Go-owned pointer-hover flag: 1 marks the node currently under the
+	// pointer (the gesture FSM tracks it from the raycast hit on each pointer-move and
+	// emits KindHover). The renderer thickens+recolors this node's border ring (pre-branch
+	// hover style: #aaddff, r*0.14). Persistent-until-next-move; NOT a transient event flag.
+	// Selection styling takes precedence over hover where both apply (renderer-side).
+	Hovered uint8 `buf:"u8"` // 1 = node is pointer-hovered
 }
 
 // bufLayoutInterior defines one row of the interior-bead column block.
@@ -166,6 +172,11 @@ type bufLayoutPort struct {
 	DY      float32 `buf:"f32"` // unit dir y
 	DZ      float32 `buf:"f32"` // unit dir z
 	IsInput uint8   `buf:"u8"`  // 1 = input port, 0 = output port
+	// Hovered is the Go-owned pointer-hover flag for this port: 1 marks the port currently
+	// under the pointer (the gesture FSM tracks it from the raycast port hit and emits
+	// KindHover). The renderer highlights this port (pre-branch isHov style). Persistent-
+	// until-next-move; NOT a transient event flag.
+	Hovered uint8 `buf:"u8"` // 1 = port is pointer-hovered
 }
 
 // bufLayoutCamera defines the camera column block (always 1 row).

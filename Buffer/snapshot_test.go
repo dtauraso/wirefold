@@ -414,6 +414,50 @@ func TestSelectMode(t *testing.T) {
 	}
 }
 
+// TestHoverColumn verifies that KindHover marks the Hovered column on the hovered node OR
+// port (exclusive, cleared on others), and that an empty hover clears all hover flags.
+func TestHoverColumn(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1,
+		Ports: []T.PortGeom{{Name: "in", IsInput: true, DX: -1}}})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+
+	nodeHovered := func(row int) byte {
+		snap := s.BuildSnapshot()
+		nodeOff := BufHeaderSize + int(readU32(snap, 4))*BufBeadStride
+		return snap[nodeOff+row*BufNodeStride+BufNodeColHovered]
+	}
+	portHovered := func() byte {
+		snap := s.BuildSnapshot()
+		nodeCount := readU32(snap, 8)
+		edgeCount := readU32(snap, 12)
+		portOff := BufHeaderSize + int(readU32(snap, 4))*BufBeadStride +
+			int(nodeCount)*BufNodeStride +
+			int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
+			int(edgeCount)*BufEdgeStride
+		return snap[portOff+BufPortColHovered] // port row 0 = n0/in
+	}
+
+	// Hover node n0 → node row 0 Hovered=1, node row 1 = 0.
+	s.Update(T.Event{Kind: T.KindHover, Node: "n0"})
+	if nodeHovered(0) != 1 || nodeHovered(1) != 0 {
+		t.Fatalf("node hover: row0=%d row1=%d, want 1,0", nodeHovered(0), nodeHovered(1))
+	}
+	// Hover the port n0/in → port Hovered=1, node hover cleared.
+	s.Update(T.Event{Kind: T.KindHover, Node: "n0", Port: "in", Value: 1})
+	if portHovered() != 1 {
+		t.Fatalf("port hover: got %d, want 1", portHovered())
+	}
+	if nodeHovered(0) != 0 {
+		t.Fatalf("port hover should clear node hover: node0=%d, want 0", nodeHovered(0))
+	}
+	// Empty hover clears everything.
+	s.Update(T.Event{Kind: T.KindHover, Node: ""})
+	if nodeHovered(0) != 0 || portHovered() != 0 {
+		t.Fatalf("cleared hover: node0=%d port=%d, want 0,0", nodeHovered(0), portHovered())
+	}
+}
+
 // parseFrameStream reads all framed snapshots from raw and returns their payloads.
 // Each frame is [len:u32-LE][payload]; returns an error string on malformed input.
 func parseFrameStream(t *testing.T, raw []byte) [][]byte {

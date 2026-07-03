@@ -90,6 +90,7 @@ func TestSetNodeRow(t *testing.T) {
 		3,    // kindID (Input = index 3 in NODE_DEFS_ARRAY)
 		7, 4, // labelOff, labelLen
 		1, // faded
+		1, // hovered
 	)
 
 	assertF32At(t, buf, BufNodeColCX, 1.0, "CX")
@@ -118,6 +119,7 @@ func TestSetNodeRow(t *testing.T) {
 	assertU32At(t, buf, BufNodeColLabelOff, 7, "LabelOff")
 	assertU32At(t, buf, BufNodeColLabelLen, 4, "LabelLen")
 	assertU8At(t, buf, BufNodeColFaded, 1, "Faded")
+	assertU8At(t, buf, BufNodeColHovered, 1, "Hovered")
 }
 
 func TestSetEdgeRow(t *testing.T) {
@@ -184,9 +186,9 @@ func TestBeadStrideIsPackedSize(t *testing.T) {
 }
 
 func TestNodeStrideIsPackedSize(t *testing.T) {
-	// Node block: 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (faded)
-	//           = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 + 8 + 1 = 77
-	want := 5*4 + 6*4 + 1 + 4 + 3*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1
+	// Node block: 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (faded) + 1×u8 (hovered)
+	//           = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 + 8 + 1 + 1 = 78
+	want := 5*4 + 6*4 + 1 + 4 + 3*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1
 	if BufNodeStride != want {
 		t.Errorf("BufNodeStride = %d, want %d (packed size)", BufNodeStride, want)
 	}

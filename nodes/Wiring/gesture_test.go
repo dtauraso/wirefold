@@ -315,6 +315,37 @@ func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 	}
 }
 
+// Hover is Go-owned: a pointer-move over a node records it as the hovered node; a move over a
+// port records the hovered port (clearing the node hover); a move over empty space clears
+// hover. The FSM dedupes on the (node,port,isInput) triple so a still/same-target move does
+// not re-emit. Drives moves and asserts md.hoverNode/hoverPort track the hit.
+func TestGestureHoverTracksNodeAndPort(t *testing.T) {
+	md := newGestureMD(canonicalViewpoint())
+	md.SetPortRowResolver(stubPortRows{{Node: "A", Port: "in", IsInput: true}})
+
+	// Move over node N7 → hovered node.
+	mv := rawEvent("pointermove", 400, 300)
+	mv.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(mv, nil, nil)
+	if md.hoverNode != "N7" || md.hoverPort != "" {
+		t.Fatalf("node hover: hoverNode=%q hoverPort=%q want N7,''", md.hoverNode, md.hoverPort)
+	}
+
+	// Move onto a port (row 0 = A.in) → hovered port, node hover cleared.
+	pv := rawEvent("pointermove", 410, 300)
+	pv.Hit = rawHit{Kind: "port", PortRow: 0}
+	md.HandleRawInput(pv, nil, nil)
+	if md.hoverPort != "in" || md.hoverNode != "A" || !md.hoverInput {
+		t.Fatalf("port hover: hoverNode=%q hoverPort=%q input=%v want A,in,true", md.hoverNode, md.hoverPort, md.hoverInput)
+	}
+
+	// Move over empty space → hover cleared.
+	md.HandleRawInput(rawEvent("pointermove", 500, 300), nil, nil)
+	if md.hoverNode != "" || md.hoverPort != "" {
+		t.Fatalf("empty hover: hoverNode=%q hoverPort=%q want '',''", md.hoverNode, md.hoverPort)
+	}
+}
+
 // A SECONDARY (two-finger trackpad tap, button 2) select is a tap-select that must survive
 // finger drift PAST the move slop: two fingers don't land precisely, so the down→up path
 // jitters more than the slop. It must stay gestPending (never convert to drag/rotate) and

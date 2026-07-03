@@ -136,13 +136,21 @@ const (
 	// snapshot mirrors the seeds and recomputes the fade fixpoint (computeFade) each build,
 	// writing the Faded columns. Empty sets clear all fade.
 	KindFade = "fade"
+	// KindHover carries the CURRENTLY-HOVERED entity (pointer hover). Hover is Go-owned
+	// state: the gesture FSM (gesture.go) tracks which node or port is under the pointer from
+	// the raycast hit on each pointer-move and emits this event so the buffer snapshot marks
+	// the node's / port's Hovered column. Port!="" hovers that port (Node is its owning node,
+	// Value=1 for an input port); otherwise Node hovers that node (Node="" clears all hover).
+	// Emitted only when the hovered entity CHANGES (the FSM dedupes) so pointer-move does not
+	// flood the snapshot stream. Keyed by node id / (node,port); the renderer highlights it.
+	KindHover = "hover"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindNodeStatus, KindSelect, KindFade}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindNodeStatus, KindSelect, KindFade, KindHover}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -531,6 +539,20 @@ func (t *Trace) Select(node string, own bool) {
 // set.
 func (t *Trace) SelectEdge(edge string) {
 	t.emit(Event{Kind: KindSelect, Edge: edge})
+}
+
+// Hover emits the currently-hovered entity (KindHover). Go owns hover state; the gesture
+// FSM emits this on a pointer-move when the hovered entity CHANGES so the buffer snapshot
+// marks the node's / port's Hovered column. port!="" hovers that port (node is its owning
+// node id; isInput picks the input vs output port when matching); port=="" hovers the node
+// named by node (node="" clears all hover). isInput rides the Value field (1=input) so no
+// dedicated struct field is needed.
+func (t *Trace) Hover(node, port string, isInput bool) {
+	v := 0
+	if isInput {
+		v = 1
+	}
+	t.emit(Event{Kind: KindHover, Node: node, Port: port, Value: v})
 }
 
 // Fade emits the FULL directly-faded seed sets (KindFade). Go owns the fade seeds; the
