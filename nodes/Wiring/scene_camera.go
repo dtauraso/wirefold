@@ -61,7 +61,6 @@ type sceneFile struct {
 	CameraPolar *scenePolarCamera `json:"cameraPolar"`
 }
 
-
 // loadSceneViewpoint reads the saved polar camera from the scene sidecar and converts it
 // to the FSM viewpoint tuple (pivot, r, pos, up). ok is false when the file is
 // absent/empty/malformed or carries no complete cameraPolar — callers then use
