@@ -32,6 +32,81 @@ func readI32(buf []byte, off int) int32 {
 	return int32(binary.LittleEndian.Uint32(buf[off:]))
 }
 
+// TestEventBlockPopulate feeds two nodes (with ports) and a wire send, then asserts the
+// snapshot's EVENT block resolves the send's node/port/target/targetHandle to the correct
+// buffer rows and carries the value/arc/latency — the populate half of the buffer-decoded
+// .probe log path (the ext-host decode half is covered by the TS equivalence test).
+func TestEventBlockPopulate(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "A", Radius: 1,
+		Ports: []T.PortGeom{{Name: "out", IsInput: false, DX: 1}}})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "B", Radius: 1,
+		Ports: []T.PortGeom{{Name: "in", IsInput: true, DX: -1}}})
+	s.Update(T.Event{Kind: T.KindSend, Node: "A", Port: "out", Value: 7,
+		ArcLength: 12.5, SimLatencyMs: 33.0, Target: "B", TargetHandle: "in"})
+
+	snap := s.BuildSnapshot()
+	beadCount := int(readU32(snap, 4))
+	nodeCount := int(readU32(snap, 8))
+	edgeCount := int(readU32(snap, 12))
+	portCount := int(readU32(snap, 16))
+	labelBytesCount := int(readU32(snap, 20))
+	eventCount := int(readU32(snap, 24))
+	// The two node-geometry events each emitted (and flushed) their own snapshot; only the
+	// send (which does not emit) is still pending, so this snapshot's EVENT block holds 1 row.
+	if eventCount != 1 {
+		t.Fatalf("eventCount: got %d, want 1 (send; node-geometry flushed on its own emits)", eventCount)
+	}
+	eventOff := BufHeaderSize +
+		beadCount*BufBeadStride +
+		nodeCount*BufNodeStride +
+		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
+		edgeCount*BufEdgeStride +
+		portCount*BufPortStride +
+		BufCameraStride + BufOverlayStride + labelBytesCount
+
+	// Find the send row (kind == index of "send" in TraceEventKinds).
+	sendKind := -1
+	for i, k := range T.TraceEventKinds {
+		if k == T.KindSend {
+			sendKind = i
+		}
+	}
+	found := false
+	for r := 0; r < eventCount; r++ {
+		base := eventOff + r*BufEventStride
+		if int(snap[base+BufEventColKind]) != sendKind {
+			continue
+		}
+		found = true
+		// A=row0, out=port row0; B=row1, in=port row1.
+		if got := readI32(snap, base+BufEventColNodeRow); got != 0 {
+			t.Errorf("send NodeRow: got %d, want 0 (A)", got)
+		}
+		if got := readI32(snap, base+BufEventColPortRow); got != 0 {
+			t.Errorf("send PortRow: got %d, want 0 (A/out)", got)
+		}
+		if got := readI32(snap, base+BufEventColTargetRow); got != 1 {
+			t.Errorf("send TargetRow: got %d, want 1 (B)", got)
+		}
+		if got := readI32(snap, base+BufEventColTargetPortRow); got != 1 {
+			t.Errorf("send TargetPortRow: got %d, want 1 (B/in)", got)
+		}
+		if got := readI32(snap, base+BufEventColValue); got != 7 {
+			t.Errorf("send Value: got %d, want 7", got)
+		}
+		if got := readF32(snap, base+BufEventColArcLength); got != 12.5 {
+			t.Errorf("send ArcLength: got %v, want 12.5", got)
+		}
+		if got := readF32(snap, base+BufEventColSimLatencyMs); got != 33.0 {
+			t.Errorf("send SimLatencyMs: got %v, want 33", got)
+		}
+	}
+	if !found {
+		t.Fatal("no send event row found in EVENT block")
+	}
+}
+
 // TestSnapshotRoundTrip feeds known events into a SnapshotState, builds a
 // snapshot, then parses the bytes and asserts all counts and sampled field
 // values are correct and match the layout constants in buffer_layout_gen.go.
@@ -114,13 +189,22 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 
 	// ── Size check ───────────────────────────────────────────────────────────
+	// Trailing self-sizing sections (header counts at offsets 24/28/32): the EVENT block,
+	// port-name bytes, edge-label bytes. The fixture feeds events + an edge label, so these
+	// are non-zero — read their counts from the header rather than hard-coding.
+	eventCount := readU32(snap, 24)
+	portNameBytesCount := readU32(snap, 28)
+	edgeLabelBytesCount := readU32(snap, 32)
 	wantSize := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride +
-		BufOverlayStride
+		BufOverlayStride +
+		int(eventCount)*BufEventStride +
+		int(portNameBytesCount) +
+		int(edgeLabelBytesCount)
 	// No ports and no labels were injected in this fixture, so the Port and Label sections
 	// are zero-length; the header labelBytesCount reflects that.
 	if got := readU32(snap, 20); got != 0 {
@@ -529,7 +613,10 @@ func TestSnapshotFraming(t *testing.T) {
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
-		BufCameraStride + BufOverlayStride
+		BufCameraStride + BufOverlayStride +
+		int(readU32(payload, 24))*BufEventStride + // event block
+		int(readU32(payload, 28)) + // port-name bytes
+		int(readU32(payload, 32)) // edge-label bytes
 	if len(payload) != wantSize {
 		t.Errorf("last frame size: got %d, want %d", len(payload), wantSize)
 	}
@@ -809,8 +896,15 @@ func TestSnapshotNodeLabels(t *testing.T) {
 		portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride
-	if labelSecOff+labelBytesCount != len(snap) {
-		t.Fatalf("label section end %d != snapshot len %d", labelSecOff+labelBytesCount, len(snap))
+	// The label section is followed by the EVENT block + port-name + edge-label sections, so
+	// its end is the start of the event block, not the snapshot end. Verify the full length.
+	eventCount := int(readU32(snap, 24))
+	portNameBytesCount := int(readU32(snap, 28))
+	edgeLabelBytesCount := int(readU32(snap, 32))
+	fullLen := labelSecOff + labelBytesCount +
+		eventCount*BufEventStride + portNameBytesCount + edgeLabelBytesCount
+	if fullLen != len(snap) {
+		t.Fatalf("computed full length %d != snapshot len %d", fullLen, len(snap))
 	}
 
 	nodeOff := BufHeaderSize + beadCount*BufBeadStride

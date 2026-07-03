@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 12
+const BufLayoutVersion = 13
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -153,6 +153,14 @@ type bufLayoutEdge struct {
 	// (computeFade) each snapshot; the renderer dims a faded edge's tube. A faded edge's
 	// transit bead is suppressed Go-side (its bead rows are written Live=0).
 	Faded uint8 `buf:"u8"` // 1 = edge is faded (dimmed)
+	// EdgeLabelOff/EdgeLabelLen are this edge's slice into the snapshot's trailing EDGE-LABEL
+	// BYTES section (the label-section analogue for edges): EdgeLabelOff is the byte offset,
+	// EdgeLabelLen the UTF-8 byte length. Edge labels are carried ONLY for the .probe buffer-
+	// decoded log (geometry `edge`, select-edge, fade `fadedEdges`) — the render/bridge path
+	// still resolves an edge hit by row index (LookupEdgeRow), never by this string.
+	// Concatenated in the same stable edge-row order as the Edge block.
+	EdgeLabelOff uint32 `buf:"u32"` // byte offset into the edge-label-bytes section
+	EdgeLabelLen uint32 `buf:"u32"` // edge-label UTF-8 byte length
 }
 
 // bufLayoutPort defines one row of the ports column block.
@@ -177,6 +185,14 @@ type bufLayoutPort struct {
 	// KindHover). The renderer highlights this port (pre-branch isHov style). Persistent-
 	// until-next-move; NOT a transient event flag.
 	Hovered uint8 `buf:"u8"` // 1 = port is pointer-hovered
+	// PortNameOff/PortNameLen are this port's slice into the snapshot's trailing PORT-NAME
+	// BYTES section (the label-section analogue for ports): PortNameOff is the byte offset,
+	// PortNameLen the UTF-8 byte length. Port names are carried ONLY for the .probe buffer-
+	// decoded log (send targetHandle, recv/send/done/hover port, node-geometry port names) —
+	// the render/bridge path still resolves a port hit by row index (LookupPortRow), never by
+	// this string. Concatenated in the same flattened port-row order as the Port block.
+	PortNameOff uint32 `buf:"u32"` // byte offset into the port-name-bytes section
+	PortNameLen uint32 `buf:"u32"` // port-name UTF-8 byte length
 }
 
 // bufLayoutCamera defines the camera column block (always 1 row).
@@ -214,6 +230,33 @@ type bufLayoutOverlay struct {
 	SelMode uint8 `buf:"u8"`
 }
 
+// bufLayoutEvent defines one row of the per-tick EVENT column block.
+// The block is self-sizing via an eventCount field in the snapshot header; it carries
+// the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
+// arrive/pulse-cancelled/position and the state-change kinds), cleared each emit like the
+// transient node flags. It is consumed ONLY by the ext-host buffer-decoded .probe logger —
+// the render path ignores it. Kind is the event's index into TRACE_EVENT_KINDS (shared
+// Go/TS vocabulary); the row/label references resolve identities via the existing row
+// tables + string sections, so no id/port/edge strings are duplicated per event.
+// Sentinel: row/index fields are -1 when the event does not carry that reference.
+type bufLayoutEvent struct {
+	Kind          uint8   `buf:"u8"`  // index into TRACE_EVENT_KINDS
+	NodeRow       int32   `buf:"i32"` // emitting node's buffer row (-1 = none)
+	PortRow       int32   `buf:"i32"` // port's buffer row (-1 = none)
+	TargetRow     int32   `buf:"i32"` // target node's buffer row (send; -1 = none)
+	TargetPortRow int32   `buf:"i32"` // target handle's port row (send; -1 = none)
+	EdgeRow       int32   `buf:"i32"` // edge's buffer row (geometry/select-edge; -1 = none)
+	Slot          int32   `buf:"i32"` // node-bead interior slot = row*2+col (-1 = none)
+	Value         int32   `buf:"i32"` // event value (recv/send/position/status/select mode/…)
+	Bead          uint32  `buf:"u32"` // per-wire bead id (wire-bead events; 0 = none)
+	ArcLength     float32 `buf:"f32"` // send: wire arc length
+	SimLatencyMs  float32 `buf:"f32"` // send: wire traversal latency (ms)
+	X             float32 `buf:"f32"` // position/status world/marker x
+	Y             float32 `buf:"f32"` // position/status world/marker y
+	Z             float32 `buf:"f32"` // position/status world/marker z
+	F             float32 `buf:"f32"` // position: fractional progress t
+}
+
 // schemaTypes prevents the bufLayout* types from being flagged as unused by
 // staticcheck. They are schema sources: the generator reads them via AST at
 // codegen time; they are not used at runtime.
@@ -225,4 +268,5 @@ var _ = [...]any{
 	bufLayoutPort{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
+	bufLayoutEvent{},
 }

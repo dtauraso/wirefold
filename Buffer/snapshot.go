@@ -11,15 +11,18 @@
 //
 // Snapshot layout (little-endian, packed):
 //
-//	Header   24 bytes: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32]
+//	Header   36 bytes: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount] (u32 each)
 //	Bead     beadCount × BufBeadStride bytes
 //	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags + label off/len)
 //	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
-//	Edge     edgeCount × BufEdgeStride bytes
-//	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order)
+//	Edge     edgeCount × BufEdgeStride bytes   (+ edge-label off/len)
+//	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
 //	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
+//	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
+//	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
+//	EdgeLabel edgeLabelBytesCount bytes        (edge labels' UTF-8 bytes, edge-row order)
 //
 // At the rollout flip (a later phase), this becomes the sole framed stdout once
 // the JSON trace is removed. For now it runs alongside JSON on a side channel.
@@ -108,6 +111,36 @@ type SnapshotState struct {
 	// This is the node analogue of portTable/edgeTable: a numeric node-row hit resolves to
 	// its node id so the gesture FSM can drag/select the Go-owned node.
 	nodeTable atomic.Pointer[[]string]
+
+	// pendingEvents accumulates the per-tick causal trace events since the last snapshot
+	// emit (the same accumulate-then-flush lifecycle as the transient node event flags).
+	// buildSnapshot resolves each to numeric rows + string-section slices and writes the
+	// EVENT block; clearTransients drops them. Consumed ONLY by the ext-host buffer-decoded
+	// .probe logger — the render path ignores the EVENT block.
+	pendingEvents []eventRec
+
+	// kindID maps a trace-event kind string to its index in T.TraceEventKinds (the shared
+	// Go/TS vocabulary), which is the EVENT block's Kind column. Built once in NewSnapshotState.
+	kindID map[string]uint8
+}
+
+// eventRec is one buffered causal event, holding string identities that buildSnapshot
+// resolves to numeric rows / string-section slices when it writes the EVENT block.
+type eventRec struct {
+	kind         string
+	node, port   string
+	portIsInput  bool
+	target       string
+	targetHandle string
+	edge         string
+	slot         int
+	value        int
+	bead         uint64
+	arc, lat     float64
+	x, y, z, f   float64
+	flag         bool     // torusRed (node-status) / visible (overlay toggles)
+	fadedNodes   []string // fade: directly-faded node seeds
+	fadedEdges   []string // fade: directly-faded edge seeds
 }
 
 type beadSnapKey struct {
@@ -242,13 +275,27 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
 		out:                out,
+		kindID:             buildKindIDMap(),
 	}
+}
+
+// buildKindIDMap indexes T.TraceEventKinds so the EVENT block Kind column matches the
+// TS TRACE_EVENT_KINDS array (both generated from Trace.go's Kind* constants).
+func buildKindIDMap() map[string]uint8 {
+	m := make(map[string]uint8, len(T.TraceEventKinds))
+	for i, k := range T.TraceEventKinds {
+		m[k] = uint8(i)
+	}
+	return m
 }
 
 // Update processes one trace event, updating the snapshot state.
 // Must be called from the Trace drain goroutine on every event.
 // On KindPosition events it also triggers a snapshot emit.
 func (s *SnapshotState) Update(ev T.Event) {
+	// Record the causal event for the buffer-decoded .probe log BEFORE mutating state, so the
+	// EVENT block flushed by the next emitSnapshot mirrors exactly the events seen this window.
+	s.recordEvent(ev)
 	switch ev.Kind {
 	case T.KindNodeGeometry:
 		s.onNodeGeometry(ev)
@@ -716,12 +763,31 @@ func (s *SnapshotState) clearTransients() {
 		n.evArrive = 0
 		n.evDone = 0
 	}
+	// Drop the per-tick causal events now that they have been packed into the emitted
+	// snapshot's EVENT block (same accumulate-then-flush lifecycle as the flags above).
+	s.pendingEvents = s.pendingEvents[:0]
 }
 
 // emitSnapshot builds one snapshot, writes a framed frame to s.out, then
 // clears transient event flags. Ignores write errors (nothing reads this fd
 // yet — on-but-harmless until the rollout flip phase).
 func (s *SnapshotState) emitSnapshot() {
+	// Defer any event whose identity references a node/edge not yet registered (e.g. an
+	// Input node's startup send fires before its target's geometry is emitted). Such an event
+	// would resolve to row -1 and drop its target/handle from the log; carry it forward to the
+	// next emit instead, when the referenced entity is registered. Ordering is irrelevant to
+	// the log (a multiset of events), and by end-of-run every node/edge is registered.
+	ready := s.pendingEvents[:0:0]
+	deferred := make([]eventRec, 0)
+	for _, e := range s.pendingEvents {
+		if s.eventReady(e) {
+			ready = append(ready, e)
+		} else {
+			deferred = append(deferred, e)
+		}
+	}
+	s.pendingEvents = ready
+
 	snap := s.buildSnapshot()
 	if s.out != nil {
 		var hdr [4]byte
@@ -730,6 +796,26 @@ func (s *SnapshotState) emitSnapshot() {
 		_, _ = s.out.Write(snap)
 	}
 	s.clearTransients()
+	// Restore the deferred events (clearTransients truncated pendingEvents to empty).
+	s.pendingEvents = append(s.pendingEvents, deferred...)
+}
+
+// eventReady reports whether every node/edge identity an event references is registered, so
+// buildSnapshot can resolve it to a real row (not the -1 sentinel that would drop it from the
+// decoded log).
+func (s *SnapshotState) eventReady(e eventRec) bool {
+	if e.node != "" && s.nodeRowIndex(e.node) < 0 {
+		return false
+	}
+	if e.target != "" && s.nodeRowIndex(e.target) < 0 {
+		return false
+	}
+	if e.edge != "" {
+		if _, ok := s.edgeIndex[e.edge]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // buildSnapshot packs all current state into one snapshot []byte.
@@ -776,6 +862,38 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	}
 	labelBytesCount := len(labelBytes)
 
+	// Port-name section (self-sizing, label-section analogue for ports): concatenate every
+	// port's name UTF-8 bytes in the SAME flattened port-row order as the Port block; each
+	// port's PortNameOff/PortNameLen slice into it. Carried for the .probe buffer-decoded log.
+	portNameBytes := make([]byte, 0, portCount*8)
+	portNameOffs := make([]uint32, 0, portCount)
+	portNameLens := make([]uint32, 0, portCount)
+	for i := range s.nodes {
+		for _, p := range s.nodes[i].ports {
+			portNameOffs = append(portNameOffs, uint32(len(portNameBytes)))
+			pb := []byte(p.name)
+			portNameLens = append(portNameLens, uint32(len(pb)))
+			portNameBytes = append(portNameBytes, pb...)
+		}
+	}
+	portNameBytesCount := len(portNameBytes)
+
+	// Edge-label section (self-sizing, label-section analogue for edges): concatenate every
+	// edge's label UTF-8 bytes in stable edge-row order; each edge's EdgeLabelOff/EdgeLabelLen
+	// slice into it. Carried for the .probe buffer-decoded log (geometry/select-edge/fade).
+	edgeLabelBytes := make([]byte, 0, int(edgeCount)*8)
+	edgeLabelOffs := make([]uint32, edgeCount)
+	edgeLabelLens := make([]uint32, edgeCount)
+	for i := range s.edges {
+		edgeLabelOffs[i] = uint32(len(edgeLabelBytes))
+		eb := []byte(s.edgeLabels[i])
+		edgeLabelLens[i] = uint32(len(eb))
+		edgeLabelBytes = append(edgeLabelBytes, eb...)
+	}
+	edgeLabelBytesCount := len(edgeLabelBytes)
+
+	eventCount := len(s.pendingEvents)
+
 	size := BufHeaderSize +
 		int(beadCount)*BufBeadStride +
 		int(nodeCount)*BufNodeStride +
@@ -784,11 +902,14 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
-		labelBytesCount
+		labelBytesCount +
+		eventCount*BufEventStride +
+		portNameBytesCount +
+		edgeLabelBytesCount
 
 	buf := make([]byte, size)
 
-	// Header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32]
+	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount]
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
 	off += 4
@@ -801,6 +922,12 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	binary.LittleEndian.PutUint32(buf[off:], uint32(portCount))
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], uint32(labelBytesCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(eventCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(portNameBytesCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(edgeLabelBytesCount))
 	off += 4
 	s.tick++
 
@@ -861,7 +988,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			float32(e.sx), float32(e.sy), float32(e.sz),
 			float32(e.ex), float32(e.ey), float32(e.ez),
 			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)), e.selected,
-			boolU8(fadedEdges[s.edgeLabels[i]]))
+			boolU8(fadedEdges[s.edgeLabels[i]]), edgeLabelOffs[i], edgeLabelLens[i])
 	}
 	off += int(edgeCount) * BufEdgeStride
 
@@ -875,7 +1002,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	for i := range s.nodes {
 		for _, p := range s.nodes[i].ports {
 			SetPortRow(portBuf, prow,
-				int32(i), float32(p.dx), float32(p.dy), float32(p.dz), boolU8(p.isInput), p.hovered)
+				int32(i), float32(p.dx), float32(p.dy), float32(p.dz), boolU8(p.isInput), p.hovered,
+				portNameOffs[prow], portNameLens[prow])
 			prow++
 		}
 	}
@@ -903,6 +1031,22 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	// UTF-8 bytes concatenated in node-row order. Each node's LabelOff/LabelLen columns
 	// slice into this section; the numeric node row carries its human label with no sidecar.
 	copy(buf[off:off+labelBytesCount], labelBytes)
+	off += labelBytesCount
+
+	// EVENT block (self-sizing via header eventCount): the per-tick causal trace events
+	// (numeric rows + string-section refs). Consumed only by the ext-host .probe logger.
+	eventBuf := buf[off : off+eventCount*BufEventStride]
+	s.writeEventBlock(eventBuf, s.portRowLookup())
+	off += eventCount * BufEventStride
+
+	// Port-name bytes section (self-sizing via header portNameBytesCount): every port's name
+	// UTF-8 bytes in flattened port-row order; PortNameOff/PortNameLen slice into it.
+	copy(buf[off:off+portNameBytesCount], portNameBytes)
+	off += portNameBytesCount
+
+	// Edge-label bytes section (self-sizing via header edgeLabelBytesCount): every edge's
+	// label UTF-8 bytes in edge-row order; EdgeLabelOff/EdgeLabelLen slice into it.
+	copy(buf[off:off+edgeLabelBytesCount], edgeLabelBytes)
 
 	return buf
 }

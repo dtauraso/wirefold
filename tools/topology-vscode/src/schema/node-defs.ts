@@ -50,3 +50,14 @@ export const NODE_DEFS_ARRAY: readonly NodeDef[] = [
   { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "window-and-inhibit-left-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
   { bg: "#fce4ec", border: "#880e4f", text: "#880e4f", minWidth: 110, role: "window-and-inhibit-right-gate", shape: "rect", fill: "#fce4ec", stroke: "#880e4f", width: 80, height: 60, inputs: [{ name: "FromLeft", kind: "chain" }, { name: "FromRight", kind: "chain" }], outputs: [{ name: "ToPassed", kind: "chain" }] },
 ];
+
+export const NODE_KIND_NAMES: readonly string[] = [
+  "Hold",
+  "HoldFlip",
+  "HoldNewSendOld",
+  "Input",
+  "Pacer",
+  "Pulse",
+  "WindowAndInhibitLeftGate",
+  "WindowAndInhibitRightGate",
+];

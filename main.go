@@ -43,7 +43,12 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}
 	}
 	snapState := B.NewSnapshotState(snapOut)
-	tr := T.NewWithSinkHook(0, os.Stdout, snapState.Update)
+	// sink=nil: the JSON-trace-on-stdout emitter is REMOVED. Trace still assigns Step, buffers
+	// events (WriteJSONL -trace file), and drives snapState.Update (the onEvent hook) which packs
+	// the binary content buffer's EVENT block. The .probe log is now the ext-host DECODE of that
+	// buffer (buffer-log.ts) — the spec's "one representation including logs". Nothing writes
+	// trace-event JSON to stdout; the ext host no longer parses trace lines from stdout.
+	tr := T.NewWithSinkHook(0, nil, snapState.Update)
 
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()
@@ -139,6 +144,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	}
 
 	tr.Close()
+	// Trace.Close drained every remaining event into snapState.Update; flush a final snapshot
+	// so trailing causal events (recv/fire/done/arrive not followed by a position emit) still
+	// reach the buffer-decoded .probe log.
+	snapState.FinalFlush()
 	if tracePath != "" {
 		f, err := os.Create(tracePath)
 		if err != nil {
