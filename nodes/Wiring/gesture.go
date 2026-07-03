@@ -484,6 +484,10 @@ func (md *MoveDispatch) ToggleFadeSelection(tr *T.Trace) {
 	if tr != nil {
 		tr.Fade(setToSlice(md.directlyFadedNodes), setToSlice(md.directlyFadedEdges))
 	}
+	// Persist the updated fade seeds to scene.json (debounced, fire-and-forget).
+	if md.fadePersist != nil {
+		md.fadePersist.schedule(setToSlice(md.directlyFadedNodes), setToSlice(md.directlyFadedEdges))
+	}
 }
 
 // toggleSet flips key's membership in set (add if absent, delete if present).
@@ -613,6 +617,10 @@ func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec
 		if ch, ok := md.dispatch[edgeID]; ok {
 			ch <- msg
 		}
+	}
+	// Persist the snapped anchor index to the port file (debounced, fire-and-forget).
+	if md.anchorPersist != nil {
+		md.anchorPersist.schedule(node, port, isInput, anchorID)
 	}
 }
 
