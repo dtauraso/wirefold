@@ -18,6 +18,7 @@ import {
   NODE_COL_TORUS_RED, NODE_COL_MISS_VAL, NODE_COL_MX, NODE_COL_MY, NODE_COL_MZ,
   NODE_COL_EV_RECV, NODE_COL_EV_FIRE, NODE_COL_EV_SEND, NODE_COL_EV_ARRIVE, NODE_COL_EV_DONE,
   NODE_COL_SELECTED,
+  NODE_COL_KIND_ID,
   NODE_STRIDE,
   NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
@@ -25,6 +26,7 @@ import {
   readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readNodeEvRecv, readNodeEvFire, readNodeEvSend, readNodeEvArrive, readNodeEvDone,
   readNodeSelected,
+  readNodeKindId,
   // Interior
   INTERIOR_COL_PRESENT, INTERIOR_COL_VALUE, INTERIOR_COL_OX, INTERIOR_COL_OY, INTERIOR_COL_OZ,
   INTERIOR_STRIDE,
@@ -115,9 +117,9 @@ describe("buffer-layout — Bead block", () => {
 
 describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
-    // 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected)
-    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 = 67
-    expect(NODE_STRIDE).toBe(67);
+    // 5×f32 + 6×f32 (vr/fr normals) + u8 + i32 + 3×f32 + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindId)
+    //   = (5+6+3)×4 + 1 + 4 + 5 + 1 + 1 = 68
+    expect(NODE_STRIDE).toBe(68);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -146,6 +148,7 @@ describe("buffer-layout — Node block", () => {
     dv.setUint8(NODE_COL_EV_ARRIVE, 0);
     dv.setUint8(NODE_COL_EV_DONE, 1);
     dv.setUint8(NODE_COL_SELECTED, 1);
+    dv.setUint8(NODE_COL_KIND_ID, 5); // Pulse = index 5
 
     expectF32(readNodeCX(dv, 0), 1.0);
     expectF32(readNodeCY(dv, 0), 2.0);
@@ -169,6 +172,7 @@ describe("buffer-layout — Node block", () => {
     expect(readNodeEvArrive(dv, 0)).toBe(0);
     expect(readNodeEvDone(dv, 0)).toBe(1);
     expect(readNodeSelected(dv, 0)).toBe(1);
+    expect(readNodeKindId(dv, 0)).toBe(5);
   });
 });
 
@@ -322,8 +326,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 7", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(8);
+  it("schema version is 9", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(9);
   });
 
   it("header size is 20 bytes (5×u32)", () => {

@@ -18,8 +18,8 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
-import { getNavNodeIds, getNavNodeKind } from "./buffer-nav";
-import { NODE_DEFS } from "../../schema/node-defs";
+import { getNavNodeIds } from "./buffer-nav";
+import { NODE_DEFS_ARRAY } from "../../schema/node-defs";
 import { ndcToPixel } from "./geometry-helpers";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
 import { EnvTexContext } from "./scene-env";
@@ -48,6 +48,7 @@ import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected,
   readNodeTorusRed, readNodeMissVal, readNodeMX, readNodeMY, readNodeMZ,
   readNodeSphereR, readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
+  readNodeKindId,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected,
@@ -108,10 +109,14 @@ const PORT_SPHERE_R = 4;
 // resting torusThick = r * 0.08).
 const NODE_RING_TUBE_RATIO = 0.08;
 
-/** Resolve a node row's fill/stroke from its Go kind via NODE_DEFS, with a grey fallback. */
-export function nodeRowColors(id: string): { fill: string; stroke: string } {
-  const kind = getNavNodeKind(id);
-  const def = kind ? NODE_DEFS[kind] : undefined;
+/**
+ * Resolve a node row's fill/stroke from its KindId column in the buffer.
+ * Reads KindId (u8) at the given row and indexes NODE_DEFS_ARRAY; falls back to
+ * grey when the id is out-of-range (0xFF sentinel = unknown kind).
+ */
+export function nodeRowColors(nodeView: DataView, row: number): { fill: string; stroke: string } {
+  const kindId = readNodeKindId(nodeView, row);
+  const def = NODE_DEFS_ARRAY[kindId];
   return {
     fill: def?.fill ?? NODE_DEFAULT_FILL,
     stroke: def?.stroke ?? NODE_DEFAULT_STROKE,
@@ -227,7 +232,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
       // is baked into the geometry as a fraction of that radius (NODE_RING_TUBE_RATIO).
       ring.setMatrixAt(i, matRef.current);
 
-      const { fill, stroke } = nodeRowColors(ids[i] ?? `#${i}`);
+      const { fill, stroke } = nodeRowColors(nodeView, i);
       body.setColorAt(i, colRef.current.set(fill));
       ring.setColorAt(i, colRef.current.set(stroke));
     }
@@ -302,7 +307,6 @@ function PortInstances({ capacity }: { capacity: number }) {
     const decoded = decodeSnapshot(snap);
     if (!decoded) { mesh.count = 0; return; }
     const { portCount, portView, nodeCount, nodeView } = decoded;
-    const ids = getNavNodeIds();
 
     const q = quatRef.current;
     // Instance index MUST stay == buffer port row so a raycast hit's instanceId is the port
@@ -323,7 +327,7 @@ function PortInstances({ capacity }: { capacity: number }) {
           readNodeCY(nodeView, nodeRow) + readPortDY(portView, i) * r,
           readNodeCZ(nodeView, nodeRow) + readPortDZ(portView, i) * r,
         );
-        mesh.setColorAt(i, colRef.current.set(nodeRowColors(ids[nodeRow] ?? `#${nodeRow}`).stroke));
+        mesh.setColorAt(i, colRef.current.set(nodeRowColors(nodeView, nodeRow).stroke));
       }
       matRef.current.compose(posRef.current, q, sclRef.current);
       mesh.setMatrixAt(i, matRef.current);
@@ -528,7 +532,6 @@ function SphereRings() {
           edges.push({ src: readEdgeSrcNodeRow(edgeView, e), dst: readEdgeDstNodeRow(edgeView, e) });
         }
         const mode: SelMode = readOverlaySelMode(overlayView) ? "own" : "surface";
-        const ids = getNavNodeIds();
         for (const row of ownerRowSet(selectedRow, mode, edges)) {
           if (row < 0 || row >= nodeCount) continue;
           // R = Go-streamed reach radius (sphereR); fall back to node radius pre-emit.
@@ -541,7 +544,7 @@ function SphereRings() {
             R, tube,
             vrx: readNodeVRX(nodeView, row), vry: readNodeVRY(nodeView, row), vrz: readNodeVRZ(nodeView, row),
             frx: readNodeFRX(nodeView, row), fry: readNodeFRY(nodeView, row), frz: readNodeFRZ(nodeView, row),
-            color: nodeRowColors(ids[row] ?? `#${row}`).stroke,
+            color: nodeRowColors(nodeView, row).stroke,
           };
           next.push(ring);
           key += `${ring.cx},${ring.cy},${ring.cz}|${ring.R},${ring.tube}|${ring.vrx},${ring.vry},${ring.vrz}|${ring.frx},${ring.fry},${ring.frz}|${ring.color};`;
