@@ -670,13 +670,13 @@ func (t *Trace) drain() {
 	encBuf := &bytes.Buffer{}
 	enc := json.NewEncoder(encBuf)
 	record := func(ev Event) {
-		// Hold the lock ACROSS the sink write. Breadcrumb() and Close() also write to
-		// the sink under t.mu; if we unlocked before writing (as before), an event's
-		// two writes (body, '\n') could interleave with a breadcrumb's writes, fusing
-		// two JSON objects onto one line. That garbled the stdout stream — the extension's
-		// line parser then rejected the fused line and dumped it to the "topology run"
-		// Output channel, and the pump could misparse events. Serialized writes keep every
-		// line a single newline-delimited JSON object.
+		// The JSON event serialization here is an OPTIONAL in-process observation sink (used by
+		// headless model tests that poll a bytes.Buffer). PRODUCTION passes sink=nil (main.go),
+		// so NO trace-event JSON is written to stdout — the JSON-trace-on-stdout emitter is
+		// removed at the wiring. The .probe log is now the DECODE of the fd3 binary content
+		// buffer's EVENT block (onEvent → SnapshotState → ext-host buffer-log.ts), the spec's
+		// "one representation including logs". Hold the lock across the sink write so a
+		// concurrent Breadcrumb()/Close() write cannot fuse two JSON objects onto one line.
 		t.mu.Lock()
 		ev.Step = len(t.events)
 		t.events = append(t.events, ev)
@@ -684,7 +684,6 @@ func (t *Trace) drain() {
 			if v, err := eventValue(ev); err == nil {
 				encBuf.Reset()
 				if enc.Encode(v) == nil {
-					// encBuf holds the JSON body plus Encode's trailing '\n'.
 					_, _ = t.sink.Write(encBuf.Bytes())
 				}
 			}
