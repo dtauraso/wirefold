@@ -422,9 +422,10 @@ type MoveDispatch struct {
 	// posPersist / anchorPersist / fadePersist are the debounced disk persisters for the
 	// three FSM-applied edits (node-drag position, ring-move anchor, fade). Armed by
 	// EnableEditPersist after the startup seed; nil until armed (tests that never arm).
-	posPersist    *nodePosPersister
-	anchorPersist *anchorPersister
-	fadePersist   *fadePersister
+	posPersist      *nodePosPersister
+	anchorPersist   *anchorPersister
+	fadePersist     *fadePersister
+	overlaysPersist *overlaysPersister
 	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
 	// KindSelect so the buffer snapshot marks the node's Selected column.
@@ -904,6 +905,7 @@ func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
 //   - node-drag (RootMove) → the moved node's x/y/z in <root>/nodes/<id>/meta.json
 //   - ring-move (applyRingAnchor) → the port's anchorId in the port json file
 //   - fade (ToggleFadeSelection) → fadedNodes/fadedEdges in view/scene.json
+//   - overlays (applyUpdate toggle/set) → overlay-visibility keys in view/scene.json
 //
 // Node-position + anchor persistence needs the per-node/per-port files of the directory-tree
 // form; for a monolithic topology.json (no per-node files) their root is "" and those two
@@ -917,6 +919,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.overlaysPersist = &overlaysPersister{treeRoot: root, debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

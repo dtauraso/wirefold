@@ -340,7 +340,7 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 // requested attribute. The sole live entity is overlays (toggle one flag / set the whole
 // visibility snapshot). Unknown kinds/attrs are ignored (forward-compat).
 func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
-	_ = treeRoot // overlay updates flip Go-owned state; persistence rides the save command.
+	_ = treeRoot // overlay persistence rides the armed overlaysPersist writer, not treeRoot here.
 	// EDIT_UPDATE_KINDS_START
 	switch msg.Kind {
 	case "overlays":
@@ -363,6 +363,10 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			// overlayState struct; SetGuideVisibility installs it wholesale.
 			md.SetGuideVisibility(overlayStateFromPayload(msg.State), tr)
 		}
+		// Persist ON CHANGE (mirrors fade/camera): schedule a debounced write of the new
+		// overlay snapshot so toggles survive a reload without an explicit save. No-op until
+		// EnableEditPersist arms the writer (nil-receiver / empty-treeRoot guard in schedule).
+		md.overlaysPersist.schedule(md.ov)
 	}
 	// EDIT_UPDATE_KINDS_END
 }

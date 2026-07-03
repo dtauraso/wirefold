@@ -193,8 +193,8 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	md.EnableEditPersist(root)
 
 	// Flip a visible-sense flag off (tori) and the hidden-sense flag on (labelsGlobal off).
-	md.ToggleSceneTori(nil)      // sceneToriVisible: true -> false
-	md.ToggleLabelsGlobal(nil)   // labelsGlobalVisible: true -> false
+	md.ToggleSceneTori(nil)    // sceneToriVisible: true -> false
+	md.ToggleLabelsGlobal(nil) // labelsGlobalVisible: true -> false
 	md.overlaysPersist.schedule(md.ov)
 	md.overlaysPersist.flush()
 
