@@ -4,7 +4,7 @@
 // returns DataView slices over each column block — zero-copy, no store writes.
 //
 // Layout (little-endian, packed):
-//   Header   24 bytes : [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32]
+//   Header   36 bytes : [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount] (u32 each)
 //   Bead     beadCount × BEAD_STRIDE bytes
 //   Node     nodeCount × NODE_STRIDE bytes
 //   Interior nodeCount × INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes
@@ -13,6 +13,9 @@
 //   Camera   CAMERA_STRIDE bytes   (always 1 row)
 //   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
 //   Label    labelBytesCount bytes (node labels' UTF-8 bytes, node-row order)
+//   Event    eventCount × EVENT_STRIDE bytes (per-tick causal trace events; .probe log only)
+//   PortName portNameBytesCount bytes (port names' UTF-8 bytes, flattened port-row order)
+//   EdgeLabel edgeLabelBytesCount bytes (edge labels' UTF-8 bytes, edge-row order)
 
 import {
   BUF_HEADER_SIZE,
@@ -23,12 +26,17 @@ import {
   PORT_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
+  EVENT_STRIDE,
   readNodeLabelOff,
   readNodeLabelLen,
+  readPortPortNameOff,
+  readPortPortNameLen,
+  readEdgeEdgeLabelOff,
+  readEdgeEdgeLabelLen,
 } from "../../schema/buffer-layout";
 
-/** Shared UTF-8 decoder for node labels (see nodeLabel). */
-const LABEL_DECODER = new TextDecoder();
+/** Shared UTF-8 decoder for the label / port-name / edge-label sections. */
+const STR_DECODER = new TextDecoder();
 
 /**
  * Fixed interior grid slots per node in the Interior block. MUST match
@@ -67,6 +75,14 @@ export interface DecodedSnapshot {
   /** Uint8 view over the label-bytes section: every node's label UTF-8 bytes concatenated in
    *  node-row order. A node's label is labelBytes[LabelOff : LabelOff+LabelLen) — see nodeLabel. */
   labelBytes: Uint8Array;
+  /** Number of per-tick causal events in this snapshot's EVENT block (.probe log only). */
+  eventCount: number;
+  /** DataView over the EVENT block; byteLength = eventCount × EVENT_STRIDE. */
+  eventView: DataView;
+  /** Uint8 view over the port-name-bytes section (flattened port-row order). See portName. */
+  portNameBytes: Uint8Array;
+  /** Uint8 view over the edge-label-bytes section (edge-row order). See edgeLabel. */
+  edgeLabelBytes: Uint8Array;
 }
 
 /**
@@ -82,22 +98,27 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   if (buf.byteLength < BUF_HEADER_SIZE) return null;
 
   const hdr = new DataView(buf, 0, BUF_HEADER_SIZE);
-  const tick            = hdr.getUint32(0,  true);
-  const beadCount       = hdr.getUint32(4,  true);
-  const nodeCount       = hdr.getUint32(8,  true);
-  const edgeCount       = hdr.getUint32(12, true);
-  const portCount       = hdr.getUint32(16, true);
-  const labelBytesCount = hdr.getUint32(20, true);
+  const tick                = hdr.getUint32(0,  true);
+  const beadCount           = hdr.getUint32(4,  true);
+  const nodeCount           = hdr.getUint32(8,  true);
+  const edgeCount           = hdr.getUint32(12, true);
+  const portCount           = hdr.getUint32(16, true);
+  const labelBytesCount     = hdr.getUint32(20, true);
+  const eventCount          = hdr.getUint32(24, true);
+  const portNameBytesCount  = hdr.getUint32(28, true);
+  const edgeLabelBytesCount = hdr.getUint32(32, true);
 
   const interiorCount = nodeCount * INTERIOR_SLOTS_PER_NODE;
 
-  const beadBytes     = beadCount * BEAD_STRIDE;
-  const nodeBytes     = nodeCount * NODE_STRIDE;
-  const interiorBytes = interiorCount * INTERIOR_STRIDE;
-  const edgeBytes     = edgeCount * EDGE_STRIDE;
-  const portBytes     = portCount * PORT_STRIDE;
+  const beadBytes      = beadCount * BEAD_STRIDE;
+  const nodeBytes      = nodeCount * NODE_STRIDE;
+  const interiorBytes  = interiorCount * INTERIOR_STRIDE;
+  const edgeBytes      = edgeCount * EDGE_STRIDE;
+  const portBytes      = portCount * PORT_STRIDE;
+  const eventBytes     = eventCount * EVENT_STRIDE;
   const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
-                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount;
+                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount +
+                      eventBytes + portNameBytesCount + edgeLabelBytesCount;
 
   if (buf.byteLength < expectedLen) return null;
 
@@ -125,8 +146,21 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   off += OVERLAY_STRIDE;
 
   const labelBytes = new Uint8Array(buf, off, labelBytesCount);
+  off += labelBytesCount;
 
-  return { tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount, interiorView, edgeView, portView, cameraView, overlayView, labelBytesCount, labelBytes };
+  const eventView = new DataView(buf, off, eventBytes);
+  off += eventBytes;
+
+  const portNameBytes = new Uint8Array(buf, off, portNameBytesCount);
+  off += portNameBytesCount;
+
+  const edgeLabelBytes = new Uint8Array(buf, off, edgeLabelBytesCount);
+
+  return {
+    tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount,
+    interiorView, edgeView, portView, cameraView, overlayView, labelBytesCount, labelBytes,
+    eventCount, eventView, portNameBytes, edgeLabelBytes,
+  };
 }
 
 /**
@@ -139,5 +173,31 @@ export function nodeLabel(decoded: DecodedSnapshot, row: number): string {
   const off = readNodeLabelOff(decoded.nodeView, row);
   const len = readNodeLabelLen(decoded.nodeView, row);
   if (len === 0) return "";
-  return LABEL_DECODER.decode(decoded.labelBytes.subarray(off, off + len));
+  return STR_DECODER.decode(decoded.labelBytes.subarray(off, off + len));
+}
+
+/**
+ * Port name for buffer port row `row`: slice out of the decoded port-name-bytes section.
+ * Returns "" when the port has no name. Used only by the buffer-decoded .probe logger — the
+ * render/bridge path resolves a port hit by row index, never by this string.
+ */
+export function portName(decoded: DecodedSnapshot, row: number): string {
+  if (row < 0) return "";
+  const off = readPortPortNameOff(decoded.portView, row);
+  const len = readPortPortNameLen(decoded.portView, row);
+  if (len === 0) return "";
+  return STR_DECODER.decode(decoded.portNameBytes.subarray(off, off + len));
+}
+
+/**
+ * Edge label for buffer edge row `row`: slice out of the decoded edge-label-bytes section.
+ * Returns "" when the edge has no label. Used only by the buffer-decoded .probe logger — the
+ * render/bridge path resolves an edge hit by row index, never by this string.
+ */
+export function edgeLabel(decoded: DecodedSnapshot, row: number): string {
+  if (row < 0) return "";
+  const off = readEdgeEdgeLabelOff(decoded.edgeView, row);
+  const len = readEdgeEdgeLabelLen(decoded.edgeView, row);
+  if (len === 0) return "";
+  return STR_DECODER.decode(decoded.edgeLabelBytes.subarray(off, off + len));
 }

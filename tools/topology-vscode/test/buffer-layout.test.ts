@@ -195,8 +195,8 @@ describe("buffer-layout — Node block", () => {
 
 describe("buffer-layout — Port block", () => {
   it("stride equals packed field sizes", () => {
-    // i32 + 3×f32 + u8 (isInput) + u8 (hovered) = 4 + 12 + 1 + 1 = 18
-    expect(PORT_STRIDE).toBe(18);
+    // i32 + 3×f32 + u8 (isInput) + u8 (hovered) + 2×u32 (port-name off/len) = 4 + 12 + 1 + 1 + 8 = 26
+    expect(PORT_STRIDE).toBe(26);
   });
 
   it("read helpers decode isInput + hovered", () => {
@@ -241,8 +241,8 @@ describe("buffer-layout — Interior block", () => {
 
 describe("buffer-layout — Edge block", () => {
   it("stride equals packed field sizes", () => {
-    // 6×f32 + 2×i32 + 2×u8 (selected + faded) = 34
-    expect(EDGE_STRIDE).toBe(34);
+    // 6×f32 + 2×i32 + 2×u8 (selected + faded) + 2×u32 (edge-label off/len) = 42
+    expect(EDGE_STRIDE).toBe(42);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -363,11 +363,11 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 11", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(12);
+  it("schema version is 13", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(13);
   });
 
-  it("header size is 24 bytes (6×u32)", () => {
-    expect(BUF_HEADER_SIZE).toBe(24);
+  it("header size is 36 bytes (9×u32)", () => {
+    expect(BUF_HEADER_SIZE).toBe(36);
   });
 });

@@ -8,6 +8,7 @@ import { validateNodeStatusFields } from "./schema/trace-event-fields";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { encodePlay, encodePause, encodeResend, frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
+import { decodeBufferLog } from "./buffer-log";
 import {
   BUF_HEADER_SIZE,
   BEAD_STRIDE,
@@ -390,25 +391,11 @@ export class BuildAndRunRunner {
         }
         continue;
       }
-      const ev = tryParseTraceEvent(line);
-      if (ev && this.onTraceEvent) {
-        const _evNode = 'node' in ev ? ev.node : undefined;
-        const _evPort = 'port' in ev ? (ev as { port?: string }).port : undefined;
-        if (DEBUG_TRACE) console.log(`[ext] trace-event step=${ev.step} kind=${ev.kind} node=${_evNode} port=${_evPort ?? "-"}`);
-        if (this.tsFile) {
-          try {
-            fs.appendFileSync(this.tsFile, JSON.stringify({ ts_ms: Date.now(), src: "ts-ext", label: "ext.trace-event", kind: ev.kind, node: _evNode, port: _evPort ?? null }) + "\n", "utf8");
-          } catch { /* swallow */ }
-        }
-        if (this.probeFile) {
-          try {
-            fs.appendFileSync(this.probeFile, JSON.stringify({ ts_ms: Date.now(), src: "go", ...(typeof ev.step === "number" ? { step: ev.step } : {}), ...ev }) + "\n", "utf8");
-          } catch { /* swallow */ }
-        }
-        this.onTraceEvent(ev);
-      } else {
-        this.channel!.appendLine(line);
-      }
+      // Trace events are NO LONGER emitted on stdout: Go's JSON-trace emitter was removed and
+      // the .probe log is now the DECODE of the fd3 binary content buffer's EVENT block (see
+      // handleFd3 → decodeBufferLog). The ext host therefore no longer parses trace lines from
+      // stdout; any remaining stdout line is just process output.
+      this.channel!.appendLine(line);
     }
   }
 
@@ -416,12 +403,13 @@ export class BuildAndRunRunner {
     const { frames, rest } = splitFrames(this.fd3Buf, chunk);
     this.fd3Buf = rest;
     for (const ab of frames) {
-      // Decode transient event columns and append to the .probe log.
+      // Decode the snapshot's EVENT block into full trace-event .probe lines (the buffer-
+      // decoded log — the DECODE of the same binary that replaces Go's JSON-on-stdout path).
       if (this.probeFile) {
-        const lines = decodeSnapshotEvents(ab);
+        const lines = decodeBufferLog(ab);
         if (lines.length > 0) {
           try {
-            fs.appendFileSync(this.probeFile, lines.join(""), "utf8");
+            fs.appendFileSync(this.probeFile, lines, "utf8");
           } catch { /* swallow */ }
         }
       }
