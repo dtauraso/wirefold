@@ -27,6 +27,7 @@ func TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys(t *testing.T) {
 	var kinds []string
 	tr := T.NewWithSinkHook(256, io.Discard, func(e T.Event) { kinds = append(kinds, e.Kind) })
 	md.LoadOverlays(root, tr)
+	tr.Close() // drain the goroutine so all emitted events are recorded before asserting
 	// The default-visible overlay flags must have been emitted, not skipped.
 	for _, want := range []string{"scene-tori", "overlays-vis", "double-links"} {
 		seen := false
