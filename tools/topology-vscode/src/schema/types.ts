@@ -37,6 +37,11 @@ export type Port = {
   // Ring anchor index: index into the evenly-spaced ring of port positions
   // computed by Go (N = floor(2πR / (d+p)), d=8, p=2). Absent = 0.
   anchorId?: number;
+  // Per-port radius (world units): distance from the node center at which this
+  // port is drawn and its edge attaches. Go-owned and authoritative when present;
+  // absent falls back to nodeRadius(kind) = min(w,h)/4 (see portRadiusByName in
+  // port_geometry.go).
+  portR?: number;
 };
 export type StateValue = string | number;
 export type SendRule = "consumeGated" | "fireAndForget";

@@ -1,10 +1,43 @@
 package Wiring
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 )
+
+// TestReadPortsParsesPortR verifies that a port file's optional "portR" field is
+// parsed into specPort.PortR and, via specPortsToGeom → portGeom, drives
+// portWorldPos placement (the materialized on-disk value is authoritative).
+func TestReadPortsParsesPortR(t *testing.T) {
+	dir := t.TempDir()
+	portFile := filepath.Join(dir, "In.json")
+	if err := os.WriteFile(portFile, []byte(`{"name":"In","anchorId":0,"portR":33.5}`), 0o644); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	ports, err := readPorts(dir)
+	if err != nil {
+		t.Fatalf("readPorts: %v", err)
+	}
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(ports))
+	}
+	if ports[0].PortR == nil || *ports[0].PortR != 33.5 {
+		t.Fatalf("PortR = %v, want 33.5", ports[0].PortR)
+	}
+
+	geom := specPortsToGeom(ports)
+	g := nodeGeom{Kind: "HoldFlip", Inputs: geom}
+	center := nodeWorldPos(g)
+	dir0 := ringAnchorDir(nodeRadius(g.Kind), 0)
+	want := center.add(dir0.scale(33.5))
+	got := portWorldPos(g, "In", true)
+	if got != want {
+		t.Fatalf("portWorldPos = %v, want %v (portR=33.5 authoritative)", got, want)
+	}
+}
 
 func TestLoadTreeRoundTrip(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)

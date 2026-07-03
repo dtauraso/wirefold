@@ -151,6 +151,77 @@ func TestChordLength(t *testing.T) {
 	}
 }
 
+// TestPortRadiusPerPort verifies that two ports on the same node with DIFFERENT
+// PortR values place each port (and its edge endpoint / arc length) at its own
+// radius, not the shared nodeRadius(kind) value.
+func TestPortRadiusPerPort(t *testing.T) {
+	anchorId0 := 0
+	r1, r2 := 15.0, 40.0
+	g := nodeGeom{
+		Kind: "HoldFlip",
+		Inputs: []portGeom{
+			{Name: "InSmall", AnchorId: &anchorId0, PortR: &r1},
+			{Name: "InBig", AnchorId: &anchorId0, PortR: &r2},
+		},
+	}
+	center := nodeWorldPos(g)
+	dir := ringAnchorDir(nodeRadius(g.Kind), 0)
+
+	gotSmall := portWorldPos(g, "InSmall", true)
+	wantSmall := center.add(dir.scale(r1))
+	if math.Abs(gotSmall.X-wantSmall.X) > 1e-9 || math.Abs(gotSmall.Y-wantSmall.Y) > 1e-9 || math.Abs(gotSmall.Z-wantSmall.Z) > 1e-9 {
+		t.Fatalf("portWorldPos(InSmall) = %v, want %v (r=%v)", gotSmall, wantSmall, r1)
+	}
+
+	gotBig := portWorldPos(g, "InBig", true)
+	wantBig := center.add(dir.scale(r2))
+	if math.Abs(gotBig.X-wantBig.X) > 1e-9 || math.Abs(gotBig.Y-wantBig.Y) > 1e-9 || math.Abs(gotBig.Z-wantBig.Z) > 1e-9 {
+		t.Fatalf("portWorldPos(InBig) = %v, want %v (r=%v)", gotBig, wantBig, r2)
+	}
+
+	if got := portRadiusByName(g, "InSmall", true); got != r1 {
+		t.Fatalf("portRadiusByName(InSmall) = %v, want %v", got, r1)
+	}
+	if got := portRadiusByName(g, "InBig", true); got != r2 {
+		t.Fatalf("portRadiusByName(InBig) = %v, want %v", got, r2)
+	}
+	// A port with no PortR falls back to nodeRadius(kind).
+	if got := portRadiusByName(g, "NoSuchPort", true); got != nodeRadius(g.Kind) {
+		t.Fatalf("portRadiusByName(unknown) = %v, want fallback %v", got, nodeRadius(g.Kind))
+	}
+}
+
+// TestArcLengthBetweenPortsUsesEachEndsOwnRadius verifies that when the source
+// OUTPUT port and destination INPUT port carry different PortR values, the
+// chord distance (edge arc length) is computed from each end's own radius, not
+// a shared nodeRadius(kind).
+func TestArcLengthBetweenPortsUsesEachEndsOwnRadius(t *testing.T) {
+	anchorId0 := 0
+	srcR, tgtR := 10.0, 60.0
+	srcCenter := vec3{X: 0, Y: 0, Z: 0}
+	tgtCenter := vec3{X: 200, Y: 0, Z: 0}
+	src := nodeGeom{
+		Kind:    "HoldFlip",
+		Center:  &srcCenter,
+		Outputs: []portGeom{{Name: "Out", AnchorId: &anchorId0, PortR: &srcR}},
+	}
+	tgt := nodeGeom{
+		Kind:   "HoldFlip",
+		Center: &tgtCenter,
+		Inputs: []portGeom{{Name: "In", AnchorId: &anchorId0, PortR: &tgtR}},
+	}
+	got := arcLengthBetweenPorts(src, "Out", tgt, "In")
+
+	srcDir := ringAnchorDir(nodeRadius(src.Kind), 0)
+	tgtDir := ringAnchorDir(nodeRadius(tgt.Kind), 0)
+	p0 := srcCenter.add(srcDir.scale(srcR))
+	p1 := tgtCenter.add(tgtDir.scale(tgtR))
+	want := chordLength(p0, p1)
+	if !almostEqual(got, want, 1e-9) {
+		t.Fatalf("arcLengthBetweenPorts = %v, want %v (per-end radii src=%v tgt=%v)", got, want, srcR, tgtR)
+	}
+}
+
 // TestPortAnchorIdRingPath verifies that AnchorId selects the correct ring slot and
 // that a nil AnchorId falls back to ring slot 0.
 func TestPortAnchorIdRingPath(t *testing.T) {

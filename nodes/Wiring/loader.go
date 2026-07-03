@@ -37,8 +37,9 @@ type specPosition struct {
 // specPort mirrors the per-node inputs/outputs entries in topology.json.
 // AnchorId is the only placement field; side/slot/anchor have been removed.
 type specPort struct {
-	Name     string `json:"name"`
-	AnchorId *int   `json:"anchorId,omitempty"` // optional ring-anchor index (flat array); highest priority
+	Name     string   `json:"name"`
+	AnchorId *int     `json:"anchorId,omitempty"` // optional ring-anchor index (flat array); highest priority
+	PortR    *float64 `json:"portR,omitempty"`    // optional per-port radius (distance from node center); nil → nodeRadius(kind) fallback
 }
 
 // specNode mirrors the JSON node shape.
@@ -482,7 +483,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 			}
 		}
 
-		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID])
+		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID], aimedPorts, centerOf)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
