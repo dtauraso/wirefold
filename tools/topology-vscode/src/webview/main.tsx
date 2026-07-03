@@ -1,8 +1,6 @@
 // lifecycle: bundle-eval start — this line runs as soon as the bundle is
 // evaluated by the webview, before any React or heavy side effects.
-import { vscode, postGoRecord } from "./vscode-api";
-import { encodeOverlaysSet } from "../schema/input-layout";
-import type { OverlayState } from "../messages";
+import { vscode } from "./vscode-api";
 import { postLog } from "./log/post";
 postLog("lifecycle", { phase: "bundle-eval" });
 
@@ -18,7 +16,6 @@ import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./three/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
-import { viewerState } from "./state/viewer-state";
 import { setLatestSnapshot } from "./snapshot-buffer";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
@@ -87,29 +84,11 @@ window.addEventListener("message", (e) => {
     // Fully Go/buffer-driven: NO spec store, NO pump. Everything the render needs arrives via
     // buffer-snapshot ALONE — node labels ride the buffer node block (LabelOff/LabelLen),
     // there is no id/label sidecar; label/badge visibility comes from the overlay columns.
-    // Push all Go-owned guide visibilities (including the master overlays toggle) so Go's
-    // authoritative state survives a window reload; Go reflects these into the buffer
-    // overlay columns the render path reads.
-    const guidePush: OverlayState = {
-      tori: viewerState.sceneToriVisible !== false,
-      scenePoles: viewerState.scenePolesVisible !== false,
-      nodePoles: viewerState.nodePolesVisible !== false,
-      angleLabels: viewerState.angleLabelsVisible !== false,
-      selSpherePoles: viewerState.selSpherePolesVisible !== false,
-      handholds: viewerState.handholdsVisible !== false,
-      doubleLinks: viewerState.doubleLinksVisible === true,
-      // labelsGlobalHidden is hidden sense (true=hidden); labelsGlobal is visible sense.
-      labelsGlobal: viewerState.labelsGlobalHidden !== true,
-      // badgesHidden is hidden sense (true=hidden); badgesGlobal is visible sense.
-      badgesGlobal: viewerState.badgesHidden !== true,
-      overlays: viewerState.overlaysActive !== false,
-    };
-    postLog("guide-load-push", { persisted: {
-      sceneTori: viewerState.sceneToriVisible, scenePoles: viewerState.scenePolesVisible,
-      nodePoles: viewerState.nodePolesVisible, angleLabels: viewerState.angleLabelsVisible,
-      selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, overlaysActive: viewerState.overlaysActive,
-    }, pushed: guidePush });
-    postGoRecord(encodeOverlaysSet(guidePush));
+    // Overlays are Go-owned: Go's SeedOverlays reads view/scene.json on startup and streams
+    // the loaded visibilities into the buffer overlay columns the render path reads. TS must
+    // NOT push an overlay `set` on load — doing so overrode Go's persisted state with the
+    // (empty) viewerState defaults AND scheduled a persist that wrote those defaults back,
+    // wiping the saved overlay keys on every reload. There is nothing to do here.
   } else if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running
