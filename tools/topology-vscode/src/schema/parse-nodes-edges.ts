@@ -63,6 +63,13 @@ function parsePort(v: unknown, path: string): Port {
     }
     out.anchorId = id;
   }
+  if (o.portR !== undefined) {
+    const r = num(o.portR, `${path}.portR`);
+    if (!Number.isFinite(r) || r < 0) {
+      throw new Error(`${path}.portR: expected non-negative number, got ${JSON.stringify(o.portR)}`);
+    }
+    out.portR = r;
+  }
   return out;
 }
 

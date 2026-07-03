@@ -22,7 +22,8 @@ import "math"
 // portGeom is one port's layout descriptor: its name and optional ring-anchor index.
 type portGeom struct {
 	Name     string
-	AnchorId *int // optional index into the flat ring-anchor array; nil → ring slot 0
+	AnchorId *int     // optional index into the flat ring-anchor array; nil → ring slot 0
+	PortR    *float64 // optional per-port radius (distance from node center); nil → nodeRadius(kind) fallback (see portRadiusByName)
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
@@ -217,6 +218,30 @@ func portDir(g nodeGeom, portName string, isInput bool) (vec3, bool) {
 	return ringAnchorDir(R, anchorIdx), true
 }
 
+// portRadiusByName returns the per-port radius (distance from node center at
+// which this port is drawn and its edge attaches) for the named port on g.
+// This is the AUTHORITATIVE port-placement radius: it returns the port's own
+// stored PortR when set. The nodeRadius(kind) formula (min(w,h)/4) is used ONLY
+// as a fallback for ports that have no stored PortR — e.g. registry-default
+// ports synthesized in specNode.toNodeGeom for hand-written/partial specs that
+// omit inputs/outputs. This is the one remaining call site of that formula for
+// port placement; every materialized port file carries its own portR.
+func portRadiusByName(g nodeGeom, portName string, isInput bool) float64 {
+	list := g.Outputs
+	if isInput {
+		list = g.Inputs
+	}
+	for _, p := range list {
+		if p.Name == portName {
+			if p.PortR != nil {
+				return *p.PortR
+			}
+			break
+		}
+	}
+	return nodeRadius(g.Kind)
+}
+
 // portWorldPos returns the sphere-surface point in the port direction, or the
 // node center when the port is unnamed/unknown. This is the authoritative port
 // placement (Go owns geometry); the TS renderer plots from Go's streamed segments.
@@ -229,7 +254,7 @@ func portWorldPos(g nodeGeom, portName string, isInput bool) vec3 {
 	if !ok {
 		return center
 	}
-	return center.add(dir.scale(nodeRadius(g.Kind)))
+	return center.add(dir.scale(portRadiusByName(g, portName, isInput)))
 }
 
 // arcLengthBetweenPorts computes the straight chord distance between the

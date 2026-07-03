@@ -81,5 +81,5 @@ func portWorldPosAimed(
 	if !ok {
 		return center
 	}
-	return center.add(dir.scale(nodeRadius(g.Kind)))
+	return center.add(dir.scale(portRadiusByName(g, portName, isInput)))
 }
