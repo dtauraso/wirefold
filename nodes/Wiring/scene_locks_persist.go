@@ -29,7 +29,7 @@ import (
 // self-describing.
 type scenePolarTerm struct {
 	Node string  `json:"node"`
-	Comp string  `json:"comp"` // "theta" | "phi"
+	Comp string  `json:"comp"` // "theta" | "phi" | "r"
 	Sign float64 `json:"sign"` // +1 or -1
 }
 type scenePolarEq struct {
@@ -39,16 +39,24 @@ type scenePolarEq struct {
 }
 
 func compToString(c polarComp) string {
-	if c == compPhi {
+	switch c {
+	case compPhi:
 		return "phi"
+	case compR:
+		return "r"
+	default:
+		return "theta"
 	}
-	return "theta"
 }
 func compFromString(s string) polarComp {
-	if s == "phi" {
+	switch s {
+	case "phi":
 		return compPhi
+	case "r":
+		return compR
+	default:
+		return compTheta
 	}
-	return compTheta
 }
 
 func toScenePolarEq(eq polarEq) scenePolarEq {

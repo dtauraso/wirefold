@@ -9,8 +9,8 @@ import { useOverlayFlags } from "./overlay-flags";
 import { useRuleBuilder, type RuleBuilderTerm } from "./rule-builder";
 
 /** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=+θ,
- *  1=+φ, 2=−θ, 3=−φ). */
-const ANGLE_CHIPS = ["+θ", "+φ", "−θ", "−φ"];
+ *  1=+φ, 2=−θ, 3=−φ, 4=r — r is unsigned). */
+const ANGLE_CHIPS = ["+θ", "+φ", "−θ", "−φ", "r"];
 
 function angleChip(code: number): string {
   return ANGLE_CHIPS[code] ?? "?";

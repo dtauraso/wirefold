@@ -478,8 +478,8 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 // Center sphere itself).
 //
 //   - A handhold hit (Hit.Kind=="handhold", HandholdTerm>=0) latches a pending half-term
-//     decoded from the term-id (+θ=0, +φ=1, -θ=2, -φ=3: comp = term&1, sign = term&2 ? -1
-//     : +1) WITHOUT touching md.selected.
+//     decoded from the term-id (+θ=0, +φ=1, -θ=2, -φ=3, r=4; see decodeTermCode) WITHOUT
+//     touching md.selected.
 //   - A node hit while a half-term is pending completes the term {Node, comp, sign} and
 //     appends it to ruleTerms. Once two terms have accumulated (a full equation) and
 //     md.selected names a Center, they form one polarEq appended to md.polarEqs and the
@@ -491,12 +491,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 	g := &md.gest
 	switch {
 	case ev.Hit.Kind == "handhold" && ev.Hit.HandholdTerm >= 0:
-		term := ev.Hit.HandholdTerm
-		g.pendingComp = polarComp(term & 1)
-		g.pendingSign = 1
-		if term&2 != 0 {
-			g.pendingSign = -1
-		}
+		g.pendingComp, g.pendingSign = decodeTermCode(ev.Hit.HandholdTerm)
 		g.hasPending = true
 		md.emitRuleBuilder(tr)
 		return true
@@ -526,10 +521,13 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 	}
 }
 
-// ruleTermCode packs a completed/pending term's (comp, sign) to a single 0..3 code —
-// matches the handhold hit's HandholdTerm encoding: +θ=0, +φ=1, −θ=2, −φ=3, i.e.
-// code = (sign<0 ? 2 : 0) + (comp==compPhi ? 1 : 0).
+// ruleTermCode packs a completed/pending term's (comp, sign) to a single code — matches the
+// handhold hit's HandholdTerm encoding: +θ=0, +φ=1, −θ=2, −φ=3, r=4 (r is unsigned), i.e.
+// the angles use code = (sign<0 ? 2 : 0) + (comp==compPhi ? 1 : 0); r is the fixed code 4.
 func ruleTermCode(comp polarComp, sign float64) int {
+	if comp == compR {
+		return 4
+	}
 	code := 0
 	if sign < 0 {
 		code += 2
@@ -538,6 +536,19 @@ func ruleTermCode(comp polarComp, sign float64) int {
 		code++
 	}
 	return code
+}
+
+// decodeTermCode is the inverse of ruleTermCode: a handhold/term code → (comp, sign). Code 4
+// is r (unsigned, sign +1); codes 0..3 are the signed angles (comp = code&1, sign = code&2).
+func decodeTermCode(code int) (polarComp, float64) {
+	if code == 4 {
+		return compR, 1
+	}
+	sign := 1.0
+	if code&2 != 0 {
+		sign = -1
+	}
+	return polarComp(code & 1), sign
 }
 
 // emitRuleBuilder emits the FULL current rule-builder session state (KindRuleBuilder):

@@ -14,8 +14,9 @@ import {
   type NavNode, decodeNavNodes, contentSphereFromCenters,
 } from "./buffer-nav";
 
-// HANDHOLD_TERM_TAG — userData key stamped on the octant θ/φ angle handhold meshes with
-// their term-id (+θ=0, +φ=1, -θ=2, -φ=3; see nodes/Wiring/gesture.go). Mirrors
+// HANDHOLD_TERM_TAG — userData key stamped on the octant angle handhold meshes and the
+// pole-crossing radius handholds with their term-id (+θ=0, +φ=1, -θ=2, -φ=3, r=4; see
+// nodes/Wiring/gesture.go). Mirrors
 // BUFFER_EDGE_TAG (buffer-scene.tsx) as the pattern for a numeric pick-payload tag.
 export const HANDHOLD_TERM_TAG = "handholdTerm";
 
@@ -241,11 +242,11 @@ function PolarFrame({ center, scale, tag, octants }: {
         <AxisLabel key={`pl-${p.n}`} text={`${p.sz > 0 ? "+" : "−"}φ`} color={p.c} position={[p.sx * arcMid, 0, p.sz * arcMid]} size={poleLen * 0.11} />
       ))}
       {octants && (<>
-        {/* Decorative handholds (NO pick / NO behavior): an orange grab-sphere where each
-            pole crosses the arc circles (±arcR on each axis) and at each quarter-arc
-            midpoint. raycast off, no userData.handhold. Opaque so the color is stable. */}
+        {/* Radius (r) handholds: the six pole-crossing grab-spheres (±arcR on each axis).
+            All pickable and stamped with the r term-id (code 4, unsigned), so grabbing any
+            of them selects the node's RADIUS component for the rule-builder. */}
         {([[arcR, 0, 0], [-arcR, 0, 0], [0, arcR, 0], [0, -arcR, 0], [0, 0, arcR], [0, 0, -arcR]] as [number, number, number][]).map((p, i) => (
-          <mesh key={`hhp-${i}`} position={p} raycast={() => null}>
+          <mesh key={`hhp-${i}`} position={p} userData={{ [HANDHOLD_TERM_TAG]: 4 }}>
             <sphereGeometry args={[hhR, 12, 12]} />
             <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} />
           </mesh>

@@ -13,13 +13,14 @@ package Wiring
 // the equations touching it are satisfied by writing the OTHER term's component; that is a
 // property of solving, not a stored direction.
 
-// polarComp names the polar-coordinate component an equation term constrains. Radius is
-// intentionally excluded — equations constrain angles only.
+// polarComp names the polar-coordinate component an equation term constrains: the two
+// angles (θ, φ) or the radius (r). r carries no sign — a negative radius is meaningless.
 type polarComp int
 
 const (
 	compTheta polarComp = iota // θ: polar angle from +y
 	compPhi                    // φ: azimuth around +y
+	compR                      // r: radius (distance from Center); always +1 sign
 )
 
 // polarTerm is one side of an equation: a node's polar component about the Center, times a
@@ -37,19 +38,26 @@ type polarEq struct {
 	B      polarTerm
 }
 
-// compOf reads a polar's θ or φ.
+// compOf reads a polar's θ, φ, or r.
 func compOf(p polar, c polarComp) float64 {
-	if c == compPhi {
+	switch c {
+	case compPhi:
 		return p.Phi
+	case compR:
+		return p.R
+	default:
+		return p.Theta
 	}
-	return p.Theta
 }
 
-// setCompOf writes a polar's θ or φ, leaving the other coordinates untouched.
+// setCompOf writes a polar's θ, φ, or r, leaving the other coordinates untouched.
 func setCompOf(p *polar, c polarComp, v float64) {
-	if c == compPhi {
+	switch c {
+	case compPhi:
 		p.Phi = v
-	} else {
+	case compR:
+		p.R = v
+	default:
 		p.Theta = v
 	}
 }
