@@ -300,3 +300,48 @@ diameter-hypotenuse made it span the whole sphere and drift off-view
 [drift 2](screenshots/2026-06-17-panguide-triangle-drift-2.png)). Fix: use the camera-up as
 the pole so the green intersection line and the compact C–Q–P right triangle (right angle at
 the foot Q) land on the visible horizontal torus.
+
+---
+
+## 2026-07-02 — Agnostic content buffer: one binary representation both ways (merged to main)
+
+Designed + shipped the biggest architecture change since v0: **input → Go (owns all state) →
+one language-agnostic binary buffer → TS renders**. TS holds no domain state; it decodes the
+buffer and forwards raw input. Built the new system behind a flag alongside the old one, then
+**erased the old system 100%** in one revertible commit (23 files, ~1700 lines: `pump.ts`,
+the render/spec/camera/cursor stores, the old scene-graph/beads render, `interaction-handlers`,
+the `wirefold.newSystem` flag). The erase found **no hidden compile-time deps** — a clean `tsc`
+with the old code gone was the proof the new system stood alone.
+
+Brought every feature to parity on the buffer (nodes/colors/labels, beads, edges, double-links,
+sphere-rings, selection incl. on-surface + edge, ports + edge-create + handhold, overlays, fade,
+hover, camera). Then made **both bridges binary**: Go→TS is the content buffer (no sidecar —
+label rides a buffer section, kind is a numeric column, identity is row-index); TS→Go is framed
+binary records on stdin (no JSON on either wire). Logs now **decode from the buffer's EVENT
+block** (Go's JSON emitter removed) — the spec's "one representation including logs."
+
+**The friction (and the lesson):** the live-testing round exposed three persistence bugs that
+GREEN UNIT TESTS HID — (1) `EnableEditPersist` computed the tree root as `""` for a FILE-form
+`topologyPath` so node/anchor/overlay persisters silently no-op'd; (2) `main.tsx` still pushed
+overlays to Go on `load` (empty→defaults), clobbering Go's persisted state; (3) `LoadOverlays`
+skipped emitting when scene.json had no overlay keys, so the buffer streamed all-off. Each fix
+"passed its test" while failing live. The reliable check turned out to be a **headless
+disk-repro** — drive the built binary via framed stdin, read the actual `scene.json`/`meta.json`
+bytes, two runs to prove write THEN reload-restore. Compounded by the two-process reload gap
+(webview-only reload keeps the stale Go process) and the cost-overrun pattern (each blind fix was
+speculative tooling on an unverified diagnosis). Captured as
+`feedback_headless_repro_verifies_persistence`.
+
+**Hardening after merge (PR #5):** turned the pain into guardrails — unified all five persisters
+onto one `sceneTreeRoot`/`sceneJSONPath` resolver + a `check-scene-path-resolution` guard (the
+path-drift bug class is now unrepresentable); wired a real **Go debug breadcrumb channel** to
+`.probe/go-debug.jsonl` (the JSON-emitter removal had left Go-side debugging to scattered
+`Fprintf`); audited `memory/` against the post-erase code (51/55 valid; rewrote the 2 the erase
+invalidated). Trimmed dead surface: the `overlays attr=set` bridge record (no sender post
+load-push removal) and the unexercised missed-bead/red-torus status viz (buffer columns + trace
+event + render), preserving HoldNewSendOld's discard behavior (a mismatched bead is still
+consumed-and-dropped, now silently — consistent with the no-back-pressure node model).
+
+**Outcome:** merged to `main` (fast-forward), then hygiene/trims via PR #5. Both bridges binary,
+no JSON anywhere, no sidecar, logs from the buffer. Verified live in the editor across the whole
+feature set; persistence proven on-disk.
