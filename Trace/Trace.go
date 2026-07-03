@@ -274,14 +274,15 @@ type Event struct {
 // all nodes have stopped to drain
 // the channel and receive the final event slice via Events().
 type Trace struct {
-	ch      chan Event
-	done    chan struct{}
-	stopped chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
-	mu      sync.Mutex
-	events  []Event
-	closed  bool
-	sink    io.Writer   // if non-nil, each event is written as JSONL in real time
-	onEvent func(Event) // if non-nil, called from drain goroutine on every event (binary snapshot hook)
+	ch        chan Event
+	done      chan struct{}
+	stopped   chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
+	mu        sync.Mutex
+	events    []Event
+	closed    bool
+	sink      io.Writer   // if non-nil, each event is written as JSONL in real time
+	onEvent   func(Event) // if non-nil, called from drain goroutine on every event (binary snapshot hook)
+	debugSink io.Writer   // if non-nil, Breadcrumb() lines are ALSO written here (production debug channel)
 }
 
 // New allocates a Trace with a buffered emit channel. buf controls
@@ -580,7 +581,14 @@ func (t *Trace) PulseCancelled(node, port string, value int, bead uint64) {
 // Used to trace one-off control events (e.g. edge delete / wire reset)
 // that have no place in the recv/fire/send/done lifecycle.
 func (t *Trace) Breadcrumb(label, node, port, value string) {
-	if t == nil || t.sink == nil {
+	if t == nil {
+		return
+	}
+	// sink = the in-process test observation buffer (headless model/gate tests poll it).
+	// debugSink = the PRODUCTION debug channel (os.Stdout, wired in main via SetDebugSink),
+	// which the ext host recognises by the "breadcrumb" kind and routes to .probe/go-debug.jsonl.
+	// A breadcrumb with neither sink wired is a cheap no-op (marshal is skipped).
+	if t.sink == nil && t.debugSink == nil {
 		return
 	}
 	b, err := marshalBreadcrumb(label, node, port, value)
@@ -589,8 +597,30 @@ func (t *Trace) Breadcrumb(label, node, port, value string) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	_, _ = t.sink.Write(b)
-	_, _ = t.sink.Write([]byte{'\n'})
+	if t.sink != nil {
+		_, _ = t.sink.Write(b)
+		_, _ = t.sink.Write([]byte{'\n'})
+	}
+	if t.debugSink != nil {
+		_, _ = t.debugSink.Write(b)
+		_, _ = t.debugSink.Write([]byte{'\n'})
+	}
+}
+
+// SetDebugSink wires the production DEBUG BREADCRUMB channel: after this call every
+// Breadcrumb() line is ALSO written to w in real time (in addition to the optional
+// in-process test sink). main passes os.Stdout so breadcrumbs ride stdout as
+// {"kind":"breadcrumb",...} lines; the ext host routes those to .probe/go-debug.jsonl
+// (distinct from trace events, which flow on fd3, and from errors on stderr). This is
+// diagnostic-only and fire-and-forget — it never blocks node loops and is safe to leave
+// unset (Breadcrumb stays a no-op). Set once at startup before nodes run.
+func (t *Trace) SetDebugSink(w io.Writer) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.debugSink = w
 }
 
 func marshalBreadcrumb(label, node, port, value string) ([]byte, error) {
