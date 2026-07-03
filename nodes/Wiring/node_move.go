@@ -439,7 +439,25 @@ type MoveDispatch struct {
 	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Edge
 	// block, so it — not TS — maps an edge row to its label.
 	edgeRows EdgeRowResolver
+	// nodeRows resolves a numeric buffer NODE-ROW index (carried on a new-system raw hit)
+	// back to its node id. Wired to the buffer SnapshotState's node-row table in main.go
+	// (new-system only); nil on the old path and in unit tests, in which case the gesture
+	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Node
+	// block, so it — not TS — maps a node row to its id.
+	nodeRows NodeRowResolver
 }
+
+// NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
+// Buffer.SnapshotState (which wrote the Node block in this same row order). Kept as an
+// interface here so the Wiring package needs no dependency on the Buffer package — main.go
+// injects the concrete resolver.
+type NodeRowResolver interface {
+	LookupNodeRow(row int) (nodeID string, ok bool)
+}
+
+// SetNodeRowResolver injects the node-row resolver (new-system only). Called once at
+// startup after LoadTopology.
+func (md *MoveDispatch) SetNodeRowResolver(r NodeRowResolver) { md.nodeRows = r }
 
 // EdgeRowResolver maps a numeric buffer EDGE-ROW index to its edge label. Implemented by
 // Buffer.SnapshotState (which wrote the Edge block in this same row order). Kept as an

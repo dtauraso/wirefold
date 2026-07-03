@@ -197,9 +197,11 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 		g.handholdDown = true
 		md.beginSphereRotation(ev)
 	case "node":
-		if c, ok := md.centerOfNode(ev.Hit.Id); ok {
-			g.dragNode = ev.Hit.Id
-			g.dragStartCenter = c
+		if node, ok := md.nodeFromHit(ev.Hit); ok {
+			if c, ok := md.centerOfNode(node); ok {
+				g.dragNode = node
+				g.dragStartCenter = c
+			}
 		}
 	case "empty":
 		g.emptyDown = true
@@ -445,7 +447,9 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	var node string
 	switch ev.Hit.Kind {
 	case "node":
-		node = ev.Hit.Id
+		if n, ok := md.nodeFromHit(ev.Hit); ok {
+			node = n
+		}
 	case "port":
 		if n, _, _, ok := md.portFromHit(ev.Hit); ok {
 			node = n
@@ -454,6 +458,21 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selected = node
 	md.selectedEdge = ""
 	tr.Select(node, own)
+}
+
+// nodeFromHit resolves a node hit to its node id. On the new-system path a node hit carries
+// only a numeric buffer NODE-ROW index (the node InstancedMesh instanceId == its buffer node
+// row); Go maps it back through its own node-row table (nodeRows), since Go owns the topology
+// and wrote the Node block in that same row order. When no resolver is wired (old path / unit
+// tests) it falls back to the hit's Id string.
+func (md *MoveDispatch) nodeFromHit(h rawHit) (node string, ok bool) {
+	if md.nodeRows != nil && h.NodeRow >= 0 {
+		return md.nodeRows.LookupNodeRow(h.NodeRow)
+	}
+	if h.Id != "" {
+		return h.Id, true
+	}
+	return "", false
 }
 
 // edgeFromHit resolves an edge hit to its edge label. On the new-system path an edge hit

@@ -195,7 +195,13 @@ type rawHit struct {
 	// pick-halo carries its buffer edge row). -1 (or absent) when not an edge hit. Go
 	// resolves this row → edge label via its own edge-row table (edgeFromHit); no edge
 	// label crosses the bridge.
-	EdgeRow int     `json:"edgeRow"`
+	EdgeRow int `json:"edgeRow"`
+	// NodeRow is the numeric buffer NODE-ROW index for a new-system node hit (the node
+	// InstancedMesh instanceId == its buffer node row). -1 (or absent) on the old path /
+	// unit tests, which carry the node id in the Id string instead. Go resolves this row →
+	// node id via its own node-row table (nodeFromHit); no node id crosses the bridge on the
+	// new-system path.
+	NodeRow int     `json:"nodeRow"`
 	IsInput bool    `json:"isInput"`
 	X       float64 `json:"x"`
 	Y       float64 `json:"y"`

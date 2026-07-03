@@ -75,6 +75,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Go resolves it back to its edge label here (Go wrote the Edge block in that row order)
 	// to mark the Go-owned edge selection.
 	md.SetEdgeRowResolver(snapState)
+	// Likewise the node-row table: a node hit carries only a numeric buffer NODE-ROW index;
+	// Go resolves it back to its node id here (Go wrote the Node block in that row order) to
+	// drag/select the Go-owned node — no node id crosses the bridge.
+	md.SetNodeRowResolver(snapState)
 	// Initial camera viewpoint = FILE DATA: Go reads the saved camera from
 	// <topologyPath>/view/scene.json and installs it into the gesture-FSM viewpoint.
 	W.SeedInitialViewpoint(topologyPath, md, tr)
