@@ -91,6 +91,16 @@ type gestureState struct {
 	// per-gesture render params captured from the raw events
 	fov  float64
 	rect gestureRect
+
+	// Polar rule-builder session state (active only while the selSpherePoles overlay is
+	// ON — see trySelectSphereRule / clearRuleBuilding). A handhold click latches a
+	// pending half-term (comp, sign); a subsequent node click completes it. Every
+	// consecutive PAIR of completed terms forms one polarEq about md.selected (the
+	// latched Center), appended to md.polarEqs.
+	hasPending  bool
+	pendingComp polarComp
+	pendingSign float64
+	ruleTerms   []polarTerm
 }
 
 type gestureRect struct{ left, top, width, height float64 }
@@ -454,9 +464,72 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 		// selection. md.selected is the authoritative selection; Select() emits it so the
 		// buffer snapshot marks the node's Selected column. g.secondary (two-finger tap)
 		// picks the "own" select mode; a primary click picks "surface".
-		md.applySelect(ev, tr, g.secondary)
+		if !md.trySelectSphereRule(ev, tr) {
+			md.applySelect(ev, tr, g.secondary)
+		}
 	}
 	g.reset()
+}
+
+// trySelectSphereRule handles a click while the selSpherePoles overlay is ON: node clicks
+// author a polar rule instead of changing selection. Returns true when it handled the
+// click (suppressing the normal click-select); false when the overlay is off or the hit
+// doesn't participate in rule-building (falls through to applySelect, e.g. to pick the
+// Center sphere itself).
+//
+//   - A handhold hit (Hit.Kind=="handhold", HandholdTerm>=0) latches a pending half-term
+//     decoded from the term-id (+θ=0, +φ=1, -θ=2, -φ=3: comp = term&1, sign = term&2 ? -1
+//     : +1) WITHOUT touching md.selected.
+//   - A node hit while a half-term is pending completes the term {Node, comp, sign} and
+//     appends it to ruleTerms. Once two terms have accumulated (a full equation) and
+//     md.selected names a Center, they form one polarEq appended to md.polarEqs and the
+//     accumulator resets for the next equation (e.g. a mirror's θ-pair then φ-pair).
+func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
+	if !md.ov.selSpherePolesVisible {
+		return false
+	}
+	g := &md.gest
+	switch {
+	case ev.Hit.Kind == "handhold" && ev.Hit.HandholdTerm >= 0:
+		term := ev.Hit.HandholdTerm
+		g.pendingComp = polarComp(term & 1)
+		g.pendingSign = 1
+		if term&2 != 0 {
+			g.pendingSign = -1
+		}
+		g.hasPending = true
+		return true
+	case ev.Hit.Kind == "node" && g.hasPending:
+		node, ok := md.nodeFromHit(ev.Hit)
+		g.hasPending = false
+		if !ok {
+			return true // suppress select even when the hit is unresolvable
+		}
+		g.ruleTerms = append(g.ruleTerms, polarTerm{Node: node, Comp: g.pendingComp, Sign: g.pendingSign})
+		if len(g.ruleTerms) == 2 && md.selected != "" {
+			eq := polarEq{Center: md.selected, A: g.ruleTerms[0], B: g.ruleTerms[1]}
+			md.polarEqs = append(md.polarEqs, eq)
+			if tr != nil {
+				tr.Breadcrumb("polar-rule-added", md.selected, node, "")
+			}
+			if md.locksPersist != nil {
+				md.locksPersist.schedule(md.polarEqs)
+			}
+			g.ruleTerms = nil
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// clearRuleBuilding ends any in-progress polar rule-building session: half-finished
+// pending term + accumulated ruleTerms. Called when the selSpherePoles overlay turns OFF
+// (stdin_reader.go applyUpdate) so a stale pending/half-formed pair doesn't leak into the
+// next session.
+func (md *MoveDispatch) clearRuleBuilding() {
+	md.gest.hasPending = false
+	md.gest.ruleTerms = nil
 }
 
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is

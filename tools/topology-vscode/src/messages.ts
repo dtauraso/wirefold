@@ -99,6 +99,9 @@ export type RawHit = {
   /** Numeric buffer EDGE-ROW index for an edge hit (the edge's pick-halo carries its buffer
    *  edge row); -1 when not an edge hit. Go resolves edgeRow → its edge via its edge-row table. */
   edgeRow: number;
+  /** Term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; NavGuides.tsx HANDHOLD_TERM_TAG);
+   *  -1 when not a handhold hit. Go decodes comp/sign from it (nodes/Wiring/gesture.go). */
+  handholdTerm: number;
   x: number;
   y: number;
   z: number;

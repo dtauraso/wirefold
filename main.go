@@ -103,6 +103,9 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// the buffer streams the saved overlay state from the first frame. Seed BEFORE
 	// EnableEditPersist so the seed's own emit does not write the loaded state back.
 	md.LoadOverlays(topologyPath, tr)
+	// Restore persisted polar rule-builder equations (locks.go) from scene.json's
+	// "polarLocks" key, so authored rules survive a reload.
+	md.LoadPolarEqs(topologyPath)
 	// Arm the WRITE side AFTER the seeds: from here, every gesture that changes the FSM
 	// viewpoint (orbit/zoom/pan/home) debounces a write of the current pose back to
 	// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.

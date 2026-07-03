@@ -395,8 +395,8 @@ type MoveDispatch struct {
 	// links is the double-link movement graph (links.go). Polar locks ride on these;
 	// the graph is declared at load and is independent of the displayed data edges.
 	links []movementLink
-	// mirrorLocks are polar mirror locks rebuilt on the link graph (locks.go).
-	mirrorLocks []mirrorLock
+	// polarEqs are the polar-equation locks riding on the link graph (locks.go).
+	polarEqs []polarEq
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
@@ -425,6 +425,10 @@ type MoveDispatch struct {
 	anchorPersist   *anchorPersister
 	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
+	// locksPersist is the debounced disk persister for the polar rule-builder's equations
+	// (md.polarEqs, scene_locks_persist.go). Armed by EnableEditPersist; nil until armed
+	// (tests that never arm).
+	locksPersist *polarEqsPersister
 	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
 	// KindSelect so the buffer snapshot marks the node's Selected column.
@@ -821,9 +825,10 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
 	// read the stored link polar — no cart2polar in the lock equation.
 	md.refreshLinksTouching(nodeID, pos)
-	// Apply the polar locks riding on the link graph: each triggered follower is written
-	// (in polar, on its link) and its derived world is merged into the single per-frame fan.
-	for id, w := range md.applyMirrorLocks(nodeID, pos) {
+	// Apply the polar-equation locks riding on the link graph: each equation touching the
+	// moved node writes the OTHER term's node (in polar, on its link) and its derived world
+	// is merged into the single per-frame fan.
+	for id, w := range md.applyPolarEqs(nodeID, pos) {
 		emit[id] = w
 	}
 
@@ -919,6 +924,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.locksPersist = &polarEqsPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

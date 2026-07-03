@@ -130,11 +130,15 @@ type rawHit struct {
 	// unit tests, which carry the node id in the Id string instead. Go resolves this row →
 	// node id via its own node-row table (nodeFromHit); no node id crosses the bridge on the
 	// new-system path.
-	NodeRow int     `json:"nodeRow"`
-	IsInput bool    `json:"isInput"`
-	X       float64 `json:"x"`
-	Y       float64 `json:"y"`
-	Z       float64 `json:"z"`
+	NodeRow int `json:"nodeRow"`
+	// HandholdTerm is the term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; see
+	// NavGuides.tsx HANDHOLD_TERM_TAG); -1 (or absent) when not a handhold hit. Decoded into
+	// (comp, sign) by the gesture FSM's rule-builder (gesture.go).
+	HandholdTerm int     `json:"handholdTerm"`
+	IsInput      bool    `json:"isInput"`
+	X            float64 `json:"x"`
+	Y            float64 `json:"y"`
+	Z            float64 `json:"z"`
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
@@ -240,6 +244,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				// persister so it uses the correct sceneCameraPath-resolved path.
 				if md != nil {
 					md.overlaysPersist.schedule(md.ov)
+					md.locksPersist.schedule(md.polarEqs)
 				}
 			case "fade-toggle":
 				// Bare FADE command: toggle fade on the Go-owned current selection. Go owns
@@ -345,6 +350,11 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			// Flip the named flag — Go owns the state; TS just signals the flip.
 			if fn, ok := overlayToggles[msg.Flag]; ok {
 				fn(md, tr)
+				// Turning the rule-builder's overlay off ends the authoring session:
+				// clear any half-finished pending term / accumulated ruleTerms.
+				if msg.Flag == "selSpherePoles" && !md.ov.selSpherePolesVisible {
+					md.clearRuleBuilding()
+				}
 			}
 		}
 		// Persist ON CHANGE (mirrors fade/camera): schedule a debounced write of the new
