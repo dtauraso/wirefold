@@ -18,7 +18,6 @@ import { RunButton } from "./three/RunButton";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { viewerState } from "./state/viewer-state";
 import { setLatestSnapshot } from "./snapshot-buffer";
-import { recordNavNodeLabel, clearNavNodeIds } from "./three/buffer-nav";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -83,11 +82,9 @@ window.addEventListener("message", (e) => {
     // becoming hidden / about to dispose).
     flushViewSave();
   } else if (msg.type === "load") {
-    // Fully Go/buffer-driven: NO spec store, NO pump. Reset the row-keyed buffer-nav
-    // id/label table so it repopulates in node-row order from the fresh run's node-label
-    // sidecar. Everything the render needs arrives via buffer-snapshot + node-label;
-    // label/badge visibility comes from the buffer overlay columns.
-    clearNavNodeIds();
+    // Fully Go/buffer-driven: NO spec store, NO pump. Everything the render needs arrives via
+    // buffer-snapshot ALONE — node labels ride the buffer node block (LabelOff/LabelLen),
+    // there is no id/label sidecar; label/badge visibility comes from the overlay columns.
     // Push all Go-owned guide visibilities (including the master overlays toggle) so Go's
     // authoritative state survives a window reload; Go reflects these into the buffer
     // overlay columns the render path reads.
@@ -111,11 +108,6 @@ window.addEventListener("message", (e) => {
       selSpherePoles: viewerState.selSpherePolesVisible, handholdsVisible: viewerState.handholdsVisible, overlaysActive: viewerState.overlaysActive,
     }, pushed: guidePush });
     vscode.postMessage({ type: "edit", op: "update", kind: "overlays", attr: "set", state: guidePush });
-  } else if (msg.type === "node-label") {
-    // New-system label sidecar: record {id,label} into the row-keyed buffer-nav table
-    // (first-seen order == buffer node-row order). Runs under both flags; flag-off never
-    // reads this table, so the extra write is invisible there.
-    recordNavNodeLabel(msg.id, msg.label);
   } else if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running

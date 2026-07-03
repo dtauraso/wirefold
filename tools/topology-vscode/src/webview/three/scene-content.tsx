@@ -14,13 +14,12 @@ import {
 } from "../../schema/shading-params";
 import { ProceduralEnvProvider } from "./scene-env";
 import { CameraSettleDetector } from "./scene-camera";
-import { getNavNodeIds, instanceIdToNodeId } from "./buffer-nav";
 import { BUFFER_NODE_TAG, BUFFER_PORT_TAG, BUFFER_EDGE_TAG } from "./buffer-scene";
 
 // ---------------------------------------------------------------------------
 // Buffer-backed pick helpers. Nodes/ports/edges are InstancedMesh / halo meshes
-// rendered by buffer-scene.tsx in buffer-row order; the pick resolves the hit back
-// to a node id (via the nav id table) or a numeric buffer row (forwarded to Go).
+// rendered by buffer-scene.tsx in buffer-row order; the pick resolves the hit to a numeric
+// buffer ROW (node / port / edge), forwarded to Go — Go resolves the row back to its entity.
 // ---------------------------------------------------------------------------
 
 /**
@@ -52,15 +51,19 @@ function pickBufferEdge(hits: THREE.Intersection[]): string | null {
   return null;
 }
 
-function pickBufferNode(hits: THREE.Intersection[], excludeId?: string): string | null {
-  const ids = getNavNodeIds();
+/**
+ * NODE pick: buffer-rendered nodes are an InstancedMesh (buffer-scene.tsx NodeInstances)
+ * tagged with BUFFER_NODE_TAG, where instanceId IS the buffer NODE-ROW index. Returns that row
+ * as a decimal STRING so classifyHit can forward the numeric row to Go — which resolves it back
+ * to its node id. excludeRow (decimal string) skips a specific row (nodesOnly re-pick).
+ */
+function pickBufferNode(hits: THREE.Intersection[], excludeRow?: string): string | null {
   for (const hit of hits) {
     if ((hit.object as THREE.Mesh).userData?.[BUFFER_NODE_TAG] !== true) continue;
     if (hit.instanceId === undefined) continue;
-    const id = instanceIdToNodeId(hit.instanceId, ids);
-    if (id === null) continue;
-    if (excludeId && id === excludeId) continue;
-    return id;
+    const row = String(hit.instanceId);
+    if (excludeRow && row === excludeRow) continue;
+    return row;
   }
   return null;
 }

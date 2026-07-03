@@ -83,29 +83,16 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     }
   };
   let lastSpec: { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined;
-  // New-system label sidecar: node ids already forwarded to the webview as {id,label}
-  // messages this run. node-geometry events re-emit on every move/resend, but a node's
-  // label is stable per run, so we post once per id (first-seen order == buffer node-row
-  // order). Cleared on each new run (spec emit) so a reload rebuilds the table.
-  const labelSidecarSeen = new Set<string>();
   const runner = new BuildAndRunRunner(
     (status) => post({ type: "run-status", ...status }),
     (event) => {
+      // Forward the JSON trace event verbatim (the .probe log source). Node labels are NOT
+      // derived here anymore — each node's label rides the binary content buffer's node block
+      // (LabelOff/LabelLen), so there is no id/label sidecar. Go → TS is buffer-only.
       post({ type: "trace-event", event });
-      // Derive the label sidecar from node-geometry events. The event carries the
-      // node's human label (Go: data.label, else id); forward {id,label} once per id.
-      // This channel is independent of pump.ts so the flag-on path (which ignores JSON
-      // trace-events) still receives node labels.
-      if (event.kind === "node-geometry" && !labelSidecarSeen.has(event.node)) {
-        labelSidecarSeen.add(event.node);
-        post({ type: "node-label", id: event.node, label: event.label ?? event.node });
-      }
     },
     (spec) => {
       // Go emitted the spec on startup — cache it and send it to the webview as a load message.
-      // A spec emit marks a fresh run: reset the label-sidecar dedup so the webview's
-      // (also-cleared) table repopulates in node-row order.
-      labelSidecarSeen.clear();
       lastSpec = spec;
       post({ type: "load", text: JSON.stringify(spec), sceneText: readSceneText() });
     },

@@ -123,19 +123,20 @@ type EditMsg =
 export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "wheel" | "home";
 
 /** The stateless raycast hit: which rendered entity is under the pointer + its world point.
- *  kind classifies the rendered target (three.js hit-testing); id is the entity id
- *  (node id, or "nodeId:in|out:portName" for a port on the OLD path); isInput selects the
- *  port side (old path). portRow is the numeric buffer PORT-ROW index for a NEW-system port
- *  hit (the port InstancedMesh instanceId == its buffer row); -1 when not a new-system port.
- *  Go resolves portRow → (node, port) via its own port-row table — no port name crosses. */
+ *  kind classifies the rendered target (three.js hit-testing). Every entity hit carries ONLY a
+ *  numeric buffer ROW — Go resolves the row back to its entity via its own row tables, so NO id
+ *  string crosses the bridge. isInput is vestigial (Go derives the port side from its port-row
+ *  table). nodeRow/portRow/edgeRow are the buffer NODE/PORT/EDGE row indices (the InstancedMesh
+ *  instanceId == its buffer row), each -1 when the hit is not of that kind. */
 export type RawHit = {
   kind: "port" | "handhold" | "node" | "edge" | "empty";
-  id: string;
   isInput: boolean;
+  /** Numeric buffer NODE-ROW index for a node hit (the node InstancedMesh instanceId == its
+   *  buffer row); -1 when not a node hit. Go resolves nodeRow → node id via its node-row table. */
+  nodeRow: number;
   portRow: number;
-  /** Numeric buffer EDGE-ROW index for a NEW-system edge hit (the edge's pick-halo carries
-   *  its buffer edge row); -1 when not an edge hit. Go resolves edgeRow → its edge via its
-   *  own edge-row table — no edge label crosses the bridge. */
+  /** Numeric buffer EDGE-ROW index for an edge hit (the edge's pick-halo carries its buffer
+   *  edge row); -1 when not an edge hit. Go resolves edgeRow → its edge via its edge-row table. */
   edgeRow: number;
   x: number;
   y: number;
@@ -229,14 +230,10 @@ export type HostToWebviewMsg =
   // Phase 3: binary snapshot from Go's fd3 side channel.
   // The ArrayBuffer is transferred zero-copy (postMessage transferable).
   // Phase 5 will render from it; for now the webview stubs the handler.
-  | { type: "buffer-snapshot"; buffer: ArrayBuffer }
-  // New-system label sidecar: per-node {id,label} derived by the host from each
-  // node-geometry trace event (which now carries the node's human label). The webview
-  // records it into the row-keyed buffer-nav label table (first-seen order == buffer
-  // node-row order), so the new render path resolves pill text without the old spec
-  // store. One message per node id per run (host dedups); repopulated on resend.
-  // KindId is now carried in the binary buffer node block; the sidecar is id + label only.
-  | { type: "node-label"; id: string; label: string };
+  // Go → TS is the binary content buffer ONLY (no id/label sidecar): each node's human label
+  // rides the buffer node block (LabelOff/LabelLen into the trailing label section) and is
+  // decoded row-keyed via buffer-decode nodeLabel.
+  | { type: "buffer-snapshot"; buffer: ArrayBuffer };
 
 // Note: "resend" is host-originated (runner.resend() writes it straight to Go's
 // stdin) and is never emitted by the webview. It is kept in this set so the
@@ -248,7 +245,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "load", "run-status", "flush", "save-error", "trace-event", "buffer-snapshot", "node-label",
+  "load", "run-status", "flush", "save-error", "trace-event", "buffer-snapshot",
 ]);
 
 // parseEdit validates an "edit" message by its op, mirroring the per-op payloads
@@ -380,8 +377,8 @@ function parseRawInput(m: Record<string, unknown>): WebviewToHostMsg | undefined
   if (!h || typeof h !== "object") return undefined;
   const hit = h as Record<string, unknown>;
   if (typeof hit.kind !== "string" || !RAW_HIT_KINDS.has(hit.kind)) return undefined;
-  if (typeof hit.id !== "string" || !bool(hit.isInput)) return undefined;
-  if (![hit.portRow, hit.edgeRow, hit.x, hit.y, hit.z].every(num)) return undefined;
+  if (!bool(hit.isInput)) return undefined;
+  if (![hit.nodeRow, hit.portRow, hit.edgeRow, hit.x, hit.y, hit.z].every(num)) return undefined;
   return m as unknown as WebviewToHostMsg;
 }
 
@@ -472,11 +469,6 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
     case "buffer-snapshot":
       // buffer must be an ArrayBuffer (transferred zero-copy from the host).
       return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;
-    case "node-label":
-      // id + label are required strings (KindId now rides the binary buffer; sidecar is text-only).
-      return typeof m.id === "string" && typeof m.label === "string"
-        ? (m as unknown as HostToWebviewMsg)
-        : undefined;
     default:
       return undefined;
   }

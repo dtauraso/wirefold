@@ -69,11 +69,6 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
   border: 1px solid #1976d2; border-radius: 4px; padding: 4px 6px;
   font: inherit; outline: none; min-width: 140px;
 }
-.node-label.rename-active {
-  outline: 1px solid #1976d2; border-radius: 2px;
-  background: #fff; color: #111;
-  cursor: text;
-}
 .palette-panel {
   position: fixed; top: 48px; left: 8px; bottom: 200px; width: 160px;
   padding: 8px 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;
