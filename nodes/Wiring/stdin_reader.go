@@ -245,9 +245,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				// Bare SAVE command: Go persists its OWN authoritative scene state. The
 				// camera pose is already continuously flushed (scene_camera_persist.go); this
 				// writes Go's current overlay-visibility snapshot to scene.json, preserving the
-				// Go-owned cameraPolar. No document crosses the bridge.
-				if md != nil && treeRoot != "" {
-					_ = writeSceneOverlays(treeRoot, md.ov)
+				// Go-owned cameraPolar. No document crosses the bridge. Route through the
+				// persister so it uses the correct sceneCameraPath-resolved path.
+				if md != nil {
+					md.overlaysPersist.schedule(md.ov)
 				}
 			case "fade-toggle":
 				// Bare FADE command: toggle fade on the Go-owned current selection. Go owns

@@ -162,7 +162,7 @@ func TestWriteSceneOverlaysPreservesCameraPolar(t *testing.T) {
 	// which must land as labelsGlobalHidden:true in scene.json.
 	ov := defaultOverlayState()
 	ov.labelsGlobalVisible = false
-	if err := writeSceneOverlays(td, ov); err != nil {
+	if err := writeSceneOverlays(sceneCameraPath(td), ov); err != nil {
 		t.Fatalf("writeSceneOverlays: %v", err)
 	}
 

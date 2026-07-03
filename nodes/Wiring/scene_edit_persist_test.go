@@ -198,7 +198,7 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	md.overlaysPersist.schedule(md.ov)
 	md.overlaysPersist.flush()
 
-	ov, found := loadSceneOverlays(root)
+	ov, found := loadSceneOverlays(sceneCameraPath(root))
 	if !found {
 		t.Fatalf("loadSceneOverlays found no overlay keys after flush")
 	}
@@ -252,8 +252,51 @@ func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
 		t.Fatalf("fade seeds clobbered: %v/%v", nodes, edges)
 	}
 	// Overlay landed.
-	ov, found := loadSceneOverlays(root)
+	ov, found := loadSceneOverlays(sceneCameraPath(root))
 	if !found || ov.sceneToriVisible {
 		t.Fatalf("overlay not persisted alongside camera+fade (found=%v ov=%+v)", found, ov)
+	}
+}
+
+// TestOverlaysPersistMonolithicForm: overlays persist correctly when topologyPath is a
+// monolithic file (not a directory), the form that caused the original treeRoot="" no-op bug.
+// sceneCameraPath resolves to the sibling view/scene.json; EnableEditPersist + SeedOverlays
+// must both land on that same path.
+func TestOverlaysPersistMonolithicForm(t *testing.T) {
+	// Build a tmp directory that looks like a monolithic topology: the "topology file"
+	// is a file inside the dir; view/scene.json is a sibling of that file.
+	dir := t.TempDir()
+	topoFile := dir + "/topology.json"
+	if err := os.WriteFile(topoFile, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	md := &MoveDispatch{ov: defaultOverlayState(), directlyFadedNodes: map[string]bool{}, directlyFadedEdges: map[string]bool{}}
+	md.EnableEditPersist(topoFile) // topologyPath is a FILE, not a dir
+
+	// overlaysPersist.path must be non-empty (the sceneCameraPath sibling).
+	if md.overlaysPersist.path == "" {
+		t.Fatal("overlaysPersist.path is empty for monolithic topologyPath — EnableEditPersist bug")
+	}
+
+	// Toggle an overlay and flush.
+	md.ToggleSceneTori(nil) // sceneToriVisible: true -> false
+	md.overlaysPersist.schedule(md.ov)
+	md.overlaysPersist.flush()
+
+	// Load back via sceneCameraPath.
+	ov, found := loadSceneOverlays(sceneCameraPath(topoFile))
+	if !found {
+		t.Fatal("loadSceneOverlays found no overlay keys after flush on monolithic form")
+	}
+	if ov.sceneToriVisible {
+		t.Fatal("sceneToriVisible not persisted on monolithic form")
+	}
+
+	// SeedOverlays must restore into a fresh dispatch.
+	fresh := &MoveDispatch{ov: defaultOverlayState()}
+	fresh.SeedOverlays(topoFile, nil)
+	if fresh.ov.sceneToriVisible {
+		t.Fatal("SeedOverlays did not restore sceneToriVisible=false on monolithic form")
 	}
 }

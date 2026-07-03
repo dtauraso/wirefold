@@ -32,9 +32,10 @@ import (
 )
 
 // writeSceneOverlays writes the current overlay-visibility snapshot into
-// <treeRoot>/view/scene.json, preserving every other field (cameraPolar, camera3d, …).
-func writeSceneOverlays(treeRoot string, ov overlayState) error {
-	path := filepath.Join(treeRoot, "view", "scene.json")
+// scenePath (the resolved scene.json path, e.g. from sceneCameraPath), preserving
+// every other field (cameraPolar, camera3d, …).
+func writeSceneOverlays(scenePath string, ov overlayState) error {
+	path := scenePath
 	sceneFileMu.Lock()
 	defer sceneFileMu.Unlock()
 
@@ -94,9 +95,9 @@ func writeSceneOverlays(treeRoot string, ov overlayState) error {
 
 // overlaysPersister coalesces rapid overlay toggles/sets into a debounced read-modify-write
 // of scene.json's overlay-visibility keys. Owned by MoveDispatch (armed by EnableEditPersist),
-// mirroring fadePersister. treeRoot == "" (monolithic form / tests that never arm) → no-op.
+// mirroring fadePersister. path == "" (tests that never arm) → no-op.
 type overlaysPersister struct {
-	treeRoot string
+	path     string // scene.json path (sceneCameraPath(topologyPath))
 	debounce time.Duration
 	mu       sync.Mutex
 	pending  overlayState
@@ -107,7 +108,7 @@ type overlaysPersister struct {
 
 // schedule records the latest overlay snapshot and (re)arms the debounce timer.
 func (p *overlaysPersister) schedule(ov overlayState) {
-	if p == nil || p.treeRoot == "" {
+	if p == nil || p.path == "" {
 		return
 	}
 	p.mu.Lock()
@@ -130,8 +131,8 @@ func (p *overlaysPersister) flush() {
 	if !has {
 		return
 	}
-	if err := writeSceneOverlays(p.treeRoot, ov); err != nil {
-		fmt.Fprintf(os.Stderr, "scene_overlays_persist: write %s: %v\n", p.treeRoot, err)
+	if err := writeSceneOverlays(p.path, ov); err != nil {
+		fmt.Fprintf(os.Stderr, "scene_overlays_persist: write %s: %v\n", p.path, err)
 		return
 	}
 	p.mu.Lock()
@@ -156,15 +157,16 @@ type sceneOverlaysFile struct {
 	DoubleLinksVisible    *bool `json:"doubleLinksVisible"`
 }
 
-// loadSceneOverlays reads the persisted overlay-visibility snapshot from scene.json, applying
-// the same key names + polarity the writer used (visible-sense keys straight through; the two
-// *Hidden keys inverted back to visible-sense). Starts from defaultOverlayState so any key the
-// writer omitted (because it was at its default) keeps the code default. The bool return is
-// false when scene.json is absent/malformed OR carries no overlay keys (fresh topology) — the
+// loadSceneOverlays reads the persisted overlay-visibility snapshot from scenePath (the
+// resolved scene.json path, e.g. from sceneCameraPath), applying the same key names +
+// polarity the writer used (visible-sense keys straight through; the two *Hidden keys
+// inverted back to visible-sense). Starts from defaultOverlayState so any key the writer
+// omitted (because it was at its default) keeps the code default. The bool return is false
+// when scene.json is absent/malformed OR carries no overlay keys (fresh topology) — the
 // caller then keeps the code defaults.
-func loadSceneOverlays(treeRoot string) (overlayState, bool) {
+func loadSceneOverlays(scenePath string) (overlayState, bool) {
 	ov := defaultOverlayState()
-	raw, err := os.ReadFile(filepath.Join(treeRoot, "view", "scene.json"))
+	raw, err := os.ReadFile(scenePath)
 	if err != nil {
 		return ov, false
 	}
@@ -220,17 +222,11 @@ func loadSceneOverlays(treeRoot string) (overlayState, bool) {
 // on startup and emits each flag so the first buffer snapshot streams the loaded values (the
 // UI shows them after a reload). Call after LoadTopology (which builds MoveDispatch) and, like
 // SeedFade, BEFORE EnableEditPersist so the seed's own emit does not write the loaded state
-// back. topologyPath is the directory-tree root; a monolithic (non-dir) form or a scene.json
-// with no overlay keys keeps the code defaults.
+// back. topologyPath is passed to sceneCameraPath, which handles both the directory-tree and
+// monolithic forms. A scene.json with no overlay keys keeps the code defaults.
 func (md *MoveDispatch) SeedOverlays(topologyPath string, tr *T.Trace) {
-	treeRoot := ""
-	if info, err := os.Stat(topologyPath); err == nil && info.IsDir() {
-		treeRoot = topologyPath
-	}
-	if treeRoot == "" {
-		return
-	}
-	ov, found := loadSceneOverlays(treeRoot)
+	scenePath := sceneCameraPath(topologyPath)
+	ov, found := loadSceneOverlays(scenePath)
 	if !found {
 		return
 	}

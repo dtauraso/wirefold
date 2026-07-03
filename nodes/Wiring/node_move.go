@@ -919,7 +919,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
-	md.overlaysPersist = &overlaysPersister{treeRoot: root, debounce: viewpointPersistDebounce}
+	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

@@ -128,7 +128,7 @@ func TestSavePersistsCurrentOverlayState(t *testing.T) {
 		t.Fatal("decode toggle failed")
 	}
 	applyEdit(toggle, SlotRegistry{}, md, nil, root)
-	if err := writeSceneOverlays(root, md.ov); err != nil {
+	if err := writeSceneOverlays(sceneCameraPath(root), md.ov); err != nil {
 		t.Fatalf("writeSceneOverlays: %v", err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(root, "view", "scene.json"))
@@ -151,6 +151,7 @@ func TestFramedPartialReads(t *testing.T) {
 	pr, pw := io.Pipe()
 	// A real (empty) dispatch so the `save` command has an overlay snapshot to persist.
 	md := newMoveDispatch(map[string]nodeGeom{}, map[string]EdgeEndpoints{}, nil)
+	md.EnableEditPersist(root) // arms overlaysPersist so `save` can write scene.json
 	go RunStdinReader(ctx, pr, SlotRegistry{}, md, nil, nil, root)
 
 	frame := frameRecord(encodeControl(inKindSave))
