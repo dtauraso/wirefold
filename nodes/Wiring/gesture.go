@@ -538,9 +538,11 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		if len(g.ruleTerms) == 2 && md.ruleCenter != "" {
 			eq := polarEq{Center: md.ruleCenter, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
 			md.appendPolarEq(eq)
-			// Auto-select the just-committed equation so it lands highlighted in the panel
-			// list AND draws its diagram guides immediately — both follow selectedLockIndex.
-			md.selectedLockIndex = len(md.polarEqsSnap()) - 1
+			// Auto-select JUST the just-committed equation (replacing any prior multi-
+			// selection) so it lands highlighted in the panel list AND draws its diagram
+			// guides immediately — both follow selectedLocks. The user multi-selects
+			// further equations afterward via clicks.
+			md.selectedLocks = []int{len(md.polarEqsSnap()) - 1}
 			// Guarantee the Center↔term movement links exist so the equation is enforced
 			// even when no topology edge connects the picked nodes to the Center.
 			md.ensureEqLinks(eq)

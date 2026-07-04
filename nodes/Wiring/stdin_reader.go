@@ -269,7 +269,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				}
 			case "delete-selected-lock":
 				// Bare DELETE command: delete the panel-focused committed polar-equation lock
-				// (selectedLockIndex). Go re-guards (only deletes when deactivated).
+				// (selectedLocks). Go re-guards (only deletes when deactivated).
 				if md != nil {
 					md.DeleteSelectedLock(tr)
 				}

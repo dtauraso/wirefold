@@ -22,7 +22,7 @@ function angleChip(code: number): string {
 export function RuleEquationPanel() {
   const overlays = useOverlayFlags();
   const rb = useRuleBuilder();
-  const { equations, selectedLockIndex } = usePolarLocks();
+  const { equations } = usePolarLocks();
   const mount = document.getElementById("rule-eq-mount");
 
   // The committed-equations LIST keys off the rule-builder's STICKY panel Center
@@ -45,19 +45,20 @@ export function RuleEquationPanel() {
   // is showing but the builder section (which already renders its own Center line) is not.
   const showListCenter = showList && !showBuilder;
 
-  // Delete key: only when the panel-focused row is one of THIS center's rows and is
-  // deactivated. Go re-guards regardless. Listens while the list is showing.
+  // Delete key: fires whenever at least one of THIS center's SELECTED rows is deactivated
+  // (multi-select — Go deletes every selected+deactivated lock). Go re-guards regardless.
+  // Listens while the list is showing.
   useEffect(() => {
     if (!showList) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
-      const focused = rowEquations.find((eq) => eq.index === selectedLockIndex);
-      if (!focused || focused.active) return;
+      const hasDeletable = rowEquations.some((eq) => eq.selected && !eq.active);
+      if (!hasDeletable) return;
       postGoRecord(encodeDeleteSelectedLock());
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showList, rowEquations, selectedLockIndex]);
+  }, [showList, rowEquations]);
 
   if (!mount) return null;
   if (!showBuilder && !showList) return null;
@@ -68,7 +69,7 @@ export function RuleEquationPanel() {
       {showListCenter && <div className="rule-eq-center">Center: {rb?.centerLabel || "—"}</div>}
       {showList && (
         <div className="rule-eq-list">
-          {rowEquations.map((eq) => renderLockRow(eq, eq.index === selectedLockIndex))}
+          {rowEquations.map((eq) => renderLockRow(eq, eq.selected))}
         </div>
       )}
     </div>,

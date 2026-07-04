@@ -317,6 +317,8 @@ type polarLockSnapState struct {
 	portName    string
 	portIsInput bool
 	torusNode   string
+	// selected mirrors md.selectedLocks membership for this row's equation index.
+	selected bool
 }
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
@@ -433,6 +435,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 				portName:    l.PortName,
 				portIsInput: l.PortIsInput,
 				torusNode:   l.TorusNode,
+				selected:    l.Selected,
 			}
 		}
 		s.polarLocks = locks
@@ -1186,7 +1189,8 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			uint8(l.kind),
 			int32(s.portRowIndex(l.portNode, l.portName, l.portIsInput)),
 			boolU8(l.portIsInput),
-			int32(s.nodeRowIndex(l.torusNode)))
+			int32(s.nodeRowIndex(l.torusNode)),
+			boolU8(l.selected))
 	}
 	off += int(polarLockCount) * BufPolarLockStride
 

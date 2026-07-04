@@ -66,9 +66,11 @@ import {
   POLAR_LOCK_COL_CENTER_ROW, POLAR_LOCK_COL_AROW, POLAR_LOCK_COL_ACODE,
   POLAR_LOCK_COL_BROW, POLAR_LOCK_COL_BCODE, POLAR_LOCK_COL_ACTIVE, POLAR_LOCK_STRIDE,
   POLAR_LOCK_COL_KIND, POLAR_LOCK_COL_PORT_ROW, POLAR_LOCK_COL_PORT_IS_INPUT, POLAR_LOCK_COL_TORUS_ROW,
+  POLAR_LOCK_COL_SELECTED,
   readPolarLockCenterRow, readPolarLockARow, readPolarLockACode,
   readPolarLockBRow, readPolarLockBCode, readPolarLockActive,
   readPolarLockKind, readPolarLockPortRow, readPolarLockPortIsInput, readPolarLockTorusRow,
+  readPolarLockSelected,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -421,9 +423,9 @@ describe("buffer-layout — RuleBuilder block", () => {
 
 describe("buffer-layout — PolarLock block", () => {
   it("stride equals packed field sizes", () => {
-    // 5×i32 (CenterRow/ARow/BRow/PortRow/TorusRow) + 5×u8 (ACode/BCode/Active/Kind/PortIsInput)
-    // = 5*4 + 5 = 25
-    expect(POLAR_LOCK_STRIDE).toBe(25);
+    // 5×i32 (CenterRow/ARow/BRow/PortRow/TorusRow) +
+    // 6×u8 (ACode/BCode/Active/Kind/PortIsInput/Selected) = 5*4 + 6 = 26
+    expect(POLAR_LOCK_STRIDE).toBe(26);
   });
 
   it("column offsets match the packed i32/u8 layout", () => {
@@ -437,6 +439,7 @@ describe("buffer-layout — PolarLock block", () => {
     expect(POLAR_LOCK_COL_PORT_ROW).toBe(16);
     expect(POLAR_LOCK_COL_PORT_IS_INPUT).toBe(20);
     expect(POLAR_LOCK_COL_TORUS_ROW).toBe(21);
+    expect(POLAR_LOCK_COL_SELECTED).toBe(25);
   });
 
   it("read helpers decode a committed node/node equation row", () => {
@@ -451,6 +454,7 @@ describe("buffer-layout — PolarLock block", () => {
     dv.setUint8(POLAR_LOCK_COL_KIND, 0);
     dv.setInt32(POLAR_LOCK_COL_PORT_ROW, -1, true);
     dv.setInt32(POLAR_LOCK_COL_TORUS_ROW, -1, true);
+    dv.setUint8(POLAR_LOCK_COL_SELECTED, 1);
 
     expect(readPolarLockCenterRow(dv, 0)).toBe(3);
     expect(readPolarLockARow(dv, 0)).toBe(1);
@@ -459,6 +463,7 @@ describe("buffer-layout — PolarLock block", () => {
     expect(readPolarLockBCode(dv, 0)).toBe(2);
     expect(readPolarLockActive(dv, 0)).toBe(1);
     expect(readPolarLockKind(dv, 0)).toBe(0);
+    expect(readPolarLockSelected(dv, 0)).toBe(1);
   });
 
   it("read helpers decode a committed port∈torus lock row", () => {
@@ -472,11 +477,13 @@ describe("buffer-layout — PolarLock block", () => {
     dv.setInt32(POLAR_LOCK_COL_PORT_ROW, 5, true);
     dv.setUint8(POLAR_LOCK_COL_PORT_IS_INPUT, 1);
     dv.setInt32(POLAR_LOCK_COL_TORUS_ROW, 3, true);
+    dv.setUint8(POLAR_LOCK_COL_SELECTED, 0);
 
     expect(readPolarLockKind(dv, 0)).toBe(1);
     expect(readPolarLockPortRow(dv, 0)).toBe(5);
     expect(readPolarLockPortIsInput(dv, 0)).toBe(1);
     expect(readPolarLockTorusRow(dv, 0)).toBe(3);
+    expect(readPolarLockSelected(dv, 0)).toBe(0);
   });
 });
 

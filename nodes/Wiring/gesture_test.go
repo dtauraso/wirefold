@@ -577,9 +577,9 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
 	}
 	// The just-committed equation auto-selects so the panel row highlights and the diagram
-	// guides draw immediately (both follow selectedLockIndex) — no separate click needed.
-	if md.selectedLockIndex != 0 {
-		t.Fatalf("selectedLockIndex=%d after commit, want 0 (new equation auto-selected)", md.selectedLockIndex)
+	// guides draw immediately (both follow selectedLocks) — no separate click needed.
+	if want := []int{0}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("selectedLocks=%v after commit, want %v (new equation auto-selected)", md.selectedLocks, want)
 	}
 }
 

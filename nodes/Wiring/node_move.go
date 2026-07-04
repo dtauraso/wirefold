@@ -509,11 +509,14 @@ type MoveDispatch struct {
 	// (polarEqsSnap) is never mutated out from under it. Use polarEqsSnap/setPolarEqs/
 	// appendPolarEq — never access this field directly.
 	polarEqs atomic.Pointer[[]polarEq]
-	// selectedLockIndex is the md.polarEqs index of the committed equation the user has
-	// clicked in the rule-panel's list (locks.go SelectLock), or -1 = none focused. Reset
-	// to -1 when it goes out of range (e.g. after DeleteSelectedLock) or on a selection
-	// change to a different node. Go-owned; streamed via KindPolarLocks.
-	selectedLockIndex int
+	// selectedLocks is the ORDERED list of md.polarEqs indices the user has multi-selected
+	// in the rule-panel's list (locks.go SelectLock toggles membership), or nil/empty = none
+	// selected. Order is preserve-insertion (append on select, not reordered on toggle-off)
+	// so overlay/panel rendering is deterministic. Entries are pruned when they go out of
+	// range (e.g. after DeleteSelectedLock) or when the panel's Center moves off the
+	// equation's Center (pruneSelectionOffCenter). Go-owned; streamed via KindPolarLocks
+	// (per-row PolarLockPayload.Selected).
+	selectedLocks []int
 	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
 	// direction should dynamically point toward their connected node's current center.
 	// nil when no aimed ports are registered.
@@ -652,7 +655,6 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		ov:                 defaultOverlayState(),
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
-		selectedLockIndex:  -1,
 	}
 	md.setPolarEqs(nil)
 	for id, g := range geoms {

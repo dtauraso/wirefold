@@ -290,6 +290,11 @@ type bufLayoutPolarLock struct {
 	PortRow     int32 `buf:"i32"` // constrained port's buffer PORT-ROW index (-1 = unresolved)
 	PortIsInput uint8 `buf:"u8"`  // 1 = input port, 0 = output port (only meaningful for Kind==1)
 	TorusRow    int32 `buf:"i32"` // torus-owning node's buffer NODE-ROW index (-1 = unresolved)
+	// Selected mirrors md.selectedLocks membership for THIS row's equation index — 1 = this
+	// equation is one of (possibly several) currently-selected locks, 0 = not selected.
+	// Authoritative per-row selection state; the scalar RuleBuilder.SelectedLockIndex column
+	// is no longer used to drive per-row highlight (kept for wire-shape stability, set to -1).
+	Selected uint8 `buf:"u8"`
 }
 
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
