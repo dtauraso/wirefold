@@ -70,8 +70,8 @@ func TestApplyPortTorusColinearityMovesDependentZ(t *testing.T) {
 	postCenters := map[string]vec3{"S": sCenter, "D": dCenterAfter}
 	centerOf := func(id string) (vec3, bool) { v, ok := postCenters[id]; return v, ok }
 
-	sPort := portWorldPosAimed(gS, "out", false, "S", registry, centerOf)
-	dPort := portWorldPosAimed(gD, "in", true, "D", registry, centerOf)
+	sPort := portWorldPosAimed(gS, "out", false, "S", registry, centerOf, nil)
+	dPort := portWorldPosAimed(gD, "in", true, "D", registry, centerOf, nil)
 
 	// (b) each port lies in its own node's ring plane: port.z == that node's center.z.
 	if sPort.Z != sCenter.Z {

@@ -239,5 +239,14 @@ func (md *MoveDispatch) LoadPolarEqs(topologyPath string) {
 			md.ensureEqLinks(eq)
 		}
 		md.emitPolarLocks(md.tr)
+		// A loaded ACTIVE `port ∈ torus` lock geometrically constrains its port
+		// (aimed_ports.go portWorldPosAimed ring-projection) — re-emit each such
+		// port's geometry now so it starts ON the ring rather than waiting for the
+		// first unrelated node move.
+		for _, eq := range eqs {
+			if eq.Kind == eqPortTorus && eq.Active {
+				md.reemitPortTorusGeometry(eq.PortNode)
+			}
+		}
 	}
 }

@@ -119,6 +119,11 @@ type nodeMover struct {
 	aimed AimedPortRegistry
 	// centerOf returns the current center for a node id — used only when aimed != nil.
 	centerOf func(string) (vec3, bool)
+	// locked reports whether (nodeID, portName, isInput) carries an ACTIVE
+	// `port ∈ torus` lock (MoveDispatch.portTorusLocked); nil when no lock system
+	// is installed yet. Passed through to portWorldPosAimed so a locked port's
+	// streamed position is ring-projected instead of aimed.
+	locked func(nodeID, portName string, isInput bool) bool
 	// snap is an atomically-published immutable snapshot of this node's current
 	// center+reachR. Written only by the mover's own goroutine after every center
 	// update; read by any goroutine (stdin reader) to observe the current position
@@ -186,7 +191,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 // falls back to the static portDir via emitNodeGeometry.
 func (m *nodeMover) emitGeometry() {
 	if m.aimed != nil && m.centerOf != nil {
-		emitNodeGeometryAimed(m.tr, m.id, m.geom, m.aimed, m.centerOf)
+		emitNodeGeometryAimed(m.tr, m.id, m.geom, m.aimed, m.centerOf, m.locked)
 	} else {
 		emitNodeGeometry(m.tr, m.id, m.geom)
 	}
@@ -225,6 +230,10 @@ type edgeMover struct {
 	// aimed / centerOf: same registry as nodeMover; used in recomputeGeometry.
 	aimed    AimedPortRegistry
 	centerOf func(string) (vec3, bool)
+	// locked: same `port ∈ torus` lock check as nodeMover.locked; used in
+	// recomputeGeometry/emitGeometry so a locked endpoint's segment endpoint stays
+	// ring-projected in step with the streamed port marker.
+	locked func(nodeID, portName string, isInput bool) bool
 }
 
 func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace) *edgeMover {
@@ -327,7 +336,7 @@ func (m *edgeMover) emitGeometry() {
 	if m.tr == nil {
 		return
 	}
-	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf)
+	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf, m.locked)
 	m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
 		seg.Start.X, seg.Start.Y, seg.Start.Z,
 		seg.End.X, seg.End.Y, seg.End.Z)
@@ -338,7 +347,7 @@ func (m *edgeMover) emitGeometry() {
 // bead (fraction-preserving), update the dest port window aggregate, and emit the new
 // segment so the renderer redraws the wire. Shared by node-move and port-anchor handling.
 func (m *edgeMover) recomputeGeometry() {
-	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf)
+	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf, m.locked)
 	arc := seg.Start.sub(seg.End).length()
 	lat := arc / PulseSpeedWuPerMs
 
@@ -603,7 +612,7 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 		centerOf := md.centerOfNode
 		for _, nm := range md.nodeMovers {
 			if nm.aimed != nil {
-				emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf)
+				emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf, md.portTorusLocked)
 			} else {
 				emitNodeGeometry(tr, nm.id, nm.geom)
 			}
@@ -613,7 +622,7 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 			if em.centerOf != nil {
 				emCenterOf = em.centerOf
 			}
-			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, emCenterOf)
+			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, emCenterOf, md.portTorusLocked)
 			tr.Geometry(em.edgeID, em.srcID, em.dstID,
 				seg.Start.X, seg.Start.Y, seg.Start.Z,
 				seg.End.X, seg.End.Y, seg.End.Z)
@@ -678,12 +687,18 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 func (md *MoveDispatch) installAimedPorts(registry AimedPortRegistry) {
 	md.AimedPorts = registry
 	centerOf := md.centerOfNode
+	// locked is a live lookup against md.polarEqs (via portTorusLocked) — installed
+	// once here but always reflects the CURRENT lock state, including locks loaded
+	// later by LoadPolarEqs and toggled afterward (ToggleLockActive/addPortTorusLock).
+	locked := md.portTorusLocked
 	for _, nm := range md.nodeMovers {
 		nm.aimed = registry
 		nm.centerOf = centerOf
+		nm.locked = locked
 	}
 	for _, em := range md.edgeMovers {
 		em.aimed = registry
+		em.locked = locked
 		// An edge owns BOTH its endpoint geoms and updates them synchronously on its
 		// own goroutine before recomputing (handle → recomputeGeometry). For aiming,
 		// read those held centers directly rather than the node mover's published

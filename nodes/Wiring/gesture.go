@@ -513,6 +513,10 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		return false
 	}
 	g := &md.gest
+	if tr != nil {
+		hitNode, _ := md.nodeFromHit(ev.Hit)
+		tr.Breadcrumb("rulepanel_sphererule", hitNode, "", fmt.Sprintf("hitKind=%s hasPendingPort=%v hasPendingTorus=%v", ev.Hit.Kind, g.hasPendingPort, g.hasPendingTorus))
+	}
 	switch {
 	case ev.Hit.Kind == "handhold" && ev.Hit.HandholdTerm >= 0:
 		g.pendingComp, g.pendingSign = decodeTermCode(ev.Hit.HandholdTerm)
@@ -623,6 +627,9 @@ func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput 
 		md.locksPersist.schedule(md.polarEqs)
 	}
 	md.emitPolarLocks(tr)
+	// The lock is active the instant it's authored — re-emit the constrained port's
+	// geometry now so it moves onto its node's border ring immediately (locks.go).
+	md.reemitPortTorusGeometry(portNode)
 	// Both pending flags were already cleared by the caller before it reached here; mirror
 	// that into the RuleBuilder block so the in-progress preview clears the instant the
 	// pair commits to the list.

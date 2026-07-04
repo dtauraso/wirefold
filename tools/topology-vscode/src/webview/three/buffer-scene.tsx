@@ -115,6 +115,12 @@ const PORT_SPHERE_R = 4;
 // Border-ring tube thickness as a fraction of the node radius (mirrors GraphNode's
 // resting torusThick = r * 0.08).
 const NODE_RING_TUBE_RATIO = 0.08;
+// Invisible pick-proxy tube thickness as a fraction of the node radius. The VISIBLE ring
+// (NODE_RING_TUBE_RATIO=0.08) sits flush on the body sphere's surface and is practically
+// unhittable by raycast — clicks aimed at it register as hitKind=node instead (confirmed via
+// runtime breadcrumbs). This proxy is a much thicker, invisible torus sharing the ring's
+// per-instance transform, so the same visual band becomes a generous raycast target. Tunable.
+const RING_PICK_TUBE_RATIO = 0.4;
 // Pointer-hover highlight (pre-branch scene-graph.tsx): the hovered node's border ring turns
 // #aaddff and thickens to r*0.14 (HOVER_RING_TUBE_RATIO); a hovered port sphere turns #aaddff
 // and grows to 1.3× (PortSphere isHov). Go OWNS hover (the Hovered columns); this is render-only.
@@ -233,6 +239,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
   const envTex = useContext(EnvTexContext);
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const ringRef = useRef<THREE.InstancedMesh>(null);
+  const ringPickRef = useRef<THREE.InstancedMesh>(null);
   const bodyFadedRef = useRef<THREE.InstancedBufferAttribute>(null);
   const ringFadedRef = useRef<THREE.InstancedBufferAttribute>(null);
   const matRef  = useRef(new THREE.Matrix4());
@@ -244,12 +251,13 @@ function NodeInstances({ capacity }: { capacity: number }) {
   useFrame(() => {
     const body = bodyRef.current;
     const ring = ringRef.current;
-    if (!body || !ring) return;
+    const ringPick = ringPickRef.current;
+    if (!body || !ring || !ringPick) return;
 
     const snap = getLatestSnapshot();
-    if (!snap) { body.count = 0; ring.count = 0; return; }
+    if (!snap) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
     const decoded = decodeSnapshot(snap);
-    if (!decoded) { body.count = 0; ring.count = 0; return; }
+    if (!decoded) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
     const { nodeCount, nodeView } = decoded;
 
     const n = Math.min(nodeCount, capacity);
@@ -268,6 +276,9 @@ function NodeInstances({ capacity }: { capacity: number }) {
       // Ring: unit torus (major radius 1) scaled to the node radius; tube thickness
       // is baked into the geometry as a fraction of that radius (NODE_RING_TUBE_RATIO).
       ring.setMatrixAt(i, matRef.current);
+      // Invisible pick-proxy: identical transform to the visible ring, just a thicker
+      // raycast target (see RING_PICK_TUBE_RATIO comment).
+      ringPick.setMatrixAt(i, matRef.current);
 
       const { fill, stroke } = nodeRowColors(nodeView, i);
       body.setColorAt(i, colRef.current.set(fill));
@@ -282,8 +293,10 @@ function NodeInstances({ capacity }: { capacity: number }) {
     }
     body.count = n;
     ring.count = n;
+    ringPick.count = n;
     body.instanceMatrix.needsUpdate = true;
     ring.instanceMatrix.needsUpdate = true;
+    ringPick.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
     if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
     if (bodyFadedRef.current) bodyFadedRef.current.needsUpdate = true;
@@ -293,6 +306,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
     // node outside the stale sphere would otherwise be un-pickable). Cheap for the
     // small node counts here.
     body.computeBoundingSphere();
+    ringPick.computeBoundingSphere();
   });
 
   return (
@@ -330,6 +344,16 @@ function NodeInstances({ capacity }: { capacity: number }) {
         {/* transparent so faded rings (aFaded=1) blend at reduced alpha; solid rings keep
             alpha 1 → visually opaque. */}
         <meshStandardMaterial roughness={0.6} metalness={0} transparent depthWrite={false} onBeforeCompile={patchRingFade} />
+      </instancedMesh>
+      {/* Invisible pick-proxy torus: same per-instance transform as the visible ring above,
+          but a much thicker tube (RING_PICK_TUBE_RATIO) so the ring band is a generous
+          raycast target. colorWrite/depthWrite false + zero opacity means it draws nothing;
+          it must stay visible (not visible={false}) or three.js Raycaster skips it entirely.
+          Tagged BUFFER_RING_TAG so pickBufferRing (scene-content.tsx) resolves its instanceId
+          to the same node row as the visible ring. */}
+      <instancedMesh ref={ringPickRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_RING_TAG]: true }} frustumCulled={false}>
+        <torusGeometry args={[1, RING_PICK_TUBE_RATIO, 8, 32]} />
+        <meshBasicMaterial transparent opacity={0} colorWrite={false} depthWrite={false} />
       </instancedMesh>
     </>
   );

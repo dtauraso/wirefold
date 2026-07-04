@@ -246,7 +246,9 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	// startup), so it sees the completed slice.
 	var sourceOuts []*Out
 	injectFunc(v, "EmitGeometry", tFireFunc, func() {
-		emitNodeGeometryAimed(tr, name, geom, aimedPorts, centerOf)
+		// No lock check here: this fires once at node startup, before MoveDispatch
+		// (and any `port ∈ torus` lock) exists — see buildFromSpec ordering in loader.go.
+		emitNodeGeometryAimed(tr, name, geom, aimedPorts, centerOf, nil)
 		for _, o := range sourceOuts {
 			if o != nil && o.EdgeLabel != "" {
 				g := o.Geom()
@@ -433,10 +435,13 @@ func emitNodeGeometry(tr *T.Trace, nodeName string, g nodeGeom) {
 
 // emitNodeGeometryAimed is like emitNodeGeometry but uses portDirAimed for
 // every port, so registered ports point dynamically toward their connected
-// node's current center. Non-registered ports fall back to portDir.
-func emitNodeGeometryAimed(tr *T.Trace, nodeName string, g nodeGeom, registry AimedPortRegistry, centerOf func(string) (vec3, bool)) {
+// node's current center. Non-registered ports fall back to portDir. locked, when
+// non-nil, reports whether a given port carries an ACTIVE `port ∈ torus` lock
+// (MoveDispatch.portTorusLocked); such a port is ring-projected instead of aimed
+// (see portWorldPosAimed) so the streamed marker sits ON the node's border ring.
+func emitNodeGeometryAimed(tr *T.Trace, nodeName string, g nodeGeom, registry AimedPortRegistry, centerOf func(string) (vec3, bool), locked func(nodeID, portName string, isInput bool) bool) {
 	emitNodeGeometryWith(tr, nodeName, g, func(name string, isInput bool) (vec3, vec3) {
-		pos := portWorldPosAimed(g, name, isInput, nodeName, registry, centerOf)
+		pos := portWorldPosAimed(g, name, isInput, nodeName, registry, centerOf, locked)
 		dir, _ := portDirAimed(g, name, isInput, nodeName, registry, centerOf)
 		return pos, dir
 	})

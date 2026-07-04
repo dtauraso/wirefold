@@ -239,6 +239,46 @@ func (md *MoveDispatch) applyPortTorusColinearity(movedID string, pos func(strin
 	return out
 }
 
+// reemitPortTorusGeometry re-emits nodeID's node-geometry plus every incident edge's
+// segment, so a `port ∈ torus` lock's geometric effect (portWorldPosAimed's
+// ring-projection, see aimed_ports.go) is visible IMMEDIATELY when the lock is
+// authored (addPortTorusLock) or toggled active/inactive (ToggleLockActive) — not
+// only on the next unrelated node move. Mirrors fanCenters' aimedReemit trick: send
+// each mover a no-op "same center" message so it recomputes+re-emits on its own
+// goroutine. Dual-pathed like ResendGeometry: direct emit when movers aren't
+// started (headless tests), inbox-routed when they are (production).
+func (md *MoveDispatch) reemitPortTorusGeometry(nodeID string) {
+	nm, ok := md.nodeMovers[nodeID]
+	if !ok {
+		return
+	}
+	if !md.started {
+		nm.emitGeometry()
+		for _, em := range md.edgeMovers {
+			if em.srcID == nodeID || em.dstID == nodeID {
+				em.emitGeometry()
+			}
+		}
+		return
+	}
+	s := nm.snap.Load()
+	if s == nil {
+		return
+	}
+	if ch, ok := md.dispatch[nodeID]; ok {
+		cc := s.c
+		ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: &cc, ReachR: s.reach}
+	}
+	for edgeID, em := range md.edgeMovers {
+		if em.srcID != nodeID && em.dstID != nodeID {
+			continue
+		}
+		if ch, ok := md.dispatch[edgeID]; ok {
+			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: map[string]vec3{nodeID: s.c}}
+		}
+	}
+}
+
 // emitPolarLocks emits the FULL committed polar-equation lock list (KindPolarLocks). Call
 // from every mutation point: rule completion (gesture.go), ToggleLockActive, SelectLock,
 // DeleteSelectedLock, and LoadPolarEqs. No-op when tr is nil (headless tests).
@@ -293,6 +333,12 @@ func (md *MoveDispatch) ToggleLockActive(i int, tr *T.Trace) {
 	md.emitPolarLocks(tr)
 	if md.locksPersist != nil {
 		md.locksPersist.schedule(md.polarEqs)
+	}
+	// A toggled eqPortTorus lock changes its port's resolved geometry (ring-projected
+	// when active, plain aimed when not) — re-emit immediately so the port visibly
+	// moves rather than waiting for the next unrelated node move.
+	if eq := md.polarEqs[i]; eq.Kind == eqPortTorus {
+		md.reemitPortTorusGeometry(eq.PortNode)
 	}
 }
 

@@ -301,10 +301,13 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry,
 		// using aimed port directions for registered ports (radial toward connected node)
 		// rather than ring-anchor positions. Non-registered ports fall back to portWorldPos.
+		// No lock check here: this fires before MoveDispatch (and any `port ∈ torus`
+		// lock) exists. Locks load later (LoadPolarEqs); md.ResendGeometry re-emits
+		// with the live lock check once they do.
 		seg := segmentBetweenPortsAimed(
 			nodeGeoms[e.Source], e.SourceHandle, e.Source,
 			nodeGeoms[e.Target], e.TargetHandle, e.Target,
-			aimedPorts, centerOf,
+			aimedPorts, centerOf, nil,
 		)
 		arcLength := chordLength(seg.Start, seg.End)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
