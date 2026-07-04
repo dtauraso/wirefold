@@ -54,7 +54,7 @@ import {
   readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected, readEdgeFaded,
   readNodeFaded, readNodeHovered,
   readPortNodeRow, readPortPX, readPortPY, readPortPZ, readPortHovered,
-  readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
+  readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode, readOverlaySelSpherePoles,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
@@ -258,7 +258,14 @@ function NodeInstances({ capacity }: { capacity: number }) {
     if (!snap) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
     const decoded = decodeSnapshot(snap);
     if (!decoded) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
-    const { nodeCount, nodeView } = decoded;
+    const { nodeCount, nodeView, overlayView } = decoded;
+    // The invisible ring pick-proxy (RING_PICK_TUBE_RATIO) is a pick target ONLY while the
+    // selSpherePoles ("select") overlay is on — that's the one mode where a torus click
+    // authors a `port ∈ torus` equation. When the overlay is off, count=0 removes it from
+    // the raycast scene entirely, so it never steals hits from the node body (BUFFER_NODE_TAG)
+    // underneath it. The VISIBLE ring (ringRef, NODE_RING_TUBE_RATIO) is unaffected — it stays
+    // rendered in both modes; only the fat invisible pick torus is gated.
+    const selectModeOn = readOverlaySelSpherePoles(overlayView) !== 0;
 
     const n = Math.min(nodeCount, capacity);
     const q = quatRef.current; // identity (no per-node rotation)
@@ -293,7 +300,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
     }
     body.count = n;
     ring.count = n;
-    ringPick.count = n;
+    ringPick.count = selectModeOn ? n : 0;
     body.instanceMatrix.needsUpdate = true;
     ring.instanceMatrix.needsUpdate = true;
     ringPick.instanceMatrix.needsUpdate = true;
@@ -306,7 +313,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
     // node outside the stale sphere would otherwise be un-pickable). Cheap for the
     // small node counts here.
     body.computeBoundingSphere();
-    ringPick.computeBoundingSphere();
+    if (selectModeOn) ringPick.computeBoundingSphere();
   });
 
   return (
