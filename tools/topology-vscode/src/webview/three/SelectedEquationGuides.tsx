@@ -56,20 +56,21 @@ function EdgeHalo({ s, e }: { s: THREE.Vector3; e: THREE.Vector3 }) {
   );
 }
 
-// A single torus ring (the "torus" half of a `port ∈ torus` lock), drawn at a node's own
-// world radius in the sphere's equatorial plane (torusGeometry lies in XY → normal +Z; rotate
-// -90° about X so its normal is +Y, matching the Y-pole sphere frame). Decorative — no raycast.
+// A single torus ring emphasizing the "torus" half of a `port ∈ torus` lock — the node's own
+// border ring. Matches buffer-scene.tsx's node border torus EXACTLY: identity orientation (the
+// node ring is drawn with no per-node rotation → torusGeometry in XY, normal +Z) and scaled to
+// the node's OWN radius (not its sphereR), just a touch thicker so it reads as highlighted.
+// Decorative — no raycast.
 function TorusRing({ node, color }: { node: NavNode; color: string }) {
-  const r = node.sphereR ?? node.radius ?? 1;
+  const r = node.radius || 1;
   return (
     <mesh
       position={[node.center.x, node.center.y, node.center.z]}
-      rotation={[-Math.PI / 2, 0, 0]}
       scale={r}
       raycast={() => null}
       frustumCulled={false}
     >
-      <torusGeometry args={[1, 0.03, 8, 64]} />
+      <torusGeometry args={[1, 0.12, 8, 48]} />
       <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.4} />
     </mesh>
   );
@@ -129,13 +130,21 @@ function TermGuide({
   return null;
 }
 
-// Small port marker (mirrors PortInstances' sphere look) at a single world position —
-// used to call out the `port` half of a `port ∈ torus` lock.
-function PortMarker({ position, color }: { position: THREE.Vector3; color: string }) {
+// Port-selection highlight params, copied from buffer-scene.tsx PortInstances' hovered/selected
+// port look (PORT_SPHERE_R sphere, grown PORT_HOVER_SCALE× and colored HOVER_COLOR). Kept as a
+// local copy because those constants are module-private there.
+const PORT_SPHERE_R = 4;
+const PORT_HOVER_SCALE = 1.3;
+const PORT_HOVER_COLOR = "#aaddff";
+
+// Port marker for the `port` half of a `port ∈ torus` lock — draws the SAME highlight the
+// editor shows for a selected/hovered port: the port sphere at PORT_SPHERE_R, grown 1.3× and
+// #aaddff, plain meshStandardMaterial (matches PortInstances exactly). Decorative — no raycast.
+function PortMarker({ position }: { position: THREE.Vector3 }) {
   return (
-    <mesh position={position} raycast={() => null}>
-      <sphereGeometry args={[4, 12, 12]} />
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.6} />
+    <mesh position={position} scale={PORT_HOVER_SCALE} raycast={() => null}>
+      <sphereGeometry args={[PORT_SPHERE_R, 8, 8]} />
+      <meshStandardMaterial color={PORT_HOVER_COLOR} />
     </mesh>
   );
 }
@@ -277,7 +286,7 @@ export function SelectedEquationGuides() {
       {center && !centerIsTerm && <NodeHighlight node={center} color="#ffcc00" />}
       {/* `port ∈ torus` lock ONLY: the port marker and a single torus ring on the torus node.
           Node-node equations have neither, so nothing extra is drawn for them. */}
-      {portPos && <PortMarker position={portPos} color="#aaddff" />}
+      {portPos && <PortMarker position={portPos} />}
       {torusNode && <TorusRing node={torusNode} color="#aaddff" />}
     </>
   );
