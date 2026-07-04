@@ -167,6 +167,112 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 	return out
 }
 
+// lockRecalc is the DECENTRALIZED per-receiver counterpart to applyPolarEqs: it computes
+// `self`'s own constrained polar (about `center`) given that `from` just sent its polar
+// `senderPolar` about the same center, using the exact same equation math applyPolarEqs
+// uses (target = fromSign·fromComp·selfSign). It touches ONLY self's own link
+// (md.linkBetween(center, self)) — never `from`'s link — so two different receiving
+// goroutines never write the same movementLink concurrently (each follower owns exactly
+// its own center↔self link). md.polarEqs/md.links are read-only here: locks are authored
+// on a separate gesture, never mid-drag, so the equation/link TOPOLOGY cannot change
+// while a cascade is in flight.
+//
+// Returns (newWorld, false) when no active eqNodeNode touches (self,from,center) or when
+// the recomputed position is within lockPropEps of self's current published position —
+// the latter is the anti-divergence guarantee: an over-constrained lock set converges to
+// a fixpoint and the cascade goes silent instead of oscillating forever.
+func (md *MoveDispatch) lockRecalc(self, from, center string, senderPolar polar) (vec3, bool) {
+	selfLink := md.linkBetween(center, self)
+	if selfLink == nil {
+		return vec3{}, false
+	}
+	op, ok := selfLink.polarOf(center, self)
+	if !ok {
+		return vec3{}, false
+	}
+	np := op
+	applied := false
+	for _, eq := range md.polarEqs {
+		if !eq.Active || eq.Kind != eqNodeNode || eq.Center != center {
+			continue
+		}
+		var selfTerm, fromTerm polarTerm
+		switch {
+		case eq.A.Node == self && eq.B.Node == from:
+			selfTerm, fromTerm = eq.A, eq.B
+		case eq.B.Node == self && eq.A.Node == from:
+			selfTerm, fromTerm = eq.B, eq.A
+		default:
+			continue
+		}
+		target := fromTerm.Sign * compOf(senderPolar, fromTerm.Comp) * selfTerm.Sign
+		setCompOf(&np, selfTerm.Comp, target)
+		applied = true
+	}
+	if !applied {
+		return vec3{}, false
+	}
+	centerWorld, ok := md.centerOfNode(center)
+	if !ok {
+		return vec3{}, false
+	}
+	newWorld := polar2cart(np).add(centerWorld)
+	if oldWorld, ok := md.centerOfNode(self); ok && oldWorld.sub(newWorld).length() <= lockPropEps {
+		return vec3{}, false // already satisfied — the cascade dies here
+	}
+	selfLink.setPolar(center, self, np) // written only by self's own goroutine
+	return newWorld, true
+}
+
+// lockNeighbors returns one moveMsg per DISTINCT (other node, center) pair that an
+// active eqNodeNode equation ties `self` to, excluding `exclude` (the node that just
+// sent to self, so the cascade never echoes straight back). Each message carries self's
+// CURRENT polar about that center (read from self's own link, which lockRecalc just
+// wrote when called from a receiver) so the recipient can recompute locally — no shared
+// mutable state crosses the channel, only an immutable value.
+func (md *MoveDispatch) lockNeighbors(self, exclude string) []moveMsg {
+	var out []moveMsg
+	seen := map[string]bool{}
+	for _, eq := range md.polarEqs {
+		if !eq.Active || eq.Kind != eqNodeNode {
+			continue
+		}
+		var otherID string
+		switch self {
+		case eq.A.Node:
+			otherID = eq.B.Node
+		case eq.B.Node:
+			otherID = eq.A.Node
+		default:
+			continue
+		}
+		if otherID == "" || otherID == self || otherID == exclude {
+			continue
+		}
+		key := otherID + "|" + eq.Center
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		lk := md.linkBetween(eq.Center, self)
+		if lk == nil {
+			continue
+		}
+		p, ok := lk.polarOf(eq.Center, self)
+		if !ok {
+			continue
+		}
+		out = append(out, moveMsg{
+			Kind:        moveMsgKindLockUpdate,
+			NodeID:      otherID,
+			From:        self,
+			LockCenter:  eq.Center,
+			SenderPolar: p,
+		})
+	}
+	return out
+}
+
 // portTorusLocked returns true if there is an ACTIVE eqPortTorus lock on the given
 // (node, port, isInput). Used by applyPortTorusColinearity to find coupled edges.
 func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
