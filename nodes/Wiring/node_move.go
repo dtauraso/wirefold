@@ -480,6 +480,11 @@ type MoveDispatch struct {
 	// links is the double-link movement graph (links.go). Polar locks ride on these;
 	// the graph is declared at load and is independent of the displayed data edges.
 	links []movementLink
+	// sceneSphere is the first-class scene reference every node's SCENE polar is measured
+	// about (polar-model.md, sphere_layout.go). Loaded from scene.json (or defaulted from
+	// the content-fit) at startup; its Center is the one cartesian anchor. Phase 1 stores
+	// it; later phases derive node world from it and move it on pan.
+	sceneSphere sceneSphere
 	// polarEqs are the polar-equation locks riding on the link graph (locks.go).
 	polarEqs []polarEq
 	// selectedLockIndex is the md.polarEqs index of the committed equation the user has
