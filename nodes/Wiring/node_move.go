@@ -47,11 +47,6 @@ const (
 	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
 )
 
-// lockPropEps is the change-gate epsilon for RootMove's transitive lock-propagation
-// worklist: a follower whose newly solved center is within lockPropEps of its previous
-// center is considered settled and is not re-enqueued (fixpoint / no thrash).
-const lockPropEps = 1e-6
-
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
 // via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
 // the current center without touching the mover's live geom.
@@ -846,70 +841,29 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	edges := md.heldEdges()
 	emit := map[string]vec3{nodeID: target}
 
-	// pos reads the GROWING emit set first (so each successive solve in the worklist
-	// below sees already-moved followers' new centers), falling back to the movers'
-	// held centers for anything not yet touched this frame.
+	// pos reads the dragged node's TARGET (from emit) before falling back to the movers'
+	// held centers.
 	pos := func(id string) (vec3, bool) {
 		if w, ok := emit[id]; ok {
 			return w, true
 		}
 		return md.centerOfNode(id)
 	}
-	// Transitive lock propagation: a bounded worklist fixpoint over applyPolarEqs so a
-	// chain of equations (A—eq—B—eq—C) fully resolves when either A or B moves, not just
-	// the equations directly touching the dragged node. maxIters is a hard backstop
-	// against non-convergence/cycles; lockPropEps gates re-enqueue so a settled node
-	// doesn't thrash forever.
-	frontier := []string{nodeID}
-	iters := 0
-	maxIters := 16 * (len(md.polarEqs) + 1)
-	// enqueue merges a solve's output map into the single per-frame fan through the
-	// shared change-gate: never overwrite/re-enqueue the dragged node itself, and skip
-	// a follower whose new center hasn't moved beyond lockPropEps (fixpoint settled).
-	// Both applyPolarEqs and applyPortTorusColinearity route through this so a
-	// second-hop `port ∈ torus` follower re-enters the worklist exactly like a
-	// node-node equation follower does.
-	enqueue := func(out map[string]vec3) {
-		for f, newC := range out {
-			if f == nodeID {
-				continue
-			}
-			prevC, hadPrev := emit[f]
-			if !hadPrev {
-				prevC, hadPrev = md.centerOfNode(f)
-			}
-			if hadPrev && chordLength(newC, prevC) <= lockPropEps {
-				continue // settled: no change, don't re-enqueue (fixpoint)
-			}
-			emit[f] = newC
-			frontier = append(frontier, f)
-		}
+	// Drag edge: the mouse handed in a world point, so recompute the polar of every link
+	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
+	// read the stored link polar — no cart2polar in the lock equation.
+	md.refreshLinksTouching(nodeID, pos)
+	// Apply the polar-equation locks riding on the link graph: each equation touching the
+	// moved node writes the OTHER term's node (in polar, on its link) and its derived world
+	// is merged into the single per-frame fan.
+	for id, w := range md.applyPolarEqs(nodeID, pos) {
+		emit[id] = w
 	}
-	for len(frontier) > 0 {
-		if iters >= maxIters {
-			if md.tr != nil {
-				md.tr.Breadcrumb("lockPropCap", nodeID, "", "")
-			}
-			break
-		}
-		iters++
-		m := frontier[0]
-		frontier = frontier[1:]
-		// Drag edge: the mouse handed in a world point, so recompute the polar of every
-		// link touching the moved node (the ONE world→polar conversion). Thereafter the
-		// locks read the stored link polar — no cart2polar in the lock equation.
-		md.refreshLinksTouching(m, pos)
-		// Apply the polar-equation locks riding on the link graph: each equation touching
-		// the moved node writes the OTHER term's node (in polar, on its link) and its
-		// derived world is merged into the single per-frame fan.
-		enqueue(md.applyPolarEqs(m, pos))
-		// Stage 2 of the `port ∈ torus` lock: keep any edge whose both ports are pinned
-		// to their own node's border ring colinear by coupling the dependent node's z to
-		// the moved node's z. Runs after applyPolarEqs (within this worklist node's turn)
-		// so pos() sees its writes too. Driven by the WORKLIST node `m`, not the fixed
-		// dragged nodeID, so a chain of coupled edges (A—torus—B—torus—C) fully resolves
-		// when the propagation reaches B, not only the hop directly off the dragged node.
-		enqueue(md.applyPortTorusColinearity(m, pos))
+	// Stage 2 of the `port ∈ torus` lock: keep any edge whose both ports are pinned
+	// to their own node's border ring colinear by coupling the dependent node's z to
+	// the dragged node's z. Runs after applyPolarEqs so pos() sees its writes too.
+	for id, w := range md.applyPortTorusColinearity(nodeID, pos) {
+		emit[id] = w
 	}
 
 	// Recompute every center's reach over the updated positions and fan all movers ONCE.

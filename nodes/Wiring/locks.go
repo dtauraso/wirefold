@@ -198,11 +198,10 @@ func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
 // edge-endpoint state RootMove already reads via heldEdges — no new adjacency was
 // added.
 //
-// ONE-HOP PER CALL: a single call only solves the edges directly touching movedID.
-// RootMove drives transitivity: it runs this inside its bounded worklist fixpoint
-// (alongside applyPolarEqs), calling it once per worklist node as propagation reaches
-// it — so a chain of torus-coupled edges (A—torus—B—torus—C) fully resolves when
-// either end (or the middle) moves, not just the hop directly off the dragged node.
+// ONE-HOP ONLY (matching applyPolarEqs): if the dependent node is itself an endpoint
+// of another port-torus-coupled edge, that second edge is NOT solved this pass. A
+// drag that should ripple through a chain of torus-coupled edges needs a future
+// multi-hop pass; today's caller (RootMove) calls this once per drag frame.
 func (md *MoveDispatch) applyPortTorusColinearity(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
 	out := map[string]vec3{}
 	moved, ok := pos(movedID)
