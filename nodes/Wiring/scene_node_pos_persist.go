@@ -36,6 +36,10 @@ type nodePosPersister struct {
 	pending  map[string]vec3 // node id → latest center awaiting write
 	timer    *time.Timer
 	writes   int // count of completed flushes (test observability)
+	// sceneCenter returns the current scene-sphere center, so each write can ALSO record the
+	// node's SCENE POLAR (r,θ,φ = cart2polar(world − sceneCenter)) alongside x/y/z during the
+	// polar-model migration (polar-model.md phase 2). nil → write cartesian only.
+	sceneCenter func() vec3
 }
 
 // schedule records the latest center for a node and (re)arms the debounce timer. A
@@ -67,8 +71,13 @@ func (p *nodePosPersister) flush() {
 	if len(pend) == 0 {
 		return
 	}
+	var sc vec3
+	haveSC := false
+	if p.sceneCenter != nil {
+		sc, haveSC = p.sceneCenter(), true
+	}
 	for id, c := range pend {
-		if err := writeNodePosition(p.root, id, c); err != nil {
+		if err := writeNodePosition(p.root, id, c, sc, haveSC); err != nil {
 			fmt.Fprintf(os.Stderr, "scene_node_pos_persist: write %s: %v\n", id, err)
 		}
 	}
@@ -80,7 +89,7 @@ func (p *nodePosPersister) flush() {
 // writeNodePosition sets ONLY the x/y/z fields of <root>/nodes/<id>/meta.json, preserving
 // every other field (id, type, r). The file must already exist (a node always has a
 // meta.json); a missing/malformed file is reported rather than fabricated.
-func writeNodePosition(root, id string, c vec3) error {
+func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCenter bool) error {
 	path := filepath.Join(root, "nodes", id, "meta.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -97,6 +106,15 @@ func writeNodePosition(root, id string, c vec3) error {
 	setNum("x", c.X)
 	setNum("y", c.Y)
 	setNum("z", c.Z)
+	// Dual-write the SCENE POLAR (polar-model.md phase 2): the node's polar about the scene
+	// sphere. Cartesian x/y/z stays for back-compat during migration; the polar fields become
+	// authoritative once the load side prefers them (phase 2b).
+	if haveSceneCenter {
+		sp := cart2polar(c.sub(sceneCenter))
+		setNum("scenePolarR", sp.R)
+		setNum("scenePolarTheta", sp.Theta)
+		setNum("scenePolarPhi", sp.Phi)
+	}
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return err

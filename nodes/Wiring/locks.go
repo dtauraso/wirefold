@@ -115,7 +115,8 @@ func (md *MoveDispatch) ensureLink(a, b string) {
 	}
 }
 
-// applyPolarEqs returns the new world positions of the nodes written to satisfy every
+// applyPolarEqs is now TEST-ONLY (production node-move uses the decentralized
+// lockRecalc/lockNeighbors cascade below): it returns the new world positions of the nodes written to satisfy every
 // equation that touches movedID. For each such equation the moved node's term is the
 // input; the OTHER term's constrained component is solved for and written on its link,
 // keeping that node's remaining polar coordinates. Equations are applied in order, so two
@@ -167,6 +168,227 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 	return out
 }
 
+// lockRecalc is the DECENTRALIZED per-receiver counterpart to applyPolarEqs AND
+// applyPortTorusColinearity, UNIFIED into one mechanism: it computes `self`'s own
+// constrained world position given that `from` just moved to world position `fromWorld`,
+// by checking EVERY active constraint (of ANY kind) tying `self` to `from` and applying
+// each in turn (later constraints read earlier ones' writes, exactly like applyPolarEqs'
+// composition of a mirror's θ+φ pair). Self's CURRENT position, and every eqNodeNode
+// Center's position, are derived LOCALLY from atomic position snapshots (md.centerOfNode
+// reads nm.snap.Load(), never the shared md.links) — this never reads or writes
+// md.linkBetween, so two different receiving goroutines never touch the same movementLink
+// concurrently; each node's position lives only in its own goroutine's world snapshot.
+// md.polarEqs is read-only here (locks are authored on a separate gesture, never
+// mid-drag, so the equation TOPOLOGY cannot change while a cascade is in flight).
+//
+// eqNodeNode: self's polar about the eq's Center is recomputed by cart2polar(selfWorld -
+// centerWorld), the sender's polar about that SAME center by cart2polar(fromWorld -
+// centerWorld), and the constrained component is solved for exactly as applyPolarEqs
+// does (target = fromSign·fromComp·selfSign).
+//
+// eqPortTorus: when self and from are the two endpoints of an edge whose BOTH ports carry
+// an active eqPortTorus lock (portTorusLocked), the edge is colinear iff the two node
+// centers share a z (applyPortTorusColinearity's rule) — so self's z is set to from's z.
+//
+// Returns (newWorld, false) when no active constraint of any kind touches (self,from) or
+// when the recomputed position is within lockPropEps of self's current published
+// position — the latter is the anti-divergence guarantee: an over-constrained lock set
+// converges to a fixpoint and the cascade goes silent instead of oscillating forever.
+// clonePolar returns an immutable copy of a node's owned local-polar map for carrying in a
+// message (the receiver reads it on another goroutine; a copy avoids sharing the sender's
+// live map). nil for an empty map.
+func clonePolar(s map[string]polar) map[string]polar {
+	if len(s) == 0 {
+		return nil
+	}
+	c := make(map[string]polar, len(s))
+	for k, v := range s {
+		c[k] = v
+	}
+	return c
+}
+
+// localPolarOf returns node m's OWNED local polar offset about center, lazily taking it —
+// the FIRST time it is needed — from the value that already exists: the movement-link polar
+// (links.go), which was initialized at load from the saved node positions (ensureEqLinks /
+// refreshLink). There is NO separate seed step; the offset simply comes from where it
+// already lives. Thereafter m.localPolar[center] is authoritative (a lock nudges one
+// component) and the link is not read again. Falls back to a cart2polar of the current world
+// only if no link exists yet.
+func (md *MoveDispatch) localPolarOf(m *nodeMover, center string) (polar, bool) {
+	if p, ok := m.localPolar[center]; ok {
+		return p, true
+	}
+	if lk := md.linkBetween(center, m.id); lk != nil {
+		if p, ok := lk.polarOf(center, m.id); ok {
+			m.localPolar[center] = p
+			return p, true
+		}
+	}
+	cw, ok1 := md.centerOfNode(center)
+	sw, ok2 := md.centerOfNode(m.id)
+	if ok1 && ok2 {
+		p := cart2polar(sw.sub(cw))
+		m.localPolar[center] = p
+		return p, true
+	}
+	return polar{}, false
+}
+
+func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromWorld vec3, fromLocalPolar map[string]polar) (vec3, bool) {
+	self := m.id
+	selfWorld, ok := md.centerOfNode(self)
+	if !ok {
+		return vec3{}, false
+	}
+	newWorld := selfWorld
+	applied := false
+
+	// eqNodeNode: satisfy every equation tying (self,from) about their shared Center by
+	// updating self's OWNED local polar offset (m.localPolar[center]) — NEVER by recomputing
+	// it from the current cartesian world. self's owned offset is seeded from good positions
+	// (seedLocalPolar); here we set ONLY the constrained component to the (sign-adjusted) copy
+	// of the sender's OWNED component (from the message's FromLocalPolar, NOT cart2polar of a
+	// possibly-perturbed FromWorld), preserving self's owned r/θ. World is DERIVED as
+	// polar2cart(owned)+liveCenter — the live center rigidly translates self; the owned r
+	// never inflates.
+	for _, eq := range md.polarEqs {
+		if !eq.Active || eq.Kind != eqNodeNode {
+			continue
+		}
+		var selfTerm, fromTerm polarTerm
+		switch {
+		case eq.A.Node == self && eq.B.Node == from:
+			selfTerm, fromTerm = eq.A, eq.B
+		case eq.B.Node == self && eq.A.Node == from:
+			selfTerm, fromTerm = eq.B, eq.A
+		default:
+			continue
+		}
+		centerWorld, ok := md.centerOfNode(eq.Center)
+		if !ok {
+			continue
+		}
+		np, ok := md.localPolarOf(m, eq.Center) // owned offset, from the existing link (no seed)
+		if !ok {
+			np = cart2polar(newWorld.sub(centerWorld))
+		}
+		sp, ok := fromLocalPolar[eq.Center]
+		if !ok {
+			sp = cart2polar(fromWorld.sub(centerWorld)) // fallback: sender carried no owned offset
+		}
+		target := fromTerm.Sign * compOf(sp, fromTerm.Comp) * selfTerm.Sign
+		setCompOf(&np, selfTerm.Comp, target)
+		m.localPolar[eq.Center] = np // owned offset is authoritative; store it back
+		newWorld = polar2cart(np).add(centerWorld)
+		applied = true
+	}
+
+	// eqPortTorus: self and from colinear-coupled via a torus-locked edge — self's z
+	// follows from's z (applyPortTorusColinearity's rule, replicated per-hop here).
+	for _, em := range md.edgeMovers {
+		if em.srcID == em.dstID {
+			continue
+		}
+		var isSelfFromEdge bool
+		switch {
+		case em.srcID == self && em.dstID == from:
+			isSelfFromEdge = true
+		case em.dstID == self && em.srcID == from:
+			isSelfFromEdge = true
+		}
+		if !isSelfFromEdge {
+			continue
+		}
+		coupled := md.portTorusLocked(em.srcID, em.srcH, false) &&
+			md.portTorusLocked(em.dstID, em.dstH, true)
+		if !coupled {
+			continue
+		}
+		newWorld.Z = fromWorld.Z
+		applied = true
+	}
+
+	if !applied {
+		return vec3{}, false
+	}
+	if selfWorld.sub(newWorld).length() <= lockPropEps {
+		return vec3{}, false // already satisfied — the cascade dies here
+	}
+	return newWorld, true
+}
+
+// lockNeighbors returns one moveMsg per DISTINCT neighbor `self` is tied to by an
+// active constraint of ANY kind — eqNodeNode polar equations AND eqPortTorus colinearity
+// via a coupled edge — excluding `exclude` (the node that just sent to self, so the
+// cascade never echoes straight back). A lock KIND is just which constraint a RECEIVER
+// checks (lockRecalc), not a separate propagation mechanism: every message here carries
+// the same payload shape, self's CURRENT world position. selfWorld is passed in by the
+// caller (RootMove's just-computed drag target, or a follower's just-applied newWorld
+// inside nodeMover.handle) rather than re-derived via md.centerOfNode — the latter would
+// race the very "center" message the caller just fanned out asynchronously to self's own
+// goroutine (self's atomic snap may not have caught up yet when the caller is a different
+// goroutine, e.g. RootMove originating a drag).
+func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude string) []moveMsg {
+	self := m.id
+	// Ensure self's owned offset is populated (from the existing link) for every center it is
+	// a term of, so the message carries an un-inflated offset for each shared center.
+	for _, eq := range md.polarEqs {
+		if eq.Active && eq.Kind == eqNodeNode && (eq.A.Node == self || eq.B.Node == self) {
+			md.localPolarOf(m, eq.Center)
+		}
+	}
+	localPolar := clonePolar(m.localPolar) // immutable snapshot shared across the fan (safe)
+	var out []moveMsg
+	seen := map[string]bool{}
+	add := func(otherID string) {
+		if otherID == "" || otherID == self || otherID == exclude || seen[otherID] {
+			return
+		}
+		seen[otherID] = true
+		out = append(out, moveMsg{
+			Kind:           moveMsgKindLockUpdate,
+			NodeID:         otherID,
+			From:           self,
+			FromWorld:      selfWorld,
+			FromLocalPolar: localPolar, // sender's OWNED offset so receivers copy an un-inflated component
+		})
+	}
+
+	for _, eq := range md.polarEqs {
+		if !eq.Active || eq.Kind != eqNodeNode {
+			continue
+		}
+		switch self {
+		case eq.A.Node:
+			add(eq.B.Node)
+		case eq.B.Node:
+			add(eq.A.Node)
+		}
+	}
+
+	// eqPortTorus: self's torus-neighbor is the OTHER endpoint of any edge where BOTH
+	// ports carry an active eqPortTorus lock (portTorusLocked) and self is one endpoint.
+	for _, em := range md.edgeMovers {
+		if em.srcID == em.dstID {
+			continue
+		}
+		coupled := md.portTorusLocked(em.srcID, em.srcH, false) &&
+			md.portTorusLocked(em.dstID, em.dstH, true)
+		if !coupled {
+			continue
+		}
+		switch self {
+		case em.srcID:
+			add(em.dstID)
+		case em.dstID:
+			add(em.srcID)
+		}
+	}
+
+	return out
+}
+
 // portTorusLocked returns true if there is an ACTIVE eqPortTorus lock on the given
 // (node, port, isInput). Used by applyPortTorusColinearity to find coupled edges.
 func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
@@ -179,7 +401,9 @@ func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
 	return false
 }
 
-// applyPortTorusColinearity implements STAGE 2 of the `port ∈ torus` lock: when both
+// applyPortTorusColinearity is now TEST-ONLY (production node-move uses the decentralized
+// lockRecalc/lockNeighbors cascade above, which replicates this exact z-coupling rule
+// per-hop): it implements STAGE 2 of the `port ∈ torus` lock: when both
 // endpoints of an edge have an ACTIVE eqPortTorus lock on their respective ports (the
 // source's out-port pinned to its own node's border ring, the destination's in-port
 // pinned to its own node's border ring), the edge S.out→D.in is colinear (S_center,
@@ -198,11 +422,10 @@ func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
 // edge-endpoint state RootMove already reads via heldEdges — no new adjacency was
 // added.
 //
-// ONE-HOP PER CALL: a single call only solves the edges directly touching movedID.
-// RootMove drives transitivity: it runs this inside its bounded worklist fixpoint
-// (alongside applyPolarEqs), calling it once per worklist node as propagation reaches
-// it — so a chain of torus-coupled edges (A—torus—B—torus—C) fully resolves when
-// either end (or the middle) moves, not just the hop directly off the dragged node.
+// ONE-HOP ONLY (matching applyPolarEqs): if the dependent node is itself an endpoint
+// of another port-torus-coupled edge, that second edge is NOT solved this pass. A
+// drag that should ripple through a chain of torus-coupled edges needs a future
+// multi-hop pass; today's caller (RootMove) calls this once per drag frame.
 func (md *MoveDispatch) applyPortTorusColinearity(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
 	out := map[string]vec3{}
 	moved, ok := pos(movedID)

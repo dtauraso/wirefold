@@ -147,6 +147,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	for i := 0; i < 500 && snapState.NodeRowCount() < len(nodes); i++ {
 		time.Sleep(time.Millisecond)
 	}
+	md.LoadSceneSphere(topologyPath)
 	md.LoadPolarEqs(topologyPath)
 
 	// Wait for all nodes to exit, but never block forever: in a timed/cancelled

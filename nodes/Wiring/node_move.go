@@ -45,11 +45,23 @@ const (
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
 	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
+	// moveMsgKindLockUpdate is the DECENTRALIZED lock propagation message, covering EVERY
+	// constraint kind (node-node polar equations AND port∈torus colinearity) over one
+	// mechanism (node_move.go doc comment / locks.go lockRecalc/lockNeighbors). It carries
+	// what a receiving nodeMover needs to recompute its own constrained position without
+	// reading any cross-goroutine shared state except the atomic center snapshot: who sent
+	// it (From) and the sender's fresh WORLD position (FromWorld). The receiver checks
+	// EVERY active constraint tying it to the sender, of any kind, and recomputes locally.
+	// There is no central worklist: a receiver that moves > epsilon re-broadcasts the same
+	// kind to its OWN lock-neighbors (excluding the sender); a receiver that doesn't move
+	// stays silent, which is how the cascade terminates.
+	moveMsgKindLockUpdate = "lockUpdate"
 )
 
-// lockPropEps is the change-gate epsilon for RootMove's transitive lock-propagation
-// worklist: a follower whose newly solved center is within lockPropEps of its previous
-// center is considered settled and is not re-enqueued (fixpoint / no thrash).
+// lockPropEps is the minimum world-space displacement a lock-propagation recalculation
+// must produce to be considered a real move. Below this, the receiving node is already
+// satisfied and does NOT rebroadcast — this is the anti-divergence / termination
+// guarantee for a decentralized cascade over a possibly over-constrained lock graph.
 const lockPropEps = 1e-6
 
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
@@ -90,7 +102,21 @@ type moveMsg struct {
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
 	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
 	ReachR float64
-	ack    chan struct{}
+	// Lock-propagation payload (Kind == "lockUpdate"): see moveMsgKindLockUpdate. FromWorld
+	// is the sender's new WORLD position; each receiver derives whatever a given
+	// constraint kind needs from it locally (polar-about-center via cart2polar, torus z
+	// via .Z) — the message itself carries no constraint-kind-specific shape, since a
+	// single sender may be tied to the same neighbor by more than one constraint kind.
+	From      string
+	FromWorld vec3
+	// FromLocalPolar is the sender's OWNED local polar offset about each lock-center it is
+	// tied to (keyed by center id). A polar-lock receiver reads the sender's owned offset
+	// about their SHARED center from here — NOT recomputed via cart2polar of FromWorld — so
+	// a sender whose cartesian world was perturbed (torus z-copy, or a moved center) does not
+	// inflate the receiver's radius. Torus receivers still use FromWorld.Z. An immutable
+	// snapshot built by the sender; never mutated after send (safe cross-goroutine).
+	FromLocalPolar map[string]polar
+	ack            chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -134,10 +160,37 @@ type nodeMover struct {
 	// update; read by any goroutine (stdin reader) to observe the current position
 	// without crossing into the mover's live geom.
 	snap atomic.Pointer[centerSnap]
+	// Decentralized node-node polar-lock propagation (locks.go): lockRecalc computes
+	// this node's own constrained position from an incoming lockUpdate by deriving both
+	// self's and the center's world position from atomic position snapshots
+	// (md.centerOfNode → nm.snap.Load()) — it never reads or writes the shared md.links,
+	// so no two goroutines ever touch the same movementLink concurrently. md.polarEqs is
+	// READ-ONLY during a drag cascade (locks are authored on a separate gesture, not
+	// mid-drag). lockNeighbors finds this node's OWN lock-neighbors to re-broadcast to
+	// (excluding the sender), deriving each outgoing polar the same local way. sendMove
+	// routes a moveMsg to another id's inbox by id-lookup against md.dispatch (a
+	// read-only directory after construction — no queue, no shared mutable state).
+	// edgeIDs are the ids of every edge incident to this node, so a lock-driven move can
+	// notify its own edges exactly the way a dragged node's move does (fanCenters), via
+	// sendMove, without a separately-cached channel slice duplicating md.dispatch.
+	lockRecalc    func(m *nodeMover, from string, fromWorld vec3, fromLocalPolar map[string]polar) (vec3, bool)
+	lockNeighbors func(m *nodeMover, selfWorld vec3, exclude string) []moveMsg
+	// localPolar is this node's OWNED local polar OFFSET (r, θ, φ) about each lock-center it
+	// is doubly-linked to (keyed by center id) — polar-model.md. It is the AUTHORITATIVE
+	// constraint state: seeded once from good positions (seedLocalPolar), refreshed for the
+	// dragged node from its cursor at the drag edge, and thereafter changed ONLY by a lock
+	// nudging a single component (a bounded copy of a neighbor's owned component). It is
+	// NEVER re-derived as cart2polar(node − center) from live world during a cascade — that
+	// reconstruction against a mid-moving center is what inflates the radius. World is DERIVED
+	// as centerWorld + polar2cart(localPolar[center]) for render/messaging. Touched only by
+	// this node's own goroutine during a cascade.
+	localPolar map[string]polar
+	sendMove   func(id string, msg moveMsg)
+	edgeIDs    []string
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
-	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr, localPolar: map[string]polar{}}
 	// Seed the atomic snapshot from the initial geometry so readers have a
 	// valid center before the first center message arrives.
 	if geom.Center != nil {
@@ -183,6 +236,41 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// path used by ResendGeometry when movers are running.
 		if m.tr != nil {
 			m.emitGeometry()
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindLockUpdate {
+		if m.lockRecalc == nil {
+			return
+		}
+		newWorld, moved := m.lockRecalc(m, msg.From, msg.FromWorld, msg.FromLocalPolar)
+		if !moved {
+			// Anti-divergence / termination: this node is already satisfied (or has no
+			// eq touching this sender+center), so it does NOT rebroadcast. The wave
+			// dies here — there is no central worklist to fall back on.
+			return
+		}
+		nw := newWorld
+		m.geom.Center = &nw
+		m.snap.Store(&centerSnap{c: nw, reach: m.geom.ReachR})
+		if m.tr != nil {
+			m.emitGeometry()
+		}
+		// Notify this node's OWN edges (mirrors what fanCenters does for a moved node) —
+		// each edgeMover recomputes/emits on its own goroutine from the same
+		// moveMsgKindCenter case a drag already uses. Routed via sendMove (the same
+		// dispatch-map lookup used for lock-neighbor rebroadcast), not a cached channel.
+		if m.sendMove != nil {
+			for _, edgeID := range m.edgeIDs {
+				cc := nw
+				m.sendMove(edgeID, moveMsg{Kind: moveMsgKindCenter, NodeID: m.id, Center: &cc, ReachR: m.geom.ReachR})
+			}
+		}
+		// Re-broadcast to this node's OWN lock-neighbors, excluding the sender (no echo).
+		if m.lockNeighbors != nil && m.sendMove != nil {
+			for _, out := range m.lockNeighbors(m, nw, msg.From) {
+				m.sendMove(out.NodeID, out)
+			}
 		}
 		return
 	}
@@ -409,6 +497,11 @@ type MoveDispatch struct {
 	// links is the double-link movement graph (links.go). Polar locks ride on these;
 	// the graph is declared at load and is independent of the displayed data edges.
 	links []movementLink
+	// sceneSphere is the first-class scene reference every node's SCENE polar is measured
+	// about (polar-model.md, sphere_layout.go). Loaded from scene.json (or defaulted from
+	// the content-fit) at startup; its Center is the one cartesian anchor. Phase 1 stores
+	// it; later phases derive node world from it and move it on pan.
+	sceneSphere sceneSphere
 	// polarEqs are the polar-equation locks riding on the link graph (locks.go).
 	polarEqs []polarEq
 	// selectedLockIndex is the md.polarEqs index of the committed equation the user has
@@ -444,6 +537,10 @@ type MoveDispatch struct {
 	anchorPersist   *anchorPersister
 	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
+	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
+	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanSceneSphere on every
+	// camera pan. nil until armed (tests that never arm).
+	spherePersist *sceneSpherePersister
 	// locksPersist is the debounced disk persister for the polar rule-builder's equations
 	// (md.polarEqs, scene_locks_persist.go). Armed by EnableEditPersist; nil until armed
 	// (tests that never arm).
@@ -554,6 +651,9 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
+		nm.lockRecalc = md.lockRecalc
+		nm.lockNeighbors = md.lockNeighbors
+		nm.sendMove = md.sendMove
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -561,6 +661,15 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr)
 		md.edgeMovers[edgeID] = em
 		md.dispatch[edgeID] = em.inbox
+	}
+	// Give every nodeMover the ids of its OWN incident edges, so a lock-driven move can
+	// notify its edges via sendMove (dispatch-map lookup) — no cached channel slice.
+	for id, nm := range md.nodeMovers {
+		for edgeID, em := range md.edgeMovers {
+			if em.srcID == id || em.dstID == id {
+				nm.edgeIDs = append(nm.edgeIDs, edgeID)
+			}
+		}
 	}
 	return md
 }
@@ -684,6 +793,16 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 		}
 	}
 	return vec3{}, false
+}
+
+// sendMove routes one moveMsg to another node's (or edge's) inbox by id, if known.
+// Used by the decentralized lock-propagation cascade so a nodeMover can re-broadcast
+// to its own lock-neighbors without any central worklist — the dispatch map is the
+// only "directory" involved, and it's read-only lookup, not a queue.
+func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
+	if ch, ok := md.dispatch[id]; ok {
+		ch <- msg
+	}
 }
 
 // installAimedPorts sets the aimed registry on every nodeMover and edgeMover and
@@ -846,71 +965,18 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	edges := md.heldEdges()
 	emit := map[string]vec3{nodeID: target}
 
-	// pos reads the GROWING emit set first (so each successive solve in the worklist
-	// below sees already-moved followers' new centers), falling back to the movers'
-	// held centers for anything not yet touched this frame.
+	// pos reads the dragged node's TARGET (from emit) before falling back to the movers'
+	// held centers.
 	pos := func(id string) (vec3, bool) {
 		if w, ok := emit[id]; ok {
 			return w, true
 		}
 		return md.centerOfNode(id)
 	}
-	// Transitive lock propagation: a bounded worklist fixpoint over applyPolarEqs so a
-	// chain of equations (A—eq—B—eq—C) fully resolves when either A or B moves, not just
-	// the equations directly touching the dragged node. maxIters is a hard backstop
-	// against non-convergence/cycles; lockPropEps gates re-enqueue so a settled node
-	// doesn't thrash forever.
-	frontier := []string{nodeID}
-	iters := 0
-	maxIters := 16 * (len(md.polarEqs) + 1)
-	// enqueue merges a solve's output map into the single per-frame fan through the
-	// shared change-gate: never overwrite/re-enqueue the dragged node itself, and skip
-	// a follower whose new center hasn't moved beyond lockPropEps (fixpoint settled).
-	// Both applyPolarEqs and applyPortTorusColinearity route through this so a
-	// second-hop `port ∈ torus` follower re-enters the worklist exactly like a
-	// node-node equation follower does.
-	enqueue := func(out map[string]vec3) {
-		for f, newC := range out {
-			if f == nodeID {
-				continue
-			}
-			prevC, hadPrev := emit[f]
-			if !hadPrev {
-				prevC, hadPrev = md.centerOfNode(f)
-			}
-			if hadPrev && chordLength(newC, prevC) <= lockPropEps {
-				continue // settled: no change, don't re-enqueue (fixpoint)
-			}
-			emit[f] = newC
-			frontier = append(frontier, f)
-		}
-	}
-	for len(frontier) > 0 {
-		if iters >= maxIters {
-			if md.tr != nil {
-				md.tr.Breadcrumb("lockPropCap", nodeID, "", "")
-			}
-			break
-		}
-		iters++
-		m := frontier[0]
-		frontier = frontier[1:]
-		// Drag edge: the mouse handed in a world point, so recompute the polar of every
-		// link touching the moved node (the ONE world→polar conversion). Thereafter the
-		// locks read the stored link polar — no cart2polar in the lock equation.
-		md.refreshLinksTouching(m, pos)
-		// Apply the polar-equation locks riding on the link graph: each equation touching
-		// the moved node writes the OTHER term's node (in polar, on its link) and its
-		// derived world is merged into the single per-frame fan.
-		enqueue(md.applyPolarEqs(m, pos))
-		// Stage 2 of the `port ∈ torus` lock: keep any edge whose both ports are pinned
-		// to their own node's border ring colinear by coupling the dependent node's z to
-		// the moved node's z. Runs after applyPolarEqs (within this worklist node's turn)
-		// so pos() sees its writes too. Driven by the WORKLIST node `m`, not the fixed
-		// dragged nodeID, so a chain of coupled edges (A—torus—B—torus—C) fully resolves
-		// when the propagation reaches B, not only the hop directly off the dragged node.
-		enqueue(md.applyPortTorusColinearity(m, pos))
-	}
+	// Drag edge: the mouse handed in a world point, so recompute the polar of every link
+	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
+	// read the stored link polar — no cart2polar in the lock equation.
+	md.refreshLinksTouching(nodeID, pos)
 
 	// Recompute every center's reach over the updated positions and fan all movers ONCE.
 	centers := md.heldCenters()
@@ -919,6 +985,33 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	}
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
+
+	// DECENTRALIZED lock propagation (locks.go): originate ONE cascade covering EVERY
+	// constraint kind (node-node polar equations AND port∈torus colinearity) by sending
+	// the dragged node's fresh world position to each of ITS lock-neighbors of ANY kind.
+	// There is no central worklist here — each receiver (nodeMover.handle,
+	// moveMsgKindLockUpdate) checks every active constraint tying it to the sender,
+	// decides locally whether it must move and, if so, re-broadcasts to ITS OWN
+	// lock-neighbors over the same channels (excluding the sender).
+	if dragged := md.nodeMovers[nodeID]; dragged != nil {
+		// Drag edge: refresh the dragged node's OWNED local polar about each center it is a
+		// term of, from its NEW cursor world (the one world→polar conversion of a bounded
+		// cursor position). Its neighbors then satisfy against this fresh owned offset.
+		for _, eq := range md.polarEqs {
+			if !eq.Active || eq.Kind != eqNodeNode {
+				continue
+			}
+			if eq.A.Node != nodeID && eq.B.Node != nodeID {
+				continue
+			}
+			if cw, ok := md.centerOfNode(eq.Center); ok {
+				dragged.localPolar[eq.Center] = cart2polar(target.sub(cw))
+			}
+		}
+		for _, out := range md.lockNeighbors(dragged, target, "") {
+			md.sendMove(out.NodeID, out)
+		}
+	}
 
 	// Persist every moved node's new center (the dragged node plus any lock followers) to
 	// disk. Debounced + fire-and-forget: a drag re-arms per pointermove and writes once it
@@ -972,7 +1065,13 @@ func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 	md.vp.OrbitLockedViewpoint(from, to, tr)
 }
 func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
-func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace)      { md.vp.PanViewpoint(delta, tr) }
+func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
+	md.vp.PanViewpoint(delta, tr)
+	// Phase 6 (polar-model.md): a camera pan also pans the scene sphere by the same delta —
+	// the sphere is a separate entity from the camera pivot, but pan is the one gesture that
+	// moves both together. Orbit (OrbitViewpoint/OrbitLockedViewpoint) must NOT call this.
+	md.PanSceneSphere(delta)
+}
 
 // EnableViewpointPersist arms gesture-driven camera persistence: every subsequent
 // EmitViewpoint (orbit/zoom/pan/home) debounces a write of the current viewpoint to
@@ -1000,11 +1099,13 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	// returns "" for a true monolithic topology with no tree), making the two-form bug
 	// class unrepresentable here. Do not hand-roll os.Stat/IsDir — use sceneTreeRoot.
 	root := sceneTreeRoot(topologyPath)
-	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
+	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce,
+		sceneCenter: func() vec3 { return md.sceneSphere.Center }}
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.locksPersist = &polarEqsPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

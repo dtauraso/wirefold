@@ -530,9 +530,17 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 			return true // suppress select even when the hit is unresolvable
 		}
 		g.ruleTerms = append(g.ruleTerms, polarTerm{Node: node, Comp: g.pendingComp, Sign: g.pendingSign})
-		if len(g.ruleTerms) == 2 && md.selected != "" {
-			eq := polarEq{Center: md.selected, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
+		// Center is the rule-builder's authored center (md.ruleCenter — the node clicked
+		// as Center while authoring), NOT md.selected: in select mode a node-body click
+		// sets md.ruleCenter and never md.selected, so keying the Center off md.selected
+		// committed an empty Center whose links no-op'd (ensureEqLinks) and whose drag
+		// enforcement silently skipped (applyPolarEqs). Gate on ruleCenter for the same reason.
+		if len(g.ruleTerms) == 2 && md.ruleCenter != "" {
+			eq := polarEq{Center: md.ruleCenter, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
 			md.polarEqs = append(md.polarEqs, eq)
+			// Auto-select the just-committed equation so it lands highlighted in the panel
+			// list AND draws its diagram guides immediately — both follow selectedLockIndex.
+			md.selectedLockIndex = len(md.polarEqs) - 1
 			// Guarantee the Center↔term movement links exist so the equation is enforced
 			// even when no topology edge connects the picked nodes to the Center.
 			md.ensureEqLinks(eq)
@@ -543,7 +551,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 				md.RootMove(eq.A.Node, c)
 			}
 			if tr != nil {
-				tr.Breadcrumb("polar-rule-added", md.selected, node, "")
+				tr.Breadcrumb("polar-rule-added", md.ruleCenter, node, "")
 			}
 			if md.locksPersist != nil {
 				md.locksPersist.schedule(md.polarEqs)

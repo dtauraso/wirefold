@@ -165,6 +165,36 @@ goroutines is drift — move it back into Go. Likewise any domain state
 any TS-side geometry/position/timing computation, is drift: Go owns the
 model and streams it as the content buffer; TS decodes and draws.
 
+## Node positions & movement locks (the polar model)
+
+Editor-time node geometry and lock propagation are **pure polar**. The ONLY cartesian value
+in the system is the scene sphere's own center (the world anchor).
+
+- **Scene sphere** — a first-class, persisted reference (NOT the derived content-sphere
+  centroid, which moves with the nodes and is circular). It has a **cartesian center** (the
+  one world anchor, in `scene.json`) and a **radius** that fits the diagram and re-fits on
+  pan. It is a SEPARATE entity from the camera pivot: camera **orbit** must not move it;
+  camera **pan** does (`PanViewpoint` → `PanSceneSphere`, same delta), holding node world
+  positions fixed while their scene polars recompute about the new center.
+- **Two polars per node.** (1) **Scene polar** `(r,θ,φ)` about the scene-sphere center — the
+  node's POSITION, persisted (`meta.json` `scenePolar*`; cartesian `x/y/z` kept only for
+  back-compat, and only used at load when no sphere is persisted yet). World = `sceneCenter +
+  polar2cart(scenePolar)`. (2) **Local polar** — the node's stored OFFSET about the local
+  node it is doubly-linked to (its lock center). This is the constraint frame.
+- **Locks are offsets.** A node-node lock nudges ONE component of a node's **stored local
+  polar** offset (a bounded copy of a neighbor's owned component), carried node-to-node in the
+  decentralized cascade message (`FromLocalPolar`). The offset is taken from the existing
+  movement-link value on first touch (`localPolarOf`) — there is no separate seed step.
+- **No blow-up, by construction.** The offset is STORED and only carried through the
+  composition or nudged one component — it is NEVER re-derived as `cart2polar(node − center)`
+  from a live world during a cascade. That reconstruction against a mid-moving center is the
+  bug that made positions fly to infinity. A moved center rigidly translates its satellites
+  (offset unchanged ⇒ locks stay satisfied ⇒ the wave terminates). Guard:
+  `TestPolarLockNoBlowup`.
+- **Panel-authored locks must be structurally incapable of a position blow-up.** If one
+  happens, the implementation is wrong (an offset was reconstructed from a moving reference),
+  not the locks.
+
 ## Allowed vocabulary
 
 - bead, in-flight, held (node-local) state

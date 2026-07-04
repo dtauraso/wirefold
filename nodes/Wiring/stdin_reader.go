@@ -248,6 +248,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				if md != nil {
 					md.overlaysPersist.schedule(md.ov)
 					md.locksPersist.schedule(md.polarEqs)
+					// Persist the scene sphere immediately (not debounced) so save reliably
+					// activates the polar-load path (scene_sphere_persist.go LoadSceneSphere) —
+					// until the sphere is in scene.json, reload stays on cartesian x/y/z.
+					md.spherePersist.flushNow(md.sceneSphere)
 				}
 			case "fade-toggle":
 				// Bare FADE command: toggle fade on the Go-owned current selection. Go owns
