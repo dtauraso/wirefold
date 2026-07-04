@@ -118,9 +118,12 @@ const NODE_RING_TUBE_RATIO = 0.08;
 // Invisible pick-proxy tube thickness as a fraction of the node radius. The VISIBLE ring
 // (NODE_RING_TUBE_RATIO=0.08) sits flush on the body sphere's surface and is practically
 // unhittable by raycast — clicks aimed at it register as hitKind=node instead (confirmed via
-// runtime breadcrumbs). This proxy is a much thicker, invisible torus sharing the ring's
-// per-instance transform, so the same visual band becomes a generous raycast target. Tunable.
-const RING_PICK_TUBE_RATIO = 0.4;
+// runtime breadcrumbs). This proxy is an invisible torus sharing the ring's per-instance
+// transform. It must sit EXACTLY on the visible ring (same tube thickness) so the pick band
+// covers the torus and nothing else — at 0.4 the tube spanned 0.6r..1.4r and its projected
+// donut covered most of the node face, stealing body clicks (the "band spread over the whole
+// node" bug). Matched to NODE_RING_TUBE_RATIO so the band IS the torus.
+const RING_PICK_TUBE_RATIO = NODE_RING_TUBE_RATIO;
 // Pointer-hover highlight (pre-branch scene-graph.tsx): the hovered node's border ring turns
 // #aaddff and thickens to r*0.14 (HOVER_RING_TUBE_RATIO); a hovered port sphere turns #aaddff
 // and grows to 1.3× (PortSphere isHov). Go OWNS hover (the Hovered columns); this is render-only.
