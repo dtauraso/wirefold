@@ -170,27 +170,28 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 // lockRecalc is the DECENTRALIZED per-receiver counterpart to applyPolarEqs: it computes
 // `self`'s own constrained polar (about `center`) given that `from` just sent its polar
 // `senderPolar` about the same center, using the exact same equation math applyPolarEqs
-// uses (target = fromSign·fromComp·selfSign). It touches ONLY self's own link
-// (md.linkBetween(center, self)) — never `from`'s link — so two different receiving
-// goroutines never write the same movementLink concurrently (each follower owns exactly
-// its own center↔self link). md.polarEqs/md.links are read-only here: locks are authored
-// on a separate gesture, never mid-drag, so the equation/link TOPOLOGY cannot change
-// while a cascade is in flight.
+// uses (target = fromSign·fromComp·selfSign). Self's CURRENT polar about center is derived
+// LOCALLY from atomic position snapshots (md.centerOfNode reads nm.snap.Load(), never the
+// shared md.links) — it never reads or writes md.linkBetween(center,self), so two different
+// receiving goroutines never touch the same movementLink concurrently; each node's polar
+// lives only in its own goroutine's world-position snapshot. md.polarEqs is read-only here
+// (locks are authored on a separate gesture, never mid-drag, so the equation TOPOLOGY
+// cannot change while a cascade is in flight).
 //
 // Returns (newWorld, false) when no active eqNodeNode touches (self,from,center) or when
 // the recomputed position is within lockPropEps of self's current published position —
 // the latter is the anti-divergence guarantee: an over-constrained lock set converges to
 // a fixpoint and the cascade goes silent instead of oscillating forever.
 func (md *MoveDispatch) lockRecalc(self, from, center string, senderPolar polar) (vec3, bool) {
-	selfLink := md.linkBetween(center, self)
-	if selfLink == nil {
-		return vec3{}, false
-	}
-	op, ok := selfLink.polarOf(center, self)
+	centerWorld, ok := md.centerOfNode(center)
 	if !ok {
 		return vec3{}, false
 	}
-	np := op
+	selfWorld, ok := md.centerOfNode(self)
+	if !ok {
+		return vec3{}, false
+	}
+	np := cart2polar(selfWorld.sub(centerWorld))
 	applied := false
 	for _, eq := range md.polarEqs {
 		if !eq.Active || eq.Kind != eqNodeNode || eq.Center != center {
@@ -212,24 +213,20 @@ func (md *MoveDispatch) lockRecalc(self, from, center string, senderPolar polar)
 	if !applied {
 		return vec3{}, false
 	}
-	centerWorld, ok := md.centerOfNode(center)
-	if !ok {
-		return vec3{}, false
-	}
 	newWorld := polar2cart(np).add(centerWorld)
-	if oldWorld, ok := md.centerOfNode(self); ok && oldWorld.sub(newWorld).length() <= lockPropEps {
+	if selfWorld.sub(newWorld).length() <= lockPropEps {
 		return vec3{}, false // already satisfied — the cascade dies here
 	}
-	selfLink.setPolar(center, self, np) // written only by self's own goroutine
 	return newWorld, true
 }
 
 // lockNeighbors returns one moveMsg per DISTINCT (other node, center) pair that an
 // active eqNodeNode equation ties `self` to, excluding `exclude` (the node that just
 // sent to self, so the cascade never echoes straight back). Each message carries self's
-// CURRENT polar about that center (read from self's own link, which lockRecalc just
-// wrote when called from a receiver) so the recipient can recompute locally — no shared
-// mutable state crosses the channel, only an immutable value.
+// CURRENT polar about that center, derived LOCALLY from atomic position snapshots
+// (md.centerOfNode) rather than read off the shared md.links — no shared mutable state
+// crosses the channel, only an immutable value computed from self's own goroutine's view
+// of the world.
 func (md *MoveDispatch) lockNeighbors(self, exclude string) []moveMsg {
 	var out []moveMsg
 	seen := map[string]bool{}
@@ -254,14 +251,15 @@ func (md *MoveDispatch) lockNeighbors(self, exclude string) []moveMsg {
 			continue
 		}
 		seen[key] = true
-		lk := md.linkBetween(eq.Center, self)
-		if lk == nil {
-			continue
-		}
-		p, ok := lk.polarOf(eq.Center, self)
+		centerWorld, ok := md.centerOfNode(eq.Center)
 		if !ok {
 			continue
 		}
+		selfWorld, ok := md.centerOfNode(self)
+		if !ok {
+			continue
+		}
+		p := cart2polar(selfWorld.sub(centerWorld))
 		out = append(out, moveMsg{
 			Kind:        moveMsgKindLockUpdate,
 			NodeID:      otherID,

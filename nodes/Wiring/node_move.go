@@ -150,17 +150,22 @@ type nodeMover struct {
 	// without crossing into the mover's live geom.
 	snap atomic.Pointer[centerSnap]
 	// Decentralized node-node polar-lock propagation (locks.go): lockRecalc computes
-	// this node's own constrained position from an incoming lockUpdate (reading
-	// md.polarEqs/md.links, which are READ-ONLY during a drag cascade — locks are
-	// authored on a separate gesture, not mid-drag). lockNeighbors finds this node's
-	// OWN lock-neighbors to re-broadcast to (excluding the sender). sendMove routes a
-	// moveMsg to another node's inbox by id. edgeChans are the inboxes of every edge
-	// incident to this node, so a lock-driven move can notify its own edges exactly the
-	// way a dragged node's move does (fanCenters), without a central collection point.
+	// this node's own constrained position from an incoming lockUpdate by deriving both
+	// self's and the center's world position from atomic position snapshots
+	// (md.centerOfNode → nm.snap.Load()) — it never reads or writes the shared md.links,
+	// so no two goroutines ever touch the same movementLink concurrently. md.polarEqs is
+	// READ-ONLY during a drag cascade (locks are authored on a separate gesture, not
+	// mid-drag). lockNeighbors finds this node's OWN lock-neighbors to re-broadcast to
+	// (excluding the sender), deriving each outgoing polar the same local way. sendMove
+	// routes a moveMsg to another id's inbox by id-lookup against md.dispatch (a
+	// read-only directory after construction — no queue, no shared mutable state).
+	// edgeIDs are the ids of every edge incident to this node, so a lock-driven move can
+	// notify its own edges exactly the way a dragged node's move does (fanCenters), via
+	// sendMove, without a separately-cached channel slice duplicating md.dispatch.
 	lockRecalc    func(self, from, center string, senderPolar polar) (vec3, bool)
 	lockNeighbors func(self, exclude string) []moveMsg
 	sendMove      func(id string, msg moveMsg)
-	edgeChans     []chan moveMsg
+	edgeIDs       []string
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
@@ -232,10 +237,13 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		// Notify this node's OWN edges (mirrors what fanCenters does for a moved node) —
 		// each edgeMover recomputes/emits on its own goroutine from the same
-		// moveMsgKindCenter case a drag already uses.
-		for _, ch := range m.edgeChans {
-			cc := nw
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: m.id, Center: &cc, ReachR: m.geom.ReachR}
+		// moveMsgKindCenter case a drag already uses. Routed via sendMove (the same
+		// dispatch-map lookup used for lock-neighbor rebroadcast), not a cached channel.
+		if m.sendMove != nil {
+			for _, edgeID := range m.edgeIDs {
+				cc := nw
+				m.sendMove(edgeID, moveMsg{Kind: moveMsgKindCenter, NodeID: m.id, Center: &cc, ReachR: m.geom.ReachR})
+			}
 		}
 		// Re-broadcast to this node's OWN lock-neighbors, excluding the sender (no echo).
 		if m.lockNeighbors != nil && m.sendMove != nil {
@@ -624,12 +632,12 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		md.edgeMovers[edgeID] = em
 		md.dispatch[edgeID] = em.inbox
 	}
-	// Give every nodeMover the inboxes of its OWN incident edges, so a lock-driven move
-	// can notify its edges directly (no central fan-out point).
+	// Give every nodeMover the ids of its OWN incident edges, so a lock-driven move can
+	// notify its edges via sendMove (dispatch-map lookup) — no cached channel slice.
 	for id, nm := range md.nodeMovers {
-		for _, em := range md.edgeMovers {
+		for edgeID, em := range md.edgeMovers {
 			if em.srcID == id || em.dstID == id {
-				nm.edgeChans = append(nm.edgeChans, em.inbox)
+				nm.edgeIDs = append(nm.edgeIDs, edgeID)
 			}
 		}
 	}
