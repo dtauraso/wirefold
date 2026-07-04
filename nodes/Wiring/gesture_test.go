@@ -532,7 +532,7 @@ func TestGestureClickNoCameraChange(t *testing.T) {
 func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.ov.selSpherePolesVisible = true
-	md.selected = "Center1" // latched Center for the session
+	md.ruleCenter = "Center1" // authored Center for the equation (set by a center-node click)
 
 	click := func(hit rawHit) {
 		down := rawEvent("pointerdown", 400, 300)
@@ -555,8 +555,8 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 	if len(md.polarEqs) != 0 {
 		t.Fatalf("polarEqs=%v after ONE term, want none yet", md.polarEqs)
 	}
-	if md.selected != "Center1" {
-		t.Fatalf("selected changed to %q by rule-building clicks, want unchanged Center1", md.selected)
+	if md.ruleCenter != "Center1" {
+		t.Fatalf("ruleCenter changed to %q by rule-building clicks, want unchanged Center1", md.ruleCenter)
 	}
 
 	// -θ handhold (term-id 2) → node B completes the pair.
@@ -576,8 +576,10 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 	if eq != want {
 		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
 	}
-	if md.selected != "Center1" {
-		t.Fatalf("selected=%q after rule completed, want unchanged Center1", md.selected)
+	// The just-committed equation auto-selects so the panel row highlights and the diagram
+	// guides draw immediately (both follow selectedLockIndex) — no separate click needed.
+	if md.selectedLockIndex != 0 {
+		t.Fatalf("selectedLockIndex=%d after commit, want 0 (new equation auto-selected)", md.selectedLockIndex)
 	}
 }
 
