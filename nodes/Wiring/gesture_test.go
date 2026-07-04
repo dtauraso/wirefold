@@ -552,8 +552,8 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 	if md.gest.hasPending {
 		t.Fatalf("after node click: hasPending=true, want false (term completed)")
 	}
-	if len(md.polarEqs) != 0 {
-		t.Fatalf("polarEqs=%v after ONE term, want none yet", md.polarEqs)
+	if len(md.polarEqsSnap()) != 0 {
+		t.Fatalf("polarEqs=%v after ONE term, want none yet", md.polarEqsSnap())
 	}
 	if md.ruleCenter != "Center1" {
 		t.Fatalf("ruleCenter changed to %q by rule-building clicks, want unchanged Center1", md.ruleCenter)
@@ -563,10 +563,10 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 	click(rawHit{Kind: "handhold", HandholdTerm: 2})
 	click(rawHit{Kind: "node", Id: "B"})
 
-	if len(md.polarEqs) != 1 {
-		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqs)
+	if len(md.polarEqsSnap()) != 1 {
+		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
 	}
-	eq := md.polarEqs[0]
+	eq := md.polarEqsSnap()[0]
 	want := polarEq{
 		Center: "Center1",
 		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
@@ -601,10 +601,10 @@ func TestGestureSelSpherePolesPortThenTorus(t *testing.T) {
 	click(rawHit{Kind: "port", Id: "N1:out:out"})
 	click(rawHit{Kind: "torus", Id: "N2"})
 
-	if len(md.polarEqs) != 1 {
-		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqs)
+	if len(md.polarEqsSnap()) != 1 {
+		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
 	}
-	eq := md.polarEqs[0]
+	eq := md.polarEqsSnap()[0]
 	want := polarEq{Kind: eqPortTorus, PortNode: "N1", PortName: "out", PortIsInput: false, TorusNode: "N2", Active: true}
 	if eq != want {
 		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
@@ -632,10 +632,10 @@ func TestGestureSelSpherePolesTorusThenPort(t *testing.T) {
 	click(rawHit{Kind: "torus", Id: "N2"})
 	click(rawHit{Kind: "port", Id: "N1:in:in"})
 
-	if len(md.polarEqs) != 1 {
-		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqs)
+	if len(md.polarEqsSnap()) != 1 {
+		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
 	}
-	eq := md.polarEqs[0]
+	eq := md.polarEqsSnap()[0]
 	want := polarEq{Kind: eqPortTorus, PortNode: "N1", PortName: "in", PortIsInput: true, TorusNode: "N2", Active: true}
 	if eq != want {
 		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)

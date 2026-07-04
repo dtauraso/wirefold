@@ -29,18 +29,20 @@ func posFn(md *MoveDispatch) func(string) (vec3, bool) {
 
 func TestApplyPolarEqsSkipsInactive(t *testing.T) {
 	md := polarLockTestMD()
-	md.polarEqs = []polarEq{{
+	md.setPolarEqs([]polarEq{{
 		Center: "Center",
 		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
 		B:      polarTerm{Node: "B", Comp: compTheta, Sign: 1},
 		Active: false,
-	}}
+	}})
 	out := md.applyPolarEqs("A", posFn(md))
 	if len(out) != 0 {
 		t.Fatalf("applyPolarEqs on an inactive equation wrote %v, want no writes", out)
 	}
 
-	md.polarEqs[0].Active = true
+	eqs := md.polarEqsSnap()
+	eqs[0].Active = true
+	md.setPolarEqs(eqs)
 	out = md.applyPolarEqs("A", posFn(md))
 	if _, ok := out["B"]; !ok {
 		t.Fatalf("applyPolarEqs on an active equation wrote %v, want a write to B", out)
@@ -58,7 +60,7 @@ func TestEnsureEqLinksMakesUnlinkedEquationApply(t *testing.T) {
 		B:      polarTerm{Node: "B", Comp: compTheta, Sign: 1},
 		Active: true,
 	}
-	md.polarEqs = []polarEq{eq}
+	md.setPolarEqs([]polarEq{eq})
 	center := func(id string) (vec3, bool) { return vec3{}, id == "C" }
 
 	// Before: no links → nothing is written even though the equation is active.
@@ -86,14 +88,14 @@ func TestEnsureEqLinksMakesUnlinkedEquationApply(t *testing.T) {
 
 func TestToggleLockActive(t *testing.T) {
 	md := polarLockTestMD()
-	md.polarEqs = []polarEq{{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true}}
+	md.setPolarEqs([]polarEq{{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true}})
 
 	md.ToggleLockActive(0, nil)
-	if md.polarEqs[0].Active {
+	if md.polarEqsSnap()[0].Active {
 		t.Fatalf("after ToggleLockActive(0): Active=true, want false")
 	}
 	md.ToggleLockActive(0, nil)
-	if !md.polarEqs[0].Active {
+	if !md.polarEqsSnap()[0].Active {
 		t.Fatalf("after second ToggleLockActive(0): Active=false, want true")
 	}
 	// Out-of-range index is a no-op, not a panic.
@@ -102,22 +104,24 @@ func TestToggleLockActive(t *testing.T) {
 
 func TestDeleteSelectedLockGuard(t *testing.T) {
 	md := polarLockTestMD()
-	md.polarEqs = []polarEq{
+	md.setPolarEqs([]polarEq{
 		{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true},
-	}
+	})
 	md.selectedLockIndex = 0
 
 	// Active equation: delete is refused.
 	md.DeleteSelectedLock(nil)
-	if len(md.polarEqs) != 1 {
-		t.Fatalf("DeleteSelectedLock deleted an ACTIVE equation: polarEqs=%v", md.polarEqs)
+	if len(md.polarEqsSnap()) != 1 {
+		t.Fatalf("DeleteSelectedLock deleted an ACTIVE equation: polarEqs=%v", md.polarEqsSnap())
 	}
 
 	// Deactivate, then delete succeeds and clears the focus.
-	md.polarEqs[0].Active = false
+	eqs := md.polarEqsSnap()
+	eqs[0].Active = false
+	md.setPolarEqs(eqs)
 	md.DeleteSelectedLock(nil)
-	if len(md.polarEqs) != 0 {
-		t.Fatalf("DeleteSelectedLock on a deactivated equation left polarEqs=%v, want empty", md.polarEqs)
+	if len(md.polarEqsSnap()) != 0 {
+		t.Fatalf("DeleteSelectedLock on a deactivated equation left polarEqs=%v, want empty", md.polarEqsSnap())
 	}
 	if md.selectedLockIndex != -1 {
 		t.Fatalf("selectedLockIndex=%d after delete, want -1", md.selectedLockIndex)
@@ -126,7 +130,7 @@ func TestDeleteSelectedLockGuard(t *testing.T) {
 
 func TestSelectLockClampsOutOfRange(t *testing.T) {
 	md := polarLockTestMD()
-	md.polarEqs = []polarEq{{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true}}
+	md.setPolarEqs([]polarEq{{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true}})
 
 	md.SelectLock(0, nil)
 	if md.selectedLockIndex != 0 {
@@ -142,10 +146,10 @@ func TestSelectLockClampsOutOfRange(t *testing.T) {
 // clears the diagram guide overlay that follows selectedLockIndex).
 func TestSelectLockTogglesOffOnReselect(t *testing.T) {
 	md := polarLockTestMD()
-	md.polarEqs = []polarEq{
+	md.setPolarEqs([]polarEq{
 		{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true},
 		{Center: "Center", A: polarTerm{Node: "C", Comp: compPhi, Sign: 1}, B: polarTerm{Node: "D", Comp: compPhi, Sign: 1}, Active: true},
-	}
+	})
 
 	md.SelectLock(1, nil)
 	if md.selectedLockIndex != 1 {

@@ -124,7 +124,7 @@ func (md *MoveDispatch) ensureLink(a, b string) {
 // first's write. World is derived (polar2cart) only for the render bridge.
 func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
 	out := map[string]vec3{}
-	for _, eq := range md.polarEqs {
+	for _, eq := range md.polarEqsSnap() {
 		if !eq.Active {
 			continue
 		}
@@ -252,7 +252,7 @@ func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromWorld vec3, fr
 	// possibly-perturbed FromWorld), preserving self's owned r/θ. World is DERIVED as
 	// polar2cart(owned)+liveCenter — the live center rigidly translates self; the owned r
 	// never inflates.
-	for _, eq := range md.polarEqs {
+	for _, eq := range md.polarEqsSnap() {
 		if !eq.Active || eq.Kind != eqNodeNode {
 			continue
 		}
@@ -333,7 +333,8 @@ func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude stri
 	self := m.id
 	// Ensure self's owned offset is populated (from the existing link) for every center it is
 	// a term of, so the message carries an un-inflated offset for each shared center.
-	for _, eq := range md.polarEqs {
+	eqsSnap := md.polarEqsSnap()
+	for _, eq := range eqsSnap {
 		if eq.Active && eq.Kind == eqNodeNode && (eq.A.Node == self || eq.B.Node == self) {
 			md.localPolarOf(m, eq.Center)
 		}
@@ -355,7 +356,7 @@ func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude stri
 		})
 	}
 
-	for _, eq := range md.polarEqs {
+	for _, eq := range eqsSnap {
 		if !eq.Active || eq.Kind != eqNodeNode {
 			continue
 		}
@@ -392,7 +393,7 @@ func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude stri
 // portTorusLocked returns true if there is an ACTIVE eqPortTorus lock on the given
 // (node, port, isInput). Used by applyPortTorusColinearity to find coupled edges.
 func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
-	for _, eq := range md.polarEqs {
+	for _, eq := range md.polarEqsSnap() {
 		if eq.Kind == eqPortTorus && eq.Active &&
 			eq.PortNode == node && eq.PortName == port && eq.PortIsInput == isInput {
 			return true
@@ -510,8 +511,9 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 	if tr == nil {
 		return
 	}
-	locks := make([]T.PolarLockPayload, len(md.polarEqs))
-	for i, eq := range md.polarEqs {
+	eqsSnap := md.polarEqsSnap()
+	locks := make([]T.PolarLockPayload, len(eqsSnap))
+	for i, eq := range eqsSnap {
 		if eq.Kind == eqPortTorus {
 			locks[i] = T.PolarLockPayload{
 				Active:      eq.Active,
@@ -541,7 +543,7 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 // unhighlights the equation, and since the diagram guides follow selectedLockIndex, it also
 // removes the guide overlay. Re-emits the committed list so the panel highlight follows.
 func (md *MoveDispatch) SelectLock(i int, tr *T.Trace) {
-	if i < 0 || i >= len(md.polarEqs) || i == md.selectedLockIndex {
+	if i < 0 || i >= len(md.polarEqsSnap()) || i == md.selectedLockIndex {
 		md.selectedLockIndex = -1
 	} else {
 		md.selectedLockIndex = i
@@ -555,8 +557,9 @@ func (md *MoveDispatch) SelectLock(i int, tr *T.Trace) {
 // highlight and the diagram guide overlay both follow selectedLockIndex, so clearing it here
 // removes both at once. No-op when nothing is selected or the selection is still on-center.
 func (md *MoveDispatch) pruneSelectionOffCenter(center string, tr *T.Trace) {
-	if md.selectedLockIndex >= 0 && md.selectedLockIndex < len(md.polarEqs) &&
-		md.polarEqs[md.selectedLockIndex].Center != center {
+	eqsSnap := md.polarEqsSnap()
+	if md.selectedLockIndex >= 0 && md.selectedLockIndex < len(eqsSnap) &&
+		eqsSnap[md.selectedLockIndex].Center != center {
 		md.selectedLockIndex = -1
 		md.emitPolarLocks(tr)
 	}
@@ -565,18 +568,21 @@ func (md *MoveDispatch) pruneSelectionOffCenter(center string, tr *T.Trace) {
 // ToggleLockActive flips md.polarEqs[i].Active (activate/deactivate). Out-of-range i is a
 // no-op. Re-emits the committed list and schedules persistence.
 func (md *MoveDispatch) ToggleLockActive(i int, tr *T.Trace) {
-	if i < 0 || i >= len(md.polarEqs) {
+	eqsSnap := md.polarEqsSnap()
+	if i < 0 || i >= len(eqsSnap) {
 		return
 	}
-	md.polarEqs[i].Active = !md.polarEqs[i].Active
+	next := append([]polarEq(nil), eqsSnap...)
+	next[i].Active = !next[i].Active
+	md.setPolarEqs(next)
 	md.emitPolarLocks(tr)
 	if md.locksPersist != nil {
-		md.locksPersist.schedule(md.polarEqs)
+		md.locksPersist.schedule(md.polarEqsSnap())
 	}
 	// A toggled eqPortTorus lock changes its port's resolved geometry (ring-projected
 	// when active, plain aimed when not) — re-emit immediately so the port visibly
 	// moves rather than waiting for the next unrelated node move.
-	if eq := md.polarEqs[i]; eq.Kind == eqPortTorus {
+	if eq := next[i]; eq.Kind == eqPortTorus {
 		md.reemitPortTorusGeometry(eq.PortNode)
 	}
 }
@@ -587,16 +593,18 @@ func (md *MoveDispatch) ToggleLockActive(i int, tr *T.Trace) {
 // persistence.
 func (md *MoveDispatch) DeleteSelectedLock(tr *T.Trace) {
 	i := md.selectedLockIndex
-	if i < 0 || i >= len(md.polarEqs) {
+	eqsSnap := md.polarEqsSnap()
+	if i < 0 || i >= len(eqsSnap) {
 		return
 	}
-	if md.polarEqs[i].Active {
+	if eqsSnap[i].Active {
 		return
 	}
-	md.polarEqs = append(md.polarEqs[:i], md.polarEqs[i+1:]...)
+	next := append(append([]polarEq(nil), eqsSnap[:i]...), eqsSnap[i+1:]...)
+	md.setPolarEqs(next)
 	md.selectedLockIndex = -1
 	md.emitPolarLocks(tr)
 	if md.locksPersist != nil {
-		md.locksPersist.schedule(md.polarEqs)
+		md.locksPersist.schedule(md.polarEqsSnap())
 	}
 }

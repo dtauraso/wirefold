@@ -49,14 +49,14 @@ func TestPolarLockNoBlowup(t *testing.T) {
 	}
 
 	// Locks (authored before Start; positions are good).
-	md.polarEqs = []polarEq{
+	md.setPolarEqs([]polarEq{
 		{Center: "n2", A: polarTerm{"n5", compPhi, 1}, B: polarTerm{"n6", compPhi, -1}, Active: true},
 		{Center: "c1", A: polarTerm{"n2", compPhi, 1}, B: polarTerm{"n3", compPhi, -1}, Active: true},
 		{Center: "c1", A: polarTerm{"n2", compR, 1}, B: polarTerm{"n3", compR, 1}, Active: true},
 		{Kind: eqPortTorus, PortNode: "n6", PortName: "Feedback", PortIsInput: false, TorusNode: "n6", Active: true},
 		{Kind: eqPortTorus, PortNode: "n3", PortName: "FromSrc", PortIsInput: true, TorusNode: "n3", Active: true},
-	}
-	for _, eq := range md.polarEqs {
+	})
+	for _, eq := range md.polarEqsSnap() {
 		md.ensureEqLinks(eq)
 	}
 

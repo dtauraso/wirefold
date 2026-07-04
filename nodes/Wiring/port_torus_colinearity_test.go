@@ -18,10 +18,10 @@ func portTorusTestMD(active bool, sCenter, dCenter vec3) *MoveDispatch {
 			srcH: "out", dstH: "in",
 		},
 	}
-	md.polarEqs = []polarEq{
+	md.setPolarEqs([]polarEq{
 		{Kind: eqPortTorus, PortNode: "S", PortName: "out", PortIsInput: false, TorusNode: "S", Active: active},
 		{Kind: eqPortTorus, PortNode: "D", PortName: "in", PortIsInput: true, TorusNode: "D", Active: active},
-	}
+	})
 	md.nodeMovers = map[string]*nodeMover{} // unused by the solve; pos() below supplies centers
 	_ = sCenter
 	_ = dCenter
@@ -125,9 +125,9 @@ func TestApplyPortTorusColinearityInactiveLocksMoveNothing(t *testing.T) {
 // the node-node solver), even though STAGE 2 now gives them a real solve elsewhere.
 func TestApplyPolarEqsStillSkipsPortTorus(t *testing.T) {
 	md := &MoveDispatch{selectedLockIndex: -1}
-	md.polarEqs = []polarEq{
+	md.setPolarEqs([]polarEq{
 		{Kind: eqPortTorus, PortNode: "S", PortName: "out", PortIsInput: false, TorusNode: "S", Active: true},
-	}
+	})
 	out := md.applyPolarEqs("S", func(string) (vec3, bool) { return vec3{}, true })
 	if len(out) != 0 {
 		t.Fatalf("applyPolarEqs wrote %v for an eqPortTorus entry, want no writes (handled by applyPortTorusColinearity)", out)

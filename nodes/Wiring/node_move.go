@@ -503,7 +503,12 @@ type MoveDispatch struct {
 	// it; later phases derive node world from it and move it on pan.
 	sceneSphere sceneSphere
 	// polarEqs are the polar-equation locks riding on the link graph (locks.go).
-	polarEqs []polarEq
+	// Swap-on-write: authored on the stdin-reader goroutine, read unsynchronized by
+	// node-mover goroutines (portTorusLocked, lockRecalc/lockNeighbors during a drag
+	// cascade). Every write publishes a FRESH slice via Store so a reader's snapshot
+	// (polarEqsSnap) is never mutated out from under it. Use polarEqsSnap/setPolarEqs/
+	// appendPolarEq — never access this field directly.
+	polarEqs atomic.Pointer[[]polarEq]
 	// selectedLockIndex is the md.polarEqs index of the committed equation the user has
 	// clicked in the rule-panel's list (locks.go SelectLock), or -1 = none focused. Reset
 	// to -1 when it goes out of range (e.g. after DeleteSelectedLock) or on a selection
@@ -649,6 +654,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		directlyFadedEdges: map[string]bool{},
 		selectedLockIndex:  -1,
 	}
+	md.setPolarEqs(nil)
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
 		nm.lockRecalc = md.lockRecalc
@@ -672,6 +678,30 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		}
 	}
 	return md
+}
+
+// polarEqsSnap returns an IMMUTABLE snapshot of the current polar-equation locks.
+// Safe to call from any goroutine without external synchronization (swap-on-write).
+// Callers must only read/range the result, never mutate its elements in place.
+func (md *MoveDispatch) polarEqsSnap() []polarEq {
+	p := md.polarEqs.Load()
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// setPolarEqs publishes eqs as the new polar-equation-locks snapshot. eqs must not be
+// mutated by the caller afterward (ownership transfers to the atomic pointer).
+func (md *MoveDispatch) setPolarEqs(eqs []polarEq) {
+	md.polarEqs.Store(&eqs)
+}
+
+// appendPolarEq publishes a fresh snapshot with eq appended, leaving any previously
+// published snapshot (and any reader currently ranging it) untouched.
+func (md *MoveDispatch) appendPolarEq(eq polarEq) {
+	next := append(append([]polarEq(nil), md.polarEqsSnap()...), eq)
+	md.setPolarEqs(next)
 }
 
 // Bind wires the per-edge source Outs (keyed "source.sourceHandle" in outSink) and
@@ -997,7 +1027,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		// Drag edge: refresh the dragged node's OWNED local polar about each center it is a
 		// term of, from its NEW cursor world (the one world→polar conversion of a bounded
 		// cursor position). Its neighbors then satisfy against this fresh owned offset.
-		for _, eq := range md.polarEqs {
+		for _, eq := range md.polarEqsSnap() {
 			if !eq.Active || eq.Kind != eqNodeNode {
 				continue
 			}
