@@ -123,7 +123,7 @@ const PHI_CIRCLES: { sx: number; sz: number; n: number; c: string }[] = [
 // the scene frame and a node's frame are distinguishable. Decorative (raycast off),
 // not affected by the scene-tori toggle. Same drawing for every center, so node 2's
 // frame matches the scene's exactly.
-function PolarFrame({ center, scale, tag, octants }: {
+export function PolarFrame({ center, scale, tag, octants }: {
   center: THREE.Vector3; scale: number; tag?: string; octants?: boolean;
 }) {
   const radiusKey = Math.max(Math.round(scale), 1);
@@ -284,7 +284,7 @@ function PolarFrame({ center, scale, tag, octants }: {
 // of equal sweep (just rotated apart in φ); different θ shows as different sweep length.
 // Built canonically in the local X-Y plane, then: inner Z-rotation (π/2−θ) seats the
 // arc's far end at +Y, outer Y-rotation (−φ) swings the meridian plane to the node's φ.
-function ThetaArc({ center, sample, color, tube }: {
+export function ThetaArc({ center, sample, color, tube }: {
   center: THREE.Vector3; sample: THREE.Vector3; color: string; tube: number;
 }) {
   const delta = sample.clone().sub(center);
@@ -315,7 +315,7 @@ function ThetaArc({ center, sample, color, tube }: {
 // the arc tip sits under/at the node. φ traces horizontally (around the pole). Built
 // canonically in the local X-Y plane sweeping +X→+Y over |φ|, then rotated about X by
 // ±90° so it lies flat in world X-Z and sweeps toward +z (φ>0) or −z (φ<0).
-function PhiArc({ center, sample, color, tube }: {
+export function PhiArc({ center, sample, color, tube }: {
   center: THREE.Vector3; sample: THREE.Vector3; color: string; tube: number;
 }) {
   const dx = sample.x - center.x;
