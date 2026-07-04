@@ -354,20 +354,30 @@ func TestGestureRuleCenterStickyOnEmptyClick(t *testing.T) {
 	}
 }
 
-// Hover is Go-owned: a pointer-move over a node records it as the hovered node; a move over a
-// port records the hovered port (clearing the node hover); a move over empty space clears
-// hover. The FSM dedupes on the (node,port,isInput) triple so a still/same-target move does
-// not re-emit. Drives moves and asserts md.hoverNode/hoverPort track the hit.
+// Hover is Go-owned: a pointer-move over a node's TORUS ring records it as the hovered node
+// (the concentric hover ring emphasizes the ring handle, so it lights only on a torus hit, not
+// a body hit); a move over a port records the hovered port (clearing the node hover); a move
+// over empty space — or over the node BODY — clears hover. The FSM dedupes on the
+// (node,port,isInput) triple so a still/same-target move does not re-emit. Drives moves and
+// asserts md.hoverNode/hoverPort track the hit.
 func TestGestureHoverTracksNodeAndPort(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.SetPortRowResolver(stubPortRows{{Node: "A", Port: "in", IsInput: true}})
 
-	// Move over node N7 → hovered node.
+	// Move over node N7's torus ring → hovered node.
 	mv := rawEvent("pointermove", 400, 300)
-	mv.Hit = rawHit{Kind: "node", Id: "N7"}
+	mv.Hit = rawHit{Kind: "torus", Id: "N7"}
 	md.HandleRawInput(mv, nil, nil)
 	if md.hoverNode != "N7" || md.hoverPort != "" {
-		t.Fatalf("node hover: hoverNode=%q hoverPort=%q want N7,''", md.hoverNode, md.hoverPort)
+		t.Fatalf("torus hover: hoverNode=%q hoverPort=%q want N7,''", md.hoverNode, md.hoverPort)
+	}
+
+	// Move over the node BODY (kind "node") → hover clears (body does not light the ring).
+	bodyMv := rawEvent("pointermove", 402, 300)
+	bodyMv.Hit = rawHit{Kind: "node", Id: "N7"}
+	md.HandleRawInput(bodyMv, nil, nil)
+	if md.hoverNode != "" || md.hoverPort != "" {
+		t.Fatalf("body hover: hoverNode=%q hoverPort=%q want '',''", md.hoverNode, md.hoverPort)
 	}
 
 	// Move onto a port (row 0 = A.in) → hovered port, node hover cleared.

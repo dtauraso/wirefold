@@ -137,3 +137,26 @@ func TestSelectLockClampsOutOfRange(t *testing.T) {
 		t.Fatalf("SelectLock(9) out-of-range: selectedLockIndex=%d want -1", md.selectedLockIndex)
 	}
 }
+
+// Re-selecting the already-selected equation toggles it OFF (unhighlights it, which also
+// clears the diagram guide overlay that follows selectedLockIndex).
+func TestSelectLockTogglesOffOnReselect(t *testing.T) {
+	md := polarLockTestMD()
+	md.polarEqs = []polarEq{
+		{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true},
+		{Center: "Center", A: polarTerm{Node: "C", Comp: compPhi, Sign: 1}, B: polarTerm{Node: "D", Comp: compPhi, Sign: 1}, Active: true},
+	}
+
+	md.SelectLock(1, nil)
+	if md.selectedLockIndex != 1 {
+		t.Fatalf("SelectLock(1): selectedLockIndex=%d want 1", md.selectedLockIndex)
+	}
+	md.SelectLock(1, nil) // click the same row again → toggle off
+	if md.selectedLockIndex != -1 {
+		t.Fatalf("SelectLock(1) re-select: selectedLockIndex=%d want -1 (toggled off)", md.selectedLockIndex)
+	}
+	md.SelectLock(0, nil) // selecting a different row still selects normally
+	if md.selectedLockIndex != 0 {
+		t.Fatalf("SelectLock(0) after toggle-off: selectedLockIndex=%d want 0", md.selectedLockIndex)
+	}
+}

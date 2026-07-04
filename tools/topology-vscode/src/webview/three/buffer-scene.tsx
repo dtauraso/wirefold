@@ -54,7 +54,7 @@ import {
   readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected, readEdgeFaded,
   readNodeFaded, readNodeHovered,
   readPortNodeRow, readPortPX, readPortPY, readPortPZ, readPortHovered,
-  readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode,
+  readOverlayOverlaysVis, readOverlayDoubleLinks, readOverlaySelMode, readOverlaySelSpherePoles,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
 } from "../../schema/buffer-layout";
@@ -118,9 +118,12 @@ const NODE_RING_TUBE_RATIO = 0.08;
 // Invisible pick-proxy tube thickness as a fraction of the node radius. The VISIBLE ring
 // (NODE_RING_TUBE_RATIO=0.08) sits flush on the body sphere's surface and is practically
 // unhittable by raycast — clicks aimed at it register as hitKind=node instead (confirmed via
-// runtime breadcrumbs). This proxy is a much thicker, invisible torus sharing the ring's
-// per-instance transform, so the same visual band becomes a generous raycast target. Tunable.
-const RING_PICK_TUBE_RATIO = 0.4;
+// runtime breadcrumbs). This proxy is an invisible torus sharing the ring's per-instance
+// transform. It must sit EXACTLY on the visible ring (same tube thickness) so the pick band
+// covers the torus and nothing else — at 0.4 the tube spanned 0.6r..1.4r and its projected
+// donut covered most of the node face, stealing body clicks (the "band spread over the whole
+// node" bug). Matched to NODE_RING_TUBE_RATIO so the band IS the torus.
+const RING_PICK_TUBE_RATIO = NODE_RING_TUBE_RATIO;
 // Pointer-hover highlight (pre-branch scene-graph.tsx): the hovered node's border ring turns
 // #aaddff and thickens to r*0.14 (HOVER_RING_TUBE_RATIO); a hovered port sphere turns #aaddff
 // and grows to 1.3× (PortSphere isHov). Go OWNS hover (the Hovered columns); this is render-only.
@@ -258,7 +261,14 @@ function NodeInstances({ capacity }: { capacity: number }) {
     if (!snap) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
     const decoded = decodeSnapshot(snap);
     if (!decoded) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
-    const { nodeCount, nodeView } = decoded;
+    const { nodeCount, nodeView, overlayView } = decoded;
+    // The invisible ring pick-proxy (RING_PICK_TUBE_RATIO) is a pick target ONLY while the
+    // selSpherePoles ("select") overlay is on — that's the one mode where a torus click
+    // authors a `port ∈ torus` equation. When the overlay is off, count=0 removes it from
+    // the raycast scene entirely, so it never steals hits from the node body (BUFFER_NODE_TAG)
+    // underneath it. The VISIBLE ring (ringRef, NODE_RING_TUBE_RATIO) is unaffected — it stays
+    // rendered in both modes; only the fat invisible pick torus is gated.
+    const selectModeOn = readOverlaySelSpherePoles(overlayView) !== 0;
 
     const n = Math.min(nodeCount, capacity);
     const q = quatRef.current; // identity (no per-node rotation)
@@ -293,7 +303,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
     }
     body.count = n;
     ring.count = n;
-    ringPick.count = n;
+    ringPick.count = selectModeOn ? n : 0;
     body.instanceMatrix.needsUpdate = true;
     ring.instanceMatrix.needsUpdate = true;
     ringPick.instanceMatrix.needsUpdate = true;
@@ -306,7 +316,7 @@ function NodeInstances({ capacity }: { capacity: number }) {
     // node outside the stale sphere would otherwise be un-pickable). Cheap for the
     // small node counts here.
     body.computeBoundingSphere();
-    ringPick.computeBoundingSphere();
+    if (selectModeOn) ringPick.computeBoundingSphere();
   });
 
   return (

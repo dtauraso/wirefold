@@ -332,7 +332,11 @@ func (md *MoveDispatch) updateHover(ev rawInputMsg, tr *T.Trace) {
 		if n, p, in, ok := md.portFromHit(ev.Hit); ok {
 			node, port, isInput = n, p, in
 		}
-	case "node":
+	case "torus":
+		// The concentric hover ring emphasizes the TORUS handle, so it lights only when the
+		// cursor is actually on the ring — NOT on the node body. A plain "node"-body hit
+		// deliberately falls through here and clears hover (node-body hover feedback is a
+		// separate concern, not wired yet).
 		if n, ok := md.nodeFromHit(ev.Hit); ok {
 			node = n
 		}
@@ -557,6 +561,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		// pending port/torus captures.
 		if node, ok := md.nodeFromHit(ev.Hit); ok {
 			md.ruleCenter = node
+			md.pruneSelectionOffCenter(node, tr)
 			md.emitRuleBuilder(tr)
 		}
 		return true
@@ -745,6 +750,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selected = node
 	md.selectedEdge = ""
 	md.ruleCenter = node
+	md.pruneSelectionOffCenter(node, tr)
 	tr.Select(node, own)
 	// A selection change always changes the rule-builder's latched sticky Center
 	// (md.ruleCenter), so mirror it unconditionally to keep the buffer's RuleBuilder block
