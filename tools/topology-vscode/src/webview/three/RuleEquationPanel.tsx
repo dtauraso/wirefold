@@ -10,9 +10,6 @@ import { useRuleBuilder, usePolarLocks, type RuleBuilderTerm, type RuleBuilderSt
 import { postGoRecord } from "../vscode-api";
 import { encodeClearRule, encodeLockToggleActive, encodeLockSelect, encodeDeleteSelectedLock } from "../../schema/input-layout";
 import { useEffect } from "react";
-import { postLog } from "../log/post";
-
-postLog("RULEPANEL:module-loaded", {});
 
 /** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=θ,
  *  1=φ, 2=−θ, 3=−φ, 4=r — positive θ/φ show no sign). */
@@ -47,26 +44,6 @@ export function RuleEquationPanel() {
   // emits it unconditionally now), so show a standalone Center header whenever the list
   // is showing but the builder section (which already renders its own Center line) is not.
   const showListCenter = showList && !showBuilder;
-
-  postLog("RULEPANEL:render", {
-    rbCenterRow: rb?.centerRow,
-    equationsLen: equations.length,
-    equations: equations.map((eq) => ({
-      kind: eq.kind,
-      centerRow: (eq as unknown as { centerRow?: number }).centerRow,
-      aRow: (eq as unknown as { a?: { row?: number } }).a?.row,
-      bRow: (eq as unknown as { b?: { row?: number } }).b?.row,
-      torusRow: (eq as unknown as { torusRow?: number }).torusRow,
-      portNodeRow: (eq as unknown as { portNodeRow?: number }).portNodeRow,
-    })),
-    rowEquationsLen: rowEquations.length,
-    rbPresent: !!rb,
-    rbCenterLabel: rb?.centerLabel,
-    selSpherePoles: overlays?.selSpherePoles,
-    mountPresent: !!document.getElementById("rule-eq-mount"),
-    showBuilder,
-    showList,
-  });
 
   // Delete key: only when the panel-focused row is one of THIS center's rows and is
   // deactivated. Go re-guards regardless. Listens while the list is showing.

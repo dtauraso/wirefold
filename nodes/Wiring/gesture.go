@@ -1,7 +1,6 @@
 package Wiring
 
 import (
-	"fmt"
 	"math"
 	"strings"
 
@@ -513,10 +512,6 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		return false
 	}
 	g := &md.gest
-	if tr != nil {
-		hitNode, _ := md.nodeFromHit(ev.Hit)
-		tr.Breadcrumb("rulepanel_sphererule", hitNode, "", fmt.Sprintf("hitKind=%s hasPendingPort=%v hasPendingTorus=%v", ev.Hit.Kind, g.hasPendingPort, g.hasPendingTorus))
-	}
 	switch {
 	case ev.Hit.Kind == "handhold" && ev.Hit.HandholdTerm >= 0:
 		g.pendingComp, g.pendingSign = decodeTermCode(ev.Hit.HandholdTerm)
@@ -693,7 +688,6 @@ func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
 		pendingTorusNode = g.pendingTorusNode
 	}
 	tr.RuleBuilder(md.ruleCenter, g.hasPending, pendingCode, terms, pendingPortNode, pendingPortName, pendingPortIsInput, pendingTorusNode)
-	tr.Breadcrumb("rulepanel_emitRuleBuilder", md.ruleCenter, "", fmt.Sprintf("hasPending=%v pendingCode=%d numTerms=%d hasPendingPort=%v hasPendingTorus=%v", g.hasPending, pendingCode, len(terms), g.hasPendingPort, g.hasPendingTorus))
 }
 
 // clearRuleBuilding ends any in-progress polar rule-building session: half-finished
@@ -722,7 +716,6 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 		md.selected = ""
 		md.selectedEdge = ""
 		tr.Select("", own)
-		tr.Breadcrumb("rulepanel_select", md.selected, "", "hitKind=empty highlightCleared=true ruleCenter="+md.ruleCenter)
 		md.emitRuleBuilder(tr)
 		return
 	}
@@ -753,7 +746,6 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selectedEdge = ""
 	md.ruleCenter = node
 	tr.Select(node, own)
-	tr.Breadcrumb("rulepanel_select", node, "", fmt.Sprintf("hitKind=%s own=%v", ev.Hit.Kind, own))
 	// A selection change always changes the rule-builder's latched sticky Center
 	// (md.ruleCenter), so mirror it unconditionally to keep the buffer's RuleBuilder block
 	// (CenterRow/centerLabel) tracking the panel. The in-progress builder UI itself stays
