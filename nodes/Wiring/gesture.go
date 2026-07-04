@@ -537,10 +537,10 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		// enforcement silently skipped (applyPolarEqs). Gate on ruleCenter for the same reason.
 		if len(g.ruleTerms) == 2 && md.ruleCenter != "" {
 			eq := polarEq{Center: md.ruleCenter, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
-			md.polarEqs = append(md.polarEqs, eq)
+			md.appendPolarEq(eq)
 			// Auto-select the just-committed equation so it lands highlighted in the panel
 			// list AND draws its diagram guides immediately — both follow selectedLockIndex.
-			md.selectedLockIndex = len(md.polarEqs) - 1
+			md.selectedLockIndex = len(md.polarEqsSnap()) - 1
 			// Guarantee the Center↔term movement links exist so the equation is enforced
 			// even when no topology edge connects the picked nodes to the Center.
 			md.ensureEqLinks(eq)
@@ -554,7 +554,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 				tr.Breadcrumb("polar-rule-added", md.ruleCenter, node, "")
 			}
 			if md.locksPersist != nil {
-				md.locksPersist.schedule(md.polarEqs)
+				md.locksPersist.schedule(md.polarEqsSnap())
 			}
 			g.ruleTerms = nil
 		}
@@ -627,12 +627,12 @@ func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput 
 		TorusNode:   torusNode,
 		Active:      true,
 	}
-	md.polarEqs = append(md.polarEqs, eq)
+	md.appendPolarEq(eq)
 	if tr != nil {
 		tr.Breadcrumb("port-torus-lock-added", portNode, torusNode, portName)
 	}
 	if md.locksPersist != nil {
-		md.locksPersist.schedule(md.polarEqs)
+		md.locksPersist.schedule(md.polarEqsSnap())
 	}
 	md.emitPolarLocks(tr)
 	// The lock is active the instant it's authored — re-emit the constrained port's

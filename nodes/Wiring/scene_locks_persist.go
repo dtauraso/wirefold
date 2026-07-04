@@ -232,7 +232,7 @@ func loadScenePolarEqs(scenePath string) ([]polarEq, bool) {
 func (md *MoveDispatch) LoadPolarEqs(topologyPath string) {
 	scenePath := sceneCameraPath(topologyPath)
 	if eqs, ok := loadScenePolarEqs(scenePath); ok {
-		md.polarEqs = eqs
+		md.setPolarEqs(eqs)
 		// Rebuild the Center↔term movement links each equation rides (they are not persisted
 		// with the topology edges), so loaded constraints enforce after a reload.
 		for _, eq := range eqs {

@@ -57,8 +57,8 @@ func TestPolarEqsRoundTrip(t *testing.T) {
 	// Full MoveDispatch.LoadPolarEqs path.
 	md := &MoveDispatch{}
 	md.LoadPolarEqs(root)
-	if len(md.polarEqs) != len(eqs) {
-		t.Fatalf("md.polarEqs len=%d want %d", len(md.polarEqs), len(eqs))
+	if len(md.polarEqsSnap()) != len(eqs) {
+		t.Fatalf("md.polarEqs len=%d want %d", len(md.polarEqsSnap()), len(eqs))
 	}
 }
 
@@ -144,8 +144,8 @@ func TestPortTorusEqRoundTrip(t *testing.T) {
 	// stage — no link is required for a lock with no solve).
 	md := &MoveDispatch{}
 	md.LoadPolarEqs(root)
-	if len(md.polarEqs) != 2 {
-		t.Fatalf("md.polarEqs len=%d want 2", len(md.polarEqs))
+	if len(md.polarEqsSnap()) != 2 {
+		t.Fatalf("md.polarEqs len=%d want 2", len(md.polarEqsSnap()))
 	}
 	if md.linkBetween("3", "3") != nil {
 		t.Fatalf("ensureEqLinks created a link for an eqPortTorus entry; want none")
@@ -162,7 +162,7 @@ func TestApplyPolarEqsSkipsPortTorus(t *testing.T) {
 	md.linkBetween("Center1", "A").setPolar("Center1", "A", polar{Theta: 1, Phi: 0.5, R: 1})
 	md.linkBetween("Center1", "B").setPolar("Center1", "B", polar{Theta: 0, Phi: 0, R: 1})
 
-	md.polarEqs = []polarEq{
+	md.setPolarEqs([]polarEq{
 		{
 			Kind:        eqPortTorus,
 			PortNode:    "A",
@@ -177,7 +177,7 @@ func TestApplyPolarEqsSkipsPortTorus(t *testing.T) {
 			B:      polarTerm{Node: "B", Comp: compTheta, Sign: 1},
 			Active: true,
 		},
-	}
+	})
 	pos := func(id string) (vec3, bool) {
 		if id == "Center1" {
 			return vec3{}, true

@@ -87,7 +87,7 @@ func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
 		B:      polarTerm{Node: "b", Comp: compTheta, Sign: 1},
 		Active: true,
 	}
-	md.polarEqs = append(md.polarEqs, eq)
+	md.appendPolarEq(eq)
 	md.ensureEqLinks(eq)
 	if c, ok := md.centerOfNode(eq.A.Node); ok {
 		md.RootMove(eq.A.Node, c)

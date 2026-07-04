@@ -247,7 +247,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				// persister so it uses the correct sceneCameraPath-resolved path.
 				if md != nil {
 					md.overlaysPersist.schedule(md.ov)
-					md.locksPersist.schedule(md.polarEqs)
+					md.locksPersist.schedule(md.polarEqsSnap())
 					// Persist the scene sphere immediately (not debounced) so save reliably
 					// activates the polar-load path (scene_sphere_persist.go LoadSceneSphere) —
 					// until the sphere is in scene.json, reload stays on cartesian x/y/z.
