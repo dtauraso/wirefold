@@ -51,9 +51,15 @@ type specNode struct {
 	Inputs  []specPort `json:"inputs,omitempty"`
 	Outputs []specPort `json:"outputs,omitempty"`
 	R       *float64   `json:"r,omitempty"` // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
-	X       float64    `json:"x"`           // stored absolute world center (polar layout)
+	X       float64    `json:"x"`           // legacy absolute world center (cartesian; back-compat)
 	Y       float64    `json:"y"`
 	Z       float64    `json:"z"`
+	// Scene polar (polar-model.md phase 2): the node's position as (r,θ,φ) about the scene
+	// sphere. When present AND a persisted scene sphere exists, world = sceneCenter +
+	// polar2cart(scenePolar) is AUTHORITATIVE over x/y/z (which stay for back-compat).
+	ScenePolarR     *float64 `json:"scenePolarR,omitempty"`
+	ScenePolarTheta *float64 `json:"scenePolarTheta,omitempty"`
+	ScenePolarPhi   *float64 `json:"scenePolarPhi,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -69,8 +75,15 @@ func (n specNode) label() string {
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
-func (n specNode) toNodeGeom() nodeGeom {
-	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, Center: &vec3{X: n.X, Y: n.Y, Z: n.Z}}
+func (n specNode) toNodeGeom(sceneCenter vec3, hasScene bool) nodeGeom {
+	// Position: prefer the scene polar (authoritative) when present and a persisted scene
+	// sphere exists — world = sceneCenter + polar2cart(scenePolar). Otherwise fall back to
+	// the legacy cartesian x/y/z (fresh/unmigrated scenes).
+	center := vec3{X: n.X, Y: n.Y, Z: n.Z}
+	if hasScene && n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
+		center = sceneCenter.add(polar2cart(polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}))
+	}
+	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, Center: &center}
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -183,7 +196,12 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 	if err := validateSpec(&spec); err != nil {
 		return nil, nil, nil, err
 	}
-	return buildFromSpec(ctx, spec, tr, clk)
+	// Load the persisted scene sphere (if any) BEFORE positioning nodes, so nodes stored as
+	// scene polar can be placed as sceneCenter + polar2cart(scenePolar). A persisted sphere
+	// is not derived from node positions, so there is no circularity; a fresh/legacy scene
+	// has none and nodes fall back to cartesian x/y/z (polar-model.md phase 2b).
+	sphere, hasScene := loadSceneSphere(jsonPath)
+	return buildFromSpec(ctx, spec, tr, clk, sphere, hasScene)
 }
 
 // parseSpec reads and parses the topology spec at path — a directory tree
@@ -207,13 +225,13 @@ func parseSpec(path string) (topoSpec, error) {
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
 // and validated topoSpec.
-func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, error) {
+func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, sphere sceneSphere, hasScene bool) ([]Node, SlotRegistry, *MoveDispatch, error) {
 	// Build id→geometry map for arc-length computation at wire construction.
 	// nodeGeom carries kind/dims/port side+slot so the Go arc length mirrors
 	// buildPortCurve (3-D port-to-port) exactly.
 	nodeGeoms := map[string]nodeGeom{}
 	for _, n := range spec.Nodes {
-		nodeGeoms[n.ID] = n.toNodeGeom()
+		nodeGeoms[n.ID] = n.toNodeGeom(sphere.Center, hasScene)
 	}
 
 	// Shared world-center map, built ONCE from the loaded geometry and reused by the
@@ -341,6 +359,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock) (
 	// mover stream its own node/edge geometry on a move. Outs + dest wires are bound
 	// below once node construction has populated them.
 	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
+	if hasScene {
+		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
+		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then
+		// content-fits it from the loaded node centers).
+		md.sceneSphere = sphere
+	}
 
 	// The lock system and the central polar position store have been removed. Node
 	// positions live in the movers' held geometry (geom.Center). Declare the double-link
