@@ -313,14 +313,29 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 }
 
 // SelectLock focuses md.polarEqs[i] as the panel's clicked row (selectedLockIndex). Out-of-
-// range i clears the focus (-1). Re-emits the committed list so the panel highlight follows.
+// range i clears the focus (-1). Clicking the ALREADY-selected row toggles it OFF (-1) — that
+// unhighlights the equation, and since the diagram guides follow selectedLockIndex, it also
+// removes the guide overlay. Re-emits the committed list so the panel highlight follows.
 func (md *MoveDispatch) SelectLock(i int, tr *T.Trace) {
-	if i < 0 || i >= len(md.polarEqs) {
+	if i < 0 || i >= len(md.polarEqs) || i == md.selectedLockIndex {
 		md.selectedLockIndex = -1
 	} else {
 		md.selectedLockIndex = i
 	}
 	md.emitPolarLocks(tr)
+}
+
+// pruneSelectionOffCenter unhighlights the selected equation when the panel's Center moves to
+// a node that equation does NOT belong to — the equation panel lists only equations under the
+// current Center, so an off-center selection is no longer in the visible list. The panel row
+// highlight and the diagram guide overlay both follow selectedLockIndex, so clearing it here
+// removes both at once. No-op when nothing is selected or the selection is still on-center.
+func (md *MoveDispatch) pruneSelectionOffCenter(center string, tr *T.Trace) {
+	if md.selectedLockIndex >= 0 && md.selectedLockIndex < len(md.polarEqs) &&
+		md.polarEqs[md.selectedLockIndex].Center != center {
+		md.selectedLockIndex = -1
+		md.emitPolarLocks(tr)
+	}
 }
 
 // ToggleLockActive flips md.polarEqs[i].Active (activate/deactivate). Out-of-range i is a

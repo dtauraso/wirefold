@@ -557,6 +557,7 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		// pending port/torus captures.
 		if node, ok := md.nodeFromHit(ev.Hit); ok {
 			md.ruleCenter = node
+			md.pruneSelectionOffCenter(node, tr)
 			md.emitRuleBuilder(tr)
 		}
 		return true
@@ -745,6 +746,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	md.selected = node
 	md.selectedEdge = ""
 	md.ruleCenter = node
+	md.pruneSelectionOffCenter(node, tr)
 	tr.Select(node, own)
 	// A selection change always changes the rule-builder's latched sticky Center
 	// (md.ruleCenter), so mirror it unconditionally to keep the buffer's RuleBuilder block
