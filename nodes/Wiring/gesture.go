@@ -332,7 +332,11 @@ func (md *MoveDispatch) updateHover(ev rawInputMsg, tr *T.Trace) {
 		if n, p, in, ok := md.portFromHit(ev.Hit); ok {
 			node, port, isInput = n, p, in
 		}
-	case "node":
+	case "torus":
+		// The concentric hover ring emphasizes the TORUS handle, so it lights only when the
+		// cursor is actually on the ring — NOT on the node body. A plain "node"-body hit
+		// deliberately falls through here and clears hover (node-body hover feedback is a
+		// separate concern, not wired yet).
 		if n, ok := md.nodeFromHit(ev.Hit); ok {
 			node = n
 		}
