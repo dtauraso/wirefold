@@ -194,7 +194,49 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 // when the recomputed position is within lockPropEps of self's current published
 // position — the latter is the anti-divergence guarantee: an over-constrained lock set
 // converges to a fixpoint and the cascade goes silent instead of oscillating forever.
-func (md *MoveDispatch) lockRecalc(self, from string, fromWorld vec3) (vec3, bool) {
+// clonePolar returns an immutable copy of a node's owned local-polar map for carrying in a
+// message (the receiver reads it on another goroutine; a copy avoids sharing the sender's
+// live map). nil for an empty map.
+func clonePolar(s map[string]polar) map[string]polar {
+	if len(s) == 0 {
+		return nil
+	}
+	c := make(map[string]polar, len(s))
+	for k, v := range s {
+		c[k] = v
+	}
+	return c
+}
+
+// localPolarOf returns node m's OWNED local polar offset about center, lazily taking it —
+// the FIRST time it is needed — from the value that already exists: the movement-link polar
+// (links.go), which was initialized at load from the saved node positions (ensureEqLinks /
+// refreshLink). There is NO separate seed step; the offset simply comes from where it
+// already lives. Thereafter m.localPolar[center] is authoritative (a lock nudges one
+// component) and the link is not read again. Falls back to a cart2polar of the current world
+// only if no link exists yet.
+func (md *MoveDispatch) localPolarOf(m *nodeMover, center string) (polar, bool) {
+	if p, ok := m.localPolar[center]; ok {
+		return p, true
+	}
+	if lk := md.linkBetween(center, m.id); lk != nil {
+		if p, ok := lk.polarOf(center, m.id); ok {
+			m.localPolar[center] = p
+			return p, true
+		}
+	}
+	cw, ok1 := md.centerOfNode(center)
+	sw, ok2 := md.centerOfNode(m.id)
+	if ok1 && ok2 {
+		p := cart2polar(sw.sub(cw))
+		m.localPolar[center] = p
+		return p, true
+	}
+	return polar{}, false
+}
+
+func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromWorld vec3, fromLocalPolar map[string]polar) (vec3, bool) {
+	self := m.id
 	selfWorld, ok := md.centerOfNode(self)
 	if !ok {
 		return vec3{}, false
@@ -202,8 +244,14 @@ func (md *MoveDispatch) lockRecalc(self, from string, fromWorld vec3) (vec3, boo
 	newWorld := selfWorld
 	applied := false
 
-	// eqNodeNode: apply every equation tying (self,from) about their shared Center,
-	// each write feeding the next (mirror θ+φ composition).
+	// eqNodeNode: satisfy every equation tying (self,from) about their shared Center by
+	// updating self's OWNED local polar offset (m.localPolar[center]) — NEVER by recomputing
+	// it from the current cartesian world. self's owned offset is seeded from good positions
+	// (seedLocalPolar); here we set ONLY the constrained component to the (sign-adjusted) copy
+	// of the sender's OWNED component (from the message's FromLocalPolar, NOT cart2polar of a
+	// possibly-perturbed FromWorld), preserving self's owned r/θ. World is DERIVED as
+	// polar2cart(owned)+liveCenter — the live center rigidly translates self; the owned r
+	// never inflates.
 	for _, eq := range md.polarEqs {
 		if !eq.Active || eq.Kind != eqNodeNode {
 			continue
@@ -221,10 +269,17 @@ func (md *MoveDispatch) lockRecalc(self, from string, fromWorld vec3) (vec3, boo
 		if !ok {
 			continue
 		}
-		np := cart2polar(newWorld.sub(centerWorld))
-		senderPolar := cart2polar(fromWorld.sub(centerWorld))
-		target := fromTerm.Sign * compOf(senderPolar, fromTerm.Comp) * selfTerm.Sign
+		np, ok := md.localPolarOf(m, eq.Center) // owned offset, from the existing link (no seed)
+		if !ok {
+			np = cart2polar(newWorld.sub(centerWorld))
+		}
+		sp, ok := fromLocalPolar[eq.Center]
+		if !ok {
+			sp = cart2polar(fromWorld.sub(centerWorld)) // fallback: sender carried no owned offset
+		}
+		target := fromTerm.Sign * compOf(sp, fromTerm.Comp) * selfTerm.Sign
 		setCompOf(&np, selfTerm.Comp, target)
+		m.localPolar[eq.Center] = np // owned offset is authoritative; store it back
 		newWorld = polar2cart(np).add(centerWorld)
 		applied = true
 	}
@@ -274,7 +329,16 @@ func (md *MoveDispatch) lockRecalc(self, from string, fromWorld vec3) (vec3, boo
 // race the very "center" message the caller just fanned out asynchronously to self's own
 // goroutine (self's atomic snap may not have caught up yet when the caller is a different
 // goroutine, e.g. RootMove originating a drag).
-func (md *MoveDispatch) lockNeighbors(self string, selfWorld vec3, exclude string) []moveMsg {
+func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude string) []moveMsg {
+	self := m.id
+	// Ensure self's owned offset is populated (from the existing link) for every center it is
+	// a term of, so the message carries an un-inflated offset for each shared center.
+	for _, eq := range md.polarEqs {
+		if eq.Active && eq.Kind == eqNodeNode && (eq.A.Node == self || eq.B.Node == self) {
+			md.localPolarOf(m, eq.Center)
+		}
+	}
+	localPolar := clonePolar(m.localPolar) // immutable snapshot shared across the fan (safe)
 	var out []moveMsg
 	seen := map[string]bool{}
 	add := func(otherID string) {
@@ -283,10 +347,11 @@ func (md *MoveDispatch) lockNeighbors(self string, selfWorld vec3, exclude strin
 		}
 		seen[otherID] = true
 		out = append(out, moveMsg{
-			Kind:      moveMsgKindLockUpdate,
-			NodeID:    otherID,
-			From:      self,
-			FromWorld: selfWorld,
+			Kind:           moveMsgKindLockUpdate,
+			NodeID:         otherID,
+			From:           self,
+			FromWorld:      selfWorld,
+			FromLocalPolar: localPolar, // sender's OWNED offset so receivers copy an un-inflated component
 		})
 	}
 

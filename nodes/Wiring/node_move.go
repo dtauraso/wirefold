@@ -109,7 +109,14 @@ type moveMsg struct {
 	// single sender may be tied to the same neighbor by more than one constraint kind.
 	From      string
 	FromWorld vec3
-	ack       chan struct{}
+	// FromLocalPolar is the sender's OWNED local polar offset about each lock-center it is
+	// tied to (keyed by center id). A polar-lock receiver reads the sender's owned offset
+	// about their SHARED center from here — NOT recomputed via cart2polar of FromWorld — so
+	// a sender whose cartesian world was perturbed (torus z-copy, or a moved center) does not
+	// inflate the receiver's radius. Torus receivers still use FromWorld.Z. An immutable
+	// snapshot built by the sender; never mutated after send (safe cross-goroutine).
+	FromLocalPolar map[string]polar
+	ack            chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -166,14 +173,24 @@ type nodeMover struct {
 	// edgeIDs are the ids of every edge incident to this node, so a lock-driven move can
 	// notify its own edges exactly the way a dragged node's move does (fanCenters), via
 	// sendMove, without a separately-cached channel slice duplicating md.dispatch.
-	lockRecalc    func(self, from string, fromWorld vec3) (vec3, bool)
-	lockNeighbors func(self string, selfWorld vec3, exclude string) []moveMsg
-	sendMove      func(id string, msg moveMsg)
-	edgeIDs       []string
+	lockRecalc    func(m *nodeMover, from string, fromWorld vec3, fromLocalPolar map[string]polar) (vec3, bool)
+	lockNeighbors func(m *nodeMover, selfWorld vec3, exclude string) []moveMsg
+	// localPolar is this node's OWNED local polar OFFSET (r, θ, φ) about each lock-center it
+	// is doubly-linked to (keyed by center id) — polar-model.md. It is the AUTHORITATIVE
+	// constraint state: seeded once from good positions (seedLocalPolar), refreshed for the
+	// dragged node from its cursor at the drag edge, and thereafter changed ONLY by a lock
+	// nudging a single component (a bounded copy of a neighbor's owned component). It is
+	// NEVER re-derived as cart2polar(node − center) from live world during a cascade — that
+	// reconstruction against a mid-moving center is what inflates the radius. World is DERIVED
+	// as centerWorld + polar2cart(localPolar[center]) for render/messaging. Touched only by
+	// this node's own goroutine during a cascade.
+	localPolar map[string]polar
+	sendMove   func(id string, msg moveMsg)
+	edgeIDs    []string
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
-	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr, localPolar: map[string]polar{}}
 	// Seed the atomic snapshot from the initial geometry so readers have a
 	// valid center before the first center message arrives.
 	if geom.Center != nil {
@@ -226,7 +243,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		if m.lockRecalc == nil {
 			return
 		}
-		newWorld, moved := m.lockRecalc(m.id, msg.From, msg.FromWorld)
+		newWorld, moved := m.lockRecalc(m, msg.From, msg.FromWorld, msg.FromLocalPolar)
 		if !moved {
 			// Anti-divergence / termination: this node is already satisfied (or has no
 			// eq touching this sender+center), so it does NOT rebroadcast. The wave
@@ -251,7 +268,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		// Re-broadcast to this node's OWN lock-neighbors, excluding the sender (no echo).
 		if m.lockNeighbors != nil && m.sendMove != nil {
-			for _, out := range m.lockNeighbors(m.id, nw, msg.From) {
+			for _, out := range m.lockNeighbors(m, nw, msg.From) {
 				m.sendMove(out.NodeID, out)
 			}
 		}
@@ -972,8 +989,24 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// moveMsgKindLockUpdate) checks every active constraint tying it to the sender,
 	// decides locally whether it must move and, if so, re-broadcasts to ITS OWN
 	// lock-neighbors over the same channels (excluding the sender).
-	for _, out := range md.lockNeighbors(nodeID, target, "") {
-		md.sendMove(out.NodeID, out)
+	if dragged := md.nodeMovers[nodeID]; dragged != nil {
+		// Drag edge: refresh the dragged node's OWNED local polar about each center it is a
+		// term of, from its NEW cursor world (the one world→polar conversion of a bounded
+		// cursor position). Its neighbors then satisfy against this fresh owned offset.
+		for _, eq := range md.polarEqs {
+			if !eq.Active || eq.Kind != eqNodeNode {
+				continue
+			}
+			if eq.A.Node != nodeID && eq.B.Node != nodeID {
+				continue
+			}
+			if cw, ok := md.centerOfNode(eq.Center); ok {
+				dragged.localPolar[eq.Center] = cart2polar(target.sub(cw))
+			}
+		}
+		for _, out := range md.lockNeighbors(dragged, target, "") {
+			md.sendMove(out.NodeID, out)
+		}
 	}
 
 	// Persist every moved node's new center (the dragged node plus any lock followers) to
