@@ -45,15 +45,16 @@ const (
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
 	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
-	// moveMsgKindLockUpdate is the DECENTRALIZED node-node polar-lock propagation message
-	// (node_move.go doc comment / locks.go lockRecalc/lockNeighbors). It carries what a
-	// receiving nodeMover needs to recompute its own constrained position without reading
-	// any cross-goroutine shared state except the atomic center snapshot: who sent it
-	// (From), which shared Center the equation rides on (LockCenter), and the sender's OWN
-	// polar coordinate about that center (SenderPolar) at the moment it sent. There is no
-	// central worklist: a receiver that moves > epsilon re-broadcasts the same kind to its
-	// OWN lock-neighbors (excluding the sender); a receiver that doesn't move stays silent,
-	// which is how the cascade terminates.
+	// moveMsgKindLockUpdate is the DECENTRALIZED lock propagation message, covering EVERY
+	// constraint kind (node-node polar equations AND port∈torus colinearity) over one
+	// mechanism (node_move.go doc comment / locks.go lockRecalc/lockNeighbors). It carries
+	// what a receiving nodeMover needs to recompute its own constrained position without
+	// reading any cross-goroutine shared state except the atomic center snapshot: who sent
+	// it (From) and the sender's fresh WORLD position (FromWorld). The receiver checks
+	// EVERY active constraint tying it to the sender, of any kind, and recomputes locally.
+	// There is no central worklist: a receiver that moves > epsilon re-broadcasts the same
+	// kind to its OWN lock-neighbors (excluding the sender); a receiver that doesn't move
+	// stays silent, which is how the cascade terminates.
 	moveMsgKindLockUpdate = "lockUpdate"
 )
 
@@ -101,11 +102,14 @@ type moveMsg struct {
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
 	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
 	ReachR float64
-	// Lock-propagation payload (Kind == "lockUpdate"): see moveMsgKindLockUpdate.
-	From        string
-	LockCenter  string
-	SenderPolar polar
-	ack         chan struct{}
+	// Lock-propagation payload (Kind == "lockUpdate"): see moveMsgKindLockUpdate. FromWorld
+	// is the sender's new WORLD position; each receiver derives whatever a given
+	// constraint kind needs from it locally (polar-about-center via cart2polar, torus z
+	// via .Z) — the message itself carries no constraint-kind-specific shape, since a
+	// single sender may be tied to the same neighbor by more than one constraint kind.
+	From      string
+	FromWorld vec3
+	ack       chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -162,8 +166,8 @@ type nodeMover struct {
 	// edgeIDs are the ids of every edge incident to this node, so a lock-driven move can
 	// notify its own edges exactly the way a dragged node's move does (fanCenters), via
 	// sendMove, without a separately-cached channel slice duplicating md.dispatch.
-	lockRecalc    func(self, from, center string, senderPolar polar) (vec3, bool)
-	lockNeighbors func(self, exclude string) []moveMsg
+	lockRecalc    func(self, from string, fromWorld vec3) (vec3, bool)
+	lockNeighbors func(self string, selfWorld vec3, exclude string) []moveMsg
 	sendMove      func(id string, msg moveMsg)
 	edgeIDs       []string
 }
@@ -222,7 +226,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		if m.lockRecalc == nil {
 			return
 		}
-		newWorld, moved := m.lockRecalc(m.id, msg.From, msg.LockCenter, msg.SenderPolar)
+		newWorld, moved := m.lockRecalc(m.id, msg.From, msg.FromWorld)
 		if !moved {
 			// Anti-divergence / termination: this node is already satisfied (or has no
 			// eq touching this sender+center), so it does NOT rebroadcast. The wave
@@ -247,7 +251,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		// Re-broadcast to this node's OWN lock-neighbors, excluding the sender (no echo).
 		if m.lockNeighbors != nil && m.sendMove != nil {
-			for _, out := range m.lockNeighbors(m.id, msg.From) {
+			for _, out := range m.lockNeighbors(m.id, nw, msg.From) {
 				m.sendMove(out.NodeID, out)
 			}
 		}
@@ -947,12 +951,6 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// touching the dragged node (the ONE world→polar conversion). Thereafter the locks
 	// read the stored link polar — no cart2polar in the lock equation.
 	md.refreshLinksTouching(nodeID, pos)
-	// Stage 2 of the `port ∈ torus` lock: keep any edge whose both ports are pinned
-	// to their own node's border ring colinear by coupling the dependent node's z to
-	// the dragged node's z. Runs after applyPolarEqs so pos() sees its writes too.
-	for id, w := range md.applyPortTorusColinearity(nodeID, pos) {
-		emit[id] = w
-	}
 
 	// Recompute every center's reach over the updated positions and fan all movers ONCE.
 	centers := md.heldCenters()
@@ -962,13 +960,14 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromCenters(centers, edges)
 	md.fanCenters(emit, reach)
 
-	// DECENTRALIZED node-node polar-lock propagation (locks.go): originate the cascade
-	// by sending the dragged node's fresh polar-about-center to each of ITS lock-
-	// neighbors. There is no central worklist here — each receiver (nodeMover.handle,
-	// moveMsgKindLockUpdate) decides locally whether it must move and, if so, re-
-	// broadcasts to ITS OWN lock-neighbors over the same channels. Port-torus locks stay
-	// on the single-hop applyPortTorusColinearity path above (not yet ported).
-	for _, out := range md.lockNeighbors(nodeID, "") {
+	// DECENTRALIZED lock propagation (locks.go): originate ONE cascade covering EVERY
+	// constraint kind (node-node polar equations AND port∈torus colinearity) by sending
+	// the dragged node's fresh world position to each of ITS lock-neighbors of ANY kind.
+	// There is no central worklist here — each receiver (nodeMover.handle,
+	// moveMsgKindLockUpdate) checks every active constraint tying it to the sender,
+	// decides locally whether it must move and, if so, re-broadcasts to ITS OWN
+	// lock-neighbors over the same channels (excluding the sender).
+	for _, out := range md.lockNeighbors(nodeID, target, "") {
 		md.sendMove(out.NodeID, out)
 	}
 
