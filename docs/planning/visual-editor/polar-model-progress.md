@@ -15,10 +15,11 @@ Status recorded at the phase-2b pause.
 | `733ba856` | **Phase 1** — `sceneSphere{Center,Radius}` entity; persisted in `scene.json` (`sceneSphere` key); `LoadSceneSphere` (file, else content-fit default). Additive. |
 | `c3a3ed6f` | **Phase 2a** — node-position save DUAL-WRITES `scenePolarR/Theta/Phi = cart2polar(world − sceneCenter)` into `meta.json` alongside `x/y/z`. Persister reads live scene center via a closure. |
 | `ae2cdc56` | **Phase 2b** — load derives node world = `sceneCenter + polar2cart(scenePolar)` when a node has scene-polar fields AND a persisted sphere exists; else legacy `x/y/z`. `LoadTopology` loads the sphere before positioning and installs `md.sceneSphere`. |
+| `8918f9a4` | **Phases 3–5** — each node owns its LOCAL polar offset about its lock-center (`nodeMover.localPolar`), taken from the EXISTING movement-link value on first touch (`localPolarOf`) — NO seed step. `lockRecalc` nudges the stored offset from the sender's owned offset (`moveMsg.FromLocalPolar`), never re-deriving via `cart2polar` of a moving center. **The drag blow-up is FIXED.** Guard: `TestPolarLockNoBlowup` (1.2e11 before → bounded now, `-race` clean). |
 
-**Nothing visible has changed yet** and **the lock blow-up is NOT fixed yet** (that is phase 5).
-Everything so far is additive + back-compatible: positions can now round-trip through polar,
-but live behavior is unchanged.
+**The lock blow-up is FIXED** as of `8918f9a4`. The node-position persistence is polar-capable
+(phases 1–2) and back-compatible. Live drag of a node that is both a lock center and a
+torus-reached satellite no longer flies away.
 
 ### Key files touched
 - `nodes/Wiring/sphere_layout.go` — `sceneSphere` type + `contentFitSceneSphere`.
@@ -29,21 +30,22 @@ but live behavior is unchanged.
 - `main.go` — `md.LoadSceneSphere(topologyPath)` in the load sequence.
 - Tests: `scene_sphere_persist_test.go`, `scene_node_pos_polar_test.go`, `loader_scene_polar_test.go`.
 
-## Remaining (not started)
+## Remaining
 
-- **Phase 3 — local polar owned per node.** Each node owns its LOCAL polar offset about its
-  lock-center (the movement-link polar, made per-node-owned so it is race-free and
-  authoritative). Stored; seeded once from good positions; never re-derived from live world.
-- **Phase 4 — pure-polar composition.** Closed-form spherical vector sum along the path
-  (scene-center → local-center → node), polar in / polar out, no cartesian exposed.
-- **Phase 5 — cascade fix (THE BLOW-UP FIX).** Rewrite `lockRecalc`/`lockNeighbors`
-  (`locks.go`) + the `moveMsgKindLockUpdate` handler (`node_move.go`) to CARRY and NUDGE the
-  stored local polar, removing ALL `cart2polar(node − center)` reconstruction from the
-  cascade. Violation-check termination; rigid-translate on a center move. Verify the
-  center-and-satellite structure that blows up today stays bounded and terminates.
-- **Phase 6 — pan moves the scene sphere.** New op: move `md.sceneSphere.Center`, hold node
-  world positions fixed, recompute each node's scene polar about the new center, re-fit the
-  radius. Distinct from camera orbit (separate entity, confirmed with David).
+- **Phases 3–5 — DONE** (`8918f9a4`). (Phase 4's "pure-polar composition" landed as the
+  polar2cart(offset)+liveCenter derivation; a closed-form spherical sum was deemed the same
+  operation and not separately needed. The "no seed" decision: the offset comes from the
+  existing link value via `localPolarOf`, not a seed function.)
+- **Phase 6 — pan moves the scene sphere (NOT started).** The OPERATION: move
+  `md.sceneSphere.Center`, hold node world positions fixed, re-fit the radius; the node scene
+  polars then recompute about the new center on the next save (the dual-write already does
+  `cart2polar(world − sceneCenter)`). Also: **persist the scene sphere on `save`** so a
+  reload actually loads positions as polar (until the sphere is persisted, `loadSceneSphere`
+  returns not-ok and load stays on cartesian `x/y/z`).
+  - **OPEN — trigger:** scene-sphere pan is a NEW op distinct from camera-pivot pan
+    (`viewpoint.pan`). Which gesture invokes it? Needs David's decision before wiring
+    (`gesture.go` `gestWheel` / a new gesture). The method + persistence can be built first,
+    trigger wired after.
 
 ## Open threads / notes
 
