@@ -165,7 +165,7 @@ export function ThreeView() {
           {/* NavGuides (polar tori / pole frames / θ-φ angle arcs / handholds), derived from
               the binary buffer (Go-owned node centers/radii/sphereR + selection column). */}
           <NavGuides />
-          {/* Guides for the focused equation only (rule-builder.ts selectedLockIndex) —
+          {/* Guides for every multi-selected equation (rule-builder.ts eq.selected) —
               independent of the Overlays master gate, so selecting an equation always
               shows its own torus/port/nodes/angle arcs. */}
           <SelectedEquationGuides />

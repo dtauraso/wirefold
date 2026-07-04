@@ -196,6 +196,10 @@ type PolarLockPayload struct {
 	PortName    string `json:"portName,omitempty"`
 	PortIsInput bool   `json:"portIsInput,omitempty"`
 	TorusNode   string `json:"torusNode,omitempty"`
+	// Selected mirrors md.selectedLocks membership for this equation index — authoritative
+	// per-row selection (supports multi-select). The event's scalar SelectedLockIndex is kept
+	// for wire-shape stability but is no longer the source of highlight truth.
+	Selected bool `json:"selected,omitempty"`
 }
 
 type Event struct {

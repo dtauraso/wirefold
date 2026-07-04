@@ -1,6 +1,10 @@
 package Wiring
 
-import T "github.com/dtauraso/wirefold/Trace"
+import (
+	"sort"
+
+	T "github.com/dtauraso/wirefold/Trace"
+)
 
 // locks.go — the polar-equation lock engine. A lock is an EQUATION between two terms,
 // each a (node, component, sign) about a shared Center: `signA·compA(A) = signB·compB(B)`,
@@ -514,6 +518,7 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 	eqsSnap := md.polarEqsSnap()
 	locks := make([]T.PolarLockPayload, len(eqsSnap))
 	for i, eq := range eqsSnap {
+		selected := containsInt(md.selectedLocks, i)
 		if eq.Kind == eqPortTorus {
 			locks[i] = T.PolarLockPayload{
 				Active:      eq.Active,
@@ -522,45 +527,82 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 				PortName:    eq.PortName,
 				PortIsInput: eq.PortIsInput,
 				TorusNode:   eq.TorusNode,
+				Selected:    selected,
 			}
 			continue
 		}
 		locks[i] = T.PolarLockPayload{
-			Center: eq.Center,
-			ANode:  eq.A.Node,
-			ACode:  ruleTermCode(eq.A.Comp, eq.A.Sign),
-			BNode:  eq.B.Node,
-			BCode:  ruleTermCode(eq.B.Comp, eq.B.Sign),
-			Active: eq.Active,
-			Kind:   int(eqNodeNode),
+			Center:   eq.Center,
+			ANode:    eq.A.Node,
+			ACode:    ruleTermCode(eq.A.Comp, eq.A.Sign),
+			BNode:    eq.B.Node,
+			BCode:    ruleTermCode(eq.B.Comp, eq.B.Sign),
+			Active:   eq.Active,
+			Kind:     int(eqNodeNode),
+			Selected: selected,
 		}
 	}
-	tr.PolarLocks(locks, md.selectedLockIndex)
+	// Per-row Selected is now authoritative; the scalar index is kept for wire-shape
+	// stability only (set to -1, unused by consumers).
+	tr.PolarLocks(locks, -1)
 }
 
-// SelectLock focuses md.polarEqs[i] as the panel's clicked row (selectedLockIndex). Out-of-
-// range i clears the focus (-1). Clicking the ALREADY-selected row toggles it OFF (-1) — that
-// unhighlights the equation, and since the diagram guides follow selectedLockIndex, it also
-// removes the guide overlay. Re-emits the committed list so the panel highlight follows.
+// containsInt reports whether v is present in xs.
+func containsInt(xs []int, v int) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// SelectLock toggles md.polarEqs[i]'s membership in the ORDERED md.selectedLocks list: if i
+// is already selected it is removed (preserving the order of the rest); otherwise, if i is
+// in range, it is appended. Out-of-range i is a no-op. Re-emits the committed list so the
+// panel highlight and diagram guide overlays (which follow selectedLocks) follow.
 func (md *MoveDispatch) SelectLock(i int, tr *T.Trace) {
-	if i < 0 || i >= len(md.polarEqsSnap()) || i == md.selectedLockIndex {
-		md.selectedLockIndex = -1
-	} else {
-		md.selectedLockIndex = i
+	if idx := indexOfInt(md.selectedLocks, i); idx >= 0 {
+		next := append([]int(nil), md.selectedLocks[:idx]...)
+		next = append(next, md.selectedLocks[idx+1:]...)
+		md.selectedLocks = next
+	} else if i >= 0 && i < len(md.polarEqsSnap()) {
+		md.selectedLocks = append(append([]int(nil), md.selectedLocks...), i)
 	}
 	md.emitPolarLocks(tr)
 }
 
-// pruneSelectionOffCenter unhighlights the selected equation when the panel's Center moves to
-// a node that equation does NOT belong to — the equation panel lists only equations under the
-// current Center, so an off-center selection is no longer in the visible list. The panel row
-// highlight and the diagram guide overlay both follow selectedLockIndex, so clearing it here
-// removes both at once. No-op when nothing is selected or the selection is still on-center.
+// indexOfInt returns the index of v in xs, or -1 if not present.
+func indexOfInt(xs []int, v int) int {
+	for idx, x := range xs {
+		if x == v {
+			return idx
+		}
+	}
+	return -1
+}
+
+// pruneSelectionOffCenter unhighlights any selected equation whose Center is not the panel's
+// new Center — the equation panel lists only equations under the current Center, so an
+// off-center selection is no longer in the visible list. The panel row highlight and the
+// diagram guide overlay both follow selectedLocks, so pruning here removes both for that
+// entry. No-op when nothing selected or every selection is still on-center.
 func (md *MoveDispatch) pruneSelectionOffCenter(center string, tr *T.Trace) {
+	if len(md.selectedLocks) == 0 {
+		return
+	}
 	eqsSnap := md.polarEqsSnap()
-	if md.selectedLockIndex >= 0 && md.selectedLockIndex < len(eqsSnap) &&
-		eqsSnap[md.selectedLockIndex].Center != center {
-		md.selectedLockIndex = -1
+	next := make([]int, 0, len(md.selectedLocks))
+	changed := false
+	for _, i := range md.selectedLocks {
+		if i >= 0 && i < len(eqsSnap) && eqsSnap[i].Center == center {
+			next = append(next, i)
+		} else {
+			changed = true
+		}
+	}
+	if changed {
+		md.selectedLocks = next
 		md.emitPolarLocks(tr)
 	}
 }
@@ -587,22 +629,32 @@ func (md *MoveDispatch) ToggleLockActive(i int, tr *T.Trace) {
 	}
 }
 
-// DeleteSelectedLock deletes md.polarEqs[selectedLockIndex], but ONLY when that equation
-// exists AND is deactivated (!Active) — an active equation must be deactivated first. No-op
-// otherwise. Fixes up selectedLockIndex, re-emits the committed list, and schedules
-// persistence.
+// DeleteSelectedLock deletes every selected md.polarEqs entry that is deactivated (!Active)
+// — an active equation must be deactivated first, so a selected-but-active entry is left in
+// place. Deletes high-to-low index so earlier deletions don't shift later ones. No-op if
+// nothing is selected or none of the selected entries are deactivated. Clears selectedLocks,
+// re-emits the committed list, and schedules persistence.
 func (md *MoveDispatch) DeleteSelectedLock(tr *T.Trace) {
-	i := md.selectedLockIndex
+	if len(md.selectedLocks) == 0 {
+		return
+	}
 	eqsSnap := md.polarEqsSnap()
-	if i < 0 || i >= len(eqsSnap) {
+	toDelete := make([]int, 0, len(md.selectedLocks))
+	for _, i := range md.selectedLocks {
+		if i >= 0 && i < len(eqsSnap) && !eqsSnap[i].Active {
+			toDelete = append(toDelete, i)
+		}
+	}
+	if len(toDelete) == 0 {
 		return
 	}
-	if eqsSnap[i].Active {
-		return
+	sort.Sort(sort.Reverse(sort.IntSlice(toDelete)))
+	next := append([]polarEq(nil), eqsSnap...)
+	for _, i := range toDelete {
+		next = append(next[:i], next[i+1:]...)
 	}
-	next := append(append([]polarEq(nil), eqsSnap[:i]...), eqsSnap[i+1:]...)
 	md.setPolarEqs(next)
-	md.selectedLockIndex = -1
+	md.selectedLocks = nil
 	md.emitPolarLocks(tr)
 	if md.locksPersist != nil {
 		md.locksPersist.schedule(md.polarEqsSnap())

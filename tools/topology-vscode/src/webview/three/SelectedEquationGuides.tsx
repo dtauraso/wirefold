@@ -1,11 +1,13 @@
-// SelectedEquationGuides.tsx — render-only guides for the FOCUSED polar equation
-// (rule-builder.ts usePolarLocks().selectedLockIndex), scoped to ONLY that equation's own
+// SelectedEquationGuides.tsx — render-only guides for EVERY multi-SELECTED polar equation
+// (rule-builder.ts usePolarLocks().equations[].selected), scoped to each equation's own
 // terms (its Center/A/B nodes, θ/φ angle arcs between them, and — for a `port ∈ torus`
 // lock — the port marker + torus node). Pure REFLECT of the buffer: usePolarLocks decodes
-// the PolarLock block (Go-owned, locks.go), and this component resolves the lock's node
+// the PolarLock block (Go-owned, locks.go), and this component resolves each lock's node
 // rows to world centers/radii via decodeNavNodes (the same buffer-nav path NavGuides
 // uses). No TS state authority, no bridge sends, independent of the Overlays master gate
 // (an equation selection should show its own guides regardless of overlay toggle state).
+// Edge halos are unioned/deduped across the selected set so an edge shared by two selected
+// equations doesn't double-draw its halo.
 
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
@@ -149,12 +151,12 @@ function PortMarker({ position }: { position: THREE.Vector3 }) {
   );
 }
 
-// SelectedEquationGuides — draws guides for ONLY the currently-focused equation (committed
-// PolarLock row), scoped to that equation's own terms. Renders nothing when no equation is
-// selected (selectedLockIndex < 0) — this is intentionally independent of the Overlays
-// master gate (bufFlags.overlays), so focusing an equation always shows its own guides.
+// SelectedEquationGuides — draws guides for EVERY currently-selected equation (committed
+// PolarLock rows with selected=true), scoped to each equation's own terms. Renders nothing
+// when no equation is selected — this is intentionally independent of the Overlays master
+// gate (bufFlags.overlays), so selecting an equation always shows its own guides.
 export function SelectedEquationGuides() {
-  const { equations, selectedLockIndex } = usePolarLocks();
+  const { equations } = usePolarLocks();
 
   // Buffer-driven node sampling — same decode path NavGuides uses (decodeNavNodes), kept
   // fresh via useFrame + a coarse tick so this rebuilds on real position/selection changes
@@ -181,64 +183,83 @@ export function SelectedEquationGuides() {
   // bump on real change), and this component re-renders whenever it changes.
   const navNodes = navRef.current;
 
-  if (selectedLockIndex < 0) return null;
-  const lock = equations.find((e) => e.index === selectedLockIndex);
-  if (!lock) return null;
+  const selectedLocks = equations.filter((e) => e.selected);
+  if (selectedLocks.length === 0) return null;
 
   const byRow = (row: number): NavNode | null => {
     if (row === ROW_NONE) return null;
     return navNodes.find((n) => n.row === row) ?? null;
   };
 
-  const center = byRow(lock.centerRow);
-  const a = byRow(lock.a.row);
-  const b = byRow(lock.b.row);
-
-  // Angle-arc tube scale, mirroring NavGuides' thetaTube derivation off the center node's
-  // own radius (falls back to a small constant if the center hasn't resolved yet).
-  const tube = center ? Math.max(center.radius * 0.5 * 0.014, 1.4) : 1.4;
-
-  // For a port-torus lock, resolve the port's live world position (PX/PY/PZ) directly from
-  // the buffer (same source PortInstances draws from), and the torus node it belongs to.
-  let portPos: THREE.Vector3 | null = null;
-  let torusNode: NavNode | null = null;
-  if (lock.kind === POLAR_LOCK_KIND_PORT_TORUS) {
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    if (decoded && lock.portRow !== ROW_NONE && lock.portRow < decoded.portCount) {
-      portPos = new THREE.Vector3(
-        readPortPX(decoded.portView, lock.portRow),
-        readPortPY(decoded.portView, lock.portRow),
-        readPortPZ(decoded.portView, lock.portRow),
-      );
-    }
-    torusNode = byRow(lock.torusRow);
-  }
-
-  // Only highlight the center node when it's a DISTINCT reference node (not just an alias of
-  // a term) — otherwise a 2-term equation would triple-highlight its own nodes.
-  const centerIsTerm =
-    !!center && ((a && center.row === a.row) || (b && center.row === b.row));
-
-  // Edges to highlight with the same halo EdgeTube draws for a selected edge — chosen by what
-  // each term constrains, NOT a flat node set:
-  //   • term↔term: the connection between the two term nodes (a real edge, if any).
-  //   • center→term: ONLY for a RADIUS (code r) term — that spoke IS the radius the equation
-  //     constrains, so it gets the halo. An ANGLE term draws its arc and NO center spoke
-  //     (a center→angle-term spoke read as a spurious "radius" highlight on θ/φ equations).
-  // Each wanted pair is an unordered {row,row} key; an edge matches if its endpoints are that
-  // pair in either orientation. Uses raw lock rows so it works before NavNodes resolve.
+  // Union/dedupe edge-halo pairs across the WHOLE selected set — a term↔term or
+  // center→radius-term edge shared by two selected equations gets exactly one halo, drawn
+  // once after the per-lock guides below.
   const pairKey = (x: number, y: number) => (x < y ? `${x}:${y}` : `${y}:${x}`);
   const wantedPairs = new Set<string>();
-  if (lock.a.row !== ROW_NONE && lock.b.row !== ROW_NONE) {
-    wantedPairs.add(pairKey(lock.a.row, lock.b.row));
-  }
-  if (lock.a.code === CODE_R && lock.centerRow !== ROW_NONE && lock.a.row !== ROW_NONE) {
-    wantedPairs.add(pairKey(lock.centerRow, lock.a.row));
-  }
-  if (lock.b.code === CODE_R && lock.centerRow !== ROW_NONE && lock.b.row !== ROW_NONE) {
-    wantedPairs.add(pairKey(lock.centerRow, lock.b.row));
-  }
+
+  const guideGroups = selectedLocks.map((lock) => {
+    const center = byRow(lock.centerRow);
+    const a = byRow(lock.a.row);
+    const b = byRow(lock.b.row);
+
+    // Angle-arc tube scale, mirroring NavGuides' thetaTube derivation off the center node's
+    // own radius (falls back to a small constant if the center hasn't resolved yet).
+    const tube = center ? Math.max(center.radius * 0.5 * 0.014, 1.4) : 1.4;
+
+    // For a port-torus lock, resolve the port's live world position (PX/PY/PZ) directly from
+    // the buffer (same source PortInstances draws from), and the torus node it belongs to.
+    let portPos: THREE.Vector3 | null = null;
+    let torusNode: NavNode | null = null;
+    if (lock.kind === POLAR_LOCK_KIND_PORT_TORUS) {
+      const snap = getLatestSnapshot();
+      const decoded = snap ? decodeSnapshot(snap) : null;
+      if (decoded && lock.portRow !== ROW_NONE && lock.portRow < decoded.portCount) {
+        portPos = new THREE.Vector3(
+          readPortPX(decoded.portView, lock.portRow),
+          readPortPY(decoded.portView, lock.portRow),
+          readPortPZ(decoded.portView, lock.portRow),
+        );
+      }
+      torusNode = byRow(lock.torusRow);
+    }
+
+    // Only highlight the center node when it's a DISTINCT reference node (not just an alias
+    // of a term) — otherwise a 2-term equation would triple-highlight its own nodes.
+    const centerIsTerm =
+      !!center && ((a && center.row === a.row) || (b && center.row === b.row));
+
+    // Edges to highlight with the same halo EdgeTube draws for a selected edge — chosen by
+    // what each term constrains, NOT a flat node set:
+    //   • term↔term: the connection between the two term nodes (a real edge, if any).
+    //   • center→term: ONLY for a RADIUS (code r) term — that spoke IS the radius the
+    //     equation constrains, so it gets the halo. An ANGLE term draws its arc and NO
+    //     center spoke (a center→angle-term spoke read as a spurious "radius" highlight on
+    //     θ/φ equations).
+    // Each wanted pair is an unordered {row,row} key, accumulated into the shared set above.
+    if (lock.a.row !== ROW_NONE && lock.b.row !== ROW_NONE) {
+      wantedPairs.add(pairKey(lock.a.row, lock.b.row));
+    }
+    if (lock.a.code === CODE_R && lock.centerRow !== ROW_NONE && lock.a.row !== ROW_NONE) {
+      wantedPairs.add(pairKey(lock.centerRow, lock.a.row));
+    }
+    if (lock.b.code === CODE_R && lock.centerRow !== ROW_NONE && lock.b.row !== ROW_NONE) {
+      wantedPairs.add(pairKey(lock.centerRow, lock.b.row));
+    }
+
+    return {
+      key: lock.index,
+      center,
+      a,
+      aCode: lock.a.code,
+      b,
+      bCode: lock.b.code,
+      tube,
+      portPos,
+      torusNode,
+      centerIsTerm,
+    };
+  });
+
   const edgeHalos: Array<{ s: THREE.Vector3; e: THREE.Vector3 }> = [];
   if (wantedPairs.size > 0) {
     const snap = getLatestSnapshot();
@@ -267,27 +288,33 @@ export function SelectedEquationGuides() {
 
   return (
     <>
-      {/* Per-term coordinate guide — each term draws ONLY the coordinate it constrains
-          (θ arc, φ arc, or radial line), chosen by its code. The center is used only as the
-          pole/origin to measure from; no frame is drawn there (that read as an overlay). */}
-      {center && a && (
-        <TermGuide center={center} node={a} code={lock.a.code} color="#ff8800" tube={tube} />
-      )}
-      {center && b && (
-        <TermGuide center={center} node={b} code={lock.b.code} color="#00ccff" tube={tube} />
-      )}
-      {/* Edges between the equation's own nodes — same halo as a selected edge. */}
+      {guideGroups.map(({ key, center, a, aCode, b, bCode, tube, portPos, torusNode, centerIsTerm }) => (
+        <group key={key}>
+          {/* Per-term coordinate guide — each term draws ONLY the coordinate it constrains
+              (θ arc, φ arc, or radial line), chosen by its code. The center is used only as
+              the pole/origin to measure from; no frame is drawn there (that read as an
+              overlay). */}
+          {center && a && (
+            <TermGuide center={center} node={a} code={aCode} color="#ff8800" tube={tube} />
+          )}
+          {center && b && (
+            <TermGuide center={center} node={b} code={bCode} color="#00ccff" tube={tube} />
+          )}
+          {/* Node highlights — this equation's own term nodes only. */}
+          {a && <NodeHighlight node={a} color="#ff8800" />}
+          {b && <NodeHighlight node={b} color="#00ccff" />}
+          {center && !centerIsTerm && <NodeHighlight node={center} color="#ffcc00" />}
+          {/* `port ∈ torus` lock ONLY: the port marker and a single torus ring on the torus
+              node. Node-node equations have neither, so nothing extra is drawn for them. */}
+          {portPos && <PortMarker position={portPos} />}
+          {torusNode && <TorusRing node={torusNode} color="#aaddff" />}
+        </group>
+      ))}
+      {/* Edges between any selected equation's own nodes — same halo as a selected edge,
+          deduped across the whole selected set. */}
       {edgeHalos.map((h, i) => (
         <EdgeHalo key={i} s={h.s} e={h.e} />
       ))}
-      {/* Node highlights — this equation's own term nodes only. */}
-      {a && <NodeHighlight node={a} color="#ff8800" />}
-      {b && <NodeHighlight node={b} color="#00ccff" />}
-      {center && !centerIsTerm && <NodeHighlight node={center} color="#ffcc00" />}
-      {/* `port ∈ torus` lock ONLY: the port marker and a single torus ring on the torus node.
-          Node-node equations have neither, so nothing extra is drawn for them. */}
-      {portPos && <PortMarker position={portPos} />}
-      {torusNode && <TorusRing node={torusNode} color="#aaddff" />}
     </>
   );
 }

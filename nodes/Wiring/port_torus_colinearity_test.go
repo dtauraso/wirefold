@@ -10,7 +10,7 @@ import "testing"
 // S.out -> D.in (an edgeMover, matching what heldEdges/RootMove actually reads), each
 // starting at a DIFFERENT z, plus an eqPortTorus lock on each port (Active as given).
 func portTorusTestMD(active bool, sCenter, dCenter vec3) *MoveDispatch {
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	md.edgeMovers = map[string]*edgeMover{
 		"S->D": {
 			edgeID: "S->D",
@@ -124,7 +124,7 @@ func TestApplyPortTorusColinearityInactiveLocksMoveNothing(t *testing.T) {
 // remain inert inside applyPolarEqs (they're handled by applyPortTorusColinearity, not
 // the node-node solver), even though STAGE 2 now gives them a real solve elsewhere.
 func TestApplyPolarEqsStillSkipsPortTorus(t *testing.T) {
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	md.setPolarEqs([]polarEq{
 		{Kind: eqPortTorus, PortNode: "S", PortName: "out", PortIsInput: false, TorusNode: "S", Active: true},
 	})

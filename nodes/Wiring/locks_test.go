@@ -3,12 +3,16 @@ package Wiring
 // locks_test.go — Active flag semantics: applyPolarEqs skips inactive equations,
 // ToggleLockActive flips the flag, DeleteSelectedLock only deletes a deactivated equation.
 
-import "testing"
+import (
+	"testing"
+
+	T "github.com/dtauraso/wirefold/Trace"
+)
 
 // polarLockTestMD builds a MoveDispatch with a Center↔A and Center↔B link, each seeded
 // with a polar so applyPolarEqs has real polar state to read/write.
 func polarLockTestMD() *MoveDispatch {
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	md.addLink("Center", "A")
 	md.addLink("Center", "B")
 	ca := md.linkBetween("Center", "A")
@@ -53,7 +57,7 @@ func TestApplyPolarEqsSkipsInactive(t *testing.T) {
 // the second side is set" report: an equation whose Center↔term pairs have no movement link
 // (no topology edge) silently no-ops, and ensureEqLinks fixes it by creating those links.
 func TestEnsureEqLinksMakesUnlinkedEquationApply(t *testing.T) {
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	eq := polarEq{
 		Center: "C",
 		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
@@ -107,7 +111,7 @@ func TestDeleteSelectedLockGuard(t *testing.T) {
 	md.setPolarEqs([]polarEq{
 		{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true},
 	})
-	md.selectedLockIndex = 0
+	md.selectedLocks = []int{0}
 
 	// Active equation: delete is refused.
 	md.DeleteSelectedLock(nil)
@@ -115,7 +119,7 @@ func TestDeleteSelectedLockGuard(t *testing.T) {
 		t.Fatalf("DeleteSelectedLock deleted an ACTIVE equation: polarEqs=%v", md.polarEqsSnap())
 	}
 
-	// Deactivate, then delete succeeds and clears the focus.
+	// Deactivate, then delete succeeds and clears the selection.
 	eqs := md.polarEqsSnap()
 	eqs[0].Active = false
 	md.setPolarEqs(eqs)
@@ -123,8 +127,8 @@ func TestDeleteSelectedLockGuard(t *testing.T) {
 	if len(md.polarEqsSnap()) != 0 {
 		t.Fatalf("DeleteSelectedLock on a deactivated equation left polarEqs=%v, want empty", md.polarEqsSnap())
 	}
-	if md.selectedLockIndex != -1 {
-		t.Fatalf("selectedLockIndex=%d after delete, want -1", md.selectedLockIndex)
+	if len(md.selectedLocks) != 0 {
+		t.Fatalf("selectedLocks=%v after delete, want empty", md.selectedLocks)
 	}
 }
 
@@ -133,17 +137,17 @@ func TestSelectLockClampsOutOfRange(t *testing.T) {
 	md.setPolarEqs([]polarEq{{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true}})
 
 	md.SelectLock(0, nil)
-	if md.selectedLockIndex != 0 {
-		t.Fatalf("SelectLock(0): selectedLockIndex=%d want 0", md.selectedLockIndex)
+	if want := []int{0}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("SelectLock(0): selectedLocks=%v want %v", md.selectedLocks, want)
 	}
 	md.SelectLock(9, nil)
-	if md.selectedLockIndex != -1 {
-		t.Fatalf("SelectLock(9) out-of-range: selectedLockIndex=%d want -1", md.selectedLockIndex)
+	if want := []int{0}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("SelectLock(9) out-of-range: selectedLocks=%v want %v (unchanged)", md.selectedLocks, want)
 	}
 }
 
 // Re-selecting the already-selected equation toggles it OFF (unhighlights it, which also
-// clears the diagram guide overlay that follows selectedLockIndex).
+// clears the diagram guide overlay that follows selectedLocks).
 func TestSelectLockTogglesOffOnReselect(t *testing.T) {
 	md := polarLockTestMD()
 	md.setPolarEqs([]polarEq{
@@ -152,15 +156,56 @@ func TestSelectLockTogglesOffOnReselect(t *testing.T) {
 	})
 
 	md.SelectLock(1, nil)
-	if md.selectedLockIndex != 1 {
-		t.Fatalf("SelectLock(1): selectedLockIndex=%d want 1", md.selectedLockIndex)
+	if want := []int{1}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("SelectLock(1): selectedLocks=%v want %v", md.selectedLocks, want)
 	}
 	md.SelectLock(1, nil) // click the same row again → toggle off
-	if md.selectedLockIndex != -1 {
-		t.Fatalf("SelectLock(1) re-select: selectedLockIndex=%d want -1 (toggled off)", md.selectedLockIndex)
+	if want := []int{}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("SelectLock(1) re-select: selectedLocks=%v want empty (toggled off)", md.selectedLocks)
 	}
 	md.SelectLock(0, nil) // selecting a different row still selects normally
-	if md.selectedLockIndex != 0 {
-		t.Fatalf("SelectLock(0) after toggle-off: selectedLockIndex=%d want 0", md.selectedLockIndex)
+	if want := []int{0}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("SelectLock(0) after toggle-off: selectedLocks=%v want %v", md.selectedLocks, want)
 	}
+}
+
+// TestSelectLockMultiSelect verifies selecting two locks marks BOTH as selected (ordered),
+// and that both stream Selected=1 in the emitted PolarLock payload.
+func TestSelectLockMultiSelect(t *testing.T) {
+	md := polarLockTestMD()
+	md.setPolarEqs([]polarEq{
+		{Center: "Center", A: polarTerm{Node: "A", Comp: compTheta, Sign: 1}, B: polarTerm{Node: "B", Comp: compTheta, Sign: 1}, Active: true},
+		{Center: "Center", A: polarTerm{Node: "C", Comp: compPhi, Sign: 1}, B: polarTerm{Node: "D", Comp: compPhi, Sign: 1}, Active: true},
+	})
+
+	md.SelectLock(0, nil)
+	md.SelectLock(1, nil)
+	if want := []int{0, 1}; !slicesEqualInt(md.selectedLocks, want) {
+		t.Fatalf("after selecting 0 then 1: selectedLocks=%v want %v", md.selectedLocks, want)
+	}
+
+	tr := T.New(8)
+	md.emitPolarLocks(tr)
+	tr.Close()
+	events := tr.Events()
+	if len(events) != 1 || len(events[0].PolarLocks) != 2 {
+		t.Fatalf("emitPolarLocks: events=%+v want one KindPolarLocks event with 2 locks", events)
+	}
+	locks := events[0].PolarLocks
+	if !locks[0].Selected || !locks[1].Selected {
+		t.Fatalf("PolarLocks=%+v want both rows Selected=true", locks)
+	}
+}
+
+// slicesEqualInt reports whether a and b contain the same ints in the same order.
+func slicesEqualInt(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -42,7 +42,7 @@ func TestSceneSphereRoundTrip(t *testing.T) {
 // TestSceneSphereDefaultsFromContentFit: with no persisted sphere, LoadSceneSphere falls
 // back to a content-fit of the node centers rather than a zero sphere.
 func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	md.nodeMovers = map[string]*nodeMover{
 		"a": {id: "a", geom: nodeGeom{Center: &vec3{X: 0, Y: 0, Z: 0}}},
 		"b": {id: "b", geom: nodeGeom{Center: &vec3{X: 100, Y: 0, Z: 0}}},
@@ -64,7 +64,7 @@ func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
 // a positive Radius, and leaves every node's WORLD center (centerOfNode) unchanged — nodes
 // are held fixed in world space; only the reference frame moves (phase 6, polar-model.md).
 func TestPanSceneSphereHoldsNodesWorldFixed(t *testing.T) {
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	md.nodeMovers = map[string]*nodeMover{
 		"a": {id: "a", geom: nodeGeom{Center: &vec3{X: 0, Y: 0, Z: 0}}},
 		"b": {id: "b", geom: nodeGeom{Center: &vec3{X: 100, Y: 0, Z: 0}}},
@@ -111,7 +111,7 @@ func TestPanSceneSphereThenNodeSaveUpdatesScenePolar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md := &MoveDispatch{selectedLockIndex: -1}
+	md := &MoveDispatch{}
 	md.nodeMovers = map[string]*nodeMover{
 		"a": {id: "a", geom: nodeGeom{Center: &vec3{X: 100, Y: 0, Z: 0}}},
 	}
