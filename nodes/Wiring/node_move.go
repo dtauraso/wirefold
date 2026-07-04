@@ -1056,7 +1056,8 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	// returns "" for a true monolithic topology with no tree), making the two-form bug
 	// class unrepresentable here. Do not hand-roll os.Stat/IsDir — use sceneTreeRoot.
 	root := sceneTreeRoot(topologyPath)
-	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
+	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce,
+		sceneCenter: func() vec3 { return md.sceneSphere.Center }}
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
