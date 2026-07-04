@@ -36,16 +36,25 @@ torus-reached satellite no longer flies away.
   polar2cart(offset)+liveCenter derivation; a closed-form spherical sum was deemed the same
   operation and not separately needed. The "no seed" decision: the offset comes from the
   existing link value via `localPolarOf`, not a seed function.)
-- **Phase 6 — pan moves the scene sphere (NOT started).** The OPERATION: move
-  `md.sceneSphere.Center`, hold node world positions fixed, re-fit the radius; the node scene
-  polars then recompute about the new center on the next save (the dual-write already does
-  `cart2polar(world − sceneCenter)`). Also: **persist the scene sphere on `save`** so a
-  reload actually loads positions as polar (until the sphere is persisted, `loadSceneSphere`
-  returns not-ok and load stays on cartesian `x/y/z`).
-  - **OPEN — trigger:** scene-sphere pan is a NEW op distinct from camera-pivot pan
-    (`viewpoint.pan`). Which gesture invokes it? Needs David's decision before wiring
-    (`gesture.go` `gestWheel` / a new gesture). The method + persistence can be built first,
-    trigger wired after.
+- **Phase 6 — DONE** (`4b28b293`). `PanSceneSphere(delta)` moves `md.sceneSphere.Center`,
+  re-fits `Radius` (`fitSceneRadius`), holds node worlds fixed (scene polars recompute on the
+  next save via the dual-write). Trigger (David's call): the **camera pan** drives it —
+  `PanViewpoint` calls `PanSceneSphere(delta)`; ORBIT does not (separate `OrbitViewpoint`
+  methods). The bare `save` command `flushNow`s the sphere into `scene.json`, ACTIVATING the
+  polar-load path. Guards: `TestPanSceneSphereHoldsNodesWorldFixed`,
+  `TestPanSceneSphereThenNodeSaveUpdatesScenePolar`, `TestSceneSpherePersisterFlushNow`.
+
+## All phases complete
+
+The polar model is fully implemented (phases 1–6) and the drag blow-up is fixed. Remaining
+before merge: live-verify in the editor (reload, drag the 5/6 pair, pan), and decide on
+merging `task/decentralized-lock-propagation` (+ the two stacked branches) to `main`.
+
+### Known pre-existing issue (not from this work)
+`md.polarEqs` is appended during lock authoring while node goroutines read it unsynchronized
+— a `-race` failure in `TestEquationAppliesImmediatelyOnCompletion`, present on the
+pre-change base too (`stop-checks` does not run `-race`, so it is masked). Worth a follow-up
+guard on `md.polarEqs` access.
 
 ## Open threads / notes
 
