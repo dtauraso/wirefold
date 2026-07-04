@@ -537,6 +537,10 @@ type MoveDispatch struct {
 	anchorPersist   *anchorPersister
 	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
+	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
+	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanSceneSphere on every
+	// camera pan. nil until armed (tests that never arm).
+	spherePersist *sceneSpherePersister
 	// locksPersist is the debounced disk persister for the polar rule-builder's equations
 	// (md.polarEqs, scene_locks_persist.go). Armed by EnableEditPersist; nil until armed
 	// (tests that never arm).
@@ -1061,7 +1065,13 @@ func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 	md.vp.OrbitLockedViewpoint(from, to, tr)
 }
 func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
-func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace)      { md.vp.PanViewpoint(delta, tr) }
+func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
+	md.vp.PanViewpoint(delta, tr)
+	// Phase 6 (polar-model.md): a camera pan also pans the scene sphere by the same delta —
+	// the sphere is a separate entity from the camera pivot, but pan is the one gesture that
+	// moves both together. Orbit (OrbitViewpoint/OrbitLockedViewpoint) must NOT call this.
+	md.PanSceneSphere(delta)
+}
 
 // EnableViewpointPersist arms gesture-driven camera persistence: every subsequent
 // EmitViewpoint (orbit/zoom/pan/home) debounces a write of the current viewpoint to
@@ -1095,6 +1105,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.locksPersist = &polarEqsPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 )
 
 type sceneSphereJSON struct {
@@ -92,4 +94,79 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 		return
 	}
 	md.sceneSphere = contentFitSceneSphere(md.heldCenters())
+}
+
+// PanSceneSphere moves the scene sphere's Center by the SAME delta as a camera pan (phase 6:
+// pan moves the scene sphere; orbit does NOT — callers must only invoke this from the pan
+// path, never from orbit). Node WORLD positions are held fixed here; only the reference
+// Center moves, so every node's SCENE polar (measured about Center) changes implicitly and
+// is recomputed the next time it is read/persisted (scene_node_pos_persist.go's dual-write).
+// Radius re-fits around the new Center via fitSceneRadius so it keeps covering the diagram.
+// Schedules a debounced disk write when persistence is armed (EnableEditPersist); path=="" /
+// nil persister is a no-op (tests that never arm).
+func (md *MoveDispatch) PanSceneSphere(delta vec3) {
+	md.sceneSphere.Center = md.sceneSphere.Center.add(delta)
+	md.sceneSphere.Radius = fitSceneRadius(md.heldCenters(), md.sceneSphere.Center)
+	if md.spherePersist != nil {
+		md.spherePersist.schedule(md.sceneSphere)
+	}
+}
+
+// sceneSpherePersister coalesces rapid pans into a debounced read-modify-write of
+// scene.json's "sceneSphere" key, mirroring overlaysPersister/fadePersister. path == "" ⇒
+// no-op (tests that never arm persistence).
+type sceneSpherePersister struct {
+	path     string
+	debounce time.Duration
+	mu       sync.Mutex
+	pending  sceneSphere
+	has      bool
+	timer    *time.Timer
+	writes   int
+}
+
+// schedule records the latest sphere snapshot and (re)arms the debounce timer.
+func (p *sceneSpherePersister) schedule(s sceneSphere) {
+	if p == nil || p.path == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pending = s
+	p.has = true
+	if p.timer == nil {
+		p.timer = time.AfterFunc(p.debounce, p.flush)
+	} else {
+		p.timer.Reset(p.debounce)
+	}
+}
+
+// flush writes the pending sphere to scene.json and clears it.
+func (p *sceneSpherePersister) flush() {
+	p.mu.Lock()
+	s, has := p.pending, p.has
+	p.has = false
+	p.mu.Unlock()
+	if !has {
+		return
+	}
+	if err := writeSceneSphere(p.path, s); err != nil {
+		return
+	}
+	p.mu.Lock()
+	p.writes++
+	p.mu.Unlock()
+}
+
+// flushNow synchronously writes the current sphere, bypassing the debounce — used by the
+// "save" command so the sphere is guaranteed persisted at save time even if the debounce
+// timer hasn't fired yet.
+func (p *sceneSpherePersister) flushNow(s sceneSphere) {
+	if p == nil || p.path == "" {
+		return
+	}
+	if p.timer != nil {
+		p.timer.Stop()
+	}
+	_ = writeSceneSphere(p.path, s)
 }
