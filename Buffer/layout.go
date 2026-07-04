@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 16
+const BufLayoutVersion = 18
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -254,6 +254,14 @@ type bufLayoutRuleBuilder struct {
 	// (MoveDispatch.selectedLockIndex); the panel highlights this row and the Delete key
 	// targets it.
 	SelectedLockIndex int32 `buf:"i32"` // -1 = no lock row focused
+	// Pending `port ∈ torus` authoring capture (gesture.go trySelectSphereRule's
+	// hasPendingPort/hasPendingTorus): independent of the node/node pending term above, so
+	// both may be inert at once. -1 = that side not yet picked; the panel renders whichever
+	// side IS picked plus a placeholder for the other, mirroring the node/node pending-term
+	// preview.
+	PendingPortRow     int32 `buf:"i32"` // constrained port's buffer PORT-ROW index (-1 = none)
+	PendingPortIsInput uint8 `buf:"u8"`  // 1 = input port, 0 = output port (meaningful only if PendingPortRow != -1)
+	PendingTorusRow    int32 `buf:"i32"` // pending torus-owning node's buffer NODE-ROW index (-1 = none)
 }
 
 // bufLayoutPolarLock defines one row of the COMMITTED polar-equation locks column block.
@@ -262,6 +270,12 @@ type bufLayoutRuleBuilder struct {
 // events (full-mirror, like Edge/RuleBuilder — no incremental diffing). CenterRow/ARow/BRow
 // are buffer NODE-ROW indices (-1 = node id not found); ACode/BCode pack each term's
 // (comp,sign) with the same code as RuleBuilder's term codes (+θ=0,+φ=1,−θ=2,−φ=3,r=4).
+//
+// Kind discriminates the row: 0 = node/node (CenterRow/ARow/ACode/BRow/BCode above),
+// 1 = port∈torus (PortRow/PortIsInput/TorusRow below; CenterRow/ARow/BRow are -1 and
+// ACode/BCode are 0 for that kind). A port∈torus row's human port NAME is NOT duplicated
+// here — the renderer resolves it via PortRow indexing the Port block's own
+// PortNameOff/PortNameLen columns (the port-name-bytes section already carries it).
 type bufLayoutPolarLock struct {
 	CenterRow int32 `buf:"i32"` // equation's Center node buffer row (-1 = unresolved)
 	ARow      int32 `buf:"i32"` // term A's node buffer row (-1 = unresolved)
@@ -269,6 +283,13 @@ type bufLayoutPolarLock struct {
 	BRow      int32 `buf:"i32"` // term B's node buffer row (-1 = unresolved)
 	BCode     uint8 `buf:"u8"`  // term B's (comp,sign) code
 	Active    uint8 `buf:"u8"`  // 1 = equation currently enforced; 0 = deactivated
+	Kind      uint8 `buf:"u8"`  // 0 = node/node, 1 = port∈torus
+	// eqPortTorus fields (Kind==1). PortRow is the constrained port's buffer PORT-ROW index
+	// (-1 = unresolved); TorusRow is the owning node's buffer NODE-ROW index for the torus
+	// (-1 = unresolved). Inert this stage — no geometric effect, display only.
+	PortRow     int32 `buf:"i32"` // constrained port's buffer PORT-ROW index (-1 = unresolved)
+	PortIsInput uint8 `buf:"u8"`  // 1 = input port, 0 = output port (only meaningful for Kind==1)
+	TorusRow    int32 `buf:"i32"` // torus-owning node's buffer NODE-ROW index (-1 = unresolved)
 }
 
 // bufLayoutEvent defines one row of the per-tick EVENT column block.

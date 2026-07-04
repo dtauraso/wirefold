@@ -56,15 +56,19 @@ import {
   RULE_BUILDER_COL_CENTER_ROW, RULE_BUILDER_COL_PENDING_CODE, RULE_BUILDER_COL_TERM_COUNT,
   RULE_BUILDER_COL_T0ROW, RULE_BUILDER_COL_T0CODE, RULE_BUILDER_COL_T1ROW, RULE_BUILDER_COL_T1CODE,
   RULE_BUILDER_COL_SELECTED_LOCK_INDEX,
+  RULE_BUILDER_COL_PENDING_PORT_ROW, RULE_BUILDER_COL_PENDING_PORT_IS_INPUT, RULE_BUILDER_COL_PENDING_TORUS_ROW,
   RULE_BUILDER_STRIDE,
   readRuleBuilderCenterRow, readRuleBuilderPendingCode, readRuleBuilderTermCount,
   readRuleBuilderT0Row, readRuleBuilderT0Code, readRuleBuilderT1Row, readRuleBuilderT1Code,
   readRuleBuilderSelectedLockIndex,
+  readRuleBuilderPendingPortRow, readRuleBuilderPendingPortIsInput, readRuleBuilderPendingTorusRow,
   // PolarLock block
   POLAR_LOCK_COL_CENTER_ROW, POLAR_LOCK_COL_AROW, POLAR_LOCK_COL_ACODE,
   POLAR_LOCK_COL_BROW, POLAR_LOCK_COL_BCODE, POLAR_LOCK_COL_ACTIVE, POLAR_LOCK_STRIDE,
+  POLAR_LOCK_COL_KIND, POLAR_LOCK_COL_PORT_ROW, POLAR_LOCK_COL_PORT_IS_INPUT, POLAR_LOCK_COL_TORUS_ROW,
   readPolarLockCenterRow, readPolarLockARow, readPolarLockACode,
   readPolarLockBRow, readPolarLockBCode, readPolarLockActive,
+  readPolarLockKind, readPolarLockPortRow, readPolarLockPortIsInput, readPolarLockTorusRow,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -354,8 +358,9 @@ describe("buffer-layout — Overlay block", () => {
 
 describe("buffer-layout — RuleBuilder block", () => {
   it("stride equals packed field sizes", () => {
-    // i32 + u8 + u8 + i32 + u8 + i32 + u8 + i32 (SelectedLockIndex) = 4+1+1+4+1+4+1+4 = 20
-    expect(RULE_BUILDER_STRIDE).toBe(20);
+    // i32 + u8 + u8 + i32 + u8 + i32 + u8 + i32 (SelectedLockIndex) + i32 (PendingPortRow)
+    // + u8 (PendingPortIsInput) + i32 (PendingTorusRow) = 4+1+1+4+1+4+1+4+4+1+4 = 29
+    expect(RULE_BUILDER_STRIDE).toBe(29);
   });
 
   it("column offsets match the packed i32/u8 layout", () => {
@@ -367,6 +372,9 @@ describe("buffer-layout — RuleBuilder block", () => {
     expect(RULE_BUILDER_COL_T1ROW).toBe(11);
     expect(RULE_BUILDER_COL_T1CODE).toBe(15);
     expect(RULE_BUILDER_COL_SELECTED_LOCK_INDEX).toBe(16);
+    expect(RULE_BUILDER_COL_PENDING_PORT_ROW).toBe(20);
+    expect(RULE_BUILDER_COL_PENDING_PORT_IS_INPUT).toBe(24);
+    expect(RULE_BUILDER_COL_PENDING_TORUS_ROW).toBe(25);
   });
 
   it("read helpers decode a completed term + pending half-term", () => {
@@ -395,14 +403,27 @@ describe("buffer-layout — RuleBuilder block", () => {
     dv.setInt32(RULE_BUILDER_COL_SELECTED_LOCK_INDEX, 2, true);
     expect(readRuleBuilderSelectedLockIndex(dv)).toBe(2);
   });
+
+  it("reads the pending port/torus authoring columns", () => {
+    const buf = new ArrayBuffer(RULE_BUILDER_STRIDE);
+    const dv = new DataView(buf);
+    dv.setInt32(RULE_BUILDER_COL_PENDING_PORT_ROW, 7, true);
+    dv.setUint8(RULE_BUILDER_COL_PENDING_PORT_IS_INPUT, 1);
+    dv.setInt32(RULE_BUILDER_COL_PENDING_TORUS_ROW, -1, true);
+
+    expect(readRuleBuilderPendingPortRow(dv)).toBe(7);
+    expect(readRuleBuilderPendingPortIsInput(dv)).toBe(1);
+    expect(readRuleBuilderPendingTorusRow(dv)).toBe(-1);
+  });
 });
 
 // ─ PolarLock block ──────────────────────────────────────────────────────────────
 
 describe("buffer-layout — PolarLock block", () => {
   it("stride equals packed field sizes", () => {
-    // i32 + i32 + u8 + i32 + u8 + u8 = 4+4+1+4+1+1 = 15
-    expect(POLAR_LOCK_STRIDE).toBe(15);
+    // 5×i32 (CenterRow/ARow/BRow/PortRow/TorusRow) + 5×u8 (ACode/BCode/Active/Kind/PortIsInput)
+    // = 5*4 + 5 = 25
+    expect(POLAR_LOCK_STRIDE).toBe(25);
   });
 
   it("column offsets match the packed i32/u8 layout", () => {
@@ -412,9 +433,13 @@ describe("buffer-layout — PolarLock block", () => {
     expect(POLAR_LOCK_COL_BROW).toBe(9);
     expect(POLAR_LOCK_COL_BCODE).toBe(13);
     expect(POLAR_LOCK_COL_ACTIVE).toBe(14);
+    expect(POLAR_LOCK_COL_KIND).toBe(15);
+    expect(POLAR_LOCK_COL_PORT_ROW).toBe(16);
+    expect(POLAR_LOCK_COL_PORT_IS_INPUT).toBe(20);
+    expect(POLAR_LOCK_COL_TORUS_ROW).toBe(21);
   });
 
-  it("read helpers decode a committed equation row", () => {
+  it("read helpers decode a committed node/node equation row", () => {
     const buf = new ArrayBuffer(POLAR_LOCK_STRIDE);
     const dv = new DataView(buf);
     dv.setInt32(POLAR_LOCK_COL_CENTER_ROW, 3, true);
@@ -423,6 +448,9 @@ describe("buffer-layout — PolarLock block", () => {
     dv.setInt32(POLAR_LOCK_COL_BROW, 2, true);
     dv.setUint8(POLAR_LOCK_COL_BCODE, 2);
     dv.setUint8(POLAR_LOCK_COL_ACTIVE, 1);
+    dv.setUint8(POLAR_LOCK_COL_KIND, 0);
+    dv.setInt32(POLAR_LOCK_COL_PORT_ROW, -1, true);
+    dv.setInt32(POLAR_LOCK_COL_TORUS_ROW, -1, true);
 
     expect(readPolarLockCenterRow(dv, 0)).toBe(3);
     expect(readPolarLockARow(dv, 0)).toBe(1);
@@ -430,6 +458,25 @@ describe("buffer-layout — PolarLock block", () => {
     expect(readPolarLockBRow(dv, 0)).toBe(2);
     expect(readPolarLockBCode(dv, 0)).toBe(2);
     expect(readPolarLockActive(dv, 0)).toBe(1);
+    expect(readPolarLockKind(dv, 0)).toBe(0);
+  });
+
+  it("read helpers decode a committed port∈torus lock row", () => {
+    const buf = new ArrayBuffer(POLAR_LOCK_STRIDE);
+    const dv = new DataView(buf);
+    dv.setInt32(POLAR_LOCK_COL_CENTER_ROW, -1, true);
+    dv.setInt32(POLAR_LOCK_COL_AROW, -1, true);
+    dv.setInt32(POLAR_LOCK_COL_BROW, -1, true);
+    dv.setUint8(POLAR_LOCK_COL_ACTIVE, 1);
+    dv.setUint8(POLAR_LOCK_COL_KIND, 1);
+    dv.setInt32(POLAR_LOCK_COL_PORT_ROW, 5, true);
+    dv.setUint8(POLAR_LOCK_COL_PORT_IS_INPUT, 1);
+    dv.setInt32(POLAR_LOCK_COL_TORUS_ROW, 3, true);
+
+    expect(readPolarLockKind(dv, 0)).toBe(1);
+    expect(readPolarLockPortRow(dv, 0)).toBe(5);
+    expect(readPolarLockPortIsInput(dv, 0)).toBe(1);
+    expect(readPolarLockTorusRow(dv, 0)).toBe(3);
   });
 });
 
@@ -448,8 +495,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 16", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(16);
+  it("schema version is 18", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(18);
   });
 
   it("header size is 40 bytes (10×u32)", () => {

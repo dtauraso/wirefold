@@ -100,6 +100,102 @@ func TestPolarEqsActiveRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPortTorusEqRoundTrip verifies an authored `port ∈ torus` lock (eqPortTorus) round-trips
+// through scene_locks_persist (write → load) preserving its port/torus identity and kind, and
+// composes correctly with an ordinary node/node equation in the same file.
+func TestPortTorusEqRoundTrip(t *testing.T) {
+	root := writeTree(t)
+	scenePath := sceneCameraPath(root)
+
+	eqs := []polarEq{
+		{
+			Center: "Center1",
+			A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
+			B:      polarTerm{Node: "B", Comp: compTheta, Sign: -1},
+			Active: true,
+		},
+		{
+			Kind:        eqPortTorus,
+			PortNode:    "3",
+			PortName:    "Out",
+			PortIsInput: false,
+			TorusNode:   "3",
+			Active:      true,
+		},
+	}
+	if err := writeScenePolarEqs(scenePath, eqs); err != nil {
+		t.Fatalf("writeScenePolarEqs: %v", err)
+	}
+	got, ok := loadScenePolarEqs(scenePath)
+	if !ok || len(got) != 2 {
+		t.Fatalf("loadScenePolarEqs: ok=%v got=%+v", ok, got)
+	}
+	for i, want := range eqs {
+		if got[i] != want {
+			t.Fatalf("polarEqs[%d]=%+v want %+v", i, got[i], want)
+		}
+	}
+	if got[1].Kind != eqPortTorus {
+		t.Fatalf("polarEqs[1].Kind=%v want eqPortTorus", got[1].Kind)
+	}
+
+	// Full MoveDispatch.LoadPolarEqs path: authoring an eqPortTorus entry appends it to
+	// md.polarEqs, and ensureEqLinks must NOT create a movement link for it (inert this
+	// stage — no link is required for a lock with no solve).
+	md := &MoveDispatch{}
+	md.LoadPolarEqs(root)
+	if len(md.polarEqs) != 2 {
+		t.Fatalf("md.polarEqs len=%d want 2", len(md.polarEqs))
+	}
+	if md.linkBetween("3", "3") != nil {
+		t.Fatalf("ensureEqLinks created a link for an eqPortTorus entry; want none")
+	}
+}
+
+// TestApplyPolarEqsSkipsPortTorus verifies applyPolarEqs is a no-op for an eqPortTorus entry
+// (STAGE 1: authorable/persisted/displayed only, no geometric effect) while an ordinary
+// node/node equation touching the SAME moved node still solves normally.
+func TestApplyPolarEqsSkipsPortTorus(t *testing.T) {
+	md := &MoveDispatch{}
+	md.addLink("Center1", "A")
+	md.addLink("Center1", "B")
+	md.linkBetween("Center1", "A").setPolar("Center1", "A", polar{Theta: 1, Phi: 0.5, R: 1})
+	md.linkBetween("Center1", "B").setPolar("Center1", "B", polar{Theta: 0, Phi: 0, R: 1})
+
+	md.polarEqs = []polarEq{
+		{
+			Kind:        eqPortTorus,
+			PortNode:    "A",
+			PortName:    "Out",
+			PortIsInput: false,
+			TorusNode:   "Center1",
+			Active:      true,
+		},
+		{
+			Center: "Center1",
+			A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
+			B:      polarTerm{Node: "B", Comp: compTheta, Sign: 1},
+			Active: true,
+		},
+	}
+	pos := func(id string) (vec3, bool) {
+		if id == "Center1" {
+			return vec3{}, true
+		}
+		return vec3{}, false
+	}
+	out := md.applyPolarEqs("A", pos)
+	if _, ok := out["A"]; ok {
+		t.Fatalf("applyPolarEqs wrote a position for the moved node itself; want none")
+	}
+	if _, ok := out["Center1"]; ok {
+		t.Fatalf("applyPolarEqs wrote a position for the torus node from the eqPortTorus entry; want none (inert)")
+	}
+	if _, ok := out["B"]; !ok {
+		t.Fatalf("applyPolarEqs did not solve the ordinary node/node equation touching the same moved node")
+	}
+}
+
 // TestPolarEqsBackCompatDefaultActive verifies that an eq JSON object with no "active" key
 // (an already-saved lock from before this field existed) defaults to Active=true on load.
 func TestPolarEqsBackCompatDefaultActive(t *testing.T) {

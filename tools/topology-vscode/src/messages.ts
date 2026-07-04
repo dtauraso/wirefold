@@ -93,10 +93,12 @@ export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "whee
  *  table). nodeRow/portRow/edgeRow are the buffer NODE/PORT/EDGE row indices (the InstancedMesh
  *  instanceId == its buffer row), each -1 when the hit is not of that kind. */
 export type RawHit = {
-  kind: "port" | "handhold" | "node" | "edge" | "empty";
+  kind: "port" | "handhold" | "node" | "edge" | "torus" | "empty";
   isInput: boolean;
   /** Numeric buffer NODE-ROW index for a node hit (the node InstancedMesh instanceId == its
-   *  buffer row); -1 when not a node hit. Go resolves nodeRow → node id via its node-row table. */
+   *  buffer row); -1 when not a node hit. Go resolves nodeRow → node id via its node-row table.
+   *  A torus (border-ring) hit ALSO carries the owning node's row here (rings are drawn per-node
+   *  in the same row order as bodies) — Go resolves it the same way. */
   nodeRow: number;
   portRow: number;
   /** Numeric buffer EDGE-ROW index for an edge hit (the edge's pick-halo carries its buffer

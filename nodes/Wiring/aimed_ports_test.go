@@ -125,7 +125,7 @@ func TestLoaderInitialEdgeSegment_AimedPortUsesRadialNotRingAnchor(t *testing.T)
 		return c, ok
 	}
 
-	seg := segmentBetweenPortsAimed(geom1, "ToHoldNewSendOld", "1", geom2, "FromPrevHoldNewSendOldNode", "2", registry, centerOf)
+	seg := segmentBetweenPortsAimed(geom1, "ToHoldNewSendOld", "1", geom2, "FromPrevHoldNewSendOldNode", "2", registry, centerOf, nil)
 
 	// Start should be node1Center + nodeRadius * (1,0,0).
 	r := nodeRadius(geom1.Kind)
@@ -198,13 +198,13 @@ func TestPortWorldPosAimed_MatchesEdgeEndpoint_AndColinear(t *testing.T) {
 	// The source (output) port's world position must equal the edge segment Start,
 	// and the dest (input) port's world position must equal the edge segment End —
 	// they are the SAME point by construction (both computed via portWorldPosAimed).
-	srcPortPos := portWorldPosAimed(geom1, "ToHoldNewSendOld", false, "1", registry, centerOf)
-	dstPortPos := portWorldPosAimed(geom2, "FromPrevHoldNewSendOldNode", true, "2", registry, centerOf)
+	srcPortPos := portWorldPosAimed(geom1, "ToHoldNewSendOld", false, "1", registry, centerOf, nil)
+	dstPortPos := portWorldPosAimed(geom2, "FromPrevHoldNewSendOldNode", true, "2", registry, centerOf, nil)
 
 	seg := segmentBetweenPortsAimed(
 		geom1, "ToHoldNewSendOld", "1",
 		geom2, "FromPrevHoldNewSendOldNode", "2",
-		registry, centerOf,
+		registry, centerOf, nil,
 	)
 
 	const eps = 1e-9

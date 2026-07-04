@@ -33,12 +33,34 @@ type polarTerm struct {
 	Sign float64 // +1 or -1
 }
 
-// polarEq is one polar equation about a Center: A and B held equal after their signs.
+// eqKind discriminates what a polarEq constrains. The zero value (eqNodeNode) is today's
+// (node,comp)=(node,comp) equation, so existing/loaded equations that never set Kind decode
+// as eqNodeNode unchanged. eqPortTorus is a `port ∈ torus` membership lock: STAGE 1 is
+// author/persist/display only — applyPolarEqs skips it (no geometric effect yet; that is a
+// later stage's solve).
+type eqKind int
+
+const (
+	eqNodeNode  eqKind = iota // A.Comp = B.Comp about Center (today's equation)
+	eqPortTorus               // PortNode/PortName/PortIsInput's port lies on TorusNode's border ring
+)
+
+// polarEq is one polar equation. eqNodeNode uses Center/A/B (A and B held equal after their
+// signs). eqPortTorus uses PortNode/PortName/PortIsInput (the constrained port) and TorusNode
+// (the ring it must lie on); Center/A/B are unused for that kind.
 type polarEq struct {
+	Kind   eqKind
 	Center string
 	A      polarTerm
 	B      polarTerm
 	Active bool
+
+	// eqPortTorus fields (Kind == eqPortTorus). Inert this stage: applyPolarEqs never writes
+	// through a port∈torus entry, so authoring one moves nothing.
+	PortNode    string
+	PortName    string
+	PortIsInput bool
+	TorusNode   string
 }
 
 // compOf reads a polar's θ, φ, or r.
@@ -74,6 +96,9 @@ func setCompOf(p *polar, c polarComp, v float64) {
 // polar on the first drag-edge refresh (refreshLinksTouching). A degenerate Center==node
 // term is skipped — a node has no polar coordinate about itself.
 func (md *MoveDispatch) ensureEqLinks(eq polarEq) {
+	if eq.Kind == eqPortTorus {
+		return // inert this stage: no solve rides a link for a port∈torus lock yet
+	}
 	md.ensureLink(eq.Center, eq.A.Node)
 	md.ensureLink(eq.Center, eq.B.Node)
 }
@@ -101,6 +126,9 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 	for _, eq := range md.polarEqs {
 		if !eq.Active {
 			continue
+		}
+		if eq.Kind == eqPortTorus {
+			continue // STAGE 1: authorable/persisted/displayed only — no solve yet
 		}
 		var moved, other polarTerm
 		switch movedID {
@@ -139,6 +167,118 @@ func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bo
 	return out
 }
 
+// portTorusLocked returns true if there is an ACTIVE eqPortTorus lock on the given
+// (node, port, isInput). Used by applyPortTorusColinearity to find coupled edges.
+func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
+	for _, eq := range md.polarEqs {
+		if eq.Kind == eqPortTorus && eq.Active &&
+			eq.PortNode == node && eq.PortName == port && eq.PortIsInput == isInput {
+			return true
+		}
+	}
+	return false
+}
+
+// applyPortTorusColinearity implements STAGE 2 of the `port ∈ torus` lock: when both
+// endpoints of an edge have an ACTIVE eqPortTorus lock on their respective ports (the
+// source's out-port pinned to its own node's border ring, the destination's in-port
+// pinned to its own node's border ring), the edge S.out→D.in is colinear (S_center,
+// S.port, D.port, D_center on one line) IFF S_center.z == D_center.z — because the
+// node-border ring is drawn in the world X-Y plane (identity rotation, unit-scaled
+// TorusGeometry — buffer-scene.tsx ~251-265) and the aimed port sits on that ring
+// exactly when the aim direction (unit(otherCenter-thisCenter)) has zero z, i.e. when
+// the two centers share a z.
+//
+// So the solve is: for each coupled edge with movedID as one endpoint, set the OTHER
+// endpoint's z to movedID's z (x/y unchanged) and emit that as its new world center.
+// The existing portWorldPosAimed recompute (driven by the emitted center) then places
+// both ports back on their rings, colinear — no separate port write needed.
+//
+// Edge list: reused from md.edgeMovers (srcID/srcH/dstID/dstH), the same live
+// edge-endpoint state RootMove already reads via heldEdges — no new adjacency was
+// added.
+//
+// ONE-HOP ONLY (matching applyPolarEqs): if the dependent node is itself an endpoint
+// of another port-torus-coupled edge, that second edge is NOT solved this pass. A
+// drag that should ripple through a chain of torus-coupled edges needs a future
+// multi-hop pass; today's caller (RootMove) calls this once per drag frame.
+func (md *MoveDispatch) applyPortTorusColinearity(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
+	out := map[string]vec3{}
+	moved, ok := pos(movedID)
+	if !ok {
+		return out
+	}
+	for _, em := range md.edgeMovers {
+		if em.srcID == em.dstID {
+			continue // guard against a degenerate self-edge
+		}
+		coupled := md.portTorusLocked(em.srcID, em.srcH, false) &&
+			md.portTorusLocked(em.dstID, em.dstH, true)
+		if !coupled {
+			continue
+		}
+		var depID string
+		switch movedID {
+		case em.srcID:
+			depID = em.dstID
+		case em.dstID:
+			depID = em.srcID
+		default:
+			continue
+		}
+		if depID == movedID {
+			continue // guard against moving the dragged node itself
+		}
+		dep, ok := pos(depID)
+		if !ok {
+			continue
+		}
+		dep.Z = moved.Z
+		out[depID] = dep
+	}
+	return out
+}
+
+// reemitPortTorusGeometry re-emits nodeID's node-geometry plus every incident edge's
+// segment, so a `port ∈ torus` lock's geometric effect (portWorldPosAimed's
+// ring-projection, see aimed_ports.go) is visible IMMEDIATELY when the lock is
+// authored (addPortTorusLock) or toggled active/inactive (ToggleLockActive) — not
+// only on the next unrelated node move. Mirrors fanCenters' aimedReemit trick: send
+// each mover a no-op "same center" message so it recomputes+re-emits on its own
+// goroutine. Dual-pathed like ResendGeometry: direct emit when movers aren't
+// started (headless tests), inbox-routed when they are (production).
+func (md *MoveDispatch) reemitPortTorusGeometry(nodeID string) {
+	nm, ok := md.nodeMovers[nodeID]
+	if !ok {
+		return
+	}
+	if !md.started {
+		nm.emitGeometry()
+		for _, em := range md.edgeMovers {
+			if em.srcID == nodeID || em.dstID == nodeID {
+				em.emitGeometry()
+			}
+		}
+		return
+	}
+	s := nm.snap.Load()
+	if s == nil {
+		return
+	}
+	if ch, ok := md.dispatch[nodeID]; ok {
+		cc := s.c
+		ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: &cc, ReachR: s.reach}
+	}
+	for edgeID, em := range md.edgeMovers {
+		if em.srcID != nodeID && em.dstID != nodeID {
+			continue
+		}
+		if ch, ok := md.dispatch[edgeID]; ok {
+			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: map[string]vec3{nodeID: s.c}}
+		}
+	}
+}
+
 // emitPolarLocks emits the FULL committed polar-equation lock list (KindPolarLocks). Call
 // from every mutation point: rule completion (gesture.go), ToggleLockActive, SelectLock,
 // DeleteSelectedLock, and LoadPolarEqs. No-op when tr is nil (headless tests).
@@ -148,6 +288,17 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 	}
 	locks := make([]T.PolarLockPayload, len(md.polarEqs))
 	for i, eq := range md.polarEqs {
+		if eq.Kind == eqPortTorus {
+			locks[i] = T.PolarLockPayload{
+				Active:      eq.Active,
+				Kind:        int(eqPortTorus),
+				PortNode:    eq.PortNode,
+				PortName:    eq.PortName,
+				PortIsInput: eq.PortIsInput,
+				TorusNode:   eq.TorusNode,
+			}
+			continue
+		}
 		locks[i] = T.PolarLockPayload{
 			Center: eq.Center,
 			ANode:  eq.A.Node,
@@ -155,6 +306,7 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 			BNode:  eq.B.Node,
 			BCode:  ruleTermCode(eq.B.Comp, eq.B.Sign),
 			Active: eq.Active,
+			Kind:   int(eqNodeNode),
 		}
 	}
 	tr.PolarLocks(locks, md.selectedLockIndex)
@@ -181,6 +333,12 @@ func (md *MoveDispatch) ToggleLockActive(i int, tr *T.Trace) {
 	md.emitPolarLocks(tr)
 	if md.locksPersist != nil {
 		md.locksPersist.schedule(md.polarEqs)
+	}
+	// A toggled eqPortTorus lock changes its port's resolved geometry (ring-projected
+	// when active, plain aimed when not) — re-emit immediately so the port visibly
+	// moves rather than waiting for the next unrelated node move.
+	if eq := md.polarEqs[i]; eq.Kind == eqPortTorus {
+		md.reemitPortTorusGeometry(eq.PortNode)
 	}
 }
 

@@ -123,7 +123,7 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	}
 	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
 	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
-	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantRegistry, wantCenterOf)
+	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantRegistry, wantCenterOf, nil)
 	wantArc := wantSeg.Start.sub(wantSeg.End).length()
 
 	// Segment endpoints on the source Out must match exactly.

@@ -288,6 +288,15 @@ type ruleBuilderSnapState struct {
 	hasPending  bool
 	pendingCode int
 	terms       []ruleBuilderTermSnap
+	// pendingPortNode/pendingPortName/pendingPortIsInput/pendingTorusNode mirror the
+	// in-progress `port ∈ torus` authoring capture (gesture.go hasPendingPort/
+	// hasPendingTorus), independent of hasPending/pendingCode/terms above. Empty
+	// pendingPortNode/pendingTorusNode = that side not yet picked; resolved to buffer rows
+	// at build time (same pattern as center/terms).
+	pendingPortNode    string
+	pendingPortName    string
+	pendingPortIsInput bool
+	pendingTorusNode   string
 }
 
 // polarLockSnapState is one committed polar-equation lock mirrored from a KindPolarLocks
@@ -300,6 +309,14 @@ type polarLockSnapState struct {
 	bNode  string
 	bCode  int
 	active bool
+	// kind discriminates the row: 0 = node/node (fields above), 1 = port∈torus (fields
+	// below). portNode/portName/portIsInput/torusNode are resolved to buffer rows at build
+	// time, same as center/aNode/bNode.
+	kind        int
+	portNode    string
+	portName    string
+	portIsInput bool
+	torusNode   string
 }
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
@@ -390,10 +407,14 @@ func (s *SnapshotState) Update(ev T.Event) {
 			terms[i] = ruleBuilderTermSnap{node: t.Node, code: t.Code}
 		}
 		s.ruleBuilder = ruleBuilderSnapState{
-			center:      ev.RuleCenter,
-			hasPending:  ev.RuleHasPending,
-			pendingCode: ev.RulePendingCode,
-			terms:       terms,
+			center:             ev.RuleCenter,
+			hasPending:         ev.RuleHasPending,
+			pendingCode:        ev.RulePendingCode,
+			terms:              terms,
+			pendingPortNode:    ev.RulePendingPortNode,
+			pendingPortName:    ev.RulePendingPortName,
+			pendingPortIsInput: ev.RulePendingPortIsInput,
+			pendingTorusNode:   ev.RulePendingTorusNode,
 		}
 		s.emitSnapshot()
 
@@ -406,7 +427,12 @@ func (s *SnapshotState) Update(ev T.Event) {
 				center: l.Center,
 				aNode:  l.ANode, aCode: l.ACode,
 				bNode: l.BNode, bCode: l.BCode,
-				active: l.Active,
+				active:      l.Active,
+				kind:        l.Kind,
+				portNode:    l.PortNode,
+				portName:    l.PortName,
+				portIsInput: l.PortIsInput,
+				torusNode:   l.TorusNode,
 			}
 		}
 		s.polarLocks = locks
@@ -816,6 +842,28 @@ func (s *SnapshotState) nodeRowIndex(nodeID string) int {
 	return -1
 }
 
+// portRowIndex returns the buffer PORT-ROW index for a (node, port, isInput) identity, or -1
+// when unresolved (id empty or not (yet) a registered port). Used to resolve an eqPortTorus
+// lock's constrained port to a buffer row at build time — the same row a `port ∈ torus` lock's
+// PortRow column carries, letting the renderer resolve the port's human name via the Port
+// block's own PortNameOff/PortNameLen columns with no duplicated string storage. Linear scan:
+// the port table is small and this runs only for the (rare) committed polar-lock list.
+func (s *SnapshotState) portRowIndex(node, port string, isInput bool) int {
+	if node == "" || port == "" {
+		return -1
+	}
+	tbl := s.portTable.Load()
+	if tbl == nil {
+		return -1
+	}
+	for i, e := range *tbl {
+		if e.Node == node && e.Port == port && e.IsInput == isInput {
+			return i
+		}
+	}
+	return -1
+}
+
 // clearTransients resets all transient node event flags to 0 after snapshot emit.
 func (s *SnapshotState) clearTransients() {
 	for i := range s.nodes {
@@ -1113,7 +1161,17 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		t1Row = int32(s.nodeRowIndex(rb.terms[1].node))
 		t1Code = uint8(rb.terms[1].code)
 	}
-	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code, int32(s.selectedLockIndex))
+	pendingPortRow := int32(-1)
+	pendingPortIsInput := boolU8(false)
+	if rb.pendingPortNode != "" {
+		pendingPortRow = int32(s.portRowIndex(rb.pendingPortNode, rb.pendingPortName, rb.pendingPortIsInput))
+		pendingPortIsInput = boolU8(rb.pendingPortIsInput)
+	}
+	pendingTorusRow := int32(-1)
+	if rb.pendingTorusNode != "" {
+		pendingTorusRow = int32(s.nodeRowIndex(rb.pendingTorusNode))
+	}
+	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code, int32(s.selectedLockIndex), pendingPortRow, pendingPortIsInput, pendingTorusRow)
 	off += BufRuleBuilderStride
 
 	// PolarLock block: one row per committed polar-equation lock, IN ORDER (block row i ==
@@ -1124,7 +1182,11 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			int32(s.nodeRowIndex(l.center)),
 			int32(s.nodeRowIndex(l.aNode)), uint8(l.aCode),
 			int32(s.nodeRowIndex(l.bNode)), uint8(l.bCode),
-			boolU8(l.active))
+			boolU8(l.active),
+			uint8(l.kind),
+			int32(s.portRowIndex(l.portNode, l.portName, l.portIsInput)),
+			boolU8(l.portIsInput),
+			int32(s.nodeRowIndex(l.torusNode)))
 	}
 	off += int(polarLockCount) * BufPolarLockStride
 

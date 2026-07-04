@@ -187,6 +187,15 @@ type PolarLockPayload struct {
 	BNode  string `json:"bNode"`
 	BCode  int    `json:"bCode"`
 	Active bool   `json:"active"`
+	// Kind discriminates what the lock constrains: 0 = node/node (Center/A/B above),
+	// 1 = port∈torus (PortNode/PortName/PortIsInput/TorusNode below). Zero value keeps every
+	// existing node/node lock's wire shape unchanged.
+	Kind int `json:"kind,omitempty"`
+	// eqPortTorus fields (Kind==1). Inert this stage — no geometric effect, display only.
+	PortNode    string `json:"portNode,omitempty"`
+	PortName    string `json:"portName,omitempty"`
+	PortIsInput bool   `json:"portIsInput,omitempty"`
+	TorusNode   string `json:"torusNode,omitempty"`
 }
 
 type Event struct {
@@ -298,6 +307,14 @@ type Event struct {
 	RuleHasPending  bool              `json:"ruleHasPending,omitempty"`
 	RulePendingCode int               `json:"rulePendingCode,omitempty"`
 	RuleTerms       []RuleTermPayload `json:"ruleTerms,omitempty"`
+	// RulePendingPortNode/RulePendingPortName/RulePendingPortIsInput/RulePendingTorusNode
+	// carry the in-progress `port ∈ torus` authoring capture (gesture.go's gestureState
+	// hasPendingPort/hasPendingTorus), independent of the node/node pending term above —
+	// both may be set/unset independently. Empty string = that side not yet picked.
+	RulePendingPortNode    string `json:"rulePendingPortNode,omitempty"`
+	RulePendingPortName    string `json:"rulePendingPortName,omitempty"`
+	RulePendingPortIsInput bool   `json:"rulePendingPortIsInput,omitempty"`
+	RulePendingTorusNode   string `json:"rulePendingTorusNode,omitempty"`
 	// PolarLocks/SelectedLockIndex carry the FULL committed polar-equation lock list and the
 	// currently-focused row on KindPolarLocks events (full-mirror). SelectedLockIndex=-1 = no
 	// row focused. PolarLocks order IS the md.polarEqs index (block row = slice index).
@@ -596,13 +613,20 @@ func (t *Trace) Fade(nodes, edges []string) {
 // snapshot mirrors it. center="" = no Center latched; hasPending=false = no half-finished
 // term (pendingCode is ignored then); terms carries the 0..2 completed terms so far. Fresh
 // slices are passed so the drain goroutine never races the caller's slice.
-func (t *Trace) RuleBuilder(center string, hasPending bool, pendingCode int, terms []RuleTermPayload) {
+// pendingPortNode/pendingPortName/pendingTorusNode carry the in-progress `port ∈ torus`
+// capture (gesture.go's hasPendingPort/hasPendingTorus); empty string = that side not yet
+// picked. Independent of hasPending/pendingCode/terms (the node/node pending term).
+func (t *Trace) RuleBuilder(center string, hasPending bool, pendingCode int, terms []RuleTermPayload, pendingPortNode, pendingPortName string, pendingPortIsInput bool, pendingTorusNode string) {
 	t.emit(Event{
-		Kind:            KindRuleBuilder,
-		RuleCenter:      center,
-		RuleHasPending:  hasPending,
-		RulePendingCode: pendingCode,
-		RuleTerms:       terms,
+		Kind:                   KindRuleBuilder,
+		RuleCenter:             center,
+		RuleHasPending:         hasPending,
+		RulePendingCode:        pendingCode,
+		RuleTerms:              terms,
+		RulePendingPortNode:    pendingPortNode,
+		RulePendingPortName:    pendingPortName,
+		RulePendingPortIsInput: pendingPortIsInput,
+		RulePendingTorusNode:   pendingTorusNode,
 	})
 }
 
@@ -998,18 +1022,22 @@ func eventValue(e Event) (any, error) {
 		return fade{Step: e.Step, Kind: e.Kind, FadedNodes: e.FadedNodes, FadedEdges: e.FadedEdges}, nil
 	case KindRuleBuilder:
 		type ruleBuilder struct {
-			Step            int               `json:"step"`
-			Kind            string            `json:"kind"`
-			RuleCenter      string            `json:"ruleCenter"`
-			RuleHasPending  bool              `json:"ruleHasPending"`
-			RulePendingCode int               `json:"rulePendingCode"`
-			RuleTerms       []RuleTermPayload `json:"ruleTerms"`
+			Step                   int               `json:"step"`
+			Kind                   string            `json:"kind"`
+			RuleCenter             string            `json:"ruleCenter"`
+			RuleHasPending         bool              `json:"ruleHasPending"`
+			RulePendingCode        int               `json:"rulePendingCode"`
+			RuleTerms              []RuleTermPayload `json:"ruleTerms"`
+			RulePendingPortNode    string            `json:"rulePendingPortNode,omitempty"`
+			RulePendingPortName    string            `json:"rulePendingPortName,omitempty"`
+			RulePendingPortIsInput bool              `json:"rulePendingPortIsInput,omitempty"`
+			RulePendingTorusNode   string            `json:"rulePendingTorusNode,omitempty"`
 		}
 		terms := e.RuleTerms
 		if terms == nil {
 			terms = []RuleTermPayload{}
 		}
-		return ruleBuilder{Step: e.Step, Kind: e.Kind, RuleCenter: e.RuleCenter, RuleHasPending: e.RuleHasPending, RulePendingCode: e.RulePendingCode, RuleTerms: terms}, nil
+		return ruleBuilder{Step: e.Step, Kind: e.Kind, RuleCenter: e.RuleCenter, RuleHasPending: e.RuleHasPending, RulePendingCode: e.RulePendingCode, RuleTerms: terms, RulePendingPortNode: e.RulePendingPortNode, RulePendingPortName: e.RulePendingPortName, RulePendingPortIsInput: e.RulePendingPortIsInput, RulePendingTorusNode: e.RulePendingTorusNode}, nil
 	case KindPolarLocks:
 		type polarLocks struct {
 			Step              int                `json:"step"`

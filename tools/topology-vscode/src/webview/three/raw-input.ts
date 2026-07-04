@@ -43,6 +43,12 @@ function classifyHit(pickRequest: PickRef, ndcX: number, ndcY: number): { kind: 
   // HANDHOLD_TERM_TAG). Go decodes comp/sign from it for the polar rule-builder.
   const handholdStr = pickRequest.current?.(ndcX, ndcY, { handholdOnly: true }) ?? null;
   if (handholdStr !== null) return { kind: "handhold", isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, handholdTerm: Number(handholdStr) };
+  // A torus (node border-ring) hit carries ONLY the owning node's numeric buffer NODE-ROW index
+  // (pickBufferRing returns the row as a string, since rings are drawn per-node in body row
+  // order). Checked before the plain node body so a ring-edge click (`port ∈ torus` lock
+  // capture) is not swallowed by the larger body sphere underneath it.
+  const torusStr = pickRequest.current?.(ndcX, ndcY, { ringOnly: true }) ?? null;
+  if (torusStr !== null) return { kind: "torus", isInput: false, nodeRow: Number(torusStr), portRow: -1, edgeRow: -1, handholdTerm: -1 };
   // A node hit carries ONLY its numeric buffer NODE-ROW index (pickBufferNode returns the row
   // as a string). Go resolves the row → node id via its own node-row table; no id crosses.
   const nodeStr = pickRequest.current?.(ndcX, ndcY) ?? null;

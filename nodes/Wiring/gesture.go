@@ -101,6 +101,20 @@ type gestureState struct {
 	pendingComp polarComp
 	pendingSign float64
 	ruleTerms   []polarTerm
+
+	// `port ∈ torus` lock capture (independent of the node/node hasPending/ruleTerms above):
+	// a PORT click latches the port; a subsequent TORUS click completes the lock and appends
+	// an eqPortTorus entry to md.polarEqs. Does not touch pendingComp/pendingSign/ruleTerms.
+	hasPendingPort  bool
+	pendingPortNode string
+	pendingPortName string
+	pendingPortIn   bool
+
+	// the other half of the `port ∈ torus` pair: a TORUS click latches the owning node id
+	// when no port is pending yet, so port-then-torus AND torus-then-port both complete the
+	// lock (whichever hit arrives second finds the other side already latched).
+	hasPendingTorus  bool
+	pendingTorusNode string
 }
 
 type gestureRect struct{ left, top, width, height float64 }
@@ -195,10 +209,19 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 		if md.portConnected(node, port, isInput) {
 			// Connected port → ring-move along the node's ring. Freeze the node center
 			// (the ring plane is z = center.z) at grab, mirroring portMoveRef.nodeCenter.
+			// (A plain click without crossing the drag slop still resolves via the
+			// gestPending fallthrough on pointer-up, so this doesn't block select-mode
+			// `port ∈ torus` authoring — only an actual drag reaches gestPortMove.)
 			if c, ok := md.centerOfNode(node); ok {
 				g.portMoveNode, g.portMovePort, g.portMoveInput = node, port, isInput
 				g.portMoveCenter = c
 			}
+			return
+		}
+		if md.ov.selSpherePolesVisible {
+			// Select mode: an UNCONNECTED port hit is `port ∈ torus` authoring on
+			// pointer-up (trySelectSphereRule), not a wiring-drag grab. Leave g.wireNode
+			// unset so gestPointerUp's gestPending fallthrough reaches trySelectSphereRule.
 			return
 		}
 		g.wireNode, g.wirePort, g.wireInput = node, port, isInput
@@ -526,9 +549,86 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		md.emitRuleBuilder(tr)
 		md.emitPolarLocks(tr)
 		return true
+	case ev.Hit.Kind == "node":
+		// Select mode ON, no handhold pending: a plain node-body click does NOT highlight
+		// (highlighting is an applySelect/select-mode-OFF behavior only), but the equation
+		// panel must still show for the clicked node — set the sticky panel target
+		// (md.ruleCenter) and emit the RuleBuilder row without touching md.selected or any
+		// pending port/torus captures.
+		if node, ok := md.nodeFromHit(ev.Hit); ok {
+			md.ruleCenter = node
+			md.emitRuleBuilder(tr)
+		}
+		return true
+	case ev.Hit.Kind == "port":
+		node, port, isInput, ok := md.portFromHit(ev.Hit)
+		if !ok {
+			return true
+		}
+		if g.hasPendingTorus {
+			// Torus was captured first; this port click completes the `port ∈ torus` lock.
+			torusNode := g.pendingTorusNode
+			g.hasPendingTorus = false
+			md.addPortTorusLock(node, port, isInput, torusNode, tr)
+			return true
+		}
+		// Latch the clicked port; a subsequent torus click completes the lock.
+		g.hasPendingPort = true
+		g.pendingPortNode = node
+		g.pendingPortName = port
+		g.pendingPortIn = isInput
+		md.emitRuleBuilder(tr)
+		return true
+	case ev.Hit.Kind == "torus":
+		torusNode, ok := md.nodeFromHit(ev.Hit)
+		if !ok {
+			return true
+		}
+		if g.hasPendingPort {
+			// Port was captured first; this torus click completes the `port ∈ torus` lock.
+			portNode, portName, portIn := g.pendingPortNode, g.pendingPortName, g.pendingPortIn
+			g.hasPendingPort = false
+			md.addPortTorusLock(portNode, portName, portIn, torusNode, tr)
+			return true
+		}
+		// Latch the clicked torus (owning node); a subsequent port click completes the lock.
+		g.hasPendingTorus = true
+		g.pendingTorusNode = torusNode
+		md.emitRuleBuilder(tr)
+		return true
 	default:
 		return false
 	}
+}
+
+// addPortTorusLock appends a `port ∈ torus` equation once BOTH sides of the pair have been
+// captured (in either order — see trySelectSphereRule's port/torus cases). STAGE 1: no
+// ensureEqLinks call (ensureEqLinks itself skips eqPortTorus) and no RootMove/solve —
+// authoring the lock moves nothing yet.
+func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput bool, torusNode string, tr *T.Trace) {
+	eq := polarEq{
+		Kind:        eqPortTorus,
+		PortNode:    portNode,
+		PortName:    portName,
+		PortIsInput: portIsInput,
+		TorusNode:   torusNode,
+		Active:      true,
+	}
+	md.polarEqs = append(md.polarEqs, eq)
+	if tr != nil {
+		tr.Breadcrumb("port-torus-lock-added", portNode, torusNode, portName)
+	}
+	if md.locksPersist != nil {
+		md.locksPersist.schedule(md.polarEqs)
+	}
+	md.emitPolarLocks(tr)
+	// The lock is active the instant it's authored — re-emit the constrained port's
+	// geometry now so it moves onto its node's border ring immediately (locks.go).
+	md.reemitPortTorusGeometry(portNode)
+	// Both pending flags were already cleared by the caller before it reached here; mirror
+	// that into the RuleBuilder block so the in-progress preview clears the instant the
+	// pair commits to the list.
+	md.emitRuleBuilder(tr)
 }
 
 // ruleTermCode packs a completed/pending term's (comp, sign) to a single code — matches the
@@ -579,7 +679,15 @@ func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
 	if g.hasPending {
 		pendingCode = ruleTermCode(g.pendingComp, g.pendingSign)
 	}
-	tr.RuleBuilder(md.selected, g.hasPending, pendingCode, terms)
+	pendingPortNode, pendingPortName, pendingPortIsInput := "", "", false
+	if g.hasPendingPort {
+		pendingPortNode, pendingPortName, pendingPortIsInput = g.pendingPortNode, g.pendingPortName, g.pendingPortIn
+	}
+	pendingTorusNode := ""
+	if g.hasPendingTorus {
+		pendingTorusNode = g.pendingTorusNode
+	}
+	tr.RuleBuilder(md.ruleCenter, g.hasPending, pendingCode, terms, pendingPortNode, pendingPortName, pendingPortIsInput, pendingTorusNode)
 }
 
 // clearRuleBuilding ends any in-progress polar rule-building session: half-finished
@@ -590,19 +698,34 @@ func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
 func (md *MoveDispatch) clearRuleBuilding(tr *T.Trace) {
 	md.gest.hasPending = false
 	md.gest.ruleTerms = nil
+	md.gest.hasPendingPort = false
+	md.gest.hasPendingTorus = false
 	md.emitRuleBuilder(tr)
 }
 
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is
 // single + EXCLUSIVE across nodes and edges: an EDGE hit selects that edge (clearing any
 // node selection); a node/port hit selects that node (clearing any edge selection); an
-// empty (or handhold) hit clears both.
+// empty-space hit CLEARS the transient highlight (md.selected / md.selectedEdge) — this is
+// the original click-empty-clears behavior. The rule-builder panel's Center (md.ruleCenter)
+// is a SEPARATE, sticky piece of state: it is untouched by an empty-space click and only
+// changes when a different node is selected, so the equation panel stays on the last
+// selected node even after the highlight ring clears.
 func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
+	if ev.Hit.Kind == "empty" {
+		md.selected = ""
+		md.selectedEdge = ""
+		tr.Select("", own)
+		md.emitRuleBuilder(tr)
+		return
+	}
 	if ev.Hit.Kind == "edge" {
 		if label, ok := md.edgeFromHit(ev.Hit); ok {
 			md.selectedEdge = label
 			md.selected = ""
 			tr.SelectEdge(label)
+			// Edge selection does not touch the sticky rule-builder Center; leave
+			// md.ruleCenter as-is so the panel keeps showing the last-selected node.
 			return
 		}
 		// Unresolvable edge hit → clear selection rather than leaving stale state.
@@ -621,13 +744,13 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	}
 	md.selected = node
 	md.selectedEdge = ""
+	md.ruleCenter = node
 	tr.Select(node, own)
-	// A selection change can change the rule-builder's latched Center (e.g. picking the
-	// Center sphere itself while selSpherePoles is on); mirror it so the RuleBuilder block
-	// stays in sync. Cheap no-op while the overlay is off (the panel is hidden either way).
-	if md.ov.selSpherePolesVisible {
-		md.emitRuleBuilder(tr)
-	}
+	// A selection change always changes the rule-builder's latched sticky Center
+	// (md.ruleCenter), so mirror it unconditionally to keep the buffer's RuleBuilder block
+	// (CenterRow/centerLabel) tracking the panel. The in-progress builder UI itself stays
+	// gated on the selSpherePoles overlay in TS; this only keeps the data fresh underneath it.
+	md.emitRuleBuilder(tr)
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

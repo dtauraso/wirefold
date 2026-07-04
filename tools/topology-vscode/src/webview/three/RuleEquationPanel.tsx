@@ -6,14 +6,14 @@
 
 import { createPortal } from "react-dom";
 import { useOverlayFlags } from "./overlay-flags";
-import { useRuleBuilder, usePolarLocks, useSelectedNodeRow, type RuleBuilderTerm, type PolarLockEntry } from "./rule-builder";
+import { useRuleBuilder, usePolarLocks, type RuleBuilderTerm, type RuleBuilderState, type PolarLockEntry, POLAR_LOCK_KIND_PORT_TORUS } from "./rule-builder";
 import { postGoRecord } from "../vscode-api";
 import { encodeClearRule, encodeLockToggleActive, encodeLockSelect, encodeDeleteSelectedLock } from "../../schema/input-layout";
 import { useEffect } from "react";
 
-/** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=+θ,
- *  1=+φ, 2=−θ, 3=−φ, 4=r — r is unsigned). */
-const ANGLE_CHIPS = ["+θ", "+φ", "−θ", "−φ", "r"];
+/** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=θ,
+ *  1=φ, 2=−θ, 3=−φ, 4=r — positive θ/φ show no sign). */
+const ANGLE_CHIPS = ["θ", "φ", "−θ", "−φ", "r"];
 
 function angleChip(code: number): string {
   return ANGLE_CHIPS[code] ?? "?";
@@ -23,15 +23,27 @@ export function RuleEquationPanel() {
   const overlays = useOverlayFlags();
   const rb = useRuleBuilder();
   const { equations, selectedLockIndex } = usePolarLocks();
-  const selectedRow = useSelectedNodeRow();
   const mount = document.getElementById("rule-eq-mount");
 
-  // The committed-equations LIST is independent of the selSpherePoles overlay: it shows
-  // whenever the selected node is the Center of >=1 committed equation. The in-progress
+  // The committed-equations LIST keys off the rule-builder's STICKY panel Center
+  // (rb.centerRow, gesture.go md.ruleCenter) rather than the transient click highlight
+  // (Node.Selected / useSelectedNodeRow): it shows whenever the sticky center participates
+  // in >=1 committed equation, as ANY participant (center, term A, term B, the port's
+  // owning node, or the torus). This keeps the panel showing the last-selected node's
+  // equations even after an empty-space click clears the highlight ring. The in-progress
   // builder section stays gated on the overlay, as before.
-  const rowEquations = equations.filter((eq) => eq.centerRow === selectedRow);
+  const centerRow = rb?.centerRow;
+  const rowEquations = equations.filter((eq) =>
+    eq.kind === POLAR_LOCK_KIND_PORT_TORUS
+      ? eq.torusRow === centerRow || eq.portNodeRow === centerRow
+      : eq.centerRow === centerRow || eq.a.row === centerRow || eq.b.row === centerRow,
+  );
   const showBuilder = !!overlays?.selSpherePoles && !!rb;
   const showList = rowEquations.length > 0;
+  // rb.centerLabel tracks md.selected regardless of the overlay (gesture.go applySelect
+  // emits it unconditionally now), so show a standalone Center header whenever the list
+  // is showing but the builder section (which already renders its own Center line) is not.
+  const showListCenter = showList && !showBuilder;
 
   // Delete key: only when the panel-focused row is one of THIS center's rows and is
   // deactivated. Go re-guards regardless. Listens while the list is showing.
@@ -53,6 +65,7 @@ export function RuleEquationPanel() {
   return createPortal(
     <div className="rule-eq-panel">
       {showBuilder && rb && renderBuilder(rb)}
+      {showListCenter && <div className="rule-eq-center">Center: {rb?.centerLabel || "—"}</div>}
       {showList && (
         <div className="rule-eq-list">
           {rowEquations.map((eq) => renderLockRow(eq, eq.index === selectedLockIndex))}
@@ -63,8 +76,14 @@ export function RuleEquationPanel() {
   );
 }
 
-/** Renders the in-progress equation-being-authored section (the selSpherePoles session). */
-function renderBuilder(rb: { centerLabel: string; pending: { code: number } | null; terms: RuleBuilderTerm[] }) {
+/** Renders the in-progress equation-being-authored section (the selSpherePoles session).
+ *  A `port ∈ torus` authoring capture (rb.pendingPort/rb.pendingTorus) is INDEPENDENT of
+ *  the node/node pending term above — if either side is picked, render the port∈torus
+ *  in-progress form instead of the node/node builder preview. */
+function renderBuilder(rb: RuleBuilderState) {
+  if (rb.pendingPort != null || rb.pendingTorus != null) {
+    return renderPortTorusBuilder(rb);
+  }
   // Left term = the first completed term, or (when none completed yet) the pending
   // half-term itself — "show the handhold being selected" before any node is picked.
   const leftTerm = rb.terms[0] ?? null;
@@ -103,6 +122,38 @@ function renderBuilder(rb: { centerLabel: string; pending: { code: number } | nu
   );
 }
 
+/** Renders the in-progress `port ∈ torus` authoring capture: whichever side has been
+ *  picked (port or torus) shows its label; the other side shows the same `_` placeholder
+ *  style as the node/node pending-term preview (renderTerm's awaiting slot). Mirrors
+ *  renderPortTorus's committed syntax so the preview reads identically once it commits. */
+function renderPortTorusBuilder(rb: RuleBuilderState) {
+  const portSide = rb.pendingPort ? (rb.pendingPort.isInput ? "in" : "out") : null;
+  const hasInProgress = rb.pendingPort != null || rb.pendingTorus != null;
+  return (
+    <>
+      <div className="rule-eq-center">Center: {rb.centerLabel || "—"}</div>
+      <div className="rule-eq-equation">
+        <span className="rule-eq-term rule-eq-term--pending">
+          (
+          <span className="rule-eq-node">{rb.pendingPort ? rb.pendingPort.nodeLabel : "_"}</span>
+          ,
+          <span className="rule-eq-angle">{rb.pendingPort ? `${portSide}:${rb.pendingPort.label}` : "_"}</span>
+          ) ∈ ◯
+          <span className="rule-eq-node">{rb.pendingTorus ? rb.pendingTorus.label : "_"}</span>
+        </span>
+      </div>
+      <button
+        className="rule-eq-clear"
+        disabled={!hasInProgress}
+        title="Clear the equation being built"
+        onClick={() => postGoRecord(encodeClearRule())}
+      >
+        Clear equation
+      </button>
+    </>
+  );
+}
+
 /** Renders one committed polar-equation lock row: activate/deactivate checkbox + the
  *  symbolic equation. Clicking the row (not the checkbox) focuses it (edit-update
  *  lock/selected); the checkbox toggles active (edit-update lock/active). */
@@ -123,11 +174,31 @@ function renderLockRow(eq: PolarLockEntry, selected: boolean) {
         onChange={() => postGoRecord(encodeLockToggleActive(eq.index))}
       />
       <span className="rule-eq-equation">
-        {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
-        <span className="rule-eq-op"> = </span>
-        {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
+        {eq.kind === POLAR_LOCK_KIND_PORT_TORUS
+          ? renderPortTorus(eq)
+          : (
+            <>
+              {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
+              <span className="rule-eq-op"> = </span>
+              {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
+            </>
+          )}
       </span>
     </div>
+  );
+}
+
+/** Renders a `port ∈ torus` membership lock: (nodeLabel,side) ∈ ◯torusLabel. Rendered
+ *  distinctly from the (node,comp)=(node,comp) tuple form above — there is no equals sign,
+ *  this is a membership relation, not an equation between two terms. STAGE 1 display only
+ *  (no geometric effect). */
+function renderPortTorus(eq: PolarLockEntry) {
+  const side = eq.portIsInput ? "in" : "out";
+  return (
+    <span className="rule-eq-term">
+      (<span className="rule-eq-node">{eq.portNodeLabel || "?"}</span>,{side}:{eq.portLabel || "?"}) ∈ ◯
+      <span className="rule-eq-node">{eq.torusLabel || "?"}</span>
+    </span>
   );
 }
 
@@ -137,16 +208,16 @@ function renderTerm(term: RuleBuilderTerm | null, pendingCode: number | null) {
   if (term != null) {
     return (
       <span className="rule-eq-term">
-        ( <span className="rule-eq-node">{term.label}</span>{" "}
-        <span className="rule-eq-angle">{angleChip(term.code)}</span> )
+        (<span className="rule-eq-node">{term.label}</span>,
+        <span className="rule-eq-angle">{angleChip(term.code)}</span>)
       </span>
     );
   }
   if (pendingCode != null) {
     return (
       <span className="rule-eq-term rule-eq-term--pending">
-        ( <span className="rule-eq-node rule-eq-node--awaiting">_</span>{" "}
-        <span className="rule-eq-angle rule-eq-angle--pending">{angleChip(pendingCode)}</span> )
+        (<span className="rule-eq-node rule-eq-node--awaiting">_</span>,
+        <span className="rule-eq-angle rule-eq-angle--pending">{angleChip(pendingCode)}</span>)
       </span>
     );
   }
