@@ -23,9 +23,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+// safeTreePathComponent reports whether s is safe to use as a SINGLE path segment
+// under the topology tree root — i.e. it is a plain name, not "", ".", "..", not
+// absolute, and contains no path separator. Guards node ids / port names (spec- or
+// input-controlled) before they are filepath.Join'd into a write path, so a value like
+// "../../x" cannot escape the tree root (path traversal).
+func safeTreePathComponent(s string) bool {
+	return s != "" && s != "." && s != ".." && !filepath.IsAbs(s) &&
+		!strings.ContainsRune(s, '/') && !strings.ContainsRune(s, '\\') &&
+		s == filepath.Base(s)
+}
 
 // sceneFileMu serializes read-modify-write cycles on view/scene.json across all of its
 // writers (camera, overlays, fade, polar locks) so their field updates never race/clobber.

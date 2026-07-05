@@ -14,6 +14,7 @@ package Wiring
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"time"
 )
@@ -65,6 +66,9 @@ func (p *anchorPersister) flush() {
 // writePortAnchor sets ONLY the anchorId field of the port file, preserving the other fields
 // (name). The port file must already exist (a placed port always has one).
 func writePortAnchor(root, node, port string, isInput bool, anchorID int) error {
+	if !safeTreePathComponent(node) || !safeTreePathComponent(port) {
+		return fmt.Errorf("unsafe node/port %q/%q", node, port)
+	}
 	dir := "outputs"
 	if isInput {
 		dir = "inputs"
