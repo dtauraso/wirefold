@@ -43,13 +43,17 @@ func (p *nodePosPersister) schedule(id string, c vec3) {
 		return
 	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.pending == nil {
 		p.pending = map[string]vec3{}
 	}
 	p.pending[id] = c
-	v := p.pending
-	p.mu.Unlock()
-	p.arm(p.debounce, v, p.flush)
+	p.has = true
+	if p.timer == nil {
+		p.timer = time.AfterFunc(p.debounce, p.flush)
+	} else {
+		p.timer.Reset(p.debounce)
+	}
 }
 
 // flush writes every pending node center to its meta.json (read-modify-write, preserving

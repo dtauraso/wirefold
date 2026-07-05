@@ -15,8 +15,6 @@ package Wiring
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -53,34 +51,15 @@ func loadSceneSphere(topologyPath string) (sceneSphere, bool) {
 // writeSceneSphere writes the scene sphere into scene.json's "sceneSphere" key, preserving
 // every other field (read-modify-write, serialized via sceneFileMu like the sibling writers).
 func writeSceneSphere(scenePath string, s sceneSphere) error {
-	sceneFileMu.Lock()
-	defer sceneFileMu.Unlock()
-
-	obj := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(scenePath); err == nil && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &obj)
-	}
-
 	center := [3]float64{s.Center.X, s.Center.Y, s.Center.Z}
 	radius := s.Radius
 	rawSphere, err := json.Marshal(sceneSphereJSON{Center: &center, Radius: &radius})
 	if err != nil {
 		return err
 	}
-	obj["sceneSphere"] = rawSphere
-
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(scenePath), 0755); err != nil {
-		return err
-	}
-	tmp := scenePath + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, scenePath)
+	return sceneReadModifyWrite(scenePath, func(obj map[string]json.RawMessage) {
+		obj["sceneSphere"] = rawSphere
+	})
 }
 
 // LoadSceneSphere installs md.sceneSphere from FILE DATA, or — when scene.json has no
@@ -118,11 +97,7 @@ func (md *MoveDispatch) PanSceneSphere(delta vec3) {
 type sceneSpherePersister struct {
 	path     string
 	debounce time.Duration
-	mu       sync.Mutex
-	pending  sceneSphere
-	has      bool
-	timer    *time.Timer
-	writes   int
+	debouncedPersister[sceneSphere]
 }
 
 // schedule records the latest sphere snapshot and (re)arms the debounce timer.
@@ -130,32 +105,21 @@ func (p *sceneSpherePersister) schedule(s sceneSphere) {
 	if p == nil || p.path == "" {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pending = s
-	p.has = true
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
-	}
+	p.arm(p.debounce, s, p.flush)
 }
 
-// flush writes the pending sphere to scene.json and clears it.
+// flush writes the pending sphere to scene.json and clears it. Fire-and-forget: errors are
+// logged, not returned.
 func (p *sceneSpherePersister) flush() {
-	p.mu.Lock()
-	s, has := p.pending, p.has
-	p.has = false
-	p.mu.Unlock()
+	s, has := p.take()
 	if !has {
 		return
 	}
 	if err := writeSceneSphere(p.path, s); err != nil {
+		logPersistErr("scene_sphere_persist", p.path, err)
 		return
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
+	p.recordWrite()
 }
 
 // flushNow synchronously writes the current sphere, bypassing the debounce — used by the
@@ -168,5 +132,7 @@ func (p *sceneSpherePersister) flushNow(s sceneSphere) {
 	if p.timer != nil {
 		p.timer.Stop()
 	}
-	_ = writeSceneSphere(p.path, s)
+	if err := writeSceneSphere(p.path, s); err != nil {
+		logPersistErr("scene_sphere_persist", p.path, err)
+	}
 }
