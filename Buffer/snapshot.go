@@ -906,6 +906,11 @@ func (s *SnapshotState) emitSnapshot() {
 	if s.out != nil {
 		var hdr [4]byte
 		binary.LittleEndian.PutUint32(hdr[:], uint32(len(snap)))
+		// Write errors are intentionally ignored: this is the fire-and-forget Go→TS render
+		// stream (CLAUDE.md — no ack, no delivery signal), emitted every tick. Logging on
+		// failure would be a per-tick firehose (see log-flood lesson), and there is no caller
+		// that could act on the error. A dead peer (broken pipe) is a lifecycle event: the
+		// host tears the Go process down, so there is nothing to recover here.
 		_, _ = s.out.Write(hdr[:])
 		_, _ = s.out.Write(snap)
 	}
