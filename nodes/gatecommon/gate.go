@@ -210,11 +210,18 @@ func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() 
 	return true
 }
 
+// tickDuration converts a tick count to the equivalent wall-clock time.Duration
+// using the same MsPerTick conversion as defaultTick/defaultPark below, so both
+// wall-clock fallbacks agree on what a "tick" means.
+func tickDuration(ticks int64) time.Duration {
+	return time.Duration(ticks) * Wiring.MsPerTick * time.Millisecond
+}
+
 // defaultTick returns a wall-clock-derived tick function for use when GateNode.Tick
 // is unset (unit tests with no loader).
 func defaultTick() func() int64 {
 	start := time.Now()
-	return func() int64 { return int64(time.Since(start) / (Wiring.MsPerTick * time.Millisecond)) }
+	return func() int64 { return int64(time.Since(start) / tickDuration(1)) }
 }
 
 // defaultPark returns a wall-clock park function for use when GateNode.WaitTick is
@@ -224,7 +231,7 @@ func defaultPark() func(ctx context.Context, _ int64) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(PollIntervalTicks * Wiring.MsPerTick * time.Millisecond):
+		case <-time.After(tickDuration(PollIntervalTicks)):
 			return nil
 		}
 	}

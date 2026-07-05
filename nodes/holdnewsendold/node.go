@@ -7,10 +7,6 @@ import (
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
-// noValue is the sentinel meaning "no value seen yet". Real values are
-// non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = gatecommon.NoValue
-
 type Node struct {
 	Fire                       func()
 	EmitGeometry               func()
@@ -21,14 +17,14 @@ type Node struct {
 }
 
 // placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving
-// them, returning the extended set. Invariant: noValue (the empty-Held sentinel) is
-// never sent on an output channel — a fire whose Held is noValue places nothing on
-// ToNext. Only the SEND is suppressed; Held still updates to the received value in
-// the caller. The caller drives these together with the feedback bead in ONE
+// them, returning the extended set. Invariant: gatecommon.NoValue (the empty-Held
+// sentinel) is never sent on an output channel — a fire whose Held is NoValue places
+// nothing on ToNext. Only the SEND is suppressed; Held still updates to the received
+// value in the caller. The caller drives these together with the feedback bead in ONE
 // Wiring.DriveAll so every outbound bead animates concurrently and the node
 // goroutine blocks once (for the fan-out flight) rather than once per edge.
 func placeHeld(outs Wiring.OutMulti, held int, items []Wiring.DriveItem) []Wiring.DriveItem {
-	if held == noValue {
+	if held == gatecommon.NoValue {
 		return items
 	}
 	return outs.PlaceDrivenAll(held, items)
@@ -38,9 +34,9 @@ func (in *Node) Update(ctx context.Context) {
 	Wiring.TryEmit(in.EmitGeometry)
 
 	// -1 is the sentinel meaning "no value seen yet"; real values are non-negative
-	// indices, so noValue never collides with a legitimate Init index.
-	held := noValue
-	// Emit the initial interior bead state: held == noValue → present=false (empty
+	// indices, so gatecommon.NoValue never collides with a legitimate Init index.
+	held := gatecommon.NoValue
+	// Emit the initial interior bead state: held == NoValue → present=false (empty
 	// interior). The bead is re-emitted only when held actually changes below.
 	if in.EmitHeldBead != nil {
 		in.EmitHeldBead(held)

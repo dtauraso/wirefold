@@ -8,6 +8,7 @@ import (
 
 	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
 // testHangGuard bounds how long a test waits for an async drive output. Success
@@ -30,7 +31,7 @@ func drainForFirstReal(ctx context.Context, out <-chan int) <-chan int {
 			case <-ctx.Done():
 				return
 			case v := <-out:
-				if v == noValue {
+				if v == gatecommon.NoValue {
 					continue
 				}
 				select {
@@ -75,7 +76,7 @@ func firstPulse(t *testing.T, value int) int {
 		cancel()
 		wg.Wait()
 		t.Fatal("drive never delivered the held value")
-		return noValue
+		return gatecommon.NoValue
 	}
 }
 
@@ -89,7 +90,7 @@ func TestPulseDrivesHeldInput(t *testing.T) {
 	}
 }
 
-// Before any input the node self-emits the noValue sentinel on Out (not
+// Before any input the node self-emits the gatecommon.NoValue sentinel on Out (not
 // precondition-gated). driveOutput must run from startup.
 func TestPulseEmitsSentinelBeforeInput(t *testing.T) {
 	tr := T.New(0)
@@ -109,8 +110,8 @@ func TestPulseEmitsSentinelBeforeInput(t *testing.T) {
 
 	select {
 	case v := <-out:
-		if v != noValue {
-			t.Fatalf("expected startup sentinel %d before any input, got %d", noValue, v)
+		if v != gatecommon.NoValue {
+			t.Fatalf("expected startup sentinel %d before any input, got %d", gatecommon.NoValue, v)
 		}
 	case <-time.After(testHangGuard):
 		t.Fatal("no sentinel emitted before input (drive did not start)")
@@ -151,11 +152,11 @@ func TestPulseHeldBeadUpdatesOnInput(t *testing.T) {
 
 	// startup sentinel then the input value 9.
 	deadline := time.After(testHangGuard)
-	var last int = noValue
+	var last int = gatecommon.NoValue
 	for {
 		select {
 		case v := <-beadCh:
-			if v != noValue {
+			if v != gatecommon.NoValue {
 				last = v
 			}
 		case <-deadline:

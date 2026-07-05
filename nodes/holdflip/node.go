@@ -8,10 +8,6 @@ import (
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
-// noValue is the sentinel meaning "no value held yet". Real values are
-// non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = gatecommon.NoValue
-
 // Node is a drain-to-latest flip node. It HOLDS one int value (the last
 // received input), initialized to noValue, and drives the FLIPPED value (1-held)
 // out continuously.
@@ -46,39 +42,28 @@ func (g *Node) Update(ctx context.Context) {
 
 	// held is shared between the drive goroutine and this main loop.
 	var held atomic.Int64
-	held.Store(noValue)
+	held.Store(gatecommon.NoValue)
 	if g.EmitHeldBead != nil {
-		g.EmitHeldBead(noValue) // startup: empty interior
+		g.EmitHeldBead(gatecommon.NoValue) // startup: empty interior
 	}
 
 	// DRIVE goroutine: continuously pulse the FLIPPED current held value to Out.
-	// EmitOneDriven is synchronous (blocks for the full wire traversal), so this
-	// self-paces at the wire rate. Reading held each iteration means the next
-	// pulse after an input update carries the new flipped value. Stops on ctx cancel.
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			h := held.Load()
-			var out int
-			if h == noValue {
-				out = noValue // no value yet; emit sentinel so wire doesn't carry garbage
-			} else {
-				out = 1 - int(h)
-			}
-			if !g.Out.EmitOneDriven(ctx, out) {
-				return
-			}
+	// Delegates to gatecommon.DriveHeld (shared with Pulse's identical-shaped
+	// drive goroutine); EmitOneDriven is synchronous (blocks for the full wire
+	// traversal), so this self-paces at the wire rate. Reading held each
+	// iteration means the next pulse after an input update carries the new
+	// flipped value. Stops on ctx cancel.
+	gatecommon.DriveHeld(ctx, g.Out, &held, func(h int64) int {
+		if h == gatecommon.NoValue {
+			return gatecommon.NoValue // no value yet; emit sentinel so wire doesn't carry garbage
 		}
-	}()
+		return 1 - int(h)
+	})
 
 	// MAIN loop: BLOCK on input (TryRecv parks in paced mode). Once a value
 	// arrives, drain any additional queued beads non-blocking (PollRecv) to keep
 	// only the LATEST. Then Done()/Fire()/update held/emit interior bead.
-	var lastDisplayed int64 = noValue
+	var lastDisplayed int64 = gatecommon.NoValue
 	for {
 		v, ok := g.In.TryRecv()
 		if !ok {
@@ -92,7 +77,7 @@ func (g *Node) Update(ctx context.Context) {
 			if !ok {
 				break
 			}
-			if next != noValue {
+			if next != gatecommon.NoValue {
 				v = next
 			}
 		}

@@ -201,6 +201,12 @@ func (pw *PacedWire) PlaceAndDriveDeliverOnly(ctx context.Context, value any, in
 	return pw.PlaceAndDrive(ctx, value, beadPlacement{InFlightMs: inFlightMs})
 }
 
+// msToArcWu names the ms→world-units conversion used to reconstruct a bead's
+// travelled arc from a reported InFlightMs latency (placeBeadNoWalker below).
+// It is PulseSpeedWuPerMs under a name that documents what the multiplication
+// means at that call site, without changing the value.
+const msToArcWu = PulseSpeedWuPerMs
+
 // placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
 // returning the bead's gen so the caller can drive delivery synchronously.
 // Returns (0, false) when faded/deleted (nothing placed).
@@ -221,8 +227,9 @@ func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64,
 		placementTick: nowTick,
 		startedTick:   nowTick, // anchor first step to placement tick, not goroutine-start tick
 		// arc (world units) is reconstructed from the reported ms latency via the
-		// FIXED ms conversion, so it is independent of the clock's tick speed.
-		arc:     bp.InFlightMs * PulseSpeedWuPerMs,
+		// FIXED ms→wu conversion (msToArcWu), so it is independent of the clock's
+		// tick speed.
+		arc:     bp.InFlightMs * msToArcWu,
 		seg:     wireSegment{Start: bp.Start, End: bp.End},
 		node:    bp.Node,
 		port:    bp.Port,
