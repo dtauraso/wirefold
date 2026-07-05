@@ -229,13 +229,10 @@ func (md *MoveDispatch) localPolarOf(m *nodeMover, center string) (polar, bool) 
 			return p, true
 		}
 	}
-	cw, ok1 := md.centerOfNode(center)
-	sw, ok2 := md.centerOfNode(m.id)
-	if ok1 && ok2 {
-		p := cart2polar(sw.sub(cw))
-		m.localPolar[center] = p
-		return p, true
-	}
+	// No stored offset and no movement link: return not-found. NEVER reconstruct the
+	// offset as cart2polar(node − center) from a live world — that reconstruction against
+	// a mid-moving center is the position blow-up MODEL.md forbids. With every edge now
+	// registering a movement link, a connected pair always resolves above.
 	return polar{}, false
 }
 
@@ -275,11 +272,11 @@ func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromWorld vec3, fr
 		}
 		np, ok := md.localPolarOf(m, eq.Center) // owned offset, from the existing link (no seed)
 		if !ok {
-			np = cart2polar(newWorld.sub(centerWorld))
+			continue // no stored offset for self — NEVER reconstruct r from a live world (MODEL.md)
 		}
 		sp, ok := fromLocalPolar[eq.Center]
 		if !ok {
-			sp = cart2polar(fromWorld.sub(centerWorld)) // fallback: sender carried no owned offset
+			continue // sender carried no owned offset — NEVER reconstruct from a live world
 		}
 		target := fromTerm.Sign * compOf(sp, fromTerm.Comp) * selfTerm.Sign
 		setCompOf(&np, selfTerm.Comp, target)
