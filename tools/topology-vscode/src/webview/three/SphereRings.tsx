@@ -84,15 +84,33 @@ function SphereRingBuf({ ring }: { ring: OwnerRing }) {
   );
 }
 
+function sameRings(a: OwnerRing[], b: OwnerRing[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.row !== y.row ||
+      x.cx !== y.cx || x.cy !== y.cy || x.cz !== y.cz ||
+      x.R !== y.R || x.tube !== y.tube ||
+      x.vrx !== y.vrx || x.vry !== y.vry || x.vrz !== y.vrz ||
+      x.frx !== y.frx || x.fry !== y.fry || x.frz !== y.frz ||
+      x.color !== y.color
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function SphereRings() {
   const [rings, setRings] = useState<OwnerRing[]>([]);
-  const keyRef = useRef<string>("");
+  const prevRef = useRef<OwnerRing[]>([]);
   const edgesRef = useRef<EdgeAdj[]>([]);
 
   useFrame(() => {
     const snap = getLatestSnapshot();
     const decoded = snap ? decodeSnapshot(snap) : null;
-    let key = "";
     const next: OwnerRing[] = [];
     if (decoded) {
       const { nodeCount, nodeView, edgeCount, edgeView, overlayView } = decoded;
@@ -126,13 +144,12 @@ export function SphereRings() {
             color: nodeRowColors(nodeView, row).stroke,
           };
           next.push(ring);
-          key += `${ring.cx},${ring.cy},${ring.cz}|${ring.R},${ring.tube}|${ring.vrx},${ring.vry},${ring.vrz}|${ring.frx},${ring.fry},${ring.frz}|${ring.color};`;
         }
       }
     }
     // Rebuild only when the owner set / geometry / color actually changed.
-    if (key !== keyRef.current) {
-      keyRef.current = key;
+    if (!sameRings(prevRef.current, next)) {
+      prevRef.current = next;
       setRings(next);
     }
   });
