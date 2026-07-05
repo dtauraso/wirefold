@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 18
+const BufLayoutVersion = 19
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -295,6 +295,11 @@ type bufLayoutPolarLock struct {
 	// Authoritative per-row selection state; the scalar RuleBuilder.SelectedLockIndex column
 	// is no longer used to drive per-row highlight (kept for wire-shape stability, set to -1).
 	Selected uint8 `buf:"u8"`
+	// Owned reports whether this equation's owner (Center for a node/node lock, TorusNode
+	// — the "owning node" — for a port∈torus lock) is the panel's current center
+	// (md.ruleCenter). The equation panel shows Owned rows only, replacing the old
+	// participation filter (center OR either term OR the port's node OR the torus).
+	Owned uint8 `buf:"u8"`
 }
 
 // bufLayoutEvent defines one row of the per-tick EVENT column block.

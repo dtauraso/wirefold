@@ -200,6 +200,11 @@ type PolarLockPayload struct {
 	// per-row selection (supports multi-select). The event's scalar SelectedLockIndex is kept
 	// for wire-shape stability but is no longer the source of highlight truth.
 	Selected bool `json:"selected,omitempty"`
+	// Owned reports whether this equation's Center (or eqPortTorus owner) is the panel's
+	// current center (md.ruleCenter) — the equation panel lists only Owned rows so an
+	// equation authored under a different center never appears just because this center
+	// happens to be one of its participating terms.
+	Owned bool `json:"owned,omitempty"`
 }
 
 type Event struct {

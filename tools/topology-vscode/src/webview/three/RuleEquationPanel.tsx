@@ -330,18 +330,14 @@ export function RuleEquationPanel() {
   }
 
   // The committed-equations LIST keys off the rule-builder's STICKY panel Center
-  // (rb.centerRow, gesture.go md.ruleCenter) rather than the transient click highlight
-  // (Node.Selected / useSelectedNodeRow): it shows whenever the sticky center participates
-  // in >=1 committed equation, as ANY participant (center, term A, term B, the port's
-  // owning node, or the torus). This keeps the panel showing the last-selected node's
-  // equations even after an empty-space click clears the highlight ring. The in-progress
-  // builder section stays gated on the overlay, as before.
-  const centerRow = rb?.centerRow;
-  const rowEquations = equations.filter((eq) =>
-    eq.kind === POLAR_LOCK_KIND_PORT_TORUS
-      ? eq.torusRow === centerRow || eq.portNodeRow === centerRow
-      : eq.centerRow === centerRow || eq.a.row === centerRow || eq.b.row === centerRow,
-  );
+  // (rb.centerRow, gesture.go md.ruleCenter): it shows exactly the equations Go marks
+  // Owned (locks.go emitPolarLocks: eqOwner(eq) == md.ruleCenter — Center for a node/node
+  // equation, TorusNode for a port∈torus lock). An equation is owned by exactly one
+  // center, so a node that merely participates as a term (but isn't the owning Center)
+  // no longer pulls the equation into its panel. This keeps the panel showing the
+  // last-selected node's OWN equations even after an empty-space click clears the
+  // highlight ring. The in-progress builder section stays gated on the overlay, as before.
+  const rowEquations = equations.filter((eq) => eq.owned);
   // A typed session (form != null) owns the in-progress display exclusively — the click
   // builder's renderBuilder/renderPortTorusBuilder is suppressed while typing so the two
   // never render at once.

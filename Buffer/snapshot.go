@@ -319,6 +319,9 @@ type polarLockSnapState struct {
 	torusNode   string
 	// selected mirrors md.selectedLocks membership for this row's equation index.
 	selected bool
+	// owned reports whether this equation's owner (Center, or TorusNode for eqPortTorus) is
+	// the panel's current center (md.ruleCenter) — the equation panel shows Owned rows only.
+	owned bool
 }
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
@@ -436,6 +439,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 				portIsInput: l.PortIsInput,
 				torusNode:   l.TorusNode,
 				selected:    l.Selected,
+				owned:       l.Owned,
 			}
 		}
 		s.polarLocks = locks
@@ -1269,7 +1273,8 @@ func (s *SnapshotState) writePolarLockBlock(buf []byte, off int, b *snapshotBuil
 			int32(s.portRowIndex(l.portNode, l.portName, l.portIsInput)),
 			boolU8(l.portIsInput),
 			int32(s.nodeRowIndex(l.torusNode)),
-			boolU8(l.selected))
+			boolU8(l.selected),
+			boolU8(l.owned))
 	}
 	return off + int(b.polarLockCount)*BufPolarLockStride
 }

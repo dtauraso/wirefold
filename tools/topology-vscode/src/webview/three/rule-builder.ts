@@ -35,6 +35,7 @@ import {
   readPolarLockPortIsInput,
   readPolarLockTorusRow,
   readPolarLockSelected,
+  readPolarLockOwned,
 } from "../../schema/buffer-layout";
 
 /** POLAR_LOCK_KIND_NODE_NODE / POLAR_LOCK_KIND_PORT_TORUS mirror the Go eqKind ordering
@@ -80,6 +81,9 @@ export interface PolarLockEntry {
   // membership in an ordered list). Authoritative per-row; the panel/overlays no longer
   // read a single scalar "selectedLockIndex".
   selected: boolean;
+  // owned mirrors Go's eqOwner(eq) == md.ruleCenter (locks.go emitPolarLocks) — the
+  // equation panel shows a row iff owned is true. Go-computed; no role logic on the TS side.
+  owned: boolean;
   // eqPortTorus fields (kind === POLAR_LOCK_KIND_PORT_TORUS). Unused for a node/node row.
   portRow: number;
   portLabel: string;
@@ -115,7 +119,7 @@ export function readPolarLocks(): PolarLocksState {
 
   let fp = `${n}`;
   for (let i = 0; i < n; i++) {
-    fp += `|${readPolarLockKind(v, i)},${readPolarLockCenterRow(v, i)},${readPolarLockARow(v, i)},${readPolarLockACode(v, i)},${readPolarLockBRow(v, i)},${readPolarLockBCode(v, i)},${readPolarLockActive(v, i)},${readPolarLockPortRow(v, i)},${readPolarLockPortIsInput(v, i)},${readPolarLockTorusRow(v, i)},${readPolarLockSelected(v, i)}`;
+    fp += `|${readPolarLockKind(v, i)},${readPolarLockCenterRow(v, i)},${readPolarLockARow(v, i)},${readPolarLockACode(v, i)},${readPolarLockBRow(v, i)},${readPolarLockBCode(v, i)},${readPolarLockActive(v, i)},${readPolarLockPortRow(v, i)},${readPolarLockPortIsInput(v, i)},${readPolarLockTorusRow(v, i)},${readPolarLockSelected(v, i)},${readPolarLockOwned(v, i)}`;
   }
   if (fp === cachedLocksFingerprint) {
     return cachedLocksVal;
@@ -138,6 +142,7 @@ export function readPolarLocks(): PolarLocksState {
       b: { row: bRow, label: bRow === ROW_NONE ? "" : nodeLabel(decoded, bRow), code: readPolarLockBCode(v, i) },
       active: readPolarLockActive(v, i) === 1,
       selected: readPolarLockSelected(v, i) === 1,
+      owned: readPolarLockOwned(v, i) === 1,
       portRow,
       portLabel: portRow === ROW_NONE ? "" : portName(decoded, portRow),
       portNodeLabel: portRow === ROW_NONE ? "" : nodeLabel(decoded, portNodeRow),
