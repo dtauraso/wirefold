@@ -46,6 +46,9 @@ export function renderBuilder(rb: RuleBuilderState) {
   // (awaiting the second handhold) or as the left term itself (nothing completed yet).
   const pendingSlot: "left" | "right" | null =
     rb.pending == null ? null : leftTerm == null ? "left" : rightTerm == null ? "right" : null;
+  // Derived once so the slot renders below need no non-null assertion on rb.pending: when a
+  // slot is "left"/"right", pendingSlot was computed above only while rb.pending != null.
+  const pendingCode = rb.pending?.code ?? null;
 
   // The clear button is armed only when there is an in-progress equation to discard (a
   // pending half-term or at least one completed term). Go owns the state; the button just
@@ -55,11 +58,11 @@ export function renderBuilder(rb: RuleBuilderState) {
   return (
     <>
       <div className="rule-eq-equation">
-        {renderTerm(leftTerm, pendingSlot === "left" ? rb.pending!.code : null)}
+        {renderTerm(leftTerm, pendingSlot === "left" ? pendingCode : null)}
         {(rightTerm != null || pendingSlot === "right") && (
           <>
             <span className="rule-eq-op"> = </span>
-            {renderTerm(rightTerm, pendingSlot === "right" ? rb.pending!.code : null)}
+            {renderTerm(rightTerm, pendingSlot === "right" ? pendingCode : null)}
           </>
         )}
       </div>

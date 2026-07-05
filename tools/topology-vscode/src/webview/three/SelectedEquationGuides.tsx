@@ -31,6 +31,7 @@ import {
 import { ThetaArc, PhiArc } from "./NavGuides";
 import { usePolarLocks, POLAR_LOCK_KIND_PORT_TORUS } from "./rule-builder";
 import { EDGE_HALO_RADIUS, EDGE_HALO_COLOR, EDGE_HALO_SELECTED_OPACITY } from "./buffer-scene";
+import { PORT_SPHERE_R, PORT_HOVER_SCALE, PORT_HOVER_COLOR } from "./buffer-scene-shared";
 
 const ROW_NONE = -1;
 
@@ -125,13 +126,6 @@ function TermGuide({
   // CODE_R draws nothing here — the radius is the center→term edge halo below.
   return null;
 }
-
-// Port-selection highlight params, copied from buffer-scene.tsx PortInstances' hovered/selected
-// port look (PORT_SPHERE_R sphere, grown PORT_HOVER_SCALE× and colored HOVER_COLOR). Kept as a
-// local copy because those constants are module-private there.
-const PORT_SPHERE_R = 4;
-const PORT_HOVER_SCALE = 1.3;
-const PORT_HOVER_COLOR = "#aaddff";
 
 // Port marker for the `port` half of a `port ∈ torus` lock — draws the SAME highlight the
 // editor shows for a selected/hovered port: the port sphere at PORT_SPHERE_R, grown 1.3× and

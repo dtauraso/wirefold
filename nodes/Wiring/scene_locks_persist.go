@@ -113,27 +113,26 @@ func fromScenePolarEq(s scenePolarEq) polarEq {
 // writeScenePolarEqs writes the current polarEqs snapshot into scenePath (the resolved
 // scene.json path, e.g. from sceneCameraPath), preserving every other field.
 func writeScenePolarEqs(scenePath string, eqs []polarEq) error {
-	var marshalErr error
-	err := sceneReadModifyWrite(scenePath, func(obj map[string]json.RawMessage) {
-		if len(eqs) == 0 {
-			delete(obj, "polarLocks")
-			return
-		}
+	// Marshal BEFORE entering the read-modify-write so a marshal failure and a file-write
+	// failure can't both arise inside the callback (which forced an ambiguous error priority).
+	var raw []byte
+	if len(eqs) > 0 {
 		out := make([]scenePolarEq, len(eqs))
 		for i, eq := range eqs {
 			out[i] = toScenePolarEq(eq)
 		}
-		raw, mErr := json.Marshal(out)
-		if mErr != nil {
-			marshalErr = mErr
+		var err error
+		if raw, err = json.Marshal(out); err != nil {
+			return err
+		}
+	}
+	return sceneReadModifyWrite(scenePath, func(obj map[string]json.RawMessage) {
+		if len(eqs) == 0 {
+			delete(obj, "polarLocks")
 			return
 		}
 		obj["polarLocks"] = raw
 	})
-	if marshalErr != nil {
-		return marshalErr
-	}
-	return err
 }
 
 // polarEqsPersister coalesces rapid rule-authoring into a debounced read-modify-write of
