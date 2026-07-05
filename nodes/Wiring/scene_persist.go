@@ -66,10 +66,15 @@ func (c *debouncedPersister[T]) arm(debounce time.Duration, v T, flush func()) {
 }
 
 // take returns the pending value and clears it; ok is false when nothing is pending (e.g.
-// a flush that raced an empty timer fire).
+// a flush that raced an empty timer fire). It resets pending to the zero value — critical
+// when T is a reference type (the map-valued anchor/node-pos persisters mutate pending in
+// place): clearing it forces the next schedule to allocate a fresh map, so flush can iterate
+// the value it took here without a concurrent schedule writing the same map underneath it.
 func (c *debouncedPersister[T]) take() (v T, ok bool) {
 	c.mu.Lock()
 	v, ok = c.pending, c.has
+	var zero T
+	c.pending = zero
 	c.has = false
 	c.mu.Unlock()
 	return v, ok

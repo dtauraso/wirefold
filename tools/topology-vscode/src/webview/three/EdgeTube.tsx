@@ -190,6 +190,29 @@ function DoubleEdgeOverlayBuf({ seg }: { seg: EdgeSeg }) {
   );
 }
 
+function sameSegs(a: EdgeSeg[], b: EdgeSeg[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.sx !== y.sx || x.sy !== y.sy || x.sz !== y.sz ||
+      x.ex !== y.ex || x.ey !== y.ey || x.ez !== y.ez
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameFaded(a: boolean[], b: boolean[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export function EdgeTubes({ capacity }: { capacity: number }) {
   const [segs, setSegs] = useState<EdgeSeg[]>([]);
   const [showDouble, setShowDouble] = useState(false);
@@ -201,8 +224,8 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
   // segment set — a fade toggle does NOT move any endpoint, so it dims the tube without
   // rebuilding geometry (mirrors selRow).
   const [fadedRows, setFadedRows] = useState<boolean[]>([]);
-  const fadedKeyRef = useRef<string>("");
-  const keyRef = useRef<string>("");
+  const fadedPrevRef = useRef<boolean[]>([]);
+  const prevRef = useRef<{ dbl: boolean; segs: EdgeSeg[] }>({ dbl: false, segs: [] });
 
   useFrame(() => {
     const snap = getLatestSnapshot();
@@ -215,8 +238,6 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
     const n = Math.min(edgeCount, capacity);
     const next: EdgeSeg[] = new Array<EdgeSeg>(n);
     const fadedNext: boolean[] = new Array<boolean>(n);
-    let key = dbl ? "D|" : "S|";
-    let fkey = "";
     let sel = -1;
     for (let i = 0; i < n; i++) {
       const s: EdgeSeg = {
@@ -224,24 +245,22 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
         ex: readEdgeEX(edgeView, i), ey: readEdgeEY(edgeView, i), ez: readEdgeEZ(edgeView, i),
       };
       next[i] = s;
-      key += `${s.sx},${s.sy},${s.sz}:${s.ex},${s.ey},${s.ez};`;
       if (sel < 0 && readEdgeSelected(edgeView, i)) sel = i;
       const f = !!readEdgeFaded(edgeView, i);
       fadedNext[i] = f;
-      fkey += f ? "1" : "0";
     }
     // Rebuild the segment set (and thus the tube geometries) only when something moved
     // or the double-links flag flipped — not every frame.
-    if (key !== keyRef.current) {
-      keyRef.current = key;
+    if (dbl !== prevRef.current.dbl || !sameSegs(prevRef.current.segs, next)) {
+      prevRef.current = { dbl, segs: next };
       setSegs(next);
       setShowDouble(dbl);
     }
     // Selection toggles cheaply (no geometry rebuild) — update only when the row changes.
     if (sel !== selRow) setSelRow(sel);
     // Fade toggles cheaply too (opacity only, no geometry rebuild).
-    if (fkey !== fadedKeyRef.current) {
-      fadedKeyRef.current = fkey;
+    if (!sameFaded(fadedPrevRef.current, fadedNext)) {
+      fadedPrevRef.current = fadedNext;
       setFadedRows(fadedNext);
     }
   });

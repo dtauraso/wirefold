@@ -178,13 +178,18 @@ type SlotRegistry map[string]*PacedWire
 // fade ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
+// maxFrameBytes bounds a single framed-binary record: the reader buffer size and the
+// upper limit a decoded [len:u32] is allowed to request, so a corrupt/hostile length can't
+// drive an unbounded allocation. Matches the 1 MB headroom of the pre-frame line buffer.
+const maxFrameBytes = 1 << 20
+
 func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock, treeRoot string) {
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the
 	// record bytes to the dispatch loop over a channel. The channel keeps the dispatch
 	// ctx-aware exactly as the old line reader did.
-	br := bufio.NewReaderSize(r, 1<<20)
+	br := bufio.NewReaderSize(r, maxFrameBytes)
 	done := ctx.Done()
 	recCh := make(chan []byte, 8)
 	go func() {
@@ -200,7 +205,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			n := binary.LittleEndian.Uint32(lenBuf[:])
 			// Cap the frame size to the same 1 MB headroom the old line buffer had, so a
 			// corrupt/hostile length can't drive an unbounded allocation and deafen the bridge.
-			if n == 0 || n > (1<<20) {
+			if n == 0 || n > maxFrameBytes {
 				fmt.Fprintf(os.Stderr, "stdin_reader: bad frame length %d; stopping reader\n", n)
 				close(recCh)
 				return
