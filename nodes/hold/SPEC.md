@@ -30,6 +30,7 @@
 | Name | Direction | EdgeKind | Notes |
 |------|-----------|----------|-------|
 | In | in | chain | single received value to hold and display |
+| ToHoldNewSendOld | out | chain | declared output to a HoldNewSendOld node (inert) |
 
 ## Firing rule
 

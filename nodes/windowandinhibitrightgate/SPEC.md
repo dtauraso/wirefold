@@ -25,6 +25,8 @@
 | FromLeft | in | chain | left operand |
 | FromRight | in | chain | right operand |
 | ToPassed | out | chain | emits result (1 if Left=1 AND Right=1, else 0) |
+| ToPulse6 | out | chain | declared output to a Pulse node (instance 6) (inert) |
+| ToPulse8 | out | chain | declared output to a Pulse node (instance 8) (inert) |
 
 ## Firing rule
 

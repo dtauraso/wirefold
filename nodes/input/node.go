@@ -36,6 +36,9 @@ type Node struct {
 	// FromHoldNewSendOld is a declared feedback input from node 2's ToInput
 	// output. Intentionally inert (no read logic) — see 2To1 edge task.
 	FromHoldNewSendOld *Wiring.In
+	// FromPulse is a declared feedback input from a Pulse node's ToInput
+	// output. Intentionally inert (no read logic) — see 3To1 edge task.
+	FromPulse *Wiring.In
 }
 
 // fanOut places beads on all wired outputs and drives them concurrently via

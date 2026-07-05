@@ -20,6 +20,9 @@ type Node struct {
 	EmitHeldBead func(held int)
 	Held         int `wire:"data.state"`
 	In           *Wiring.In
+	// ToHoldNewSendOld is a declared output to a HoldNewSendOld node.
+	// Intentionally inert (no send logic) — see 7To5 edge task.
+	ToHoldNewSendOld *Wiring.Out
 }
 
 func (h *Node) Update(ctx context.Context) {

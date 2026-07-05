@@ -105,6 +105,15 @@ func main() {
 		if err != nil {
 			fatalf("parse ports %s: %v", e.Name(), err)
 		}
+		// Merge in ports declared on embedded structs from other local nodes/
+		// packages (e.g. gatecommon.GateNode) — AST parsing only looks at
+		// pkgDir's own files, so promoted fields from an embedded sibling
+		// package are otherwise invisible.
+		embedded, err := parseEmbeddedPorts(nodesDir, pkgDir, map[string]bool{})
+		if err != nil {
+			fatalf("parse embedded ports %s: %v", e.Name(), err)
+		}
+		ports = append(ports, embedded...)
 		// Fallback: if AST found no ports (e.g. all ports are in an embedded struct
 		// from another package), read them from the SPEC.md Ports table.
 		if len(ports) == 0 {
@@ -364,6 +373,80 @@ func parsePortsFromAST(pkgDir string) ([]port, error) {
 							ports = append(ports, port{id: name.Name, direction: outDir, isMulti: multi})
 						}
 					}
+				}
+			}
+		}
+	}
+	return ports, nil
+}
+
+// parseEmbeddedPorts scans pkgDir's struct declarations for anonymous
+// (embedded) fields whose type is a selector into another local nodes/<pkg>
+// package (e.g. gatecommon.GateNode), and returns the channel-typed ports
+// declared on that embedded package's own structs (recursively, guarded by
+// visited to avoid cycles). This lets a wrapper kind's SPEC.md-independent
+// AST port discovery still pick up promoted fields from a shared embedded
+// struct package.
+func parseEmbeddedPorts(nodesDir, pkgDir string, visited map[string]bool) ([]port, error) {
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return nil, err
+	}
+	var ports []port
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(pkgDir, name), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, decl := range f.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				structType, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				for _, field := range structType.Fields.List {
+					if len(field.Names) != 0 {
+						continue // not embedded
+					}
+					sel, ok := field.Type.(*ast.SelectorExpr)
+					if !ok {
+						continue
+					}
+					pkgIdent, ok := sel.X.(*ast.Ident)
+					if !ok {
+						continue
+					}
+					embedDir := filepath.Join(nodesDir, strings.ToLower(pkgIdent.Name))
+					if visited[embedDir] {
+						continue
+					}
+					visited[embedDir] = true
+					if _, statErr := os.Stat(embedDir); statErr != nil {
+						continue // not a local nodes/ package (e.g. Wiring itself)
+					}
+					embedded, err := parsePortsFromAST(embedDir)
+					if err != nil {
+						return nil, err
+					}
+					ports = append(ports, embedded...)
+					more, err := parseEmbeddedPorts(nodesDir, embedDir, visited)
+					if err != nil {
+						return nil, err
+					}
+					ports = append(ports, more...)
 				}
 			}
 		}
