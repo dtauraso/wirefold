@@ -49,18 +49,45 @@ The through-line: making every edge a double link *structurally* guarantees the
 radius backup exists, which is what lets the world re-derivation be deleted without
 locks silently no-op'ing.
 
+### The offset data moves ONTO the edge (no separate `movementLink`)
+
+The `movementLink` struct (links.go: `A`, `B`, `BfromA`, `AfromB`, shared `R`) is
+NOT kept as a parallel structure derived at load. Its offset data is **transferred
+onto the regular edge** — the edge itself carries the stored radii both ways. There
+is no `md.links` slice living alongside the edges; the offset is a field on the
+edge, read through the edge's already-present directed source→dest identity.
+
+Consequences (these retire prior open questions):
+
+- **Lifecycle = edge lifecycle.** Create the edge → the offset exists (seeded once
+  from the endpoints' positions). Delete the edge → the offset is gone with it. No
+  separate `removeLink` primitive; no "does the link track silence vs. existence"
+  decision — it is just a field on the edge.
+- **`localPolarOf` reads the radius from the edge**, not from a separate
+  `linkBetween` lookup over `md.links`.
+- **`registerMovementLinks` at load** becomes "seed the offset field on each edge
+  from the nodes' loaded positions" (same `cart2polar(posB−posA)` seed, now stored
+  on the edge).
+- **`linkBetween` / `polarOf` / `addLink`** collapse into edge accessors (find the
+  edge between two nodes; read its stored offset in the queried direction).
+
 ## Work (single branch: `task/edge-is-double-link`)
 
 Order, each step building green:
 
-1. **Edge creation registers the double link.** On edge create, register both
-   directed halves as the movement-link / radius source between the endpoints
-   (seed the stored offset once from the endpoints' current positions at create
-   time — the legitimate load/author-time world→polar seed, NOT a cascade
-   re-derivation). Bead travels on the outgoing half (unchanged path).
-   - Touch points to confirm against code: `registerMovementLinks` (loader.go),
-     the edit/create path (`stdin_reader.go applyEdit`), and how a `movementLink`
-     is currently derived from a topology edge.
+1. **Move the offset data onto the edge.** Add the stored offset (`BfromA`,
+   `AfromB`, `R`) as fields on the regular edge; seed once from the endpoints'
+   positions (`cart2polar(posB−posA)` — the legitimate load/author-time seed, NOT a
+   cascade re-derivation). Retire the separate `md.links` slice + `movementLink`
+   struct; `localPolarOf` / `linkBetween` / `polarOf` become edge accessors.
+   - **Edge create** (`applyEdit` create → `createEdgeInSlot`/`Restore`,
+     `stdin_reader.go`): investigation confirmed this path does NOT register a link
+     today — seed the edge's offset field here from current positions.
+   - **Edge delete** (`applyEdit` delete → `pw.Delete()`): offset is gone with the
+     edge; no separate removal primitive needed once it is a field.
+   - **Load** (`registerMovementLinks` → `initLinkPolar`/`refreshLink`,
+     loader.go:462-473): reshape to seed the per-edge offset field.
+   - Bead travels on the outgoing (source→dest) half — unchanged path.
 2. **Remove derive-r-from-world.** Delete the three cascade fallbacks in
    `locks.go` — `localPolarOf` world fallback (~:236), and the `np`/`sp` fallbacks
    in `lockRecalc` (~:282, ~:287). When no stored offset and no movement link
@@ -86,14 +113,15 @@ Order, each step building green:
 
 ## Notes / open questions
 
-- Confirm what a "double link" carries structurally today (`movementLink` in
-  links.go: `BfromA`, `AfromB`, shared R) and that one topology edge → one
-  movement link already holds (`registerMovementLinks`), so step 1 is mostly
-  "make it authoritative + bead-on-outgoing" rather than new structure.
-- Decide the fate of `refreshLinksTouching` (step 2 audit) — it is the only
-  *live-during-drag* `cart2polar` and may be the actual blow-up source rather than
-  the three "dead" cascade fallbacks; do not delete blindly, bring to model
-  conformance.
-- `ensureEqLinks` (equation-authored links between a center and its terms) may
-  become redundant if every edge already supplies the link — evaluate, don't
-  assume.
+- RESOLVED — structural: a `movementLink` is created **only at load** (one per
+  topology edge, seeded both ways); runtime edge-create (`Restore`) and delete
+  (`Delete`) do NOT register/remove one, and no `removeLink` exists. The offset data
+  moves onto the edge (above), so create/delete/load all seed or drop the edge's
+  own offset field. No separate link lifecycle.
+- OPEN — `refreshLinksTouching` (step 2 audit): the only *live-during-drag*
+  `cart2polar`, and may be the actual blow-up source rather than the three "dead"
+  cascade fallbacks; do not delete blindly, bring to model conformance.
+- OPEN — equation-authored pairs with NO edge (`ensureEqLinks`): if the offset now
+  lives on the edge, a lock between two nodes not joined by an edge has no carrier.
+  Either require an edge for such an equation, or keep a minimal edgeless-offset
+  path. Decide before step 2.
