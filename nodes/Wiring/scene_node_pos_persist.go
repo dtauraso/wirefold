@@ -19,6 +19,7 @@ package Wiring
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"time"
 )
@@ -80,6 +81,9 @@ func (p *nodePosPersister) flush() {
 // every other field (id, type, r). The file must already exist (a node always has a
 // meta.json); a missing/malformed file is reported rather than fabricated.
 func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCenter bool) error {
+	if !safeTreePathComponent(id) {
+		return fmt.Errorf("unsafe node id %q", id)
+	}
 	path := filepath.Join(root, "nodes", id, "meta.json")
 	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
 		setNum := func(key string, v float64) {
