@@ -33,3 +33,23 @@ decisions — reconcile commit messages against the actually-committed code, not
 agent's report. Builds/tests passing is the ground-truth check that the
 reconstructed state is internally consistent. Related: [[feedback_verify_subagent_commits]],
 [[feedback_no_nested_agents]].
+
+**2026-07-04 recurrence — trampling happens even WITHOUT worktrees.** Ran 6
+parallel `implementer`s over disjoint file sets with an explicit "do NOT create a
+worktree, edit directly" instruction. Still corrupted the shared tree because one
+agent ran `git stash`/`git stash pop` (a whole-tree op) to isolate its own build
+check — that stashed the other 5 agents' in-flight edits into `stash@{0}`, and the
+pop hit conflicts and left work stranded. Symptoms: items reported "done" but
+reverted to HEAD on disk; a half-applied refactor with orphan/unused helpers; a
+stray `stash@{0}` holding the trampled edits. Recovery: stop remaining agents to
+quiesce, then `git checkout stash@{0} -- <only the files that were stranded>` to
+surgically extract (leaving newer verified versions in the tree), reset half-applied
+files to HEAD, bisect any behavioral regression by reverting refactor files in
+groups, then commit. **Lessons:** (1) the file-disjoint split is NOT sufficient —
+ANY git tree/index mutation by a subagent (`stash`, `checkout`, `reset`, `add`) is
+global and tramples siblings; the delegation prompt must forbid all mutating git,
+not just worktrees. (2) A refactor's blast radius can exceed its named file set
+(splitting a struct broke `fadePersister` call sites in `node_move.go` + test files
+outside the agent's scope) — scope the agent to the call sites too, or serialize.
+(3) When trampling is likely (shared tree, overlapping-ish concerns), prefer
+SEQUENTIAL implementers or worktree isolation over disjoint-file parallelism.
