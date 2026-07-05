@@ -228,10 +228,42 @@ func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node. ctx is required when pb contains PacedWire
 // bindings (paced mode); it is passed into the In/Out wrappers.
+//
+// The three concerns are split into named helpers, each called in the same
+// order the original monolithic function performed them (behavior unchanged):
+//   - injectClosures: Fire/EmitGeometry/EmitNodeBeads/EmitHeldBead/EmitInputBeads/
+//     EmitRefillSlide/Tick/WaitTick closure injection.
+//   - wirePorts: tag-driven (struct-shape-driven) port wiring — In/Out/OutMulti
+//     fields set from pb's resolved bindings.
+//   - populateData: wire:"data.<key>" / wire:"data.state" tag-driven data
+//     population.
 func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindings, e kindEntry, tr *T.Trace, geom nodeGeom, aimedPorts AimedPortRegistry, centerOf func(string) (vec3, bool)) (Node, error) {
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
+	var sourceOuts []*Out
+	injectClosures(ctx, v, name, pb, tr, geom, aimedPorts, centerOf, &sourceOuts)
+	wirePorts(ctx, v, nodePtr, name, pb, tr, &sourceOuts)
+	populateData(v, nodePtr, data)
+
+	node, ok := nodePtr.(Node)
+	if !ok {
+		return nil, fmt.Errorf("reflectBuild: %T does not implement Node", nodePtr)
+	}
+	return node, nil
+}
+
+// injectClosures injects every func-typed closure field reflectBuild supports
+// (Fire, EmitGeometry, the Emit* interior-bead closures, and — when a shared
+// clock is present — EmitRefillSlide/Tick/WaitTick). Each injection is a no-op
+// when the struct lacks the matching field (injectFunc's contract). Returns the
+// sourceOuts slice that EmitGeometry's closure reads for per-edge segments;
+// wirePorts appends to it as it resolves each Out/OutMulti binding, and the
+// closure (which fires later, at node startup) sees the completed slice.
+// sourceOuts is owned by the caller (reflectBuild) and shared with wirePorts,
+// which appends to it as it resolves each Out/OutMulti binding; the EmitGeometry
+// closure reads through the same pointer so it sees the completed slice.
+func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBindings, tr *T.Trace, geom nodeGeom, aimedPorts AimedPortRegistry, centerOf func(string) (vec3, bool), sourceOuts *[]*Out) {
 	// Inject Fire closure if the struct has a `Fire func()` field. The closure
 	// captures the node name so the node calls n.Fire() with no arguments and
 	// cannot mis-name itself in the trace.
@@ -242,14 +274,13 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	// positions/dirs as a node-geometry event (port_geometry.go helpers, no
 	// duplicated math), then each outgoing edge's segment. Each node's goroutine
 	// calls it once on startup, so the node owns its geometry emission. sourceOuts
-	// is populated during port wiring below; the closure fires later (at node
+	// is populated during port wiring by wirePorts; the closure fires later (at node
 	// startup), so it sees the completed slice.
-	var sourceOuts []*Out
 	injectFunc(v, "EmitGeometry", tFireFunc, func() {
 		// No lock check here: this fires once at node startup, before MoveDispatch
 		// (and any `port ∈ torus` lock) exists — see buildFromSpec ordering in loader.go.
 		emitNodeGeometryAimed(tr, name, geom, aimedPorts, centerOf, nil)
-		for _, o := range sourceOuts {
+		for _, o := range *sourceOuts {
 			if o != nil && o.EdgeLabel != "" {
 				g := o.Geom()
 				dst := ""
@@ -307,8 +338,14 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			return clk.WaitTick(ctx, k)
 		})
 	}
+}
 
-	// Wire port fields with traced wrappers.
+// wirePorts wires every port field (In/Out/OutMulti) discovered by reflectPorts
+// with traced wrappers, resolving each from pb's paced bindings when present and
+// falling back to a dead-end chan/slice otherwise. sourceOuts accumulates every
+// paced Out built (for EmitGeometry's closure, injected by injectClosures) and
+// pb.outSink (when non-nil) is populated so the loader can index Outs by edge.
+func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
 	ports := reflectPorts(nodePtr)
 	for _, port := range ports {
 		f := v.FieldByName(port.Name)
@@ -317,55 +354,83 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 		}
 		switch port.Dir {
 		case PortIn:
-			if b := pb.singlePaced[port.Name]; b.pw != nil {
-				f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, port.Name, tr)))
-			} else {
-				ch := pb.In(port.Name)
-				f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: port.Name, trace: tr}))
-			}
+			wireInPort(f, port.Name, ctx, name, pb, tr)
 		case PortOut:
-			if b := pb.singlePaced[port.Name]; b.pw != nil {
-				o := NewOutPaced(b.pw, ctx, name, port.Name, tr, b.rule, b.arc, b.latency, b.seg, b.label)
-				sourceOuts = append(sourceOuts, o)
-				if pb.outSink != nil {
-					pb.outSink[name+"."+port.Name] = o
-				}
-				f.Set(reflect.ValueOf(o))
-			} else {
-				ch := pb.Out(port.Name)
-				f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: port.Name, trace: tr}))
-			}
+			wireOutPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
 		case PortOutMulti:
-			if bs := pb.multiPaced[port.Name]; len(bs) > 0 {
-				outs := make(OutMulti, len(bs))
-				for i, b := range bs {
-					outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
-					sourceOuts = append(sourceOuts, outs[i])
-					if pb.outSink != nil {
-						pb.outSink[name+"."+b.handle] = outs[i]
-					}
-				}
-				f.Set(reflect.ValueOf(outs))
-			} else {
-				chs := pb.OutSlice(port.Name)
-				outs := make(OutMulti, len(chs))
-				for i, c := range chs {
-					outs[i] = &Out{ch: c, node: name, port: port.Name, trace: tr}
-				}
-				f.Set(reflect.ValueOf(outs))
-			}
+			wireOutMultiPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
 		}
 	}
+}
 
-	// Tag-driven data population: wire:"data.<key>" or wire:"data.state".
+// wireInPort resolves a single PortIn field: a paced binding (NewInPaced) when
+// pb has one for this port name, otherwise a dead-end chan wrapper.
+func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace) {
+	if b := pb.singlePaced[portName]; b.pw != nil {
+		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
+	} else {
+		ch := pb.In(portName)
+		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
+	}
+}
+
+// wireOutPort resolves a single PortOut field: a paced binding
+// (NewOutPaced, with the edge's own send rule/arc/latency/segment/label) when pb
+// has one for this port name, otherwise a dead-end chan wrapper. The resolved
+// paced Out is appended to sourceOuts and (when pb.outSink is non-nil) recorded
+// under "node.port" for the loader's node-move travel-time updates.
+func wireOutPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
+	if b := pb.singlePaced[portName]; b.pw != nil {
+		o := NewOutPaced(b.pw, ctx, name, portName, tr, b.rule, b.arc, b.latency, b.seg, b.label)
+		*sourceOuts = append(*sourceOuts, o)
+		if pb.outSink != nil {
+			pb.outSink[name+"."+portName] = o
+		}
+		f.Set(reflect.ValueOf(o))
+	} else {
+		ch := pb.Out(portName)
+		f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: portName, trace: tr}))
+	}
+}
+
+// wireOutMultiPort resolves a PortOutMulti field: one paced Out per fan-out
+// element recorded in pb.multiPaced (each with its own handle/rule/arc/
+// latency/segment/label) when present, otherwise a dead-end chan slice. Each
+// resolved paced Out is appended to sourceOuts and (when pb.outSink is
+// non-nil) recorded under "node.handle".
+func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
+	if bs := pb.multiPaced[portName]; len(bs) > 0 {
+		outs := make(OutMulti, len(bs))
+		for i, b := range bs {
+			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
+			*sourceOuts = append(*sourceOuts, outs[i])
+			if pb.outSink != nil {
+				pb.outSink[name+"."+b.handle] = outs[i]
+			}
+		}
+		f.Set(reflect.ValueOf(outs))
+	} else {
+		chs := pb.OutSlice(portName)
+		outs := make(OutMulti, len(chs))
+		for i, c := range chs {
+			outs[i] = &Out{ch: c, node: name, port: portName, trace: tr}
+		}
+		f.Set(reflect.ValueOf(outs))
+	}
+}
+
+// populateData performs tag-driven data population: wire:"data.<key>" or
+// wire:"data.state" struct tags on nodePtr's fields, read from data (a nil
+// data leaves every tagged field untouched, matching the original guard).
+func populateData(v reflect.Value, nodePtr any, data *NodeData) {
+	if data == nil {
+		return
+	}
 	t := reflect.TypeOf(nodePtr).Elem()
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		tag := f.Tag.Get("wire")
 		if tag == "" {
-			continue
-		}
-		if data == nil {
 			continue
 		}
 		fv := v.Field(i)
@@ -403,12 +468,6 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 			}
 		}
 	}
-
-	node, ok := nodePtr.(Node)
-	if !ok {
-		return nil, fmt.Errorf("reflectBuild: %T does not implement Node", nodePtr)
-	}
-	return node, nil
 }
 
 // verticalRingNormal and flatRingNormal are the two great-circle ring normals

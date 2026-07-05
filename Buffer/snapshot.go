@@ -932,16 +932,42 @@ func (s *SnapshotState) eventReady(e eventRec) bool {
 	return true
 }
 
-// buildSnapshot packs all current state into one snapshot []byte.
-func (s *SnapshotState) buildSnapshot() []byte {
-	beadCount := uint32(len(s.beads))
-	nodeCount := uint32(len(s.nodes))
-	edgeCount := uint32(len(s.edges))
+// snapshotBuild holds all the per-build derived data (counts, fade fixpoint, string sections,
+// total size) that buildSnapshot's block-writer helpers read from. Computed once per build by
+// newSnapshotBuild; the block writers never recompute it.
+type snapshotBuild struct {
+	beadCount, nodeCount, edgeCount uint32
+	interiorCount, portCount        int
+	eventCount                      int
+	polarLockCount                  uint32
 
-	// Fade fixpoint: recompute the faded node/edge sets from the Go-owned seeds + the current
-	// adjacency (computeFade). The result drives the Node/Edge Faded columns and suppresses
-	// faded edges' transit beads. fadedNodePairs indexes faded edges by (srcNode,dstNode) so a
-	// live bead (routed sourceNode→dest via srcToDest) can be matched to a faded edge.
+	fadedNodes     map[string]bool
+	fadedEdges     map[string]bool
+	fadedNodePairs map[srcPortKey]bool // faded edges indexed by (srcNode,dstNode)
+
+	labelBytes      []byte
+	labelOffs       []uint32
+	labelLens       []uint32
+	labelBytesCount int
+
+	portNameBytes      []byte
+	portNameOffs       []uint32
+	portNameLens       []uint32
+	portNameBytesCount int
+
+	edgeLabelBytes      []byte
+	edgeLabelOffs       []uint32
+	edgeLabelLens       []uint32
+	edgeLabelBytesCount int
+
+	size int
+}
+
+// computeFadeSets recomputes the faded node/edge sets from the Go-owned seeds + the current
+// adjacency (computeFade). The result drives the Node/Edge Faded columns and suppresses faded
+// edges' transit beads. The returned pair map indexes faded edges by (srcNode,dstNode) so a
+// live bead (routed sourceNode→dest via srcToDest) can be matched to a faded edge.
+func (s *SnapshotState) computeFadeSets() (map[string]bool, map[string]bool, map[srcPortKey]bool) {
 	fadeEdges := make([]FadeEdge, len(s.edges))
 	for i := range s.edges {
 		fadeEdges[i] = FadeEdge{ID: s.edgeLabels[i], Source: s.edges[i].srcNode, Target: s.edges[i].dstNode}
@@ -953,19 +979,14 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			fadedNodePairs[srcPortKey{s.edges[i].srcNode, s.edges[i].dstNode}] = true
 		}
 	}
+	return fadedNodes, fadedEdges, fadedNodePairs
+}
 
-	interiorCount := int(nodeCount) * BufInteriorSlotsPerNode
-
-	// Port block is self-sizing: total port rows = sum of each node's ports.
-	portCount := 0
-	for i := range s.nodes {
-		portCount += len(s.nodes[i].ports)
-	}
-
-	// Label section is self-sizing (like the Port block): concatenate every node's label
-	// UTF-8 bytes in node-row order; each node's LabelOff/LabelLen columns slice into it.
-	// labelBytes is the trailing section; labelOffs/labelLens are the per-row columns.
-	labelBytes := make([]byte, 0, int(nodeCount)*8)
+// buildLabelSection concatenates every node's label UTF-8 bytes in node-row order; each
+// node's LabelOff/LabelLen columns slice into the returned bytes.
+func (s *SnapshotState) buildLabelSection() ([]byte, []uint32, []uint32) {
+	nodeCount := len(s.nodes)
+	labelBytes := make([]byte, 0, nodeCount*8)
 	labelOffs := make([]uint32, nodeCount)
 	labelLens := make([]uint32, nodeCount)
 	for i := range s.nodes {
@@ -974,11 +995,13 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		labelLens[i] = uint32(len(lb))
 		labelBytes = append(labelBytes, lb...)
 	}
-	labelBytesCount := len(labelBytes)
+	return labelBytes, labelOffs, labelLens
+}
 
-	// Port-name section (self-sizing, label-section analogue for ports): concatenate every
-	// port's name UTF-8 bytes in the SAME flattened port-row order as the Port block; each
-	// port's PortNameOff/PortNameLen slice into it. Carried for the .probe buffer-decoded log.
+// buildPortNameSection concatenates every port's name UTF-8 bytes in the SAME flattened
+// port-row order as the Port block; each port's PortNameOff/PortNameLen slice into the
+// returned bytes. Carried for the .probe buffer-decoded log.
+func (s *SnapshotState) buildPortNameSection(portCount int) ([]byte, []uint32, []uint32) {
 	portNameBytes := make([]byte, 0, portCount*8)
 	portNameOffs := make([]uint32, 0, portCount)
 	portNameLens := make([]uint32, 0, portCount)
@@ -990,12 +1013,15 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			portNameBytes = append(portNameBytes, pb...)
 		}
 	}
-	portNameBytesCount := len(portNameBytes)
+	return portNameBytes, portNameOffs, portNameLens
+}
 
-	// Edge-label section (self-sizing, label-section analogue for edges): concatenate every
-	// edge's label UTF-8 bytes in stable edge-row order; each edge's EdgeLabelOff/EdgeLabelLen
-	// slice into it. Carried for the .probe buffer-decoded log (geometry/select-edge/fade).
-	edgeLabelBytes := make([]byte, 0, int(edgeCount)*8)
+// buildEdgeLabelSection concatenates every edge's label UTF-8 bytes in stable edge-row order;
+// each edge's EdgeLabelOff/EdgeLabelLen slice into the returned bytes. Carried for the .probe
+// buffer-decoded log (geometry/select-edge/fade).
+func (s *SnapshotState) buildEdgeLabelSection() ([]byte, []uint32, []uint32) {
+	edgeCount := len(s.edges)
+	edgeLabelBytes := make([]byte, 0, edgeCount*8)
 	edgeLabelOffs := make([]uint32, edgeCount)
 	edgeLabelLens := make([]uint32, edgeCount)
 	for i := range s.edges {
@@ -1004,74 +1030,108 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		edgeLabelLens[i] = uint32(len(eb))
 		edgeLabelBytes = append(edgeLabelBytes, eb...)
 	}
-	edgeLabelBytesCount := len(edgeLabelBytes)
+	return edgeLabelBytes, edgeLabelOffs, edgeLabelLens
+}
 
-	eventCount := len(s.pendingEvents)
-	polarLockCount := uint32(len(s.polarLocks))
+// newSnapshotBuild computes all counts, the fade fixpoint, and the trailing string sections
+// once per buildSnapshot call, plus the total buffer size. The block-writer helpers read from
+// the returned struct only — none of them recompute this data.
+func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
+	b := &snapshotBuild{
+		beadCount: uint32(len(s.beads)),
+		nodeCount: uint32(len(s.nodes)),
+		edgeCount: uint32(len(s.edges)),
+	}
+	b.interiorCount = int(b.nodeCount) * BufInteriorSlotsPerNode
 
-	size := BufHeaderSize +
-		int(beadCount)*BufBeadStride +
-		int(nodeCount)*BufNodeStride +
-		interiorCount*BufInteriorStride +
-		int(edgeCount)*BufEdgeStride +
-		portCount*BufPortStride +
+	// Port block is self-sizing: total port rows = sum of each node's ports.
+	for i := range s.nodes {
+		b.portCount += len(s.nodes[i].ports)
+	}
+
+	b.fadedNodes, b.fadedEdges, b.fadedNodePairs = s.computeFadeSets()
+
+	b.labelBytes, b.labelOffs, b.labelLens = s.buildLabelSection()
+	b.labelBytesCount = len(b.labelBytes)
+
+	b.portNameBytes, b.portNameOffs, b.portNameLens = s.buildPortNameSection(b.portCount)
+	b.portNameBytesCount = len(b.portNameBytes)
+
+	b.edgeLabelBytes, b.edgeLabelOffs, b.edgeLabelLens = s.buildEdgeLabelSection()
+	b.edgeLabelBytesCount = len(b.edgeLabelBytes)
+
+	b.eventCount = len(s.pendingEvents)
+	b.polarLockCount = uint32(len(s.polarLocks))
+
+	b.size = BufHeaderSize +
+		int(b.beadCount)*BufBeadStride +
+		int(b.nodeCount)*BufNodeStride +
+		b.interiorCount*BufInteriorStride +
+		int(b.edgeCount)*BufEdgeStride +
+		b.portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
 		BufRuleBuilderStride +
-		int(polarLockCount)*BufPolarLockStride +
-		labelBytesCount +
-		eventCount*BufEventStride +
-		portNameBytesCount +
-		edgeLabelBytesCount
+		int(b.polarLockCount)*BufPolarLockStride +
+		b.labelBytesCount +
+		b.eventCount*BufEventStride +
+		b.portNameBytesCount +
+		b.edgeLabelBytesCount
 
-	buf := make([]byte, size)
+	return b
+}
 
-	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount]
+// writeHeader writes the fixed 40-byte header and increments s.tick. Returns the offset after
+// the header.
+func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
+	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][polarLockCount]
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], beadCount)
+	binary.LittleEndian.PutUint32(buf[off:], b.beadCount)
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], nodeCount)
+	binary.LittleEndian.PutUint32(buf[off:], b.nodeCount)
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], edgeCount)
+	binary.LittleEndian.PutUint32(buf[off:], b.edgeCount)
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(portCount))
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portCount))
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(labelBytesCount))
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.labelBytesCount))
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(eventCount))
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.eventCount))
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(portNameBytesCount))
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portNameBytesCount))
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(edgeLabelBytesCount))
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.edgeLabelBytesCount))
 	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], polarLockCount)
+	binary.LittleEndian.PutUint32(buf[off:], b.polarLockCount)
 	off += 4
 	s.tick++
+	return off
+}
 
-	// Bead block: one row per live bead (map iteration; order not guaranteed,
-	// but the consumer identifies beads by beadID, not row position).
-	beadBuf := buf[off : off+int(beadCount)*BufBeadStride]
+// writeBeadBlock writes one row per live bead (map iteration; order not guaranteed, but the
+// consumer identifies beads by beadID, not row position). Suppresses a faded edge's transit
+// bead (Live=0) — a faded edge shows no traveling bead.
+func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) int {
+	beadBuf := buf[off : off+int(b.beadCount)*BufBeadStride]
 	row := 0
-	for k, b := range s.beads {
-		// Suppress a faded edge's transit bead: a faded edge shows no traveling bead
-		// (pre-branch SingleEdgeTube `!faded && <PulseBead/>`). The bead's edge is its
-		// route sourceNode→dest (dest via srcToDest); if that edge is faded, write the row
-		// Live=0 so the renderer hides it (buffer beads are edge-agnostic on the TS side).
+	for k, bead := range s.beads {
 		live := uint8(1)
-		if dest, ok := s.srcToDest[srcPortKey{k.node, k.port}]; ok && fadedNodePairs[srcPortKey{k.node, dest}] {
+		if dest, ok := s.srcToDest[srcPortKey{k.node, k.port}]; ok && b.fadedNodePairs[srcPortKey{k.node, dest}] {
 			live = 0
 		}
 		SetBeadRow(beadBuf, row,
-			float32(b.x), float32(b.y), float32(b.z),
-			int32(b.value), float32(b.frac), uint32(b.beadID), live)
+			float32(bead.x), float32(bead.y), float32(bead.z),
+			int32(bead.value), float32(bead.frac), uint32(bead.beadID), live)
 		row++
 	}
-	off += int(beadCount) * BufBeadStride
+	return off + int(b.beadCount)*BufBeadStride
+}
 
-	// Node block: stable row order (insertion order of node IDs).
-	nodeBuf := buf[off : off+int(nodeCount)*BufNodeStride]
+// writeNodeBlock writes the Node block: stable row order (insertion order of node IDs).
+func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) int {
+	nodeBuf := buf[off : off+int(b.nodeCount)*BufNodeStride]
 	for i, n := range s.nodes {
 		SetNodeRow(nodeBuf, i,
 			float32(n.cx), float32(n.cy), float32(n.cz),
@@ -1079,15 +1139,16 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
-			labelOffs[i], labelLens[i], boolU8(fadedNodes[s.nodeIDs[i]]), n.hovered)
+			b.labelOffs[i], b.labelLens[i], boolU8(b.fadedNodes[s.nodeIDs[i]]), n.hovered)
 	}
-	off += int(nodeCount) * BufNodeStride
+	return off + int(b.nodeCount)*BufNodeStride
+}
 
-	// Interior block: FIXED BufInteriorSlotsPerNode rows per node, stable node order
-	// (row = nodeRow*slotsPerNode + slot). No header count — the decoder derives the
-	// length from nodeCount. Empty slots are written with present=0 so a popped bead
-	// clears on the render side.
-	interiorBuf := buf[off : off+interiorCount*BufInteriorStride]
+// writeInteriorBlock writes FIXED BufInteriorSlotsPerNode rows per node, stable node order
+// (row = nodeRow*slotsPerNode + slot). No header count — the decoder derives the length from
+// nodeCount. Empty slots are written with present=0 so a popped bead clears on the render side.
+func (s *SnapshotState) writeInteriorBlock(buf []byte, off int, b *snapshotBuild) int {
+	interiorBuf := buf[off : off+b.interiorCount*BufInteriorStride]
 	for i, n := range s.nodes {
 		for slot := 0; slot < BufInteriorSlotsPerNode; slot++ {
 			it := n.interior[slot]
@@ -1096,58 +1157,69 @@ func (s *SnapshotState) buildSnapshot() []byte {
 				float32(it.ox), float32(it.oy), float32(it.oz))
 		}
 	}
-	off += interiorCount * BufInteriorStride
+	return off + b.interiorCount*BufInteriorStride
+}
 
-	// Edge block: stable row order (insertion order of edge labels).
-	edgeBuf := buf[off : off+int(edgeCount)*BufEdgeStride]
+// writeEdgeBlock writes the Edge block: stable row order (insertion order of edge labels).
+func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) int {
+	edgeBuf := buf[off : off+int(b.edgeCount)*BufEdgeStride]
 	for i, e := range s.edges {
 		SetEdgeRow(edgeBuf, i,
 			float32(e.sx), float32(e.sy), float32(e.sz),
 			float32(e.ex), float32(e.ey), float32(e.ez),
 			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)), e.selected,
-			boolU8(fadedEdges[s.edgeLabels[i]]), edgeLabelOffs[i], edgeLabelLens[i])
+			boolU8(b.fadedEdges[s.edgeLabels[i]]), b.edgeLabelOffs[i], b.edgeLabelLens[i])
 	}
-	off += int(edgeCount) * BufEdgeStride
+	return off + int(b.edgeCount)*BufEdgeStride
+}
 
-	// Port block: flattened over nodes in stable node-row order — for each node in its
-	// buffer row order, that node's ports in node-geometry Ports order. NodeRow is the
-	// owning node's row index; DX/DY/DZ is the port surface direction; IsInput marks input
-	// ports. The Go-side port-row table (LookupPortRow) is built in this identical
-	// flattened order, so port row i ↔ (node, port) i for hit resolution.
-	portBuf := buf[off : off+portCount*BufPortStride]
+// writePortBlock writes the Port block: flattened over nodes in stable node-row order — for
+// each node in its buffer row order, that node's ports in node-geometry Ports order. NodeRow
+// is the owning node's row index; DX/DY/DZ is the port surface direction; IsInput marks input
+// ports. The Go-side port-row table (LookupPortRow) is built in this identical flattened
+// order, so port row i ↔ (node, port) i for hit resolution.
+func (s *SnapshotState) writePortBlock(buf []byte, off int, b *snapshotBuild) int {
+	portBuf := buf[off : off+b.portCount*BufPortStride]
 	prow := 0
 	for i := range s.nodes {
 		for _, p := range s.nodes[i].ports {
 			SetPortRow(portBuf, prow,
 				int32(i), float32(p.dx), float32(p.dy), float32(p.dz),
 				float32(p.px), float32(p.py), float32(p.pz), boolU8(p.isInput), p.hovered,
-				portNameOffs[prow], portNameLens[prow])
+				b.portNameOffs[prow], b.portNameLens[prow])
 			prow++
 		}
 	}
-	off += portCount * BufPortStride
+	return off + b.portCount*BufPortStride
+}
 
-	// Camera block (always 1 row).
+// writeCameraBlock writes the Camera block (always 1 row).
+func (s *SnapshotState) writeCameraBlock(buf []byte, off int) int {
 	c := s.camera
 	SetCameraRow(buf[off:],
 		float32(c.px), float32(c.py), float32(c.pz),
 		float32(c.r),
 		float32(c.posTheta), float32(c.posPhi),
 		float32(c.upTheta), float32(c.upPhi))
-	off += BufCameraStride
+	return off + BufCameraStride
+}
 
-	// Overlay block (always 1 row).
+// writeOverlayBlock writes the Overlay block (always 1 row).
+func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 	ov := s.overlay
 	SetOverlayRow(buf[off:],
 		ov.sceneTori, ov.scenePoles, ov.nodePoles, ov.angleLabels,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal, ov.badgesGlobal,
 		ov.overlaysVis, ov.doubleLinks, ov.selMode)
-	off += BufOverlayStride
+	return off + BufOverlayStride
+}
 
-	// RuleBuilder block (always 1 row): the in-progress polar-equation authoring session.
-	// PendingCode/T0Code/T1Code use 255 for "absent" (matches the TS RULE_BUILDER_* decode
-	// sentinel); Row fields use -1 (matches every other row-index column in the buffer).
+// writeRuleBuilderBlock writes the RuleBuilder block (always 1 row): the in-progress
+// polar-equation authoring session. PendingCode/T0Code/T1Code use 255 for "absent" (matches
+// the TS RULE_BUILDER_* decode sentinel); Row fields use -1 (matches every other row-index
+// column in the buffer).
+func (s *SnapshotState) writeRuleBuilderBlock(buf []byte, off int) int {
 	rb := s.ruleBuilder
 	centerRow := int32(s.nodeRowIndex(rb.center))
 	pendingCode := uint8(255)
@@ -1175,11 +1247,13 @@ func (s *SnapshotState) buildSnapshot() []byte {
 		pendingTorusRow = int32(s.nodeRowIndex(rb.pendingTorusNode))
 	}
 	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code, int32(s.selectedLockIndex), pendingPortRow, pendingPortIsInput, pendingTorusRow)
-	off += BufRuleBuilderStride
+	return off + BufRuleBuilderStride
+}
 
-	// PolarLock block: one row per committed polar-equation lock, IN ORDER (block row i ==
-	// md.polarEqs index i on the Go side). Node ids resolved to buffer rows at build time.
-	polarLockBuf := buf[off : off+int(polarLockCount)*BufPolarLockStride]
+// writePolarLockBlock writes one row per committed polar-equation lock, IN ORDER (block row i
+// == md.polarEqs index i on the Go side). Node ids resolved to buffer rows at build time.
+func (s *SnapshotState) writePolarLockBlock(buf []byte, off int, b *snapshotBuild) int {
+	polarLockBuf := buf[off : off+int(b.polarLockCount)*BufPolarLockStride]
 	for i, l := range s.polarLocks {
 		SetPolarLockRow(polarLockBuf, i,
 			int32(s.nodeRowIndex(l.center)),
@@ -1192,28 +1266,64 @@ func (s *SnapshotState) buildSnapshot() []byte {
 			int32(s.nodeRowIndex(l.torusNode)),
 			boolU8(l.selected))
 	}
-	off += int(polarLockCount) * BufPolarLockStride
+	return off + int(b.polarLockCount)*BufPolarLockStride
+}
 
-	// Label bytes section (self-sizing via header labelBytesCount): every node's label
-	// UTF-8 bytes concatenated in node-row order. Each node's LabelOff/LabelLen columns
-	// slice into this section; the numeric node row carries its human label with no sidecar.
-	copy(buf[off:off+labelBytesCount], labelBytes)
-	off += labelBytesCount
+// writeLabelBytesSection writes the Label bytes section (self-sizing via header
+// labelBytesCount): every node's label UTF-8 bytes concatenated in node-row order. Each
+// node's LabelOff/LabelLen columns slice into this section; the numeric node row carries its
+// human label with no sidecar.
+func (s *SnapshotState) writeLabelBytesSection(buf []byte, off int, b *snapshotBuild) int {
+	copy(buf[off:off+b.labelBytesCount], b.labelBytes)
+	return off + b.labelBytesCount
+}
 
-	// EVENT block (self-sizing via header eventCount): the per-tick causal trace events
-	// (numeric rows + string-section refs). Consumed only by the ext-host .probe logger.
-	eventBuf := buf[off : off+eventCount*BufEventStride]
+// writeEventBlockSection writes the EVENT block (self-sizing via header eventCount): the
+// per-tick causal trace events (numeric rows + string-section refs). Consumed only by the
+// ext-host .probe logger.
+func (s *SnapshotState) writeEventBlockSection(buf []byte, off int, b *snapshotBuild) int {
+	eventBuf := buf[off : off+b.eventCount*BufEventStride]
 	s.writeEventBlock(eventBuf, s.portRowLookup())
-	off += eventCount * BufEventStride
+	return off + b.eventCount*BufEventStride
+}
 
-	// Port-name bytes section (self-sizing via header portNameBytesCount): every port's name
-	// UTF-8 bytes in flattened port-row order; PortNameOff/PortNameLen slice into it.
-	copy(buf[off:off+portNameBytesCount], portNameBytes)
-	off += portNameBytesCount
+// writePortNameBytesSection writes the Port-name bytes section (self-sizing via header
+// portNameBytesCount): every port's name UTF-8 bytes in flattened port-row order;
+// PortNameOff/PortNameLen slice into it.
+func (s *SnapshotState) writePortNameBytesSection(buf []byte, off int, b *snapshotBuild) int {
+	copy(buf[off:off+b.portNameBytesCount], b.portNameBytes)
+	return off + b.portNameBytesCount
+}
 
-	// Edge-label bytes section (self-sizing via header edgeLabelBytesCount): every edge's
-	// label UTF-8 bytes in edge-row order; EdgeLabelOff/EdgeLabelLen slice into it.
-	copy(buf[off:off+edgeLabelBytesCount], edgeLabelBytes)
+// writeEdgeLabelBytesSection writes the Edge-label bytes section (self-sizing via header
+// edgeLabelBytesCount): every edge's label UTF-8 bytes in edge-row order;
+// EdgeLabelOff/EdgeLabelLen slice into it.
+func (s *SnapshotState) writeEdgeLabelBytesSection(buf []byte, off int, b *snapshotBuild) int {
+	copy(buf[off:off+b.edgeLabelBytesCount], b.edgeLabelBytes)
+	return off + b.edgeLabelBytesCount
+}
+
+// buildSnapshot packs all current state into one snapshot []byte. It is a short orchestrator:
+// newSnapshotBuild computes all counts/fade/string-sections once, then each block is written
+// in the exact byte-layout order the header/format comment at the top of this file documents.
+func (s *SnapshotState) buildSnapshot() []byte {
+	b := s.newSnapshotBuild()
+	buf := make([]byte, b.size)
+
+	off := s.writeHeader(buf, b)
+	off = s.writeBeadBlock(buf, off, b)
+	off = s.writeNodeBlock(buf, off, b)
+	off = s.writeInteriorBlock(buf, off, b)
+	off = s.writeEdgeBlock(buf, off, b)
+	off = s.writePortBlock(buf, off, b)
+	off = s.writeCameraBlock(buf, off)
+	off = s.writeOverlayBlock(buf, off)
+	off = s.writeRuleBuilderBlock(buf, off)
+	off = s.writePolarLockBlock(buf, off, b)
+	off = s.writeLabelBytesSection(buf, off, b)
+	off = s.writeEventBlockSection(buf, off, b)
+	off = s.writePortNameBytesSection(buf, off, b)
+	s.writeEdgeLabelBytesSection(buf, off, b)
 
 	return buf
 }

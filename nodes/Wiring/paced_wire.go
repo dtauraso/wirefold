@@ -242,24 +242,14 @@ type driveItem struct {
 	gen uint64
 }
 
-// DriveBeadsToDelivery drives multiple beads on different PacedWires in lockstep
-// on the calling goroutine — no additional goroutines. Each tick it advances
-// every not-yet-final bead one position, emits position traces, and marks
-// delivered items done. Blocks until all items are delivered or ctx is canceled.
-// All quantities are ticks on the shared human-speed clock (MODEL.md).
-func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
-	if len(items) == 0 {
-		return
-	}
-
-	// Per-item state: done marks items that have finished delivery.
-	done := make([]bool, len(items))
-	remaining := len(items)
-
+// driveNextsInit computes the first step tick for each item, anchored to its
+// placement tick, and marks items with no live inflight bead as already done.
+// Mutates done in place and returns the initial nexts slice and the count of
+// items still live (remaining).
+func driveNextsInit(items []driveItem, done []bool) (nexts []float64, remaining int) {
 	const interval = float64(positionStepTicks) // one position step per tick
-
-	// Compute the first step tick for each item anchored to its placement tick.
-	nexts := make([]float64, len(items))
+	nexts = make([]float64, len(items))
+	remaining = len(items)
 	for i, it := range items {
 		if done[i] {
 			continue
@@ -288,15 +278,128 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 		}
 		nexts[i] = next
 	}
+	return nexts, remaining
+}
 
-	// Use the clock from the first live item (all items share the same clock).
-	var clk Clock
+// driveClockOf returns the clock owned by the first not-done item (all items in a
+// DriveBeadsToDelivery call share the same clock), or nil if none is live.
+func driveClockOf(items []driveItem, done []bool) Clock {
 	for i, it := range items {
 		if !done[i] {
-			clk = it.pw.clock
-			break
+			return it.pw.clock
 		}
 	}
+	return nil
+}
+
+// driveMinNextTick caps each live item's next-step tick at its bead's own delivery
+// tick (so WaitTick never parks past the point where final=true would be set),
+// mutating nexts in place, and returns the minimum next-step tick across all live
+// items — the tick DriveBeadsToDelivery's WaitTick should park until.
+func driveMinNextTick(items []driveItem, done []bool, nexts []float64) float64 {
+	var minNext float64
+	first := true
+	for i, it := range items {
+		if done[i] {
+			continue
+		}
+		// Cap nexts[i] at the bead's delivery tick so WaitTick never parks
+		// past the point where final=true would be set.
+		it.pw.mu.Lock()
+		idx := it.pw.findInflightLocked(it.gen)
+		if idx >= 0 {
+			b := it.pw.inflight[idx]
+			dl := b.placementTick + it.pw.ticksToCross(b.arc)
+			if nexts[i] > dl {
+				nexts[i] = dl
+			}
+		}
+		it.pw.mu.Unlock()
+		if first || nexts[i] < minNext {
+			minNext = nexts[i]
+			first = false
+		}
+	}
+	return minNext
+}
+
+// driveAdvanceItem advances one item's bead to (at most) minNext if its next step
+// is due, delivering it when it reaches its deadline. It marks done[i] and
+// decrements remaining when the item finishes (delivered or torn down), and
+// otherwise bumps nexts[i] by one step interval. Lock semantics are preserved
+// EXACTLY as in the original inline body: pw.mu is acquired/released manually
+// around each phase (advanceBeadLocked releases the lock itself) — no defer, no
+// change in acquire/release ordering or timing.
+func driveAdvanceItem(ctx context.Context, it driveItem, i int, nexts []float64, minNext float64, done []bool, remaining *int) {
+	const interval = float64(positionStepTicks) // one position step per tick
+	if done[i] || nexts[i] > minNext {
+		return
+	}
+
+	it.pw.mu.Lock()
+	if it.gen < it.pw.teardownGen {
+		it.pw.mu.Unlock()
+		done[i] = true
+		*remaining--
+		return
+	}
+	idx := it.pw.findInflightLocked(it.gen)
+	if idx < 0 {
+		it.pw.mu.Unlock()
+		done[i] = true
+		*remaining--
+		return
+	}
+	b := it.pw.inflight[idx]
+	arc := b.arc
+	placementTick := b.placementTick
+	it.pw.mu.Unlock()
+
+	deadline := placementTick + it.pw.ticksToCross(arc)
+
+	target := nexts[i]
+	final := false
+	if target >= deadline {
+		target = deadline
+		final = true
+	}
+
+	it.pw.mu.Lock()
+	emit, posArgs, isFinal := it.pw.advanceBeadLocked(it.gen, target)
+	// advanceBeadLocked released the lock.
+	if emit {
+		it.pw.Trace.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
+	}
+	if final || isFinal {
+		it.pw.mu.Lock()
+		if ai, ok := it.pw.deliverHeadLocked(ctx, it.gen); ok {
+			it.pw.emitArrive(ai)
+		}
+		done[i] = true
+		*remaining--
+		return
+	}
+	nexts[i] += interval
+}
+
+// DriveBeadsToDelivery drives multiple beads on different PacedWires in lockstep
+// on the calling goroutine — no additional goroutines. Each tick it advances
+// every not-yet-final bead one position, emits position traces, and marks
+// delivered items done. Blocks until all items are delivered or ctx is canceled.
+// All quantities are ticks on the shared human-speed clock (MODEL.md).
+func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
+	if len(items) == 0 {
+		return
+	}
+
+	// Per-item state: done marks items that have finished delivery.
+	done := make([]bool, len(items))
+
+	// Compute the first step tick for each item anchored to its placement tick.
+	nexts, remaining := driveNextsInit(items, done)
+
+	// Use the clock from the first live item (all items share the same clock).
+	clk := driveClockOf(items, done)
 	if clk == nil || remaining == 0 {
 		return
 	}
@@ -308,29 +411,7 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 
 		// Find the minimum next step across live items, capping each item's next
 		// at its bead's delivery tick so we never park past the delivery point.
-		var minNext float64
-		first := true
-		for i, it := range items {
-			if done[i] {
-				continue
-			}
-			// Cap nexts[i] at the bead's delivery tick so WaitTick never parks
-			// past the point where final=true would be set.
-			it.pw.mu.Lock()
-			idx := it.pw.findInflightLocked(it.gen)
-			if idx >= 0 {
-				b := it.pw.inflight[idx]
-				dl := b.placementTick + it.pw.ticksToCross(b.arc)
-				if nexts[i] > dl {
-					nexts[i] = dl
-				}
-			}
-			it.pw.mu.Unlock()
-			if first || nexts[i] < minNext {
-				minNext = nexts[i]
-				first = false
-			}
-		}
+		minNext := driveMinNextTick(items, done, nexts)
 
 		// WaitTick resumes when the tick reaches the target; ceil so we wait for
 		// the integer tick at or past the (possibly fractional) delivery tick.
@@ -340,54 +421,7 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 
 		// Advance all items whose next step is at or before minNext.
 		for i, it := range items {
-			if done[i] || nexts[i] > minNext {
-				continue
-			}
-
-			it.pw.mu.Lock()
-			if it.gen < it.pw.teardownGen {
-				it.pw.mu.Unlock()
-				done[i] = true
-				remaining--
-				continue
-			}
-			idx := it.pw.findInflightLocked(it.gen)
-			if idx < 0 {
-				it.pw.mu.Unlock()
-				done[i] = true
-				remaining--
-				continue
-			}
-			b := it.pw.inflight[idx]
-			arc := b.arc
-			placementTick := b.placementTick
-			it.pw.mu.Unlock()
-
-			deadline := placementTick + it.pw.ticksToCross(arc)
-
-			target := nexts[i]
-			final := false
-			if target >= deadline {
-				target = deadline
-				final = true
-			}
-
-			it.pw.mu.Lock()
-			emit, posArgs, isFinal := it.pw.advanceBeadLocked(it.gen, target)
-			// advanceBeadLocked released the lock.
-			if emit {
-				it.pw.Trace.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
-			}
-			if final || isFinal {
-				it.pw.mu.Lock()
-				if ai, ok := it.pw.deliverHeadLocked(ctx, it.gen); ok {
-					it.pw.emitArrive(ai)
-				}
-				done[i] = true
-				remaining--
-				continue
-			}
-			nexts[i] += interval
+			driveAdvanceItem(ctx, it, i, nexts, minNext, done, &remaining)
 		}
 	}
 }

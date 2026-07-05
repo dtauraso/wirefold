@@ -223,98 +223,170 @@ func parseSpec(path string) (topoSpec, error) {
 	return spec, nil
 }
 
-// buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
-// and validated topoSpec.
-func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, sphere sceneSphere, hasScene bool) ([]Node, SlotRegistry, *MoveDispatch, error) {
-	// Build id→geometry map for arc-length computation at wire construction.
-	// nodeGeom carries kind/dims/port side+slot so the Go arc length mirrors
-	// buildPortCurve (3-D port-to-port) exactly.
-	nodeGeoms := map[string]nodeGeom{}
-	for _, n := range spec.Nodes {
-		nodeGeoms[n.ID] = n.toNodeGeom(sphere.Center, hasScene)
-	}
+// buildCtx carries the shared state threaded through the buildFromSpec phase
+// helpers below. Each phase method populates its own fields from spec (and
+// fields written by earlier phases); buildFromSpec calls them in order and
+// stays a short orchestrator. Splitting on struct fields (rather than
+// threading a long parameter list) mirrors the original function's data
+// flow exactly — no behavior changes, only the grouping into named steps.
+type buildCtx struct {
+	ctx      context.Context
+	spec     topoSpec
+	tr       *T.Trace
+	clk      Clock
+	sphere   sceneSphere
+	hasScene bool
 
-	// Shared world-center map, built ONCE from the loaded geometry and reused by the
-	// reach-radius pass, the aimed-port registry, and the edge-geometry centerOf closure.
-	// Each node's world center is loaded directly from its spec (meta.json x/y/z, injected
-	// as nodeGeom.Center in toNodeGeom). Nothing below mutates a node's Center, so this
-	// snapshot stays authoritative for the whole build (the reach-radius pass writes
-	// ReachR, which does not affect centers).
+	// Phase 1: node geometry + world centers.
+	nodeGeoms map[string]nodeGeom
+	centers   map[string]vec3
+
+	// Phase 3: aimed-port registry + the centerOf closure used while it is built.
+	aimedPorts AimedPortRegistry
+	centerOf   func(string) (vec3, bool)
+
+	// Phase 4: per-destination-port wire allocation + per-edge geometry.
+	destWire      map[string]*PacedWire
+	edgeWire      WireRegistry
+	edgeEndpoints map[string]EdgeEndpoints
+	edgeArc       map[string]float64
+	edgeLatency   map[string]float64
+	edgeSegments  map[string]wireSegment
+
+	// Phase 5: the MoveDispatch.
+	md *MoveDispatch
+
+	// Phase 6: id→type map and per-kind OutMulti port set.
+	nodeType          map[string]string
+	kindOutMultiPorts map[string]map[string]bool
+
+	// Phase 7: inbound/outbound edge maps.
+	inbound        map[string]map[string]string
+	outbound       map[string]map[string][]string
+	outboundHandle map[string]map[string][]string
+
+	// Phase 8: built nodes + the paced-Out sink.
+	outSink map[string]*Out
+	nodes   []Node
+}
+
+// buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
+// and validated topoSpec. It orchestrates the phase helpers below in the same order
+// the original monolithic function performed them; behavior is unchanged.
+func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, sphere sceneSphere, hasScene bool) ([]Node, SlotRegistry, *MoveDispatch, error) {
+	b := &buildCtx{ctx: ctx, spec: spec, tr: tr, clk: clk, sphere: sphere, hasScene: hasScene}
+
+	b.computeNodeGeometry()
+	b.computeReachRadii()
+	b.buildAimedPorts()
+	b.allocateWires()
+	b.buildMoveDispatch()
+	b.buildTypeMaps()
+	b.buildEdgeMaps()
+	if err := b.buildNodes(); err != nil {
+		return nil, nil, nil, err
+	}
+	b.bindDispatch()
+
+	return b.nodes, SlotRegistry(b.destWire), b.md, nil
+}
+
+// computeNodeGeometry builds the id→geometry map used for arc-length computation
+// at wire construction (nodeGeom carries kind/dims/port side+slot so the Go arc
+// length mirrors buildPortCurve exactly), plus the shared world-center map built
+// ONCE from that geometry and reused by the reach-radius pass, the aimed-port
+// registry, and the edge-geometry centerOf closure. Each node's world center is
+// loaded directly from its spec (meta.json x/y/z, injected as nodeGeom.Center in
+// toNodeGeom); nothing later mutates a node's Center, so this snapshot stays
+// authoritative for the whole build (the reach-radius pass writes ReachR, which
+// does not affect centers).
+func (b *buildCtx) computeNodeGeometry() {
+	nodeGeoms := map[string]nodeGeom{}
+	for _, n := range b.spec.Nodes {
+		nodeGeoms[n.ID] = n.toNodeGeom(b.sphere.Center, b.hasScene)
+	}
+	b.nodeGeoms = nodeGeoms
+
 	centers := map[string]vec3{}
 	for id, g := range nodeGeoms {
 		if g.Center != nil {
 			centers[id] = *g.Center
 		}
 	}
+	b.centers = centers
+}
 
-	// Non-rooted layout: compute each node's REACH radius (max distance from its center
-	// to any node it outputs to) under the loaded centers; streamed in NodeGeometry's
-	// sphereR field so the TS SphereRing reaches every surface node. Computed before
-	// newMoveDispatch so each node/edge mover captures it in its held geom.
-	{
-		edges := make([]sphereEdge, 0, len(spec.Edges))
-		for _, e := range spec.Edges {
-			edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
+// computeReachRadii computes each node's REACH radius (max distance from its
+// center to any node it outputs to) under the loaded centers — non-rooted layout
+// — streamed in NodeGeometry's sphereR field so the TS SphereRing reaches every
+// surface node. Computed before newMoveDispatch so each node/edge mover captures
+// it in its held geom.
+func (b *buildCtx) computeReachRadii() {
+	edges := make([]sphereEdge, 0, len(b.spec.Edges))
+	for _, e := range b.spec.Edges {
+		edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
+	}
+	for id, r := range reachRFromCenters(b.centers, edges) {
+		g := b.nodeGeoms[id]
+		g.ReachR = r
+		b.nodeGeoms[id] = g
+	}
+}
+
+// buildAimedPorts builds the aimed-port registry ONCE — the single source of
+// truth. It is used both by allocateWires below (aimed port directions, radial
+// toward the connected node, rather than ring-anchor directions) AND installed on
+// the dispatch for drag-time aiming (md.installAimedPorts), so the two can never
+// drift. Guarded on the 1→9→{2,6} spine being present; a nil registry falls back
+// to non-aimed ports. Also builds the centerOf closure used while the registry is
+// live (reads the shared static world centers, before movers are running).
+func (b *buildCtx) buildAimedPorts() {
+	// Derive the aimed-port registry from the loaded edge list: every edge-connected
+	// port aims toward the node on the other end. No node-ID hardcoding; any topology
+	// gets correct aimed ports automatically. Only register when BOTH endpoint nodes
+	// have geometry (centers), matching the original guard intent that aimed needs
+	// positions.
+	reg := AimedPortRegistry{}
+	for _, e := range b.spec.Edges {
+		if _, srcOK := b.centers[e.Source]; !srcOK {
+			continue
 		}
-		for id, r := range reachRFromCenters(centers, edges) {
-			g := nodeGeoms[id]
-			g.ReachR = r
-			nodeGeoms[id] = g
+		if _, tgtOK := b.centers[e.Target]; !tgtOK {
+			continue
 		}
+		reg[AimedPortKey{NodeID: e.Source, PortName: e.SourceHandle, IsInput: false}] = e.Target
+		reg[AimedPortKey{NodeID: e.Target, PortName: e.TargetHandle, IsInput: true}] = e.Source
+	}
+	if len(reg) > 0 {
+		b.aimedPorts = reg
 	}
 
-	// Build the aimed-port registry ONCE here — the single source of truth. It is used
-	// both by the initial edge-geometry loop below (aimed port directions, radial toward
-	// the connected node, rather than ring-anchor directions) AND installed on the
-	// dispatch for drag-time aiming (md.installAimedPorts), so the two can never drift.
-	// Guarded on the 1→9→{2,6} spine being present; a nil registry falls back to
-	// non-aimed ports.
-	var aimedPorts AimedPortRegistry
-	{
-		// Derive the aimed-port registry from the loaded edge list: every edge-connected
-		// port aims toward the node on the other end. No node-ID hardcoding; any topology
-		// gets correct aimed ports automatically. Only register when BOTH endpoint nodes
-		// have geometry (centers), matching the original guard intent that aimed needs
-		// positions.
-		reg := AimedPortRegistry{}
-		for _, e := range spec.Edges {
-			if _, srcOK := centers[e.Source]; !srcOK {
-				continue
-			}
-			if _, tgtOK := centers[e.Target]; !tgtOK {
-				continue
-			}
-			reg[AimedPortKey{NodeID: e.Source, PortName: e.SourceHandle, IsInput: false}] = e.Target
-			reg[AimedPortKey{NodeID: e.Target, PortName: e.TargetHandle, IsInput: true}] = e.Source
-		}
-		if len(reg) > 0 {
-			aimedPorts = reg
-		}
-	}
-
-	// centerOf closure for portDirAimed during initial edge-geometry construction:
-	// reads the shared static world centers (before movers are running).
-	centerOf := func(id string) (vec3, bool) {
-		c, ok := centers[id]
+	b.centerOf = func(id string) (vec3, bool) {
+		c, ok := b.centers[id]
 		return c, ok
 	}
+}
 
-	// Allocate one *PacedWire per destination port (fan-in safe).
-	// destWire: "destNode.destPort" → *PacedWire (owned by the destination).
-	// edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
-	// edgeEndpoints: edge label → source/target node IDs + handles (for NodeMoveRegistry).
+// allocateWires allocates one *PacedWire per destination port (fan-in safe) and
+// computes each edge's own travel-time (arc length / sim latency) and
+// straight-segment endpoints.
+//   - destWire: "destNode.destPort" → *PacedWire (owned by the destination).
+//   - edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
+//   - edgeEndpoints: edge label → source/target node IDs + handles (for NodeMoveRegistry).
+//   - edgeArc / edgeLatency: each edge's OWN travel-time (per-edge geometry),
+//     distinct from the dest wire's MaxIncomingSimLatencyMs aggregate.
+//   - edgeSegments: each edge's straight-segment endpoints (Start/End) so the
+//     bead's position stream evaluates P(t)=Start+t*(End-Start).
+//
+// All keyed by edge label; consumed by buildNodes when binding the source Out.
+func (b *buildCtx) allocateWires() {
 	destWire := map[string]*PacedWire{}
 	edgeWire := WireRegistry{}
 	edgeEndpoints := map[string]EdgeEndpoints{}
-	// edgeArc / edgeLatency carry each edge's OWN travel-time (per-edge geometry),
-	// distinct from the dest wire's MaxIncomingSimLatencyMs aggregate. edgeSegments
-	// carries each edge's straight-segment endpoints (Start/End) so the bead's
-	// position stream evaluates P(t)=Start+t*(End-Start). All keyed by edge label;
-	// consumed below when binding the source Out.
 	edgeArc := map[string]float64{}
 	edgeLatency := map[string]float64{}
 	edgeSegments := map[string]wireSegment{}
-	for _, e := range spec.Edges {
+	for _, e := range b.spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
 		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry,
 		// using aimed port directions for registered ports (radial toward connected node)
@@ -323,9 +395,9 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 		// lock) exists. Locks load later (LoadPolarEqs); md.ResendGeometry re-emits
 		// with the live lock check once they do.
 		seg := segmentBetweenPortsAimed(
-			nodeGeoms[e.Source], e.SourceHandle, e.Source,
-			nodeGeoms[e.Target], e.TargetHandle, e.Target,
-			aimedPorts, centerOf, nil,
+			b.nodeGeoms[e.Source], e.SourceHandle, e.Source,
+			b.nodeGeoms[e.Target], e.TargetHandle, e.Target,
+			b.aimedPorts, b.centerOf, nil,
 		)
 		arcLength := chordLength(seg.Start, seg.End)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
@@ -337,45 +409,54 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 			pw = NewPacedWire(arcLength, PulseSpeedWuPerTick)
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
-			pw.Trace = tr
-			pw.SetClock(clk) // one clock shared by every wire; times its own delivery
+			pw.Trace = b.tr
+			pw.SetClock(b.clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
 		}
-		// Fan-in MaxIncomingSimLatencyMs is NOT pre-written here. md.Bind (below) calls
-		// PacedWire.SetIncomingLatency for every feeding edge, which is the CANONICAL
-		// source: it records each edge's SimLatencyMs and recomputes the per-port
-		// aggregate as the max over all of them. A manual raise here would just be
-		// overwritten by that authoritative pass.
+		// Fan-in MaxIncomingSimLatencyMs is NOT pre-written here. md.Bind (called from
+		// bindDispatch) calls PacedWire.SetIncomingLatency for every feeding edge, which
+		// is the CANONICAL source: it records each edge's SimLatencyMs and recomputes the
+		// per-port aggregate as the max over all of them. A manual raise here would just
+		// be overwritten by that authoritative pass.
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
 			SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle,
 		}
 	}
+	b.destWire = destWire
+	b.edgeWire = edgeWire
+	b.edgeEndpoints = edgeEndpoints
+	b.edgeArc = edgeArc
+	b.edgeLatency = edgeLatency
+	b.edgeSegments = edgeSegments
+}
 
-	// Build the MoveDispatch from initial geometry and edge endpoints. It creates one
-	// nodeMover per node and one edgeMover per edge; each owns its geometry and
-	// recomputes itself on a node-move (no central coordinator). The trace lets each
-	// mover stream its own node/edge geometry on a move. Outs + dest wires are bound
-	// below once node construction has populated them.
-	md := newMoveDispatch(nodeGeoms, edgeEndpoints, tr)
-	if hasScene {
+// buildMoveDispatch builds the MoveDispatch from initial geometry and edge
+// endpoints. It creates one nodeMover per node and one edgeMover per edge; each
+// owns its geometry and recomputes itself on a node-move (no central
+// coordinator). The trace lets each mover stream its own node/edge geometry on a
+// move. Outs + dest wires are bound later (bindDispatch) once node construction
+// has populated them. Also declares the double-link movement graph (links.go;
+// polar locks ride on it in a later step — the lock system and the central polar
+// position store have been removed, so node positions live in the movers' held
+// geometry) and installs the aimed-port registry for drag-time aiming.
+func (b *buildCtx) buildMoveDispatch() {
+	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr)
+	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then
 		// content-fits it from the loaded node centers).
-		md.sceneSphere = sphere
+		md.sceneSphere = b.sphere
 	}
 
-	// The lock system and the central polar position store have been removed. Node
-	// positions live in the movers' held geometry (geom.Center). Declare the double-link
-	// movement graph (links.go); polar locks ride on it in a later step.
 	{
 		loaded := map[string]bool{}
-		for _, n := range spec.Nodes {
+		for _, n := range b.spec.Nodes {
 			loaded[n.ID] = true
 		}
-		linkEdges := make([]sphereEdge, 0, len(spec.Edges))
-		for _, e := range spec.Edges {
+		linkEdges := make([]sphereEdge, 0, len(b.spec.Edges))
+		for _, e := range b.spec.Edges {
 			linkEdges = append(linkEdges, sphereEdge{Source: e.Source, Target: e.Target})
 		}
 		md.registerMovementLinks(linkEdges, func(id string) bool { return loaded[id] })
@@ -383,7 +464,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 		// Fill each link's polar state from the loaded world centers (the one-time
 		// world→polar conversion at load; thereafter locks read the stored link polar).
 		md.initLinkPolar(func(id string) (vec3, bool) {
-			g, ok := nodeGeoms[id]
+			g, ok := b.nodeGeoms[id]
 			if !ok || g.Center == nil {
 				return vec3{}, false
 			}
@@ -397,13 +478,18 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 
 	// Install the aimed-port registry (built above) so edges still render aimed at their
 	// connected node during a drag.
-	if aimedPorts != nil {
-		md.installAimedPorts(aimedPorts)
+	if b.aimedPorts != nil {
+		md.installAimedPorts(b.aimedPorts)
 	}
 
-	// Build id→type map and per-kind OutMulti port set (needed for sourceHandle normalization).
+	b.md = md
+}
+
+// buildTypeMaps builds the id→type map and per-kind OutMulti port set (needed
+// for sourceHandle normalization in buildEdgeMaps).
+func (b *buildCtx) buildTypeMaps() {
 	nodeType := map[string]string{}
-	for _, n := range spec.Nodes {
+	for _, n := range b.spec.Nodes {
 		nodeType[n.ID] = n.Type
 	}
 	kindOutMultiPorts := map[string]map[string]bool{}
@@ -416,16 +502,21 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 		}
 		kindOutMultiPorts[kind] = outMultis
 	}
+	b.nodeType = nodeType
+	b.kindOutMultiPorts = kindOutMultiPorts
+}
 
-	// Build inbound and outbound edge maps.
-	// inbound:  target node id → port name → destKey ("destNode.destPort")
-	// outbound: source node id → port name → []edge label
-	// outboundHandle: source node id → port name → []sourceHandle (indexed, same order as outbound)
-	// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
+// buildEdgeMaps builds the inbound and outbound edge maps.
+//   - inbound:  target node id → port name → destKey ("destNode.destPort")
+//   - outbound: source node id → port name → []edge label
+//   - outboundHandle: source node id → port name → []sourceHandle (indexed, same order as outbound)
+//
+// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
+func (b *buildCtx) buildEdgeMaps() {
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
 	outboundHandle := map[string]map[string][]string{}
-	for _, e := range spec.Edges {
+	for _, e := range b.spec.Edges {
 		if inbound[e.Target] == nil {
 			inbound[e.Target] = map[string]string{}
 		}
@@ -437,65 +528,71 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 		}
 		inbound[e.Target][e.TargetHandle] = e.Target + "." + e.TargetHandle
 		srcKey := e.SourceHandle
-		if base, isMulti := outMultiBaseName(e.SourceHandle, nodeType[e.Source], kindOutMultiPorts); isMulti {
+		if base, isMulti := outMultiBaseName(e.SourceHandle, b.nodeType[e.Source], b.kindOutMultiPorts); isMulti {
 			srcKey = base
 		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
 		outboundHandle[e.Source][srcKey] = append(outboundHandle[e.Source][srcKey], e.SourceHandle)
 	}
+	b.inbound = inbound
+	b.outbound = outbound
+	b.outboundHandle = outboundHandle
+}
 
-	// nodeSendRule looks up the node-owned per-output-port send rule for the
-	// given node id and output port name (sourceHandle). The rule lives on the
-	// SOURCE NODE's data.sendRules map, keyed by output port name. Ports not
-	// listed default to consumeGated.
-	nodeSendRule := func(n specNode, port string) SendRule {
-		if n.Data == nil || n.Data.SendRules == nil {
-			return RuleConsumeGated
-		}
-		// ParseSendRule returns RuleConsumeGated for "" and errors for
-		// unrecognised values. validate.go rejects bad values before we
-		// reach here, so the error branch is defence-in-depth only.
-		rule, err := ParseSendRule(n.Data.SendRules[port])
-		if err != nil {
-			return RuleConsumeGated
-		}
-		return rule
+// nodeSendRule looks up the node-owned per-output-port send rule for the
+// given node id and output port name (sourceHandle). The rule lives on the
+// SOURCE NODE's data.sendRules map, keyed by output port name. Ports not
+// listed default to consumeGated.
+func nodeSendRule(n specNode, port string) SendRule {
+	if n.Data == nil || n.Data.SendRules == nil {
+		return RuleConsumeGated
 	}
+	// ParseSendRule returns RuleConsumeGated for "" and errors for
+	// unrecognised values. validate.go rejects bad values before we
+	// reach here, so the error branch is defence-in-depth only.
+	rule, err := ParseSendRule(n.Data.SendRules[port])
+	if err != nil {
+		return RuleConsumeGated
+	}
+	return rule
+}
 
-	// Build each node. outSink collects every paced source Out keyed by
-	// "node.handle" so node-move can update per-edge travel-time on the Out.
+// buildNodes builds each node from the wire allocation and edge maps computed by
+// earlier phases. outSink collects every paced source Out keyed by "node.handle"
+// so node-move can update per-edge travel-time on the Out.
+func (b *buildCtx) buildNodes() error {
 	outSink := map[string]*Out{}
-	nodes := make([]Node, 0, len(spec.Nodes))
-	for _, n := range spec.Nodes {
+	nodes := make([]Node, 0, len(b.spec.Nodes))
+	for _, n := range b.spec.Nodes {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
 		pb.outSink = outSink
-		pb.clock = clk // shared clock for clock-paced interior animation (Input refill slide)
+		pb.clock = b.clk // shared clock for clock-paced interior animation (Input refill slide)
 
 		for _, port := range bind.Ports {
 			switch port.Dir {
 			case PortIn:
-				dk, ok := inbound[n.ID][port.Name]
+				dk, ok := b.inbound[n.ID][port.Name]
 				if ok {
-					pb.SetSinglePaced(port.Name, destWire[dk])
+					pb.SetSinglePaced(port.Name, b.destWire[dk])
 				}
 				// If no inbound edge, reflectBuild falls back to dead-end chan.
 
 			case PortOut:
-				labels := outbound[n.ID][port.Name]
+				labels := b.outbound[n.ID][port.Name]
 				if len(labels) > 0 {
 					// Look up wire by destination of the first outbound edge.
 					// For fan-in, the destination port owns the wire.
 					// Send rule is node-owned, keyed by this output port name.
 					rule := nodeSendRule(n, port.Name)
 					lbl := labels[0]
-					pb.SetSinglePacedRule(port.Name, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeSegments[lbl], lbl)
+					pb.SetSinglePacedRule(port.Name, b.edgeWire[lbl], rule, b.edgeArc[lbl], b.edgeLatency[lbl], b.edgeSegments[lbl], lbl)
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
 			case PortOutMulti:
-				labels := outbound[n.ID][port.Name]
-				handles := outboundHandle[n.ID][port.Name]
+				labels := b.outbound[n.ID][port.Name]
+				handles := b.outboundHandle[n.ID][port.Name]
 				for i, lbl := range labels {
 					handle := port.Name
 					if i < len(handles) {
@@ -504,25 +601,29 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 					// Per-port (per fan-out element): the rule is keyed by the
 					// concrete output port name (sourceHandle, e.g. "ToNext0").
 					rule := nodeSendRule(n, handle)
-					pb.AppendMultiPacedWithHandle(port.Name, handle, edgeWire[lbl], rule, edgeArc[lbl], edgeLatency[lbl], edgeSegments[lbl], lbl)
+					pb.AppendMultiPacedWithHandle(port.Name, handle, b.edgeWire[lbl], rule, b.edgeArc[lbl], b.edgeLatency[lbl], b.edgeSegments[lbl], lbl)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}
 		}
 
-		nd, err := bind.Build(ctx, n.ID, n.Data, pb, tr, nodeGeoms[n.ID], aimedPorts, centerOf)
+		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], b.aimedPorts, b.centerOf)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
+			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
 		nodes = append(nodes, nd)
 	}
+	b.outSink = outSink
+	b.nodes = nodes
+	return nil
+}
 
-	// Bind per-edge source Outs and dest wires into each edgeMover so a node-move
-	// updates per-edge travel-time and the per-port window aggregate, and seed each
-	// dest wire's per-edge latency for the MaxIncomingSimLatencyMs aggregate.
-	md.Bind(outSink, SlotRegistry(destWire))
-
-	return nodes, SlotRegistry(destWire), md, nil
+// bindDispatch binds per-edge source Outs and dest wires into each edgeMover so
+// a node-move updates per-edge travel-time and the per-port window aggregate,
+// and seeds each dest wire's per-edge latency for the MaxIncomingSimLatencyMs
+// aggregate.
+func (b *buildCtx) bindDispatch() {
+	b.md.Bind(b.outSink, SlotRegistry(b.destWire))
 }
 
 // EmitSpecLine reads the topology spec at jsonPath and writes a single

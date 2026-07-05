@@ -192,6 +192,7 @@ export function nodeLabel(decoded: DecodedSnapshot, row: number): string {
   const off = readNodeLabelOff(decoded.nodeView, row);
   const len = readNodeLabelLen(decoded.nodeView, row);
   if (len === 0) return "";
+  if (off < 0 || len < 0 || off + len > decoded.labelBytes.byteLength) return "";
   return STR_DECODER.decode(decoded.labelBytes.subarray(off, off + len));
 }
 
@@ -205,6 +206,7 @@ export function portName(decoded: DecodedSnapshot, row: number): string {
   const off = readPortPortNameOff(decoded.portView, row);
   const len = readPortPortNameLen(decoded.portView, row);
   if (len === 0) return "";
+  if (off < 0 || len < 0 || off + len > decoded.portNameBytes.byteLength) return "";
   return STR_DECODER.decode(decoded.portNameBytes.subarray(off, off + len));
 }
 
@@ -218,5 +220,6 @@ export function edgeLabel(decoded: DecodedSnapshot, row: number): string {
   const off = readEdgeEdgeLabelOff(decoded.edgeView, row);
   const len = readEdgeEdgeLabelLen(decoded.edgeView, row);
   if (len === 0) return "";
+  if (off < 0 || len < 0 || off + len > decoded.edgeLabelBytes.byteLength) return "";
   return STR_DECODER.decode(decoded.edgeLabelBytes.subarray(off, off + len));
 }

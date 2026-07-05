@@ -260,7 +260,7 @@ export function SelectedEquationGuides() {
     };
   });
 
-  const edgeHalos: Array<{ s: THREE.Vector3; e: THREE.Vector3 }> = [];
+  const edgeHalos: Array<{ key: string; s: THREE.Vector3; e: THREE.Vector3 }> = [];
   if (wantedPairs.size > 0) {
     const snap = getLatestSnapshot();
     const decoded = snap ? decodeSnapshot(snap) : null;
@@ -270,6 +270,7 @@ export function SelectedEquationGuides() {
         const dst = readEdgeDstNodeRow(decoded.edgeView, i);
         if (wantedPairs.has(pairKey(src, dst))) {
           edgeHalos.push({
+            key: pairKey(src, dst),
             s: new THREE.Vector3(
               readEdgeSX(decoded.edgeView, i),
               readEdgeSY(decoded.edgeView, i),
@@ -312,8 +313,8 @@ export function SelectedEquationGuides() {
       ))}
       {/* Edges between any selected equation's own nodes — same halo as a selected edge,
           deduped across the whole selected set. */}
-      {edgeHalos.map((h, i) => (
-        <EdgeHalo key={i} s={h.s} e={h.e} />
+      {edgeHalos.map((h) => (
+        <EdgeHalo key={h.key} s={h.s} e={h.e} />
       ))}
     </>
   );
