@@ -547,13 +547,12 @@ func nodeSendRule(n specNode, port string) SendRule {
 	if n.Data == nil || n.Data.SendRules == nil {
 		return RuleConsumeGated
 	}
-	// ParseSendRule returns RuleConsumeGated for "" and errors for
-	// unrecognised values. validate.go rejects bad values before we
-	// reach here, so the error branch is defence-in-depth only.
-	rule, err := ParseSendRule(n.Data.SendRules[port])
-	if err != nil {
-		return RuleConsumeGated
-	}
+	// ParseSendRule returns RuleConsumeGated for "" AND on error (unrecognised
+	// value), so the fallback is already baked into its return value; the
+	// error is deliberately ignored here (validate.go rejects bad values
+	// before we reach here, so this is defence-in-depth only, and nodeSendRule's
+	// callers aren't set up to handle a propagated error).
+	rule, _ := ParseSendRule(n.Data.SendRules[port])
 	return rule
 }
 

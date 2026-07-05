@@ -256,6 +256,21 @@ func (o *Out) Gated() bool {
 	return o.Rule != RuleFireAndForget
 }
 
+// placeDrivenNoWalker places one bead on the paced wire WITHOUT spawning a
+// walker goroutine, emitting the SendWire trace at placement time. Shared by
+// PlaceDriven and EmitOneDriven, which differ only in when/how the placed
+// bead is subsequently driven to delivery. Caller must have already checked
+// o.pw != nil.
+func (o *Out) placeDrivenNoWalker(v int) (gen uint64, ok bool) {
+	g := o.Geom()
+	gen, ok = o.pw.placeBeadNoWalker(v, o.placementFrom(g))
+	if !ok {
+		return 0, false
+	}
+	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+	return gen, true
+}
+
 // EmitOneDriven places one bead WITHOUT spawning a walker goroutine, emits the
 // same SendWire trace as EmitOne, then drives the bead to delivery synchronously
 // on the caller's goroutine. Blocks until delivered or ctx is canceled.
@@ -265,12 +280,10 @@ func (o *Out) EmitOneDriven(ctx context.Context, v int) bool {
 		return false
 	}
 	if o.pw != nil {
-		g := o.Geom()
-		gen, ok := o.pw.placeBeadNoWalker(v, o.placementFrom(g))
+		gen, ok := o.placeDrivenNoWalker(v)
 		if !ok {
 			return false
 		}
-		o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		o.pw.DriveBeadToDelivery(ctx, gen)
 		return true
 	}
@@ -329,12 +342,10 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 		return DriveItem{}
 	}
 	if o.pw != nil {
-		g := o.Geom()
-		gen, ok := o.pw.placeBeadNoWalker(v, o.placementFrom(g))
+		gen, ok := o.placeDrivenNoWalker(v)
 		if !ok {
 			return DriveItem{}
 		}
-		o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
 	}
 	// chan mode (tests): no drive needed, send now and return inert.
