@@ -85,6 +85,26 @@ type stdinMsg struct {
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg `json:"event,omitempty"`
 	stdinCRUDPayload
+	// authorPreviewPayload carries op=="update" kind=="lock" attr=="author"/"preview" fields —
+	// the keyboard-authoring channel (gesture.go's Author*/SetHover*ByRow). Already-resolved
+	// tokens only (see input_codec.go decodeInputRecord); no free-text parsing crosses here.
+	authorPreviewPayload
+}
+
+// authorPreviewPayload holds the keyboard-authoring channel's payload fields. Action names
+// (for attr=="author") the atomic builder step: "begin"|"center"|"term"|"port"|"torus".
+// EqKind (action=="begin") is the eqKind to build. NodeRow is the buffer NODE-ROW index
+// (resolved via md.nodeRows exactly like a raycast hit's NodeRow — see nodeFromHit).
+// Comp/Sign (action=="term") are the polarComp index and +1/-1 sign. PortName/IsInput
+// (action=="port", or attr=="preview" for a port preview) name the port on NodeRow.
+type authorPreviewPayload struct {
+	Action   string  `json:"action,omitempty"`
+	EqKind   int     `json:"eqKind,omitempty"`
+	NodeRow  int     `json:"nodeRow,omitempty"`
+	Comp     int     `json:"comp,omitempty"`
+	Sign     float64 `json:"sign,omitempty"`
+	PortName string  `json:"portName,omitempty"`
+	IsInput  bool    `json:"isInput,omitempty"`
 }
 
 // rawInputMsg carries the payload for a top-level type=="raw-input" message (Phase 6):
@@ -390,6 +410,29 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			md.ToggleLockActive(msg.Index, tr)
 		case "selected":
 			md.SelectLock(msg.Index, tr)
+		case "author":
+			// Keyboard-authoring channel: an already-resolved token drives the SAME builder
+			// the click path drives (gesture.go's Author* methods). Fire-and-forget.
+			switch msg.Action {
+			case "begin":
+				md.AuthorBegin(eqKind(msg.EqKind), tr)
+			case "node":
+				md.AuthorNode(msg.NodeRow, tr)
+			case "latch":
+				md.AuthorLatchHalfTerm(polarComp(msg.Comp), msg.Sign, tr)
+			case "port":
+				md.AuthorPort(msg.NodeRow, msg.PortName, msg.IsInput, tr)
+			case "torus":
+				md.AuthorTorus(msg.NodeRow, tr)
+			}
+		case "preview":
+			// Preview highlight for the keyboard-authoring channel: mirrors updateHover's
+			// pointer-hover write so a typed token's target highlights in the streamed buffer.
+			if msg.PortName != "" {
+				md.SetHoverPortByRow(msg.NodeRow, msg.PortName, msg.IsInput, tr)
+			} else {
+				md.SetHoverNodeByRow(msg.NodeRow, tr)
+			}
 		}
 	}
 	// EDIT_UPDATE_KINDS_END

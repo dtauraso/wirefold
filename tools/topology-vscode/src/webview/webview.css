@@ -36,6 +36,8 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
   z-index: 1000; color: #333;
 }
 .rule-eq-center { color: #666; }
+.rule-eq-center-value { cursor: pointer; }
+.rule-eq-center-value:hover { text-decoration: underline; }
 .rule-eq-equation { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .rule-eq-op { color: #666; padding: 0 2px; }
 .rule-eq-term { display: inline-flex; align-items: center; gap: 2px; }
@@ -70,6 +72,56 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
 .rule-eq-row input[type="checkbox"] { margin: 0; cursor: pointer; }
 .rule-eq-row--inactive .rule-eq-node,
 .rule-eq-row--inactive .rule-eq-angle { opacity: 0.45; }
+
+/* Typed "+ Add equation" entry: kind picker + a single small text field. The in-progress
+   equation itself is drawn by renderBuilder/renderPortTorusBuilder (.rule-eq-equation etc
+   above) — the SAME notation a click-driven session uses — not by anything below. */
+.rule-eq-add-row { display: flex; flex-direction: column; gap: 4px; }
+.rule-eq-add-btn {
+  align-self: flex-start; font-size: 16px; line-height: 1; padding: 2px 10px; cursor: pointer;
+  background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; color: #333;
+}
+.rule-eq-add-btn:hover { background: #eee; }
+.rule-eq-add-select { font-size: 11px; padding: 2px 4px; }
+.rule-eq-kind-menu {
+  display: inline-flex; flex-direction: column; align-self: flex-start;
+  background: #fff; border: 1px solid #ccc; border-radius: 4px; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.rule-eq-kind-option { padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; color: #222; }
+.rule-eq-kind-option:hover { background: #e3f2fd; }
+.rule-eq-hint { color: #aaa; font-style: italic; font-weight: 400; }
+.rule-eq-toggle {
+  align-self: flex-start; font-size: 11px; padding: 1px 6px; margin-bottom: 4px; cursor: pointer;
+  background: none; border: none; color: #666;
+}
+.rule-eq-toggle:hover { color: #222; }
+.rule-eq-typed-row { display: flex; align-items: center; gap: 6px; }
+.rule-eq-typed-input-wrap { position: relative; display: inline-flex; align-items: center; }
+.rule-eq-form-input {
+  width: 96px; font: inherit; font-size: 12px; padding: 1px 3px;
+  border: 1px solid #1976d2; border-radius: 3px;
+}
+.rule-eq-form-preview { margin-left: 4px; color: #1976d2; font-weight: 600; }
+.rule-eq-form-autocomplete {
+  position: absolute; top: 100%; left: 0; z-index: 1001;
+  display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #ccc; border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2); min-width: 100px; margin-top: 2px;
+}
+.rule-eq-form-option { padding: 2px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.rule-eq-form-option--hl { background: #e3f2fd; }
+
+/* Inline fill-in-the-blank input: the user types DIRECTLY into the equation's `_` blanks
+   (RuleEquationPanel's renderTypedNodeNode/renderTypedPortTorus) — no separate text box.
+   Sized/colored to sit inline inside the `( , )` parens without breaking that layout; the
+   node/angle color coding carries over via the shared rule-eq-node/rule-eq-angle class. */
+.rule-eq-blank-input {
+  font: inherit; font-size: 12px; padding: 1px 5px; min-width: 2em;
+  border: 1px solid #1976d2; border-radius: 3px; background: #e3f2fd; color: #111;
+}
+.rule-eq-blank-input:focus { outline: none; box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.35); }
+.rule-eq-blank-input::placeholder { color: #1976d2; font-style: normal; opacity: 0.75; }
 
 
 .timeline-panel {

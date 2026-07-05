@@ -40,7 +40,8 @@ function navSignature(nav: NavNode[]): string {
 // ---------------------------------------------------------------------------
 
 // AxisLabel — canvas-texture Sprite billboard; always faces the camera, no font asset needed.
-function AxisLabel({ text, color, position, size }: {
+// Exported for reuse by other buffer-driven 3D overlays (e.g. PortLabels' port-name tags).
+export function AxisLabel({ text, color, position, size }: {
   text: string; color: string; position: [number, number, number]; size: number;
 }) {
   const texture = useMemo(() => {

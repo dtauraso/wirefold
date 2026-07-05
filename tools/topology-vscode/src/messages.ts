@@ -67,7 +67,52 @@ type EditMsg =
   | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
   // lock: active/selected both carry an i32 md.polarEqs index payload (locks.go
   // ToggleLockActive/SelectLock).
-  | { type: "edit"; op: "update"; kind: "lock"; attr: "active" | "selected"; index: number };
+  | { type: "edit"; op: "update"; kind: "lock"; attr: "active" | "selected"; index: number }
+  // lock attr="author": the keyboard-authoring channel drives the SAME builder the click
+  // path (gesture.go trySelectSphereRule) drives. nodeRow is an ALREADY-RESOLVED buffer
+  // NODE-ROW index (exactly like a raycast hit's nodeRow) — no free-text parsing crosses
+  // this seam. comp/sign only apply to action="term"; portName/isInput only to action="port".
+  | {
+      type: "edit";
+      op: "update";
+      kind: "lock";
+      attr: "author";
+      action: "begin";
+      eqKind: number;
+    }
+  | { type: "edit"; op: "update"; kind: "lock"; attr: "author"; action: "center"; nodeRow: number }
+  | {
+      type: "edit";
+      op: "update";
+      kind: "lock";
+      attr: "author";
+      action: "term";
+      nodeRow: number;
+      comp: number;
+      sign: number;
+    }
+  | {
+      type: "edit";
+      op: "update";
+      kind: "lock";
+      attr: "author";
+      action: "port";
+      nodeRow: number;
+      portName: string;
+      isInput: boolean;
+    }
+  | { type: "edit"; op: "update"; kind: "lock"; attr: "author"; action: "torus"; nodeRow: number }
+  // lock attr="preview": a keyboard-authoring preview highlight, mirroring pointer hover
+  // (gesture.go SetHoverPortByRow/SetHoverNodeByRow). portName present = port preview.
+  | {
+      type: "edit";
+      op: "update";
+      kind: "lock";
+      attr: "preview";
+      nodeRow: number;
+      portName?: string;
+      isInput?: boolean;
+    };
 // EDIT_MSG_END
 
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel

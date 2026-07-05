@@ -18,9 +18,9 @@
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v7 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v7 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
@@ -49,9 +49,15 @@ export const IN_UPDATE_KINDS = ["overlays", "lock"] as const;
 // IN_UPDATE_ATTRS is the shared update sub-attribute vocabulary, u8 index on the wire.
 // "toggle" is overlays' single-flag toggle. "active"/"selected" are lock's two attrs (both
 // carry an i32 md.polarEqs index payload): active flips ToggleLockActive, selected calls
-// SelectLock. The former "set" full-visibility-snapshot attr was removed (its only caller,
-// the load-time main.tsx push, was deleted; no live TS sender remained).
-export const IN_UPDATE_ATTRS = ["toggle", "active", "selected"] as const;
+// SelectLock. "author" drives the keyboard-authoring builder (gesture.go Author* methods);
+// "preview" sets a keyboard-authoring preview highlight (mirrors pointer hover). The former
+// "set" full-visibility-snapshot attr was removed (its only caller, the load-time main.tsx
+// push, was deleted; no live TS sender remained).
+export const IN_UPDATE_ATTRS = ["toggle", "active", "selected", "author", "preview"] as const;
+// IN_AUTHOR_ACTIONS is the attr="author" payload's action sub-discriminator (u8 index on the
+// wire, first byte of the author payload after the attr byte). Must match inAuthorActions
+// ordering in input_codec.go.
+export const IN_AUTHOR_ACTIONS = ["begin", "latch", "node", "port", "torus"] as const;
 
 import type { RawInputEvent, OverlayFlag } from "../messages";
 import { OVERLAY_FLAG_ORDER } from "../messages";
@@ -148,6 +154,8 @@ export const encodeDeleteSelectedLock = () => encodeControl(IN_KIND_DELETE_SELEC
 const IN_OVERLAY_ATTR_TOGGLE = 0;
 const IN_LOCK_ATTR_ACTIVE = 1;
 const IN_LOCK_ATTR_SELECTED = 2;
+const IN_LOCK_ATTR_AUTHOR = 3;
+const IN_LOCK_ATTR_PREVIEW = 4;
 
 /** Build an edit create/delete record: two length-prefixed UTF-8 strings. Kept for the
  *  3-op (create/update/delete) codec concept; no live TS caller (the FSM creates/deletes
@@ -196,6 +204,102 @@ export function encodeLockSelect(index: number): ArrayBuffer {
   w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
   w.u8(IN_LOCK_ATTR_SELECTED);
   w.i32(index);
+  return w.toArrayBuffer();
+}
+
+/** Build an author BEGIN record: [22][lock][author][begin][u8 eqKind]. Starts (or restarts) a
+ *  keyboard-authored equation of the given kind (gesture.go AuthorBegin). */
+export function encodeAuthorBegin(eqKind: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_AUTHOR);
+  w.u8(enumIndex(IN_AUTHOR_ACTIONS, "begin"));
+  w.u8(eqKind);
+  return w.toArrayBuffer();
+}
+
+/** Build an author NODE record: [22][lock][author][node][i32 nodeRow]. Applies the resolved
+ *  node to the builder EXACTLY like a node click: with a half-term pending it completes the
+ *  term (committing the equation on the 2nd completed term); otherwise it latches the node as
+ *  the rule-builder's Center. Go decides center-vs-term (gesture.go AuthorNode) — the caller
+ *  does not need to know which. */
+export function encodeAuthorNode(nodeRow: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_AUTHOR);
+  w.u8(enumIndex(IN_AUTHOR_ACTIONS, "node"));
+  w.i32(nodeRow);
+  return w.toArrayBuffer();
+}
+
+/** Build an author LATCH record: [22][lock][author][latch][u8 comp][u8 signBit]. Latches a
+ *  pending half-term (comp, sign) WITHOUT touching a node — the typed equivalent of a handhold
+ *  click (gesture.go AuthorLatchHalfTerm). signBit: 0 = +1, 1 = -1. */
+export function encodeAuthorLatch(comp: number, sign: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_AUTHOR);
+  w.u8(enumIndex(IN_AUTHOR_ACTIONS, "latch"));
+  w.u8(comp);
+  w.u8(sign < 0 ? 1 : 0);
+  return w.toArrayBuffer();
+}
+
+/** Build an author PORT record: [22][lock][author][port][i32 nodeRow][str portName][bool
+ *  isInput]. Latches (or completes, if a torus is pending) the `port ∈ torus` pair's port
+ *  side (gesture.go AuthorPort). */
+export function encodeAuthorPort(nodeRow: number, portName: string, isInput: boolean): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_AUTHOR);
+  w.u8(enumIndex(IN_AUTHOR_ACTIONS, "port"));
+  w.i32(nodeRow);
+  w.str(portName);
+  w.bool(isInput);
+  return w.toArrayBuffer();
+}
+
+/** Build an author TORUS record: [22][lock][author][torus][i32 nodeRow]. Latches (or
+ *  completes) the `port ∈ torus` pair's torus side (gesture.go AuthorTorus). */
+export function encodeAuthorTorus(nodeRow: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_AUTHOR);
+  w.u8(enumIndex(IN_AUTHOR_ACTIONS, "torus"));
+  w.i32(nodeRow);
+  return w.toArrayBuffer();
+}
+
+/** Build a preview NODE record: [22][lock][preview][previewKind=1(node)][i32 nodeRow]. Sets
+ *  the keyboard-authoring preview highlight to a node/torus target (gesture.go
+ *  SetHoverNodeByRow). */
+export function encodePreviewNode(nodeRow: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_PREVIEW);
+  w.u8(1); // previewKind = node
+  w.i32(nodeRow);
+  return w.toArrayBuffer();
+}
+
+/** Build a preview PORT record: [22][lock][preview][previewKind=0(port)][i32 nodeRow][str
+ *  portName][bool isInput]. Sets the keyboard-authoring preview highlight to a port target
+ *  (gesture.go SetHoverPortByRow). */
+export function encodePreviewPort(nodeRow: number, portName: string, isInput: boolean): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "lock"));
+  w.u8(IN_LOCK_ATTR_PREVIEW);
+  w.u8(0); // previewKind = port
+  w.i32(nodeRow);
+  w.str(portName);
+  w.bool(isInput);
   return w.toArrayBuffer();
 }
 
@@ -286,7 +390,34 @@ export type DecodedInput =
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
   | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag }
-  | { kind: "edit-update"; entity: "lock"; attr: "active" | "selected"; index: number };
+  | { kind: "edit-update"; entity: "lock"; attr: "active" | "selected"; index: number }
+  | { kind: "edit-update"; entity: "lock"; attr: "author"; action: "begin"; eqKind: number }
+  | { kind: "edit-update"; entity: "lock"; attr: "author"; action: "node" | "torus"; nodeRow: number }
+  | {
+      kind: "edit-update";
+      entity: "lock";
+      attr: "author";
+      action: "latch";
+      comp: number;
+      sign: number;
+    }
+  | {
+      kind: "edit-update";
+      entity: "lock";
+      attr: "author";
+      action: "port";
+      nodeRow: number;
+      portName: string;
+      isInput: boolean;
+    }
+  | {
+      kind: "edit-update";
+      entity: "lock";
+      attr: "preview";
+      nodeRow: number;
+      portName?: string;
+      isInput?: boolean;
+    };
 
 /** Decode one record body (with kind byte, without the [len] frame). */
 export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined {
@@ -351,12 +482,42 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
       const entityKind = IN_UPDATE_KINDS[r.u8()];
       if (entityKind === "lock") {
         const attr = r.u8();
-        const index = r.i32();
-        if (attr === IN_LOCK_ATTR_ACTIVE) {
-          return { kind: "edit-update", entity: "lock", attr: "active", index };
+        if (attr === IN_LOCK_ATTR_ACTIVE || attr === IN_LOCK_ATTR_SELECTED) {
+          const index = r.i32();
+          return { kind: "edit-update", entity: "lock", attr: attr === IN_LOCK_ATTR_ACTIVE ? "active" : "selected", index };
         }
-        if (attr === IN_LOCK_ATTR_SELECTED) {
-          return { kind: "edit-update", entity: "lock", attr: "selected", index };
+        if (attr === IN_LOCK_ATTR_AUTHOR) {
+          const action = IN_AUTHOR_ACTIONS[r.u8()];
+          switch (action) {
+            case "begin":
+              return { kind: "edit-update", entity: "lock", attr: "author", action: "begin", eqKind: r.u8() };
+            case "node":
+            case "torus":
+              return { kind: "edit-update", entity: "lock", attr: "author", action, nodeRow: r.i32() };
+            case "latch": {
+              const comp = r.u8();
+              const signBit = r.u8();
+              return { kind: "edit-update", entity: "lock", attr: "author", action: "latch", comp, sign: signBit ? -1 : 1 };
+            }
+            case "port": {
+              const nodeRow = r.i32();
+              const portName = r.str();
+              const isInput = r.bool();
+              return { kind: "edit-update", entity: "lock", attr: "author", action: "port", nodeRow, portName, isInput };
+            }
+            default:
+              return undefined;
+          }
+        }
+        if (attr === IN_LOCK_ATTR_PREVIEW) {
+          const previewKind = r.u8();
+          const nodeRow = r.i32();
+          if (previewKind === 0) {
+            const portName = r.str();
+            const isInput = r.bool();
+            return { kind: "edit-update", entity: "lock", attr: "preview", nodeRow, portName, isInput };
+          }
+          return { kind: "edit-update", entity: "lock", attr: "preview", nodeRow };
         }
         return undefined;
       }

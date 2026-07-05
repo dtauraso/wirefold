@@ -18,6 +18,7 @@ import { RunButton } from "./three/RunButton";
 import { RuleEquationPanel } from "./three/RuleEquationPanel";
 import { SaveLifecycle } from "./SaveLifecycle";
 import { setLatestSnapshot } from "./snapshot-buffer";
+import { PortAutocompleteContext, type PortAutocompleteUI } from "./three/port-autocomplete-context";
 
 // Test-only hook for the Playwright e2e harness. The harness stub of
 // acquireVsCodeApi populates window.__wirefold_sent with every postMessage
@@ -31,13 +32,19 @@ import { setLatestSnapshot } from "./snapshot-buffer";
 function Root() {
   const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
   useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
+  // Ephemeral cross-tree UI signal (not domain state — see port-autocomplete-context.tsx):
+  // lets RuleEquationPanel's typed-equation form tell the Canvas-mounted PortLabels layer
+  // which node's ports to label and which one is highlighted.
+  const [portAutocomplete, setPortAutocomplete] = useState<PortAutocompleteUI | null>(null);
   return (
     <RunStatusCtx.Provider value={runStatus}>
-      {/* SaveLifecycle and RunButton are mounted once here for all views. */}
-      <SaveLifecycle />
-      <RunButton />
-      <RuleEquationPanel />
-      <ThreeView />
+      <PortAutocompleteContext.Provider value={{ value: portAutocomplete, setValue: setPortAutocomplete }}>
+        {/* SaveLifecycle and RunButton are mounted once here for all views. */}
+        <SaveLifecycle />
+        <RunButton />
+        <RuleEquationPanel />
+        <ThreeView />
+      </PortAutocompleteContext.Provider>
     </RunStatusCtx.Provider>
   );
 }
