@@ -30,15 +30,9 @@ import {
 } from "../../schema/buffer-layout";
 import { ThetaArc, PhiArc } from "./NavGuides";
 import { usePolarLocks, POLAR_LOCK_KIND_PORT_TORUS } from "./rule-builder";
+import { EDGE_HALO_RADIUS, EDGE_HALO_COLOR, EDGE_HALO_SELECTED_OPACITY } from "./buffer-scene";
 
 const ROW_NONE = -1;
-
-// Selected-edge highlight look, copied verbatim from buffer-scene.tsx EdgeTube's halo mesh
-// (EDGE_HALO_RADIUS/COLOR/SELECTED_OPACITY) so an equation's edges read identically to a
-// hand-selected edge. Kept as a local copy because those constants are module-private there.
-const EDGE_HALO_RADIUS = 5;
-const EDGE_HALO_COLOR = "#ff5a00";
-const EDGE_HALO_SELECTED_OPACITY = 0.6;
 
 // EdgeHalo — the same wide orange halo tube EdgeTube draws for a selected edge, over the
 // straight segment between two baked edge endpoints. Decorative — no raycast.

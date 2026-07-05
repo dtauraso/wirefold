@@ -8,10 +8,6 @@ import (
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
-// noValue is the sentinel meaning "no value held yet". Real values are
-// non-negative indices so noValue (-1) never collides with a legitimate value.
-const noValue = gatecommon.NoValue
-
 // Node is a sample-and-hold pulse. It HOLDS one int value (the thing it is
 // outputting), initialized to noValue, and drives that held value out continuously.
 // Even before any input arrives it emits noValue. When an input value arrives on
@@ -49,20 +45,10 @@ type Node struct {
 }
 
 // driveOutput runs a continuous-drive goroutine on out, always emitting the
-// current value of held. Stops when ctx is cancelled or EmitOneDriven returns false.
+// current value of held. Delegates to gatecommon.DriveHeld (shared with
+// HoldFlip's identical-shaped drive goroutine) with an identity transform.
 func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			if !out.EmitOneDriven(ctx, int(held.Load())) {
-				return
-			}
-		}
-	}()
+	gatecommon.DriveHeld(ctx, out, held, func(h int64) int { return int(h) })
 }
 
 func (g *Node) Update(ctx context.Context) {
@@ -70,9 +56,9 @@ func (g *Node) Update(ctx context.Context) {
 
 	// held is shared between the drive goroutine(s) and this main loop.
 	var held atomic.Int64
-	held.Store(noValue)
+	held.Store(gatecommon.NoValue)
 	if g.EmitHeldBead != nil {
-		g.EmitHeldBead(noValue) // startup: empty interior
+		g.EmitHeldBead(gatecommon.NoValue) // startup: empty interior
 	}
 
 	// DRIVE goroutine: continuously pulse the current held value to Out.

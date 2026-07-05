@@ -31,6 +31,10 @@ import (
 // writers (camera, overlays, fade, polar locks) so their field updates never race/clobber.
 var sceneFileMu sync.Mutex
 
+// atomicWriteTmpSuffix is the temp-file suffix writeJSONAtomic uses before renaming into
+// place, so a reader never observes a partially-written file.
+const atomicWriteTmpSuffix = ".tmp"
+
 // debouncedPersister is the generic debounce/coalesce/write machinery every domain
 // persister below embeds ANONYMOUSLY (not as a named field): that lets the `writes` test
 // counter promote through to e.g. `md.vpPersist.writes`. Each domain type keeps its own
@@ -145,7 +149,7 @@ func writeJSONAtomic(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
+	tmp := path + atomicWriteTmpSuffix
 	if err := os.WriteFile(tmp, out, 0644); err != nil {
 		return err
 	}

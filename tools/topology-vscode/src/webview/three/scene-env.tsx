@@ -80,6 +80,9 @@ export function ProceduralEnvProvider({ children }: { children: React.ReactNode 
       skyMat.dispose();
       pmrem.dispose();
     };
+  // Intentionally empty deps: this builds the PMREM texture ONCE on mount (a fixed
+  // procedural sky, not derived from props/state), and disposes it on unmount. Re-running
+  // per render would leak GPU textures/PMREM generators without changing the output.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

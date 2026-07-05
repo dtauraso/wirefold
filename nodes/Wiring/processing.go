@@ -78,6 +78,11 @@ func (g *ProcessingGuard) Process(ctx context.Context, lastVal int, items []Driv
 	// One reused timer for the whole window instead of a fresh time.After per poll
 	// iteration (which allocated and abandoned a Timer every ~1ms). Go 1.23 timer
 	// semantics make Reset safe without manual channel draining. Stop on return.
+	// This create/reset/stop-on-defer lifecycle appears once in this file (a
+	// single Process call owns one timer for its whole window); there is no
+	// second call site to share it with, so it is left inline rather than
+	// wrapped in a helper — a wrapper here would trade three plain lines for an
+	// extra type/function indirection with no reuse to justify it.
 	poll := time.NewTimer(processPollInterval)
 	defer poll.Stop()
 

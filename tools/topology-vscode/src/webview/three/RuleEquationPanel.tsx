@@ -19,17 +19,13 @@ import { useOverlayFlags } from "./overlay-flags";
 import {
   useRuleBuilder,
   usePolarLocks,
-  type RuleBuilderTerm,
   type RuleBuilderState,
-  type PolarLockEntry,
   POLAR_LOCK_KIND_NODE_NODE,
   POLAR_LOCK_KIND_PORT_TORUS,
 } from "./rule-builder";
 import { postGoRecord } from "../vscode-api";
 import {
   encodeClearRule,
-  encodeLockToggleActive,
-  encodeLockSelect,
   encodeDeleteSelectedLock,
   encodeAuthorBegin,
   encodeAuthorNode,
@@ -42,74 +38,28 @@ import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot, nodeLabel } from "./buffer-decode";
 import {
   parseCompInput,
-  compLivePreview,
   resolveNodeRowByLabel,
   listPortsForNode,
   type PortOption,
 } from "./equation-form";
 import { usePortAutocompleteContext } from "./port-autocomplete-context";
-
-/** Angle-chip glyphs for the packed term code (matches gesture.go's ruleTermCode: 0=θ,
- *  1=φ, 2=−θ, 3=−φ, 4=r — positive θ/φ show no sign). */
-const ANGLE_CHIPS = ["θ", "φ", "−θ", "−φ", "r"];
-
-function angleChip(code: number): string {
-  return ANGLE_CHIPS[code] ?? "?";
-}
-
-// ── Typed "+ Add equation" entry — fill-in-the-blank on the equation itself ────────────────
-//
-// Typing REPLACES clicking; each blank's resolved token fires the matching Author* wire action
-// (fire-and-forget), exactly like a click. Blank order for node=node is
-// center, nodeA, compA, nodeB, compB (`active` 0..4); Go's builder latches comp-then-node per
-// term, so this form BUFFERS the term's node blank locally (pendingNodeRow/pendingNodeLabel)
-// until the following comp blank resolves, then sends encodeAuthorLatch(comp,sign) followed by
-// encodeAuthorNode(nodeRow) in that order — center is a lone AuthorNode with nothing buffered.
-// Blank order for port∈torus is portNode, portName (autocomplete), torusNode (`active` 0..2);
-// torusNode is the final blank — its delimiter no longer auto-commits, ENTER commits the pair
-// and closes the typed session (see onBlankEnter).
-
-const NN_CENTER = 0;
-const NN_NODE_A = 1;
-const NN_COMP_A = 2;
-const NN_NODE_B = 3;
-const NN_COMP_B = 4;
-
-const PT_PORT_NODE = 0;
-const PT_PORT_NAME = 1;
-const PT_TORUS_NODE = 2;
-
-interface TypedFormState {
-  kind: number; // POLAR_LOCK_KIND_NODE_NODE | POLAR_LOCK_KIND_PORT_TORUS
-  active: number; // blank index — semantics depend on kind (NN_* / PT_*)
-  text: string;
-  // node=node: the node blank of the term currently in progress, buffered until its
-  // following comp blank resolves (Go latches comp-then-node, the form fills node-then-comp).
-  pendingNodeRow: number;
-  pendingNodeLabel: string;
-  // port∈torus: the portNode blank's resolved row/label, buffered until AuthorPort is sent
-  // (once the portName blank resolves) — same buffering shape as node=node's pendingNode*.
-  portOptions: PortOption[];
-  portHighlight: number;
-}
-
-function beginForm(kind: number): TypedFormState {
-  return {
-    kind,
-    active: 0,
-    text: "",
-    pendingNodeRow: -1,
-    pendingNodeLabel: "",
-    portOptions: [],
-    portHighlight: 0,
-  };
-}
-
-function filteredPortOptions(f: TypedFormState): PortOption[] {
-  const t = f.text.trim().toLowerCase();
-  if (!t) return f.portOptions;
-  return f.portOptions.filter((o) => o.name.toLowerCase().includes(t));
-}
+import {
+  beginForm,
+  filteredPortOptions,
+  type TypedFormState,
+  NN_CENTER,
+  NN_NODE_A,
+  NN_COMP_A,
+  NN_NODE_B,
+  NN_COMP_B,
+  PT_PORT_NODE,
+  PT_PORT_NAME,
+  PT_TORUS_NODE,
+} from "./rule-eq-types";
+import { renderTypedNodeNode } from "./TypedNodeNodeForm";
+import { renderTypedPortTorus } from "./TypedPortTorusForm";
+import { renderBuilder } from "./RuleEquationBuilderPreview";
+import { CommittedEquationsList } from "./CommittedEquationsList";
 
 export function RuleEquationPanel() {
   const overlays = useOverlayFlags();
@@ -379,133 +329,6 @@ export function RuleEquationPanel() {
     setForm(null);
   }
 
-  /** Renders an inline `<input>` sitting where a blank's value would otherwise be printed —
-   *  same rule-eq-node/rule-eq-angle classes as the resolved/awaiting spans, so the active
-   *  blank visually matches the rest of the equation. */
-  function renderBlankInput(
-    text: string,
-    placeholder: string,
-    cls: string,
-    onChange: (t: string) => void,
-    onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void,
-  ) {
-    return (
-      <input
-        autoFocus
-        className={"rule-eq-blank-input " + cls}
-        size={Math.max(placeholder.length, text.length, 2)}
-        value={text}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-      />
-    );
-  }
-
-  /** A dim placeholder shown in a blank that isn't filled yet (and isn't the active input),
-   *  so every field advertises what it expects (node… / θ/φ/r / port… / torus…) at all times. */
-  const hint = (t: string) => <span className="rule-eq-hint">{t}</span>;
-
-  /** Renders the node=node typed session as the equation itself, in parens notation:
-   *  `Center: [center]` then `( [nodeA] , [compA] ) = ( [nodeB] , [compB] )`. Resolved blanks
-   *  come from rb (the same Go-streamed state a click drives); the blank currently being typed
-   *  is an inline input; a term's node blank shows its buffered (not-yet-sent) value once the
-   *  form has moved on to that term's comp blank; unreached blanks show `_`. */
-  function renderTypedNodeNode(f: TypedFormState, rb: RuleBuilderState | null) {
-    const centerLabel =
-      f.active === NN_CENTER
-        ? renderBlankInput(f.text, "node…", "rule-eq-node", onNodeBlankChange, onBlankEnter)
-        : rb?.centerLabel || hint("node…");
-    const termA = rb?.terms[0] ?? null;
-    const termB = rb?.terms[1] ?? null;
-    const nodeACell =
-      f.active === NN_NODE_A
-        ? renderBlankInput(f.text, "node…", "rule-eq-node", onNodeBlankChange, onBlankEnter)
-        : (termA?.label ?? (f.active > NN_NODE_A ? f.pendingNodeLabel : hint("node…")));
-    const compACell =
-      f.active === NN_COMP_A
-        ? renderBlankInput(compLivePreview(f.text), "θ/φ/r", "rule-eq-angle", onCompBlankChange, onBlankEnter)
-        : (termA != null ? angleChip(termA.code) : hint("θ/φ/r"));
-    const nodeBCell =
-      f.active === NN_NODE_B
-        ? renderBlankInput(f.text, "node…", "rule-eq-node", onNodeBlankChange, onBlankEnter)
-        : (termB?.label ?? (f.active > NN_NODE_B ? f.pendingNodeLabel : hint("node…")));
-    const compBCell =
-      f.active === NN_COMP_B
-        ? renderBlankInput(compLivePreview(f.text), "θ/φ/r", "rule-eq-angle", onCompBlankChange, onBlankEnter)
-        : (termB != null ? angleChip(termB.code) : hint("θ/φ/r"));
-    return (
-      <>
-        <div className="rule-eq-center">Center: {centerLabel}</div>
-        <div className="rule-eq-equation">
-          <span className="rule-eq-term">
-            (<span className="rule-eq-node">{nodeACell}</span>,<span className="rule-eq-angle">{compACell}</span>)
-          </span>
-          <span className="rule-eq-op"> = </span>
-          <span className="rule-eq-term">
-            (<span className="rule-eq-node">{nodeBCell}</span>,<span className="rule-eq-angle">{compBCell}</span>)
-          </span>
-        </div>
-      </>
-    );
-  }
-
-  /** Renders the port∈torus typed session as the equation itself, in the same notation
-   *  renderPortTorus uses: `( [portNode] , [portName] ) ∈ ◯ [torusNode]`. The portName blank
-   *  keeps its option-list autocomplete under the input. */
-  function renderTypedPortTorus(f: TypedFormState, rb: RuleBuilderState | null) {
-    const portNodeCell =
-      f.active === PT_PORT_NODE
-        ? renderBlankInput(f.text, "node…", "rule-eq-node", onPortTorusNodeBlankChange, onBlankEnter)
-        : (rb?.pendingPort?.nodeLabel ?? f.pendingNodeLabel) || hint("node…");
-    const opts = filteredPortOptions(f);
-    const portNameCell =
-      f.active === PT_PORT_NAME ? (
-        <span className="rule-eq-typed-input-wrap">
-          <input
-            autoFocus
-            className="rule-eq-blank-input rule-eq-angle"
-            size={Math.max(4, f.text.length)}
-            value={f.text}
-            placeholder="port…"
-            onChange={(e) => onPortNameBlankChange(e.target.value)}
-            onKeyDown={onPortNameKeyDown}
-          />
-          <span className="rule-eq-form-autocomplete">
-            {opts.map((o, oi) => (
-              <span
-                key={o.row}
-                className={"rule-eq-form-option" + (oi === f.portHighlight ? " rule-eq-form-option--hl" : "")}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  selectPortOption(f, o);
-                }}
-              >
-                {o.isInput ? "in" : "out"}:{o.name}
-              </span>
-            ))}
-          </span>
-        </span>
-      ) : rb?.pendingPort ? (
-        `${rb.pendingPort.isInput ? "in" : "out"}:${rb.pendingPort.label}`
-      ) : (
-        hint("port…")
-      );
-    const torusNodeCell =
-      f.active === PT_TORUS_NODE
-        ? renderBlankInput(f.text, "torus…", "rule-eq-node", onPortTorusNodeBlankChange, onBlankEnter)
-        : rb?.pendingTorus?.label || hint("torus…");
-    return (
-      <div className="rule-eq-equation">
-        <span className="rule-eq-term">
-          (<span className="rule-eq-node">{portNodeCell}</span>,<span className="rule-eq-angle">{portNameCell}</span>)
-          {" ∈ ◯ "}
-          <span className="rule-eq-node">{torusNodeCell}</span>
-        </span>
-      </div>
-    );
-  }
-
   // The committed-equations LIST keys off the rule-builder's STICKY panel Center
   // (rb.centerRow, gesture.go md.ruleCenter) rather than the transient click highlight
   // (Node.Selected / useSelectedNodeRow): it shows whenever the sticky center participates
@@ -611,167 +434,27 @@ export function RuleEquationPanel() {
       </div>
       {form && (
         <>
-          {form.kind === POLAR_LOCK_KIND_PORT_TORUS ? renderTypedPortTorus(form, rb) : renderTypedNodeNode(form, rb)}
+          {form.kind === POLAR_LOCK_KIND_PORT_TORUS
+            ? renderTypedPortTorus(
+                form,
+                rb,
+                onPortTorusNodeBlankChange,
+                onPortNameBlankChange,
+                onPortNameKeyDown,
+                selectPortOption,
+                onBlankEnter,
+              )
+            : renderTypedNodeNode(form, rb, onNodeBlankChange, onCompBlankChange, onBlankEnter)}
           <button className="rule-eq-clear" onClick={cancelForm}>
             Cancel
           </button>
         </>
       )}
       {showBuilder && rb && renderBuilder(rb)}
-      {showList && (
-        <div className="rule-eq-list">
-          {rowEquations.map((eq) => renderLockRow(eq, eq.selected))}
-        </div>
-      )}
+      {showList && <CommittedEquationsList rowEquations={rowEquations} />}
         </>
       )}
     </div>,
     mount,
   );
-}
-
-/** Renders the in-progress equation-being-authored section (the selSpherePoles session).
- *  A `port ∈ torus` authoring capture (rb.pendingPort/rb.pendingTorus) is INDEPENDENT of
- *  the node/node pending term above — if either side is picked, render the port∈torus
- *  in-progress form instead of the node/node builder preview. */
-function renderBuilder(rb: RuleBuilderState) {
-  if (rb.pendingPort != null || rb.pendingTorus != null) {
-    return renderPortTorusBuilder(rb);
-  }
-  // Left term = the first completed term, or (when none completed yet) the pending
-  // half-term itself — "show the handhold being selected" before any node is picked.
-  const leftTerm = rb.terms[0] ?? null;
-  const rightTerm = rb.terms[1] ?? null;
-  // The pending half-term slots in wherever a term is still missing: after the left term
-  // (awaiting the second handhold) or as the left term itself (nothing completed yet).
-  const pendingSlot: "left" | "right" | null =
-    rb.pending == null ? null : leftTerm == null ? "left" : rightTerm == null ? "right" : null;
-
-  // The clear button is armed only when there is an in-progress equation to discard (a
-  // pending half-term or at least one completed term). Go owns the state; the button just
-  // sends the bare clear command (fire-and-forget).
-  const hasInProgress = rb.pending != null || rb.terms.length > 0;
-
-  return (
-    <>
-      <div className="rule-eq-equation">
-        {renderTerm(leftTerm, pendingSlot === "left" ? rb.pending!.code : null)}
-        {(rightTerm != null || pendingSlot === "right") && (
-          <>
-            <span className="rule-eq-op"> = </span>
-            {renderTerm(rightTerm, pendingSlot === "right" ? rb.pending!.code : null)}
-          </>
-        )}
-      </div>
-      <button
-        className="rule-eq-clear"
-        disabled={!hasInProgress}
-        title="Clear the equation being built"
-        onClick={() => postGoRecord(encodeClearRule())}
-      >
-        Clear
-      </button>
-    </>
-  );
-}
-
-/** Renders the in-progress `port ∈ torus` authoring capture: whichever side has been
- *  picked (port or torus) shows its label; the other side shows the same `_` placeholder
- *  style as the node/node pending-term preview (renderTerm's awaiting slot). Mirrors
- *  renderPortTorus's committed syntax so the preview reads identically once it commits. */
-function renderPortTorusBuilder(rb: RuleBuilderState) {
-  const portSide = rb.pendingPort ? (rb.pendingPort.isInput ? "in" : "out") : null;
-  const hasInProgress = rb.pendingPort != null || rb.pendingTorus != null;
-  return (
-    <>
-      <div className="rule-eq-equation">
-        <span className="rule-eq-term rule-eq-term--pending">
-          (
-          <span className="rule-eq-node">{rb.pendingPort ? rb.pendingPort.nodeLabel : "_"}</span>
-          ,
-          <span className="rule-eq-angle">{rb.pendingPort ? `${portSide}:${rb.pendingPort.label}` : "_"}</span>
-          ) ∈ ◯
-          <span className="rule-eq-node">{rb.pendingTorus ? rb.pendingTorus.label : "_"}</span>
-        </span>
-      </div>
-      <button
-        className="rule-eq-clear"
-        disabled={!hasInProgress}
-        title="Clear the equation being built"
-        onClick={() => postGoRecord(encodeClearRule())}
-      >
-        Clear
-      </button>
-    </>
-  );
-}
-
-/** Renders one committed polar-equation lock row: activate/deactivate checkbox + the
- *  symbolic equation. Clicking the row (not the checkbox) focuses it (edit-update
- *  lock/selected); the checkbox toggles active (edit-update lock/active). */
-function renderLockRow(eq: PolarLockEntry, selected: boolean) {
-  const cls = ["rule-eq-row", selected ? "rule-eq-row--selected" : "", eq.active ? "" : "rule-eq-row--inactive"]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <div
-      key={eq.index}
-      className={cls}
-      onClick={() => postGoRecord(encodeLockSelect(eq.index))}
-    >
-      <input
-        type="checkbox"
-        checked={eq.active}
-        onClick={(e) => e.stopPropagation()}
-        onChange={() => postGoRecord(encodeLockToggleActive(eq.index))}
-      />
-      <span className="rule-eq-equation">
-        {eq.kind === POLAR_LOCK_KIND_PORT_TORUS
-          ? renderPortTorus(eq)
-          : (
-            <>
-              {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
-              <span className="rule-eq-op"> = </span>
-              {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
-            </>
-          )}
-      </span>
-    </div>
-  );
-}
-
-/** Renders a `port ∈ torus` membership lock: (nodeLabel,side) ∈ ◯torusLabel. Rendered
- *  distinctly from the (node,comp)=(node,comp) tuple form above — there is no equals sign,
- *  this is a membership relation, not an equation between two terms. STAGE 1 display only
- *  (no geometric effect). */
-function renderPortTorus(eq: PolarLockEntry) {
-  const side = eq.portIsInput ? "in" : "out";
-  return (
-    <span className="rule-eq-term">
-      (<span className="rule-eq-node">{eq.portNodeLabel || "?"}</span>,{side}:{eq.portLabel || "?"}) ∈ ◯
-      <span className="rule-eq-node">{eq.torusLabel || "?"}</span>
-    </span>
-  );
-}
-
-/** Renders one term slot: a completed term (filled), a pending half-term (node slot
- *  empty, angle chip highlighted — "show the handhold being selected"), or nothing. */
-function renderTerm(term: RuleBuilderTerm | null, pendingCode: number | null) {
-  if (term != null) {
-    return (
-      <span className="rule-eq-term">
-        (<span className="rule-eq-node">{term.label}</span>,
-        <span className="rule-eq-angle">{angleChip(term.code)}</span>)
-      </span>
-    );
-  }
-  if (pendingCode != null) {
-    return (
-      <span className="rule-eq-term rule-eq-term--pending">
-        (<span className="rule-eq-node rule-eq-node--awaiting">_</span>,
-        <span className="rule-eq-angle rule-eq-angle--pending">{angleChip(pendingCode)}</span>)
-      </span>
-    );
-  }
-  return null;
 }
