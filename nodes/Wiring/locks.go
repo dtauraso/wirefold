@@ -519,6 +519,7 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 	locks := make([]T.PolarLockPayload, len(eqsSnap))
 	for i, eq := range eqsSnap {
 		selected := containsInt(md.selectedLocks, i)
+		owned := eqOwner(eq) == md.ruleCenter
 		if eq.Kind == eqPortTorus {
 			locks[i] = T.PolarLockPayload{
 				Active:      eq.Active,
@@ -528,6 +529,7 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 				PortIsInput: eq.PortIsInput,
 				TorusNode:   eq.TorusNode,
 				Selected:    selected,
+				Owned:       owned,
 			}
 			continue
 		}
@@ -540,11 +542,23 @@ func (md *MoveDispatch) emitPolarLocks(tr *T.Trace) {
 			Active:   eq.Active,
 			Kind:     int(eqNodeNode),
 			Selected: selected,
+			Owned:    owned,
 		}
 	}
 	// Per-row Selected is now authoritative; the scalar index is kept for wire-shape
 	// stability only (set to -1, unused by consumers).
 	tr.PolarLocks(locks, -1)
+}
+
+// eqOwner returns the single node id that owns eq for the equation panel: Center for
+// eqNodeNode, TorusNode (the "owning node" a port∈torus lock is authored against — see
+// trySelectSphereRule's torus-hit case) for eqPortTorus. An equation belongs to exactly one
+// center; the panel shows a row iff eqOwner(eq) == the panel's current center (md.ruleCenter).
+func eqOwner(eq polarEq) string {
+	if eq.Kind == eqPortTorus {
+		return eq.TorusNode
+	}
+	return eq.Center
 }
 
 // containsInt reports whether v is present in xs.
@@ -595,7 +609,9 @@ func (md *MoveDispatch) pruneSelectionOffCenter(center string, tr *T.Trace) {
 	next := make([]int, 0, len(md.selectedLocks))
 	changed := false
 	for _, i := range md.selectedLocks {
-		if i >= 0 && i < len(eqsSnap) && eqsSnap[i].Center == center {
+		// Same ownership definition the panel's Owned bit uses (eqOwner): node-node → Center,
+		// port-torus → TorusNode. Display and selection must agree on which center owns an eq.
+		if i >= 0 && i < len(eqsSnap) && eqOwner(eqsSnap[i]) == center {
 			next = append(next, i)
 		} else {
 			changed = true

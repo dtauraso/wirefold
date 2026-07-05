@@ -623,6 +623,9 @@ func (md *MoveDispatch) authorNode(node string, tr *T.Trace) {
 	md.ruleCenter = node
 	md.pruneSelectionOffCenter(node, tr)
 	md.emitRuleBuilder(tr)
+	// Center changed → Owned bits are stale; re-emit so the panel tracks the new Center
+	// (pruneSelectionOffCenter only re-emits when it prunes). Same reason as applySelect.
+	md.emitPolarLocks(tr)
 }
 
 // commitPolarEq appends a fully-formed eqNodeNode polar equation and performs the FOUR steps
@@ -933,6 +936,11 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	// (CenterRow/centerLabel) tracking the panel. The in-progress builder UI itself stays
 	// gated on the selSpherePoles overlay in TS; this only keeps the data fresh underneath it.
 	md.emitRuleBuilder(tr)
+	// Each equation's Owned bit is (eqOwner == ruleCenter), so a Center change makes every
+	// bit stale — re-emit the polar-lock block so the panel (which shows owned rows only)
+	// reflects the new Center. pruneSelectionOffCenter above only re-emits when it prunes a
+	// selection, so this is required for the no-selection case.
+	md.emitPolarLocks(tr)
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

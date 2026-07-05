@@ -234,8 +234,8 @@ func TestEventEnumValues(t *testing.T) {
 
 func TestSetPolarLockRow(t *testing.T) {
 	buf := make([]byte, BufPolarLockStride*2)
-	SetPolarLockRow(buf, 0, 3, 1, 0, 2, 2, 1, 0, -1, 0, -1, 1)      // node/node, active, selected
-	SetPolarLockRow(buf, 1, -1, -1, 255, -1, 255, 0, 1, 5, 1, 3, 0) // eqPortTorus, inactive, unselected
+	SetPolarLockRow(buf, 0, 3, 1, 0, 2, 2, 1, 0, -1, 0, -1, 1, 1)      // node/node, active, selected, owned
+	SetPolarLockRow(buf, 1, -1, -1, 255, -1, 255, 0, 1, 5, 1, 3, 0, 0) // eqPortTorus, inactive, unselected, unowned
 
 	assertI32At(t, buf, BufPolarLockColCenterRow, 3, "row0.CenterRow")
 	assertI32At(t, buf, BufPolarLockColARow, 1, "row0.ARow")
@@ -245,6 +245,7 @@ func TestSetPolarLockRow(t *testing.T) {
 	assertU8At(t, buf, BufPolarLockColActive, 1, "row0.Active")
 	assertU8At(t, buf, BufPolarLockColKind, 0, "row0.Kind")
 	assertU8At(t, buf, BufPolarLockColSelected, 1, "row0.Selected")
+	assertU8At(t, buf, BufPolarLockColOwned, 1, "row0.Owned")
 
 	base := BufPolarLockStride
 	assertI32At(t, buf, base+BufPolarLockColCenterRow, -1, "row1.CenterRow")
@@ -258,12 +259,13 @@ func TestSetPolarLockRow(t *testing.T) {
 	assertU8At(t, buf, base+BufPolarLockColPortIsInput, 1, "row1.PortIsInput")
 	assertI32At(t, buf, base+BufPolarLockColTorusRow, 3, "row1.TorusRow")
 	assertU8At(t, buf, base+BufPolarLockColSelected, 0, "row1.Selected")
+	assertU8At(t, buf, base+BufPolarLockColOwned, 0, "row1.Owned")
 }
 
 func TestPolarLockStrideIsPackedSize(t *testing.T) {
 	// PolarLock block: 5×i32 (CenterRow/ARow/BRow/PortRow/TorusRow) +
-	// 6×u8 (ACode/BCode/Active/Kind/PortIsInput/Selected) = 26
-	want := 5*4 + 6
+	// 7×u8 (ACode/BCode/Active/Kind/PortIsInput/Selected/Owned) = 27
+	want := 5*4 + 7
 	if BufPolarLockStride != want {
 		t.Errorf("BufPolarLockStride = %d, want %d (packed size)", BufPolarLockStride, want)
 	}
