@@ -47,7 +47,8 @@ export function AxisLabel({ text, color, position, size }: {
   const texture = useMemo(() => {
     const c = document.createElement("canvas");
     c.width = 256; c.height = 64;
-    const ctx = c.getContext("2d")!;
+    const ctx = c.getContext("2d");
+    if (!ctx) return new THREE.CanvasTexture(c);
     ctx.font = "bold 44px sans-serif";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillStyle = color;

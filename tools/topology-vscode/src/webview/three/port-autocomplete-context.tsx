@@ -19,11 +19,12 @@ export interface PortAutocompleteCtxValue {
   setValue: (v: PortAutocompleteUI | null) => void;
 }
 
-const noop = () => {};
-
+// Default setValue is a no-op: this context is always given a real setValue by the Root
+// provider (main.tsx) before any consumer mounts, so the default is never actually invoked.
+// It exists purely to satisfy createContext's required shape without an `as any` cast.
 export const PortAutocompleteContext = createContext<PortAutocompleteCtxValue>({
   value: null,
-  setValue: noop,
+  setValue: () => {},
 });
 
 export function usePortAutocompleteContext(): PortAutocompleteCtxValue {
