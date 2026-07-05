@@ -63,6 +63,173 @@ const windowTicks = int64(WindowMs / Wiring.MsPerTick)
 // fireDwellTicks is FireDwellMs converted to a tick count.
 const fireDwellTicks = int64(FireDwellMs / Wiring.MsPerTick)
 
+// gateWindow holds the window/dwell timing state for one RunGate loop instance.
+// It is local to a single call (not part of GateNode) since it is pure loop-scoped
+// bookkeeping, not node-shared state.
+type gateWindow struct {
+	t0         int64
+	t0Set      bool
+	dwellStart int64
+	dwellSet   bool
+}
+
+// drainLatestReal consumes ALL queued beads on a side and returns the most-recent
+// REAL value (discarding NoValue placeholders). got=false when nothing real was queued.
+func drainLatestReal(in *Wiring.In) (int, bool) {
+	v, got := NoValue, false
+	for {
+		nv, ok := in.PollRecv()
+		if !ok {
+			break
+		}
+		if nv != NoValue {
+			v = nv
+			got = true
+		}
+	}
+	return v, got
+}
+
+// emitInputs reports the currently-held interior bead values (NoValue where a side
+// isn't held yet).
+func emitInputs(g *GateNode) {
+	l, r := NoValue, NoValue
+	if g.HasLeft {
+		l = g.Left
+	}
+	if g.HasRight {
+		r = g.Right
+	}
+	if g.EmitInputBeads != nil {
+		g.EmitInputBeads(l, r)
+	}
+}
+
+// clearWindow discards both held inputs without firing: resets the has-input flags
+// and the window-open state. Breadcrumb on FromLeft (the consistent logging point).
+func clearWindow(g *GateNode, w *gateWindow) {
+	g.FromLeft.Breadcrumb("window_clear", "")
+	g.HasLeft = false
+	g.HasRight = false
+	w.t0Set = false
+}
+
+// captureLeft drains FromLeft and, if a real value arrived, applies the invertLeft
+// inversion and stores it (only if it changed the held value/presence). Returns
+// true when the held state changed and inputs should be re-emitted.
+func captureLeft(g *GateNode, invertLeft bool) bool {
+	v, got := drainLatestReal(g.FromLeft)
+	if !got {
+		return false
+	}
+	var stored int
+	if invertLeft {
+		stored = 1 - v // NOT the left input
+	} else {
+		stored = v
+	}
+	if !g.HasLeft || g.Left != stored {
+		g.Left = stored
+		g.HasLeft = true
+		return true
+	}
+	return false
+}
+
+// captureRight drains FromRight and, if a real value arrived, applies the
+// complementary (NOT invertLeft) inversion and stores it. Returns true when the
+// held state changed and inputs should be re-emitted.
+func captureRight(g *GateNode, invertLeft bool) bool {
+	v, got := drainLatestReal(g.FromRight)
+	if !got {
+		return false
+	}
+	var stored int
+	if !invertLeft {
+		stored = 1 - v // NOT the right input
+	} else {
+		stored = v
+	}
+	if !g.HasRight || g.Right != stored {
+		g.Right = stored
+		g.HasRight = true
+		return true
+	}
+	return false
+}
+
+// openWindowIfNeeded opens the coincidence window on the first input to arrive.
+func openWindowIfNeeded(g *GateNode, w *gateWindow, now func() int64) {
+	if (g.HasLeft || g.HasRight) && !w.t0Set {
+		w.t0 = now()
+		w.t0Set = true
+		// Breadcrumb the window-open instant. t0 is now captured against the
+		// clock, so an observer that waits for this before advancing the sim
+		// clock can't race the t0 = now() read (deterministic test sync).
+		g.FromLeft.Breadcrumb("window_open", "")
+	}
+}
+
+// tryFireOnDwell handles the both-inputs-held case: it starts the fire-dwell timer
+// on first entry, and once the dwell has elapsed, fires the AND result and resets
+// the held/window/dwell state. Returns true if it fired (caller should `continue`
+// its loop iteration without also running the window-timeout check).
+func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() int64) bool {
+	if !(g.HasLeft && g.HasRight) {
+		return false
+	}
+	// Both inputs held: dwell so both interior beads are visible before the gate
+	// resolves. Once committed to the dwell, the window-timeout is gated off so it
+	// can't clip the fire.
+	if !w.dwellSet {
+		w.dwellStart = now()
+		w.dwellSet = true
+		// Breadcrumb the dwell-start instant. dwellStart is now captured against
+		// the clock, so an observer can wait for this before advancing the sim
+		// clock without racing the dwellStart = now() read.
+		g.FromLeft.Breadcrumb("dwell_start", "")
+	}
+	if now()-w.dwellStart < fireDwellTicks {
+		return false
+	}
+	// AND gate over the stored values (each side already applied its inversion on
+	// capture); fires 1 iff Left==1 AND Right==1.
+	result := 0
+	if g.Left == 1 && g.Right == 1 {
+		result = 1
+	}
+	if g.Fire != nil {
+		g.Fire()
+	}
+	g.HasLeft = false
+	g.HasRight = false
+	w.t0Set = false
+	w.dwellSet = false
+	emitInputs(g)
+	g.ToPassed.EmitOneDriven(ctx, result)
+	return true
+}
+
+// defaultTick returns a wall-clock-derived tick function for use when GateNode.Tick
+// is unset (unit tests with no loader).
+func defaultTick() func() int64 {
+	start := time.Now()
+	return func() int64 { return int64(time.Since(start) / (Wiring.MsPerTick * time.Millisecond)) }
+}
+
+// defaultPark returns a wall-clock park function for use when GateNode.WaitTick is
+// unset (unit tests with no loader).
+func defaultPark() func(ctx context.Context, _ int64) error {
+	return func(ctx context.Context, _ int64) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(PollIntervalTicks * Wiring.MsPerTick * time.Millisecond):
+			return nil
+		}
+	}
+}
+
 // RunGate runs the shared window-and-inhibit gate loop.
 // invertLeft=true  → the LEFT input is NOT-inverted on capture  (WindowAndInhibitLeftGate).
 // invertLeft=false → the RIGHT input is NOT-inverted on capture (WindowAndInhibitRightGate).
@@ -73,67 +240,16 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 
 	now := g.Tick
 	if now == nil {
-		start := time.Now()
-		now = func() int64 { return int64(time.Since(start) / (Wiring.MsPerTick * time.Millisecond)) }
+		now = defaultTick()
 	}
 
 	park := g.WaitTick
 	if park == nil {
-		park = func(ctx context.Context, _ int64) error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(PollIntervalTicks * Wiring.MsPerTick * time.Millisecond):
-				return nil
-			}
-		}
+		park = defaultPark()
 	}
 
-	var t0 int64
-	var t0Set bool
-	var dwellStart int64
-	var dwellSet bool
-
-	emitInputs := func() {
-		l, r := NoValue, NoValue
-		if g.HasLeft {
-			l = g.Left
-		}
-		if g.HasRight {
-			r = g.Right
-		}
-		if g.EmitInputBeads != nil {
-			g.EmitInputBeads(l, r)
-		}
-	}
-	emitInputs() // initial empty interior
-
-	// drainLatestReal consumes ALL queued beads on a side and returns the
-	// most-recent REAL value (discarding NoValue placeholders). got=false when
-	// nothing real was queued.
-	drainLatestReal := func(in *Wiring.In) (int, bool) {
-		v, got := NoValue, false
-		for {
-			nv, ok := in.PollRecv()
-			if !ok {
-				break
-			}
-			if nv != NoValue {
-				v = nv
-				got = true
-			}
-		}
-		return v, got
-	}
-
-	// clear discards both held inputs without firing: resets the has-input
-	// flags. Breadcrumb on FromLeft (the consistent logging point).
-	clear := func() {
-		g.FromLeft.Breadcrumb("window_clear", "")
-		g.HasLeft = false
-		g.HasRight = false
-		t0Set = false
-	}
+	var w gateWindow
+	emitInputs(g) // initial empty interior
 
 	for {
 		select {
@@ -145,82 +261,25 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		// Each side tracks the MOST-RECENT real bead: drain to the latest value
 		// (discarding NoValue placeholders) and update the slot even if already
 		// held. NoValue never fills a slot.
-		if v, got := drainLatestReal(g.FromLeft); got {
-			var stored int
-			if invertLeft {
-				stored = 1 - v // NOT the left input
-			} else {
-				stored = v
-			}
-			if !g.HasLeft || g.Left != stored {
-				g.Left = stored
-				g.HasLeft = true
-				emitInputs()
-			}
+		if captureLeft(g, invertLeft) {
+			emitInputs(g)
+		}
+		if captureRight(g, invertLeft) {
+			emitInputs(g)
 		}
 
-		if v, got := drainLatestReal(g.FromRight); got {
-			var stored int
-			if !invertLeft {
-				stored = 1 - v // NOT the right input
-			} else {
-				stored = v
-			}
-			if !g.HasRight || g.Right != stored {
-				g.Right = stored
-				g.HasRight = true
-				emitInputs()
-			}
-		}
+		openWindowIfNeeded(g, &w, now)
 
-		// Window opens on the first input that arrives.
-		if (g.HasLeft || g.HasRight) && !t0Set {
-			t0 = now()
-			t0Set = true
-			// Breadcrumb the window-open instant. t0 is now captured against the
-			// clock, so an observer that waits for this before advancing the sim
-			// clock can't race the t0 = now() read (deterministic test sync).
-			g.FromLeft.Breadcrumb("window_open", "")
-		}
-
-		if g.HasLeft && g.HasRight {
-			// Both inputs held: dwell so both interior beads are visible before
-			// the gate resolves. Once committed to the dwell, the window-timeout
-			// below is gated off so it can't clip the fire.
-			if !dwellSet {
-				dwellStart = now()
-				dwellSet = true
-				// Breadcrumb the dwell-start instant. dwellStart is now captured
-				// against the clock, so an observer can wait for this before
-				// advancing the sim clock without racing the dwellStart = now() read.
-				g.FromLeft.Breadcrumb("dwell_start", "")
-			}
-			if now()-dwellStart >= fireDwellTicks {
-				// AND gate over the stored values (each side already applied its
-				// inversion on capture); fires 1 iff Left==1 AND Right==1.
-				result := 0
-				if g.Left == 1 && g.Right == 1 {
-					result = 1
-				}
-				if g.Fire != nil {
-					g.Fire()
-				}
-				g.HasLeft = false
-				g.HasRight = false
-				t0Set = false
-				dwellSet = false
-				emitInputs()
-				g.ToPassed.EmitOneDriven(ctx, result)
-				continue
-			}
+		if tryFireOnDwell(ctx, g, &w, now) {
+			continue
 		}
 
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held
 		// we are committed to firing after the dwell.
-		if t0Set && !(g.HasLeft && g.HasRight) && now()-t0 > windowTicks {
-			clear()
-			emitInputs()
+		if w.t0Set && !(g.HasLeft && g.HasRight) && now()-w.t0 > windowTicks {
+			clearWindow(g, &w)
+			emitInputs(g)
 		}
 
 		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).

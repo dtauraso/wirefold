@@ -18,21 +18,18 @@ package Wiring
 //     it never blocks the gesture.
 //
 // Two writers touch scene.json (this persister for cameraPolar, writeScene for the rest).
-// sceneFileMu serializes their read-modify-write cycles so neither clobbers the other's
-// fields, and writeScene preserves the Go-owned cameraPolar under the new system.
+// sceneFileMu (scene_persist.go) serializes their read-modify-write cycles so neither
+// clobbers the other's fields, and writeScene preserves the Go-owned cameraPolar under the
+// new system.
+//
+// The debounce/coalesce timer and the JSON read-modify-write/atomic-write plumbing are
+// shared machinery from scene_persist.go (debouncedPersister, sceneReadModifyWrite,
+// writeJSONAtomic) — this file holds only the camera-specific shape.
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 )
-
-// sceneFileMu serializes read-modify-write cycles on view/scene.json across the two
-// writers (this camera persister and writeScene) so their field updates do not race.
-var sceneFileMu sync.Mutex
 
 // viewpointPersistDebounce is how long the current viewpoint must be stable before it is
 // written. A drag emits a viewpoint every pointermove; this coalesces the burst into a
@@ -44,42 +41,27 @@ const viewpointPersistDebounce = 250 * time.Millisecond
 type viewpointPersister struct {
 	path     string        // scene.json path (sceneCameraPath(topologyPath))
 	debounce time.Duration // coalescing window
-	mu       sync.Mutex
-	pending  *scenePolarCamera // latest viewpoint awaiting write; nil when flushed
-	timer    *time.Timer
-	writes   int // count of completed writes (test observability)
+	debouncedPersister[*scenePolarCamera]
 }
 
 // schedule records the latest viewpoint and (re)arms the debounce timer. Each call resets
 // the window, so a continuous drag writes once — after motion stops for `debounce`.
 func (p *viewpointPersister) schedule(v viewpoint) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pending = viewpointToPolar(v)
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
-	}
+	p.arm(p.debounce, viewpointToPolar(v), p.flush)
 }
 
 // flush writes the pending viewpoint to scene.json (read-modify-write, preserving other
 // fields) and clears the pending value. Fire-and-forget: errors are logged, not returned.
 func (p *viewpointPersister) flush() {
-	p.mu.Lock()
-	cam := p.pending
-	p.pending = nil
-	p.mu.Unlock()
-	if cam == nil {
+	cam, has := p.take()
+	if !has || cam == nil {
 		return
 	}
 	if err := writeSceneCameraPolar(p.path, cam); err != nil {
-		fmt.Fprintf(os.Stderr, "scene_camera_persist: write %s: %v\n", p.path, err)
+		logPersistErr("scene_camera_persist", p.path, err)
 		return
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
+	p.recordWrite()
 }
 
 // viewpointToPolar converts an FSM viewpoint to the persisted cameraPolar shape. It is the
@@ -94,32 +76,13 @@ func viewpointToPolar(v viewpoint) *scenePolarCamera {
 
 // writeSceneCameraPolar sets ONLY the cameraPolar field of scene.json, preserving every
 // other field (camera3d, overlay flags, …). If the file/dir is absent it is created with
-// just cameraPolar. Serialized against writeScene via sceneFileMu.
+// just cameraPolar.
 func writeSceneCameraPolar(path string, cam *scenePolarCamera) error {
-	sceneFileMu.Lock()
-	defer sceneFileMu.Unlock()
-
-	obj := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
-		// Best-effort: a malformed existing file is replaced (we cannot preserve fields
-		// we cannot parse), but cameraPolar is still written so the camera persists.
-		_ = json.Unmarshal(raw, &obj)
-	}
 	camJSON, err := json.Marshal(cam)
 	if err != nil {
 		return err
 	}
-	obj["cameraPolar"] = camJSON
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return sceneReadModifyWrite(path, func(obj map[string]json.RawMessage) {
+		obj["cameraPolar"] = camJSON
+	})
 }

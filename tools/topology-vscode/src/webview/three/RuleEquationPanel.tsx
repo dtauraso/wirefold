@@ -14,7 +14,7 @@
 // useState, never sent to Go until a blank resolves.
 
 import { createPortal } from "react-dom";
-import { useState, type KeyboardEvent } from "react";
+import { useState, useEffect, type KeyboardEvent } from "react";
 import { useOverlayFlags } from "./overlay-flags";
 import {
   useRuleBuilder,
@@ -38,7 +38,6 @@ import {
   encodeAuthorTorus,
   encodePreviewPort,
 } from "../../schema/input-layout";
-import { useEffect } from "react";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot, nodeLabel } from "./buffer-decode";
 import {

@@ -14,10 +14,7 @@ package Wiring
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -33,10 +30,7 @@ type anchorKey struct {
 type anchorPersister struct {
 	root     string
 	debounce time.Duration
-	mu       sync.Mutex
-	pending  map[anchorKey]int
-	timer    *time.Timer
-	writes   int
+	debouncedPersister[map[anchorKey]int]
 }
 
 // schedule records the latest anchor index for a port and (re)arms the debounce timer.
@@ -45,35 +39,27 @@ func (p *anchorPersister) schedule(node, port string, isInput bool, anchorID int
 		return
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.pending == nil {
 		p.pending = map[anchorKey]int{}
 	}
 	p.pending[anchorKey{node: node, port: port, isInput: isInput}] = anchorID
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
-	}
+	v := p.pending
+	p.mu.Unlock()
+	p.arm(p.debounce, v, p.flush)
 }
 
 // flush writes every pending anchor to its port file and clears the pending set.
 func (p *anchorPersister) flush() {
-	p.mu.Lock()
-	pend := p.pending
-	p.pending = nil
-	p.mu.Unlock()
-	if len(pend) == 0 {
+	pend, has := p.take()
+	if !has || len(pend) == 0 {
 		return
 	}
 	for k, anchorID := range pend {
 		if err := writePortAnchor(p.root, k.node, k.port, k.isInput, anchorID); err != nil {
-			fmt.Fprintf(os.Stderr, "scene_anchor_persist: write %s/%s: %v\n", k.node, k.port, err)
+			logPersistErr("scene_anchor_persist", k.node+"/"+k.port, err)
 		}
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
+	p.recordWrite()
 }
 
 // writePortAnchor sets ONLY the anchorId field of the port file, preserving the other fields
@@ -84,23 +70,8 @@ func writePortAnchor(root, node, port string, isInput bool, anchorID int) error 
 		dir = "inputs"
 	}
 	path := filepath.Join(root, "nodes", node, dir, port+".json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	obj := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return err
-	}
-	b, _ := json.Marshal(anchorID)
-	obj["anchorId"] = b
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
+		b, _ := json.Marshal(anchorID)
+		obj["anchorId"] = b
+	})
 }

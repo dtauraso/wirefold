@@ -241,60 +241,96 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			case "edit":
 				applyEdit(msg, slotReg, md, tr, treeRoot)
 			case "play":
-				if clk != nil {
-					clk.Resume()
-				}
+				handlePlayMsg(clk)
 			case "pause":
-				if clk != nil {
-					clk.Halt()
-				}
+				handlePauseMsg(clk)
 			case "resend":
-				if md != nil {
-					md.ResendGeometry(ctx, tr)
-				}
+				handleResendMsg(ctx, md, tr)
 			case "raw-input":
-				// Raw pointer/wheel event (Phase 6): hand it to the gesture state machine,
-				// which owns gesture bookkeeping and produces camera/topology changes.
-				// Fire-and-forget — nothing on this seam triggers delivery.
-				if md != nil && msg.Event != nil {
-					md.HandleRawInput(*msg.Event, slotReg, tr)
-				}
+				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
-				// Bare SAVE command: Go persists its OWN authoritative scene state. The
-				// camera pose is already continuously flushed (scene_camera_persist.go); this
-				// writes Go's current overlay-visibility snapshot to scene.json, preserving the
-				// Go-owned cameraPolar. No document crosses the bridge. Route through the
-				// persister so it uses the correct sceneCameraPath-resolved path.
-				if md != nil {
-					md.overlaysPersist.schedule(md.ov)
-					md.locksPersist.schedule(md.polarEqsSnap())
-					// Persist the scene sphere immediately (not debounced) so save reliably
-					// activates the polar-load path (scene_sphere_persist.go LoadSceneSphere) —
-					// until the sphere is in scene.json, reload stays on cartesian x/y/z.
-					md.spherePersist.flushNow(md.sceneSphere)
-				}
+				handleSaveMsg(md)
 			case "fade-toggle":
-				// Bare FADE command: toggle fade on the Go-owned current selection. Go owns
-				// selection + topology, so TS sends no id — MoveDispatch resolves the selected
-				// node/edge, flips its fade seed, and emits the new faded sets. Fire-and-forget.
-				if md != nil {
-					md.ToggleFadeSelection(tr)
-				}
+				handleFadeToggleMsg(md, tr)
 			case "clear-rule":
-				// Bare CLEAR command: discard the in-progress polar equation (pending term +
-				// accumulated terms) the rule-builder is authoring. Go owns the state; it
-				// resets it and re-emits the RuleBuilder block so the panel clears.
-				if md != nil {
-					md.clearRuleBuilding(tr)
-				}
+				handleClearRuleMsg(md, tr)
 			case "delete-selected-lock":
-				// Bare DELETE command: delete the panel-focused committed polar-equation lock
-				// (selectedLocks). Go re-guards (only deletes when deactivated).
-				if md != nil {
-					md.DeleteSelectedLock(tr)
-				}
+				handleDeleteSelectedLockMsg(md, tr)
 			}
 		}
+	}
+}
+
+// handlePlayMsg resumes the clock's global gate (bead delivery starts). clk may be nil.
+func handlePlayMsg(clk Clock) {
+	if clk != nil {
+		clk.Resume()
+	}
+}
+
+// handlePauseMsg halts the clock's global gate (bead delivery freezes). clk may be nil.
+func handlePauseMsg(clk Clock) {
+	if clk != nil {
+		clk.Halt()
+	}
+}
+
+// handleResendMsg re-emits the full current node + edge geometry from the held
+// authoritative state, for a freshly-(re)mounted webview recovering its edge-geometry
+// store without restarting Go.
+func handleResendMsg(ctx context.Context, md *MoveDispatch, tr *T.Trace) {
+	if md != nil {
+		md.ResendGeometry(ctx, tr)
+	}
+}
+
+// handleRawInputMsg hands a raw pointer/wheel event + stateless raycast hit to the
+// gesture state machine, which owns gesture bookkeeping and produces camera/topology
+// changes. Fire-and-forget — nothing on this seam triggers delivery.
+func handleRawInputMsg(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
+	if md != nil && msg.Event != nil {
+		md.HandleRawInput(*msg.Event, slotReg, tr)
+	}
+}
+
+// handleSaveMsg persists Go's OWN authoritative scene state (overlay visibility,
+// polar-equation locks, and the scene sphere) in response to the bare "save" command.
+// The camera pose is already continuously flushed elsewhere (scene_camera_persist.go).
+func handleSaveMsg(md *MoveDispatch) {
+	if md == nil {
+		return
+	}
+	md.overlaysPersist.schedule(md.ov)
+	md.locksPersist.schedule(md.polarEqsSnap())
+	// Persist the scene sphere immediately (not debounced) so save reliably activates
+	// the polar-load path (scene_sphere_persist.go LoadSceneSphere) — until the sphere
+	// is in scene.json, reload stays on cartesian x/y/z.
+	md.spherePersist.flushNow(md.sceneSphere)
+}
+
+// handleFadeToggleMsg toggles fade on the Go-owned current selection. Go owns selection
+// + topology, so TS sends no id — MoveDispatch resolves the selected node/edge, flips
+// its fade seed, and emits the new faded sets. Fire-and-forget.
+func handleFadeToggleMsg(md *MoveDispatch, tr *T.Trace) {
+	if md != nil {
+		md.ToggleFadeSelection(tr)
+	}
+}
+
+// handleClearRuleMsg discards the in-progress polar equation (pending term +
+// accumulated terms) the rule-builder is authoring. Go owns the state; it resets it and
+// re-emits the RuleBuilder block so the panel clears.
+func handleClearRuleMsg(md *MoveDispatch, tr *T.Trace) {
+	if md != nil {
+		md.clearRuleBuilding(tr)
+	}
+}
+
+// handleDeleteSelectedLockMsg deletes the panel-focused committed polar-equation lock
+// (selectedLocks). Go re-guards (only deletes when deactivated).
+func handleDeleteSelectedLockMsg(md *MoveDispatch, tr *T.Trace) {
+	if md != nil {
+		md.DeleteSelectedLock(tr)
 	}
 }
 

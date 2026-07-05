@@ -12,36 +12,38 @@ package Wiring
 //
 // WRITE side: ToggleFadeSelection schedules a debounced read-modify-write that replaces only
 // fadedNodes/fadedEdges, preserving cameraPolar/overlays/etc. Serialized against the camera
-// and overlay writers via sceneFileMu so the three scene.json writers never clobber each
-// other. An empty set deletes its key so the on-disk shape matches a fresh scene.
+// and overlay writers via sceneFileMu (scene_persist.go) so the scene.json writers never
+// clobber each other. An empty set deletes its key so the on-disk shape matches a fresh scene.
 //
 // READ side: loadSceneFade parses those arrays back; MoveDispatch.SeedFade seeds the FSM
 // sets on startup and emits the full seeds via tr.Fade so the fixpoint is rebuilt — closing
 // the toggle→reload→still-faded round trip.
+//
+// The debounce/coalesce timer and the JSON read-modify-write/atomic-write plumbing are
+// shared machinery from scene_persist.go (debouncedPersister, sceneReadModifyWrite,
+// writeJSONAtomic) — this file holds only the fade-specific shape.
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
-	"sync"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
+// fadeSeeds is the fade-specific payload coalesced by fadePersister's debounce timer.
+type fadeSeeds struct {
+	nodes []string
+	edges []string
+}
+
 // fadePersister coalesces rapid fade toggles into a debounced read-modify-write of
 // scene.json's fadedNodes/fadedEdges. Owned by MoveDispatch (armed by EnableEditPersist).
 type fadePersister struct {
-	path       string // scene.json path (sceneCameraPath(topologyPath))
-	debounce   time.Duration
-	mu         sync.Mutex
-	pendNodes  []string
-	pendEdges  []string
-	hasPending bool
-	timer      *time.Timer
-	writes     int
+	path     string // scene.json path (sceneCameraPath(topologyPath))
+	debounce time.Duration
+	debouncedPersister[fadeSeeds]
 }
 
 // schedule records the latest fade seed snapshot and (re)arms the debounce timer.
@@ -49,74 +51,44 @@ func (p *fadePersister) schedule(nodes, edges []string) {
 	if p == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pendNodes = append([]string(nil), nodes...)
-	p.pendEdges = append([]string(nil), edges...)
-	p.hasPending = true
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
+	v := fadeSeeds{
+		nodes: append([]string(nil), nodes...),
+		edges: append([]string(nil), edges...),
 	}
+	p.arm(p.debounce, v, p.flush)
 }
 
 // flush writes the pending fade seeds to scene.json (read-modify-write) and clears pending.
 func (p *fadePersister) flush() {
-	p.mu.Lock()
-	nodes, edges, has := p.pendNodes, p.pendEdges, p.hasPending
-	p.pendNodes, p.pendEdges, p.hasPending = nil, nil, false
-	p.mu.Unlock()
+	v, has := p.take()
 	if !has {
 		return
 	}
-	if err := writeSceneFade(p.path, nodes, edges); err != nil {
-		fmt.Fprintf(os.Stderr, "scene_fade_persist: write %s: %v\n", p.path, err)
+	if err := writeSceneFade(p.path, v.nodes, v.edges); err != nil {
+		logPersistErr("scene_fade_persist", p.path, err)
 		return
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
+	p.recordWrite()
 }
 
 // writeSceneFade sets ONLY the fadedNodes/fadedEdges fields of scene.json, preserving every
 // other field (cameraPolar, overlays, …). Empty sets delete their key so the shape matches a
-// fresh scene. Serialized against the camera + overlay writers via sceneFileMu. Seeds are
-// sorted so the on-disk order is deterministic.
+// fresh scene. Seeds are sorted so the on-disk order is deterministic.
 func writeSceneFade(path string, nodes, edges []string) error {
-	sceneFileMu.Lock()
-	defer sceneFileMu.Unlock()
-
-	obj := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &obj)
-	}
-
-	setSeeds := func(key string, seeds []string) {
-		if len(seeds) == 0 {
-			delete(obj, key)
-			return
+	return sceneReadModifyWrite(path, func(obj map[string]json.RawMessage) {
+		setSeeds := func(key string, seeds []string) {
+			if len(seeds) == 0 {
+				delete(obj, key)
+				return
+			}
+			s := append([]string(nil), seeds...)
+			sort.Strings(s)
+			b, _ := json.Marshal(s)
+			obj[key] = b
 		}
-		s := append([]string(nil), seeds...)
-		sort.Strings(s)
-		b, _ := json.Marshal(s)
-		obj[key] = b
-	}
-	setSeeds("fadedNodes", nodes)
-	setSeeds("fadedEdges", edges)
-
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+		setSeeds("fadedNodes", nodes)
+		setSeeds("fadedEdges", edges)
+	})
 }
 
 // sceneFadeFile is the subset of scene.json the fade loader reads.

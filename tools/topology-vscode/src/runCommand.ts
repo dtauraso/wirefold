@@ -177,6 +177,13 @@ export function tryParseBreadcrumb(line: string): Record<string, unknown> | unde
 // event or wasn't armed. It delegates to the guarded buildBinary, so if the
 // watcher is mid-build this call coalesces (busy → ok) wait-free and never
 // blocks run().
+// ensureBinaryBuilt retries buildBinary/existsSync this many times while waiting out an
+// in-flight coalesced Go binary build (see below) before giving up and reporting an error.
+// Each attempt is cheap (a build call that returns immediately when coalesced, or a stat
+// check), so 50 is a generous ceiling meant to absorb a slow first-open Go build without
+// hanging the extension host indefinitely on a build that never completes.
+const BUILD_BINARY_MAX_ATTEMPTS = 50;
+
 function ensureBinaryBuilt(
   repoRoot: string,
   binPath: string,
@@ -193,8 +200,7 @@ function ensureBinaryBuilt(
   // non-existent path (ENOENT, runner stuck). So only report ok once the binary
   // actually exists on disk: retry buildBinary until it runs to completion (the
   // guard is released) or the in-flight build has produced the binary.
-  const maxAttempts = 50;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < BUILD_BINARY_MAX_ATTEMPTS; attempt++) {
     const res = buildBinary(repoRoot, binPath);
     if (!res.ok) return res;
     if (!res.busy) {
@@ -207,7 +213,10 @@ function ensureBinaryBuilt(
     // binary, we're done; otherwise retry (the guard will clear and our own build runs).
     if (fs.existsSync(binPath)) return { ok: true };
   }
-  return { ok: false, error: `binary ${binPath} not built after ${maxAttempts} attempts` };
+  return {
+    ok: false,
+    error: `binary ${binPath} not built after ${BUILD_BINARY_MAX_ATTEMPTS} attempts`,
+  };
 }
 
 export class BuildAndRunRunner {

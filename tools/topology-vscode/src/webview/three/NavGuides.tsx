@@ -460,8 +460,8 @@ export function NavGuides() {
   const hhRadius = Math.max(radiusKey * 0.04, 3); // grabbable, scales with the sphere
   const handholds = (rotation?: THREE.Euler) => (
     <group rotation={rotation}>
-      {hhAngles.map((a, i) => (
-        <mesh key={i} position={[radiusKey * Math.cos(a), radiusKey * Math.sin(a), 0]} userData={{ handhold: true }}>
+      {hhAngles.map((a) => (
+        <mesh key={a} position={[radiusKey * Math.cos(a), radiusKey * Math.sin(a), 0]} userData={{ handhold: true }}>
           <sphereGeometry args={[hhRadius, 16, 16]} />
           <meshStandardMaterial color="#cc8844" emissive="#cc8844" emissiveIntensity={0.6} transparent opacity={0.9} />
         </mesh>

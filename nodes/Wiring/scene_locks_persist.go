@@ -17,10 +17,7 @@ package Wiring
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -116,41 +113,27 @@ func fromScenePolarEq(s scenePolarEq) polarEq {
 // writeScenePolarEqs writes the current polarEqs snapshot into scenePath (the resolved
 // scene.json path, e.g. from sceneCameraPath), preserving every other field.
 func writeScenePolarEqs(scenePath string, eqs []polarEq) error {
-	path := scenePath
-	sceneFileMu.Lock()
-	defer sceneFileMu.Unlock()
-
-	obj := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &obj)
-	}
-
-	if len(eqs) == 0 {
-		delete(obj, "polarLocks")
-	} else {
+	var marshalErr error
+	err := sceneReadModifyWrite(scenePath, func(obj map[string]json.RawMessage) {
+		if len(eqs) == 0 {
+			delete(obj, "polarLocks")
+			return
+		}
 		out := make([]scenePolarEq, len(eqs))
 		for i, eq := range eqs {
 			out[i] = toScenePolarEq(eq)
 		}
-		raw, err := json.Marshal(out)
-		if err != nil {
-			return err
+		raw, mErr := json.Marshal(out)
+		if mErr != nil {
+			marshalErr = mErr
+			return
 		}
 		obj["polarLocks"] = raw
+	})
+	if marshalErr != nil {
+		return marshalErr
 	}
-
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return err
 }
 
 // polarEqsPersister coalesces rapid rule-authoring into a debounced read-modify-write of
@@ -159,11 +142,7 @@ func writeScenePolarEqs(scenePath string, eqs []polarEq) error {
 type polarEqsPersister struct {
 	path     string
 	debounce time.Duration
-	mu       sync.Mutex
-	pending  []polarEq
-	has      bool
-	timer    *time.Timer
-	writes   int
+	debouncedPersister[[]polarEq]
 }
 
 // schedule records the latest polarEqs snapshot and (re)arms the debounce timer.
@@ -171,33 +150,20 @@ func (p *polarEqsPersister) schedule(eqs []polarEq) {
 	if p == nil || p.path == "" {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pending = append([]polarEq(nil), eqs...)
-	p.has = true
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
-	}
+	p.arm(p.debounce, append([]polarEq(nil), eqs...), p.flush)
 }
 
 // flush writes the pending polarEqs snapshot to scene.json (read-modify-write) and clears it.
 func (p *polarEqsPersister) flush() {
-	p.mu.Lock()
-	eqs, has := p.pending, p.has
-	p.has = false
-	p.mu.Unlock()
+	eqs, has := p.take()
 	if !has {
 		return
 	}
 	if err := writeScenePolarEqs(p.path, eqs); err != nil {
-		fmt.Fprintf(os.Stderr, "scene_locks_persist: write %s: %v\n", p.path, err)
+		logPersistErr("scene_locks_persist", p.path, err)
 		return
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
+	p.recordWrite()
 }
 
 // scenePolarLocksFile is the subset of scene.json the polarEqs loader reads.
