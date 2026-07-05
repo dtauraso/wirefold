@@ -1,4 +1,5 @@
-// Canonical names of the four .probe/ JSONL log files. These names are
+// Canonical names of the .probe/ diagnosis files (five rolling JSONL logs plus
+// the append-only handler-error post-mortem). These names are
 // duplicated across the Go/TS boundary (Go writes via its own paths; the shell
 // reader tools/probe-merge.sh hardcodes them since shell can't import this) —
 // but every TypeScript reference must route through here so the two TS writers

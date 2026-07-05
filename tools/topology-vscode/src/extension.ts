@@ -6,6 +6,7 @@ import { buildBinary } from "./goBuild";
 import type { HostToWebviewMsg } from "./messages";
 import { buildWebviewHtml } from "./extension/html";
 import { handleMessage } from "./extension/handle-message";
+import { PROBE_FILES } from "./probe-files";
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
@@ -20,7 +21,10 @@ function resetProbeLogs(repoRoot: string): void {
   try {
     const probeDir = path.join(repoRoot, ".probe");
     fs.mkdirSync(probeDir, { recursive: true });
-    for (const name of ["ts.jsonl", "ts-errors.jsonl", "go.jsonl", "go-errors.jsonl"]) {
+    // Iterate the canonical registry (not a hand-typed list) so a newly-added
+    // probe file is reset automatically — the omission that let go-debug.jsonl
+    // accumulate across sessions cannot recur.
+    for (const name of Object.values(PROBE_FILES)) {
       fs.writeFileSync(path.join(probeDir, name), "");
     }
   } catch {
