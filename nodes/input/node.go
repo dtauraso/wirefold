@@ -33,6 +33,9 @@ type Node struct {
 	// is skipped so existing topologies without a Pacer are unaffected.
 	ToPacer    *Wiring.Out
 	FeedbackIn *Wiring.In
+	// FromHoldNewSendOld is a declared feedback input from node 2's ToInput
+	// output. Intentionally inert (no read logic) — see 2To1 edge task.
+	FromHoldNewSendOld *Wiring.In
 }
 
 // fanOut places beads on all wired outputs and drives them concurrently via

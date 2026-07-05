@@ -14,6 +14,7 @@ type Node struct {
 	Held                       int `wire:"data.state"`
 	FromPrevHoldNewSendOldNode *Wiring.In
 	ToNext                     Wiring.OutMulti
+	ToInput                    *Wiring.Out
 }
 
 // placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving

@@ -31,6 +31,7 @@
 |------|-----------|----------|-------|
 | FromPrevHoldNewSendOldNode | in | chain | receives value from upstream chain holdnewsendold |
 | ToNext | out | chain | fan-out to downstream nodes (multi-output) |
+| ToInput | out | chain | declared step back to the Input node (inert) |
 
 ## Firing rule
 
