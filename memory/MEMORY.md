@@ -21,7 +21,7 @@ These rarely change; skim once per session and apply throughout.
 Each entry can drift; if it conflicts with current code, update or remove the memory rather than acting on it.
 
 - [project_go_visual_vocabulary.md](project_go_visual_vocabulary.md) — Go visual vocabulary is chan→wire + per-node running indicator (with reloop); goroutine and select are not separate visual primitives
-- [project_industry_pattern_deferrals.md](project_industry_pattern_deferrals.md) — Visual-editor gaps from the 2026-05-03 industry-pattern review that are deferred until matching friction appears
+- [project_industry_pattern_deferrals.md](project_industry_pattern_deferrals.md) — Deferred visual-editor gaps, re-scoped 2026-07-05 vs current buffer/Three.js arch: render-only items (edge labels S, hover tooltips XS) cheap; stateful items all L (no multi-select/undo/waypoints)
 - [project_local_clocks_beat_global_runner.md](project_local_clocks_beat_global_runner.md) — Per-instance clock locality helped the pause-freeze fix, but recency/surface/problem-shape/written contracts also did. Don't use ease-of-fix as a single-factor Go-layer signal.
 - [feedback_specify_go_layer_first.md](feedback_specify_go_layer_first.md) — State the Go-layer answer before/alongside the visible-layer spec; implicit Go-layer slots get filled with coordinator-shaped defaults from training data
 - [feedback_go_vs_coordinator_bias.md](feedback_go_vs_coordinator_bias.md) — Before fixing Go code, name the contract violated, not the symptom. Knob-tuning (interval, cap, timeout) is the wrong shape — find the missing local signal. Folds in: Go node cycles must be paced by the visual layer.
