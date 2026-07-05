@@ -19,10 +19,7 @@ package Wiring
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -32,10 +29,7 @@ import (
 type nodePosPersister struct {
 	root     string // tree root; per-node meta.json lives at <root>/nodes/<id>/meta.json
 	debounce time.Duration
-	mu       sync.Mutex
-	pending  map[string]vec3 // node id → latest center awaiting write
-	timer    *time.Timer
-	writes   int // count of completed flushes (test observability)
+	debouncedPersister[map[string]vec3]
 	// sceneCenter returns the current scene-sphere center, so each write can ALSO record the
 	// node's SCENE POLAR (r,θ,φ = cart2polar(world − sceneCenter)) alongside x/y/z during the
 	// polar-model migration (polar-model.md phase 2). nil → write cartesian only.
@@ -49,26 +43,20 @@ func (p *nodePosPersister) schedule(id string, c vec3) {
 		return
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.pending == nil {
 		p.pending = map[string]vec3{}
 	}
 	p.pending[id] = c
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
-	}
+	v := p.pending
+	p.mu.Unlock()
+	p.arm(p.debounce, v, p.flush)
 }
 
 // flush writes every pending node center to its meta.json (read-modify-write, preserving
 // other fields) and clears the pending set. Fire-and-forget: errors are logged, not returned.
 func (p *nodePosPersister) flush() {
-	p.mu.Lock()
-	pend := p.pending
-	p.pending = nil
-	p.mu.Unlock()
-	if len(pend) == 0 {
+	pend, has := p.take()
+	if !has || len(pend) == 0 {
 		return
 	}
 	var sc vec3
@@ -78,12 +66,10 @@ func (p *nodePosPersister) flush() {
 	}
 	for id, c := range pend {
 		if err := writeNodePosition(p.root, id, c, sc, haveSC); err != nil {
-			fmt.Fprintf(os.Stderr, "scene_node_pos_persist: write %s: %v\n", id, err)
+			logPersistErr("scene_node_pos_persist", id, err)
 		}
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
+	p.recordWrite()
 }
 
 // writeNodePosition sets ONLY the x/y/z fields of <root>/nodes/<id>/meta.json, preserving
@@ -91,37 +77,22 @@ func (p *nodePosPersister) flush() {
 // meta.json); a missing/malformed file is reported rather than fabricated.
 func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCenter bool) error {
 	path := filepath.Join(root, "nodes", id, "meta.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	obj := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return err
-	}
-	setNum := func(key string, v float64) {
-		b, _ := json.Marshal(v)
-		obj[key] = b
-	}
-	setNum("x", c.X)
-	setNum("y", c.Y)
-	setNum("z", c.Z)
-	// Dual-write the SCENE POLAR (polar-model.md phase 2): the node's polar about the scene
-	// sphere. Cartesian x/y/z stays for back-compat during migration; the polar fields become
-	// authoritative once the load side prefers them (phase 2b).
-	if haveSceneCenter {
-		sp := cart2polar(c.sub(sceneCenter))
-		setNum("scenePolarR", sp.R)
-		setNum("scenePolarTheta", sp.Theta)
-		setNum("scenePolarPhi", sp.Phi)
-	}
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
+		setNum := func(key string, v float64) {
+			b, _ := json.Marshal(v)
+			obj[key] = b
+		}
+		setNum("x", c.X)
+		setNum("y", c.Y)
+		setNum("z", c.Z)
+		// Dual-write the SCENE POLAR (polar-model.md phase 2): the node's polar about the
+		// scene sphere. Cartesian x/y/z stays for back-compat during migration; the polar
+		// fields become authoritative once the load side prefers them (phase 2b).
+		if haveSceneCenter {
+			sp := cart2polar(c.sub(sceneCenter))
+			setNum("scenePolarR", sp.R)
+			setNum("scenePolarTheta", sp.Theta)
+			setNum("scenePolarPhi", sp.Phi)
+		}
+	})
 }
