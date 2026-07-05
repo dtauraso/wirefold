@@ -132,14 +132,41 @@ const HOVER_RING_TUBE_RATIO = 0.14;
 const PORT_HOVER_COLOR = HOVER_COLOR;
 const PORT_HOVER_SCALE = 1.3;
 
+// Selection-highlight pool geometry (SelectionHighlight, built at radius=1 and scaled by
+// the node's radius via g.scale.setScalar(r)). Matches GraphNode's selected border
+// (r*0.14 thick) and NODE_HALO_R_RATIO=1.45 halo sphere.
+const SELECTION_RING_TUBE_RATIO = 0.14;
+const SELECTION_RING_RADIAL_SEGMENTS = 8;
+const SELECTION_RING_TUBULAR_SEGMENTS = 32;
+const SELECTION_HALO_R_RATIO = 1.45;
+const SELECTION_HALO_WIDTH_SEGMENTS = 16;
+const SELECTION_HALO_HEIGHT_SEGMENTS = 16;
+// Sphere-ring (SphereRingBuf) great-circle torus segment counts (radial, tubular).
+const SPHERE_RING_RADIAL_SEGMENTS = 12;
+const SPHERE_RING_TUBULAR_SEGMENTS = 96;
+
+// ── Epsilon constants (named by use, not reconciled — distinct purposes) ──────
+// Below this squared-length, a ring-plane normal vector is treated as degenerate/unset
+// and replaced with a default axis rather than normalized (would divide by ~0).
+const NORMAL_DEGENERATE_EPS = 1e-12;
+// Below this reach radius, a sphere-ring owner is treated as having no sphere to draw.
+const SPHERE_RING_MIN_RADIUS = 1e-3;
+// Below this vector length, a direction is treated as zero (skip orienting off it)
+// rather than normalized.
+const DIRECTION_ZERO_EPS = 1e-6;
+
+// Node-KindId sentinel value meaning "unknown kind" (no entry in NODE_DEFS_ARRAY).
+// Must match the Go-side sentinel written into the buffer's KindId column.
+const UNKNOWN_KIND = 0xFF;
+
 /**
  * Resolve a node row's fill/stroke from its KindId column in the buffer.
  * Reads KindId (u8) at the given row and indexes NODE_DEFS_ARRAY; falls back to
- * grey when the id is out-of-range (0xFF sentinel = unknown kind).
+ * grey when the id is out-of-range (UNKNOWN_KIND sentinel = unknown kind).
  */
 export function nodeRowColors(nodeView: DataView, row: number): { fill: string; stroke: string } {
   const kindId = readNodeKindId(nodeView, row);
-  const def = NODE_DEFS_ARRAY[kindId];
+  const def = kindId === UNKNOWN_KIND ? undefined : NODE_DEFS_ARRAY[kindId];
   return {
     fill: def?.fill ?? NODE_DEFAULT_FILL,
     stroke: def?.stroke ?? NODE_DEFAULT_STROKE,
@@ -490,7 +517,9 @@ function SelectionHighlight({ capacity }: { capacity: number }) {
             readNodeCZ(nodeView, row),
           );
           // Scale so child geometries built at radius=1 match r.
-          // Torus: args=[1, 0.14, 8, 32]; halo sphere: args=[1.45, 16, 16].
+          // Torus: args=[1, SELECTION_RING_TUBE_RATIO, SELECTION_RING_RADIAL_SEGMENTS,
+          // SELECTION_RING_TUBULAR_SEGMENTS]; halo sphere: args=[SELECTION_HALO_R_RATIO,
+          // SELECTION_HALO_WIDTH_SEGMENTS, SELECTION_HALO_HEIGHT_SEGMENTS].
           g.scale.setScalar(r);
           g.visible = true;
           slot++;
@@ -507,15 +536,15 @@ function SelectionHighlight({ capacity }: { capacity: number }) {
   return (
     <>
       {Array.from({ length: HIGHLIGHT_POOL }, (_, i) => (
-        <group key={i} ref={(el) => { groupRefs.current[i] = el; }} visible={false}>
+        <group key={`highlight-slot-${i}`} ref={(el) => { groupRefs.current[i] = el; }} visible={false}>
           {/* Yellow torus ring — matches GraphNode selected border: r*0.14 thick */}
           <mesh raycast={() => null} frustumCulled={false}>
-            <torusGeometry args={[1, 0.14, 8, 32]} />
+            <torusGeometry args={[1, SELECTION_RING_TUBE_RATIO, SELECTION_RING_RADIAL_SEGMENTS, SELECTION_RING_TUBULAR_SEGMENTS]} />
             <meshStandardMaterial color="#ffcc00" emissive="#ffcc00" emissiveIntensity={0.3} />
           </mesh>
           {/* Orange halo sphere — matches GraphNode NODE_HALO_R_RATIO=1.45 */}
           <mesh raycast={() => null} frustumCulled={false}>
-            <sphereGeometry args={[1.45, 16, 16]} />
+            <sphereGeometry args={[SELECTION_HALO_R_RATIO, SELECTION_HALO_WIDTH_SEGMENTS, SELECTION_HALO_HEIGHT_SEGMENTS]} />
             <meshBasicMaterial
               color="#ff5a00"
               transparent
@@ -615,6 +644,7 @@ const SPHERE_RING_TUBE_MIN = 0.5;
 const _sphereRingDefaultNormal = new THREE.Vector3(0, 0, 1); // torusGeometry lies in XY (normal +Z)
 
 interface OwnerRing {
+  row: number; // owner node's buffer node-row index — stable identity for React keys
   cx: number; cy: number; cz: number;
   R: number; tube: number;
   vrx: number; vry: number; vrz: number;
@@ -626,11 +656,11 @@ interface OwnerRing {
 // only when the owner's R/tube/normals change (keyed useMemo) — not every frame.
 function SphereRingBuf({ ring }: { ring: OwnerRing }) {
   const { geo, vrQ, frQ } = useMemo(() => {
-    const _geo = new THREE.TorusGeometry(ring.R, ring.tube, 12, 96);
+    const _geo = new THREE.TorusGeometry(ring.R, ring.tube, SPHERE_RING_RADIAL_SEGMENTS, SPHERE_RING_TUBULAR_SEGMENTS);
     const vrN = new THREE.Vector3(ring.vrx, ring.vry, ring.vrz);
-    if (vrN.lengthSq() < 1e-12) vrN.set(0, 0, 1); else vrN.normalize();
+    if (vrN.lengthSq() < NORMAL_DEGENERATE_EPS) vrN.set(0, 0, 1); else vrN.normalize();
     const frN = new THREE.Vector3(ring.frx, ring.fry, ring.frz);
-    if (frN.lengthSq() < 1e-12) frN.set(1, 0, 0); else frN.normalize();
+    if (frN.lengthSq() < NORMAL_DEGENERATE_EPS) frN.set(1, 0, 0); else frN.normalize();
     return {
       geo: _geo,
       vrQ: new THREE.Quaternion().setFromUnitVectors(_sphereRingDefaultNormal, vrN),
@@ -698,9 +728,10 @@ function SphereRings() {
           // R = Go-streamed reach radius (sphereR); fall back to node radius pre-emit.
           const radius = readNodeRadius(nodeView, row) || NODE_SPHERE_RADIUS;
           const R = readNodeSphereR(nodeView, row) || radius;
-          if (R < 1e-3) continue;
+          if (R < SPHERE_RING_MIN_RADIUS) continue;
           const tube = Math.max(SPHERE_RING_TUBE_MIN, radius * SPHERE_RING_TUBE_RATIO);
           const ring: OwnerRing = {
+            row,
             cx: readNodeCX(nodeView, row), cy: readNodeCY(nodeView, row), cz: readNodeCZ(nodeView, row),
             R, tube,
             vrx: readNodeVRX(nodeView, row), vry: readNodeVRY(nodeView, row), vrz: readNodeVRZ(nodeView, row),
@@ -721,8 +752,8 @@ function SphereRings() {
 
   return (
     <>
-      {rings.map((ring, i) => (
-        <SphereRingBuf key={i} ring={ring} />
+      {rings.map((ring) => (
+        <SphereRingBuf key={ring.row} ring={ring} />
       ))}
     </>
   );
@@ -869,7 +900,7 @@ function EdgeTube({ seg, dimmed, row, selected, faded }: { seg: EdgeSeg; dimmed:
     const _haloGeo = new THREE.TubeGeometry(curve, 1, EDGE_HALO_RADIUS, 6, false);
     const dir = end.clone().sub(start);
     let _arrow: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
-    if (dir.length() >= 1e-6) {
+    if (dir.length() >= DIRECTION_ZERO_EPS) {
       dir.normalize();
       _arrow = buildArrow(end, dir, ARROWHEAD_LENGTH);
     }
@@ -936,7 +967,7 @@ function DoubleEdgeOverlayBuf({ seg }: { seg: EdgeSeg }) {
     const dir = end.clone().sub(start);
     let _arrowStart: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
     let _arrowEnd: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
-    if (dir.length() >= 1e-6) {
+    if (dir.length() >= DIRECTION_ZERO_EPS) {
       const dirNorm = dir.clone().normalize();
       _arrowStart = buildArrow(start, dirNorm.clone().negate(), DL_ARROWHEAD_LENGTH);
       _arrowEnd = buildArrow(end, dirNorm, DL_ARROWHEAD_LENGTH);
@@ -1037,7 +1068,7 @@ function EdgeTubes({ capacity }: { capacity: number }) {
   return (
     <>
       {segs.map((s, i) => (
-        <React.Fragment key={i}>
+        <React.Fragment key={`edge-row-${i}`}>
           <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} faded={!!fadedRows[i]} />
           {showDouble && <DoubleEdgeOverlayBuf seg={s} />}
         </React.Fragment>
