@@ -160,7 +160,6 @@ func panDisplacementPolar(pos, up dir, dx, dy, worldPerPixel float64) vec3 {
 const gestureFocusMin = 10.0  // FOCUS_MIN — keep the regionFocus pivot off the camera
 const gestureMoveSlopPx = 6.0 // MOVE_SLOP_PX — pending → drag/rotate threshold
 const gestureZoomBase = 1.01  // ZOOM_BASE — per-scroll-unit dolly factor
-const gestureMinDist = 5.0    // MIN_DIST — never let the eye reach the zoom target
 
 // contentSphereOf mirrors geometry-helpers.ts contentSphere over the given node centers:
 // center = bbox midpoint, radius = max(center-distance)*1.1 (min 1). Empty → (origin, 100).

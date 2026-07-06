@@ -120,18 +120,21 @@ func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
 	}
 }
 
-func TestGestureCtrlWheelDolliesPivot(t *testing.T) {
+func TestGestureCtrlWheelZoomsRadius(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	ev := rawEvent("wheel", 400, 300)
 	ev.Ctrl = true
 	ev.DeltaY = 1
 	md.HandleRawInput(ev, nil, nil)
-	// Empty centers → target=regionFocus=(0,0,90); eye=(0,0,100); toP=(0,0,-10);
-	// factor=1.01^1≈1.01 (distP*factor=10.1>MIN_DIST); delta=toP*(1-factor)=(0,0,0.1).
-	// Seed pivot=(0,0,90), then pan(delta) → (0,0,90.1).
-	wantZ := 90 + (-10)*(1-math.Pow(gestureZoomBase, 1))
-	if math.Abs(md.vp.pivot.Z-wantZ) > 1e-9 || math.Abs(md.vp.pivot.X) > 1e-9 {
-		t.Fatalf("ctrl-wheel pivot=%v want Z≈%v", md.vp.pivot, wantZ)
+	// ctrl-wheel is now POLAR zoom: scale the camera radius about the region-focus pivot.
+	// Empty centers → regionFocus=(0,0,90), eye=(0,0,100), r=10; the pivot must NOT move and
+	// r must scale by the zoom factor (1.01^1).
+	if math.Abs(md.vp.pivot.Z-90) > 1e-9 || math.Abs(md.vp.pivot.X) > 1e-9 {
+		t.Fatalf("ctrl-wheel moved the pivot %v; polar zoom must keep it at region-focus (0,0,90)", md.vp.pivot)
+	}
+	wantR := 10 * math.Pow(gestureZoomBase, 1)
+	if math.Abs(md.vp.r-wantR) > 1e-9 {
+		t.Fatalf("ctrl-wheel r=%v want %v (radius scaled by the zoom factor)", md.vp.r, wantR)
 	}
 }
 

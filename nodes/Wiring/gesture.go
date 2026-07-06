@@ -956,37 +956,18 @@ func (md *MoveDispatch) edgeFromHit(h rawHit) (label string, ok bool) {
 func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	vp := md.vp.viewpoint
 	eye := eyeOf(vp)
-	basis := basisFromViewpoint(vp.pos, vp.up)
 	pivot := regionFocus(vp, md.heldCenters())
 	r := eye.sub(pivot).length()
 	pos := worldDirToAngles(eye.sub(pivot))
 
 	if ev.Ctrl {
-		// Dolly toward the node nearest the cursor in NDC (fallback region-focus).
-		mouseNdcX, mouseNdcY := md.gest.pixelToNDC(ev.X, ev.Y)
-		target := pivot
-		best := math.Inf(1)
-		aspect := md.gest.rect.aspect()
-		for _, c := range md.heldCenters() {
-			nx, ny, inFront := projectNDC(c, eye, basis, ev.Fov, aspect)
-			if !inFront {
-				continue
-			}
-			d := math.Hypot(nx-mouseNdcX, ny-mouseNdcY)
-			if d < best {
-				best = d
-				target = c
-			}
-		}
-		toP := target.sub(eye)
-		distP := toP.length()
+		// Polar zoom: scale the camera RADIUS about the region-focus pivot (viewpoint.zoom) — a
+		// scalar r change, no cursor target and no vector subtraction (the old zoom-to-cursor
+		// dolly was a cartesian target−eye translation). Seed the viewpoint to the region-focus
+		// pivot first so the zoom is about what the camera is looking at.
 		factor := math.Pow(gestureZoomBase, ev.DeltaY)
-		if distP*factor < gestureMinDist && distP != 0 {
-			factor = gestureMinDist / distP
-		}
-		delta := toP.scale(1 - factor)
 		md.SetViewpoint(pivot, r, pos, vp.up)
-		md.PanViewpoint(delta, tr)
+		md.ZoomViewpoint(factor, tr)
 		return
 	}
 
