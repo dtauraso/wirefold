@@ -16,7 +16,29 @@ plan; this one tracks **what is left** and the order the remaining phases must l
   center-set site updates polar via `setNodeWorld`. The lock cascade + move path already
   operate on polar (tests confirm).
 
-## Remaining (dependency-ordered)
+## Status: teardown complete (slices 1–5)
+
+The "all polar, cartesian only at the GPU boundary" invariant is enforced. Delivered as
+five green, committed slices:
+
+1. **Slice 1** — reach-radius distance via spherical law of cosines (`polarDist`), not
+   `chordLength` of cartesian centers.
+2. **Slice 2** — node-position persistence writes `ScenePolar` directly (no `cart2polar`).
+3. **Slice 3** — edge arc is `polarDist` between node positions; segment is node-to-node
+   (**Option A**: the edge runs node-to-node; the port does not offset the endpoint).
+4. **Slice 4** — the aimed-port machinery is gone (it subtracted `targetCenter − nodeWorldPos`);
+   port markers use ring-anchor direction, torus-locked ports ring-project at emit.
+5. **Slice 5** — locks/colinearity operate on scene-polar components between nodes (no center
+   frame, no double-link graph, no `cart2polar`); colinearity = two nodes sharing `(θ,φ)`.
+
+The only cartesian left in the geometry pipeline is the **two input-boundary conversions**
+(pointer → polar in `RootMove`/`setNodeWorld`) — the mirror of the GPU emit boundary.
+
+**Phase 6 (verify) is the remaining item** and needs the live editor: node 9 port `(θ,φ)` ==
+9 edge `(θ,φ)`; drag holds; bidirectional 9↔6 lines up; torus-locked ports stay on the ring.
+The model now enforces these structurally, but they should be eyeballed in the running editor.
+
+## Original remaining plan (superseded by the status above)
 
 ### 1. Phase 2 — port owns `(θ,φ)`
 Foundation: nothing else can read a port's own polar until it is stored. A connected port
