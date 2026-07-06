@@ -996,8 +996,10 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	// unchanged, so the whole scene translates rigidly.
 	fovRad := ev.Fov * math.Pi / 180
 	worldPerPixel := (2 * r * math.Tan(fovRad/2)) / md.gest.rect.height
+	// Grab-drag-the-world: the scene follows the cursor, i.e. it moves OPPOSITE the camera-pan
+	// (planeSlide) direction panDisplacementPolar returns — negate to drag the world under the pointer.
 	disp := panDisplacementPolar(vp.pos, vp.up, ev.DeltaX, ev.DeltaY, worldPerPixel)
-	md.PanScene(disp)
+	md.PanScene(disp.scale(-1))
 	md.EmitViewpoint(tr) // camera unchanged; re-emit so the ring/sphere overlay tracks the new center
 }
 
