@@ -192,21 +192,24 @@ func contentSphereOf(centers map[string]vec3) (center vec3, radius float64) {
 func regionFocus(v viewpoint, centers map[string]vec3) vec3 {
 	eye := eyeOf(v)
 	forward := anglesToWorldOffset(1, v.pos.Theta, v.pos.Phi).scale(-1) // -pole, unit
+	// Pivot on the view axis at the depth of the NEAREST node (smallest forward-depth), not the
+	// whole-scene depth MIDPOINT. The midpoint sat between the near node you zoomed into and the
+	// far ones, so rotate/pan operated around a distant point and swung/overshot from up close.
+	// Using the nearest depth puts the pivot on what you dollied toward while staying on the
+	// screen-center ray (deterministic — no node-tie ambiguity). Falls back straight ahead when
+	// there are no nodes.
 	zNear := math.Inf(1)
-	zFar := math.Inf(-1)
 	for _, p := range centers {
 		depth := forward.dot(p.sub(eye))
 		if math.IsNaN(depth) || math.IsInf(depth, 0) {
 			continue
 		}
 		zNear = math.Min(zNear, depth)
-		zFar = math.Max(zFar, depth)
 	}
-	if math.IsInf(zNear, 1) || math.IsInf(zFar, -1) {
+	if math.IsInf(zNear, 1) {
 		return eye.add(forward.scale(gestureFocusMin))
 	}
-	mid := math.Max((zNear+zFar)/2, gestureFocusMin)
-	return eye.add(forward.scale(mid))
+	return eye.add(forward.scale(math.Max(zNear, gestureFocusMin)))
 }
 
 // ---------------------------------------------------------------------------
