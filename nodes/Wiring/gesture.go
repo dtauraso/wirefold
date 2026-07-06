@@ -235,15 +235,14 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 }
 
 // beginSphereRotation freezes the orbit pivot, its screen-pixel center, and pixels-per-radian
-// for the whole gesture. The pivot is the camera's CURRENT focus (vp.pivot) — what it last flew
-// to (zoom) or framed (home) — NOT a re-derived region-focus. This is the free-camera model
-// (polar-frame-rewrite.md): the camera orbits whatever it is focused on from wherever it sits,
-// so rotate stays controllable at any position/zoom instead of swinging around a distant
-// content midpoint.
+// for the whole gesture. The pivot is the CONTENT DIRECTLY AHEAD (focusAhead): the node the
+// camera is most pointed at, at its depth on the view-center ray. So rotate orbits whatever you
+// have flown to and centered (fly to a node → rotate spins around it), the orbit depth tracks
+// what you look at, and — because the pivot is on the view axis — it does not re-aim the camera.
 func (md *MoveDispatch) beginSphereRotation(ev rawInputMsg) {
 	g := &md.gest
 	vp := md.vp.viewpoint
-	pivot := vp.pivot
+	pivot := focusAhead(vp, md.heldCenters())
 	g.rotPivot = pivot
 
 	eye := eyeOf(vp)

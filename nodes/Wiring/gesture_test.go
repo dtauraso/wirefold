@@ -40,10 +40,10 @@ func TestGestureEmptyDragOrbits(t *testing.T) {
 	if md.gest.phase != gestPending || !md.gest.emptyDown {
 		t.Fatalf("after pointerdown: phase=%v emptyDown=%v", md.gest.phase, md.gest.emptyDown)
 	}
-	// Free-camera model: the orbit pivot is the camera's CURRENT focus (vp.pivot = (0,0,0)),
-	// not a re-derived region-focus.
-	if !vecClose(md.gest.rotPivot, vec3{0, 0, 0}, 1e-9) {
-		t.Fatalf("rotPivot=%v want vp.pivot (0,0,0)", md.gest.rotPivot)
+	// Orbit pivot is the content ahead (focusAhead). Empty centers → a point on the view axis a
+	// fixed distance ahead: eye=(0,0,100), forward=(0,0,-1), focusMin=10 → (0,0,90).
+	if !vecClose(md.gest.rotPivot, vec3{0, 0, 90}, 1e-9) {
+		t.Fatalf("rotPivot=%v want focus-ahead (0,0,90)", md.gest.rotPivot)
 	}
 
 	// First move past the slop: transitions to rotating and seeds the viewpoint. The first
@@ -52,11 +52,11 @@ func TestGestureEmptyDragOrbits(t *testing.T) {
 	if md.gest.phase != gestRotating {
 		t.Fatalf("after slop-cross move: phase=%v want rotating", md.gest.phase)
 	}
-	if !vecClose(md.vp.pivot, vec3{0, 0, 0}, 1e-9) {
-		t.Fatalf("seed pivot=%v want current focus (0,0,0)", md.vp.pivot)
+	if !vecClose(md.vp.pivot, vec3{0, 0, 90}, 1e-9) {
+		t.Fatalf("seed pivot=%v want focus-ahead (0,0,90)", md.vp.pivot)
 	}
-	if math.Abs(md.vp.r-100) > 1e-9 {
-		t.Fatalf("seed r=%v want 100 (eye→pivot)", md.vp.r)
+	if math.Abs(md.vp.r-10) > 1e-9 {
+		t.Fatalf("seed r=%v want 10 (eye→focus-ahead)", md.vp.r)
 	}
 	posBefore := md.vp.pos
 	rBefore, pivotBefore := md.vp.r, md.vp.pivot

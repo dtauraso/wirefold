@@ -161,6 +161,40 @@ const gestureFocusMin = 10.0  // FOCUS_MIN — keep the regionFocus pivot off th
 const gestureMoveSlopPx = 6.0 // MOVE_SLOP_PX — pending → drag/rotate threshold
 const gestureZoomBase = 1.01  // ZOOM_BASE — per-scroll-unit dolly factor
 
+// focusAhead returns the orbit center for rotate: a point on the view-center ray at the
+// forward-depth of the node the camera is MOST POINTED AT (smallest angle from the view axis,
+// in front). Because the point lies on the view axis, orbiting it does NOT re-aim the camera —
+// the look direction is unchanged — yet the orbit depth tracks whatever content you have flown
+// to and centered (fly to node 10, rotate spins around node 10). Falls back to a fixed distance
+// ahead when there is no node in front.
+func focusAhead(v viewpoint, centers map[string]vec3) vec3 {
+	eye := eyeOf(v)
+	forward := anglesToWorldOffset(1, v.pos.Theta, v.pos.Phi).scale(-1) // -pole, unit
+	bestCos := -2.0
+	depth := 0.0
+	found := false
+	for _, p := range centers {
+		d := p.sub(eye)
+		dl := d.length()
+		if dl < 1e-9 {
+			continue
+		}
+		cosAng := forward.dot(d) / dl
+		if cosAng <= 0 { // behind the camera
+			continue
+		}
+		if cosAng > bestCos { // more centered on the view axis
+			bestCos = cosAng
+			depth = forward.dot(d)
+			found = true
+		}
+	}
+	if !found {
+		return eye.add(forward.scale(gestureFocusMin))
+	}
+	return eye.add(forward.scale(math.Max(depth, gestureFocusMin)))
+}
+
 // contentSphereOf mirrors geometry-helpers.ts contentSphere over the given node centers:
 // center = bbox midpoint, radius = max(center-distance)*1.1 (min 1). Empty → (origin, 100).
 func contentSphereOf(centers map[string]vec3) (center vec3, radius float64) {
