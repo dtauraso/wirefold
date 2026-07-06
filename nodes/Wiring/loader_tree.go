@@ -33,9 +33,12 @@ type jsonMeta struct {
 	ID   string   `json:"id"`
 	Type string   `json:"type"`
 	R    *float64 `json:"r,omitempty"` // optional per-node sphere radius; nil → defaultNodeR (see nodeR)
-	X    float64  `json:"x"`           // stored absolute world center (polar layout)
-	Y    float64  `json:"y"`
-	Z    float64  `json:"z"`
+	// Scene polar (polar-frame-rewrite.md) — the node's position as (r,θ,φ) about the scene
+	// sphere center. This is the authoritative stored position. These MUST be carried through
+	// to specNode below: dropping them collapses every node to the origin (the blob bug).
+	ScenePolarR     *float64 `json:"scenePolarR,omitempty"`
+	ScenePolarTheta *float64 `json:"scenePolarTheta,omitempty"`
+	ScenePolarPhi   *float64 `json:"scenePolarPhi,omitempty"`
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -66,12 +69,12 @@ func loadTree(root string) (topoSpec, error) {
 		}
 
 		sn := specNode{
-			ID:   meta.ID,
-			Type: meta.Type,
-			R:    meta.R,
-			X:    meta.X,
-			Y:    meta.Y,
-			Z:    meta.Z,
+			ID:              meta.ID,
+			Type:            meta.Type,
+			R:               meta.R,
+			ScenePolarR:     meta.ScenePolarR,
+			ScenePolarTheta: meta.ScenePolarTheta,
+			ScenePolarPhi:   meta.ScenePolarPhi,
 		}
 
 		// data.json — optional

@@ -44,11 +44,11 @@ func TestSceneSphereRoundTrip(t *testing.T) {
 func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
 	md := &MoveDispatch{}
 	md.nodeMovers = map[string]*nodeMover{
-		"a": {id: "a", geom: nodeGeom{Center: &vec3{X: 0, Y: 0, Z: 0}}},
-		"b": {id: "b", geom: nodeGeom{Center: &vec3{X: 100, Y: 0, Z: 0}}},
+		"a": {id: "a", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 0, Y: 0, Z: 0})}},
+		"b": {id: "b", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 100, Y: 0, Z: 0})}},
 	}
 	for _, nm := range md.nodeMovers {
-		nm.snap.Store(&centerSnap{c: *nm.geom.Center})
+		nm.snap.Store(&centerSnap{c: nodeWorldPos(nm.geom)})
 	}
 	md.LoadSceneSphere(t.TempDir()) // no scene.json → content-fit
 	if md.sceneSphere.Radius <= 0 {
@@ -66,11 +66,11 @@ func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
 func TestPanSceneSphereHoldsNodesWorldFixed(t *testing.T) {
 	md := &MoveDispatch{}
 	md.nodeMovers = map[string]*nodeMover{
-		"a": {id: "a", geom: nodeGeom{Center: &vec3{X: 0, Y: 0, Z: 0}}},
-		"b": {id: "b", geom: nodeGeom{Center: &vec3{X: 100, Y: 0, Z: 0}}},
+		"a": {id: "a", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 0, Y: 0, Z: 0})}},
+		"b": {id: "b", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 100, Y: 0, Z: 0})}},
 	}
 	for _, nm := range md.nodeMovers {
-		nm.snap.Store(&centerSnap{c: *nm.geom.Center})
+		nm.snap.Store(&centerSnap{c: nodeWorldPos(nm.geom)})
 	}
 	md.sceneSphere = sceneSphere{Center: vec3{X: 50, Y: 0, Z: 0}, Radius: 60}
 
@@ -113,9 +113,9 @@ func TestPanSceneSphereThenNodeSaveUpdatesScenePolar(t *testing.T) {
 
 	md := &MoveDispatch{}
 	md.nodeMovers = map[string]*nodeMover{
-		"a": {id: "a", geom: nodeGeom{Center: &vec3{X: 100, Y: 0, Z: 0}}},
+		"a": {id: "a", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 100, Y: 0, Z: 0})}},
 	}
-	md.nodeMovers["a"].snap.Store(&centerSnap{c: *md.nodeMovers["a"].geom.Center})
+	md.nodeMovers["a"].snap.Store(&centerSnap{c: nodeWorldPos(md.nodeMovers["a"].geom)})
 	md.sceneSphere = sceneSphere{Center: vec3{X: 0, Y: 0, Z: 0}, Radius: 200}
 
 	delta := vec3{X: 30, Y: 0, Z: 0}

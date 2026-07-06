@@ -77,12 +77,22 @@ func (p *nodePosPersister) flush() {
 	p.recordWrite()
 }
 
-// writeNodePosition sets ONLY the x/y/z fields of <root>/nodes/<id>/meta.json, preserving
-// every other field (id, type, r). The file must already exist (a node always has a
-// meta.json); a missing/malformed file is reported rather than fabricated.
+// writeNodePosition sets the node's SCENE POLAR (r,θ,φ about the scene sphere center) in
+// <root>/nodes/<id>/meta.json, preserving every other field (id, type, r) and DELETING any
+// legacy cartesian x/y/z. Polar is the only stored position (polar-frame-rewrite.md phase 1:
+// "persist writes scene-polar only, deletes x/y/z"). A scene center is required to express a
+// polar position; without one the write is skipped (leaving the file untouched) rather than
+// falling back to a cartesian center, which would reintroduce the very field the frame removes.
+// The file must already exist (a node always has a meta.json); a missing/malformed file is
+// reported rather than fabricated.
 func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCenter bool) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
+	}
+	if !haveSceneCenter {
+		// No scene center → cannot express a polar position, and cartesian is not an
+		// acceptable stored form. Skip rather than write a cartesian center.
+		return nil
 	}
 	path := filepath.Join(root, "nodes", id, "meta.json")
 	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
@@ -90,17 +100,13 @@ func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCente
 			b, _ := json.Marshal(v)
 			obj[key] = b
 		}
-		setNum("x", c.X)
-		setNum("y", c.Y)
-		setNum("z", c.Z)
-		// Dual-write the SCENE POLAR (polar-model.md phase 2): the node's polar about the
-		// scene sphere. Cartesian x/y/z stays for back-compat during migration; the polar
-		// fields become authoritative once the load side prefers them (phase 2b).
-		if haveSceneCenter {
-			sp := cart2polar(c.sub(sceneCenter))
-			setNum("scenePolarR", sp.R)
-			setNum("scenePolarTheta", sp.Theta)
-			setNum("scenePolarPhi", sp.Phi)
-		}
+		sp := cart2polar(c.sub(sceneCenter))
+		setNum("scenePolarR", sp.R)
+		setNum("scenePolarTheta", sp.Theta)
+		setNum("scenePolarPhi", sp.Phi)
+		// Cartesian center is not a stored source of truth — drop any legacy fields.
+		delete(obj, "x")
+		delete(obj, "y")
+		delete(obj, "z")
 	})
 }

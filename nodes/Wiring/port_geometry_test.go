@@ -51,7 +51,7 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 	center := vec3{X: 46.5425, Y: 93.085, Z: -139.6275}
 	g := nodeGeom{
 		Kind:   "HoldFlip",
-		Center: &center,
+		HasPos: true, ScenePolar: cart2polar(center),
 		Inputs: []portGeom{
 			{Name: "In", AnchorId: &anchorId1},
 			{Name: "In2"},
@@ -81,28 +81,28 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}{
 		{
 			name: "input-to-holdflip-2d",
-			src: nodeGeom{Kind: "Input", Center: &c01,
+			src: nodeGeom{Kind: "Input", HasPos: true, ScenePolar: cart2polar(c01),
 				Outputs: []portGeom{{Name: "ToHoldFlip", AnchorId: &anchorId1}}},
 			srcH: "ToHoldFlip",
-			tgt: nodeGeom{Kind: "HoldFlip", Center: &c11,
+			tgt: nodeGeom{Kind: "HoldFlip", HasPos: true, ScenePolar: cart2polar(c11),
 				Inputs: []portGeom{{Name: "In", AnchorId: &anchorId1}}},
 			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",
-			src: nodeGeom{Kind: "HoldNewSendOld", Center: &c111,
+			src: nodeGeom{Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(c111),
 				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
-			tgt: nodeGeom{Kind: "HoldNewSendOld", Center: &c11n1,
+			tgt: nodeGeom{Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(c11n1),
 				Inputs: []portGeom{{Name: "FromPrevHoldNewSendOldNode", AnchorId: &anchorId1}}},
 			tgtH: "FromPrevHoldNewSendOldNode",
 		},
 		{
 			name: "anchorid0-and-anchorid2-with-z",
-			src: nodeGeom{Kind: "WindowAndInhibitRightGate", Center: &c11,
+			src: nodeGeom{Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(c11),
 				Outputs: []portGeom{{Name: "ToPassed", AnchorId: &anchorId0}}},
 			srcH: "ToPassed",
-			tgt: nodeGeom{Kind: "WindowAndInhibitRightGate", Center: &c201,
+			tgt: nodeGeom{Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(c201),
 				Inputs: []portGeom{{Name: "FromRight", AnchorId: &anchorId2}}},
 			tgtH: "FromRight",
 		},
@@ -112,12 +112,12 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 			got := arcLengthBetweenPorts(c.src, c.srcH, c.tgt, c.tgtH)
 			// Straight-segment model: arc length is the chord distance.
 			srcCenter := vec3{}
-			if c.src.Center != nil {
-				srcCenter = *c.src.Center
+			if c.src.HasPos {
+				srcCenter = nodeWorldPos(c.src)
 			}
 			tgtCenter := vec3{}
-			if c.tgt.Center != nil {
-				tgtCenter = *c.tgt.Center
+			if c.tgt.HasPos {
+				tgtCenter = nodeWorldPos(c.tgt)
 			}
 			p0 := refPortWorldPos(c.src.Kind, srcCenter, c.src.Outputs, c.srcH, false)
 			p2 := refPortWorldPos(c.tgt.Kind, tgtCenter, c.tgt.Inputs, c.tgtH, true)
@@ -201,13 +201,13 @@ func TestArcLengthBetweenPortsUsesEachEndsOwnRadius(t *testing.T) {
 	srcCenter := vec3{X: 0, Y: 0, Z: 0}
 	tgtCenter := vec3{X: 200, Y: 0, Z: 0}
 	src := nodeGeom{
-		Kind:    "HoldFlip",
-		Center:  &srcCenter,
+		Kind:   "HoldFlip",
+		HasPos: true, ScenePolar: cart2polar(srcCenter),
 		Outputs: []portGeom{{Name: "Out", AnchorId: &anchorId0, PortR: &srcR}},
 	}
 	tgt := nodeGeom{
 		Kind:   "HoldFlip",
-		Center: &tgtCenter,
+		HasPos: true, ScenePolar: cart2polar(tgtCenter),
 		Inputs: []portGeom{{Name: "In", AnchorId: &anchorId0, PortR: &tgtR}},
 	}
 	got := arcLengthBetweenPorts(src, "Out", tgt, "In")

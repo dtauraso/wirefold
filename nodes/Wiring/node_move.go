@@ -193,8 +193,8 @@ func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
 	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr, localPolar: map[string]polar{}}
 	// Seed the atomic snapshot from the initial geometry so readers have a
 	// valid center before the first center message arrives.
-	if geom.Center != nil {
-		nm.snap.Store(&centerSnap{c: *geom.Center, reach: geom.ReachR})
+	if geom.HasPos {
+		nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), reach: geom.ReachR})
 	}
 	return nm
 }
@@ -216,9 +216,12 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// Polar re-propagation: adopt the centrally-computed world center, then
-		// re-emit node-geometry.
-		m.geom.Center = msg.Center
+		// Polar re-propagation: the re-propagated WORLD center arrives at this input
+		// boundary; the mover holds it as polar (setNodeWorld → ScenePolar about its
+		// SceneCenter), then re-emits node-geometry.
+		if msg.Center != nil {
+			setNodeWorld(&m.geom, *msg.Center)
+		}
 		m.geom.ReachR = msg.ReachR
 		// Publish the new center atomically so readers on other goroutines
 		// (stdin reader: centerOfNode, heldCenters, fanCenters)
@@ -251,7 +254,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 			return
 		}
 		nw := newWorld
-		m.geom.Center = &nw
+		setNodeWorld(&m.geom, nw)
 		m.snap.Store(&centerSnap{c: nw, reach: m.geom.ReachR})
 		if m.tr != nil {
 			m.emitGeometry()
@@ -378,11 +381,14 @@ func (m *edgeMover) handle(msg moveMsg) {
 	if msg.Kind == moveMsgKindCenter {
 		// Polar re-propagation: adopt the centrally-computed center on whichever
 		// endpoint this message names, then recompute the edge.
+		if msg.Center == nil {
+			return
+		}
 		switch msg.NodeID {
 		case m.srcID:
-			m.srcGeom.Center = msg.Center
+			setNodeWorld(&m.srcGeom, *msg.Center)
 		case m.dstID:
-			m.dstGeom.Center = msg.Center
+			setNodeWorld(&m.dstGeom, *msg.Center)
 		default:
 			return
 		}
@@ -396,13 +402,11 @@ func (m *edgeMover) handle(msg moveMsg) {
 		// drag, where the dragged node and its sphere center both move.
 		moved := false
 		if c, ok := msg.Centers[m.srcID]; ok {
-			cc := c
-			m.srcGeom.Center = &cc
+			setNodeWorld(&m.srcGeom, c)
 			moved = true
 		}
 		if c, ok := msg.Centers[m.dstID]; ok {
-			cc := c
-			m.dstGeom.Center = &cc
+			setNodeWorld(&m.dstGeom, c)
 			moved = true
 		}
 		if moved {
@@ -868,12 +872,12 @@ func (md *MoveDispatch) installAimedPorts(registry AimedPortRegistry) {
 		e.centerOf = func(id string) (vec3, bool) {
 			switch id {
 			case e.srcID:
-				if e.srcGeom.Center != nil {
-					return *e.srcGeom.Center, true
+				if e.srcGeom.HasPos {
+					return nodeWorldPos(e.srcGeom), true
 				}
 			case e.dstID:
-				if e.dstGeom.Center != nil {
-					return *e.dstGeom.Center, true
+				if e.dstGeom.HasPos {
+					return nodeWorldPos(e.dstGeom), true
 				}
 			}
 			return centerOf(id)

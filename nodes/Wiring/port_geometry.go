@@ -27,13 +27,22 @@ type portGeom struct {
 }
 
 // nodeGeom carries everything the port-curve math needs for one node.
-// Center is the polar-layout propagated world center; nodeWorldPos returns it directly.
-// A nil Center falls back to the world origin (used only for hand-written/partial specs).
+//
+// Position is POLAR (polar-frame-rewrite.md): ScenePolar (r,θ,φ) about SceneCenter is the
+// source of truth; the node's world center is DERIVED only at the display/geometry boundary
+// as SceneCenter + polar2cart(ScenePolar) (nodeWorldPos). SceneCenter is the scene sphere's
+// center — the ONLY cartesian value carried here. HasPos is false for hand-written/partial
+// specs that carry no position (nodeWorldPos then falls back to the world origin).
 type nodeGeom struct {
-	Kind   string
-	Label  string   // human label for this node (data.label, else node id); streamed on node-geometry events for the new-system label sidecar
-	R      *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
-	Center *vec3    // optional precomputed world center (polar-layout propagation); when set, nodeWorldPos returns it directly
+	Kind  string
+	Label string   // human label for this node (data.label, else node id); streamed on node-geometry events for the new-system label sidecar
+	R     *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
+	// ScenePolar is the node's position as (r,θ,φ) about SceneCenter — the polar source of
+	// truth. SceneCenter is the scene-sphere center (the one cartesian anchor). World is
+	// derived: SceneCenter + polar2cart(ScenePolar). Valid only when HasPos.
+	ScenePolar  polar
+	SceneCenter vec3
+	HasPos      bool // false for hand-written/partial specs with no position → nodeWorldPos returns origin
 	// ReachR is the sphere REACH radius: the max distance from this node's center to
 	// any node it outputs to (its surface children), under the resolved centers. It is
 	// streamed in the NodeGeometry sphereR field and consumed by the TS SphereRing so the
@@ -122,14 +131,24 @@ func nodeRadius(kind string) float64 {
 	return min(w, h) / float64(CurveParamNodeRadiusDivisor)
 }
 
-// nodeWorldPos resolves a node's world center from its polar-layout propagated Center.
-// A nil Center is a fallback for hand-written/partial specs → origin.
+// nodeWorldPos derives a node's world center from its polar source of truth:
+// SceneCenter + polar2cart(ScenePolar). This is the ONE polar→cartesian conversion for a
+// node center; it happens only here, at the geometry/display boundary. A node with no
+// position (HasPos false — hand-written/partial specs) falls back to the world origin.
 func nodeWorldPos(g nodeGeom) vec3 {
-	// g.Center is resolved from meta.json x/y/z. A nil Center falls back to origin.
-	if g.Center != nil {
-		return *g.Center
+	if !g.HasPos {
+		return vec3{}
 	}
-	return vec3{}
+	return g.SceneCenter.add(polar2cart(g.ScenePolar))
+}
+
+// setNodeWorld updates a node's polar source of truth from a world center at an INPUT
+// boundary (a pointer-derived world point, or a re-propagated solve center). The held
+// representation stays polar: ScenePolar = cart2polar(world − SceneCenter). Cartesian
+// enters only here and at nodeWorldPos — never as a stored cartesian center.
+func setNodeWorld(g *nodeGeom, world vec3) {
+	g.ScenePolar = cart2polar(world.sub(g.SceneCenter))
+	g.HasPos = true
 }
 
 // Ring-anchor geometry constants. These are Go-local until the TS side adopts them.

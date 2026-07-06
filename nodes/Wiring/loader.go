@@ -76,14 +76,16 @@ func (n specNode) label() string {
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom(sceneCenter vec3, hasScene bool) nodeGeom {
-	// Position: prefer the scene polar (authoritative) when present and a persisted scene
-	// sphere exists — world = sceneCenter + polar2cart(scenePolar). Otherwise fall back to
-	// the legacy cartesian x/y/z (fresh/unmigrated scenes).
-	center := vec3{X: n.X, Y: n.Y, Z: n.Z}
-	if hasScene && n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
-		center = sceneCenter.add(polar2cart(polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}))
+	// Position is POLAR (polar-frame-rewrite.md). The stored ScenePolar (r,θ,φ about the scene
+	// sphere center) is the ONLY stored position and is adopted directly — there is no cartesian
+	// x/y/z load path. When it is absent the node has no position (HasPos false → nodeWorldPos
+	// returns origin).
+	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, SceneCenter: sceneCenter}
+	if n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
+		g.ScenePolar = polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}
+		g.HasPos = true
 	}
-	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, Center: &center}
+	_ = hasScene // scene presence no longer gates polar adoption; the stored polar is authoritative.
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -309,8 +311,8 @@ func (b *buildCtx) computeNodeGeometry() {
 
 	centers := map[string]vec3{}
 	for id, g := range nodeGeoms {
-		if g.Center != nil {
-			centers[id] = *g.Center
+		if g.HasPos {
+			centers[id] = nodeWorldPos(g)
 		}
 	}
 	b.centers = centers
@@ -465,10 +467,10 @@ func (b *buildCtx) buildMoveDispatch() {
 		// world→polar conversion at load; thereafter locks read the stored link polar).
 		md.initLinkPolar(func(id string) (vec3, bool) {
 			g, ok := b.nodeGeoms[id]
-			if !ok || g.Center == nil {
+			if !ok || !g.HasPos {
 				return vec3{}, false
 			}
-			return *g.Center, true
+			return nodeWorldPos(g), true
 		})
 
 		// No polar locks are registered: every node is lock-free, so a drag moves only
