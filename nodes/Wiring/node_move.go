@@ -536,7 +536,7 @@ type MoveDispatch struct {
 	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
 	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
-	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanSceneSphere on every
+	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanScene on every
 	// camera pan. nil until armed (tests that never arm).
 	spherePersist *sceneSpherePersister
 	// locksPersist is the debounced disk persister for the polar rule-builder's equations
@@ -1033,11 +1033,11 @@ func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 }
 func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
 func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
+	// A dolly is a pure CAMERA move (the eye translates toward the cursor). It must NOT move the
+	// scene sphere — that is the separate PanScene gesture (polar-frame-rewrite.md). Coupling them
+	// left md.sceneSphere.Center diverged from the movers' held center until the next PanScene
+	// broadcast reconciled it with a jump (the "zoom got canceled" symptom).
 	md.vp.PanViewpoint(delta, tr)
-	// Phase 6 (polar-model.md): a camera pan also pans the scene sphere by the same delta —
-	// the sphere is a separate entity from the camera pivot, but pan is the one gesture that
-	// moves both together. Orbit (OrbitViewpoint/OrbitLockedViewpoint) must NOT call this.
-	md.PanSceneSphere(delta)
 }
 
 // EnableViewpointPersist arms gesture-driven camera persistence: every subsequent

@@ -75,22 +75,6 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 	md.sceneSphere = contentFitSceneSphere(md.heldCenters())
 }
 
-// PanSceneSphere moves the scene sphere's Center by the SAME delta as a camera pan (phase 6:
-// pan moves the scene sphere; orbit does NOT — callers must only invoke this from the pan
-// path, never from orbit). Node WORLD positions are held fixed here; only the reference
-// Center moves, so every node's SCENE polar (measured about Center) changes implicitly and
-// is recomputed the next time it is read/persisted (scene_node_pos_persist.go's dual-write).
-// Radius re-fits around the new Center via fitSceneRadius so it keeps covering the diagram.
-// Schedules a debounced disk write when persistence is armed (EnableEditPersist); path=="" /
-// nil persister is a no-op (tests that never arm).
-func (md *MoveDispatch) PanSceneSphere(delta vec3) {
-	md.sceneSphere.Center = md.sceneSphere.Center.add(delta)
-	md.sceneSphere.Radius = fitSceneRadius(md.heldCenters(), md.sceneSphere.Center)
-	if md.spherePersist != nil {
-		md.spherePersist.schedule(md.sceneSphere)
-	}
-}
-
 // sceneSpherePersister coalesces rapid pans into a debounced read-modify-write of
 // scene.json's "sceneSphere" key, mirroring overlaysPersister/fadePersister. path == "" ⇒
 // no-op (tests that never arm persistence).
