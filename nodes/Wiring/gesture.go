@@ -961,7 +961,6 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	vp := md.vp.viewpoint
 	eye := eyeOf(vp)
 	pivot := regionFocus(vp, md.heldCenters())
-	r := eye.sub(pivot).length()
 
 	if ev.Ctrl {
 		// Zoom-to-cursor: move the camera TOWARD the node under the cursor along the cursor→node
@@ -996,12 +995,14 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	}
 
 	// Plain wheel = LATERAL pan = STRAFE THE CAMERA (free-camera model): the camera body slides
-	// sideways through the fixed scene. The displacement is built in polar (r = drag distance,
-	// screen bearing rotated into the screen plane by the camera's own (θ,φ)); PanViewpoint
-	// translates the pivot — and the eye rides along it (eye = pivot + r·pos) — so the whole
-	// camera strafes with the look direction unchanged. The scene does not move.
+	// sideways through the fixed scene. Pan SPEED is scaled by the camera's OWN focal distance
+	// (vp.r), NOT by eye-to-nearest-content — the latter collapses when zoom dollies the eye up
+	// to a node, which is exactly what made pan crawl after zooming in (and coupled pan to zoom).
+	// vp.r is a stable scene-scale property (set by home/framing, unchanged by the dolly), so pan
+	// stays a usable pilot speed at any zoom. The displacement is built in polar; PanViewpoint
+	// translates pivot+eye together with the look direction unchanged. The scene does not move.
 	fovRad := ev.Fov * math.Pi / 180
-	worldPerPixel := (2 * r * math.Tan(fovRad/2)) / md.gest.rect.height
+	worldPerPixel := (2 * vp.r * math.Tan(fovRad/2)) / md.gest.rect.height
 	disp := panDisplacementPolar(vp.pos, vp.up, ev.DeltaX, ev.DeltaY, worldPerPixel)
 	md.PanViewpoint(disp, tr)
 }
