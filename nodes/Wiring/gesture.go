@@ -607,9 +607,6 @@ func (md *MoveDispatch) commitPolarEq(eq polarEq, tr *T.Trace) {
 	// it lands highlighted in the panel list AND draws its diagram guides immediately — both
 	// follow selectedLocks.
 	md.selectedLocks = []int{len(md.polarEqsSnap()) - 1}
-	// Guarantee the Center↔term movement links exist so the equation is enforced even when no
-	// topology edge connects the picked nodes to the Center.
-	md.ensureEqLinks(eq)
 	// Enforce the equation IMMEDIATELY (don't wait for the next drag): settle term A in place
 	// so its lock write flows to term B — the just-set side snaps to satisfy the equation now.
 	// RootMove runs the full refresh→applyPolarEqs→fan pipeline.

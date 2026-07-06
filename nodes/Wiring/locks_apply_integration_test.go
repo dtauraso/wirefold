@@ -78,13 +78,11 @@ func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
 
 	// Replicate the gesture.go completion path for eq θ(a) == θ(b).
 	eq := polarEq{
-		Center: "c",
 		A:      polarTerm{Node: "a", Comp: compTheta, Sign: 1},
 		B:      polarTerm{Node: "b", Comp: compTheta, Sign: 1},
 		Active: true,
 	}
 	md.appendPolarEq(eq)
-	md.ensureEqLinks(eq)
 	if c, ok := md.centerOfNode(eq.A.Node); ok {
 		md.RootMove(eq.A.Node, c)
 	}

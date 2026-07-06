@@ -139,60 +139,11 @@ func TestPortTorusEqRoundTrip(t *testing.T) {
 		t.Fatalf("polarEqs[1].Kind=%v want eqPortTorus", got[1].Kind)
 	}
 
-	// Full MoveDispatch.LoadPolarEqs path: authoring an eqPortTorus entry appends it to
-	// md.polarEqs, and ensureEqLinks must NOT create a movement link for it (inert this
-	// stage — no link is required for a lock with no solve).
+	// Full MoveDispatch.LoadPolarEqs path: an eqPortTorus entry loads into md.polarEqs.
 	md := &MoveDispatch{}
 	md.LoadPolarEqs(root)
 	if len(md.polarEqsSnap()) != 2 {
 		t.Fatalf("md.polarEqs len=%d want 2", len(md.polarEqsSnap()))
-	}
-	if md.linkBetween("3", "3") != nil {
-		t.Fatalf("ensureEqLinks created a link for an eqPortTorus entry; want none")
-	}
-}
-
-// TestApplyPolarEqsSkipsPortTorus verifies applyPolarEqs is a no-op for an eqPortTorus entry
-// (STAGE 1: authorable/persisted/displayed only, no geometric effect) while an ordinary
-// node/node equation touching the SAME moved node still solves normally.
-func TestApplyPolarEqsSkipsPortTorus(t *testing.T) {
-	md := &MoveDispatch{}
-	md.addLink("Center1", "A")
-	md.addLink("Center1", "B")
-	md.linkBetween("Center1", "A").setPolar("Center1", "A", polar{Theta: 1, Phi: 0.5, R: 1})
-	md.linkBetween("Center1", "B").setPolar("Center1", "B", polar{Theta: 0, Phi: 0, R: 1})
-
-	md.setPolarEqs([]polarEq{
-		{
-			Kind:        eqPortTorus,
-			PortNode:    "A",
-			PortName:    "Out",
-			PortIsInput: false,
-			TorusNode:   "Center1",
-			Active:      true,
-		},
-		{
-			Center: "Center1",
-			A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
-			B:      polarTerm{Node: "B", Comp: compTheta, Sign: 1},
-			Active: true,
-		},
-	})
-	pos := func(id string) (vec3, bool) {
-		if id == "Center1" {
-			return vec3{}, true
-		}
-		return vec3{}, false
-	}
-	out := md.applyPolarEqs("A", pos)
-	if _, ok := out["A"]; ok {
-		t.Fatalf("applyPolarEqs wrote a position for the moved node itself; want none")
-	}
-	if _, ok := out["Center1"]; ok {
-		t.Fatalf("applyPolarEqs wrote a position for the torus node from the eqPortTorus entry; want none (inert)")
-	}
-	if _, ok := out["B"]; !ok {
-		t.Fatalf("applyPolarEqs did not solve the ordinary node/node equation touching the same moved node")
 	}
 }
 
@@ -225,4 +176,17 @@ func TestPolarEqsBackCompatDefaultActive(t *testing.T) {
 	if !got[0].Active {
 		t.Fatalf("back-compat default: Active=%v want true", got[0].Active)
 	}
+}
+
+// slicesEqualInt reports whether two int slices are element-wise equal.
+func slicesEqualInt(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

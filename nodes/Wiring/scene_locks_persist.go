@@ -198,11 +198,6 @@ func (md *MoveDispatch) LoadPolarEqs(topologyPath string) {
 	scenePath := sceneCameraPath(topologyPath)
 	if eqs, ok := loadScenePolarEqs(scenePath); ok {
 		md.setPolarEqs(eqs)
-		// Rebuild the Center↔term movement links each equation rides (they are not persisted
-		// with the topology edges), so loaded constraints enforce after a reload.
-		for _, eq := range eqs {
-			md.ensureEqLinks(eq)
-		}
 		md.emitPolarLocks(md.tr)
 		// A loaded ACTIVE `port ∈ torus` lock geometrically constrains its port
 		// (aimed_ports.go portWorldPosAimed ring-projection) — re-emit each such

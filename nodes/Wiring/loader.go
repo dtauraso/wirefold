@@ -414,32 +414,6 @@ func (b *buildCtx) buildMoveDispatch() {
 		md.sceneSphere = b.sphere
 	}
 
-	{
-		loaded := map[string]bool{}
-		for _, n := range b.spec.Nodes {
-			loaded[n.ID] = true
-		}
-		linkEdges := make([]sphereEdge, 0, len(b.spec.Edges))
-		for _, e := range b.spec.Edges {
-			linkEdges = append(linkEdges, sphereEdge{Source: e.Source, Target: e.Target})
-		}
-		md.registerMovementLinks(linkEdges, func(id string) bool { return loaded[id] })
-
-		// Fill each link's polar state from the loaded world centers (the one-time
-		// world→polar conversion at load; thereafter locks read the stored link polar).
-		md.initLinkPolar(func(id string) (vec3, bool) {
-			g, ok := b.nodeGeoms[id]
-			if !ok || !g.HasPos {
-				return vec3{}, false
-			}
-			return nodeWorldPos(g), true
-		})
-
-		// No polar locks are registered: every node is lock-free, so a drag moves only
-		// the dragged node. The link graph and its polar state stay (refreshed on drag);
-		// locks ride on it again when re-registered here.
-	}
-
 	md.installLocked()
 	b.md = md
 }
