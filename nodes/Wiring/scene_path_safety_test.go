@@ -36,7 +36,7 @@ func TestSafeTreePathComponent(t *testing.T) {
 
 func TestWriteNodePositionRejectsTraversalID(t *testing.T) {
 	root := t.TempDir()
-	err := writeNodePosition(root, "../../evil", vec3{}, vec3{}, false)
+	err := writeNodePosition(root, "../../evil", polar{})
 	if err == nil {
 		t.Fatal("expected error for traversal node id, got nil")
 	}

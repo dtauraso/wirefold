@@ -126,7 +126,7 @@ func TestPanSceneSphereThenNodeSaveUpdatesScenePolar(t *testing.T) {
 	wantPolar := cart2polar(world.sub(sc))
 
 	// Directly exercise the write side used by the debounced persister's flush.
-	if err := writeNodePosition(root, "a", world, sc, true); err != nil {
+	if err := writeNodePosition(root, "a", wantPolar); err != nil {
 		t.Fatalf("writeNodePosition: %v", err)
 	}
 	raw, err := os.ReadFile(metaPath)
