@@ -396,18 +396,13 @@ func (b *buildCtx) allocateWires() {
 	edgeSegments := map[string]wireSegment{}
 	for _, e := range b.spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
-		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry,
-		// using aimed port directions for registered ports (radial toward connected node)
-		// rather than ring-anchor positions. Non-registered ports fall back to portWorldPos.
-		// No lock check here: this fires before MoveDispatch (and any `port ∈ torus`
-		// lock) exists. Locks load later (LoadPolarEqs); md.ResendGeometry re-emits
-		// with the live lock check once they do.
-		seg := segmentBetweenPortsAimed(
-			b.nodeGeoms[e.Source], e.SourceHandle, e.Source,
-			b.nodeGeoms[e.Target], e.TargetHandle, e.Target,
-			b.aimedPorts, b.centerOf, nil,
-		)
-		arcLength := chordLength(seg.Start, seg.End)
+		// Per-edge segment + arc, node-to-node (polar-frame-rewrite.md option A). The arc
+		// (pulse travel budget) is the polar law-of-cosines distance between the two node
+		// positions (edgeArcPolar) — pure polar. The segment is the world node-to-node line
+		// for the renderer (edgeSegment), the GPU-boundary cartesian.
+		srcG, tgtG := b.nodeGeoms[e.Source], b.nodeGeoms[e.Target]
+		seg := edgeSegment(srcG, tgtG)
+		arcLength := edgeArcPolar(srcG, tgtG)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs

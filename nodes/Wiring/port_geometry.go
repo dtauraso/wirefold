@@ -276,11 +276,18 @@ func portWorldPos(g nodeGeom, portName string, isInput bool) vec3 {
 	return center.add(dir.scale(portRadiusByName(g, portName, isInput)))
 }
 
-// arcLengthBetweenPorts computes the straight chord distance between the
-// source node's OUTPUT port and the target node's INPUT port. This is the travel
-// budget for a pulse on this edge (wires are straight segments).
-func arcLengthBetweenPorts(src nodeGeom, srcHandle string, tgt nodeGeom, tgtHandle string) float64 {
-	start := portWorldPos(src, srcHandle, false) // source OUTPUT port
-	end := portWorldPos(tgt, tgtHandle, true)    // target INPUT port
-	return chordLength(start, end)
+// edgeArc is the pulse's travel budget for an edge: the straight-line distance between the
+// two node positions, computed in POLAR via the spherical law of cosines (polarDist) — no
+// cartesian, no vector subtraction (polar-frame-rewrite.md option A: an edge runs node-to-node;
+// the port does not offset the endpoint). Both node positions are scene polar about the shared
+// scene center, so polarDist applies directly.
+func edgeArcPolar(src, tgt nodeGeom) float64 {
+	return polarDist(src.ScenePolar, tgt.ScenePolar)
+}
+
+// edgeSegment is the straight world segment the renderer draws for an edge: source node center
+// to target node center. This is the GPU boundary — nodeWorldPos is the single polar→cartesian
+// conversion per endpoint, done here because WebGL needs cartesian line endpoints.
+func edgeSegment(src, tgt nodeGeom) wireSegment {
+	return wireSegment{Start: nodeWorldPos(src), End: nodeWorldPos(tgt)}
 }

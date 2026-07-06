@@ -434,7 +434,7 @@ func (m *edgeMover) emitGeometry() {
 	if m.tr == nil {
 		return
 	}
-	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf, m.locked)
+	seg := edgeSegment(m.srcGeom, m.dstGeom)
 	m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
 		seg.Start.X, seg.Start.Y, seg.Start.Z,
 		seg.End.X, seg.End.Y, seg.End.Z)
@@ -445,8 +445,8 @@ func (m *edgeMover) emitGeometry() {
 // bead (fraction-preserving), update the dest port window aggregate, and emit the new
 // segment so the renderer redraws the wire. Shared by node-move and port-anchor handling.
 func (m *edgeMover) recomputeGeometry() {
-	seg := segmentBetweenPortsAimed(m.srcGeom, m.srcH, m.srcID, m.dstGeom, m.dstH, m.dstID, m.aimed, m.centerOf, m.locked)
-	arc := seg.Start.sub(seg.End).length()
+	seg := edgeSegment(m.srcGeom, m.dstGeom)
+	arc := edgeArcPolar(m.srcGeom, m.dstGeom)
 	lat := arc / PulseSpeedWuPerMs
 
 	// Publish the new per-edge segment/arc/latency onto the source Out as an immutable
@@ -769,11 +769,7 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 			}
 		}
 		for _, em := range md.edgeMovers {
-			emCenterOf := centerOf
-			if em.centerOf != nil {
-				emCenterOf = em.centerOf
-			}
-			seg := segmentBetweenPortsAimed(em.srcGeom, em.srcH, em.srcID, em.dstGeom, em.dstH, em.dstID, em.aimed, emCenterOf, md.portTorusLocked)
+			seg := edgeSegment(em.srcGeom, em.dstGeom)
 			tr.Geometry(em.edgeID, em.srcID, em.dstID,
 				seg.Start.X, seg.Start.Y, seg.Start.Z,
 				seg.End.X, seg.End.Y, seg.End.Z)

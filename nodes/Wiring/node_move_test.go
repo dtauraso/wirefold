@@ -101,14 +101,9 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	dstCenter := vec3{X: 0, Y: 0, Z: 0}
 	srcGeom := nodeGeom{Kind: "FanInSrc", HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
 	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
-	wantReg := AimedPortRegistry{
-		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
-		{NodeID: "dst", PortName: "In", IsInput: true}:   "src",
-	}
-	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
-	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
-	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantReg, wantCenterOf, nil)
-	wantArc := wantSeg.Start.sub(wantSeg.End).length()
+	// Option A: the edge runs node-to-node; segment = node centers, arc = polar distance.
+	wantSeg := edgeSegment(srcGeom, dstGeom)
+	wantArc := edgeArcPolar(srcGeom, dstGeom)
 
 	// Edge mover wrote the new segment/arc onto the source Out.
 	if !approxEq(out.Geom().ArcLength, wantArc) || !approxEq(out.Geom().SimLatencyMs, wantArc/PulseSpeedWuPerMs) {

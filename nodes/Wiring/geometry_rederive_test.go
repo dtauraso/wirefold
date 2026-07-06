@@ -116,14 +116,9 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 		Outputs: []portGeom{{Name: "Out"}}}
 	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter),
 		Inputs: []portGeom{{Name: "In"}}}
-	wantRegistry := AimedPortRegistry{
-		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
-		{NodeID: "dst", PortName: "In", IsInput: true}:   "src",
-	}
-	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
-	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
-	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantRegistry, wantCenterOf, nil)
-	wantArc := wantSeg.Start.sub(wantSeg.End).length()
+	// Option A: the edge runs node-to-node; segment = node centers, arc = polar distance.
+	wantSeg := edgeSegment(srcGeom, dstGeom)
+	wantArc := edgeArcPolar(srcGeom, dstGeom)
 
 	// Segment endpoints on the source Out must match exactly.
 	if !approxEq(out.Geom().Start.X, wantSeg.Start.X) || !approxEq(out.Geom().Start.Y, wantSeg.Start.Y) || !approxEq(out.Geom().Start.Z, wantSeg.Start.Z) {
