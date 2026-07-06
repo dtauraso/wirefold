@@ -70,19 +70,17 @@ func waitNotInFlight(t *testing.T, pw *PacedWire) {
 // length to exactly match segmentBetweenPorts / arcLengthBetweenPorts of the new
 // port-to-port geometry, and streams a geometry event carrying the new segment.
 func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
-	t.Skip("deferred: polar-frame regression — colinearity/move/aimed rebuild pending (polar-frame-rewrite.md phase 4/6); allowed for now")
+	// Initial positions are scene polar (r,θ,φ) about the origin: src (100,0,0)→(100,π/2,0),
+	// dst (0,0,0)→(0,0,0). They must live on the nodes (the geometry source), not just
+	// view.nodes, so the aimed-port registry is built at load.
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "src": {"x": 100, "y": 0, "z": 0},
-	    "dst": {"x": 0,   "y": 0, "z": 0}
-	  }}
+	  ]
 	}`
 
 	dir := t.TempDir()

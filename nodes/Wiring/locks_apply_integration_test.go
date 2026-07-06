@@ -16,24 +16,19 @@ import (
 )
 
 func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
-	t.Skip("deferred: polar-frame regression — colinearity/move/aimed rebuild pending (polar-frame-rewrite.md phase 4/6); allowed for now")
 	// Center "c" with two satellites "a" and "b". The equation θ(a)==θ(b) about c must snap
-	// b to a's colatitude the moment it is set — no drag required.
+	// b to a's colatitude the moment it is set — no drag required. Initial positions are
+	// scene polar about the origin, from c(0,0,0) a(10,10,0) b(10,2,0).
 	const topo = `{
 	  "nodes": [
-	    {"id":"c","type":"FanInSink","inputs":[{"name":"In"}]},
-	    {"id":"a","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"b","type":"FanInSrc","outputs":[{"name":"Out"}]}
+	    {"id":"c","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]},
+	    {"id":"a","type":"FanInSrc","scenePolarR":14.1421356237,"scenePolarTheta":0.785398163397,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"b","type":"FanInSrc","scenePolarR":10.1980390272,"scenePolarTheta":1.37340076695,"scenePolarPhi":0,"outputs":[{"name":"Out"}]}
 	  ],
 	  "edges": [
 	    {"label":"ea","kind":"data","source":"a","sourceHandle":"Out","target":"c","targetHandle":"In"},
 	    {"label":"eb","kind":"data","source":"b","sourceHandle":"Out","target":"c","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "c": {"x": 0,  "y": 0,  "z": 0},
-	    "a": {"x": 10, "y": 10, "z": 0},
-	    "b": {"x": 10, "y": 2,  "z": 0}
-	  }}
+	  ]
 	}`
 	dir := t.TempDir()
 	path := filepath.Join(dir, "topo.json")

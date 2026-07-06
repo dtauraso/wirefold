@@ -263,12 +263,13 @@ func init() {
 // inline topology with a feedback loop (Pacer→Src) to confirm that loop
 // is NOT excluded from the registry.
 func TestAimedPortRegistry_DerivedFromEdges(t *testing.T) {
-	t.Skip("deferred: polar-frame regression — colinearity/move/aimed rebuild pending (polar-frame-rewrite.md phase 4/6); allowed for now")
+	// Positions are scene polar (r,θ,φ) about the origin (no scene sphere here):
+	// src (0,0,0)→(0,0,0); sink (5,0,0)→(5,π/2,0); pacer (0,5,0)→(5,0,0).
 	const topo = `{
 	  "nodes": [
-	    {"id":"src",   "type":"AimedSrc",   "x":0,  "y":0,  "z":0,  "outputs":[{"name":"Out"}], "inputs":[{"name":"FeedbackIn"}]},
-	    {"id":"sink",  "type":"AimedSink",  "x":5,  "y":0,  "z":0,  "inputs":[{"name":"In"}]},
-	    {"id":"pacer", "type":"AimedPacer", "x":0,  "y":5,  "z":0,  "inputs":[{"name":"FromSrc"}], "outputs":[{"name":"Feedback"}]}
+	    {"id":"src",   "type":"AimedSrc",   "scenePolarR":0, "scenePolarTheta":0,          "scenePolarPhi":0, "outputs":[{"name":"Out"}], "inputs":[{"name":"FeedbackIn"}]},
+	    {"id":"sink",  "type":"AimedSink",  "scenePolarR":5, "scenePolarTheta":1.5707963267948966, "scenePolarPhi":0, "inputs":[{"name":"In"}]},
+	    {"id":"pacer", "type":"AimedPacer", "scenePolarR":5, "scenePolarTheta":0,          "scenePolarPhi":0, "inputs":[{"name":"FromSrc"}], "outputs":[{"name":"Feedback"}]}
 	  ],
 	  "edges": [
 	    {"label":"e1","kind":"chain","source":"src",   "sourceHandle":"Out",      "target":"sink",  "targetHandle":"In"},

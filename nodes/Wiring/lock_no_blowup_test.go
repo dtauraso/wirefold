@@ -19,22 +19,19 @@ import (
 // with stored local polar (the offset is carried, not re-derived from a moving center) it
 // must stay bounded and settle. This is the permanent guard for "panel locks never fly away".
 func TestPolarLockNoBlowup(t *testing.T) {
-	t.Skip("deferred: polar-frame regression — colinearity/move/aimed rebuild pending (polar-frame-rewrite.md phase 4/6); allowed for now")
+	// Positions are scene polar (r,θ,φ) about the origin, from the cartesian points
+	// c1(0,0,0) n2(60,10,0) n3(40,-30,10) n5(90,20,5) n6(75,-10,-8).
 	const topo = `{
 	  "nodes": [
-	    {"id":"c1","type":"AimedSink","x":0,"y":0,"z":0,"inputs":[{"name":"In"}]},
-	    {"id":"n2","type":"AimedSink","x":60,"y":10,"z":0,"inputs":[{"name":"In"}]},
-	    {"id":"n3","type":"AimedPacer","x":40,"y":-30,"z":10,"inputs":[{"name":"FromSrc"}],"outputs":[{"name":"Feedback"}]},
-	    {"id":"n5","type":"AimedSrc","x":90,"y":20,"z":5,"outputs":[{"name":"Out"}]},
-	    {"id":"n6","type":"AimedPacer","x":75,"y":-10,"z":-8,"inputs":[{"name":"FromSrc"}],"outputs":[{"name":"Feedback"}]}
+	    {"id":"c1","type":"AimedSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]},
+	    {"id":"n2","type":"AimedSink","scenePolarR":60.827625303,"scenePolarTheta":1.40564764938,"scenePolarPhi":0,"inputs":[{"name":"In"}]},
+	    {"id":"n3","type":"AimedPacer","scenePolarR":50.9901951359,"scenePolarTheta":2.19981112922,"scenePolarPhi":0.244978663127,"inputs":[{"name":"FromSrc"}],"outputs":[{"name":"Feedback"}]},
+	    {"id":"n5","type":"AimedSrc","scenePolarR":92.3309265631,"scenePolarTheta":1.35245344738,"scenePolarPhi":0.0554985052457,"outputs":[{"name":"Out"}]},
+	    {"id":"n6","type":"AimedPacer","scenePolarR":76.0854782465,"scenePolarTheta":1.70260881705,"scenePolarPhi":-0.106264862891,"inputs":[{"name":"FromSrc"}],"outputs":[{"name":"Feedback"}]}
 	  ],
 	  "edges": [
 	    {"label":"e63","kind":"data","source":"n6","sourceHandle":"Feedback","target":"n3","targetHandle":"FromSrc"}
-	  ],
-	  "view": {"nodes": {
-	    "c1": {"x":0,"y":0,"z":0}, "n2": {"x":60,"y":10,"z":0},
-	    "n3": {"x":40,"y":-30,"z":10}, "n5": {"x":90,"y":20,"z":5}, "n6": {"x":75,"y":-10,"z":-8}
-	  }}
+	  ]
 	}`
 	dir := t.TempDir()
 	path := filepath.Join(dir, "topo.json")
