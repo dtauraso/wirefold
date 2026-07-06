@@ -46,9 +46,9 @@ function renderLockRow(eq: PolarLockEntry, selected: boolean) {
           ? renderPortTorus(eq)
           : (
             <>
-              {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null)}
+              {renderTerm({ row: eq.a.row, label: eq.a.label, code: eq.a.code }, null, eq.centerLabel)}
               <span className="rule-eq-op"> = </span>
-              {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null)}
+              {renderTerm({ row: eq.b.row, label: eq.b.label, code: eq.b.code }, null, eq.centerLabel)}
             </>
           )}
       </span>

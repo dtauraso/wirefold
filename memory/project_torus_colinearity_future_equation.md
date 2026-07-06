@@ -29,3 +29,13 @@ that blows up means an offset was reconstructed from a moving reference).
 Kept intact for that future equation to build on: `portTorusLocked`,
 `portWorldPosAimed` / `ringProjectDir` / `partnerTorusLocked` / `ringAnchorDir`,
 and the eqPortTorus authoring/persist/display path.
+
+**2026-07-05 (`task/eq-show-source-node`): `eqPortTorus` authoring is now
+own-node-only.** The torus slot is no longer a free second-node pick — it is
+PRESET to the port's own node (the sticky Center), enforced at the commit site
+(`gesture.go addPortTorusLock` always sets `TorusNode = PortNode`) and in the
+webview form (`TypedPortTorusForm` renders the torus cell from the port's own
+node label, never a typed input). A cross-node `port ∈ torus` lock can no
+longer be authored. The future port/edge/torus colinearity equation described
+above must be a **separate new equation kind** — do NOT revive a cross-node
+`eqPortTorus` to build it.
