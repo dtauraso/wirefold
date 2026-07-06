@@ -1,10 +1,8 @@
 package Wiring
 
 import (
-	"context"
 	"math"
 	"testing"
-	"time"
 )
 
 // TestPanDisplacementPolarMatchesPlaneSlide locks the polar pan displacement to the known-
@@ -30,62 +28,5 @@ func TestPanDisplacementPolarMatchesPlaneSlide(t *testing.T) {
 		if math.Abs(got.X-want.X) > 1e-9 || math.Abs(got.Y-want.Y) > 1e-9 || math.Abs(got.Z-want.Z) > 1e-9 {
 			t.Fatalf("pos=%v up=%v d=(%v,%v): polar=%+v want planeSlide=%+v", c.pos, c.up, c.dx, c.dy, got, want)
 		}
-	}
-}
-
-// TestPanSceneTranslatesRigidly verifies a scene pan moves every node's world by the same
-// displacement (ScenePolar unchanged), the whole scene translating under a fixed camera.
-func TestPanSceneTranslatesRigidly(t *testing.T) {
-	root := writeTree(t)
-	md := loadTreeMD(t, root)
-	before := md.heldCenters()
-	polarsBefore := md.heldPolar()
-
-	disp := vec3{X: 12, Y: -5, Z: 7}
-	md.PanScene(disp)
-
-	after := md.heldCenters()
-	polarsAfter := md.heldPolar()
-	for id, b := range before {
-		a := after[id]
-		want := b.add(disp)
-		if math.Abs(a.X-want.X) > 1e-9 || math.Abs(a.Y-want.Y) > 1e-9 || math.Abs(a.Z-want.Z) > 1e-9 {
-			t.Fatalf("node %s world=%+v want %+v (rigid translate by %+v)", id, a, want, disp)
-		}
-		if polarsAfter[id] != polarsBefore[id] {
-			t.Fatalf("node %s ScenePolar changed on pan: %+v -> %+v", id, polarsBefore[id], polarsAfter[id])
-		}
-	}
-}
-
-// TestPanSceneStartedPathMovesNodes drives PanScene through the REAL message path (movers
-// started, goroutines) — the path a live pan uses. It guards the regression where the scene-
-// center broadcast (no NodeID) was rejected by nodeMover.handle's id guard, so edges moved
-// but nodes did not.
-func TestPanSceneStartedPathMovesNodes(t *testing.T) {
-	root := writeTree(t)
-	md := loadTreeMD(t, root)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	md.Start(ctx)
-
-	before, ok := md.centerOfNode("src")
-	if !ok {
-		t.Fatal("no center for src")
-	}
-	disp := vec3{X: 20, Y: -8, Z: 4}
-	md.PanScene(disp)
-
-	want := before.add(disp)
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		got, _ := md.centerOfNode("src")
-		if math.Abs(got.X-want.X) < 1e-6 && math.Abs(got.Y-want.Y) < 1e-6 && math.Abs(got.Z-want.Z) < 1e-6 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("node src world did not translate on pan via the started path: got %+v want %+v", got, want)
-		}
-		time.Sleep(2 * time.Millisecond)
 	}
 }

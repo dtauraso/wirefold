@@ -84,28 +84,6 @@ type sceneSpherePersister struct {
 	debouncedPersister[sceneSphere]
 }
 
-// schedule records the latest sphere snapshot and (re)arms the debounce timer.
-func (p *sceneSpherePersister) schedule(s sceneSphere) {
-	if p == nil || p.path == "" {
-		return
-	}
-	p.arm(p.debounce, s, p.flush)
-}
-
-// flush writes the pending sphere to scene.json and clears it. Fire-and-forget: errors are
-// logged, not returned.
-func (p *sceneSpherePersister) flush() {
-	s, has := p.take()
-	if !has {
-		return
-	}
-	if err := writeSceneSphere(p.path, s); err != nil {
-		logPersistErr("scene_sphere_persist", p.path, err)
-		return
-	}
-	p.recordWrite()
-}
-
 // flushNow synchronously writes the current sphere, bypassing the debounce — used by the
 // "save" command so the sphere is guaranteed persisted at save time even if the debounce
 // timer hasn't fired yet.

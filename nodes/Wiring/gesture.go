@@ -234,12 +234,16 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 	}
 }
 
-// beginSphereRotation mirrors interaction-handlers.ts beginSphereRotation: freeze the orbit
-// pivot (regionFocus), its screen-pixel center, and pixels-per-radian for the whole gesture.
+// beginSphereRotation freezes the orbit pivot, its screen-pixel center, and pixels-per-radian
+// for the whole gesture. The pivot is the camera's CURRENT focus (vp.pivot) — what it last flew
+// to (zoom) or framed (home) — NOT a re-derived region-focus. This is the free-camera model
+// (polar-frame-rewrite.md): the camera orbits whatever it is focused on from wherever it sits,
+// so rotate stays controllable at any position/zoom instead of swinging around a distant
+// content midpoint.
 func (md *MoveDispatch) beginSphereRotation(ev rawInputMsg) {
 	g := &md.gest
 	vp := md.vp.viewpoint
-	pivot := regionFocus(vp, md.heldCenters())
+	pivot := vp.pivot
 	g.rotPivot = pivot
 
 	eye := eyeOf(vp)
@@ -993,17 +997,15 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 		return
 	}
 
-	// Plain wheel = LATERAL polar pan (grab-drag-the-world): build the displacement in polar
-	// (r = drag distance, screen bearing rotated into the screen plane by the camera's own
-	// (θ,φ)) and move ONLY the scene-sphere center — the camera stays put. Nodes' ScenePolar is
-	// unchanged, so the whole scene translates rigidly.
+	// Plain wheel = LATERAL pan = STRAFE THE CAMERA (free-camera model): the camera body slides
+	// sideways through the fixed scene. The displacement is built in polar (r = drag distance,
+	// screen bearing rotated into the screen plane by the camera's own (θ,φ)); PanViewpoint
+	// translates the pivot — and the eye rides along it (eye = pivot + r·pos) — so the whole
+	// camera strafes with the look direction unchanged. The scene does not move.
 	fovRad := ev.Fov * math.Pi / 180
 	worldPerPixel := (2 * r * math.Tan(fovRad/2)) / md.gest.rect.height
-	// Grab-drag-the-world: the scene follows the cursor, i.e. it moves OPPOSITE the camera-pan
-	// (planeSlide) direction panDisplacementPolar returns — negate to drag the world under the pointer.
 	disp := panDisplacementPolar(vp.pos, vp.up, ev.DeltaX, ev.DeltaY, worldPerPixel)
-	md.PanScene(disp.scale(-1))
-	md.EmitViewpoint(tr) // camera unchanged; re-emit so the ring/sphere overlay tracks the new center
+	md.PanViewpoint(disp, tr)
 }
 
 func (g *gestureState) reset() {
