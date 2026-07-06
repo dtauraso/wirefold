@@ -15,7 +15,7 @@ import (
 // asserts that Toggle flips the owned overlayState bool AND emits the correct trace
 // event carrying the NEW value, and that Emit re-emits the CURRENT value WITHOUT
 // flipping. The exception flags (scene/node poles breadcrumb, angleLabels accessor,
-// tori/overlays method renames, doubleLinks default-off) are covered explicitly.
+// tori/overlays method renames) are covered explicitly.
 
 // overlayCase describes one generated overlay flag by its behavior, using closures
 // so the test reads/writes the concrete overlayState field without reflection.
@@ -93,13 +93,6 @@ var overlayCases = []overlayCase{
 		toggle: (*overlayState).ToggleOverlaysVis,
 		emit:   (*overlayState).EmitOverlaysVis,
 		kind:   T.KindOverlaysVis,
-	},
-	{
-		name:   "doubleLinks",
-		get:    func(o *overlayState) bool { return o.doubleLinksVisible },
-		toggle: (*overlayState).ToggleDoubleLinks,
-		emit:   (*overlayState).EmitDoubleLinks,
-		kind:   T.KindDoubleLinks,
 	},
 }
 
@@ -208,8 +201,6 @@ func setOverlayField(o *overlayState, name string, v bool) {
 		o.badgesGlobalVisible = v
 	case "overlays":
 		o.overlaysVisible = v
-	case "doubleLinks":
-		o.doubleLinksVisible = v
 	default:
 		panic("unknown overlay field " + name)
 	}
@@ -227,8 +218,7 @@ func TestAngleLabelsAccessor(t *testing.T) {
 	}
 }
 
-// TestDefaultOverlayState pins the startup snapshot: every flag defaults ON except
-// doubleLinks (the one defaultOff override).
+// TestDefaultOverlayState pins the startup snapshot: every flag defaults ON.
 func TestDefaultOverlayState(t *testing.T) {
 	d := defaultOverlayState()
 	on := []bool{
@@ -240,8 +230,5 @@ func TestDefaultOverlayState(t *testing.T) {
 		if !v {
 			t.Fatalf("defaultOverlayState field #%d should default ON", i)
 		}
-	}
-	if d.doubleLinksVisible {
-		t.Fatal("defaultOverlayState doubleLinksVisible should default OFF")
 	}
 }

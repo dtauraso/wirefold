@@ -29,7 +29,7 @@ func TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys(t *testing.T) {
 	md.LoadOverlays(root, tr)
 	tr.Close() // drain the goroutine so all emitted events are recorded before asserting
 	// The default-visible overlay flags must have been emitted, not skipped.
-	for _, want := range []string{"scene-tori", "overlays-vis", "double-links"} {
+	for _, want := range []string{"scene-tori", "overlays-vis"} {
 		seen := false
 		for _, k := range kinds {
 			if k == want {

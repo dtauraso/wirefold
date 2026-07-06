@@ -42,7 +42,7 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		// All fields read from the Camera block at decode time.
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
-		T.KindOverlaysVis, T.KindDoubleLinks:
+		T.KindOverlaysVis:
 		r.flag = ev.Visible
 	case T.KindSelect:
 		r.edge = ev.Edge // edge!="" → edge select; else node select (value=mode)

@@ -1694,7 +1694,6 @@ var overlayOverrides = map[string]overlayOverride{
 	"nodePoles":   {breadcrumb: "nodes"},
 	"angleLabels": {accessor: true},
 	"overlays":    {method: "OverlaysVis"},
-	"doubleLinks": {defaultOff: true},
 }
 
 // parseOverlayFlags reads the OVERLAY_FLAG_NAMES const in messages.ts (bounded by the

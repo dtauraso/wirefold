@@ -527,9 +527,9 @@ type MoveDispatch struct {
 	vp viewpointState
 	// tr is the trace sink (retained for trace emission; diagnostic breadcrumbs removed).
 	tr *T.Trace
-	// ov groups the 10 overlay-toggle visibility booleans and their flip/emit logic
-	// (overlay_state.go). Initialized to defaults by newMoveDispatch (9 true,
-	// doubleLinksVisible false). MoveDispatch exposes thin delegating methods.
+	// ov groups the 9 overlay-toggle visibility booleans and their flip/emit logic
+	// (overlay_state.go). Initialized to defaults by newMoveDispatch (all true).
+	// MoveDispatch exposes thin delegating methods.
 	ov overlayState
 	// gest is the gesture state machine (gesture.go): it consumes raw pointer/wheel input
 	// and produces camera (viewpoint) + topology (node-move) changes. Owned by

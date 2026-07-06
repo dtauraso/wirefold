@@ -264,7 +264,6 @@ type overlaySnapState struct {
 	labelsGlobal   uint8
 	badgesGlobal   uint8
 	overlaysVis    uint8
-	doubleLinks    uint8
 	// selMode is the current select mode (1 = own, 0 = surface), set by KindSelect.
 	// Not an overlay flag — rides the overlay singleton row for the on-surface highlight.
 	selMode uint8
@@ -398,9 +397,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot()
 	case T.KindOverlaysVis:
 		s.overlay.overlaysVis = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindDoubleLinks:
-		s.overlay.doubleLinks = boolU8(ev.Visible)
 		s.emitSnapshot()
 
 	case T.KindRuleBuilder:
@@ -1220,7 +1216,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles, ov.angleLabels,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal, ov.badgesGlobal,
-		ov.overlaysVis, ov.doubleLinks, ov.selMode)
+		ov.overlaysVis, ov.selMode)
 	return off + BufOverlayStride
 }
 

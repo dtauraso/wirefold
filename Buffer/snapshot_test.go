@@ -145,9 +145,8 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		UpTheta: 0.25, UpPhi: 0.75,
 	})
 
-	// Toggle two overlay flags.
+	// Toggle an overlay flag.
 	s.Update(T.Event{Kind: T.KindSceneTori, Visible: true})
-	s.Update(T.Event{Kind: T.KindDoubleLinks, Visible: true})
 
 	// Latch a rule-builder session: Center=node-A, one completed term on node-B (+φ, code 1),
 	// and a pending half-term (−θ, code 2).
@@ -322,9 +321,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	ovOff := camOff + BufCameraStride
 	if snap[ovOff+BufOverlayColSceneTori] != 1 {
 		t.Errorf("overlay.SceneTori: got %v, want 1", snap[ovOff+BufOverlayColSceneTori])
-	}
-	if snap[ovOff+BufOverlayColDoubleLinks] != 1 {
-		t.Errorf("overlay.DoubleLinks: got %v, want 1", snap[ovOff+BufOverlayColDoubleLinks])
 	}
 	if snap[ovOff+BufOverlayColScenePoles] != 0 {
 		t.Errorf("overlay.ScenePoles: got %v, want 0", snap[ovOff+BufOverlayColScenePoles])
