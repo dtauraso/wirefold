@@ -251,10 +251,12 @@ func (md *MoveDispatch) beginSphereRotation(ev rawInputMsg) {
 	g.rotCx = ((ndcX+1)/2)*g.rect.width + g.rect.left
 	g.rotCy = ((-ndcY+1)/2)*g.rect.height + g.rect.top
 
-	_, csRadius := contentSphereOf(md.heldCenters())
-	pivotDist := eye.sub(pivot).length()
+	// Rotate sensitivity is DISTANCE-INDEPENDENT: pixels-per-radian depends only on the screen
+	// (height + fov), not on eye→pivot distance. The old csRadius/pivotDist factor kept on-screen
+	// motion constant with distance, but it made rotation slower the closer you were to the pivot.
+	// A fixed rate makes rotate feel the same whether you are on top of a node or far from it.
 	fovRad := ev.Fov * math.Pi / 180
-	rpx := (csRadius / pivotDist) * (g.rect.height / 2) / math.Tan(fovRad/2)
+	rpx := (g.rect.height / 2) / math.Tan(fovRad/2)
 	g.rotPxPerRad = math.Max(rpx*(2/math.Pi), 1)
 }
 
