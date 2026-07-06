@@ -68,7 +68,8 @@ const lockPropEps = 1e-6
 // via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
 // the current center without touching the mover's live geom.
 type centerSnap struct {
-	c     vec3
+	c     vec3  // world center — cartesian, published for the emit/input boundaries only
+	p     polar // scene polar (r,θ,φ about the scene center) — the polar source of truth for geometry math
 	reach float64
 }
 
@@ -194,7 +195,7 @@ func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
 	// Seed the atomic snapshot from the initial geometry so readers have a
 	// valid center before the first center message arrives.
 	if geom.HasPos {
-		nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), reach: geom.ReachR})
+		nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), p: geom.ScenePolar, reach: geom.ReachR})
 	}
 	return nm
 }
@@ -227,7 +228,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// (stdin reader: centerOfNode, heldCenters, fanCenters)
 		// observe it without touching our live geom.
 		if msg.Center != nil {
-			m.snap.Store(&centerSnap{c: *msg.Center, reach: msg.ReachR})
+			m.snap.Store(&centerSnap{c: *msg.Center, p: m.geom.ScenePolar, reach: msg.ReachR})
 		}
 		if m.tr != nil {
 			m.emitGeometry()
@@ -255,7 +256,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		nw := newWorld
 		setNodeWorld(&m.geom, nw)
-		m.snap.Store(&centerSnap{c: nw, reach: m.geom.ReachR})
+		m.snap.Store(&centerSnap{c: nw, p: m.geom.ScenePolar, reach: m.geom.ReachR})
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -898,6 +899,19 @@ func (md *MoveDispatch) heldCenters() map[string]vec3 {
 	return centers
 }
 
+// heldPolar snapshots every mover's current SCENE POLAR (r,θ,φ about the scene center) from
+// the atomically-published snap — the polar source of truth for geometry math (reach, arc,
+// colinearity), read safe from the stdin goroutine while movers write their positions.
+func (md *MoveDispatch) heldPolar() map[string]polar {
+	polars := make(map[string]polar, len(md.nodeMovers))
+	for id, m := range md.nodeMovers {
+		if s := m.snap.Load(); s != nil {
+			polars[id] = s.p
+		}
+	}
+	return polars
+}
+
 func (md *MoveDispatch) heldEdges() []sphereEdge {
 	edges := make([]sphereEdge, 0, len(md.edgeMovers))
 	for _, em := range md.edgeMovers {
@@ -1014,12 +1028,15 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// read the stored link polar — no cart2polar in the lock equation.
 	md.refreshLinksTouching(nodeID, pos)
 
-	// Recompute every center's reach over the updated positions and fan all movers ONCE.
-	centers := md.heldCenters()
+	// Recompute every node's reach over the updated positions (pure polar) and fan all movers
+	// ONCE. The dragged node's NEW polar is derived from the pointer target at the INPUT boundary
+	// (the pointer hands in a cartesian world point) — this is the mirror of the emit boundary,
+	// the one place cartesian enters the polar model on the drag path.
+	polars := md.heldPolar()
 	for id, w := range emit {
-		centers[id] = w
+		polars[id] = cart2polar(w.sub(md.sceneSphere.Center))
 	}
-	reach := reachRFromCenters(centers, edges)
+	reach := reachRFromPolar(polars, edges)
 	md.fanCenters(emit, reach)
 
 	// DECENTRALIZED lock propagation (locks.go): originate ONE cascade covering EVERY
@@ -1060,19 +1077,20 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	return true
 }
 
-// reachRFromCenters computes each node's sphere REACH radius (max distance from a
-// node's center to any node it outputs to) under the given centers and edge set.
-// Called by loader.go buildFromSpec and by RootMove so the fanned "center" message
+// reachRFromPolar computes each node's sphere REACH radius (max distance from a node to any
+// node it outputs to) under the given polar positions and edge set. Distance is the spherical
+// law-of-cosines distance between the two polar positions (polarDist) — no cartesian, no vector
+// subtraction. Called by loader.go buildFromSpec and by RootMove so the fanned "center" message
 // carries the new reach radius and the ring stays sized during a drag.
-func reachRFromCenters(centers map[string]vec3, edges []sphereEdge) map[string]float64 {
+func reachRFromPolar(polars map[string]polar, edges []sphereEdge) map[string]float64 {
 	reachR := map[string]float64{}
 	for _, e := range edges {
-		sc, okS := centers[e.Source]
-		tc, okT := centers[e.Target]
+		sp, okS := polars[e.Source]
+		tp, okT := polars[e.Target]
 		if !okS || !okT {
 			continue
 		}
-		if d := chordLength(sc, tc); d > reachR[e.Source] {
+		if d := polarDist(sp, tp); d > reachR[e.Source] {
 			reachR[e.Source] = d
 		}
 	}

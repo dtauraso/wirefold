@@ -328,7 +328,13 @@ func (b *buildCtx) computeReachRadii() {
 	for _, e := range b.spec.Edges {
 		edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
 	}
-	for id, r := range reachRFromCenters(b.centers, edges) {
+	polars := map[string]polar{}
+	for id, g := range b.nodeGeoms {
+		if g.HasPos {
+			polars[id] = g.ScenePolar
+		}
+	}
+	for id, r := range reachRFromPolar(polars, edges) {
 		g := b.nodeGeoms[id]
 		g.ReachR = r
 		b.nodeGeoms[id] = g
