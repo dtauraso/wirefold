@@ -51,18 +51,15 @@ func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
 }
 
 func TestDecentralizedNodeMove(t *testing.T) {
+	// Initial positions are scene polar about the origin: src (100,0,0), dst (0,0,0).
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "src": {"x": 100, "y": 0, "z": 0},
-	    "dst": {"x": 0,   "y": 0, "z": 0}
-	  }}
+	  ]
 	}`
 
 	dir := t.TempDir()
@@ -102,16 +99,11 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	// Use aimed computation to match the edge mover (all edge-connected ports are aimed).
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
 	dstCenter := vec3{X: 0, Y: 0, Z: 0}
-	srcGeom := nodeGeom{Kind: "FanInSrc", Center: &srcCenter, Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", Center: &dstCenter, Inputs: []portGeom{{Name: "In"}}}
-	wantReg := AimedPortRegistry{
-		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
-		{NodeID: "dst", PortName: "In", IsInput: true}:   "src",
-	}
-	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
-	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
-	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantReg, wantCenterOf, nil)
-	wantArc := wantSeg.Start.sub(wantSeg.End).length()
+	srcGeom := nodeGeom{Kind: "FanInSrc", HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
+	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
+	// Option A: the edge runs node-to-node; segment = node centers, arc = polar distance.
+	wantSeg := edgeSegment(srcGeom, dstGeom)
+	wantArc := edgeArcPolar(srcGeom, dstGeom)
 
 	// Edge mover wrote the new segment/arc onto the source Out.
 	if !approxEq(out.Geom().ArcLength, wantArc) || !approxEq(out.Geom().SimLatencyMs, wantArc/PulseSpeedWuPerMs) {
@@ -402,7 +394,7 @@ func splitBufferFrames(t *testing.T, buf []byte) [][]byte {
 }
 
 // TestMoverCenterRace is a -race regression for the data race between the mover
-// goroutines writing geom.Center/ReachR and the stdin goroutine reading those fields
+// goroutines writing geom.ScenePolar/ReachR and the stdin goroutine reading those fields
 // via centerOfNode/heldCenters/fanCenters/ResendGeometry. It hammers
 // RootMove (which triggers fanCenters and heldCenters) and ResendGeometry from one
 // goroutine while center messages flow concurrently through the mover goroutines.
@@ -439,7 +431,7 @@ func TestMoverCenterRace(t *testing.T) {
 
 	// Hammer concurrently: center messages via RootMove (fanCenters + heldCenters)
 	// and ResendGeometry from the "stdin goroutine" side, while the mover goroutines
-	// are writing geom.Center/ReachR on the other side.
+	// are writing geom.ScenePolar/ReachR on the other side.
 	const iters = 200
 	var wg sync.WaitGroup
 	wg.Add(1)

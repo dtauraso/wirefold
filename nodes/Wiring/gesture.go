@@ -234,12 +234,15 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 	}
 }
 
-// beginSphereRotation mirrors interaction-handlers.ts beginSphereRotation: freeze the orbit
-// pivot (regionFocus), its screen-pixel center, and pixels-per-radian for the whole gesture.
+// beginSphereRotation freezes the orbit pivot, its screen-pixel center, and pixels-per-radian
+// for the whole gesture. The pivot is the CONTENT DIRECTLY AHEAD (focusAhead): the node the
+// camera is most pointed at, at its depth on the view-center ray. So rotate orbits whatever you
+// have flown to and centered (fly to a node → rotate spins around it), the orbit depth tracks
+// what you look at, and — because the pivot is on the view axis — it does not re-aim the camera.
 func (md *MoveDispatch) beginSphereRotation(ev rawInputMsg) {
 	g := &md.gest
 	vp := md.vp.viewpoint
-	pivot := regionFocus(vp, md.heldCenters())
+	pivot := focusAhead(vp, md.heldCenters())
 	g.rotPivot = pivot
 
 	eye := eyeOf(vp)
@@ -248,10 +251,12 @@ func (md *MoveDispatch) beginSphereRotation(ev rawInputMsg) {
 	g.rotCx = ((ndcX+1)/2)*g.rect.width + g.rect.left
 	g.rotCy = ((-ndcY+1)/2)*g.rect.height + g.rect.top
 
-	_, csRadius := contentSphereOf(md.heldCenters())
-	pivotDist := eye.sub(pivot).length()
+	// Rotate sensitivity is DISTANCE-INDEPENDENT: pixels-per-radian depends only on the screen
+	// (height + fov), not on eye→pivot distance. The old csRadius/pivotDist factor kept on-screen
+	// motion constant with distance, but it made rotation slower the closer you were to the pivot.
+	// A fixed rate makes rotate feel the same whether you are on top of a node or far from it.
 	fovRad := ev.Fov * math.Pi / 180
-	rpx := (csRadius / pivotDist) * (g.rect.height / 2) / math.Tan(fovRad/2)
+	rpx := (g.rect.height / 2) / math.Tan(fovRad/2)
 	g.rotPxPerRad = math.Max(rpx*(2/math.Pi), 1)
 }
 
@@ -607,9 +612,6 @@ func (md *MoveDispatch) commitPolarEq(eq polarEq, tr *T.Trace) {
 	// it lands highlighted in the panel list AND draws its diagram guides immediately — both
 	// follow selectedLocks.
 	md.selectedLocks = []int{len(md.polarEqsSnap()) - 1}
-	// Guarantee the Center↔term movement links exist so the equation is enforced even when no
-	// topology edge connects the picked nodes to the Center.
-	md.ensureEqLinks(eq)
 	// Enforce the equation IMMEDIATELY (don't wait for the next drag): settle term A in place
 	// so its lock write flows to term B — the just-set side snaps to satisfy the equation now.
 	// RootMove runs the full refresh→applyPolarEqs→fan pipeline.
@@ -959,47 +961,60 @@ func (md *MoveDispatch) edgeFromHit(h rawHit) (label string, ok bool) {
 func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	vp := md.vp.viewpoint
 	eye := eyeOf(vp)
-	basis := basisFromViewpoint(vp.pos, vp.up)
 	pivot := regionFocus(vp, md.heldCenters())
-	r := eye.sub(pivot).length()
-	pos := worldDirToAngles(eye.sub(pivot))
 
 	if ev.Ctrl {
-		// Dolly toward the node nearest the cursor in NDC (fallback region-focus).
+		// Zoom-to-cursor: move the camera TOWARD the node under the cursor along the cursor→node
+		// line, KEEPING the look direction — so that node stays fixed under the mouse. It does NOT
+		// re-aim: re-aiming (snapping the camera to look straight at the node) is what recentered
+		// the view and threw the cursor off. PanViewpoint translates the whole camera (pivot+eye
+		// ride together); pos/up are unchanged, so the node keeps projecting to the same pixel.
+		// The cursor→node pick is a screen-space selection at the input boundary (projectNDC).
 		mouseNdcX, mouseNdcY := md.gest.pixelToNDC(ev.X, ev.Y)
+		basis := basisFromViewpoint(vp.pos, vp.up)
+		aspect := md.gest.rect.aspect()
 		target := pivot
 		best := math.Inf(1)
-		aspect := md.gest.rect.aspect()
 		for _, c := range md.heldCenters() {
 			nx, ny, inFront := projectNDC(c, eye, basis, ev.Fov, aspect)
 			if !inFront {
 				continue
 			}
-			d := math.Hypot(nx-mouseNdcX, ny-mouseNdcY)
-			if d < best {
+			if d := math.Hypot(nx-mouseNdcX, ny-mouseNdcY); d < best {
 				best = d
 				target = c
 			}
 		}
-		toP := target.sub(eye)
-		distP := toP.length()
-		factor := math.Pow(gestureZoomBase, ev.DeltaY)
-		if distP*factor < gestureMinDist && distP != 0 {
-			factor = gestureMinDist / distP
+		toTarget := target.sub(eye)
+		distP := toTarget.length()
+		rayDir := anglesToWorldOffset(1, vp.pos.Theta, vp.pos.Phi).scale(-1) // forward, if AT the node
+		if distP > 1e-9 {
+			rayDir = toTarget.scale(1 / distP)
 		}
-		delta := toP.scale(1 - factor)
-		md.SetViewpoint(pivot, r, pos, vp.up)
-		md.PanViewpoint(delta, tr)
+		// Move the eye ALONG the cursor→node ray. amt>0 = toward the node (zoom in). The step is a
+		// fraction of the remaining distance (fast approach when far), FLOORED at a scene-scaled
+		// minimum so you can push THROUGH the node instead of asymptotically creeping to it — a
+		// pilot camera flies past nodes. No stop-short clamp.
+		amt := 1 - math.Pow(gestureZoomBase, ev.DeltaY)
+		step := distP * amt
+		if minStep := vp.r * (gestureZoomBase - 1); math.Abs(step) < minStep {
+			step = math.Copysign(minStep, amt)
+		}
+		md.PanViewpoint(rayDir.scale(step), tr)
 		return
 	}
 
-	// Plain wheel = screen-space pan along the camera right/up basis.
+	// Plain wheel = LATERAL pan = STRAFE THE CAMERA (free-camera model): the camera body slides
+	// sideways through the fixed scene. Pan SPEED is scaled by the camera's OWN focal distance
+	// (vp.r), NOT by eye-to-nearest-content — the latter collapses when zoom dollies the eye up
+	// to a node, which is exactly what made pan crawl after zooming in (and coupled pan to zoom).
+	// vp.r is a stable scene-scale property (set by home/framing, unchanged by the dolly), so pan
+	// stays a usable pilot speed at any zoom. The displacement is built in polar; PanViewpoint
+	// translates pivot+eye together with the look direction unchanged. The scene does not move.
 	fovRad := ev.Fov * math.Pi / 180
-	worldPerPixel := (2 * r * math.Tan(fovRad/2)) / md.gest.rect.height
-	pr, angle := deltaToPolar(ev.DeltaX, -ev.DeltaY)
-	delta := planeSlide(basis, pr, angle, worldPerPixel)
-	md.SetViewpoint(pivot, r, pos, vp.up)
-	md.PanViewpoint(delta, tr)
+	worldPerPixel := (2 * vp.r * math.Tan(fovRad/2)) / md.gest.rect.height
+	disp := panDisplacementPolar(vp.pos, vp.up, ev.DeltaX, ev.DeltaY, worldPerPixel)
+	md.PanViewpoint(disp, tr)
 }
 
 func (g *gestureState) reset() {

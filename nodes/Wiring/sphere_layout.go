@@ -1,9 +1,7 @@
 // sphere_layout.go — graph-level node-position helpers for the polar layout.
-// Node centers are stored absolutely (meta.json x/y/z).
+// Node positions are stored as scene polar (meta.json scenePolar) about the scene sphere center.
 
 package Wiring
-
-import "math"
 
 // sphereEdge is a DIRECTED connection: Source outputs to Target.
 type sphereEdge struct {
@@ -30,27 +28,4 @@ type sceneSphere struct {
 func contentFitSceneSphere(centers map[string]vec3) sceneSphere {
 	c, r := contentSphereOf(centers)
 	return sceneSphere{Center: c, Radius: r}
-}
-
-// fitSceneRadius returns a radius long enough to fit every node center about the GIVEN
-// (fixed) center — unlike contentSphereOf, which also derives the center. Used on pan: the
-// sceneSphere Center moves by the pan delta but stays the authoritative anchor, and only the
-// Radius re-fits around it. max(center-distance)*1.1, floor 1; empty centers → 1.
-func fitSceneRadius(centers map[string]vec3, center vec3) float64 {
-	maxDist := 0.0
-	for _, p := range centers {
-		if math.IsInf(p.X, 0) || math.IsNaN(p.X) || math.IsInf(p.Y, 0) || math.IsNaN(p.Y) ||
-			math.IsInf(p.Z, 0) || math.IsNaN(p.Z) {
-			continue
-		}
-		d := p.sub(center).length()
-		if d > maxDist {
-			maxDist = d
-		}
-	}
-	r := maxDist * 1.1
-	if r < 1 {
-		r = 1
-	}
-	return r
 }

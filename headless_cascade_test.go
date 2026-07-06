@@ -48,12 +48,12 @@ import (
 const activeNetTopo = `{
   "nodes": [
     {
-      "id": "in08", "type": "Input",
+      "id": "in08", "type": "Input", "scenePolarR": 314.5743155, "scenePolarTheta": 0.06043586594, "scenePolarPhi": 0,
       "data": {"init": [7], "repeat": false},
       "outputs": [{"name": "ToHoldNewSendOld", "side": "right", "slot": 1}]
     },
     {
-      "id": "i0", "type": "HoldNewSendOld",
+      "id": "i0", "type": "HoldNewSendOld", "scenePolarR": 386.9328107, "scenePolarTheta": 0.8128135963, "scenePolarPhi": 0,
       "data": {"state": {"held": 5}, "sendRules": {"ToNext1": "fireAndForget"}},
       "inputs":  [{"name": "FromPrevHoldNewSendOldNode", "side": "left", "slot": 1}],
       "outputs": [
@@ -62,7 +62,7 @@ const activeNetTopo = `{
       ]
     },
     {
-      "id": "i1", "type": "HoldNewSendOld",
+      "id": "i1", "type": "HoldNewSendOld", "scenePolarR": 450.7205343, "scenePolarTheta": 0.7493070915, "scenePolarPhi": 0,
       "data": {"state": {"held": 0}, "sendRules": {"ToNext0": "fireAndForget", "ToNext1": "fireAndForget"}},
       "inputs":  [{"name": "FromPrevHoldNewSendOldNode", "side": "top", "slot": 1}],
       "outputs": [

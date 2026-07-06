@@ -40,18 +40,18 @@ import (
 const firingDemoTopo = `{
   "nodes": [
     {
-      "id": "src", "type": "Input", "r": 8, "x": 0, "y": 0, "z": 0,
+      "id": "src", "type": "Input", "r": 8, "scenePolarR": 0, "scenePolarTheta": 0, "scenePolarPhi": 0,
       "data": {"init": [0, 1], "repeat": true},
       "outputs": [{"name": "ToHoldNewSendOld"}]
     },
     {
-      "id": "h", "type": "HoldNewSendOld", "r": 8, "x": 60, "y": 0, "z": 0,
+      "id": "h", "type": "HoldNewSendOld", "r": 8, "scenePolarR": 60, "scenePolarTheta": 1.5707963267948966, "scenePolarPhi": 0,
       "data": {"state": {"held": -1}, "sendRules": {"ToNext1": "fireAndForget"}},
       "inputs":  [{"name": "FromPrevHoldNewSendOldNode"}],
       "outputs": [{"name": "ToNext0"}, {"name": "ToNext1"}]
     },
     {
-      "id": "snk", "type": "HoldNewSendOld", "r": 8, "x": 1060, "y": 0, "z": 0,
+      "id": "snk", "type": "HoldNewSendOld", "r": 8, "scenePolarR": 1060, "scenePolarTheta": 1.5707963267948966, "scenePolarPhi": 0,
       "data": {"state": {"held": -1}, "sendRules": {"ToNext1": "fireAndForget"}},
       "inputs":  [{"name": "FromPrevHoldNewSendOldNode"}],
       "outputs": [{"name": "ToNext0"}, {"name": "ToNext1"}]

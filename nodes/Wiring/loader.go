@@ -76,14 +76,16 @@ func (n specNode) label() string {
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
 func (n specNode) toNodeGeom(sceneCenter vec3, hasScene bool) nodeGeom {
-	// Position: prefer the scene polar (authoritative) when present and a persisted scene
-	// sphere exists — world = sceneCenter + polar2cart(scenePolar). Otherwise fall back to
-	// the legacy cartesian x/y/z (fresh/unmigrated scenes).
-	center := vec3{X: n.X, Y: n.Y, Z: n.Z}
-	if hasScene && n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
-		center = sceneCenter.add(polar2cart(polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}))
+	// Position is POLAR (polar-frame-rewrite.md). The stored ScenePolar (r,θ,φ about the scene
+	// sphere center) is the ONLY stored position and is adopted directly — there is no cartesian
+	// x/y/z load path. When it is absent the node has no position (HasPos false → nodeWorldPos
+	// returns origin).
+	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, SceneCenter: sceneCenter}
+	if n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
+		g.ScenePolar = polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}
+		g.HasPos = true
 	}
-	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, Center: &center}
+	_ = hasScene // scene presence no longer gates polar adoption; the stored polar is authoritative.
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -241,10 +243,6 @@ type buildCtx struct {
 	nodeGeoms map[string]nodeGeom
 	centers   map[string]vec3
 
-	// Phase 3: aimed-port registry + the centerOf closure used while it is built.
-	aimedPorts AimedPortRegistry
-	centerOf   func(string) (vec3, bool)
-
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
 	edgeWire      WireRegistry
@@ -278,7 +276,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 
 	b.computeNodeGeometry()
 	b.computeReachRadii()
-	b.buildAimedPorts()
 	b.allocateWires()
 	b.buildMoveDispatch()
 	b.buildTypeMaps()
@@ -309,8 +306,8 @@ func (b *buildCtx) computeNodeGeometry() {
 
 	centers := map[string]vec3{}
 	for id, g := range nodeGeoms {
-		if g.Center != nil {
-			centers[id] = *g.Center
+		if g.HasPos {
+			centers[id] = nodeWorldPos(g)
 		}
 	}
 	b.centers = centers
@@ -326,44 +323,16 @@ func (b *buildCtx) computeReachRadii() {
 	for _, e := range b.spec.Edges {
 		edges = append(edges, sphereEdge{Source: e.Source, Target: e.Target})
 	}
-	for id, r := range reachRFromCenters(b.centers, edges) {
+	polars := map[string]polar{}
+	for id, g := range b.nodeGeoms {
+		if g.HasPos {
+			polars[id] = g.ScenePolar
+		}
+	}
+	for id, r := range reachRFromPolar(polars, edges) {
 		g := b.nodeGeoms[id]
 		g.ReachR = r
 		b.nodeGeoms[id] = g
-	}
-}
-
-// buildAimedPorts builds the aimed-port registry ONCE — the single source of
-// truth. It is used both by allocateWires below (aimed port directions, radial
-// toward the connected node, rather than ring-anchor directions) AND installed on
-// the dispatch for drag-time aiming (md.installAimedPorts), so the two can never
-// drift. Guarded on the 1→9→{2,6} spine being present; a nil registry falls back
-// to non-aimed ports. Also builds the centerOf closure used while the registry is
-// live (reads the shared static world centers, before movers are running).
-func (b *buildCtx) buildAimedPorts() {
-	// Derive the aimed-port registry from the loaded edge list: every edge-connected
-	// port aims toward the node on the other end. No node-ID hardcoding; any topology
-	// gets correct aimed ports automatically. Only register when BOTH endpoint nodes
-	// have geometry (centers), matching the original guard intent that aimed needs
-	// positions.
-	reg := AimedPortRegistry{}
-	for _, e := range b.spec.Edges {
-		if _, srcOK := b.centers[e.Source]; !srcOK {
-			continue
-		}
-		if _, tgtOK := b.centers[e.Target]; !tgtOK {
-			continue
-		}
-		reg[AimedPortKey{NodeID: e.Source, PortName: e.SourceHandle, IsInput: false}] = e.Target
-		reg[AimedPortKey{NodeID: e.Target, PortName: e.TargetHandle, IsInput: true}] = e.Source
-	}
-	if len(reg) > 0 {
-		b.aimedPorts = reg
-	}
-
-	b.centerOf = func(id string) (vec3, bool) {
-		c, ok := b.centers[id]
-		return c, ok
 	}
 }
 
@@ -388,18 +357,13 @@ func (b *buildCtx) allocateWires() {
 	edgeSegments := map[string]wireSegment{}
 	for _, e := range b.spec.Edges {
 		destKey := e.Target + "." + e.TargetHandle
-		// Per-edge arc length / latency / segment from this edge's own port-to-port geometry,
-		// using aimed port directions for registered ports (radial toward connected node)
-		// rather than ring-anchor positions. Non-registered ports fall back to portWorldPos.
-		// No lock check here: this fires before MoveDispatch (and any `port ∈ torus`
-		// lock) exists. Locks load later (LoadPolarEqs); md.ResendGeometry re-emits
-		// with the live lock check once they do.
-		seg := segmentBetweenPortsAimed(
-			b.nodeGeoms[e.Source], e.SourceHandle, e.Source,
-			b.nodeGeoms[e.Target], e.TargetHandle, e.Target,
-			b.aimedPorts, b.centerOf, nil,
-		)
-		arcLength := chordLength(seg.Start, seg.End)
+		// Per-edge segment + arc, node-to-node (polar-frame-rewrite.md option A). The arc
+		// (pulse travel budget) is the polar law-of-cosines distance between the two node
+		// positions (edgeArcPolar) — pure polar. The segment is the world node-to-node line
+		// for the renderer (edgeSegment), the GPU-boundary cartesian.
+		srcG, tgtG := b.nodeGeoms[e.Source], b.nodeGeoms[e.Target]
+		seg := edgeSegment(srcG, tgtG)
+		arcLength := edgeArcPolar(srcG, tgtG)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
@@ -450,38 +414,7 @@ func (b *buildCtx) buildMoveDispatch() {
 		md.sceneSphere = b.sphere
 	}
 
-	{
-		loaded := map[string]bool{}
-		for _, n := range b.spec.Nodes {
-			loaded[n.ID] = true
-		}
-		linkEdges := make([]sphereEdge, 0, len(b.spec.Edges))
-		for _, e := range b.spec.Edges {
-			linkEdges = append(linkEdges, sphereEdge{Source: e.Source, Target: e.Target})
-		}
-		md.registerMovementLinks(linkEdges, func(id string) bool { return loaded[id] })
-
-		// Fill each link's polar state from the loaded world centers (the one-time
-		// world→polar conversion at load; thereafter locks read the stored link polar).
-		md.initLinkPolar(func(id string) (vec3, bool) {
-			g, ok := b.nodeGeoms[id]
-			if !ok || g.Center == nil {
-				return vec3{}, false
-			}
-			return *g.Center, true
-		})
-
-		// No polar locks are registered: every node is lock-free, so a drag moves only
-		// the dragged node. The link graph and its polar state stay (refreshed on drag);
-		// locks ride on it again when re-registered here.
-	}
-
-	// Install the aimed-port registry (built above) so edges still render aimed at their
-	// connected node during a drag.
-	if b.aimedPorts != nil {
-		md.installAimedPorts(b.aimedPorts)
-	}
-
+	md.installLocked()
 	b.md = md
 }
 
@@ -606,7 +539,7 @@ func (b *buildCtx) buildNodes() error {
 			}
 		}
 
-		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], b.aimedPorts, b.centerOf)
+		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID])
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

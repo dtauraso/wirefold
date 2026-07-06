@@ -134,6 +134,24 @@ func deltaToPolar(dx, dy float64) (r, angle float64) {
 	return math.Hypot(dx, dy), math.Atan2(dy, dx)
 }
 
+// panDisplacementPolar builds the lateral pan displacement in the POLAR frame
+// (polar-frame-rewrite.md): the mouse drag gives r (distance) and a screen bearing; the
+// displacement DIRECTION is a direction 90° off the camera view axis (i.e. in the screen
+// plane) at that bearing, derived from the camera's own (θ,φ) and up via the spherical
+// toolkit — no cartesian basis vectors. r is the magnitude. The single cartesian is the
+// polar2cart at the end, composing the finished displacement for the scene-center move (the
+// pointer input boundary). This is locked to the known-correct planeSlide by a unit test.
+//
+//	psiUp    = bearing of the up-hint about the view axis (azimuthFrom)
+//	psiRight = psiUp − π/2 (screen right is a quarter-turn before up, right-handed about pos)
+//	dir      = fromAxisFrame(pos, π/2, psiRight + bearing)   // on the view-axis equator
+func panDisplacementPolar(pos, up dir, dx, dy, worldPerPixel float64) vec3 {
+	r, bearing := deltaToPolar(dx, -dy)
+	_, psiUp := azimuthFrom(pos, up)
+	d := fromAxisFrame(pos, math.Pi/2, psiUp-math.Pi/2+bearing)
+	return polar2cart(polar{R: r * worldPerPixel, Theta: d.Theta, Phi: d.Phi})
+}
+
 // ---------------------------------------------------------------------------
 // scene geometry (mirrors geometry-helpers.ts contentSphere + interaction-handlers.ts
 // regionFocus)
@@ -142,7 +160,40 @@ func deltaToPolar(dx, dy float64) (r, angle float64) {
 const gestureFocusMin = 10.0  // FOCUS_MIN — keep the regionFocus pivot off the camera
 const gestureMoveSlopPx = 6.0 // MOVE_SLOP_PX — pending → drag/rotate threshold
 const gestureZoomBase = 1.01  // ZOOM_BASE — per-scroll-unit dolly factor
-const gestureMinDist = 5.0    // MIN_DIST — never let the eye reach the zoom target
+
+// focusAhead returns the orbit center for rotate: a point on the view-center ray at the
+// forward-depth of the node the camera is MOST POINTED AT (smallest angle from the view axis,
+// in front). Because the point lies on the view axis, orbiting it does NOT re-aim the camera —
+// the look direction is unchanged — yet the orbit depth tracks whatever content you have flown
+// to and centered (fly to node 10, rotate spins around node 10). Falls back to a fixed distance
+// ahead when there is no node in front.
+func focusAhead(v viewpoint, centers map[string]vec3) vec3 {
+	eye := eyeOf(v)
+	forward := anglesToWorldOffset(1, v.pos.Theta, v.pos.Phi).scale(-1) // -pole, unit
+	bestCos := -2.0
+	depth := 0.0
+	found := false
+	for _, p := range centers {
+		d := p.sub(eye)
+		dl := d.length()
+		if dl < 1e-9 {
+			continue
+		}
+		cosAng := forward.dot(d) / dl
+		if cosAng <= 0 { // behind the camera
+			continue
+		}
+		if cosAng > bestCos { // more centered on the view axis
+			bestCos = cosAng
+			depth = forward.dot(d)
+			found = true
+		}
+	}
+	if !found {
+		return eye.add(forward.scale(gestureFocusMin))
+	}
+	return eye.add(forward.scale(math.Max(depth, gestureFocusMin)))
+}
 
 // contentSphereOf mirrors geometry-helpers.ts contentSphere over the given node centers:
 // center = bbox midpoint, radius = max(center-distance)*1.1 (min 1). Empty → (origin, 100).
@@ -175,21 +226,24 @@ func contentSphereOf(centers map[string]vec3) (center vec3, radius float64) {
 func regionFocus(v viewpoint, centers map[string]vec3) vec3 {
 	eye := eyeOf(v)
 	forward := anglesToWorldOffset(1, v.pos.Theta, v.pos.Phi).scale(-1) // -pole, unit
+	// Pivot on the view axis at the depth of the NEAREST node (smallest forward-depth), not the
+	// whole-scene depth MIDPOINT. The midpoint sat between the near node you zoomed into and the
+	// far ones, so rotate/pan operated around a distant point and swung/overshot from up close.
+	// Using the nearest depth puts the pivot on what you dollied toward while staying on the
+	// screen-center ray (deterministic — no node-tie ambiguity). Falls back straight ahead when
+	// there are no nodes.
 	zNear := math.Inf(1)
-	zFar := math.Inf(-1)
 	for _, p := range centers {
 		depth := forward.dot(p.sub(eye))
 		if math.IsNaN(depth) || math.IsInf(depth, 0) {
 			continue
 		}
 		zNear = math.Min(zNear, depth)
-		zFar = math.Max(zFar, depth)
 	}
-	if math.IsInf(zNear, 1) || math.IsInf(zFar, -1) {
+	if math.IsInf(zNear, 1) {
 		return eye.add(forward.scale(gestureFocusMin))
 	}
-	mid := math.Max((zNear+zFar)/2, gestureFocusMin)
-	return eye.add(forward.scale(mid))
+	return eye.add(forward.scale(math.Max(zNear, gestureFocusMin)))
 }
 
 // ---------------------------------------------------------------------------

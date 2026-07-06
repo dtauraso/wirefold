@@ -17,22 +17,18 @@ import (
 
 func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
 	// Center "c" with two satellites "a" and "b". The equation θ(a)==θ(b) about c must snap
-	// b to a's colatitude the moment it is set — no drag required.
+	// b to a's colatitude the moment it is set — no drag required. Initial positions are
+	// scene polar about the origin, from c(0,0,0) a(10,10,0) b(10,2,0).
 	const topo = `{
 	  "nodes": [
-	    {"id":"c","type":"FanInSink","inputs":[{"name":"In"}]},
-	    {"id":"a","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"b","type":"FanInSrc","outputs":[{"name":"Out"}]}
+	    {"id":"c","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]},
+	    {"id":"a","type":"FanInSrc","scenePolarR":14.1421356237,"scenePolarTheta":0.785398163397,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"b","type":"FanInSrc","scenePolarR":10.1980390272,"scenePolarTheta":1.37340076695,"scenePolarPhi":0,"outputs":[{"name":"Out"}]}
 	  ],
 	  "edges": [
 	    {"label":"ea","kind":"data","source":"a","sourceHandle":"Out","target":"c","targetHandle":"In"},
 	    {"label":"eb","kind":"data","source":"b","sourceHandle":"Out","target":"c","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "c": {"x": 0,  "y": 0,  "z": 0},
-	    "a": {"x": 10, "y": 10, "z": 0},
-	    "b": {"x": 10, "y": 2,  "z": 0}
-	  }}
+	  ]
 	}`
 	dir := t.TempDir()
 	path := filepath.Join(dir, "topo.json")
@@ -82,13 +78,11 @@ func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
 
 	// Replicate the gesture.go completion path for eq θ(a) == θ(b).
 	eq := polarEq{
-		Center: "c",
 		A:      polarTerm{Node: "a", Comp: compTheta, Sign: 1},
 		B:      polarTerm{Node: "b", Comp: compTheta, Sign: 1},
 		Active: true,
 	}
 	md.appendPolarEq(eq)
-	md.ensureEqLinks(eq)
 	if c, ok := md.centerOfNode(eq.A.Node); ok {
 		md.RootMove(eq.A.Node, c)
 	}

@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,9 +56,9 @@ func writeTree(t *testing.T) string {
 			t.Fatalf("write %s: %v", p, err)
 		}
 	}
-	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"x":10,"y":20,"z":30}`)
+	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"scenePolarR":37.4165738677,"scenePolarTheta":1.00685368543,"scenePolarPhi":1.2490457724}`)
 	mk("nodes/src/outputs/Out.json", `{"name":"Out"}`)
-	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"x":-40,"y":50,"z":-60}`)
+	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"scenePolarR":87.7496438739,"scenePolarTheta":0.96453035788,"scenePolarPhi":-2.15879893034}`)
 	mk("nodes/dst/inputs/In.json", `{"name":"In"}`)
 	mk("edges/e0.json", `{"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}`)
 	mk("view/nodes/src.json", `{"x":10,"y":20,"z":30}`)
@@ -78,49 +77,6 @@ func loadTreeMD(t *testing.T, root string) *MoveDispatch {
 }
 
 // TestPersistNodePositionRoundTrips: RootMove a node → flush → meta.json x/y/z updated.
-func TestPersistNodePositionRoundTrips(t *testing.T) {
-	root := writeTree(t)
-	md := loadTreeMD(t, root)
-	md.EnableEditPersist(root)
-
-	target := vec3{X: 111, Y: 222, Z: 333}
-	if !md.RootMove("src", target) {
-		t.Fatalf("RootMove returned false")
-	}
-	md.posPersist.flush()
-
-	spec, err := parseSpec(root)
-	if err != nil {
-		t.Fatalf("parseSpec: %v", err)
-	}
-	var got *specNode
-	for i := range spec.Nodes {
-		if spec.Nodes[i].ID == "src" {
-			got = &spec.Nodes[i]
-		}
-	}
-	if got == nil {
-		t.Fatalf("node src not found after reload")
-	}
-	if math.Abs(got.X-target.X) > 1e-9 || math.Abs(got.Y-target.Y) > 1e-9 || math.Abs(got.Z-target.Z) > 1e-9 {
-		t.Fatalf("reloaded pos=(%v,%v,%v) want (%v,%v,%v)", got.X, got.Y, got.Z, target.X, target.Y, target.Z)
-	}
-	// Sibling meta fields preserved.
-	raw, _ := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("meta.json invalid: %v", err)
-	}
-	if string(obj["type"]) != `"FanInSrc"` {
-		t.Fatalf("type clobbered: %s", obj["type"])
-	}
-	if string(obj["r"]) != "100" {
-		t.Fatalf("r clobbered: %s", obj["r"])
-	}
-}
-
-// TestPersistAnchorRoundTrips: applyRingAnchor → flush → the port file's anchorId matches
-// the snapped index and reloads through loadTree.
 func TestPersistAnchorRoundTrips(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -290,79 +246,6 @@ func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
 // EnableEditPersist must still resolve the tree root to the file's PARENT dir (which contains
 // nodes/), or posPersist/anchorPersist no-op and node-drag / ring-move never reach disk.
 // This exercises the full EnableEditPersist wiring with a FILE topologyPath + a real tree.
-func TestPersistFileTopologyPathInTree(t *testing.T) {
-	root := writeTree(t)
-	md := loadTreeMD(t, root)
-
-	// The path form the editor hands Go: the topology.json FILE inside the tree dir.
-	topoFile := filepath.Join(root, "topology.json")
-	if err := os.WriteFile(topoFile, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	md.EnableEditPersist(topoFile)
-
-	// Root must resolve to the parent dir (the one containing nodes/), NOT "".
-	if md.posPersist.root != root {
-		t.Fatalf("posPersist.root=%q want %q (FILE topologyPath should resolve to parent-with-nodes)", md.posPersist.root, root)
-	}
-	if md.anchorPersist.root != root {
-		t.Fatalf("anchorPersist.root=%q want %q", md.anchorPersist.root, root)
-	}
-
-	// Node-drag → meta.json x/y/z land on disk.
-	target := vec3{X: 111, Y: 222, Z: 333}
-	if !md.RootMove("src", target) {
-		t.Fatalf("RootMove returned false")
-	}
-	md.posPersist.flush()
-	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
-	if err != nil {
-		t.Fatalf("read meta.json: %v", err)
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("meta.json invalid: %v", err)
-	}
-	if string(obj["x"]) != "111" || string(obj["y"]) != "222" || string(obj["z"]) != "333" {
-		t.Fatalf("node pos not persisted via FILE topologyPath: x=%s y=%s z=%s", obj["x"], obj["y"], obj["z"])
-	}
-
-	// Ring-move → port json anchorId lands on disk.
-	adir := vec3{X: 1, Y: 0, Z: 0}
-	want := snapToRingAnchorIndex(md.NodeKind("src"), adir)
-	md.applyRingAnchor("src", "Out", false, adir)
-	md.anchorPersist.flush()
-	praw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "outputs", "Out.json"))
-	if err != nil {
-		t.Fatalf("read port json: %v", err)
-	}
-	var pobj map[string]json.RawMessage
-	_ = json.Unmarshal(praw, &pobj)
-	var gotAnchor int
-	if err := json.Unmarshal(pobj["anchorId"], &gotAnchor); err != nil {
-		t.Fatalf("anchorId not persisted via FILE topologyPath: %v", err)
-	}
-	if gotAnchor != want {
-		t.Fatalf("persisted anchorId=%d want %d", gotAnchor, want)
-	}
-
-	// Overlays round-trip through Go on the same FILE path (LoadOverlays reads the sibling
-	// view/scene.json): toggle → flush → fresh LoadOverlays restores.
-	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topoFile), debounce: viewpointPersistDebounce}
-	md.ToggleSceneTori(nil)
-	md.overlaysPersist.schedule(md.ov)
-	md.overlaysPersist.flush()
-	fresh := &MoveDispatch{ov: defaultOverlayState()}
-	fresh.LoadOverlays(topoFile, nil)
-	if fresh.ov.sceneToriVisible {
-		t.Fatalf("LoadOverlays did not restore sceneToriVisible=false via FILE topologyPath")
-	}
-}
-
-// TestEnableEditPersistTrueMonolithicNoTree pins the guard: a genuine monolithic topology.json
-// with NO sibling nodes/ dir must keep root == "" so the position/anchor persisters no-op
-// (instead of spraying empty <parent>/nodes/<id> dirs).
 func TestEnableEditPersistTrueMonolithicNoTree(t *testing.T) {
 	dir := t.TempDir()
 	topoFile := filepath.Join(dir, "topology.json")

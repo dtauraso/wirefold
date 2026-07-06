@@ -40,9 +40,10 @@ func TestGestureEmptyDragOrbits(t *testing.T) {
 	if md.gest.phase != gestPending || !md.gest.emptyDown {
 		t.Fatalf("after pointerdown: phase=%v emptyDown=%v", md.gest.phase, md.gest.emptyDown)
 	}
-	// region-focus pivot (empty centers): eye=(0,0,100), forward=(0,0,-1) → (0,0,90).
+	// Orbit pivot is the content ahead (focusAhead). Empty centers → a point on the view axis a
+	// fixed distance ahead: eye=(0,0,100), forward=(0,0,-1), focusMin=10 → (0,0,90).
 	if !vecClose(md.gest.rotPivot, vec3{0, 0, 90}, 1e-9) {
-		t.Fatalf("rotPivot=%v want (0,0,90)", md.gest.rotPivot)
+		t.Fatalf("rotPivot=%v want focus-ahead (0,0,90)", md.gest.rotPivot)
 	}
 
 	// First move past the slop: transitions to rotating and seeds the viewpoint. The first
@@ -52,10 +53,10 @@ func TestGestureEmptyDragOrbits(t *testing.T) {
 		t.Fatalf("after slop-cross move: phase=%v want rotating", md.gest.phase)
 	}
 	if !vecClose(md.vp.pivot, vec3{0, 0, 90}, 1e-9) {
-		t.Fatalf("seed pivot=%v want region-focus (0,0,90)", md.vp.pivot)
+		t.Fatalf("seed pivot=%v want focus-ahead (0,0,90)", md.vp.pivot)
 	}
 	if math.Abs(md.vp.r-10) > 1e-9 {
-		t.Fatalf("seed r=%v want 10", md.vp.r)
+		t.Fatalf("seed r=%v want 10 (eye→focus-ahead)", md.vp.r)
 	}
 	posBefore := md.vp.pos
 	rBefore, pivotBefore := md.vp.r, md.vp.pivot
@@ -80,16 +81,20 @@ func TestGestureEmptyDragOrbits(t *testing.T) {
 
 // Plain wheel pans the pivot (screen-space slide); ctrl+wheel dollies (pivot translation
 // toward the cursor target). Both leave the radius set by the region-focus seed.
-func TestGestureWheelPansPivot(t *testing.T) {
+func TestGestureWheelStrafesCamera(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
-	before := md.vp.pivot
+	pivotBefore := md.vp.pivot
+	centerBefore := md.sceneSphere.Center
 	ev := rawEvent("wheel", 400, 300)
 	ev.DeltaX = 10
 	ev.DeltaY = 0
 	md.HandleRawInput(ev, nil, nil)
-	// worldPerPixel>0 and deltaX=10 → nonzero screen-right slide of the pivot.
-	if vecClose(md.vp.pivot, before, 1e-9) {
-		t.Fatalf("plain wheel did not pan pivot (stayed %v)", md.vp.pivot)
+	// Lateral pan strafes the CAMERA (free-camera model); the fixed scene does not move.
+	if vecClose(md.vp.pivot, pivotBefore, 1e-9) {
+		t.Fatalf("plain wheel did not strafe the camera (pivot stayed %v)", md.vp.pivot)
+	}
+	if !vecClose(md.sceneSphere.Center, centerBefore, 1e-9) {
+		t.Fatalf("plain wheel moved the scene center %v; the scene must stay fixed", md.sceneSphere.Center)
 	}
 }
 
@@ -111,23 +116,29 @@ func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
 		ev.Hit = h
 		md.HandleRawInput(ev, nil, nil)
 		if vecClose(md.vp.pivot, before, 1e-9) {
-			t.Fatalf("plain wheel with %s hit did not pan pivot (stayed %v)", h.Kind, md.vp.pivot)
+			t.Fatalf("plain wheel with %s hit did not strafe the camera (pivot stayed %v)", h.Kind, md.vp.pivot)
 		}
 	}
 }
 
-func TestGestureCtrlWheelDolliesPivot(t *testing.T) {
+func TestGestureCtrlWheelZoomsToCursor(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	ev := rawEvent("wheel", 400, 300)
 	ev.Ctrl = true
 	ev.DeltaY = 1
 	md.HandleRawInput(ev, nil, nil)
-	// Empty centers → target=regionFocus=(0,0,90); eye=(0,0,100); toP=(0,0,-10);
-	// factor=1.01^1≈1.01 (distP*factor=10.1>MIN_DIST); delta=toP*(1-factor)=(0,0,0.1).
-	// Seed pivot=(0,0,90), then pan(delta) → (0,0,90.1).
-	wantZ := 90 + (-10)*(1-math.Pow(gestureZoomBase, 1))
+	// ctrl-wheel dollies the camera along the cursor→node ray KEEPING orientation (node stays
+	// under the mouse — no re-aim). Empty centers → target=regionFocus=(0,0,90), eye=(0,0,100),
+	// rayDir=(0,0,-1), distP=10. The fractional step (10*(1-1.01)=-0.1) is below the pass-through
+	// floor (minStep = vp.r*(zoomBase-1) = 1), so the camera moves minStep AWAY (DeltaY=1) →
+	// pivot.Z = +1.
+	wantZ := 100 * (gestureZoomBase - 1)
 	if math.Abs(md.vp.pivot.Z-wantZ) > 1e-9 || math.Abs(md.vp.pivot.X) > 1e-9 {
-		t.Fatalf("ctrl-wheel pivot=%v want Z≈%v", md.vp.pivot, wantZ)
+		t.Fatalf("ctrl-wheel pivot=%v want Z≈%v (dolly toward cursor)", md.vp.pivot, wantZ)
+	}
+	// The look direction is unchanged (no re-aim).
+	if angularDistance(md.vp.pos, canonicalViewpoint().pos) > 1e-9 {
+		t.Fatalf("ctrl-wheel re-aimed the camera (pos changed); zoom-to-cursor must keep orientation")
 	}
 }
 
@@ -477,8 +488,8 @@ func TestGestureHandholdOrbits(t *testing.T) {
 func TestGestureConnectedPortRingMove(t *testing.T) {
 	center := vec3{0, 0, 0}
 	geoms := map[string]nodeGeom{
-		"N1": {Kind: "Input", Center: &center, Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
-		"N2": {Kind: "Input", Center: &vec3{50, 0, 0}, Inputs: []portGeom{{Name: "in"}}},
+		"N1": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(center), Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
+		"N2": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{50, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
 	}
 	edges := map[string]EdgeEndpoints{
 		"e1": {Source: "N1", Target: "N2", SourceHandle: "out", TargetHandle: "in"},

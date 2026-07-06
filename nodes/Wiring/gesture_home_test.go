@@ -20,7 +20,7 @@ func homeMD(v viewpoint, centers map[string]vec3) *MoveDispatch {
 	md.vp.viewpoint = v
 	for id, c := range centers {
 		cc := c
-		nm := &nodeMover{id: id, geom: nodeGeom{Kind: "Hold", Center: &cc}}
+		nm := &nodeMover{id: id, geom: nodeGeom{Kind: "Hold", HasPos: true, ScenePolar: cart2polar(cc)}}
 		nm.snap.Store(&centerSnap{c: cc})
 		md.nodeMovers[id] = nm
 	}

@@ -91,168 +91,27 @@ func setCompOf(p *polar, c polarComp, v float64) {
 	}
 }
 
-// ensureEqLinks guarantees a movement link exists between an equation's Center and EACH of
-// its term nodes, so applyPolarEqs has link-polar state to ride even when no topology EDGE
-// connects them. Movement links are consumed only by the lock engine, so an extra link is
-// inert until an equation references it. Called when an equation is authored (gesture.go)
-// and at load (LoadPolarEqs). A freshly-added link is seeded from the two nodes' current
-// world centers; if either center isn't resolvable yet, it is left unseeded and gets its
-// polar on the first drag-edge refresh (refreshLinksTouching). A degenerate Center==node
-// term is skipped — a node has no polar coordinate about itself.
-func (md *MoveDispatch) ensureEqLinks(eq polarEq) {
-	if eq.Kind == eqPortTorus {
-		return // inert this stage: no solve rides a link for a port∈torus lock yet
-	}
-	md.ensureLink(eq.Center, eq.A.Node)
-	md.ensureLink(eq.Center, eq.B.Node)
-}
-
-func (md *MoveDispatch) ensureLink(a, b string) {
-	if a == "" || b == "" || a == b || md.linkBetween(a, b) != nil {
-		return
-	}
-	md.addLink(a, b)
-	pa, oka := md.centerOfNode(a)
-	pb, okb := md.centerOfNode(b)
-	if oka && okb {
-		refreshLink(md.linkBetween(a, b), pa, pb)
-	}
-}
-
-// applyPolarEqs is now TEST-ONLY (production node-move uses the decentralized
-// lockRecalc/lockNeighbors cascade below): it returns the new world positions of the nodes written to satisfy every
-// equation that touches movedID. For each such equation the moved node's term is the
-// input; the OTHER term's constrained component is solved for and written on its link,
-// keeping that node's remaining polar coordinates. Equations are applied in order, so two
-// equations over the same pair (e.g. a mirror's θ and φ) compose: the second reads the
-// first's write. World is derived (polar2cart) only for the render bridge.
-func (md *MoveDispatch) applyPolarEqs(movedID string, pos func(string) (vec3, bool)) map[string]vec3 {
-	out := map[string]vec3{}
-	for _, eq := range md.polarEqsSnap() {
-		if !eq.Active {
-			continue
-		}
-		if eq.Kind == eqPortTorus {
-			continue // STAGE 1: authorable/persisted/displayed only — no solve yet
-		}
-		var moved, other polarTerm
-		switch movedID {
-		case eq.A.Node:
-			moved, other = eq.A, eq.B
-		case eq.B.Node:
-			moved, other = eq.B, eq.A
-		default:
-			continue
-		}
-		movedLink := md.linkBetween(eq.Center, moved.Node)
-		otherLink := md.linkBetween(eq.Center, other.Node)
-		if movedLink == nil || otherLink == nil {
-			continue
-		}
-		mp, ok := movedLink.polarOf(eq.Center, moved.Node)
-		if !ok {
-			continue
-		}
-		op, ok := otherLink.polarOf(eq.Center, other.Node)
-		if !ok {
-			continue
-		}
-		// signMoved·compMoved = signOther·compOther  ⇒  compOther = signMoved·compMoved/signOther.
-		// Sign ∈ {+1,-1}, so dividing by it is multiplying by it.
-		target := moved.Sign * compOf(mp, moved.Comp) * other.Sign
-		np := op
-		setCompOf(&np, other.Comp, target)
-		otherLink.setPolar(eq.Center, other.Node, np)
-		c, ok := pos(eq.Center)
-		if !ok {
-			continue
-		}
-		out[other.Node] = polar2cart(np).add(c)
-	}
-	return out
-}
-
-// lockRecalc is the DECENTRALIZED per-receiver counterpart to applyPolarEqs: it computes
-// `self`'s own constrained world position given that `from` just moved to world position
-// `fromWorld`, by checking EVERY active eqNodeNode constraint tying `self` to `from` and
-// applying each in turn (later constraints read earlier ones' writes, exactly like
-// applyPolarEqs' composition of a mirror's θ+φ pair). Self's CURRENT position, and every
-// eqNodeNode Center's position, are derived LOCALLY from atomic position snapshots
-// (md.centerOfNode reads nm.snap.Load(), never the shared md.links) — this never reads or
-// writes md.linkBetween, so two different receiving goroutines never touch the same
-// movementLink concurrently; each node's position lives only in its own goroutine's world
-// snapshot. md.polarEqs is read-only here (locks are authored on a separate gesture, never
-// mid-drag, so the equation TOPOLOGY cannot change while a cascade is in flight).
+// lockRecalc is the DECENTRALIZED lock solver in the SCENE-POLAR frame (polar-frame-rewrite.md:
+// locks constrain scene-polar components between nodes; there is no center-node frame and no
+// double-link graph). Given that `from` just moved to scene polar `fromPolar`, it checks EVERY
+// active eqNodeNode constraint tying `self` to `from` and, for each, sets self's constrained
+// scene-polar component to the sign-adjusted copy of the sender's component:
 //
-// eqNodeNode: self's polar about the eq's Center is recomputed by cart2polar(selfWorld -
-// centerWorld), the sender's polar about that SAME center by cart2polar(fromWorld -
-// centerWorld), and the constrained component is solved for exactly as applyPolarEqs
-// does (target = fromSign·fromComp·selfSign).
+//	signSelf·compSelf(self) = signFrom·compFrom(from)  ⇒  compSelf(self) = signFrom·compFrom(from)·signSelf
 //
-// eqPortTorus (`port ∈ torus`) is NOT a node-center constraint at all: it only pins a
-// port onto its own node's border ring via portWorldPosAimed's polar ring-projection
-// (aimed_ports.go) whenever that node's geometry is (re-)emitted. It never moves a node
-// center and is not checked here or propagated by lockNeighbors below.
+// This is PURE POLAR — reads/writes ScenePolar components directly, no cart2polar, no vector
+// subtraction, no center. Later constraints compose on earlier writes (a mirror's θ+φ pair).
+// eqPortTorus locks are NOT node-center constraints and are not solved here (they only
+// ring-project a port marker at emit, portWorldPosLocked).
 //
-// Returns (newWorld, false) when no active constraint of any kind touches (self,from) or
-// when the recomputed position is within lockPropEps of self's current published
-// position — the latter is the anti-divergence guarantee: an over-constrained lock set
-// converges to a fixpoint and the cascade goes silent instead of oscillating forever.
-// clonePolar returns an immutable copy of a node's owned local-polar map for carrying in a
-// message (the receiver reads it on another goroutine; a copy avoids sharing the sender's
-// live map). nil for an empty map.
-func clonePolar(s map[string]polar) map[string]polar {
-	if len(s) == 0 {
-		return nil
-	}
-	c := make(map[string]polar, len(s))
-	for k, v := range s {
-		c[k] = v
-	}
-	return c
-}
-
-// localPolarOf returns node m's OWNED local polar offset about center, lazily taking it —
-// the FIRST time it is needed — from the value that already exists: the movement-link polar
-// (links.go), which was initialized at load from the saved node positions (ensureEqLinks /
-// refreshLink). There is NO separate seed step; the offset simply comes from where it
-// already lives. Thereafter m.localPolar[center] is authoritative (a lock nudges one
-// component) and the link is not read again. Falls back to a cart2polar of the current world
-// only if no link exists yet.
-func (md *MoveDispatch) localPolarOf(m *nodeMover, center string) (polar, bool) {
-	if p, ok := m.localPolar[center]; ok {
-		return p, true
-	}
-	if lk := md.linkBetween(center, m.id); lk != nil {
-		if p, ok := lk.polarOf(center, m.id); ok {
-			m.localPolar[center] = p
-			return p, true
-		}
-	}
-	// No stored offset and no movement link: return not-found. NEVER reconstruct the
-	// offset as cart2polar(node − center) from a live world — that reconstruction against
-	// a mid-moving center is the position blow-up MODEL.md forbids. With every edge now
-	// registering a movement link, a connected pair always resolves above.
-	return polar{}, false
-}
-
-func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromWorld vec3, fromLocalPolar map[string]polar) (vec3, bool) {
+// Returns (newPolar, false) when no active eqNodeNode touches (self,from), or when the change
+// moves self less than lockPropEps in world space (polarDist between old and new scene polar) —
+// the anti-divergence fixpoint: an over-constrained set converges and the cascade goes silent.
+func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromPolar polar) (polar, bool) {
 	self := m.id
-	selfWorld, ok := md.centerOfNode(self)
-	if !ok {
-		return vec3{}, false
-	}
-	newWorld := selfWorld
+	sp := m.geom.ScenePolar
+	orig := sp
 	applied := false
-
-	// eqNodeNode: satisfy every equation tying (self,from) about their shared Center by
-	// updating self's OWNED local polar offset (m.localPolar[center]) — NEVER by recomputing
-	// it from the current cartesian world. self's owned offset is seeded from good positions
-	// (seedLocalPolar); here we set ONLY the constrained component to the (sign-adjusted) copy
-	// of the sender's OWNED component (from the message's FromLocalPolar, NOT cart2polar of a
-	// possibly-perturbed FromWorld), preserving self's owned r/θ. World is DERIVED as
-	// polar2cart(owned)+liveCenter — the live center rigidly translates self; the owned r
-	// never inflates.
 	for _, eq := range md.polarEqsSnap() {
 		if !eq.Active || eq.Kind != eqNodeNode {
 			continue
@@ -266,57 +125,29 @@ func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromWorld vec3, fr
 		default:
 			continue
 		}
-		centerWorld, ok := md.centerOfNode(eq.Center)
-		if !ok {
-			continue
-		}
-		np, ok := md.localPolarOf(m, eq.Center) // owned offset, from the existing link (no seed)
-		if !ok {
-			continue // no stored offset for self — NEVER reconstruct r from a live world (MODEL.md)
-		}
-		sp, ok := fromLocalPolar[eq.Center]
-		if !ok {
-			continue // sender carried no owned offset — NEVER reconstruct from a live world
-		}
-		target := fromTerm.Sign * compOf(sp, fromTerm.Comp) * selfTerm.Sign
-		setCompOf(&np, selfTerm.Comp, target)
-		m.localPolar[eq.Center] = np // owned offset is authoritative; store it back
-		newWorld = polar2cart(np).add(centerWorld)
+		target := fromTerm.Sign * compOf(fromPolar, fromTerm.Comp) * selfTerm.Sign
+		setCompOf(&sp, selfTerm.Comp, target)
 		applied = true
 	}
-
 	if !applied {
-		return vec3{}, false
+		return polar{}, false
 	}
-	if selfWorld.sub(newWorld).length() <= lockPropEps {
-		return vec3{}, false // already satisfied — the cascade dies here
+	// World displacement between two scene-polar positions about the same center IS their
+	// polar law-of-cosines distance — pure polar, no cartesian.
+	if polarDist(orig, sp) <= lockPropEps {
+		return polar{}, false
 	}
-	return newWorld, true
+	return sp, true
 }
 
-// lockNeighbors returns one moveMsg per DISTINCT neighbor `self` is tied to by an
-// active eqNodeNode polar equation, excluding `exclude` (the node that just sent to
-// self, so the cascade never echoes straight back). eqPortTorus locks do NOT propagate
-// here — a `port ∈ torus` lock only pins a port to its own node's border ring
-// (portWorldPosAimed) and never ties one node's center to another's, so it has no
-// neighbor to add. Every message here carries the same payload shape, self's CURRENT
-// world position. selfWorld is passed in by the
-// caller (RootMove's just-computed drag target, or a follower's just-applied newWorld
-// inside nodeMover.handle) rather than re-derived via md.centerOfNode — the latter would
-// race the very "center" message the caller just fanned out asynchronously to self's own
-// goroutine (self's atomic snap may not have caught up yet when the caller is a different
-// goroutine, e.g. RootMove originating a drag).
-func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude string) []moveMsg {
+// lockNeighbors returns one moveMsg per DISTINCT neighbor `self` is tied to by an active
+// eqNodeNode lock, excluding `exclude` (so the cascade never echoes straight back). Each
+// message carries self's CURRENT scene polar (selfPolar) so the receiver copies a component
+// directly — no cartesian. selfPolar is passed by the caller (RootMove's drag target polar, or
+// a follower's just-applied new polar in nodeMover.handle) rather than re-read, to avoid racing
+// the asynchronous "center" fan-out. eqPortTorus locks add no neighbor (port-marker only).
+func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfPolar polar, exclude string) []moveMsg {
 	self := m.id
-	// Ensure self's owned offset is populated (from the existing link) for every center it is
-	// a term of, so the message carries an un-inflated offset for each shared center.
-	eqsSnap := md.polarEqsSnap()
-	for _, eq := range eqsSnap {
-		if eq.Active && eq.Kind == eqNodeNode && (eq.A.Node == self || eq.B.Node == self) {
-			md.localPolarOf(m, eq.Center)
-		}
-	}
-	localPolar := clonePolar(m.localPolar) // immutable snapshot shared across the fan (safe)
 	var out []moveMsg
 	seen := map[string]bool{}
 	add := func(otherID string) {
@@ -325,15 +156,13 @@ func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude stri
 		}
 		seen[otherID] = true
 		out = append(out, moveMsg{
-			Kind:           moveMsgKindLockUpdate,
-			NodeID:         otherID,
-			From:           self,
-			FromWorld:      selfWorld,
-			FromLocalPolar: localPolar, // sender's OWNED offset so receivers copy an un-inflated component
+			Kind:      moveMsgKindLockUpdate,
+			NodeID:    otherID,
+			From:      self,
+			FromPolar: selfPolar,
 		})
 	}
-
-	for _, eq := range eqsSnap {
+	for _, eq := range md.polarEqsSnap() {
 		if !eq.Active || eq.Kind != eqNodeNode {
 			continue
 		}
@@ -344,7 +173,6 @@ func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfWorld vec3, exclude stri
 			add(eq.A.Node)
 		}
 	}
-
 	return out
 }
 

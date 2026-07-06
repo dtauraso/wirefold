@@ -30,25 +30,22 @@ import (
 type nodePosPersister struct {
 	root     string // tree root; per-node meta.json lives at <root>/nodes/<id>/meta.json
 	debounce time.Duration
-	debouncedPersister[map[string]vec3]
-	// sceneCenter returns the current scene-sphere center, so each write can ALSO record the
-	// node's SCENE POLAR (r,θ,φ = cart2polar(world − sceneCenter)) alongside x/y/z during the
-	// polar-model migration (polar-model.md phase 2). nil → write cartesian only.
-	sceneCenter func() vec3
+	debouncedPersister[map[string]polar]
 }
 
-// schedule records the latest center for a node and (re)arms the debounce timer. A
-// continuous drag re-arms each call, so the burst coalesces into one write after settle.
-func (p *nodePosPersister) schedule(id string, c vec3) {
+// schedule records the latest SCENE POLAR for a node and (re)arms the debounce timer. A
+// continuous drag re-arms each call, so the burst coalesces into one write after settle. The
+// position is already polar (the mover's source of truth) — no cartesian involved.
+func (p *nodePosPersister) schedule(id string, sp polar) {
 	if p == nil || p.root == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.pending == nil {
-		p.pending = map[string]vec3{}
+		p.pending = map[string]polar{}
 	}
-	p.pending[id] = c
+	p.pending[id] = sp
 	p.has = true
 	if p.timer == nil {
 		p.timer = time.AfterFunc(p.debounce, p.flush)
@@ -57,30 +54,28 @@ func (p *nodePosPersister) schedule(id string, c vec3) {
 	}
 }
 
-// flush writes every pending node center to its meta.json (read-modify-write, preserving
+// flush writes every pending node's scene polar to its meta.json (read-modify-write, preserving
 // other fields) and clears the pending set. Fire-and-forget: errors are logged, not returned.
 func (p *nodePosPersister) flush() {
 	pend, has := p.take()
 	if !has || len(pend) == 0 {
 		return
 	}
-	var sc vec3
-	haveSC := false
-	if p.sceneCenter != nil {
-		sc, haveSC = p.sceneCenter(), true
-	}
-	for id, c := range pend {
-		if err := writeNodePosition(p.root, id, c, sc, haveSC); err != nil {
+	for id, sp := range pend {
+		if err := writeNodePosition(p.root, id, sp); err != nil {
 			logPersistErr("scene_node_pos_persist", id, err)
 		}
 	}
 	p.recordWrite()
 }
 
-// writeNodePosition sets ONLY the x/y/z fields of <root>/nodes/<id>/meta.json, preserving
-// every other field (id, type, r). The file must already exist (a node always has a
+// writeNodePosition sets the node's SCENE POLAR (r,θ,φ about the scene sphere center) in
+// <root>/nodes/<id>/meta.json, preserving every other field (id, type, r) and DELETING any
+// legacy cartesian x/y/z. Polar is the only stored position (polar-frame-rewrite.md phase 1:
+// "persist writes scene-polar only, deletes x/y/z"), and it is written straight from the polar
+// source of truth — no cartesian conversion. The file must already exist (a node always has a
 // meta.json); a missing/malformed file is reported rather than fabricated.
-func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCenter bool) error {
+func writeNodePosition(root, id string, sp polar) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
 	}
@@ -90,17 +85,12 @@ func writeNodePosition(root, id string, c vec3, sceneCenter vec3, haveSceneCente
 			b, _ := json.Marshal(v)
 			obj[key] = b
 		}
-		setNum("x", c.X)
-		setNum("y", c.Y)
-		setNum("z", c.Z)
-		// Dual-write the SCENE POLAR (polar-model.md phase 2): the node's polar about the
-		// scene sphere. Cartesian x/y/z stays for back-compat during migration; the polar
-		// fields become authoritative once the load side prefers them (phase 2b).
-		if haveSceneCenter {
-			sp := cart2polar(c.sub(sceneCenter))
-			setNum("scenePolarR", sp.R)
-			setNum("scenePolarTheta", sp.Theta)
-			setNum("scenePolarPhi", sp.Phi)
-		}
+		setNum("scenePolarR", sp.R)
+		setNum("scenePolarTheta", sp.Theta)
+		setNum("scenePolarPhi", sp.Phi)
+		// Cartesian center is not a stored source of truth — drop any legacy fields.
+		delete(obj, "x")
+		delete(obj, "y")
+		delete(obj, "z")
 	})
 }

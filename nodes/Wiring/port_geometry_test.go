@@ -51,7 +51,7 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 	center := vec3{X: 46.5425, Y: 93.085, Z: -139.6275}
 	g := nodeGeom{
 		Kind:   "HoldFlip",
-		Center: &center,
+		HasPos: true, ScenePolar: cart2polar(center),
 		Inputs: []portGeom{
 			{Name: "In", AnchorId: &anchorId1},
 			{Name: "In2"},
@@ -81,52 +81,41 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}{
 		{
 			name: "input-to-holdflip-2d",
-			src: nodeGeom{Kind: "Input", Center: &c01,
+			src: nodeGeom{Kind: "Input", HasPos: true, ScenePolar: cart2polar(c01),
 				Outputs: []portGeom{{Name: "ToHoldFlip", AnchorId: &anchorId1}}},
 			srcH: "ToHoldFlip",
-			tgt: nodeGeom{Kind: "HoldFlip", Center: &c11,
+			tgt: nodeGeom{Kind: "HoldFlip", HasPos: true, ScenePolar: cart2polar(c11),
 				Inputs: []portGeom{{Name: "In", AnchorId: &anchorId1}}},
 			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",
-			src: nodeGeom{Kind: "HoldNewSendOld", Center: &c111,
+			src: nodeGeom{Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(c111),
 				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
-			tgt: nodeGeom{Kind: "HoldNewSendOld", Center: &c11n1,
+			tgt: nodeGeom{Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(c11n1),
 				Inputs: []portGeom{{Name: "FromPrevHoldNewSendOldNode", AnchorId: &anchorId1}}},
 			tgtH: "FromPrevHoldNewSendOldNode",
 		},
 		{
 			name: "anchorid0-and-anchorid2-with-z",
-			src: nodeGeom{Kind: "WindowAndInhibitRightGate", Center: &c11,
+			src: nodeGeom{Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(c11),
 				Outputs: []portGeom{{Name: "ToPassed", AnchorId: &anchorId0}}},
 			srcH: "ToPassed",
-			tgt: nodeGeom{Kind: "WindowAndInhibitRightGate", Center: &c201,
+			tgt: nodeGeom{Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(c201),
 				Inputs: []portGeom{{Name: "FromRight", AnchorId: &anchorId2}}},
 			tgtH: "FromRight",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := arcLengthBetweenPorts(c.src, c.srcH, c.tgt, c.tgtH)
-			// Straight-segment model: arc length is the chord distance.
-			srcCenter := vec3{}
-			if c.src.Center != nil {
-				srcCenter = *c.src.Center
-			}
-			tgtCenter := vec3{}
-			if c.tgt.Center != nil {
-				tgtCenter = *c.tgt.Center
-			}
-			p0 := refPortWorldPos(c.src.Kind, srcCenter, c.src.Outputs, c.srcH, false)
-			p2 := refPortWorldPos(c.tgt.Kind, tgtCenter, c.tgt.Inputs, c.tgtH, true)
-			want := refChordLength(p0, p2)
+			// Option A: an edge runs node-to-node; the arc is the polar law-of-cosines
+			// distance between the two node positions, equal to the chord between the two
+			// node world centers.
+			got := edgeArcPolar(c.src, c.tgt)
+			want := refChordLength(nodeWorldPos(c.src), nodeWorldPos(c.tgt))
 			if !almostEqual(got, want, 1e-9) {
-				t.Fatalf("arcLengthBetweenPorts = %v, want chord %v", got, want)
-			}
-			if got < CurveParamMinArcLength {
-				t.Fatalf("arc length below floor: %v", got)
+				t.Fatalf("edgeArcPolar = %v, want chord %v", got, want)
 			}
 		})
 	}
@@ -188,37 +177,6 @@ func TestPortRadiusPerPort(t *testing.T) {
 	// A port with no PortR falls back to nodeRadius(kind).
 	if got := portRadiusByName(g, "NoSuchPort", true); got != nodeRadius(g.Kind) {
 		t.Fatalf("portRadiusByName(unknown) = %v, want fallback %v", got, nodeRadius(g.Kind))
-	}
-}
-
-// TestArcLengthBetweenPortsUsesEachEndsOwnRadius verifies that when the source
-// OUTPUT port and destination INPUT port carry different PortR values, the
-// chord distance (edge arc length) is computed from each end's own radius, not
-// a shared nodeRadius(kind).
-func TestArcLengthBetweenPortsUsesEachEndsOwnRadius(t *testing.T) {
-	anchorId0 := 0
-	srcR, tgtR := 10.0, 60.0
-	srcCenter := vec3{X: 0, Y: 0, Z: 0}
-	tgtCenter := vec3{X: 200, Y: 0, Z: 0}
-	src := nodeGeom{
-		Kind:    "HoldFlip",
-		Center:  &srcCenter,
-		Outputs: []portGeom{{Name: "Out", AnchorId: &anchorId0, PortR: &srcR}},
-	}
-	tgt := nodeGeom{
-		Kind:   "HoldFlip",
-		Center: &tgtCenter,
-		Inputs: []portGeom{{Name: "In", AnchorId: &anchorId0, PortR: &tgtR}},
-	}
-	got := arcLengthBetweenPorts(src, "Out", tgt, "In")
-
-	srcDir := ringAnchorDir(nodeRadius(src.Kind), 0)
-	tgtDir := ringAnchorDir(nodeRadius(tgt.Kind), 0)
-	p0 := srcCenter.add(srcDir.scale(srcR))
-	p1 := tgtCenter.add(tgtDir.scale(tgtR))
-	want := chordLength(p0, p1)
-	if !almostEqual(got, want, 1e-9) {
-		t.Fatalf("arcLengthBetweenPorts = %v, want %v (per-end radii src=%v tgt=%v)", got, want, srcR, tgtR)
 	}
 }
 

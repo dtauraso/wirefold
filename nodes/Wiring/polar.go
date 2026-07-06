@@ -49,6 +49,23 @@ func cart2polar(v vec3) polar {
 	return polar{R: r, Theta: theta, Phi: phi}
 }
 
+// polarDist returns the straight-line distance between two points given in polar about the
+// SAME origin (pole +y), via the spherical law of cosines — NO cartesian, no vector
+// subtraction (polar-frame-rewrite.md: all geometry math stays polar; cartesian appears only
+// at the GPU boundary):
+//
+//	cosγ = cosθ₁·cosθ₂ + sinθ₁·sinθ₂·cos(φ₁−φ₂)   // angle between the two radial vectors
+//	d²   = r₁² + r₂² − 2·r₁·r₂·cosγ                // law of cosines on the triangle O,P₁,P₂
+func polarDist(a, b polar) float64 {
+	cosG := math.Cos(a.Theta)*math.Cos(b.Theta) +
+		math.Sin(a.Theta)*math.Sin(b.Theta)*math.Cos(a.Phi-b.Phi)
+	d2 := a.R*a.R + b.R*b.R - 2*a.R*b.R*cosG
+	if d2 <= 0 {
+		return 0
+	}
+	return math.Sqrt(d2)
+}
+
 func clamp(v, lo, hi float64) float64 {
 	if v < lo {
 		return lo

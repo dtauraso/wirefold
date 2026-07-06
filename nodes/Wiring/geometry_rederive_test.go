@@ -70,18 +70,17 @@ func waitNotInFlight(t *testing.T, pw *PacedWire) {
 // length to exactly match segmentBetweenPorts / arcLengthBetweenPorts of the new
 // port-to-port geometry, and streams a geometry event carrying the new segment.
 func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
+	// Initial positions are scene polar (r,θ,φ) about the origin: src (100,0,0)→(100,π/2,0),
+	// dst (0,0,0)→(0,0,0). They must live on the nodes (the geometry source), not just
+	// view.nodes, so the aimed-port registry is built at load.
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "src": {"x": 100, "y": 0, "z": 0},
-	    "dst": {"x": 0,   "y": 0, "z": 0}
-	  }}
+	  ]
 	}`
 
 	dir := t.TempDir()
@@ -113,18 +112,13 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	// Use aimed computation to match the edge mover (all edge-connected ports are aimed).
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
 	dstCenter := vec3{X: 0, Y: 0, Z: 0}
-	srcGeom := nodeGeom{Kind: "FanInSrc", Center: &srcCenter,
+	srcGeom := nodeGeom{Kind: "FanInSrc", HasPos: true, ScenePolar: cart2polar(srcCenter),
 		Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", Center: &dstCenter,
+	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter),
 		Inputs: []portGeom{{Name: "In"}}}
-	wantRegistry := AimedPortRegistry{
-		{NodeID: "src", PortName: "Out", IsInput: false}: "dst",
-		{NodeID: "dst", PortName: "In", IsInput: true}:   "src",
-	}
-	wantCenters := map[string]vec3{"src": srcCenter, "dst": dstCenter}
-	wantCenterOf := func(id string) (vec3, bool) { c, ok := wantCenters[id]; return c, ok }
-	wantSeg := segmentBetweenPortsAimed(srcGeom, "Out", "src", dstGeom, "In", "dst", wantRegistry, wantCenterOf, nil)
-	wantArc := wantSeg.Start.sub(wantSeg.End).length()
+	// Option A: the edge runs node-to-node; segment = node centers, arc = polar distance.
+	wantSeg := edgeSegment(srcGeom, dstGeom)
+	wantArc := edgeArcPolar(srcGeom, dstGeom)
 
 	// Segment endpoints on the source Out must match exactly.
 	if !approxEq(out.Geom().Start.X, wantSeg.Start.X) || !approxEq(out.Geom().Start.Y, wantSeg.Start.Y) || !approxEq(out.Geom().Start.Z, wantSeg.Start.Z) {
