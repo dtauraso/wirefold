@@ -958,15 +958,37 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	eye := eyeOf(vp)
 	pivot := regionFocus(vp, md.heldCenters())
 	r := eye.sub(pivot).length()
-	pos := worldDirToAngles(eye.sub(pivot))
 
 	if ev.Ctrl {
-		// Polar zoom: scale the camera RADIUS about the region-focus pivot (viewpoint.zoom) — a
-		// scalar r change, no cursor target and no vector subtraction (the old zoom-to-cursor
-		// dolly was a cartesian target−eye translation). Seed the viewpoint to the region-focus
-		// pivot first so the zoom is about what the camera is looking at.
+		// Zoom TOWARD the node under the cursor (fly-to): pick the cursor-nearest node as the
+		// pivot, aim the camera at it, and scale the RADIUS (polar r-scale, viewpoint.zoom). The
+		// camera state stays polar — pivot point, scalar r, and (θ,φ) dirs; only the cursor→node
+		// pick is a screen-space selection at the INPUT boundary (projectNDC). A pure r-scale
+		// about the near view-center pivot can only creep toward the nearest node — it can never
+		// reach a distant, off-axis node like 1 from 7; scaling r about the distant cursor target
+		// flies the eye toward it. Falls back to region-focus when the cursor is over no node.
+		mouseNdcX, mouseNdcY := md.gest.pixelToNDC(ev.X, ev.Y)
+		basis := basisFromViewpoint(vp.pos, vp.up)
+		aspect := md.gest.rect.aspect()
+		target := pivot
+		best := math.Inf(1)
+		for _, c := range md.heldCenters() {
+			nx, ny, inFront := projectNDC(c, eye, basis, ev.Fov, aspect)
+			if !inFront {
+				continue
+			}
+			if d := math.Hypot(nx-mouseNdcX, ny-mouseNdcY); d < best {
+				best = d
+				target = c
+			}
+		}
+		targetR := eye.sub(target).length()
+		if targetR < viewpointMinDist {
+			targetR = viewpointMinDist
+		}
+		targetPos := worldDirToAngles(eye.sub(target))
 		factor := math.Pow(gestureZoomBase, ev.DeltaY)
-		md.SetViewpoint(pivot, r, pos, vp.up)
+		md.SetViewpoint(target, targetR, targetPos, vp.up)
 		md.ZoomViewpoint(factor, tr)
 		return
 	}
