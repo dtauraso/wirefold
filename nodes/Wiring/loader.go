@@ -243,10 +243,6 @@ type buildCtx struct {
 	nodeGeoms map[string]nodeGeom
 	centers   map[string]vec3
 
-	// Phase 3: aimed-port registry + the centerOf closure used while it is built.
-	aimedPorts AimedPortRegistry
-	centerOf   func(string) (vec3, bool)
-
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
 	edgeWire      WireRegistry
@@ -280,7 +276,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 
 	b.computeNodeGeometry()
 	b.computeReachRadii()
-	b.buildAimedPorts()
 	b.allocateWires()
 	b.buildMoveDispatch()
 	b.buildTypeMaps()
@@ -338,40 +333,6 @@ func (b *buildCtx) computeReachRadii() {
 		g := b.nodeGeoms[id]
 		g.ReachR = r
 		b.nodeGeoms[id] = g
-	}
-}
-
-// buildAimedPorts builds the aimed-port registry ONCE — the single source of
-// truth. It is used both by allocateWires below (aimed port directions, radial
-// toward the connected node, rather than ring-anchor directions) AND installed on
-// the dispatch for drag-time aiming (md.installAimedPorts), so the two can never
-// drift. Guarded on the 1→9→{2,6} spine being present; a nil registry falls back
-// to non-aimed ports. Also builds the centerOf closure used while the registry is
-// live (reads the shared static world centers, before movers are running).
-func (b *buildCtx) buildAimedPorts() {
-	// Derive the aimed-port registry from the loaded edge list: every edge-connected
-	// port aims toward the node on the other end. No node-ID hardcoding; any topology
-	// gets correct aimed ports automatically. Only register when BOTH endpoint nodes
-	// have geometry (centers), matching the original guard intent that aimed needs
-	// positions.
-	reg := AimedPortRegistry{}
-	for _, e := range b.spec.Edges {
-		if _, srcOK := b.centers[e.Source]; !srcOK {
-			continue
-		}
-		if _, tgtOK := b.centers[e.Target]; !tgtOK {
-			continue
-		}
-		reg[AimedPortKey{NodeID: e.Source, PortName: e.SourceHandle, IsInput: false}] = e.Target
-		reg[AimedPortKey{NodeID: e.Target, PortName: e.TargetHandle, IsInput: true}] = e.Source
-	}
-	if len(reg) > 0 {
-		b.aimedPorts = reg
-	}
-
-	b.centerOf = func(id string) (vec3, bool) {
-		c, ok := b.centers[id]
-		return c, ok
 	}
 }
 
@@ -479,12 +440,7 @@ func (b *buildCtx) buildMoveDispatch() {
 		// locks ride on it again when re-registered here.
 	}
 
-	// Install the aimed-port registry (built above) so edges still render aimed at their
-	// connected node during a drag.
-	if b.aimedPorts != nil {
-		md.installAimedPorts(b.aimedPorts)
-	}
-
+	md.installLocked()
 	b.md = md
 }
 
@@ -609,7 +565,7 @@ func (b *buildCtx) buildNodes() error {
 			}
 		}
 
-		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], b.aimedPorts, b.centerOf)
+		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID])
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

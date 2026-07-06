@@ -32,8 +32,8 @@ func Register(kind string, newNode func() any) {
 	Registry[kind] = NodeBuilder{
 		Ports:     ports,
 		StateKeys: stateKeys,
-		Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, aimedPorts AimedPortRegistry, centerOf func(string) (vec3, bool)) (Node, error) {
-			return reflectBuild(ctx, name, data, pb, e, tr, geom, aimedPorts, centerOf)
+		Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom) (Node, error) {
+			return reflectBuild(ctx, name, data, pb, e, tr, geom)
 		},
 	}
 }

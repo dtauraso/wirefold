@@ -146,11 +146,6 @@ type nodeMover struct {
 	geom  nodeGeom
 	inbox chan moveMsg
 	tr    *T.Trace
-	// aimed is the registry of ports that dynamically point toward connected node
-	// centers. nil when no aimed ports are registered.
-	aimed AimedPortRegistry
-	// centerOf returns the current center for a node id — used only when aimed != nil.
-	centerOf func(string) (vec3, bool)
 	// locked reports whether (nodeID, portName, isInput) carries an ACTIVE
 	// `port ∈ torus` lock (MoveDispatch.portTorusLocked); nil when no lock system
 	// is installed yet. Passed through to portWorldPosAimed so a locked port's
@@ -283,15 +278,10 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 }
 
-// emitGeometry re-emits this node's authoritative geometry. When an aimed
-// registry is installed it uses portDirAimed for registered ports; otherwise
-// falls back to the static portDir via emitNodeGeometry.
+// emitGeometry re-emits this node's authoritative geometry. Port markers use their
+// ring-anchor direction (no aim); a torus-locked port ring-projects onto the border ring.
 func (m *nodeMover) emitGeometry() {
-	if m.aimed != nil && m.centerOf != nil {
-		emitNodeGeometryAimed(m.tr, m.id, m.geom, m.aimed, m.centerOf, m.locked)
-	} else {
-		emitNodeGeometry(m.tr, m.id, m.geom)
-	}
+	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.locked)
 }
 
 // run is the node's per-goroutine move loop: drain the inbox until ctx is done.
@@ -324,13 +314,6 @@ type edgeMover struct {
 	dest    *PacedWire // dest wire (in-flight revision + latency aggregate)
 	inbox   chan moveMsg
 	tr      *T.Trace
-	// aimed / centerOf: same registry as nodeMover; used in recomputeGeometry.
-	aimed    AimedPortRegistry
-	centerOf func(string) (vec3, bool)
-	// locked: same `port ∈ torus` lock check as nodeMover.locked; used in
-	// recomputeGeometry/emitGeometry so a locked endpoint's segment endpoint stays
-	// ring-projected in step with the streamed port marker.
-	locked func(nodeID, portName string, isInput bool) bool
 }
 
 func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace) *edgeMover {
@@ -522,10 +505,6 @@ type MoveDispatch struct {
 	// equation's Center (pruneSelectionOffCenter). Go-owned; streamed via KindPolarLocks
 	// (per-row PolarLockPayload.Selected).
 	selectedLocks []int
-	// AimedPorts maps (nodeID, portName, isInput) → targetNodeID for ports whose
-	// direction should dynamically point toward their connected node's current center.
-	// nil when no aimed ports are registered.
-	AimedPorts AimedPortRegistry
 	// vp is the polar camera viewpoint state (viewpoint_state.go). Owned entirely by
 	// MoveDispatch — no separate goroutine; callers serialize externally (stdin reader
 	// runs in a single goroutine). MoveDispatch exposes thin delegating methods.
@@ -760,13 +739,8 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 	}
 	if !md.started {
 		// Movers not running — direct read is safe (no concurrent goroutines own geom).
-		centerOf := md.centerOfNode
 		for _, nm := range md.nodeMovers {
-			if nm.aimed != nil {
-				emitNodeGeometryAimed(tr, nm.id, nm.geom, nm.aimed, centerOf, md.portTorusLocked)
-			} else {
-				emitNodeGeometry(tr, nm.id, nm.geom)
-			}
+			emitNodeGeometryLocked(tr, nm.id, nm.geom, md.portTorusLocked)
 		}
 		for _, em := range md.edgeMovers {
 			seg := edgeSegment(em.srcGeom, em.dstGeom)
@@ -838,47 +812,14 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
-// installAimedPorts sets the aimed registry on every nodeMover and edgeMover and
-// stores it on md.AimedPorts for ResendGeometry. Call after newMoveDispatch and
-// before Start so the closures are in place when goroutines begin.
-func (md *MoveDispatch) installAimedPorts(registry AimedPortRegistry) {
-	md.AimedPorts = registry
-	centerOf := md.centerOfNode
-	// locked is a live lookup against md.polarEqs (via portTorusLocked) — installed
-	// once here but always reflects the CURRENT lock state, including locks loaded
-	// later by LoadPolarEqs and toggled afterward (ToggleLockActive/addPortTorusLock).
+// installLocked installs the live torus-lock lookup on every nodeMover so port markers can
+// ring-project a torus-locked port at emit. The lookup (md.portTorusLocked) always reflects
+// the CURRENT lock state, including locks loaded later (LoadPolarEqs) and toggled afterward.
+// Call after newMoveDispatch and before Start.
+func (md *MoveDispatch) installLocked() {
 	locked := md.portTorusLocked
 	for _, nm := range md.nodeMovers {
-		nm.aimed = registry
-		nm.centerOf = centerOf
 		nm.locked = locked
-	}
-	for _, em := range md.edgeMovers {
-		em.aimed = registry
-		em.locked = locked
-		// An edge owns BOTH its endpoint geoms and updates them synchronously on its
-		// own goroutine before recomputing (handle → recomputeGeometry). For aiming,
-		// read those held centers directly rather than the node mover's published
-		// snapshot: on an endpoint move the edge has the fresh center in hand, but the
-		// moved node's snapshot may not be published yet (the node and edge movers run
-		// concurrently with no happens-before between the node's snap-write and the
-		// edge's snap-read). Reading the snapshot produced an order-dependent stale
-		// center → degenerate aim → ring-anchor fallback. The held-geom read is the
-		// local source of truth and is race-free (same goroutine writes and reads it).
-		e := em
-		e.centerOf = func(id string) (vec3, bool) {
-			switch id {
-			case e.srcID:
-				if e.srcGeom.HasPos {
-					return nodeWorldPos(e.srcGeom), true
-				}
-			case e.dstID:
-				if e.dstGeom.HasPos {
-					return nodeWorldPos(e.dstGeom), true
-				}
-			}
-			return centerOf(id)
-		}
 	}
 }
 
@@ -927,30 +868,11 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 // so they re-emit with the fresh target center (which the target mover just wrote
 // to its geom; the aimer reads via centerOfNode at emit time).
 func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]float64) {
-	// Collect set of nodes that need a re-emit due to aimed-port targeting.
-	// We track them separately to avoid double-sending to nodes that are already
-	// in newCenters (they will re-emit from their own center message).
-	aimedReemit := map[string]bool{}
-
 	// Per-node center messages (carry ReachR for sphereR streaming). One per moved node.
 	for id, c := range newCenters {
 		cc := c
 		if ch, ok := md.dispatch[id]; ok {
 			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: reach[id]}
-		}
-		// If an aimed registry is installed, trigger re-emit for any node whose
-		// port aims at the node that just moved (reverse-lookup the registry).
-		if md.AimedPorts != nil {
-			for key, targetID := range md.AimedPorts {
-				if targetID != id {
-					continue
-				}
-				// Skip if the aimer is itself in newCenters (it re-emits from its
-				// own center message above).
-				if _, alreadyMoving := newCenters[key.NodeID]; !alreadyMoving {
-					aimedReemit[key.NodeID] = true
-				}
-			}
 		}
 	}
 
@@ -969,25 +891,6 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 		}
 		if ch, ok := md.dispatch[edgeID]; ok {
 			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: eps}
-		}
-	}
-
-	// Send a center message to each aimer so it re-emits with the fresh aim.
-	// The aimer's own center hasn't changed — we preserve its current Center and
-	// ReachR (read from the atomic snap, safe from the stdin goroutine) so the
-	// nodeMover just re-emits its geometry with the updated aim dir.
-	for id := range aimedReemit {
-		nm, exists := md.nodeMovers[id]
-		if !exists {
-			continue
-		}
-		s := nm.snap.Load()
-		if s == nil {
-			continue
-		}
-		if ch, ok := md.dispatch[id]; ok {
-			cc := s.c
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: s.reach}
 		}
 	}
 }
