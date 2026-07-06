@@ -55,6 +55,51 @@ func TestPortWorldPosAimed_ActiveTorusLock_ProjectsOntoRing(t *testing.T) {
 	}
 }
 
+// TestPortWorldPosAimed_PartnerTorusLock_ProjectsInputOntoRing verifies that when
+// only the OUT-port of a bidirectional connection carries an ACTIVE eqPortTorus lock,
+// the paired IN-port on the same node (aiming at the same neighbor — the opposite
+// direction of the same connection) also ring-projects, so the two directed edges
+// stay coincident instead of splitting into two visible lines.
+func TestPortWorldPosAimed_PartnerTorusLock_ProjectsInputOntoRing(t *testing.T) {
+	xCenter := vec3{X: 0, Y: 0, Z: 5}
+	tCenter := vec3{X: 10, Y: 3, Z: 40} // very different z — aim dir leaves X's ring plane
+
+	gX := buildGeom("HoldNewSendOld", xCenter)
+
+	registry := AimedPortRegistry{
+		{NodeID: "X", PortName: "ToHoldNewSendOld", IsInput: false}:          "T",
+		{NodeID: "X", PortName: "FromPrevHoldNewSendOldNode", IsInput: true}: "T",
+	}
+	centers := map[string]vec3{"X": xCenter, "T": tCenter}
+	centerOf := func(id string) (vec3, bool) { v, ok := centers[id]; return v, ok }
+
+	// Only X's OUT-port carries an ACTIVE eqPortTorus lock; X's IN-port (the
+	// partner, same node, same neighbor T) does not.
+	locked := func(nodeID, portName string, isInput bool) bool {
+		return nodeID == "X" && portName == "ToHoldNewSendOld" && !isInput
+	}
+
+	outPort := portWorldPosAimed(gX, "ToHoldNewSendOld", false, "X", registry, centerOf, locked)
+	inPort := portWorldPosAimed(gX, "FromPrevHoldNewSendOldNode", true, "X", registry, centerOf, locked)
+
+	const eps = 1e-9
+
+	if inPort.Z != xCenter.Z {
+		t.Fatalf("partner-locked in-port z=%v, want X_center.z=%v (ring plane)", inPort.Z, xCenter.Z)
+	}
+	dist := inPort.sub(xCenter).length()
+	wantR := nodeRadius(gX.Kind)
+	if dist < wantR-eps || dist > wantR+eps {
+		t.Fatalf("partner-locked in-port distance from center = %v, want nodeRadius(kind) = %v", dist, wantR)
+	}
+
+	// Goal: the in/out pair coincide — the lock on one direction must not split
+	// the connection into two separate points.
+	if !approxVec3(inPort, outPort, eps) {
+		t.Fatalf("in-port %+v != out-port %+v; partner lock did not keep the pair coincident", inPort, outPort)
+	}
+}
+
 // TestPortWorldPosAimed_InactiveTorusLock_UsesPlainAimed is the regression case: when
 // locked reports false (e.g. the lock exists but is deactivated), the port uses the
 // plain aimed position — unaffected by the ring-plane, potentially off it.

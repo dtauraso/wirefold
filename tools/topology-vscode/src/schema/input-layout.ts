@@ -18,9 +18,9 @@
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;

@@ -55,9 +55,9 @@ func TestDecodeEditUpdateOverlaysToggle(t *testing.T) {
 		t.Fatalf("overlays toggle decode = %+v ok=%v", msg, ok)
 	}
 	// A non-tori flag maps by index.
-	msg2, _ := decodeInputRecord(encodeOverlaysToggle("doubleLinks"))
-	if msg2.Flag != "doubleLinks" {
-		t.Fatalf("toggle doubleLinks decode flag=%q", msg2.Flag)
+	msg2, _ := decodeInputRecord(encodeOverlaysToggle("overlays"))
+	if msg2.Flag != "overlays" {
+		t.Fatalf("toggle overlays decode flag=%q", msg2.Flag)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestDecodeEditUpdateLockPreview(t *testing.T) {
 // TestOverlayFlagOrderMatchesFingerprint guards that the derived flag order equals the
 // fingerprint's overlayFlags list (self-check on parseOverlayFlags).
 func TestOverlayFlagOrderMatchesFingerprint(t *testing.T) {
-	want := []string{"tori", "scenePoles", "nodePoles", "angleLabels", "selSpherePoles", "handholds", "labelsGlobal", "badgesGlobal", "overlays", "doubleLinks"}
+	want := []string{"tori", "scenePoles", "nodePoles", "angleLabels", "selSpherePoles", "handholds", "labelsGlobal", "badgesGlobal", "overlays"}
 	if !reflect.DeepEqual(inOverlayFlags, want) {
 		t.Fatalf("inOverlayFlags = %v, want %v", inOverlayFlags, want)
 	}

@@ -42,6 +42,18 @@ type Node struct {
 	// via Out2). Optional: when unwired (Wired()==false, e.g. node 7) its drive
 	// goroutine is skipped, so single-output Pulse nodes are unaffected.
 	Out2 *Wiring.Out
+	// ToInput is a declared output back to an Input node. Intentionally
+	// inert (no send logic) — see 3To1 edge task.
+	ToInput *Wiring.Out
+	// ToHoldNewSendOld is a declared output to a HoldNewSendOld node.
+	// Intentionally inert (no send logic) — see 5To2/6To2 edge task.
+	ToHoldNewSendOld *Wiring.Out
+	// FromLeftGate is a declared input from a WindowAndInhibitLeftGate node.
+	// Intentionally inert (no read logic) — see 9To3/9To6 edge task.
+	FromLeftGate *Wiring.In
+	// FromRightGate is a declared input from a WindowAndInhibitRightGate node.
+	// Intentionally inert (no read logic) — see 10To6/10To8 edge task.
+	FromRightGate *Wiring.In
 }
 
 // driveOutput runs a continuous-drive goroutine on out, always emitting the

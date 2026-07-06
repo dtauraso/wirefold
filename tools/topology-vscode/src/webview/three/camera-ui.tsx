@@ -129,15 +129,6 @@ const badgesCfg: ToggleCfg = {
   payload: (v) => ({ flag: "badgesGlobal", wasHidden: v }),
 };
 
-const doubleLinksCfg: ToggleCfg = {
-  flag: "doubleLinks",
-  default: false,
-  active: (v) => v,
-  label: "⇄ double links",
-  title: (a) => (a ? "Hide double-link overlay" : "Show double-link overlay"),
-  payload: (v) => ({ flag: "doubleLinks", was: v }),
-};
-
 // ---------------------------------------------------------------------------
 // Grouped overlay rows for the popover
 // ---------------------------------------------------------------------------
@@ -148,7 +139,6 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
   { heading: "GUIDES", cfgs: [angleLabelsCfg, ringsCfg, handholdsCfg] },
   { heading: "POLES",  cfgs: [scenePolesCfg, nodePolesCfg, selSpherePolesCfg] },
   { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
-  { heading: "EDGES",  cfgs: [doubleLinksCfg] },
 ];
 
 /** A single row inside the popover: square checkbox + label, fires the row's op on click.

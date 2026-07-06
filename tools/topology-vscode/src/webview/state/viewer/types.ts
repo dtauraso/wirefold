@@ -72,9 +72,6 @@ export type ViewerState = {
   selSpherePolesVisible?: boolean;
   // handholdsVisible: whether the rotation-handhold grab spheres are shown. undefined = shown (default true).
   handholdsVisible?: boolean;
-  // doubleLinksVisible: whether the double-link overlay is shown. undefined = hidden (default false).
-  // Go-owned; persisted so guide-vis push can restore it on reload.
-  doubleLinksVisible?: boolean;
   // overlaysActive: whether the master overlays toggle is on. undefined = active (default true).
   // Go-owned; persisted so guide-vis push can restore it on reload.
   overlaysActive?: boolean;
@@ -104,7 +101,7 @@ const VISIBLE_SENSE_SCENE_KEYS = [
 // in three/ (camera-store.ts, pump.ts, ThreeView.tsx, camera-ui.tsx) which are out of scope;
 // polarity is documented at each use site in main.tsx.
 const MERGE_OPT_KEYS = [
-  "labelsGlobalHidden", "badgesHidden", "doubleLinksVisible",
+  "labelsGlobalHidden", "badgesHidden",
   ...VISIBLE_SENSE_SCENE_KEYS,
 ] as const satisfies readonly (keyof ViewerState)[];
 
@@ -158,7 +155,6 @@ export function parseViewerState(text: string | undefined): ViewerState {
   assignStrArr(out, raw, "fadeEdgeOrder");
   if (raw.labelsGlobalHidden === true) out.labelsGlobalHidden = true;
   if (raw.badgesHidden === true) out.badgesHidden = true;
-  if (typeof (raw).doubleLinksVisible === "boolean") out.doubleLinksVisible = (raw).doubleLinksVisible;
   for (const k of VISIBLE_SENSE_SCENE_KEYS) {
     if ((raw)[k] === false) out[k] = false;
   }
@@ -189,7 +185,7 @@ export function serializeViewerState(s: ViewerState): string {
 }
 
 // Scene-only fields (camera, camera3d, cameraPolar, labelsGlobalHidden, guideline visibilities) — for topology.scene.json.
-type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "doubleLinksVisible" | "overlaysActive">;
+type SceneState = Pick<ViewerState, "camera" | "camera3d" | "cameraPolar" | "labelsGlobalHidden" | "badgesHidden" | "sceneToriVisible" | "scenePolesVisible" | "nodePolesVisible" | "angleLabelsVisible" | "selSpherePolesVisible" | "handholdsVisible" | "overlaysActive">;
 
 export function serializeSceneState(s: ViewerState): string {
   const scene: SceneState = {};
@@ -198,7 +194,6 @@ export function serializeSceneState(s: ViewerState): string {
   if (s.cameraPolar !== undefined) scene.cameraPolar = s.cameraPolar;
   if (s.labelsGlobalHidden !== undefined) scene.labelsGlobalHidden = s.labelsGlobalHidden;
   if (s.badgesHidden !== undefined) scene.badgesHidden = s.badgesHidden;
-  if (s.doubleLinksVisible !== undefined) scene.doubleLinksVisible = s.doubleLinksVisible;
   for (const k of VISIBLE_SENSE_SCENE_KEYS) {
     if (s[k] === false) scene[k] = false;
   }

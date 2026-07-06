@@ -213,7 +213,7 @@ type bufLayoutCamera struct {
 }
 
 // bufLayoutOverlay defines the overlay visibility column block (always 1 row).
-// Matched from KindSceneTori/ScenePoles/…/DoubleLinks trace events.
+// Matched from KindSceneTori/ScenePoles/…/OverlaysVis trace events.
 // Field order matches overlayState in overlay_gen.go.
 type bufLayoutOverlay struct {
 	SceneTori      uint8 `buf:"u8"` // 1 = polar-guide tori visible
@@ -225,7 +225,6 @@ type bufLayoutOverlay struct {
 	LabelsGlobal   uint8 `buf:"u8"` // 1 = all node labels visible
 	BadgesGlobal   uint8 `buf:"u8"` // 1 = all occlusion +N badges visible
 	OverlaysVis    uint8 `buf:"u8"` // 1 = master overlays toggle on
-	DoubleLinks    uint8 `buf:"u8"` // 1 = double-link arrow overlays visible
 	// SelMode is NOT an overlay flag — it rides the overlay singleton row only because
 	// it is a single global value that changes with selection. 1 = "own" (secondary /
 	// two-finger select: owners = [selected]); 0 = "surface" (primary click: owners =

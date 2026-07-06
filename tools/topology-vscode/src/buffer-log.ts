@@ -32,7 +32,7 @@ import {
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
   readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles, readOverlayAngleLabels,
   readOverlaySelSpherePoles, readOverlayHandholds, readOverlayLabelsGlobal,
-  readOverlayBadgesGlobal, readOverlayOverlaysVis, readOverlayDoubleLinks,
+  readOverlayBadgesGlobal, readOverlayOverlaysVis,
   readPortPX, readPortPY, readPortPZ,
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
@@ -77,14 +77,13 @@ function overlayFlag(d: DecodedSnapshot, kind: string): number {
     case "labels-global": return readOverlayLabelsGlobal(v);
     case "badges-global": return readOverlayBadgesGlobal(v);
     case "overlays-vis": return readOverlayOverlaysVis(v);
-    case "double-links": return readOverlayDoubleLinks(v);
     default: return 0;
   }
 }
 
 const OVERLAY_KINDS = new Set([
   "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles",
-  "handholds", "labels-global", "badges-global", "overlays-vis", "double-links",
+  "handholds", "labels-global", "badges-global", "overlays-vis",
 ]);
 
 function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {

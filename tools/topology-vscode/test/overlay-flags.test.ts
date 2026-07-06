@@ -18,7 +18,6 @@ import {
   OVERLAY_COL_SCENE_TORI, OVERLAY_COL_SCENE_POLES, OVERLAY_COL_NODE_POLES,
   OVERLAY_COL_ANGLE_LABELS, OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_BADGES_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
-  OVERLAY_COL_DOUBLE_LINKS,
 } from "../src/schema/buffer-layout";
 
 // Build a node-less snapshot (0 beads/nodes/edges) carrying only the Camera + Overlay
@@ -51,7 +50,6 @@ describe("overlay-flags readOverlayFlags", () => {
       [OVERLAY_COL_LABELS_GLOBAL]: 1,
       [OVERLAY_COL_BADGES_GLOBAL]: 1,
       [OVERLAY_COL_OVERLAYS_VIS]: 1,
-      [OVERLAY_COL_DOUBLE_LINKS]: 0,
     }));
   });
 
@@ -65,7 +63,6 @@ describe("overlay-flags readOverlayFlags", () => {
     expect(f!.selSpherePoles).toBe(true);
     expect(f!.handholds).toBe(true);
     expect(f!.overlays).toBe(true);
-    expect(f!.doubleLinks).toBe(false);
     // labelsGlobal / badgesGlobal are HIDDEN-sense in store polarity: buffer col 1 = VISIBLE
     // → store field (labelsGlobalHidden / badgesHidden) is false.
     expect(f!.labelsGlobal).toBe(false);
@@ -79,14 +76,12 @@ describe("overlay-flags readOverlayFlags", () => {
       [OVERLAY_COL_SCENE_TORI]: 0,
       [OVERLAY_COL_LABELS_GLOBAL]: 0,
       [OVERLAY_COL_BADGES_GLOBAL]: 0,
-      [OVERLAY_COL_DOUBLE_LINKS]: 1,
     }));
     const f = readOverlayFlags()!;
     expect(f.overlays).toBe(false);
     expect(f.tori).toBe(false);
     expect(f.labelsGlobal).toBe(true); // hidden
     expect(f.badgesGlobal).toBe(true); // hidden
-    expect(f.doubleLinks).toBe(true);
   });
 
   it("returns a stable object identity while flags are unchanged", () => {
@@ -104,7 +99,6 @@ describe("overlay-flags readOverlayFlags", () => {
       [OVERLAY_COL_LABELS_GLOBAL]: 1,
       [OVERLAY_COL_BADGES_GLOBAL]: 1,
       [OVERLAY_COL_OVERLAYS_VIS]: 1,
-      [OVERLAY_COL_DOUBLE_LINKS]: 0,
     }));
     expect(readOverlayFlags()).toBe(a);
   });

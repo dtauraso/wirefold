@@ -23,7 +23,6 @@ import {
   readOverlayLabelsGlobal,
   readOverlayBadgesGlobal,
   readOverlayOverlaysVis,
-  readOverlayDoubleLinks,
 } from "../../schema/buffer-layout";
 
 // Keyed by OverlayFlag, in the SAME polarity as the matching useCameraStore field so
@@ -58,8 +57,7 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     (readOverlayHandholds(v) ? 1 << 5 : 0) |
     (readOverlayLabelsGlobal(v) ? 1 << 6 : 0) |
     (readOverlayBadgesGlobal(v) ? 1 << 7 : 0) |
-    (readOverlayOverlaysVis(v) ? 1 << 8 : 0) |
-    (readOverlayDoubleLinks(v) ? 1 << 9 : 0);
+    (readOverlayOverlaysVis(v) ? 1 << 8 : 0);
   if (bits === cachedBits && cachedVals) return cachedVals;
   cachedBits = bits;
   cachedVals = {
@@ -73,7 +71,6 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     labelsGlobal: !(bits & (1 << 6)),
     badgesGlobal: !(bits & (1 << 7)),
     overlays: !!(bits & (1 << 8)),
-    doubleLinks: !!(bits & (1 << 9)),
   };
   return cachedVals;
 }

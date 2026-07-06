@@ -87,13 +87,44 @@ func ringProjectDir(dir, fallbackDir vec3) vec3 {
 	return vec3{X: 1, Y: 0, Z: 0}
 }
 
+// partnerTorusLocked reports whether this port's connection-PARTNER — the other
+// port on the SAME node aiming at the SAME neighbor (the opposite direction of a
+// bidirectional connection) — carries an active port-torus lock. Used so a
+// torus lock on one direction ring-projects BOTH directions, keeping the in/out
+// pair coincident instead of splitting (one on the ring, one aimed in 3D).
+func partnerTorusLocked(registry AimedPortRegistry, locked func(string, string, bool) bool,
+	nodeID, portName string, isInput bool) bool {
+	if registry == nil || locked == nil {
+		return false
+	}
+	target, ok := registry[AimedPortKey{nodeID, portName, isInput}]
+	if !ok {
+		return false
+	}
+	for k, v := range registry {
+		if k.NodeID != nodeID || v != target {
+			continue
+		}
+		if k.PortName == portName && k.IsInput == isInput {
+			continue // skip self
+		}
+		if locked(k.NodeID, k.PortName, k.IsInput) {
+			return true
+		}
+	}
+	return false
+}
+
 // portWorldPosAimed returns the sphere-surface point in the aimed direction,
 // or the node center when the port is unnamed/unknown. When locked reports an
 // ACTIVE `port ∈ torus` lock for this exact port, the aimed direction is
 // ring-projected (ringProjectDir) and the radius is nodeRadius(g.Kind) — the
 // node-border ring's major radius — so the port sits ON the ring instead of
 // merely aiming toward the connected node. locked may be nil (no lock check,
-// e.g. at initial load before any lock exists).
+// e.g. at initial load before any lock exists). A port also ring-projects when
+// its same-node, same-neighbor connection PARTNER (the opposite direction of a
+// bidirectional connection) is torus-locked — this keeps an in/out pair
+// coincident under a one-sided lock instead of splitting into two lines.
 func portWorldPosAimed(
 	g nodeGeom,
 	portName string,
@@ -111,7 +142,8 @@ func portWorldPosAimed(
 	if !ok {
 		return center
 	}
-	if locked != nil && locked(nodeID, portName, isInput) {
+	if locked != nil && (locked(nodeID, portName, isInput) ||
+		partnerTorusLocked(registry, locked, nodeID, portName, isInput)) {
 		fallbackDir, _ := portDir(g, portName, isInput)
 		ringDir := ringProjectDir(dir, fallbackDir)
 		return center.add(ringDir.scale(nodeRadius(g.Kind)))

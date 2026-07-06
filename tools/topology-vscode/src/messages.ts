@@ -41,7 +41,6 @@ const OVERLAY_FLAG_NAMES = [
   "labelsGlobal",
   "badgesGlobal",
   "overlays",
-  "doubleLinks",
 ] as const;
 // OVERLAY_FLAGS_END
 
@@ -251,7 +250,6 @@ export type TraceEvent =
   | { step: number; kind: "labels-global"; visible: boolean }
   | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
-  | { step: number; kind: "double-links"; visible: boolean }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
   | { step: number; kind: "select"; node: string }
   | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }

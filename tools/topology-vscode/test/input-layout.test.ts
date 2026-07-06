@@ -81,7 +81,7 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
     expect(b[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("tori"));
     expect(decodeInputRecord(rec)).toEqual({ kind: "edit-update", entity: "overlays", attr: "toggle", flag: "tori" });
     // A non-zero flag maps by index.
-    expect(new Uint8Array(encodeOverlaysToggle("doubleLinks"))[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("doubleLinks"));
+    expect(new Uint8Array(encodeOverlaysToggle("overlays"))[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("overlays"));
   });
 
 });
