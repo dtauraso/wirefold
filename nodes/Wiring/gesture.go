@@ -102,20 +102,6 @@ type gestureState struct {
 	pendingSign float64
 	ruleTerms   []polarTerm
 
-	// `port ∈ torus` lock capture (independent of the node/node hasPending/ruleTerms above):
-	// a PORT click latches the port; a subsequent TORUS click completes the lock and appends
-	// an eqPortTorus entry to md.polarEqs. Does not touch pendingComp/pendingSign/ruleTerms.
-	hasPendingPort  bool
-	pendingPortNode string
-	pendingPortName string
-	pendingPortIn   bool
-
-	// the other half of the `port ∈ torus` pair: a TORUS click latches the owning node id
-	// when no port is pending yet, so port-then-torus AND torus-then-port both complete the
-	// lock (whichever hit arrives second finds the other side already latched).
-	hasPendingTorus  bool
-	pendingTorusNode string
-
 	// authoringKind names which equation KIND the keyboard-authoring channel (AuthorBegin) is
 	// currently building. Set by AuthorBegin; the click path never sets it (it infers kind
 	// implicitly from hit type). See gesture.go's "Keyboard-authoring channel" section.
@@ -544,37 +530,18 @@ func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
 		if !ok {
 			return true
 		}
-		if g.hasPendingTorus {
-			// Torus was captured first; this port click completes the `port ∈ torus` lock.
-			torusNode := g.pendingTorusNode
-			g.hasPendingTorus = false
-			md.addPortTorusLock(node, port, isInput, torusNode, tr)
-			return true
+		// The torus is ALWAYS the port's own node (never a free second-node choice — see
+		// MODEL.md / addPortTorusLock). Authoring is one step: pick a port on the sticky
+		// Center node and the lock commits immediately.
+		if node != md.ruleCenter {
+			return true // port must belong to the sticky Center; ignore off-Center port hits
 		}
-		// Latch the clicked port; a subsequent torus click completes the lock.
-		g.hasPendingPort = true
-		g.pendingPortNode = node
-		g.pendingPortName = port
-		g.pendingPortIn = isInput
-		md.emitRuleBuilder(tr)
+		md.addPortTorusLock(node, port, isInput, tr)
 		return true
 	case ev.Hit.Kind == "torus":
-		torusNode, ok := md.nodeFromHit(ev.Hit)
-		if !ok {
-			return true
-		}
-		if g.hasPendingPort {
-			// Port was captured first; this torus click completes the `port ∈ torus` lock.
-			portNode, portName, portIn := g.pendingPortNode, g.pendingPortName, g.pendingPortIn
-			g.hasPendingPort = false
-			md.addPortTorusLock(portNode, portName, portIn, torusNode, tr)
-			return true
-		}
-		// Latch the clicked torus (owning node); a subsequent port click completes the lock.
-		g.hasPendingTorus = true
-		g.pendingTorusNode = torusNode
-		md.emitRuleBuilder(tr)
-		return true
+		// The torus ring is display-only (always the port's own node's ring); it is not a
+		// pickable second side of the lock. Fall through to normal handling (e.g. select).
+		return false
 	default:
 		return false
 	}
@@ -699,9 +666,10 @@ func (md *MoveDispatch) AuthorNode(nodeRow int, tr *T.Trace) {
 	md.authorNode(node, tr)
 }
 
-// AuthorPort resolves nodeRow → node id and latches (or completes) the `port ∈ torus` pair's
-// port side, mirroring trySelectSphereRule's "port" hit case — including completing the lock
-// via addPortTorusLock when a torus is already pending.
+// AuthorPort resolves nodeRow → node id and commits the `port ∈ torus` lock in one step,
+// mirroring trySelectSphereRule's "port" hit case: the torus is ALWAYS the port's own node
+// (the sticky Center — see MODEL.md), never a free second-node choice. The port must belong
+// to the sticky Center; off-Center port rows are ignored.
 func (md *MoveDispatch) AuthorPort(nodeRow int, portName string, isInput bool, tr *T.Trace) {
 	if md.nodeRows == nil {
 		return
@@ -710,40 +678,10 @@ func (md *MoveDispatch) AuthorPort(nodeRow int, portName string, isInput bool, t
 	if !ok {
 		return
 	}
-	g := &md.gest
-	if g.hasPendingTorus {
-		torusNode := g.pendingTorusNode
-		g.hasPendingTorus = false
-		md.addPortTorusLock(node, portName, isInput, torusNode, tr)
+	if node != md.ruleCenter {
 		return
 	}
-	g.hasPendingPort = true
-	g.pendingPortNode = node
-	g.pendingPortName = portName
-	g.pendingPortIn = isInput
-	md.emitRuleBuilder(tr)
-}
-
-// AuthorTorus resolves nodeRow → node id and latches (or completes) the `port ∈ torus` pair's
-// torus side, mirroring trySelectSphereRule's "torus" hit case.
-func (md *MoveDispatch) AuthorTorus(nodeRow int, tr *T.Trace) {
-	if md.nodeRows == nil {
-		return
-	}
-	torusNode, ok := md.nodeRows.LookupNodeRow(nodeRow)
-	if !ok {
-		return
-	}
-	g := &md.gest
-	if g.hasPendingPort {
-		portNode, portName, portIn := g.pendingPortNode, g.pendingPortName, g.pendingPortIn
-		g.hasPendingPort = false
-		md.addPortTorusLock(portNode, portName, portIn, torusNode, tr)
-		return
-	}
-	g.hasPendingTorus = true
-	g.pendingTorusNode = torusNode
-	md.emitRuleBuilder(tr)
+	md.addPortTorusLock(node, portName, isInput, tr)
 }
 
 // SetHoverPortByRow resolves nodeRow → node id and sets the SAME hover state updateHover
@@ -785,22 +723,23 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	}
 }
 
-// addPortTorusLock appends a `port ∈ torus` equation once BOTH sides of the pair have been
-// captured (in either order — see trySelectSphereRule's port/torus cases). STAGE 1: no
-// ensureEqLinks call (ensureEqLinks itself skips eqPortTorus) and no RootMove/solve —
-// authoring the lock moves nothing yet.
-func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput bool, torusNode string, tr *T.Trace) {
+// addPortTorusLock appends a `port ∈ torus` equation for the given port. The torus is ALWAYS
+// the port's own node (TorusNode forced equal to portNode) — a port∈torus lock is about a
+// SINGLE node, never a free second-node choice (see MODEL.md). STAGE 1: no ensureEqLinks call
+// (ensureEqLinks itself skips eqPortTorus) and no RootMove/solve — authoring the lock moves
+// nothing yet.
+func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput bool, tr *T.Trace) {
 	eq := polarEq{
 		Kind:        eqPortTorus,
 		PortNode:    portNode,
 		PortName:    portName,
 		PortIsInput: portIsInput,
-		TorusNode:   torusNode,
+		TorusNode:   portNode,
 		Active:      true,
 	}
 	md.appendPolarEq(eq)
 	if tr != nil {
-		tr.Breadcrumb("port-torus-lock-added", portNode, torusNode, portName)
+		tr.Breadcrumb("port-torus-lock-added", portNode, portNode, portName)
 	}
 	if md.locksPersist != nil {
 		md.locksPersist.schedule(md.polarEqsSnap())
@@ -809,9 +748,8 @@ func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput 
 	// The lock is active the instant it's authored — re-emit the constrained port's
 	// geometry now so it moves onto its node's border ring immediately (locks.go).
 	md.reemitPortTorusGeometry(portNode)
-	// Both pending flags were already cleared by the caller before it reached here; mirror
-	// that into the RuleBuilder block so the in-progress preview clears the instant the
-	// pair commits to the list.
+	// The lock commits in one step (no pending port/torus capture) — re-emit the
+	// RuleBuilder block so the panel reflects the just-committed lock.
 	md.emitRuleBuilder(tr)
 }
 
@@ -863,15 +801,10 @@ func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
 	if g.hasPending {
 		pendingCode = ruleTermCode(g.pendingComp, g.pendingSign)
 	}
-	pendingPortNode, pendingPortName, pendingPortIsInput := "", "", false
-	if g.hasPendingPort {
-		pendingPortNode, pendingPortName, pendingPortIsInput = g.pendingPortNode, g.pendingPortName, g.pendingPortIn
-	}
-	pendingTorusNode := ""
-	if g.hasPendingTorus {
-		pendingTorusNode = g.pendingTorusNode
-	}
-	tr.RuleBuilder(md.ruleCenter, g.hasPending, pendingCode, terms, pendingPortNode, pendingPortName, pendingPortIsInput, pendingTorusNode)
+	// `port ∈ torus` authoring is a one-step commit (no pending port/torus capture — the
+	// torus is always the port's own node, see addPortTorusLock), so these are always empty;
+	// the RuleBuilder wire shape is unchanged (bridge/schema stays the same).
+	tr.RuleBuilder(md.ruleCenter, g.hasPending, pendingCode, terms, "", "", false, "")
 }
 
 // clearRuleBuilding ends any in-progress polar rule-building session: half-finished
@@ -882,8 +815,6 @@ func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
 func (md *MoveDispatch) clearRuleBuilding(tr *T.Trace) {
 	md.gest.hasPending = false
 	md.gest.ruleTerms = nil
-	md.gest.hasPendingPort = false
-	md.gest.hasPendingTorus = false
 	md.emitRuleBuilder(tr)
 }
 

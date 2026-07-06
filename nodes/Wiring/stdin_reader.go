@@ -462,9 +462,13 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			case "latch":
 				md.AuthorLatchHalfTerm(polarComp(msg.Comp), msg.Sign, tr)
 			case "port":
+				// The torus is ALWAYS the port's own node (never a free second-node choice —
+				// see MODEL.md); AuthorPort commits the `port ∈ torus` lock in one step.
 				md.AuthorPort(msg.NodeRow, msg.PortName, msg.IsInput, tr)
 			case "torus":
-				md.AuthorTorus(msg.NodeRow, tr)
+				// Retained for wire-format/parity only: the torus is no longer a pickable
+				// second side of the lock (it's preset to the port's own node), so this
+				// action is now a no-op.
 			}
 		case "preview":
 			// Preview highlight for the keyboard-authoring channel: mirrors updateHover's

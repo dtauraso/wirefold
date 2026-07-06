@@ -6,9 +6,11 @@
 // notation renderBuilder uses. The active blank holds an inline <input>; resolved blanks show
 // their value (a node's label or an angle chip); blanks not yet reached show `_`. Filling is
 // strictly left-to-right; each blank's resolution auto-advances to the next blank. The LAST
-// blank of an equation (NN_COMP_B / PT_TORUS_NODE) does NOT auto-commit — it holds its parsed
-// value for live preview only; pressing ENTER is the explicit commit that fires Go's builder
-// action and closes the typed session (see onBlankEnter). Render + forward only: all in-progress
+// blank of a node=node equation (NN_COMP_B) does NOT auto-commit — it holds its parsed value
+// for live preview only; pressing ENTER is the explicit commit. A port∈torus lock has a
+// SINGLE blank (PT_PORT_NAME, scoped to the sticky Center's own ports — the torus is always
+// the Center, never typed) that commits immediately on selection (see onBlankEnter /
+// selectPortOption). Render + forward only: all in-progress
 // form state (active blank
 // index, current text, the buffered node/comp of the term in progress) is plain local
 // useState, never sent to Go until a blank resolves.
@@ -31,7 +33,6 @@ import {
   encodeAuthorNode,
   encodeAuthorLatch,
   encodeAuthorPort,
-  encodeAuthorTorus,
   encodePreviewPort,
 } from "../../schema/input-layout";
 import { getLatestSnapshot } from "../snapshot-buffer";
@@ -52,9 +53,6 @@ import {
   NN_COMP_A,
   NN_NODE_B,
   NN_COMP_B,
-  PT_PORT_NODE,
-  PT_PORT_NAME,
-  PT_TORUS_NODE,
 } from "./rule-eq-types";
 import { renderTypedNodeNode } from "./TypedNodeNodeForm";
 import { renderTypedPortTorus } from "./TypedPortTorusForm";
@@ -124,6 +122,21 @@ export function RuleEquationPanel() {
     if (kind === POLAR_LOCK_KIND_NODE_NODE && rb && rb.centerRow >= 0 && rb.centerLabel) {
       f.text = rb.centerLabel;
     }
+    // port∈torus: the torus is ALWAYS the port's own node — the sticky Center — so there is
+    // no separate node blank to type; go straight to the port-name autocomplete scoped to
+    // the Center's own ports.
+    if (kind === POLAR_LOCK_KIND_PORT_TORUS && rb && rb.centerRow >= 0 && rb.centerLabel) {
+      const snap = getLatestSnapshot();
+      const decoded = snap ? decodeSnapshot(snap) : null;
+      f.pendingNodeRow = rb.centerRow;
+      f.pendingNodeLabel = rb.centerLabel;
+      f.portOptions = decoded ? listPortsForNode(decoded, rb.centerRow) : [];
+      if (f.portOptions.length > 0) {
+        const first = f.portOptions[0]!;
+        postGoRecord(encodePreviewPort(rb.centerRow, first.name, first.isInput));
+        portAutoCtx.setValue({ nodeRow: rb.centerRow, highlightedRow: first.row });
+      }
+    }
     setForm(f);
     setAddingKind(false);
   }
@@ -190,56 +203,6 @@ export function RuleEquationPanel() {
     }
   }
 
-  /** port∈torus kind, portNode/torusNode blanks: both type a node label. portNode resolving
-   *  advances to the portName autocomplete blank. torusNode is the FINAL blank — it only
-   *  buffers the resolved digits for display; ENTER (onBlankEnter) sends AuthorTorus and
-   *  closes the form. */
-  function onPortTorusNodeBlankChange(text: string) {
-    if (!form) return;
-    // Resolve once a NON-NUMBER character is typed, so multi-digit node ids aren't
-    // committed on their first digit (same as the node=node node blanks).
-    if (!/\D/.test(text)) {
-      setForm({ ...form, text });
-      return;
-    }
-    const typed = text.replace(/\D.*$/, "");
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    if (!decoded) {
-      setForm({ ...form, text: typed });
-      return;
-    }
-    const row = resolveNodeRowByLabel(decoded, typed);
-    if (row < 0) {
-      setForm({ ...form, text: typed });
-      return;
-    }
-    if (form.active === PT_PORT_NODE) {
-      const options = listPortsForNode(decoded, row);
-      const label = nodeLabel(decoded, row);
-      const next: TypedFormState = {
-        ...form,
-        active: PT_PORT_NAME,
-        text: "",
-        pendingNodeRow: row,
-        pendingNodeLabel: label,
-        portOptions: options,
-        portHighlight: 0,
-      };
-      if (options.length > 0) {
-        const first = options[0]!;
-        postGoRecord(encodePreviewPort(row, first.name, first.isInput));
-        portAutoCtx.setValue({ nodeRow: row, highlightedRow: first.row });
-      } else {
-        portAutoCtx.setValue({ nodeRow: row, highlightedRow: -1 });
-      }
-      setForm(next);
-      return;
-    }
-    // torusNode blank — last blank; hold the resolved value for display only, Enter commits.
-    setForm({ ...form, text: typed });
-  }
-
   function previewPortOption(nodeRow: number, o: PortOption) {
     postGoRecord(encodePreviewPort(nodeRow, o.name, o.isInput));
     portAutoCtx.setValue({ nodeRow, highlightedRow: o.row });
@@ -254,10 +217,13 @@ export function RuleEquationPanel() {
     else portAutoCtx.setValue({ nodeRow: next.pendingNodeRow, highlightedRow: -1 });
   }
 
+  // The torus is ALWAYS the port's own node (the sticky Center, f.pendingNodeRow) — never a
+  // free second-node choice — so selecting a port option commits the lock in ONE step and
+  // closes the form (mirrors gesture.go addPortTorusLock's own-node-only commit).
   function selectPortOption(f: TypedFormState, o: PortOption) {
     postGoRecord(encodeAuthorPort(f.pendingNodeRow, o.name, o.isInput));
     portAutoCtx.setValue(null);
-    setForm({ ...f, active: PT_TORUS_NODE, text: "", portOptions: [], portHighlight: 0 });
+    setForm(null);
   }
 
   function onPortNameKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -282,8 +248,9 @@ export function RuleEquationPanel() {
 
   /** ENTER finishes/commits the blank currently being typed. Intermediate blanks still
    *  auto-advance on their own delimiter (non-digit / full comp word); Enter is the explicit
-   *  commit for the FINAL blank of each kind (NN_COMP_B, PT_TORUS_NODE), which no longer
-   *  auto-commits on that delimiter. For non-final blanks Enter just forces the same
+   *  commit for the FINAL blank of a node=node equation (NN_COMP_B) and for a port∈torus
+   *  lock's single PT_PORT_NAME blank, which no longer auto-commits on that delimiter. For
+   *  non-final blanks Enter just forces the same
    *  resolution their onChange already does (useful when the field holds only digits and
    *  there's no natural non-digit delimiter to type). */
   function onBlankEnter(e: KeyboardEvent<HTMLInputElement>) {
@@ -306,27 +273,10 @@ export function RuleEquationPanel() {
       }
       return;
     }
-    // port ∈ torus
-    if (form.active === PT_PORT_NODE) {
-      onPortTorusNodeBlankChange(form.text + " ");
-      return;
-    }
-    if (form.active === PT_PORT_NAME) {
-      const opts = filteredPortOptions(form);
-      if (opts.length === 0) return;
-      selectPortOption(form, opts[form.portHighlight]!);
-      return;
-    }
-    // PT_TORUS_NODE — finish and close (no looping back to author another pair).
-    const typed = form.text.trim();
-    if (!typed) return;
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    if (!decoded) return;
-    const row = resolveNodeRowByLabel(decoded, typed);
-    if (row < 0) return;
-    postGoRecord(encodeAuthorTorus(row));
-    setForm(null);
+    // port ∈ torus — the single blank (PT_PORT_NAME) commits immediately on selection.
+    const opts = filteredPortOptions(form);
+    if (opts.length === 0) return;
+    selectPortOption(form, opts[form.portHighlight]!);
   }
 
   // The committed-equations LIST keys off the rule-builder's STICKY panel Center
@@ -431,15 +381,7 @@ export function RuleEquationPanel() {
       {form && (
         <>
           {form.kind === POLAR_LOCK_KIND_PORT_TORUS
-            ? renderTypedPortTorus(
-                form,
-                rb,
-                onPortTorusNodeBlankChange,
-                onPortNameBlankChange,
-                onPortNameKeyDown,
-                selectPortOption,
-                onBlankEnter,
-              )
+            ? renderTypedPortTorus(form, rb, onPortNameBlankChange, onPortNameKeyDown, selectPortOption)
             : renderTypedNodeNode(form, rb, onNodeBlankChange, onCompBlankChange, onBlankEnter)}
           <button className="rule-eq-clear" onClick={cancelForm}>
             Cancel

@@ -583,9 +583,11 @@ func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
 	}
 }
 
-// While the selSpherePoles overlay is ON, a PORT click followed by a TORUS click authors an
-// eqPortTorus lock and never touches md.selected (no highlight in select mode).
-func TestGestureSelSpherePolesPortThenTorus(t *testing.T) {
+// While the selSpherePoles overlay is ON, clicking a port on the sticky Center node commits
+// an eqPortTorus lock in ONE step (the torus is always the port's own node — the Center —
+// never a free second-node choice; see MODEL.md) and never touches md.selected (no highlight
+// in select mode).
+func TestGestureSelSpherePolesPortOnCenterCommits(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.ov.selSpherePolesVisible = true
 
@@ -598,25 +600,25 @@ func TestGestureSelSpherePolesPortThenTorus(t *testing.T) {
 		md.HandleRawInput(up, nil, nil)
 	}
 
+	click(rawHit{Kind: "node", Id: "N1"}) // latches N1 as the sticky Center
 	click(rawHit{Kind: "port", Id: "N1:out:out"})
-	click(rawHit{Kind: "torus", Id: "N2"})
 
 	if len(md.polarEqsSnap()) != 1 {
 		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
 	}
 	eq := md.polarEqsSnap()[0]
-	want := polarEq{Kind: eqPortTorus, PortNode: "N1", PortName: "out", PortIsInput: false, TorusNode: "N2", Active: true}
+	want := polarEq{Kind: eqPortTorus, PortNode: "N1", PortName: "out", PortIsInput: false, TorusNode: "N1", Active: true}
 	if eq != want {
 		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
 	}
 	if md.selected != "" {
-		t.Fatalf("selected=%q after port→torus lock, want unchanged empty (no highlight)", md.selected)
+		t.Fatalf("selected=%q after port lock, want unchanged empty (no highlight)", md.selected)
 	}
 }
 
-// Same as above but in the REVERSE order: torus click first, then port click. Both orders
-// must complete the eqPortTorus lock.
-func TestGestureSelSpherePolesTorusThenPort(t *testing.T) {
+// A port click on a node OTHER than the sticky Center must NOT commit a cross-node lock —
+// the torus is preset to the Center and there is no second-node authoring path anymore.
+func TestGestureSelSpherePolesPortOffCenterIgnored(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.ov.selSpherePolesVisible = true
 
@@ -629,19 +631,14 @@ func TestGestureSelSpherePolesTorusThenPort(t *testing.T) {
 		md.HandleRawInput(up, nil, nil)
 	}
 
-	click(rawHit{Kind: "torus", Id: "N2"})
-	click(rawHit{Kind: "port", Id: "N1:in:in"})
+	click(rawHit{Kind: "node", Id: "N1"})       // Center = N1
+	click(rawHit{Kind: "port", Id: "N2:in:in"}) // N2 is NOT the Center
 
-	if len(md.polarEqsSnap()) != 1 {
-		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
-	}
-	eq := md.polarEqsSnap()[0]
-	want := polarEq{Kind: eqPortTorus, PortNode: "N1", PortName: "in", PortIsInput: true, TorusNode: "N2", Active: true}
-	if eq != want {
-		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
+	if eqs := md.polarEqsSnap(); len(eqs) != 0 {
+		t.Fatalf("polarEqs=%v after off-Center port click, want none committed", eqs)
 	}
 	if md.selected != "" {
-		t.Fatalf("selected=%q after torus→port lock, want unchanged empty (no highlight)", md.selected)
+		t.Fatalf("selected=%q after off-Center port click, want unchanged empty (no highlight)", md.selected)
 	}
 }
 

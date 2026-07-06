@@ -24,12 +24,11 @@ export const NN_COMP_A = 2;
 export const NN_NODE_B = 3;
 export const NN_COMP_B = 4;
 
-// Blank order for port∈torus is portNode, portName (autocomplete), torusNode (`active`
-// 0..2); torusNode is the final blank — its delimiter no longer auto-commits, ENTER
-// commits the pair and closes the typed session.
-export const PT_PORT_NODE = 0;
-export const PT_PORT_NAME = 1;
-export const PT_TORUS_NODE = 2;
+// port∈torus has a SINGLE blank: portName (autocomplete over the sticky Center's own
+// ports). The torus is ALWAYS the port's own node — the sticky Center — so it is preset,
+// display-only, never typed (see MODEL.md / gesture.go addPortTorusLock). Selecting a port
+// option commits the lock immediately (one step) and closes the form.
+export const PT_PORT_NAME = 0;
 
 export interface TypedFormState {
   kind: number; // POLAR_LOCK_KIND_NODE_NODE | POLAR_LOCK_KIND_PORT_TORUS
