@@ -80,16 +80,20 @@ func TestGestureEmptyDragOrbits(t *testing.T) {
 
 // Plain wheel pans the pivot (screen-space slide); ctrl+wheel dollies (pivot translation
 // toward the cursor target). Both leave the radius set by the region-focus seed.
-func TestGestureWheelPansPivot(t *testing.T) {
+func TestGestureWheelPansScene(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
-	before := md.vp.pivot
+	pivotBefore := md.vp.pivot
+	centerBefore := md.sceneSphere.Center
 	ev := rawEvent("wheel", 400, 300)
 	ev.DeltaX = 10
 	ev.DeltaY = 0
 	md.HandleRawInput(ev, nil, nil)
-	// worldPerPixel>0 and deltaX=10 → nonzero screen-right slide of the pivot.
-	if vecClose(md.vp.pivot, before, 1e-9) {
-		t.Fatalf("plain wheel did not pan pivot (stayed %v)", md.vp.pivot)
+	// Lateral pan moves the SCENE-sphere center (grab-drag-the-world); the camera stays put.
+	if vecClose(md.sceneSphere.Center, centerBefore, 1e-9) {
+		t.Fatalf("plain wheel did not pan the scene center (stayed %v)", md.sceneSphere.Center)
+	}
+	if !vecClose(md.vp.pivot, pivotBefore, 1e-9) {
+		t.Fatalf("plain wheel moved the camera pivot %v; camera must stay put", md.vp.pivot)
 	}
 }
 
@@ -104,14 +108,14 @@ func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
 		{Kind: "port", PortRow: 0},
 	} {
 		md := newGestureMD(canonicalViewpoint())
-		before := md.vp.pivot
+		before := md.sceneSphere.Center
 		ev := rawEvent("wheel", 400, 300)
 		ev.DeltaX = 10
 		ev.DeltaY = 0
 		ev.Hit = h
 		md.HandleRawInput(ev, nil, nil)
-		if vecClose(md.vp.pivot, before, 1e-9) {
-			t.Fatalf("plain wheel with %s hit did not pan pivot (stayed %v)", h.Kind, md.vp.pivot)
+		if vecClose(md.sceneSphere.Center, before, 1e-9) {
+			t.Fatalf("plain wheel with %s hit did not pan the scene center (stayed %v)", h.Kind, md.sceneSphere.Center)
 		}
 	}
 }

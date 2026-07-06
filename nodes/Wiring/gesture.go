@@ -990,13 +990,15 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 		return
 	}
 
-	// Plain wheel = screen-space pan along the camera right/up basis.
+	// Plain wheel = LATERAL polar pan (grab-drag-the-world): build the displacement in polar
+	// (r = drag distance, screen bearing rotated into the screen plane by the camera's own
+	// (θ,φ)) and move ONLY the scene-sphere center — the camera stays put. Nodes' ScenePolar is
+	// unchanged, so the whole scene translates rigidly.
 	fovRad := ev.Fov * math.Pi / 180
 	worldPerPixel := (2 * r * math.Tan(fovRad/2)) / md.gest.rect.height
-	pr, angle := deltaToPolar(ev.DeltaX, -ev.DeltaY)
-	delta := planeSlide(basis, pr, angle, worldPerPixel)
-	md.SetViewpoint(pivot, r, pos, vp.up)
-	md.PanViewpoint(delta, tr)
+	disp := panDisplacementPolar(vp.pos, vp.up, ev.DeltaX, ev.DeltaY, worldPerPixel)
+	md.PanScene(disp)
+	md.EmitViewpoint(tr) // camera unchanged; re-emit so the ring/sphere overlay tracks the new center
 }
 
 func (g *gestureState) reset() {

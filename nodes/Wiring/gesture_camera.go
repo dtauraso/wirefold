@@ -134,6 +134,24 @@ func deltaToPolar(dx, dy float64) (r, angle float64) {
 	return math.Hypot(dx, dy), math.Atan2(dy, dx)
 }
 
+// panDisplacementPolar builds the lateral pan displacement in the POLAR frame
+// (polar-frame-rewrite.md): the mouse drag gives r (distance) and a screen bearing; the
+// displacement DIRECTION is a direction 90° off the camera view axis (i.e. in the screen
+// plane) at that bearing, derived from the camera's own (θ,φ) and up via the spherical
+// toolkit — no cartesian basis vectors. r is the magnitude. The single cartesian is the
+// polar2cart at the end, composing the finished displacement for the scene-center move (the
+// pointer input boundary). This is locked to the known-correct planeSlide by a unit test.
+//
+//	psiUp    = bearing of the up-hint about the view axis (azimuthFrom)
+//	psiRight = psiUp − π/2 (screen right is a quarter-turn before up, right-handed about pos)
+//	dir      = fromAxisFrame(pos, π/2, psiRight + bearing)   // on the view-axis equator
+func panDisplacementPolar(pos, up dir, dx, dy, worldPerPixel float64) vec3 {
+	r, bearing := deltaToPolar(dx, -dy)
+	_, psiUp := azimuthFrom(pos, up)
+	d := fromAxisFrame(pos, math.Pi/2, psiUp-math.Pi/2+bearing)
+	return polar2cart(polar{R: r * worldPerPixel, Theta: d.Theta, Phi: d.Phi})
+}
+
 // ---------------------------------------------------------------------------
 // scene geometry (mirrors geometry-helpers.ts contentSphere + interaction-handlers.ts
 // regionFocus)

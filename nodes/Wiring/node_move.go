@@ -40,11 +40,12 @@ const (
 	// The node-move kind ("move", the zero value "") carries no payload and is a
 	// no-op in every mover switch, so it has no constant — the switches simply
 	// fall through. The remaining kinds each select a distinct payload.
-	moveMsgKindFade    = "fade"
-	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
-	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
-	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
-	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
+	moveMsgKindFade        = "fade"
+	moveMsgKindAnchor      = "anchor"      // per-port anchor update (drag along the ring)
+	moveMsgKindCenter      = "center"      // polar-layout re-propagated world center for one node
+	moveMsgKindCenters     = "centers"     // batched centers for an edge: update both endpoints, recompute ONCE
+	moveMsgKindResend      = "resend"      // re-emit this mover's held geometry on its own goroutine
+	moveMsgKindSceneCenter = "sceneCenter" // pan: scene-sphere center moved; adopt it and re-derive world (ScenePolar unchanged)
 	// moveMsgKindLockUpdate is the DECENTRALIZED lock propagation message, covering EVERY
 	// constraint kind (node-node polar equations AND port∈torus colinearity) over one
 	// mechanism (node_move.go doc comment / locks.go lockRecalc/lockNeighbors). It carries
@@ -212,6 +213,20 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		return
 	}
+	if msg.Kind == moveMsgKindSceneCenter {
+		// Pan: the one cartesian anchor (scene-sphere center) moved. Adopt it; the node's
+		// ScenePolar is unchanged, so its world = newCenter + polar2cart(ScenePolar) translates
+		// rigidly with the whole scene. Re-publish the snapshot and re-emit.
+		if msg.Center != nil {
+			m.geom.SceneCenter = *msg.Center
+			w := nodeWorldPos(m.geom)
+			m.snap.Store(&centerSnap{c: w, p: m.geom.ScenePolar, reach: m.geom.ReachR})
+			if m.tr != nil {
+				m.emitGeometry()
+			}
+		}
+		return
+	}
 	if msg.Kind == moveMsgKindResend {
 		// Re-emit this node's geometry on our own goroutine — the inbox-routed
 		// path used by ResendGeometry when movers are running.
@@ -376,6 +391,16 @@ func (m *edgeMover) handle(msg moveMsg) {
 			moved = true
 		}
 		if moved {
+			m.recomputeGeometry()
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindSceneCenter {
+		// Pan: adopt the moved scene center on BOTH held endpoints and recompute the segment
+		// (both endpoints translate rigidly, so the edge slides with the scene).
+		if msg.Center != nil {
+			m.srcGeom.SceneCenter = *msg.Center
+			m.dstGeom.SceneCenter = *msg.Center
 			m.recomputeGeometry()
 		}
 		return
@@ -834,6 +859,37 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 		edges = append(edges, sphereEdge{Source: em.srcID, Target: em.dstID})
 	}
 	return edges
+}
+
+// PanScene moves the scene-sphere center by disp (the polar pan displacement, composed to
+// cartesian once at the pointer input boundary) and broadcasts the new center to every mover
+// so each re-derives its world (newCenter + polar2cart(ScenePolar)) — the whole scene translates
+// rigidly under a fixed camera (polar-frame-rewrite.md polar pan). Node ScenePolars are
+// unchanged, so the sphere RADIUS is invariant (every node translated with the center) and is
+// not refit. The center is the one cartesian anchor; persistence rides scene.json.
+func (md *MoveDispatch) PanScene(disp vec3) {
+	md.sceneSphere.Center = md.sceneSphere.Center.add(disp)
+	c := md.sceneSphere.Center
+	if !md.started {
+		// Movers not running (tests): update each held geom directly — safe, no goroutines own it.
+		for _, nm := range md.nodeMovers {
+			nm.geom.SceneCenter = c
+			w := nodeWorldPos(nm.geom)
+			nm.snap.Store(&centerSnap{c: w, p: nm.geom.ScenePolar, reach: nm.geom.ReachR})
+		}
+		for _, em := range md.edgeMovers {
+			em.srcGeom.SceneCenter = c
+			em.dstGeom.SceneCenter = c
+		}
+	} else {
+		for _, ch := range md.dispatch {
+			cc := c
+			ch <- moveMsg{Kind: moveMsgKindSceneCenter, Center: &cc}
+		}
+	}
+	if md.spherePersist != nil {
+		md.spherePersist.schedule(md.sceneSphere)
+	}
 }
 
 // fanCenters pushes one "center" message per node (carrying its new world center and
