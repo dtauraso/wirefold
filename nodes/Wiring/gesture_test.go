@@ -121,21 +121,22 @@ func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
 	}
 }
 
-func TestGestureCtrlWheelZoomsRadius(t *testing.T) {
+func TestGestureCtrlWheelZoomsToCursor(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	ev := rawEvent("wheel", 400, 300)
 	ev.Ctrl = true
 	ev.DeltaY = 1
 	md.HandleRawInput(ev, nil, nil)
-	// ctrl-wheel is now POLAR zoom: scale the camera radius about the region-focus pivot.
-	// Empty centers → regionFocus=(0,0,90), eye=(0,0,100), r=10; the pivot must NOT move and
-	// r must scale by the zoom factor (1.01^1).
-	if math.Abs(md.vp.pivot.Z-90) > 1e-9 || math.Abs(md.vp.pivot.X) > 1e-9 {
-		t.Fatalf("ctrl-wheel moved the pivot %v; polar zoom must keep it at region-focus (0,0,90)", md.vp.pivot)
+	// ctrl-wheel dollies the camera toward the cursor target KEEPING orientation (node stays
+	// under the mouse — no re-aim). Empty centers → target=regionFocus=(0,0,90), eye=(0,0,100),
+	// toTarget=(0,0,-10); the pivot (from canonical (0,0,0)) moves by toTarget*(1-factor).
+	wantZ := (-10) * (1 - math.Pow(gestureZoomBase, 1))
+	if math.Abs(md.vp.pivot.Z-wantZ) > 1e-9 || math.Abs(md.vp.pivot.X) > 1e-9 {
+		t.Fatalf("ctrl-wheel pivot=%v want Z≈%v (dolly toward cursor)", md.vp.pivot, wantZ)
 	}
-	wantR := 10 * math.Pow(gestureZoomBase, 1)
-	if math.Abs(md.vp.r-wantR) > 1e-9 {
-		t.Fatalf("ctrl-wheel r=%v want %v (radius scaled by the zoom factor)", md.vp.r, wantR)
+	// The look direction is unchanged (no re-aim).
+	if angularDistance(md.vp.pos, canonicalViewpoint().pos) > 1e-9 {
+		t.Fatalf("ctrl-wheel re-aimed the camera (pos changed); zoom-to-cursor must keep orientation")
 	}
 }
 

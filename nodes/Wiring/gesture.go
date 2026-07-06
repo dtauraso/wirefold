@@ -964,13 +964,12 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	r := eye.sub(pivot).length()
 
 	if ev.Ctrl {
-		// Zoom TOWARD the node under the cursor (fly-to): pick the cursor-nearest node as the
-		// pivot, aim the camera at it, and scale the RADIUS (polar r-scale, viewpoint.zoom). The
-		// camera state stays polar — pivot point, scalar r, and (θ,φ) dirs; only the cursor→node
-		// pick is a screen-space selection at the INPUT boundary (projectNDC). A pure r-scale
-		// about the near view-center pivot can only creep toward the nearest node — it can never
-		// reach a distant, off-axis node like 1 from 7; scaling r about the distant cursor target
-		// flies the eye toward it. Falls back to region-focus when the cursor is over no node.
+		// Zoom-to-cursor: move the camera TOWARD the node under the cursor along the cursor→node
+		// line, KEEPING the look direction — so that node stays fixed under the mouse. It does NOT
+		// re-aim: re-aiming (snapping the camera to look straight at the node) is what recentered
+		// the view and threw the cursor off. PanViewpoint translates the whole camera (pivot+eye
+		// ride together); pos/up are unchanged, so the node keeps projecting to the same pixel.
+		// The cursor→node pick is a screen-space selection at the input boundary (projectNDC).
 		mouseNdcX, mouseNdcY := md.gest.pixelToNDC(ev.X, ev.Y)
 		basis := basisFromViewpoint(vp.pos, vp.up)
 		aspect := md.gest.rect.aspect()
@@ -986,14 +985,13 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 				target = c
 			}
 		}
-		targetR := eye.sub(target).length()
-		if targetR < viewpointMinDist {
-			targetR = viewpointMinDist
-		}
-		targetPos := worldDirToAngles(eye.sub(target))
+		toTarget := target.sub(eye)
+		distP := toTarget.length()
 		factor := math.Pow(gestureZoomBase, ev.DeltaY)
-		md.SetViewpoint(target, targetR, targetPos, vp.up)
-		md.ZoomViewpoint(factor, tr)
+		if distP*factor < viewpointMinDist && distP > 0 {
+			factor = viewpointMinDist / distP // stop short of the node; never fly through it
+		}
+		md.PanViewpoint(toTarget.scale(1-factor), tr)
 		return
 	}
 
