@@ -1,8 +1,10 @@
 package Wiring
 
 import (
+	"context"
 	"math"
 	"testing"
+	"time"
 )
 
 // TestPanDisplacementPolarMatchesPlaneSlide locks the polar pan displacement to the known-
@@ -53,5 +55,37 @@ func TestPanSceneTranslatesRigidly(t *testing.T) {
 		if polarsAfter[id] != polarsBefore[id] {
 			t.Fatalf("node %s ScenePolar changed on pan: %+v -> %+v", id, polarsBefore[id], polarsAfter[id])
 		}
+	}
+}
+
+// TestPanSceneStartedPathMovesNodes drives PanScene through the REAL message path (movers
+// started, goroutines) — the path a live pan uses. It guards the regression where the scene-
+// center broadcast (no NodeID) was rejected by nodeMover.handle's id guard, so edges moved
+// but nodes did not.
+func TestPanSceneStartedPathMovesNodes(t *testing.T) {
+	root := writeTree(t)
+	md := loadTreeMD(t, root)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	before, ok := md.centerOfNode("src")
+	if !ok {
+		t.Fatal("no center for src")
+	}
+	disp := vec3{X: 20, Y: -8, Z: 4}
+	md.PanScene(disp)
+
+	want := before.add(disp)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, _ := md.centerOfNode("src")
+		if math.Abs(got.X-want.X) < 1e-6 && math.Abs(got.Y-want.Y) < 1e-6 && math.Abs(got.Z-want.Z) < 1e-6 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node src world did not translate on pan via the started path: got %+v want %+v", got, want)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }

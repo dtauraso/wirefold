@@ -180,6 +180,22 @@ func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
 
 // handle applies one move to this node: update held position, re-emit node-geometry.
 func (m *nodeMover) handle(msg moveMsg) {
+	// A scene-center pan is a BROADCAST (no NodeID) that every node applies — handle it before
+	// the per-node id guard below, which would otherwise reject the empty-NodeID broadcast.
+	if msg.Kind == moveMsgKindSceneCenter {
+		// Pan: the one cartesian anchor (scene-sphere center) moved. Adopt it; the node's
+		// ScenePolar is unchanged, so its world = newCenter + polar2cart(ScenePolar) translates
+		// rigidly with the whole scene. Re-publish the snapshot and re-emit.
+		if msg.Center != nil {
+			m.geom.SceneCenter = *msg.Center
+			w := nodeWorldPos(m.geom)
+			m.snap.Store(&centerSnap{c: w, p: m.geom.ScenePolar, reach: m.geom.ReachR})
+			if m.tr != nil {
+				m.emitGeometry()
+			}
+		}
+		return
+	}
 	if msg.NodeID != m.id {
 		return
 	}
@@ -210,20 +226,6 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		if m.tr != nil {
 			m.emitGeometry()
-		}
-		return
-	}
-	if msg.Kind == moveMsgKindSceneCenter {
-		// Pan: the one cartesian anchor (scene-sphere center) moved. Adopt it; the node's
-		// ScenePolar is unchanged, so its world = newCenter + polar2cart(ScenePolar) translates
-		// rigidly with the whole scene. Re-publish the snapshot and re-emit.
-		if msg.Center != nil {
-			m.geom.SceneCenter = *msg.Center
-			w := nodeWorldPos(m.geom)
-			m.snap.Store(&centerSnap{c: w, p: m.geom.ScenePolar, reach: m.geom.ReachR})
-			if m.tr != nil {
-				m.emitGeometry()
-			}
 		}
 		return
 	}
