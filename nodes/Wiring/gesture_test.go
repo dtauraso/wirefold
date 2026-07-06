@@ -127,10 +127,12 @@ func TestGestureCtrlWheelZoomsToCursor(t *testing.T) {
 	ev.Ctrl = true
 	ev.DeltaY = 1
 	md.HandleRawInput(ev, nil, nil)
-	// ctrl-wheel dollies the camera toward the cursor target KEEPING orientation (node stays
+	// ctrl-wheel dollies the camera along the cursor→node ray KEEPING orientation (node stays
 	// under the mouse — no re-aim). Empty centers → target=regionFocus=(0,0,90), eye=(0,0,100),
-	// toTarget=(0,0,-10); the pivot (from canonical (0,0,0)) moves by toTarget*(1-factor).
-	wantZ := (-10) * (1 - math.Pow(gestureZoomBase, 1))
+	// rayDir=(0,0,-1), distP=10. The fractional step (10*(1-1.01)=-0.1) is below the pass-through
+	// floor (minStep = vp.r*(zoomBase-1) = 1), so the camera moves minStep AWAY (DeltaY=1) →
+	// pivot.Z = +1.
+	wantZ := 100 * (gestureZoomBase - 1)
 	if math.Abs(md.vp.pivot.Z-wantZ) > 1e-9 || math.Abs(md.vp.pivot.X) > 1e-9 {
 		t.Fatalf("ctrl-wheel pivot=%v want Z≈%v (dolly toward cursor)", md.vp.pivot, wantZ)
 	}

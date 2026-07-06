@@ -986,11 +986,20 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 		}
 		toTarget := target.sub(eye)
 		distP := toTarget.length()
-		factor := math.Pow(gestureZoomBase, ev.DeltaY)
-		if distP*factor < viewpointMinDist && distP > 0 {
-			factor = viewpointMinDist / distP // stop short of the node; never fly through it
+		rayDir := anglesToWorldOffset(1, vp.pos.Theta, vp.pos.Phi).scale(-1) // forward, if AT the node
+		if distP > 1e-9 {
+			rayDir = toTarget.scale(1 / distP)
 		}
-		md.PanViewpoint(toTarget.scale(1-factor), tr)
+		// Move the eye ALONG the cursor→node ray. amt>0 = toward the node (zoom in). The step is a
+		// fraction of the remaining distance (fast approach when far), FLOORED at a scene-scaled
+		// minimum so you can push THROUGH the node instead of asymptotically creeping to it — a
+		// pilot camera flies past nodes. No stop-short clamp.
+		amt := 1 - math.Pow(gestureZoomBase, ev.DeltaY)
+		step := distP * amt
+		if minStep := vp.r * (gestureZoomBase - 1); math.Abs(step) < minStep {
+			step = math.Copysign(minStep, amt)
+		}
+		md.PanViewpoint(rayDir.scale(step), tr)
 		return
 	}
 
