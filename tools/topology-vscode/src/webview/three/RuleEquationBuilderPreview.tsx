@@ -9,12 +9,19 @@ import type { RuleBuilderTerm, RuleBuilderState } from "./rule-builder";
 import { angleChip } from "./rule-eq-types";
 
 /** Renders one term slot: a completed term (filled), a pending half-term (node slot
- *  empty, angle chip highlighted — "show the handhold being selected"), or nothing. */
-export function renderTerm(term: RuleBuilderTerm | null, pendingCode: number | null) {
+ *  empty, angle chip highlighted — "show the handhold being selected"), or nothing.
+ *  `sourceLabel` is the shared equation Center, shown as an arrow into the term node
+ *  (`center→node`); when empty/undefined (center not yet resolved) falls back to the
+ *  plain node label so a not-yet-resolved center never renders a bare `→`. */
+export function renderTerm(
+  term: RuleBuilderTerm | null,
+  pendingCode: number | null,
+  sourceLabel?: string,
+) {
   if (term != null) {
     return (
       <span className="rule-eq-term">
-        (<span className="rule-eq-node">{term.label}</span>,
+        (<span className="rule-eq-node">{sourceLabel ? `${sourceLabel}→${term.label}` : term.label}</span>,
         <span className="rule-eq-angle">{angleChip(term.code)}</span>)
       </span>
     );
@@ -58,11 +65,11 @@ export function renderBuilder(rb: RuleBuilderState) {
   return (
     <>
       <div className="rule-eq-equation">
-        {renderTerm(leftTerm, pendingSlot === "left" ? pendingCode : null)}
+        {renderTerm(leftTerm, pendingSlot === "left" ? pendingCode : null, rb.centerLabel)}
         {(rightTerm != null || pendingSlot === "right") && (
           <>
             <span className="rule-eq-op"> = </span>
-            {renderTerm(rightTerm, pendingSlot === "right" ? pendingCode : null)}
+            {renderTerm(rightTerm, pendingSlot === "right" ? pendingCode : null, rb.centerLabel)}
           </>
         )}
       </div>

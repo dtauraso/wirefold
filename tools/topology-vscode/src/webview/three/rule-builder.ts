@@ -73,6 +73,7 @@ export interface PolarLockEntry {
   index: number;
   kind: number; // POLAR_LOCK_KIND_NODE_NODE | POLAR_LOCK_KIND_PORT_TORUS
   centerRow: number;
+  centerLabel: string;
   a: { row: number; label: string; code: number };
   b: { row: number; label: string; code: number };
   active: boolean;
@@ -138,6 +139,7 @@ export function readPolarLocks(): PolarLocksState {
       index: i,
       kind: readPolarLockKind(v, i),
       centerRow,
+      centerLabel: centerRow === ROW_NONE ? "" : nodeLabel(decoded, centerRow),
       a: { row: aRow, label: aRow === ROW_NONE ? "" : nodeLabel(decoded, aRow), code: readPolarLockACode(v, i) },
       b: { row: bRow, label: bRow === ROW_NONE ? "" : nodeLabel(decoded, bRow), code: readPolarLockBCode(v, i) },
       active: readPolarLockActive(v, i) === 1,
