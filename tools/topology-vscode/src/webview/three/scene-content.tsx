@@ -55,13 +55,18 @@ function pickBufferEdge(hits: THREE.Intersection[]): string | null {
 /**
  * HANDHOLD pick: octant θ/φ angle handhold meshes (NavGuides.tsx PolarFrame) carry
  * userData[HANDHOLD_TERM_TAG] with their term-id (+θ=0, +φ=1, -θ=2, -φ=3). Returns the
- * nearest hit's term-id as a decimal STRING so classifyHit can forward it to Go.
+ * term-id as a decimal string for those. Roll grips (NavGuides.tsx torus handholds,
+ * userData={{ handhold: true }}) carry no term-id — they return the "-1" sentinel so
+ * Go's axis-locked orbit still fires for them (Go's handhold-down branch, gesture.go
+ * ~219, doesn't inspect the term; only the rule-builder path, gesture.go ~510,
+ * requires HandholdTerm >= 0, so "-1" can't latch a rule term).
  */
 function pickBufferHandhold(hits: THREE.Intersection[]): string | null {
   for (const hit of hits) {
-    const term: unknown = (hit.object as THREE.Mesh).userData?.[HANDHOLD_TERM_TAG];
-    if (typeof term !== "number") continue;
-    return String(term);
+    const data = (hit.object as THREE.Mesh).userData;
+    const term: unknown = data?.[HANDHOLD_TERM_TAG];
+    if (typeof term === "number") return String(term);
+    if (data?.handhold === true) return "-1";
   }
   return null;
 }
