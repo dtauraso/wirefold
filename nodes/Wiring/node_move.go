@@ -165,15 +165,21 @@ type nodeMover struct {
 	lockNeighbors func(m *nodeMover, selfPolar polar, exclude string) []moveMsg
 	sendMove      func(id string, msg moveMsg)
 	edgeIDs       []string
+	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
+	// the single partner node connected via one edge (aimed-port model, port_geometry.go
+	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
+	// b.edgeEndpoints + the OTHER nodeMover's atomic snap — a dynamic, always-current lookup
+	// with no shared mutable state. nil only in tests that build a bare nodeMover directly.
+	partnerCenter partnerCenterFn
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
 	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
-	// Seed the atomic snapshot from the initial geometry so readers have a
-	// valid center before the first center message arrives.
-	if geom.HasPos {
-		nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), p: geom.ScenePolar, reach: geom.ReachR})
-	}
+	// Seed the atomic snapshot from the initial geometry (even when !HasPos, in which case
+	// nodeWorldPos falls back to the origin) so readers — including another node's aimed-port
+	// partnerCenter lookup — always have a valid center to read before the first center
+	// message arrives.
+	nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), p: geom.ScenePolar, reach: geom.ReachR})
 	return nm
 }
 
@@ -260,10 +266,11 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 }
 
-// emitGeometry re-emits this node's authoritative geometry. Port markers use their
-// ring-anchor direction (no aim); a torus-locked port ring-projects onto the border ring.
+// emitGeometry re-emits this node's authoritative geometry. A CONNECTED port marker is
+// AIMED at its partner's current center (m.partnerCenter, atomic-snapshot-backed); an
+// edgeless port falls back to its own polar-torus ring-anchor placement (portWorldPos).
 func (m *nodeMover) emitGeometry() {
-	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.locked)
+	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
 }
 
 // run is the node's per-goroutine move loop: drain the inbox until ctx is done.
@@ -399,7 +406,7 @@ func (m *edgeMover) emitGeometry() {
 	if m.tr == nil {
 		return
 	}
-	seg := edgeSegment(m.srcGeom, m.dstGeom)
+	seg := edgeSegment(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
 	m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
 		seg.Start.X, seg.Start.Y, seg.Start.Z,
 		seg.End.X, seg.End.Y, seg.End.Z)
@@ -410,8 +417,8 @@ func (m *edgeMover) emitGeometry() {
 // bead (fraction-preserving), update the dest port window aggregate, and emit the new
 // segment so the renderer redraws the wire. Shared by node-move and port-anchor handling.
 func (m *edgeMover) recomputeGeometry() {
-	seg := edgeSegment(m.srcGeom, m.dstGeom)
-	arc := edgeArcPolar(m.srcGeom, m.dstGeom)
+	seg := edgeSegment(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
+	arc := edgeArcPolar(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
 	lat := arc / PulseSpeedWuPerMs
 
 	// Publish the new per-edge segment/arc/latency onto the source Out as an immutable
@@ -633,6 +640,22 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		md.edgeMovers[edgeID] = em
 		md.dispatch[edgeID] = em.inbox
 	}
+	// Wire each nodeMover's aimed-port lookup: for (port,isInput) on nodeID, find its one
+	// edge (edgeEndpoints) and read the partner's CURRENT center off the partner
+	// nodeMover's atomic snap (md.nodeMovers is a read-only map after this point — only the
+	// individual *nodeMover.snap is read cross-goroutine, via the existing atomic pattern).
+	for id, nm := range md.nodeMovers {
+		nm.partnerCenter = buildPartnerCenterFn(id, edgeEndpoints, func(otherID string) vec3 {
+			other, ok := md.nodeMovers[otherID]
+			if !ok {
+				return vec3{}
+			}
+			if s := other.snap.Load(); s != nil {
+				return s.c
+			}
+			return vec3{}
+		})
+	}
 	// Give every nodeMover the ids of its OWN incident edges, so a lock-driven move can
 	// notify its edges via sendMove (dispatch-map lookup) — no cached channel slice.
 	for id, nm := range md.nodeMovers {
@@ -719,10 +742,10 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 	if !md.started {
 		// Movers not running — direct read is safe (no concurrent goroutines own geom).
 		for _, nm := range md.nodeMovers {
-			emitNodeGeometryLocked(tr, nm.id, nm.geom, md.portTorusLocked)
+			emitNodeGeometryLocked(tr, nm.id, nm.geom, nm.partnerCenter)
 		}
 		for _, em := range md.edgeMovers {
-			seg := edgeSegment(em.srcGeom, em.dstGeom)
+			seg := edgeSegment(em.srcGeom, em.dstGeom, em.srcH, em.dstH)
 			tr.Geometry(em.edgeID, em.srcID, em.dstID,
 				seg.Start.X, seg.Start.Y, seg.Start.Z,
 				seg.End.X, seg.End.Y, seg.End.Z)
@@ -870,6 +893,42 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 		}
 		if ch, ok := md.dispatch[edgeID]; ok {
 			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: eps}
+		}
+	}
+
+	// Aimed-port re-emit (see doc comment above): find every partner node — the OTHER
+	// end of any edge incident to a moved node — and ask it to re-emit its OWN geometry
+	// with its OWN (unchanged) center, mirroring reemitPortTorusGeometry's "same center"
+	// trick. emitGeometry reads m.partnerCenter at emit time, which is the moved node's
+	// FRESH atomic snap (already written above), so the partner's aimed port marker
+	// picks up the new target direction. This does NOT run for torus-locked ports only —
+	// it runs for every aimed connected port unconditionally, even if that breaks a
+	// port∈torus lock; that is intended.
+	partners := map[string]bool{}
+	for _, em := range md.edgeMovers {
+		if _, moved := newCenters[em.srcID]; moved {
+			if _, alsoMoved := newCenters[em.dstID]; !alsoMoved {
+				partners[em.dstID] = true
+			}
+		}
+		if _, moved := newCenters[em.dstID]; moved {
+			if _, alsoMoved := newCenters[em.srcID]; !alsoMoved {
+				partners[em.srcID] = true
+			}
+		}
+	}
+	for partnerID := range partners {
+		nm, ok := md.nodeMovers[partnerID]
+		if !ok {
+			continue
+		}
+		s := nm.snap.Load()
+		if s == nil {
+			continue
+		}
+		if ch, ok := md.dispatch[partnerID]; ok {
+			cc := s.c
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: partnerID, Center: &cc, ReachR: s.reach}
 		}
 	}
 }

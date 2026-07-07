@@ -38,8 +38,9 @@ func TestSnapToRingAnchorIndexNearest(t *testing.T) {
 	R := nodeRadius(kind)
 	d0 := ringAnchorDir(R, 0)
 	d1 := ringAnchorDir(R, 1)
-	// A point 90% toward anchor 0 from the midpoint of 0 and 1.
-	mid := vec3{X: d0.X*0.9 + d1.X*0.1, Y: d0.Y*0.9 + d1.Y*0.1, Z: 0}
+	// A point 90% toward anchor 0 from the midpoint of 0 and 1 (equatorial ring: Y=0,
+	// the swept axes are X/Z).
+	mid := vec3{X: d0.X*0.9 + d1.X*0.1, Y: 0, Z: d0.Z*0.9 + d1.Z*0.1}
 	if got := snapToRingAnchorIndex(kind, mid); got != 0 {
 		t.Fatalf("direction biased toward anchor 0 snapped to %d, want 0", got)
 	}

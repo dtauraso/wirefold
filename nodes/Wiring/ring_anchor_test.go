@@ -27,7 +27,8 @@ func TestRingAnchorCount(t *testing.T) {
 	}
 }
 
-// TestRingAnchorDirUnitLength verifies every direction is a unit vector.
+// TestRingAnchorDirUnitLength verifies every direction is a unit vector lying
+// on the node's EQUATORIAL ring (theta=pi/2 → Y=0; polar-torus model).
 func TestRingAnchorDirUnitLength(t *testing.T) {
 	R := 25.0
 	N := ringAnchorCount(R)
@@ -37,14 +38,14 @@ func TestRingAnchorDirUnitLength(t *testing.T) {
 		if math.Abs(length-1.0) > 1e-9 {
 			t.Errorf("ringAnchorDir(%d) length = %g, want 1.0", i, length)
 		}
-		if d.Z != 0 {
-			t.Errorf("ringAnchorDir(%d).Z = %g, want 0 (ring lies in XY plane)", i, d.Z)
+		if math.Abs(d.Y) > 1e-9 {
+			t.Errorf("ringAnchorDir(%d).Y = %g, want 0 (equatorial ring, theta=pi/2)", i, d.Y)
 		}
 	}
 }
 
-// TestRingAnchorDirAngle verifies anchor 0 is at angle 0 (pointing +X) and
-// subsequent anchors are evenly spaced.
+// TestRingAnchorDirAngle verifies anchor 0 is at azimuth 0 (pointing +X) and
+// subsequent anchors are evenly spaced in phi around the equatorial (XZ) ring.
 func TestRingAnchorDirAngle(t *testing.T) {
 	R := 20.0
 	N := ringAnchorCount(R)
@@ -52,12 +53,12 @@ func TestRingAnchorDirAngle(t *testing.T) {
 
 	for _, i := range []int{0, 1, N / 2} {
 		d := ringAnchorDir(R, i)
-		wantTheta := float64(i) * pitch
-		wantX := math.Cos(wantTheta)
-		wantY := math.Sin(wantTheta)
-		if math.Abs(d.X-wantX) > 1e-9 || math.Abs(d.Y-wantY) > 1e-9 {
+		wantPhi := float64(i) * pitch
+		wantX := math.Cos(wantPhi)
+		wantZ := math.Sin(wantPhi)
+		if math.Abs(d.X-wantX) > 1e-9 || math.Abs(d.Z-wantZ) > 1e-9 {
 			t.Errorf("ringAnchorDir(%d) = {%.6f, %.6f}, want {%.6f, %.6f}",
-				i, d.X, d.Y, wantX, wantY)
+				i, d.X, d.Z, wantX, wantZ)
 		}
 	}
 }
@@ -68,7 +69,7 @@ func TestRingAnchorDirWraps(t *testing.T) {
 	N := ringAnchorCount(R)
 	d0 := ringAnchorDir(R, 0)
 	dN := ringAnchorDir(R, N)
-	if d0.X != dN.X || d0.Y != dN.Y {
+	if d0.X != dN.X || d0.Z != dN.Z {
 		t.Errorf("ringAnchorDir(N) should wrap to ringAnchorDir(0); got %v vs %v", dN, d0)
 	}
 }

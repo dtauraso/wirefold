@@ -166,19 +166,23 @@ func ringAnchorCount(R float64) int {
 	return max(n, 1)
 }
 
-// ringAnchorDir returns the unit direction (in the y-up, z-forward plane — the
-// same XY plane the side/slot directions live in) for anchor index i in a ring
-// of N evenly-spaced slots around a node of radius R. The angle for slot i is:
-//
-//	theta_i = i * 2*pi / N
-//
-// and maps to direction (cos theta_i, sin theta_i, 0) in the node-local XY plane.
-// i is taken mod N so out-of-range indices wrap safely.
-func ringAnchorDir(R float64, i int) vec3 {
+// ringAnchorPolar returns anchor index i's position (unit radius) on a node's
+// EQUATORIAL ring — the polar-torus a port rides: theta held at pi/2 (the
+// equator), phi swept evenly across N anchors. This is the polar-native
+// definition of the ring; ringAnchorDir derives the cartesian direction from it
+// only at the boundary. i is taken mod N so out-of-range indices wrap safely.
+func ringAnchorPolar(R float64, i int) polar {
 	N := ringAnchorCount(R)
 	i = ((i % N) + N) % N // safe mod
-	theta := float64(i) * 2 * math.Pi / float64(N)
-	return vec3{X: math.Cos(theta), Y: math.Sin(theta), Z: 0}
+	phi := float64(i) * 2 * math.Pi / float64(N)
+	return polar{R: 1, Theta: math.Pi / 2, Phi: phi}
+}
+
+// ringAnchorDir returns the unit direction for anchor index i in a ring of N
+// evenly-spaced slots around a node of radius R, derived from ringAnchorPolar
+// (the node's equatorial ring — theta=pi/2, phi swept) via polar2cart.
+func ringAnchorDir(R float64, i int) vec3 {
+	return polar2cart(ringAnchorPolar(R, i))
 }
 
 // snapToRingAnchorIndex returns the ring-anchor index (0..N-1) whose direction
@@ -261,33 +265,93 @@ func portRadiusByName(g nodeGeom, portName string, isInput bool) float64 {
 	return nodeRadius(g.Kind)
 }
 
-// portWorldPos returns the sphere-surface point in the port direction, or the
-// node center when the port is unnamed/unknown. This is the authoritative port
-// placement (Go owns geometry); the TS renderer plots from Go's streamed segments.
+// portRingPolar returns a port's LOCAL polar offset about its own node: the
+// equatorial ring position (theta = pi/2) at the port's ring-anchor azimuth
+// (phi, from AnchorId), at the port's OWN radius r_i (portRadiusByName — never
+// overridden). This is the polar-torus a port rides: a ring at theta=pi/2,
+// radius r_i, swept in phi. Placement is independent of any torus lock — a
+// lock is movement-only and changes nothing here.
+func portRingPolar(g nodeGeom, portName string, isInput bool) polar {
+	list := g.Outputs
+	if isInput {
+		list = g.Inputs
+	}
+	anchorIdx := 0
+	for _, p := range list {
+		if p.Name == portName {
+			if p.AnchorId != nil {
+				anchorIdx = *p.AnchorId
+			}
+			break
+		}
+	}
+	p := ringAnchorPolar(nodeRadius(g.Kind), anchorIdx)
+	p.R = portRadiusByName(g, portName, isInput)
+	return p
+}
+
+// portWorldPos returns the port's world position: the node's world center plus
+// its local polar ring offset (portRingPolar), converted to cartesian at this
+// one GPU boundary. Falls back to the node center when the port is
+// unnamed/unknown. This is the authoritative port placement (Go owns
+// geometry); the TS renderer plots from Go's streamed segments.
 func portWorldPos(g nodeGeom, portName string, isInput bool) vec3 {
 	center := nodeWorldPos(g)
 	if portName == "" {
 		return center
 	}
-	dir, ok := portDir(g, portName, isInput)
-	if !ok {
+	if _, ok := portDir(g, portName, isInput); !ok {
 		return center
 	}
-	return center.add(dir.scale(portRadiusByName(g, portName, isInput)))
+	return center.add(polar2cart(portRingPolar(g, portName, isInput)))
 }
 
-// edgeArc is the pulse's travel budget for an edge: the straight-line distance between the
-// two node positions, computed in POLAR via the spherical law of cosines (polarDist) — no
-// cartesian, no vector subtraction (polar-frame-rewrite.md option A: an edge runs node-to-node;
-// the port does not offset the endpoint). Both node positions are scene polar about the shared
-// scene center, so polarDist applies directly.
-func edgeArcPolar(src, tgt nodeGeom) float64 {
-	return polarDist(src.ScenePolar, tgt.ScenePolar)
+// portDegenerateEps is the minimum partner-direction length below which an aimed port
+// falls back to its ring-anchor placement: the partner center coincides with (or is
+// indistinguishable from) self, so there is no well-defined aim direction.
+const portDegenerateEps = 1e-9
+
+// portWorldPosAimed returns a port's world position under the AIMED model
+// (port→edge→port colinearity): a CONNECTED port (hasPartner==true) sits on its own
+// node's sphere surface, in the direction of its single partner node's CENTER —
+// `nodeWorldPos(self) + r_i * normalize(partnerCenter - nodeWorldPos(self))`. An
+// edgeless port (hasPartner==false), or a partner center that is degenerate (≈ self,
+// no well-defined direction), falls back to the existing ring-anchor placement
+// (portWorldPos). partnerCenter is a CARTESIAN world point supplied by the caller —
+// the one cartesian subtraction this function performs is a fresh, per-call display-
+// boundary computation (never a stored offset; see aimed_ports.go).
+func portWorldPosAimed(self nodeGeom, portName string, isInput bool, partnerCenter vec3, hasPartner bool) vec3 {
+	if !hasPartner {
+		return portWorldPos(self, portName, isInput)
+	}
+	center := nodeWorldPos(self)
+	dir := partnerCenter.sub(center)
+	if dir.length() < portDegenerateEps {
+		return portWorldPos(self, portName, isInput)
+	}
+	return center.add(dir.normalize().scale(portRadiusByName(self, portName, isInput)))
 }
 
-// edgeSegment is the straight world segment the renderer draws for an edge: source node center
-// to target node center. This is the GPU boundary — nodeWorldPos is the single polar→cartesian
-// conversion per endpoint, done here because WebGL needs cartesian line endpoints.
-func edgeSegment(src, tgt nodeGeom) wireSegment {
-	return wireSegment{Start: nodeWorldPos(src), End: nodeWorldPos(tgt)}
+// edgeSegment is the straight world segment the renderer draws for an edge: the source node's
+// OUTPUT port to the target node's INPUT port. Both ports are AIMED at each other's node center
+// (portWorldPosAimed), so both ports plus both centers are colinear — the edge is radial (same
+// θ,φ) at each end by construction. This is the GPU boundary: nodeWorldPos/portWorldPosAimed are
+// the polar→cartesian conversions, done here because WebGL needs cartesian line endpoints.
+func edgeSegment(src, tgt nodeGeom, srcPort, dstPort string) wireSegment {
+	start := portWorldPosAimed(src, srcPort, false, nodeWorldPos(tgt), true)
+	end := portWorldPosAimed(tgt, dstPort, true, nodeWorldPos(src), true)
+	return wireSegment{Start: start, End: end}
+}
+
+// edgeArcPolar is the pulse's travel budget for an edge: the straight-line distance between the
+// two AIMED port positions (edgeSegment), computed in POLAR via the spherical law of cosines
+// (polarDist). Both aimed points are converted to scene polar about the shared scene center
+// (src.SceneCenter — src and tgt are assumed to share one scene, per the polar-frame model) so
+// polarDist applies directly; if that assumption ever breaks (multi-scene), fall back to a plain
+// cartesian chord length between the two aimed points instead.
+func edgeArcPolar(src, tgt nodeGeom, srcPort, dstPort string) float64 {
+	seg := edgeSegment(src, tgt, srcPort, dstPort)
+	startPolar := cart2polar(seg.Start.sub(src.SceneCenter))
+	endPolar := cart2polar(seg.End.sub(src.SceneCenter))
+	return polarDist(startPolar, endPolar)
 }

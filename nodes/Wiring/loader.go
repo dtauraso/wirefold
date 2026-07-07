@@ -362,8 +362,8 @@ func (b *buildCtx) allocateWires() {
 		// positions (edgeArcPolar) — pure polar. The segment is the world node-to-node line
 		// for the renderer (edgeSegment), the GPU-boundary cartesian.
 		srcG, tgtG := b.nodeGeoms[e.Source], b.nodeGeoms[e.Target]
-		seg := edgeSegment(srcG, tgtG)
-		arcLength := edgeArcPolar(srcG, tgtG)
+		seg := edgeSegment(srcG, tgtG, e.SourceHandle, e.TargetHandle)
+		arcLength := edgeArcPolar(srcG, tgtG, e.SourceHandle, e.TargetHandle)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
@@ -539,7 +539,14 @@ func (b *buildCtx) buildNodes() error {
 			}
 		}
 
-		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID])
+		// Reuse the exact partnerCenter lookup already installed on this node's mover
+		// (buildMoveDispatch runs before buildNodes) so the INITIAL geometry emit and every
+		// later re-emit compute a connected port's aim identically.
+		var pc partnerCenterFn
+		if nm, ok := b.md.nodeMovers[n.ID]; ok {
+			pc = nm.partnerCenter
+		}
+		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], pc)
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

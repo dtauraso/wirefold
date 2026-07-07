@@ -177,8 +177,9 @@ func (md *MoveDispatch) lockNeighbors(m *nodeMover, selfPolar polar, exclude str
 }
 
 // portTorusLocked returns true if there is an ACTIVE eqPortTorus lock on the given
-// (node, port, isInput). Used by portWorldPosAimed to decide whether to ring-project
-// a port (aimed_ports.go); a port∈torus lock never moves a node center.
+// (node, port, isInput). A port∈torus lock only ever targets an EDGELESS port (one with
+// no aimed-port partner) and never moves a node center; it is orthogonal to the aimed-port
+// placement in portWorldPosAimed (aimed_ports.go), which never consults this lock.
 func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
 	for _, eq := range md.polarEqsSnap() {
 		if eq.Kind == eqPortTorus && eq.Active &&
@@ -190,10 +191,10 @@ func (md *MoveDispatch) portTorusLocked(node, port string, isInput bool) bool {
 }
 
 // reemitPortTorusGeometry re-emits nodeID's node-geometry plus every incident edge's
-// segment, so a `port ∈ torus` lock's geometric effect (portWorldPosAimed's
-// ring-projection, see aimed_ports.go) is visible IMMEDIATELY when the lock is
-// authored (addPortTorusLock) or toggled active/inactive (ToggleLockActive) — not
-// only on the next unrelated node move. Mirrors fanCenters' aimedReemit trick: send
+// segment, so a `port ∈ torus` lock's geometric effect on its (edgeless, ring-placed)
+// port is visible IMMEDIATELY when the lock is authored (addPortTorusLock) or toggled
+// active/inactive (ToggleLockActive) — not only on the next unrelated node move. Mirrors
+// fanCenters' aimedReemit trick: send
 // each mover a no-op "same center" message so it recomputes+re-emits on its own
 // goroutine. Dual-pathed like ResendGeometry: direct emit when movers aren't
 // started (headless tests), inbox-routed when they are (production).
