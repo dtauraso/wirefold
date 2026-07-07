@@ -539,7 +539,14 @@ func (b *buildCtx) buildNodes() error {
 			}
 		}
 
-		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID])
+		// Reuse the exact partnerCenter lookup already installed on this node's mover
+		// (buildMoveDispatch runs before buildNodes) so the INITIAL geometry emit and every
+		// later re-emit compute a connected port's aim identically.
+		var pc partnerCenterFn
+		if nm, ok := b.md.nodeMovers[n.ID]; ok {
+			pc = nm.partnerCenter
+		}
+		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], pc)
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}

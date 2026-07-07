@@ -109,11 +109,14 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// Polar-torus port-to-port model: the arc is the polar law-of-cosines
-			// distance between the two PORT positions, equal to the chord between the
-			// two port world points.
+			// Aimed-port model (task/polar-torus-port-edges): the arc is the polar
+			// law-of-cosines distance between the two AIMED port positions — each port
+			// aims at its partner node's center, equal to the chord between the two
+			// aimed port world points.
 			got := edgeArcPolar(c.src, c.tgt, c.srcH, c.tgtH)
-			want := refChordLength(portWorldPos(c.src, c.srcH, false), portWorldPos(c.tgt, c.tgtH, true))
+			srcPort := portWorldPosAimed(c.src, c.srcH, false, nodeWorldPos(c.tgt), true)
+			tgtPort := portWorldPosAimed(c.tgt, c.tgtH, true, nodeWorldPos(c.src), true)
+			want := refChordLength(srcPort, tgtPort)
 			if !almostEqual(got, want, 1e-9) {
 				t.Fatalf("edgeArcPolar = %v, want chord %v", got, want)
 			}

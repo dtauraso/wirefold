@@ -306,28 +306,52 @@ func portWorldPos(g nodeGeom, portName string, isInput bool) vec3 {
 	return center.add(polar2cart(portRingPolar(g, portName, isInput)))
 }
 
-// portScenePolar returns a port's position as scene polar about the shared scene
-// center: the node's scene offset composed with the port's local polar ring
-// offset (portRingPolar), converted once to cartesian to compose the two
-// offsets and then back to polar so edgeArcPolar can apply the spherical law of
-// cosines (polarDist) directly, exactly as it does for node positions.
-func portScenePolar(g nodeGeom, portName string, isInput bool) polar {
-	return cart2polar(polar2cart(g.ScenePolar).add(polar2cart(portRingPolar(g, portName, isInput))))
-}
+// portDegenerateEps is the minimum partner-direction length below which an aimed port
+// falls back to its ring-anchor placement: the partner center coincides with (or is
+// indistinguishable from) self, so there is no well-defined aim direction.
+const portDegenerateEps = 1e-9
 
-// edgeArcPolar is the pulse's travel budget for an edge: the straight-line distance between the
-// two PORT positions (the polar-torus port-to-port model — a port's local polar ring offset IS
-// part of its position), computed in POLAR via the spherical law of cosines (polarDist). Both
-// port positions are expressed as scene polar about the shared scene center (portScenePolar), so
-// polarDist applies directly — no cartesian subtraction.
-func edgeArcPolar(src, tgt nodeGeom, srcPort, dstPort string) float64 {
-	return polarDist(portScenePolar(src, srcPort, false), portScenePolar(tgt, dstPort, true))
+// portWorldPosAimed returns a port's world position under the AIMED model
+// (port→edge→port colinearity): a CONNECTED port (hasPartner==true) sits on its own
+// node's sphere surface, in the direction of its single partner node's CENTER —
+// `nodeWorldPos(self) + r_i * normalize(partnerCenter - nodeWorldPos(self))`. An
+// edgeless port (hasPartner==false), or a partner center that is degenerate (≈ self,
+// no well-defined direction), falls back to the existing ring-anchor placement
+// (portWorldPos). partnerCenter is a CARTESIAN world point supplied by the caller —
+// the one cartesian subtraction this function performs is a fresh, per-call display-
+// boundary computation (never a stored offset; see aimed_ports.go).
+func portWorldPosAimed(self nodeGeom, portName string, isInput bool, partnerCenter vec3, hasPartner bool) vec3 {
+	if !hasPartner {
+		return portWorldPos(self, portName, isInput)
+	}
+	center := nodeWorldPos(self)
+	dir := partnerCenter.sub(center)
+	if dir.length() < portDegenerateEps {
+		return portWorldPos(self, portName, isInput)
+	}
+	return center.add(dir.normalize().scale(portRadiusByName(self, portName, isInput)))
 }
 
 // edgeSegment is the straight world segment the renderer draws for an edge: the source node's
-// OUTPUT port to the target node's INPUT port (port-to-port, the polar-torus model). This is the
-// GPU boundary — portWorldPos is the polar→cartesian conversion per endpoint, done here because
-// WebGL needs cartesian line endpoints.
+// OUTPUT port to the target node's INPUT port. Both ports are AIMED at each other's node center
+// (portWorldPosAimed), so both ports plus both centers are colinear — the edge is radial (same
+// θ,φ) at each end by construction. This is the GPU boundary: nodeWorldPos/portWorldPosAimed are
+// the polar→cartesian conversions, done here because WebGL needs cartesian line endpoints.
 func edgeSegment(src, tgt nodeGeom, srcPort, dstPort string) wireSegment {
-	return wireSegment{Start: portWorldPos(src, srcPort, false), End: portWorldPos(tgt, dstPort, true)}
+	start := portWorldPosAimed(src, srcPort, false, nodeWorldPos(tgt), true)
+	end := portWorldPosAimed(tgt, dstPort, true, nodeWorldPos(src), true)
+	return wireSegment{Start: start, End: end}
+}
+
+// edgeArcPolar is the pulse's travel budget for an edge: the straight-line distance between the
+// two AIMED port positions (edgeSegment), computed in POLAR via the spherical law of cosines
+// (polarDist). Both aimed points are converted to scene polar about the shared scene center
+// (src.SceneCenter — src and tgt are assumed to share one scene, per the polar-frame model) so
+// polarDist applies directly; if that assumption ever breaks (multi-scene), fall back to a plain
+// cartesian chord length between the two aimed points instead.
+func edgeArcPolar(src, tgt nodeGeom, srcPort, dstPort string) float64 {
+	seg := edgeSegment(src, tgt, srcPort, dstPort)
+	startPolar := cart2polar(seg.Start.sub(src.SceneCenter))
+	endPolar := cart2polar(seg.End.sub(src.SceneCenter))
+	return polarDist(startPolar, endPolar)
 }
