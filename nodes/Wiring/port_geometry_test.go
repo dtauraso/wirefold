@@ -7,7 +7,7 @@ import (
 
 // refPortWorldPos is an independent reimplementation of the portWorldPos algorithm,
 // used to lock the production code's output. The node center is provided directly.
-func refPortWorldPos(kind string, center vec3, ports []portGeom, name string, isInput bool) vec3 {
+func refPortWorldPos(kind string, center vec3, ports []portGeom, name string, _ bool) vec3 {
 	if name == "" {
 		return center
 	}
@@ -109,11 +109,11 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// Option A: an edge runs node-to-node; the arc is the polar law-of-cosines
-			// distance between the two node positions, equal to the chord between the two
-			// node world centers.
-			got := edgeArcPolar(c.src, c.tgt)
-			want := refChordLength(nodeWorldPos(c.src), nodeWorldPos(c.tgt))
+			// Polar-torus port-to-port model: the arc is the polar law-of-cosines
+			// distance between the two PORT positions, equal to the chord between the
+			// two port world points.
+			got := edgeArcPolar(c.src, c.tgt, c.srcH, c.tgtH)
+			want := refChordLength(portWorldPos(c.src, c.srcH, false), portWorldPos(c.tgt, c.tgtH, true))
 			if !almostEqual(got, want, 1e-9) {
 				t.Fatalf("edgeArcPolar = %v, want chord %v", got, want)
 			}

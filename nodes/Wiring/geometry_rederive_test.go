@@ -116,9 +116,9 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 		Outputs: []portGeom{{Name: "Out"}}}
 	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter),
 		Inputs: []portGeom{{Name: "In"}}}
-	// Option A: the edge runs node-to-node; segment = node centers, arc = polar distance.
-	wantSeg := edgeSegment(srcGeom, dstGeom)
-	wantArc := edgeArcPolar(srcGeom, dstGeom)
+	// Polar-torus port-to-port model: segment/arc between the two ports' world points.
+	wantSeg := edgeSegment(srcGeom, dstGeom, "Out", "In")
+	wantArc := edgeArcPolar(srcGeom, dstGeom, "Out", "In")
 
 	// Segment endpoints on the source Out must match exactly.
 	if !approxEq(out.Geom().Start.X, wantSeg.Start.X) || !approxEq(out.Geom().Start.Y, wantSeg.Start.Y) || !approxEq(out.Geom().Start.Z, wantSeg.Start.Z) {

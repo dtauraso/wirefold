@@ -277,9 +277,7 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// is populated during port wiring by wirePorts; the closure fires later (at node
 	// startup), so it sees the completed slice.
 	injectFunc(v, "EmitGeometry", tFireFunc, func() {
-		// No lock check here: this fires once at node startup, before MoveDispatch
-		// (and any `port ∈ torus` lock) exists — see buildFromSpec ordering in loader.go.
-		emitNodeGeometryLocked(tr, name, geom, nil)
+		emitNodeGeometryLocked(tr, name, geom)
 		for _, o := range *sourceOuts {
 			if o != nil && o.EdgeLabel != "" {
 				g := o.Geom()
@@ -479,13 +477,14 @@ const (
 	flatRingNormalX, flatRingNormalY, flatRingNormalZ             = 0.0, 1.0, 0.0
 )
 
-// emitNodeGeometryLocked is like emitNodeGeometry but ring-projects a torus-locked port's
-// marker onto the node's border ring (portWorldPosLocked). locked, when non-nil, reports
-// whether a given port carries an ACTIVE `port ∈ torus` lock (MoveDispatch.portTorusLocked).
-// There is no aim: a port's direction is its ring-anchor direction (portDir), no partner center.
-func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom, locked func(nodeID, portName string, isInput bool) bool) {
+// emitNodeGeometryLocked is like emitNodeGeometry but named/kept as the emit entry point used
+// by the move dispatch. A port's placement is always its own polar-torus ring offset by
+// construction (portWorldPos), so a `port ∈ torus` lock is movement-only and never changes
+// where the port is drawn — there is nothing lock-specific left to thread through here. There
+// is no aim: a port's direction is its ring-anchor direction (portDir), no partner center.
+func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom) {
 	emitNodeGeometryWith(tr, nodeName, g, func(name string, isInput bool) (vec3, vec3) {
-		pos := portWorldPosLocked(g, name, isInput, nodeName, locked)
+		pos := portWorldPos(g, name, isInput)
 		dir, _ := portDir(g, name, isInput)
 		return pos, dir
 	})

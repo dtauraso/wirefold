@@ -362,8 +362,8 @@ func (b *buildCtx) allocateWires() {
 		// positions (edgeArcPolar) — pure polar. The segment is the world node-to-node line
 		// for the renderer (edgeSegment), the GPU-boundary cartesian.
 		srcG, tgtG := b.nodeGeoms[e.Source], b.nodeGeoms[e.Target]
-		seg := edgeSegment(srcG, tgtG)
-		arcLength := edgeArcPolar(srcG, tgtG)
+		seg := edgeSegment(srcG, tgtG, e.SourceHandle, e.TargetHandle)
+		arcLength := edgeArcPolar(srcG, tgtG, e.SourceHandle, e.TargetHandle)
 		simLatencyMs := arcLength / PulseSpeedWuPerMs
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs

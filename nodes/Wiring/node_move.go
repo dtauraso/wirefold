@@ -260,10 +260,10 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 }
 
-// emitGeometry re-emits this node's authoritative geometry. Port markers use their
-// ring-anchor direction (no aim); a torus-locked port ring-projects onto the border ring.
+// emitGeometry re-emits this node's authoritative geometry. Port markers use their own
+// polar-torus ring-anchor placement (portWorldPos) — no aim, no lock-dependent override.
 func (m *nodeMover) emitGeometry() {
-	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.locked)
+	emitNodeGeometryLocked(m.tr, m.id, m.geom)
 }
 
 // run is the node's per-goroutine move loop: drain the inbox until ctx is done.
@@ -399,7 +399,7 @@ func (m *edgeMover) emitGeometry() {
 	if m.tr == nil {
 		return
 	}
-	seg := edgeSegment(m.srcGeom, m.dstGeom)
+	seg := edgeSegment(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
 	m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
 		seg.Start.X, seg.Start.Y, seg.Start.Z,
 		seg.End.X, seg.End.Y, seg.End.Z)
@@ -410,8 +410,8 @@ func (m *edgeMover) emitGeometry() {
 // bead (fraction-preserving), update the dest port window aggregate, and emit the new
 // segment so the renderer redraws the wire. Shared by node-move and port-anchor handling.
 func (m *edgeMover) recomputeGeometry() {
-	seg := edgeSegment(m.srcGeom, m.dstGeom)
-	arc := edgeArcPolar(m.srcGeom, m.dstGeom)
+	seg := edgeSegment(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
+	arc := edgeArcPolar(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
 	lat := arc / PulseSpeedWuPerMs
 
 	// Publish the new per-edge segment/arc/latency onto the source Out as an immutable
@@ -719,10 +719,10 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 	if !md.started {
 		// Movers not running — direct read is safe (no concurrent goroutines own geom).
 		for _, nm := range md.nodeMovers {
-			emitNodeGeometryLocked(tr, nm.id, nm.geom, md.portTorusLocked)
+			emitNodeGeometryLocked(tr, nm.id, nm.geom)
 		}
 		for _, em := range md.edgeMovers {
-			seg := edgeSegment(em.srcGeom, em.dstGeom)
+			seg := edgeSegment(em.srcGeom, em.dstGeom, em.srcH, em.dstH)
 			tr.Geometry(em.edgeID, em.srcID, em.dstID,
 				seg.Start.X, seg.Start.Y, seg.Start.Z,
 				seg.End.X, seg.End.Y, seg.End.Z)
