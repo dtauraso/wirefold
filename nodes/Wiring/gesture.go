@@ -55,6 +55,14 @@ type gestureState struct {
 	downX, downY float64
 	prevX, prevY float64
 	button       int
+
+	// smoothX/smoothY are the AVERAGING ("fat") cursor driving rotation: an exponential
+	// moving average of the raw pointer position, so the rotation follows a continuously
+	// blurred cursor (never holds, never freezes — just lags-free-smooths jitter). Seeded to
+	// the raw position when a rotation drag (gestRotating/gestHandhold) begins; smoothSeeded
+	// guards use before that first seed.
+	smoothX, smoothY float64
+	smoothSeeded     bool
 	// secondary is true when the pointer-down was a SECONDARY (button 2) press — a
 	// two-finger trackpad tap. Mirrors interaction-handlers.ts `secondaryDown`: such a
 	// press is always a tap-select and NEVER converts to a drag/rotate, so it stays
@@ -290,10 +298,14 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			// not the slop-crossing point, so the first locked arc is grab→first-move (mirrors
 			// interaction-handlers.ts). Seed the viewpoint about the frozen pivot, then lock.
 			g.prevX, g.prevY = g.downX, g.downY
+			g.smoothX, g.smoothY = g.downX, g.downY
+			g.smoothSeeded = true
 			g.phase = gestHandhold
 			md.seedOrbitPivot(g.rotPivot)
 		case g.emptyDown:
 			g.prevX, g.prevY = ev.X, ev.Y
+			g.smoothX, g.smoothY = ev.X, ev.Y
+			g.smoothSeeded = true
 			g.phase = gestRotating
 			// Seed the viewpoint so the orbit pivot is the frozen region-focus (mirrors the
 			// TS sendViewpointSet at rotation start). pos/up/r recompute about the new pivot.
@@ -307,11 +319,19 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			g.prevX, g.prevY = ev.X, ev.Y
 		}
 	case gestRotating:
-		md.applyOrbit(ev, tr)
-		g.prevX, g.prevY = ev.X, ev.Y
+		g.smoothX += rotSmoothAlpha * (ev.X - g.smoothX)
+		g.smoothY += rotSmoothAlpha * (ev.Y - g.smoothY)
+		smoothEv := ev
+		smoothEv.X, smoothEv.Y = g.smoothX, g.smoothY
+		md.applyOrbit(smoothEv, tr)
+		g.prevX, g.prevY = g.smoothX, g.smoothY
 	case gestHandhold:
-		md.applyOrbitLocked(ev, tr)
-		g.prevX, g.prevY = ev.X, ev.Y
+		g.smoothX += rotSmoothAlpha * (ev.X - g.smoothX)
+		g.smoothY += rotSmoothAlpha * (ev.Y - g.smoothY)
+		smoothEv := ev
+		smoothEv.X, smoothEv.Y = g.smoothX, g.smoothY
+		md.applyOrbitLocked(smoothEv, tr)
+		g.prevX, g.prevY = g.smoothX, g.smoothY
 	case gestPortMove:
 		md.applyPortMove(ev)
 		g.prevX, g.prevY = ev.X, ev.Y
