@@ -165,6 +165,12 @@ type nodeMover struct {
 	lockNeighbors func(m *nodeMover, selfPolar polar, exclude string) []moveMsg
 	sendMove      func(id string, msg moveMsg)
 	edgeIDs       []string
+	// persistPos debounced-persists THIS node's own lock-adjusted scene polar to disk
+	// (MoveDispatch.persistNodePos → md.posPersist.schedule), so a lock-cascade follower's
+	// new position survives a Go respawn (run) the same way a dragged node's does. A safe
+	// no-op (nil) until MoveDispatch.EnableEditPersist arms posPersist, and in tests that
+	// build a bare nodeMover directly.
+	persistPos func(id string, p polar)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go
 	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
@@ -240,6 +246,9 @@ func (m *nodeMover) handle(msg moveMsg) {
 		m.geom.HasPos = true
 		nw := nodeWorldPos(m.geom)
 		m.snap.Store(&centerSnap{c: nw, p: newPolar, reach: m.geom.ReachR})
+		if m.persistPos != nil {
+			m.persistPos(m.id, newPolar)
+		}
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -632,6 +641,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.lockRecalc = md.lockRecalc
 		nm.lockNeighbors = md.lockNeighbors
 		nm.sendMove = md.sendMove
+		nm.persistPos = md.persistNodePos
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -814,6 +824,22 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
+// persistNodePos debounced-persists one node's scene polar to disk via md.posPersist, if
+// armed. Wired onto every nodeMover as persistPos so a lock-cascade follower's own
+// lock-adjusted position (computed and held on the mover's own goroutine, inside
+// moveMsgKindLockUpdate) is written to its own meta.json the same way a dragged node's
+// position is written from RootMove — without RootMove needing to know the follower set
+// (the cascade runs asynchronously through mover inboxes after RootMove returns). A safe
+// no-op until EnableEditPersist arms md.posPersist (nil in tests that never arm it).
+// nodePosPersister.schedule is mutex-guarded (scene_node_pos_persist.go embeds
+// debouncedPersister, whose mu protects the pending map), so concurrent calls for
+// DIFFERENT node ids from different mover goroutines are race-free.
+func (md *MoveDispatch) persistNodePos(id string, p polar) {
+	if md.posPersist != nil {
+		md.posPersist.schedule(id, p)
+	}
+}
+
 // installLocked installs the live torus-lock lookup on every nodeMover so port markers can
 // ring-project a torus-locked port at emit. The lookup (md.portTorusLocked) always reflects
 // the CURRENT lock state, including locks loaded later (LoadPolarEqs) and toggled afterward.
@@ -980,9 +1006,14 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		}
 	}
 
-	// Persist every moved node's new center (the dragged node plus any lock followers) to
-	// disk. Debounced + fire-and-forget: a drag re-arms per pointermove and writes once it
-	// settles, off the hot path.
+	// Persist the DRAGGED node's new center to disk. Debounced + fire-and-forget: a drag
+	// re-arms per pointermove and writes once it settles, off the hot path. This loop only
+	// ranges over `emit`, which holds ONLY the dragged node — any lock followers the cascade
+	// above moves are NOT covered here (their new polars aren't even available yet; the
+	// cascade runs asynchronously through mover inboxes after RootMove returns). Each
+	// follower instead self-persists inside its own mover goroutine, at the point in
+	// nodeMover.handle (moveMsgKindLockUpdate) where it holds its own lock-adjusted polar —
+	// see nodeMover.persistPos / MoveDispatch.persistNodePos.
 	if md.posPersist != nil {
 		for id := range emit {
 			md.posPersist.schedule(id, polars[id])
