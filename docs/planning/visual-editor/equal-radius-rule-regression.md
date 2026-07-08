@@ -71,5 +71,15 @@ blow-up-safe polar formulation of equal edge length.
 
 ## Status
 
-Diagnosis only — no code change. Theory (user): the polar rewrite substituted a formulaically-equal
+Diagnosis confirmed. Theory (user): the polar rewrite substituted a formulaically-equal
 but geometrically-different polar setup. **Confirmed.**
+
+**Fixed** on `task/equal-radius-rule-regression`: `lockRecalc`'s compR path in
+`nodes/Wiring/locks.go` no longer copies the sender's scene-R onto self's scene-R. It now
+resolves `eq.Center`'s current world position (falling back to the old scene-R copy if the
+Center node can't be resolved), computes the sender's distance from that Center, and rescales
+self's world position along self's own direction from Center to match that distance — then
+converts the result back to scene polar. This equalizes edge length about `eq.Center`
+regardless of where Center sits relative to the scene sphere's origin. compTheta/compPhi are
+unchanged. Regression test: `nodes/Wiring/lock_compr_center_test.go`
+(`TestLockCompRAboutOffCenterNode`), which fails on the pre-fix code and passes after.

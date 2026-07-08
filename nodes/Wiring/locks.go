@@ -99,8 +99,16 @@ func setCompOf(p *polar, c polarComp, v float64) {
 //
 //	signSelf·compSelf(self) = signFrom·compFrom(from)  ⇒  compSelf(self) = signFrom·compFrom(from)·signSelf
 //
-// This is PURE POLAR — reads/writes ScenePolar components directly, no cart2polar, no vector
-// subtraction, no center. Later constraints compose on earlier writes (a mirror's θ+φ pair).
+// This is PURE POLAR for compTheta/compPhi — reads/writes ScenePolar components directly, no
+// cart2polar, no vector subtraction, no center. Later constraints compose on earlier writes (a
+// mirror's θ+φ pair). compR is DIFFERENT: `(from,r) = (self,r)` about eq.Center means equal edge
+// LENGTH from that Center node (|from − Center| == |self − Center|), not equal scene-R (distance
+// from the scene sphere's center) — those only coincide when Center sits at the scene center. So
+// for compR we compute both nodes' distances from eq.Center in world space, then rescale self's
+// world position along its own direction from Center to match from's distance, and convert that
+// back to scene polar. A missing Center node falls back to the old scene-R copy so a bad
+// reference can't crash; a self at Center (zero-length direction) leaves that equation's sp
+// unchanged since direction is undefined.
 // eqPortTorus locks are NOT node-center constraints and are not solved here (they only
 // ring-project a port marker at emit, portWorldPosLocked).
 //
@@ -123,6 +131,31 @@ func (md *MoveDispatch) lockRecalc(m *nodeMover, from string, fromPolar polar) (
 		case eq.B.Node == self && eq.A.Node == from:
 			selfTerm, fromTerm = eq.B, eq.A
 		default:
+			continue
+		}
+		if selfTerm.Comp == compR {
+			centerWorld, ok := md.centerOfNode(eq.Center)
+			if !ok {
+				// No resolvable Center node — fall back to the old scene-R copy so a bad
+				// reference can't crash lock propagation.
+				setCompOf(&sp, compR, compOf(fromPolar, compR))
+				applied = true
+				continue
+			}
+			sceneCenter := md.sceneSphere.Center
+			fromWorld := sceneCenter.add(polar2cart(fromPolar))
+			dFrom := fromWorld.sub(centerWorld).length()
+			selfWorld := sceneCenter.add(polar2cart(sp))
+			selfDir := selfWorld.sub(centerWorld)
+			selfLen := selfDir.length()
+			if selfLen <= lockPropEps {
+				// self sits at (or on top of) Center — direction from Center is undefined,
+				// can't rescale; leave this equation's contribution to sp untouched.
+				continue
+			}
+			newSelfWorld := centerWorld.add(selfDir.scale(dFrom / selfLen))
+			sp = cart2polar(newSelfWorld.sub(sceneCenter))
+			applied = true
 			continue
 		}
 		target := fromTerm.Sign * compOf(fromPolar, fromTerm.Comp) * selfTerm.Sign
