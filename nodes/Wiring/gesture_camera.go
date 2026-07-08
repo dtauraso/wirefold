@@ -161,6 +161,10 @@ const gestureFocusMin = 10.0  // FOCUS_MIN — keep the regionFocus pivot off th
 const gestureMoveSlopPx = 6.0 // MOVE_SLOP_PX — pending → drag/rotate threshold
 const gestureZoomBase = 1.01  // ZOOM_BASE — per-scroll-unit dolly factor
 
+// rotSmoothAlpha is the EMA factor for the averaging ("fat") cursor that drives rotation:
+// LOWER = fatter/blurrier/smoother, HIGHER = snappier/closer to raw. Range (0,1].
+const rotSmoothAlpha = 0.35
+
 // focusAhead returns the orbit center for rotate: a point on the view-center ray at the
 // forward-depth of the node the camera is MOST POINTED AT (smallest angle from the view axis,
 // in front). Because the point lies on the view axis, orbiting it does NOT re-aim the camera —
