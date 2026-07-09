@@ -1,6 +1,7 @@
 package Wiring
 
 import (
+	"fmt"
 	"math"
 	"strings"
 
@@ -184,6 +185,9 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 	g.portMoveNode = ""
 	g.handholdDown = false
 
+	if md.tr != nil {
+		md.tr.Breadcrumb("ptrdown", ev.Hit.Id, "", fmt.Sprintf("kind=%q id=%q", ev.Hit.Kind, ev.Hit.Id))
+	}
 	switch ev.Hit.Kind {
 	case "port":
 		node, port, isInput, ok := md.portFromHit(ev.Hit)
@@ -209,11 +213,14 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 		g.handholdDown = true
 		md.beginSphereRotation(ev)
 	case "node":
-		if node, ok := md.nodeFromHit(ev.Hit); ok {
-			if c, ok := md.centerOfNode(node); ok {
-				g.dragNode = node
-				g.dragStartCenter = c
-			}
+		node, okN := md.nodeFromHit(ev.Hit)
+		c, okC := md.centerOfNode(node)
+		if md.tr != nil {
+			md.tr.Breadcrumb("grab-node", node, "", fmt.Sprintf("nodeFromHit=%v centerOfNode=%v", okN, okC))
+		}
+		if okN && okC {
+			g.dragNode = node
+			g.dragStartCenter = c
 		}
 	case "empty":
 		g.emptyDown = true

@@ -1,6 +1,9 @@
 package Wiring
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 // quantized_layout.go — PHASE 1 of the quantized hierarchical polar layout
 // (replaces the polar-lock system; see docs/planning for the full plan). This file is
@@ -64,30 +67,64 @@ type quantizedNodeLayout struct {
 // the presence of a cycle.
 func buildSpanningTree(edgeEndpoints map[string]EdgeEndpoints) (parent map[string]string, roots map[string]bool) {
 	parent = map[string]string{}
-	nodes := map[string]bool{}
-	for _, e := range edgeEndpoints {
-		nodes[e.Source] = true
-		nodes[e.Target] = true
-	}
-	for id := range nodes {
-		best := ""
-		for _, e := range edgeEndpoints {
-			if e.Target != id {
-				continue
-			}
-			if e.Source == id {
-				continue // ignore self-loop
-			}
-			if best == "" || e.Source < best {
-				best = e.Source
-			}
-		}
-		parent[id] = best
-	}
 	roots = map[string]bool{}
-	for id, p := range parent {
-		if p == "" {
-			roots[id] = true
+
+	// Undirected adjacency (edges are traversed both ways so a spanning tree covers
+	// every node even in a fully bidirectional graph); ignore self-loops.
+	adj := map[string]map[string]bool{}
+	nodes := map[string]bool{}
+	touch := func(id string) {
+		nodes[id] = true
+		if adj[id] == nil {
+			adj[id] = map[string]bool{}
+		}
+	}
+	for _, e := range edgeEndpoints {
+		touch(e.Source)
+		touch(e.Target)
+		if e.Source == e.Target {
+			continue
+		}
+		adj[e.Source][e.Target] = true
+		adj[e.Target][e.Source] = true
+	}
+
+	// Deterministic node order so root selection and tree shape are stable.
+	ids := make([]string, 0, len(nodes))
+	for id := range nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	// One BFS per weakly-connected component. The first unvisited id in sorted order is
+	// the lowest id in a NEW component (BFS covers a whole component before we advance),
+	// so it is a deterministic root — this works even when EVERY node has an incoming
+	// edge (no zero-in-degree node exists). BFS assigns each node its discovery
+	// predecessor as parent, producing an acyclic spanning tree covering all nodes.
+	visited := map[string]bool{}
+	for _, start := range ids {
+		if visited[start] {
+			continue
+		}
+		roots[start] = true
+		parent[start] = ""
+		visited[start] = true
+		queue := []string{start}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			nbrs := make([]string, 0, len(adj[cur]))
+			for n := range adj[cur] {
+				nbrs = append(nbrs, n)
+			}
+			sort.Strings(nbrs)
+			for _, n := range nbrs {
+				if !visited[n] {
+					visited[n] = true
+					parent[n] = cur
+					queue = append(queue, n)
+				}
+			}
 		}
 	}
 	return parent, roots

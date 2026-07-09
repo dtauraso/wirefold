@@ -22,11 +22,11 @@ func parallel(t *testing.T, a, b vec3, msg string) {
 }
 
 func TestComposeStraightChainColinear(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"R->A": {Source: "R", Target: "A"},
-		"A->B": {Source: "A", Target: "B"},
-	}
-	parent, roots := buildSpanningTree(edges)
+	// Parent/roots built EXPLICITLY (bypassing buildSpanningTree) so this test's intended
+	// root (R) doesn't depend on buildSpanningTree's lowest-id-per-component rule — this
+	// test is about the compose forward-kinematics math, not tree-building.
+	parent := map[string]string{"R": "", "A": "R", "B": "A"}
+	roots := map[string]bool{"R": true}
 	offsets := map[string]quantizedOffset{
 		"A": {iTheta: 0, iPhi: 0, iR: 1},
 		"B": {iTheta: 0, iPhi: 0, iR: 1},
@@ -44,11 +44,9 @@ func TestComposeStraightChainColinear(t *testing.T) {
 }
 
 func TestComposeSiblingsSameOffsetColinear(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"P->X": {Source: "P", Target: "X"},
-		"P->Y": {Source: "P", Target: "Y"},
-	}
-	parent, roots := buildSpanningTree(edges)
+	// Parent/roots built explicitly (see TestComposeStraightChainColinear).
+	parent := map[string]string{"P": "", "X": "P", "Y": "P"}
+	roots := map[string]bool{"P": true}
 	offsets := map[string]quantizedOffset{
 		"X": {iTheta: 1, iPhi: 1, iR: 1},
 		"Y": {iTheta: 1, iPhi: 1, iR: 2}, // different radial step, same angular offset
@@ -63,11 +61,9 @@ func TestComposeSiblingsSameOffsetColinear(t *testing.T) {
 }
 
 func TestComposeRotationalNesting(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"R->A": {Source: "R", Target: "A"},
-		"A->B": {Source: "A", Target: "B"},
-	}
-	parent, roots := buildSpanningTree(edges)
+	// Parent/roots built explicitly (see TestComposeStraightChainColinear).
+	parent := map[string]string{"R": "", "A": "R", "B": "A"}
+	roots := map[string]bool{"R": true}
 	offsets := map[string]quantizedOffset{
 		"A": {iTheta: 1, iPhi: 0, iR: 1}, // A bends off R's forward
 		"B": {iTheta: 0, iPhi: 0, iR: 1}, // B continues straight along A's (bent) forward
@@ -89,40 +85,52 @@ func TestComposeRotationalNesting(t *testing.T) {
 	_ = r
 }
 
-func TestComposeParentIsLowestIdSource(t *testing.T) {
-	// Multi-edge graph: C has incoming edges from both "b" and "a" (lowest id "a" wins).
-	// Bidirectional pair D<->E: D's parent should be "" (no incoming aside from E, but
-	// E->D exists) except E also has D->E, so both have exactly one incoming edge from
-	// the other — parent(D)="E", parent(E)="D" is a 2-cycle; the tree-walk cycle guard
-	// handles that separately. Here we only check the local parent-selection rule.
+// TestSpanningTreeRootIsLowestIdPerComponent asserts the NEW buildSpanningTree rule: per
+// weakly-connected component, the root is the lowest-id node (string sort), parents are
+// assigned by BFS from that root, the result is acyclic, and every node in the component
+// is reachable.
+func TestSpanningTreeRootIsLowestIdPerComponent(t *testing.T) {
 	edges := map[string]EdgeEndpoints{
 		"b->c": {Source: "b", Target: "c"},
 		"a->c": {Source: "a", Target: "c"},
 		"d->e": {Source: "d", Target: "e"},
-		"e->d": {Source: "e", Target: "d"},
 	}
 	parent, roots := buildSpanningTree(edges)
 
-	if parent["c"] != "a" {
-		t.Fatalf("parent[c] = %q, want %q (lowest-id source)", parent["c"], "a")
-	}
-	// Bidirectional pair: each names the other as parent (single parent per node, per
-	// spec — "bidirectional pairs use that single parent").
-	if parent["d"] != "e" {
-		t.Fatalf("parent[d] = %q, want %q", parent["d"], "e")
-	}
-	if parent["e"] != "d" {
-		t.Fatalf("parent[e] = %q, want %q", parent["e"], "d")
-	}
-	// a and b have no incoming edges at all -> roots.
+	// One component {a,b,c}: lowest id "a" is the root.
 	if !roots["a"] {
-		t.Fatalf("expected a to be a root")
+		t.Fatalf("expected a (lowest id) to be a root, roots=%v", roots)
 	}
-	if !roots["b"] {
-		t.Fatalf("expected b to be a root")
+	if roots["b"] || roots["c"] {
+		t.Fatalf("only the lowest id per component should be a root, roots=%v", roots)
 	}
-	if roots["c"] {
-		t.Fatalf("c has an incoming edge, should not be a root")
+	// Another component {d,e}: lowest id "d" is the root.
+	if !roots["d"] {
+		t.Fatalf("expected d (lowest id) to be a root, roots=%v", roots)
+	}
+	if roots["e"] {
+		t.Fatalf("e should not be a root, roots=%v", roots)
+	}
+
+	// Every node reachable / covered.
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		if _, ok := parent[id]; !ok {
+			t.Fatalf("node %q missing from parent map, parent=%v", id, parent)
+		}
+	}
+
+	// Acyclic: walking parent pointers from any node terminates at a root without
+	// revisiting a node.
+	for _, start := range []string{"a", "b", "c", "d", "e"} {
+		seen := map[string]bool{}
+		cur := start
+		for cur != "" {
+			if seen[cur] {
+				t.Fatalf("cycle detected in parent chain starting at %q", start)
+			}
+			seen[cur] = true
+			cur = parent[cur]
+		}
 	}
 }
 
@@ -151,14 +159,68 @@ func TestMoveDispatchComposeQuantizedLayoutGuarded(t *testing.T) {
 	}
 }
 
-func TestComposeRootsNoIncoming(t *testing.T) {
+// TestSpanningTreeFullyBidirectionalHasRoot is the regression test for the bug this fix
+// addresses: a FULLY bidirectional graph (every edge present both directions, so no node
+// has zero in-degree under the old directed rule) must still produce exactly one root
+// (the lowest id), every other node must have a parent, the parent chain must be acyclic,
+// and composeQuantizedLayout must return a center for EVERY node (not empty) — this is
+// the exact condition that froze dragging.
+func TestSpanningTreeFullyBidirectionalHasRoot(t *testing.T) {
 	edges := map[string]EdgeEndpoints{
-		"R1->A": {Source: "R1", Target: "A"},
-		"R2->B": {Source: "R2", Target: "B"},
-		"A->C":  {Source: "A", Target: "C"},
+		"1->2": {Source: "1", Target: "2"},
+		"2->1": {Source: "2", Target: "1"},
+		"2->3": {Source: "2", Target: "3"},
+		"3->2": {Source: "3", Target: "2"},
+		"1->3": {Source: "1", Target: "3"},
+		"3->1": {Source: "3", Target: "1"},
+	}
+	parent, roots := buildSpanningTree(edges)
+
+	if len(roots) != 1 {
+		t.Fatalf("expected exactly one root, got roots=%v", roots)
+	}
+	if !roots["1"] {
+		t.Fatalf("expected root to be lowest id %q, roots=%v", "1", roots)
+	}
+	for _, id := range []string{"2", "3"} {
+		if parent[id] == "" {
+			t.Fatalf("expected node %q to have a non-root parent, parent=%v", id, parent)
+		}
+	}
+
+	// Acyclic parent chain.
+	for _, start := range []string{"1", "2", "3"} {
+		seen := map[string]bool{}
+		cur := start
+		for cur != "" {
+			if seen[cur] {
+				t.Fatalf("cycle detected in parent chain starting at %q", start)
+			}
+			seen[cur] = true
+			cur = parent[cur]
+		}
+	}
+
+	offsets := quantizedOffsetsFromParents(parent)
+	composed := composeQuantizedLayout(parent, roots, offsets, vec3{})
+	for _, id := range []string{"1", "2", "3"} {
+		if _, ok := composed[id]; !ok {
+			t.Fatalf("composeQuantizedLayout missing center for %q, composed=%v", id, composed)
+		}
+	}
+}
+
+// TestSpanningTreeMultipleComponents: two disconnected bidirectional clusters produce two
+// roots, each the lowest id within its own cluster.
+func TestSpanningTreeMultipleComponents(t *testing.T) {
+	edges := map[string]EdgeEndpoints{
+		"a->b": {Source: "a", Target: "b"},
+		"b->a": {Source: "b", Target: "a"},
+		"x->y": {Source: "x", Target: "y"},
+		"y->x": {Source: "y", Target: "x"},
 	}
 	_, roots := buildSpanningTree(edges)
-	want := map[string]bool{"R1": true, "R2": true}
+	want := map[string]bool{"a": true, "x": true}
 	for id := range want {
 		if !roots[id] {
 			t.Fatalf("expected %q to be a root, roots=%v", id, roots)
@@ -176,11 +238,15 @@ func TestComposeRootsNoIncoming(t *testing.T) {
 // snapQuantizedOffsets on the resulting centers and assert it recovers the SAME integers
 // exactly. This is the round-trip snap(compose(offsets)) == offsets on grid-aligned input.
 func TestSnapRecoversExactGridLayout(t *testing.T) {
+	// Node ids are single digits ("0","1",...) chosen so the intended root ("0"/"P"→"0")
+	// is the LOWEST id in its component — buildSpanningTree (called internally by
+	// snapQuantizedOffsets) picks the lowest-id node per component as root, so the ids
+	// must encode the intended tree shape, not just label it in edge names.
 	t.Run("3-deep chain", func(t *testing.T) {
 		edges := map[string]EdgeEndpoints{
-			"R->A": {Source: "R", Target: "A"},
-			"A->B": {Source: "A", Target: "B"},
-			"B->C": {Source: "B", Target: "C"},
+			"0->1": {Source: "0", Target: "1"},
+			"1->2": {Source: "1", Target: "2"},
+			"2->3": {Source: "2", Target: "3"},
 		}
 		// iTheta is a colatitude-like offset (always >= 0 by construction: it comes from
 		// angularDistance/acos, which never returns negative) — a negative iTheta would
@@ -190,12 +256,12 @@ func TestSnapRecoversExactGridLayout(t *testing.T) {
 		// resolves it to 0 regardless of the authored value — so round-trip test data
 		// must keep iTheta != 0 wherever iPhi is meant to be recovered.
 		want := map[string]quantizedOffset{
-			"A": {iTheta: 2, iPhi: -1, iR: 1, parent: "R"},
-			"B": {iTheta: 1, iPhi: 3, iR: 2, parent: "A"},
-			"C": {iTheta: 1, iPhi: 2, iR: 1, parent: "B"},
+			"1": {iTheta: 2, iPhi: -1, iR: 1, parent: "0"},
+			"2": {iTheta: 1, iPhi: 3, iR: 2, parent: "1"},
+			"3": {iTheta: 1, iPhi: 2, iR: 1, parent: "2"},
 		}
 		parent, roots := buildSpanningTree(edges)
-		full := map[string]quantizedOffset{"R": {parent: ""}}
+		full := map[string]quantizedOffset{"0": {parent: ""}}
 		for id, o := range want {
 			full[id] = o
 		}
@@ -216,24 +282,24 @@ func TestSnapRecoversExactGridLayout(t *testing.T) {
 				t.Fatalf("snap[%q] = %+v, want %+v", id, g, o)
 			}
 		}
-		if g := got["R"]; g.parent != "" || g.iTheta != 0 || g.iPhi != 0 || g.iR != 0 {
+		if g := got["0"]; g.parent != "" || g.iTheta != 0 || g.iPhi != 0 || g.iR != 0 {
 			t.Fatalf("root offset = %+v, want zero offset with no parent", g)
 		}
 	})
 
 	t.Run("branching node", func(t *testing.T) {
 		edges := map[string]EdgeEndpoints{
-			"P->X": {Source: "P", Target: "X"},
-			"P->Y": {Source: "P", Target: "Y"},
-			"P->Z": {Source: "P", Target: "Z"},
+			"0->1": {Source: "0", Target: "1"},
+			"0->2": {Source: "0", Target: "2"},
+			"0->3": {Source: "0", Target: "3"},
 		}
 		want := map[string]quantizedOffset{
-			"X": {iTheta: 1, iPhi: 0, iR: 1, parent: "P"},
-			"Y": {iTheta: 1, iPhi: 4, iR: 1, parent: "P"},
-			"Z": {iTheta: 2, iPhi: -3, iR: 2, parent: "P"},
+			"1": {iTheta: 1, iPhi: 0, iR: 1, parent: "0"},
+			"2": {iTheta: 1, iPhi: 4, iR: 1, parent: "0"},
+			"3": {iTheta: 2, iPhi: -3, iR: 2, parent: "0"},
 		}
 		parent, roots := buildSpanningTree(edges)
-		full := map[string]quantizedOffset{"P": {parent: ""}}
+		full := map[string]quantizedOffset{"0": {parent: ""}}
 		for id, o := range want {
 			full[id] = o
 		}
@@ -262,16 +328,19 @@ func TestSnapRecoversExactGridLayout(t *testing.T) {
 // within one grid step of the input (snapping rounds each node's offset to the nearest
 // grid point, so recomposing lands near, not exactly on, the original arbitrary center).
 func TestSnapComposeStable(t *testing.T) {
+	// Node ids are digits so the intended root ("0") is the lowest id in its component
+	// (buildSpanningTree, called internally by snapQuantizedOffsets, picks the lowest id
+	// per component as root).
 	edges := map[string]EdgeEndpoints{
-		"R->A": {Source: "R", Target: "A"},
-		"A->B": {Source: "A", Target: "B"},
+		"0->1": {Source: "0", Target: "1"},
+		"1->2": {Source: "1", Target: "2"},
 	}
 	anchor := vec3{X: 0, Y: 0, Z: 0}
-	// Arbitrary (not grid-aligned) centers, reachable from anchor via R.
+	// Arbitrary (not grid-aligned) centers, reachable from anchor via "0".
 	centers := map[string]vec3{
-		"R": anchor,
-		"A": vec3{X: 3.1, Y: 0.4, Z: -2.2},
-		"B": vec3{X: 5.9, Y: 1.7, Z: -3.8},
+		"0": anchor,
+		"1": vec3{X: 3.1, Y: 0.4, Z: -2.2},
+		"2": vec3{X: 5.9, Y: 1.7, Z: -3.8},
 	}
 
 	snapped := snapQuantizedOffsets(centers, edges)
