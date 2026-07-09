@@ -33,7 +33,11 @@ import (
 const (
 	stepTheta = math.Pi / 12
 	stepPhi   = math.Pi / 12
-	stepR     = defaultNodeR
+	// stepR must be smaller than the typical node-to-parent spacing, else every node
+	// rounds to iR=0 and collapses onto its parent. Node spacing here is ~80 units, so
+	// defaultNodeR (200) collapsed the graph; 20 keeps nodes distinct and makes a drag
+	// cross an r-cell responsively. Tunable.
+	stepR = 20.0
 )
 
 // rootForward is the fixed default forward direction assigned to every root node (the

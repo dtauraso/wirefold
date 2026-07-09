@@ -30,7 +30,6 @@ package Wiring
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync/atomic"
 
@@ -818,11 +817,7 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 // centers are re-emitted (center unchanged, ReachR updated). Returns false for an
 // unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	_, moverOK := md.nodeMovers[nodeID]
-	if md.tr != nil {
-		md.tr.Breadcrumb("RootMove", nodeID, "", fmt.Sprintf("moverOK=%v quantized=%v", moverOK, md.quantizedLayout))
-	}
-	if !moverOK {
+	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
 	if md.quantizedLayout {
@@ -872,17 +867,11 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
 	off, ok := md.quantizedOffsets[nodeID]
 	if !ok {
-		if md.tr != nil {
-			md.tr.Breadcrumb("rmQuant", nodeID, "", "NO-OFFSET (node absent from quantizedOffsets)")
-		}
 		return false
 	}
 	parentID := off.parent
 
 	if parentID == "" {
-		if md.tr != nil {
-			md.tr.Breadcrumb("rmQuant", nodeID, "", fmt.Sprintf("ROOT drag target=%.0f,%.0f,%.0f", target.X, target.Y, target.Z))
-		}
 		// Root drag: the anchor moves to the target directly, no grid snap.
 		composed := md.composeAllWithAnchorOverride(nodeID, target)
 		md.applyComposedCenters(composed, collectSubtree(md.quantizedOffsets, nodeID))
@@ -913,11 +902,6 @@ func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
 		iPhi:   int(math.Round(psi / stepPhi)),
 		iR:     int(math.Round(r / stepR)),
 		parent: parentID,
-	}
-	if md.tr != nil {
-		md.tr.Breadcrumb("rmQuant", nodeID, parentID, fmt.Sprintf("oldOff=%d,%d,%d newOff=%d,%d,%d c=%.3f psi=%.3f r=%.1f target=%.0f,%.0f,%.0f parentC=%.0f,%.0f,%.0f",
-			off.iTheta, off.iPhi, off.iR, newOff.iTheta, newOff.iPhi, newOff.iR, c, psi, r,
-			target.X, target.Y, target.Z, parentLayout.center.X, parentLayout.center.Y, parentLayout.center.Z))
 	}
 	md.quantizedOffsets[nodeID] = newOff
 
