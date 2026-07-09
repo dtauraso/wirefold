@@ -143,6 +143,24 @@ func composeQuantizedLayout(
 	offsets map[string]quantizedOffset,
 	anchor vec3,
 ) map[string]quantizedNodeLayout {
+	anchors := map[string]vec3{}
+	for id := range roots {
+		anchors[id] = anchor
+	}
+	return composeQuantizedLayoutAnchored(parent, roots, offsets, anchors)
+}
+
+// composeQuantizedLayoutAnchored is the PHASE 3 generalization of composeQuantizedLayout:
+// each root gets its OWN anchor (anchors[id]) instead of one anchor shared by every root.
+// This is what lets a multi-component graph's roots each keep their EXISTING world center
+// (RootMove on a root just moves its own anchor) while composeQuantizedLayout itself stays
+// the single-anchor convenience wrapper the Phase 1/2 tests already exercise.
+func composeQuantizedLayoutAnchored(
+	parent map[string]string,
+	roots map[string]bool,
+	offsets map[string]quantizedOffset,
+	anchors map[string]vec3,
+) map[string]quantizedNodeLayout {
 	result := map[string]quantizedNodeLayout{}
 	// children: parent id -> its direct children ids, for a top-down BFS/DFS walk.
 	children := map[string][]string{}
@@ -175,9 +193,42 @@ func composeQuantizedLayout(
 	}
 
 	for id := range roots {
-		visit(id, quantizedNodeLayout{center: anchor, forward: rootForward})
+		visit(id, quantizedNodeLayout{center: anchors[id], forward: rootForward})
 	}
 	return result
+}
+
+// quantizedChildrenMap inverts an offsets map (id -> quantizedOffset carrying parent) into
+// parent id -> its direct children ids, for a subtree walk (collectSubtree).
+func quantizedChildrenMap(offsets map[string]quantizedOffset) map[string][]string {
+	children := map[string][]string{}
+	for id, off := range offsets {
+		if off.parent == "" {
+			continue
+		}
+		children[off.parent] = append(children[off.parent], id)
+	}
+	return children
+}
+
+// collectSubtree returns rootID plus every node transitively reachable from it via the
+// offsets' parent links (i.e. rootID and all its descendants under the CURRENT spanning
+// tree) — the exact set of nodes whose world center moves when rootID's own offset/anchor
+// changes (rotational nesting: a change to one node's angle/anchor re-aims everything
+// hanging off it). Used by RootMove (Phase 3) to know which centers to re-emit after a
+// drag-snap-and-recompose.
+func collectSubtree(offsets map[string]quantizedOffset, rootID string) []string {
+	children := quantizedChildrenMap(offsets)
+	var out []string
+	var walk func(id string)
+	walk = func(id string) {
+		out = append(out, id)
+		for _, c := range children[id] {
+			walk(c)
+		}
+	}
+	walk(rootID)
+	return out
 }
 
 // cart converts a unit direction to a Cartesian unit vector (R=1), matching polar2cart's
@@ -268,6 +319,65 @@ func snapQuantizedOffsets(centers map[string]vec3, edgeEndpoints map[string]Edge
 		}
 	}
 	return result
+}
+
+// composeAll recomposes every node's world center from md.quantizedOffsets (Phase 3: the
+// AUTHORITATIVE live path, distinct from the Phase 1 ComposeQuantizedLayout guarded-off
+// scaffolding above). Roots are anchored at their own CURRENT held world center (from the
+// nodeMovers' atomic snap — heldCenters), so a root keeps its existing position; every
+// other node's center is derived purely from its quantized offset about its parent.
+func (md *MoveDispatch) composeAll() map[string]quantizedNodeLayout {
+	return md.composeAllWithAnchorOverride("", vec3{})
+}
+
+// composeAllWithAnchorOverride is composeAll, except root overrideID (if it is itself a
+// root under md.quantizedOffsets) is anchored at overrideCenter instead of its current held
+// center. This is how a ROOT drag applies: the dragged root's own anchor moves to the
+// pointer target and every other root's anchor stays put, then the whole graph recomposes
+// from those anchors in one pass.
+func (md *MoveDispatch) composeAllWithAnchorOverride(overrideID string, overrideCenter vec3) map[string]quantizedNodeLayout {
+	parent := map[string]string{}
+	roots := map[string]bool{}
+	for id, off := range md.quantizedOffsets {
+		parent[id] = off.parent
+		if off.parent == "" {
+			roots[id] = true
+		}
+	}
+	centers := md.heldCenters()
+	anchors := map[string]vec3{}
+	for id := range roots {
+		if id == overrideID {
+			anchors[id] = overrideCenter
+			continue
+		}
+		if c, ok := centers[id]; ok {
+			anchors[id] = c
+		} else {
+			anchors[id] = md.sceneSphere.Center
+		}
+	}
+	return composeQuantizedLayoutAnchored(parent, roots, md.quantizedOffsets, anchors)
+}
+
+// applyComposedCenters emits the composed centers for exactly the given node ids (a drag's
+// affected subtree) through the SAME fanCenters path a free drag uses: it recomputes every
+// node's reach radius under the new positions and pushes one "center" message per node/edge
+// mover, so nodes+edges+ports re-emit identically to the pre-quantized RootMove path.
+func (md *MoveDispatch) applyComposedCenters(composed map[string]quantizedNodeLayout, ids []string) {
+	edges := md.heldEdges()
+	emit := map[string]vec3{}
+	for _, id := range ids {
+		if l, ok := composed[id]; ok {
+			emit[id] = l.center
+		}
+	}
+	polars := md.heldPolar()
+	for id, c := range emit {
+		polars[id] = cart2polar(c.sub(md.sceneSphere.Center))
+	}
+	reach := reachRFromPolar(polars, edges)
+	md.fanCenters(emit, reach)
 }
 
 // SnapQuantizedOffsets fills md.quantizedOffsets from the movers' CURRENT held centers

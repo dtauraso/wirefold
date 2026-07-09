@@ -30,6 +30,7 @@ package Wiring
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -588,9 +589,14 @@ type MoveDispatch struct {
 	// the live path; this is purely additive scaffolding under test.
 	quantizedLayout bool
 	// quantizedOffsets is the per-node quantized polar offset + resolved parent
-	// (quantized_layout.go quantizedOffset), keyed by node id. Nil/empty until
-	// authored — Phase 1 leaves it unpopulated in production.
+	// (quantized_layout.go quantizedOffset), keyed by node id. Phase 3: populated by
+	// loader.go computeQuantizedLayout at load time and authoritative from then on —
+	// RootMove (drag) rewrites the dragged node's entry and recomposes the whole graph.
 	quantizedOffsets map[string]quantizedOffset
+	// quantOffsetPersist is the debounced disk persister for a dragged node's quantized
+	// offset (quant_offset_persist.go), armed by EnableEditPersist. nil until armed (tests
+	// that never arm it, and the monolithic-topology.json form).
+	quantOffsetPersist *quantOffsetPersister
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -980,6 +986,9 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
+	if md.quantizedLayout {
+		return md.rootMoveQuantized(nodeID, target)
+	}
 	// Move ONLY the dragged node. There is no lock system and no central position store:
 	// node positions live in the movers' held geometry (geom.Center). Fan the new center
 	// so the node and the edges touching it re-emit their geometry. Movement constraints
@@ -1027,6 +1036,69 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		for id := range emit {
 			md.posPersist.schedule(id, polars[id])
 		}
+	}
+	return true
+}
+
+// rootMoveQuantized is the PHASE 3 quantized-layout drag path (quantized_layout.go):
+// the dragged node's free-form world target SNAPS to the nearest grid cell — there is no
+// per-axis gesture; the whole target vector is converted to one offset about the parent's
+// CURRENT composed forward frame and rounded to the nearest (iTheta,iPhi,iR). This is
+// authoritative: the lock cascade (applyPolarEqs/lockNeighbors) does NOT run here — compose
+// is the only position solver once quantizedLayout is on.
+//
+// A ROOT drag (no parent) is the exception: a root's own position is a free anchor, not a
+// quantized offset, so it just moves to the target directly (no grid snap) and every
+// descendant hanging off it recomposes/re-emits — "a root being dragged just moves its
+// anchor". A non-root drag snaps the target to the nearest grid cell about its parent, then
+// recomposes the whole graph and re-emits the dragged node AND every descendant (rotational
+// nesting: bending one node's angle re-aims everything hanging off it).
+func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
+	off, ok := md.quantizedOffsets[nodeID]
+	if !ok {
+		return false
+	}
+	parentID := off.parent
+
+	if parentID == "" {
+		// Root drag: the anchor moves to the target directly, no grid snap.
+		composed := md.composeAllWithAnchorOverride(nodeID, target)
+		md.applyComposedCenters(composed, collectSubtree(md.quantizedOffsets, nodeID))
+		if md.posPersist != nil {
+			md.posPersist.schedule(nodeID, cart2polar(target.sub(md.sceneSphere.Center)))
+		}
+		return true
+	}
+
+	// Non-root drag: convert the target to an offset about the parent's CURRENT composed
+	// forward direction (azimuthFrom/angularDistance — the same measurement
+	// snapQuantizedOffsets uses for one node), then round to the nearest grid cell.
+	composedNow := md.composeAll()
+	parentLayout, ok := composedNow[parentID]
+	if !ok {
+		return false
+	}
+	delta := target.sub(parentLayout.center)
+	r := delta.length()
+	childDir := dir{}
+	if r > 0 {
+		p := cart2polar(delta)
+		childDir = dir{Theta: p.Theta, Phi: p.Phi}
+	}
+	c, psi := azimuthFrom(parentLayout.forward, childDir)
+	newOff := quantizedOffset{
+		iTheta: int(math.Round(c / stepTheta)),
+		iPhi:   int(math.Round(psi / stepPhi)),
+		iR:     int(math.Round(r / stepR)),
+		parent: parentID,
+	}
+	md.quantizedOffsets[nodeID] = newOff
+
+	composed := md.composeAll()
+	md.applyComposedCenters(composed, collectSubtree(md.quantizedOffsets, nodeID))
+
+	if md.quantOffsetPersist != nil {
+		md.quantOffsetPersist.schedule(nodeID, newOff)
 	}
 	return true
 }
@@ -1113,6 +1185,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.locksPersist = &polarEqsPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.quantOffsetPersist = &quantOffsetPersister{root: root, debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

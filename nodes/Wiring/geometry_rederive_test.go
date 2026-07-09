@@ -110,8 +110,16 @@ func TestNodeMoveRederivesSegmentAndArc(t *testing.T) {
 	// Build the expected segment + arc independently from the moved geometry:
 	// src center is the world target (sphere-chain; no lattice snap).
 	// Use aimed computation to match the edge mover (all edge-connected ports are aimed).
+	// dst's authoritative center comes from the quantized-layout compose (Phase 3): dst is
+	// src's child in the spanning tree, so its post-load center is composed from a SNAPPED
+	// offset about src, not necessarily the raw authored (0,0,0) — read it back rather than
+	// assume the pre-quantized value.
+	dstCenterHeld, ok := nmr.centerOfNode("dst")
+	if !ok {
+		t.Fatal("dst has no center after load")
+	}
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
-	dstCenter := vec3{X: 0, Y: 0, Z: 0}
+	dstCenter := dstCenterHeld
 	srcGeom := nodeGeom{Kind: "FanInSrc", HasPos: true, ScenePolar: cart2polar(srcCenter),
 		Outputs: []portGeom{{Name: "Out"}}}
 	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter),

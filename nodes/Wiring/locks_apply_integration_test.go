@@ -42,6 +42,9 @@ func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
+	// Phase 3: this test exercises the lock cascade directly via free RootMove drags;
+	// quantized-layout compose would grid-snap the non-root ("c") drag targets instead.
+	md.quantizedLayout = false
 	md.Start(ctx)
 
 	// Movers apply center updates asynchronously; poll until a node's published center
@@ -63,13 +66,20 @@ func TestEquationAppliesImmediatelyOnCompletion(t *testing.T) {
 		return cart2polar(p.sub(c)).Theta
 	}
 
-	// Place the three nodes at known world points and let the movers settle.
+	// Place the three nodes at known world points, settling each move before the next.
+	// Phase 3's compose pass (loader.go computeQuantizedLayout) no longer necessarily loads
+	// "c" at the origin (its snapped offset can coincide with its spanning-tree parent "a"),
+	// so — unlike before, when "c" started already AT (0,0,0) and this move was a no-op —
+	// moving "c" now actually changes its position, which means fanCenters' aimed-port
+	// partner-reemit (for the "a" move right after) must not race c's own not-yet-applied
+	// move: settle each RootMove before issuing the next.
 	md.RootMove("c", vec3{0, 0, 0})
-	md.RootMove("a", vec3{10, 10, 0})
-	md.RootMove("b", vec3{10, 2, 0})
 	waitCenter("c", vec3{0, 0, 0})
+	md.RootMove("a", vec3{10, 10, 0})
 	waitCenter("a", vec3{10, 10, 0})
+	md.RootMove("b", vec3{10, 2, 0})
 	waitCenter("b", vec3{10, 2, 0})
+	waitCenter("c", vec3{0, 0, 0})
 
 	thetaA := thetaAbout("c", "a")
 	if math.Abs(thetaA-thetaAbout("c", "b")) < 0.1 {

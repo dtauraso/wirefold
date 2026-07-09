@@ -46,6 +46,8 @@ func TestPolarLockNoBlowup(t *testing.T) {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 
+	// Phase 3: exercise the free-drag lock cascade, not quantized-layout compose.
+	md.quantizedLayout = false
 	// Locks (authored before Start; positions are good).
 	md.setPolarEqs([]polarEq{
 		{A: polarTerm{"n5", compPhi, 1}, B: polarTerm{"n6", compPhi, -1}, Active: true},

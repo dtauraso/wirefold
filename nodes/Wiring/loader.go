@@ -60,6 +60,14 @@ type specNode struct {
 	ScenePolarR     *float64 `json:"scenePolarR,omitempty"`
 	ScenePolarTheta *float64 `json:"scenePolarTheta,omitempty"`
 	ScenePolarPhi   *float64 `json:"scenePolarPhi,omitempty"`
+	// Quantized polar offset (quantized_layout.go, PHASE 3): the node's (iTheta,iPhi,iR)
+	// integer offset about its spanning-tree parent's forward direction. All three MUST be
+	// present together (all-or-nothing) for the stored offset to be adopted; a node with any
+	// of these absent (an "old scene") is snapped from its scenePolar-derived world center
+	// instead (loader.go computeQuantizedLayout / quantized_layout.go snapQuantizedOffsets).
+	QuantITheta *int `json:"quantITheta,omitempty"`
+	QuantIPhi   *int `json:"quantIPhi,omitempty"`
+	QuantIR     *int `json:"quantIR,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -243,6 +251,11 @@ type buildCtx struct {
 	nodeGeoms map[string]nodeGeom
 	centers   map[string]vec3
 
+	// Phase 1b: quantized hierarchical polar layout (quantized_layout.go, PHASE 3) —
+	// resolved BEFORE reach/wire/dispatch phases so every later phase computes from the
+	// COMPOSED (authoritative) centers, not the raw loaded ones.
+	quantizedOffsets map[string]quantizedOffset
+
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
 	edgeWire      WireRegistry
@@ -275,6 +288,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	b := &buildCtx{ctx: ctx, spec: spec, tr: tr, clk: clk, sphere: sphere, hasScene: hasScene}
 
 	b.computeNodeGeometry()
+	b.computeQuantizedLayout()
 	b.computeReachRadii()
 	b.allocateWires()
 	b.buildMoveDispatch()
@@ -311,6 +325,67 @@ func (b *buildCtx) computeNodeGeometry() {
 		}
 	}
 	b.centers = centers
+}
+
+// computeQuantizedLayout is PHASE 3: makes the quantized hierarchical polar layout
+// (quantized_layout.go) AUTHORITATIVE for every node's world center. It resolves each
+// node's quantizedOffset — the stored quantITheta/quantIPhi/quantIR when ALL THREE are
+// present (a scene saved under this model), otherwise the offset SNAPPED from the node's
+// current (pre-quantized) scenePolar-derived center (an old scene, or a node whose
+// scenePolar was hand-authored) — then recomposes every node's world center from those
+// offsets and overwrites b.nodeGeoms/b.centers with the composed result. Every later phase
+// (reach radii, per-edge arc/segment, the movers seeded in buildMoveDispatch) therefore
+// operates on the COMPOSED centers, and md.quantizedLayout defaults to true (buildMoveDispatch)
+// so the live drag path (RootMove) treats this same offset model as authoritative too.
+//
+// Isolated nodes (no edges at all) are not covered by buildSpanningTree/snapQuantizedOffsets
+// (which only walk the edge graph); they are folded in here as their own root with a
+// zero offset, so EVERY node in the spec ends up with an entry.
+func (b *buildCtx) computeQuantizedLayout() {
+	edgeEP := map[string]EdgeEndpoints{}
+	for _, e := range b.spec.Edges {
+		edgeEP[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target, SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle}
+	}
+	parent, roots := buildSpanningTree(edgeEP)
+	for _, n := range b.spec.Nodes {
+		if _, ok := parent[n.ID]; !ok {
+			parent[n.ID] = ""
+			roots[n.ID] = true
+		}
+	}
+
+	// Baseline: snap every reachable node's CURRENT center into an offset (deliverable 1's
+	// "old scene" fallback), applied up front to every node — stored offsets below then
+	// override the ones actually authored under this model.
+	offsets := snapQuantizedOffsets(b.centers, edgeEP)
+	for id, p := range parent {
+		if _, ok := offsets[id]; !ok {
+			offsets[id] = quantizedOffset{parent: p}
+		}
+	}
+	for _, n := range b.spec.Nodes {
+		if n.QuantITheta != nil && n.QuantIPhi != nil && n.QuantIR != nil {
+			offsets[n.ID] = quantizedOffset{iTheta: *n.QuantITheta, iPhi: *n.QuantIPhi, iR: *n.QuantIR, parent: parent[n.ID]}
+		}
+	}
+	b.quantizedOffsets = offsets
+
+	anchors := map[string]vec3{}
+	for id := range roots {
+		if c, ok := b.centers[id]; ok {
+			anchors[id] = c
+		} else {
+			anchors[id] = b.sphere.Center
+		}
+	}
+	composed := composeQuantizedLayoutAnchored(parent, roots, offsets, anchors)
+	for id, layout := range composed {
+		g := b.nodeGeoms[id]
+		g.SceneCenter = b.sphere.Center
+		setNodeWorld(&g, layout.center)
+		b.nodeGeoms[id] = g
+		b.centers[id] = layout.center
+	}
 }
 
 // computeReachRadii computes each node's REACH radius (max distance from its
@@ -415,6 +490,12 @@ func (b *buildCtx) buildMoveDispatch() {
 	}
 
 	md.installLocked()
+	// Phase 3: the quantized layout is authoritative by default — md.quantizedOffsets was
+	// already resolved (stored offset, or snapped from the pre-quantized center) by
+	// computeQuantizedLayout, which also overwrote b.nodeGeoms so the nodeMovers newMoveDispatch
+	// just built above are already seeded from the COMPOSED centers.
+	md.quantizedLayout = true
+	md.quantizedOffsets = b.quantizedOffsets
 	b.md = md
 }
 

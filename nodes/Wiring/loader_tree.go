@@ -39,6 +39,10 @@ type jsonMeta struct {
 	ScenePolarR     *float64 `json:"scenePolarR,omitempty"`
 	ScenePolarTheta *float64 `json:"scenePolarTheta,omitempty"`
 	ScenePolarPhi   *float64 `json:"scenePolarPhi,omitempty"`
+	// Quantized polar offset (quantized_layout.go PHASE 3) — see specNode's field doc.
+	QuantITheta *int `json:"quantITheta,omitempty"`
+	QuantIPhi   *int `json:"quantIPhi,omitempty"`
+	QuantIR     *int `json:"quantIR,omitempty"`
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -75,6 +79,9 @@ func loadTree(root string) (topoSpec, error) {
 			ScenePolarR:     meta.ScenePolarR,
 			ScenePolarTheta: meta.ScenePolarTheta,
 			ScenePolarPhi:   meta.ScenePolarPhi,
+			QuantITheta:     meta.QuantITheta,
+			QuantIPhi:       meta.QuantIPhi,
+			QuantIR:         meta.QuantIR,
 		}
 
 		// data.json — optional

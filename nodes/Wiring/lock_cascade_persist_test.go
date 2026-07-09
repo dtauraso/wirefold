@@ -65,6 +65,8 @@ func TestLockCascadeFollowerSelfPersists(t *testing.T) {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 	md.EnableEditPersist(root)
+	// Phase 3: exercise the free-drag lock cascade, not quantized-layout compose.
+	md.quantizedLayout = false
 
 	md.setPolarEqs([]polarEq{
 		{Center: "n1", A: polarTerm{"n2", compR, 1}, B: polarTerm{"n3", compR, 1}, Active: true},

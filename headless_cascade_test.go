@@ -41,6 +41,11 @@ import (
 	W "github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// i1's scenePolarR is set far enough from i0 that the quantized-layout compose pass
+// (nodes/Wiring/quantized_layout.go, PHASE 3 — authoritative by default) does not round the
+// i0->i1 hop's radial offset down to 0 (stepR == defaultNodeR == 200 world units; i0->i1's
+// original authored distance was ~69, well under half a grid step).
+//
 // activeNetTopo is the active cascade: an Input seeds chain-holdnewsendold i0, which
 // forwards its held value to i1. This mirrors topology.json's in08/i0/i1 nodes,
 // wired so the headless run is a genuine multi-hop cascade (the editor's faded
@@ -62,7 +67,7 @@ const activeNetTopo = `{
       ]
     },
     {
-      "id": "i1", "type": "HoldNewSendOld", "scenePolarR": 450.7205343, "scenePolarTheta": 0.7493070915, "scenePolarPhi": 0,
+      "id": "i1", "type": "HoldNewSendOld", "scenePolarR": 650, "scenePolarTheta": 0.7493070915, "scenePolarPhi": 0,
       "data": {"state": {"held": 0}, "sendRules": {"ToNext0": "fireAndForget", "ToNext1": "fireAndForget"}},
       "inputs":  [{"name": "FromPrevHoldNewSendOldNode", "side": "top", "slot": 1}],
       "outputs": [
