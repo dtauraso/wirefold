@@ -170,3 +170,128 @@ func TestComposeRootsNoIncoming(t *testing.T) {
 		}
 	}
 }
+
+// TestSnapRecoversExactGridLayout is the strongest correctness check for PHASE 2: build a
+// layout with KNOWN integer offsets via composeQuantizedLayout, then run
+// snapQuantizedOffsets on the resulting centers and assert it recovers the SAME integers
+// exactly. This is the round-trip snap(compose(offsets)) == offsets on grid-aligned input.
+func TestSnapRecoversExactGridLayout(t *testing.T) {
+	t.Run("3-deep chain", func(t *testing.T) {
+		edges := map[string]EdgeEndpoints{
+			"R->A": {Source: "R", Target: "A"},
+			"A->B": {Source: "A", Target: "B"},
+			"B->C": {Source: "B", Target: "C"},
+		}
+		// iTheta is a colatitude-like offset (always >= 0 by construction: it comes from
+		// angularDistance/acos, which never returns negative) — a negative iTheta would
+		// alias with (-iTheta, iPhi+π/stepPhi) representing the identical direction, so
+		// round-trip test data must stick to iTheta >= 0. Likewise iTheta == 0 (straight
+		// continuation along the pole) makes iPhi (bearing) undefined/degenerate — atan2
+		// resolves it to 0 regardless of the authored value — so round-trip test data
+		// must keep iTheta != 0 wherever iPhi is meant to be recovered.
+		want := map[string]quantizedOffset{
+			"A": {iTheta: 2, iPhi: -1, iR: 1, parent: "R"},
+			"B": {iTheta: 1, iPhi: 3, iR: 2, parent: "A"},
+			"C": {iTheta: 1, iPhi: 2, iR: 1, parent: "B"},
+		}
+		parent, roots := buildSpanningTree(edges)
+		full := map[string]quantizedOffset{"R": {parent: ""}}
+		for id, o := range want {
+			full[id] = o
+		}
+		anchor := vec3{X: 5, Y: -3, Z: 7}
+		layout := composeQuantizedLayout(parent, roots, full, anchor)
+		centers := map[string]vec3{}
+		for id, l := range layout {
+			centers[id] = l.center
+		}
+
+		got := snapQuantizedOffsets(centers, edges)
+		for id, o := range want {
+			g, ok := got[id]
+			if !ok {
+				t.Fatalf("snap missing offset for %q, got=%v", id, got)
+			}
+			if g != o {
+				t.Fatalf("snap[%q] = %+v, want %+v", id, g, o)
+			}
+		}
+		if g := got["R"]; g.parent != "" || g.iTheta != 0 || g.iPhi != 0 || g.iR != 0 {
+			t.Fatalf("root offset = %+v, want zero offset with no parent", g)
+		}
+	})
+
+	t.Run("branching node", func(t *testing.T) {
+		edges := map[string]EdgeEndpoints{
+			"P->X": {Source: "P", Target: "X"},
+			"P->Y": {Source: "P", Target: "Y"},
+			"P->Z": {Source: "P", Target: "Z"},
+		}
+		want := map[string]quantizedOffset{
+			"X": {iTheta: 1, iPhi: 0, iR: 1, parent: "P"},
+			"Y": {iTheta: 1, iPhi: 4, iR: 1, parent: "P"},
+			"Z": {iTheta: 2, iPhi: -3, iR: 2, parent: "P"},
+		}
+		parent, roots := buildSpanningTree(edges)
+		full := map[string]quantizedOffset{"P": {parent: ""}}
+		for id, o := range want {
+			full[id] = o
+		}
+		anchor := vec3{X: 0, Y: 0, Z: 0}
+		layout := composeQuantizedLayout(parent, roots, full, anchor)
+		centers := map[string]vec3{}
+		for id, l := range layout {
+			centers[id] = l.center
+		}
+
+		got := snapQuantizedOffsets(centers, edges)
+		for id, o := range want {
+			g, ok := got[id]
+			if !ok {
+				t.Fatalf("snap missing offset for %q, got=%v", id, got)
+			}
+			if g != o {
+				t.Fatalf("snap[%q] = %+v, want %+v", id, g, o)
+			}
+		}
+	})
+}
+
+// TestSnapComposeStable checks the fixpoint property on ARBITRARY (non-grid-aligned)
+// centers: snapQuantizedOffsets(centers) then composeQuantizedLayout(snapped) should land
+// within one grid step of the input (snapping rounds each node's offset to the nearest
+// grid point, so recomposing lands near, not exactly on, the original arbitrary center).
+func TestSnapComposeStable(t *testing.T) {
+	edges := map[string]EdgeEndpoints{
+		"R->A": {Source: "R", Target: "A"},
+		"A->B": {Source: "A", Target: "B"},
+	}
+	anchor := vec3{X: 0, Y: 0, Z: 0}
+	// Arbitrary (not grid-aligned) centers, reachable from anchor via R.
+	centers := map[string]vec3{
+		"R": anchor,
+		"A": vec3{X: 3.1, Y: 0.4, Z: -2.2},
+		"B": vec3{X: 5.9, Y: 1.7, Z: -3.8},
+	}
+
+	snapped := snapQuantizedOffsets(centers, edges)
+	parent, roots := buildSpanningTree(edges)
+	recomposed := composeQuantizedLayout(parent, roots, snapped, anchor)
+
+	// One grid step tolerance: the maximum positional error introduced by rounding
+	// iTheta/iPhi/iR by up to 0.5 step each, generously bounded by stepR (the radial
+	// step) plus a slack factor for the angular rounding's arc-length contribution at
+	// this radius. Use a concrete, explicit tolerance rather than a vague "close".
+	const posTol = stepR * 1.5
+
+	for id, want := range centers {
+		got, ok := recomposed[id]
+		if !ok {
+			t.Fatalf("recompose missing %q", id)
+		}
+		d := got.center.sub(want).length()
+		if d > posTol {
+			t.Fatalf("recompose[%q] = %v, want within %v of %v (delta %v)", id, got.center, posTol, want, d)
+		}
+	}
+}

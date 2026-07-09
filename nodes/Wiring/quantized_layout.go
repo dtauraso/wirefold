@@ -185,3 +185,100 @@ func composeQuantizedLayout(
 func cart(d dir) vec3 {
 	return polar2cart(polar{R: 1, Theta: d.Theta, Phi: d.Phi})
 }
+
+// snapQuantizedOffsets is PHASE 2: the INVERSE of composeQuantizedLayout — given each
+// node's current world center (heldCenters()) and the edge graph, derive the quantized
+// offset (iTheta, iPhi, iR, parent) that would reproduce that layout under
+// composeQuantizedLayout. It walks the same spanning tree (buildSpanningTree) top-down,
+// so a parent's SNAPPED forward (not its raw/unsnapped world forward) is always resolved
+// before its children are visited — this keeps compose∘snap self-consistent: composing
+// the offsets this function returns reproduces each child's direction using the exact
+// snapped angles, not the pre-snap continuous ones.
+//
+// Roots get offset {0,0,0,""} — buildSpanningTree's convention is that a root's own
+// current center becomes the anchor (matching ComposeQuantizedLayout's md.sceneSphere.Center
+// role for callers that then compose from that same center) and rootForward is its fixed
+// forward, exactly as composeQuantizedLayout assigns on the way out.
+//
+// For a child C of processed parent P:
+//
+//	childDirWorld = cart2polar(centers[C] - centers[P])   // the one cartesian boundary
+//	(c, psi)      = azimuthFrom(P.snappedForward, childDirWorld)
+//	iTheta        = round(c / stepTheta)
+//	iPhi          = round(psi / stepPhi)
+//	iR            = round(|centers[C]-centers[P]| / stepR)
+//	C.snappedForward = fromAxisFrame(P.snappedForward, iTheta*stepTheta, iPhi*stepPhi)
+//
+// Nodes missing a center, or unreachable from a root whose center is known, are omitted
+// (nothing to snap against). Cycles are detected and skipped, mirroring
+// composeQuantizedLayout's visiting-guard.
+func snapQuantizedOffsets(centers map[string]vec3, edgeEndpoints map[string]EdgeEndpoints) map[string]quantizedOffset {
+	parent, roots := buildSpanningTree(edgeEndpoints)
+	children := map[string][]string{}
+	for id, p := range parent {
+		if p == "" {
+			continue
+		}
+		children[p] = append(children[p], id)
+	}
+
+	result := map[string]quantizedOffset{}
+	forwardOf := map[string]dir{}
+	visiting := map[string]bool{}
+
+	var visit func(id string, forward dir, offset quantizedOffset)
+	visit = func(id string, forward dir, offset quantizedOffset) {
+		if visiting[id] {
+			return // cycle guard: never revisit a node already on the current path
+		}
+		if _, done := result[id]; done {
+			return
+		}
+		if _, known := centers[id]; !known {
+			return // nothing to snap against
+		}
+		visiting[id] = true
+		forwardOf[id] = forward
+		result[id] = offset
+		for _, childID := range children[id] {
+			childCenter, ok := centers[childID]
+			if !ok {
+				continue
+			}
+			delta := childCenter.sub(centers[id])
+			r := delta.length()
+			childDirWorld := dir{}
+			if r > 0 {
+				p := cart2polar(delta)
+				childDirWorld = dir{Theta: p.Theta, Phi: p.Phi}
+			}
+			c, psi := azimuthFrom(forward, childDirWorld)
+			iTheta := int(math.Round(c / stepTheta))
+			iPhi := int(math.Round(psi / stepPhi))
+			iR := int(math.Round(r / stepR))
+			snappedForward := fromAxisFrame(forward, float64(iTheta)*stepTheta, float64(iPhi)*stepPhi)
+			visit(childID, snappedForward, quantizedOffset{iTheta: iTheta, iPhi: iPhi, iR: iR, parent: id})
+		}
+		visiting[id] = false
+	}
+
+	for id := range roots {
+		if _, known := centers[id]; known {
+			visit(id, rootForward, quantizedOffset{parent: ""})
+		}
+	}
+	return result
+}
+
+// SnapQuantizedOffsets fills md.quantizedOffsets from the movers' CURRENT held centers
+// (heldCenters()) and the current edge graph (heldEdges()). It is PHASE 2 scaffolding,
+// callable from tests only for now: nothing in the live move/render/persist path calls
+// this yet (md.quantizedLayout still gates ComposeQuantizedLayout, and nothing sets it).
+func (md *MoveDispatch) SnapQuantizedOffsets() {
+	edges := map[string]EdgeEndpoints{}
+	for _, e := range md.heldEdges() {
+		key := e.Source + "->" + e.Target
+		edges[key] = EdgeEndpoints{Source: e.Source, Target: e.Target}
+	}
+	md.quantizedOffsets = snapQuantizedOffsets(md.heldCenters(), edges)
+}
