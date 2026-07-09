@@ -327,44 +327,6 @@ func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 	}
 }
 
-// The rule-builder panel's Center (md.ruleCenter) is STICKY: it survives an empty-space
-// click that clears the transient highlight (md.selected). It only changes when a
-// DIFFERENT node is selected.
-func TestGestureRuleCenterStickyOnEmptyClick(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-
-	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "node", Id: "N7"}
-	md.HandleRawInput(down, nil, nil)
-	up := rawEvent("pointerup", 401, 300)
-	up.Hit = rawHit{Kind: "node", Id: "N7"}
-	md.HandleRawInput(up, nil, nil)
-	if md.selected != "N7" || md.ruleCenter != "N7" {
-		t.Fatalf("after node select: selected=%q ruleCenter=%q want N7,N7", md.selected, md.ruleCenter)
-	}
-
-	// Empty-space click clears the highlight but must NOT touch the sticky panel center.
-	md.HandleRawInput(rawEvent("pointerdown", 400, 300), nil, nil)
-	md.HandleRawInput(rawEvent("pointerup", 401, 300), nil, nil)
-	if md.selected != "" {
-		t.Fatalf("selected=%q want empty after empty-space click", md.selected)
-	}
-	if md.ruleCenter != "N7" {
-		t.Fatalf("ruleCenter=%q want N7 (sticky, unchanged by empty click)", md.ruleCenter)
-	}
-
-	// Selecting a DIFFERENT node changes ruleCenter.
-	down2 := rawEvent("pointerdown", 400, 300)
-	down2.Hit = rawHit{Kind: "node", Id: "N9"}
-	md.HandleRawInput(down2, nil, nil)
-	up2 := rawEvent("pointerup", 401, 300)
-	up2.Hit = rawHit{Kind: "node", Id: "N9"}
-	md.HandleRawInput(up2, nil, nil)
-	if md.ruleCenter != "N9" {
-		t.Fatalf("ruleCenter=%q want N9 after selecting a different node", md.ruleCenter)
-	}
-}
-
 // Hover is Go-owned: a pointer-move over a node's TORUS ring records it as the hovered node
 // (the concentric hover ring emphasizes the ring handle, so it lights only on a torus hit, not
 // a body hit); a move over a port records the hovered port (clearing the node hover); a move
@@ -537,145 +499,9 @@ func TestGestureClickNoCameraChange(t *testing.T) {
 	}
 }
 
-// While the selSpherePoles overlay is ON, a handhold click followed by a node click
-// authors a polarTerm without touching selection; a second (handhold, node) pair completes
-// one polarEq about the latched Center (md.selected).
-func TestGestureSelSpherePolesRuleBuilder(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-	md.ov.selSpherePolesVisible = true
-	md.ruleCenter = "Center1" // authored Center for the equation (set by a center-node click)
-
-	click := func(hit rawHit) {
-		down := rawEvent("pointerdown", 400, 300)
-		down.Hit = hit
-		md.HandleRawInput(down, nil, nil)
-		up := rawEvent("pointerup", 401, 300) // <6px → click, not a drag
-		up.Hit = hit
-		md.HandleRawInput(up, nil, nil)
-	}
-
-	// +θ handhold (term-id 0) → node A.
-	click(rawHit{Kind: "handhold", HandholdTerm: 0})
-	if !md.gest.hasPending {
-		t.Fatalf("after handhold click: hasPending=false, want true")
-	}
-	click(rawHit{Kind: "node", Id: "A"})
-	if md.gest.hasPending {
-		t.Fatalf("after node click: hasPending=true, want false (term completed)")
-	}
-	if len(md.polarEqsSnap()) != 0 {
-		t.Fatalf("polarEqs=%v after ONE term, want none yet", md.polarEqsSnap())
-	}
-	if md.ruleCenter != "Center1" {
-		t.Fatalf("ruleCenter changed to %q by rule-building clicks, want unchanged Center1", md.ruleCenter)
-	}
-
-	// -θ handhold (term-id 2) → node B completes the pair.
-	click(rawHit{Kind: "handhold", HandholdTerm: 2})
-	click(rawHit{Kind: "node", Id: "B"})
-
-	if len(md.polarEqsSnap()) != 1 {
-		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
-	}
-	eq := md.polarEqsSnap()[0]
-	want := polarEq{
-		Center: "Center1",
-		A:      polarTerm{Node: "A", Comp: compTheta, Sign: 1},
-		B:      polarTerm{Node: "B", Comp: compTheta, Sign: -1},
-		Active: true,
-	}
-	if eq != want {
-		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
-	}
-	// The just-committed equation auto-selects so the panel row highlights and the diagram
-	// guides draw immediately (both follow selectedLocks) — no separate click needed.
-	if want := []int{0}; !slicesEqualInt(md.selectedLocks, want) {
-		t.Fatalf("selectedLocks=%v after commit, want %v (new equation auto-selected)", md.selectedLocks, want)
-	}
-}
-
-// While the selSpherePoles overlay is ON, clicking a port on the sticky Center node commits
-// an eqPortTorus lock in ONE step (the torus is always the port's own node — the Center —
-// never a free second-node choice; see MODEL.md) and never touches md.selected (no highlight
-// in select mode).
-func TestGestureSelSpherePolesPortOnCenterCommits(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-	md.ov.selSpherePolesVisible = true
-
-	click := func(hit rawHit) {
-		down := rawEvent("pointerdown", 400, 300)
-		down.Hit = hit
-		md.HandleRawInput(down, nil, nil)
-		up := rawEvent("pointerup", 401, 300) // <6px → click, not a drag
-		up.Hit = hit
-		md.HandleRawInput(up, nil, nil)
-	}
-
-	click(rawHit{Kind: "node", Id: "N1"}) // latches N1 as the sticky Center
-	click(rawHit{Kind: "port", Id: "N1:out:out"})
-
-	if len(md.polarEqsSnap()) != 1 {
-		t.Fatalf("polarEqs=%v, want exactly 1", md.polarEqsSnap())
-	}
-	eq := md.polarEqsSnap()[0]
-	want := polarEq{Kind: eqPortTorus, PortNode: "N1", PortName: "out", PortIsInput: false, TorusNode: "N1", Active: true}
-	if eq != want {
-		t.Fatalf("polarEqs[0]=%+v want %+v", eq, want)
-	}
-	if md.selected != "" {
-		t.Fatalf("selected=%q after port lock, want unchanged empty (no highlight)", md.selected)
-	}
-}
-
-// A port click on a node OTHER than the sticky Center must NOT commit a cross-node lock —
-// the torus is preset to the Center and there is no second-node authoring path anymore.
-func TestGestureSelSpherePolesPortOffCenterIgnored(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-	md.ov.selSpherePolesVisible = true
-
-	click := func(hit rawHit) {
-		down := rawEvent("pointerdown", 400, 300)
-		down.Hit = hit
-		md.HandleRawInput(down, nil, nil)
-		up := rawEvent("pointerup", 401, 300)
-		up.Hit = hit
-		md.HandleRawInput(up, nil, nil)
-	}
-
-	click(rawHit{Kind: "node", Id: "N1"})       // Center = N1
-	click(rawHit{Kind: "port", Id: "N2:in:in"}) // N2 is NOT the Center
-
-	if eqs := md.polarEqsSnap(); len(eqs) != 0 {
-		t.Fatalf("polarEqs=%v after off-Center port click, want none committed", eqs)
-	}
-	if md.selected != "" {
-		t.Fatalf("selected=%q after off-Center port click, want unchanged empty (no highlight)", md.selected)
-	}
-}
-
-// While the selSpherePoles overlay is ON, a plain node-body click with no pending
-// handhold/port/torus does NOT highlight (md.selected stays untouched).
-func TestGestureSelSpherePolesNodeClickNoHighlight(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-	md.ov.selSpherePolesVisible = true
-
-	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "node", Id: "A"}
-	md.HandleRawInput(down, nil, nil)
-	up := rawEvent("pointerup", 401, 300)
-	up.Hit = rawHit{Kind: "node", Id: "A"}
-	md.HandleRawInput(up, nil, nil)
-
-	if md.selected != "" {
-		t.Fatalf("selected=%q after plain node click in select mode, want unchanged empty (no highlight)", md.selected)
-	}
-	if md.ruleCenter != "A" {
-		t.Fatalf("ruleCenter=%q after plain node click in select mode, want A (panel target set)", md.ruleCenter)
-	}
-}
-
-// REGRESSION: with the selSpherePoles overlay OFF, a node click still highlights (sets
-// md.selected) and latches the sticky rule-builder Center (md.ruleCenter).
+// A node click sets md.selected regardless of the selSpherePoles overlay state (the
+// rule-builder authoring path that used to intercept it under selSpherePoles has been
+// removed; click-select is now uniform).
 func TestGestureSelectModeOffStillHighlights(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.ov.selSpherePolesVisible = false
@@ -689,8 +515,5 @@ func TestGestureSelectModeOffStillHighlights(t *testing.T) {
 
 	if md.selected != "A" {
 		t.Fatalf("selected=%q after node click with select mode OFF, want A", md.selected)
-	}
-	if md.ruleCenter != "A" {
-		t.Fatalf("ruleCenter=%q after node click with select mode OFF, want A", md.ruleCenter)
 	}
 }

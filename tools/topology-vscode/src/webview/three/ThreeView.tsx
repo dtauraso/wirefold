@@ -20,8 +20,6 @@ import { decodeSnapshot } from "./buffer-decode";
 import { decodeNavNodes } from "./buffer-nav";
 import { readOverlayLabelsGlobal, readOverlayBadgesGlobal } from "../../schema/buffer-layout";
 import { NavGuides } from "./NavGuides";
-import { SelectedEquationGuides } from "./SelectedEquationGuides";
-import { PortLabels } from "./PortLabels";
 import { postGoRecord } from "../vscode-api";
 import { encodeFadeToggle } from "../../schema/input-layout";
 
@@ -166,13 +164,6 @@ export function ThreeView() {
           {/* NavGuides (polar tori / pole frames / θ-φ angle arcs / handholds), derived from
               the binary buffer (Go-owned node centers/radii/sphereR + selection column). */}
           <NavGuides />
-          {/* Guides for every multi-selected equation (rule-builder.ts eq.selected) —
-              independent of the Overlays master gate, so selecting an equation always
-              shows its own torus/port/nodes/angle arcs. */}
-          <SelectedEquationGuides />
-          {/* Port-name labels for the typed-equation form's portName autocomplete — gated on
-              that autocomplete being open (port-autocomplete-context.tsx), render-only. */}
-          <PortLabels />
           {/* BufferScene's node bodies use a glassy PMREM-lit meshPhysicalMaterial, so it needs
               the env texture. Scene's own ProceduralEnvProvider wraps only the lighting. */}
           <ProceduralEnvProvider>

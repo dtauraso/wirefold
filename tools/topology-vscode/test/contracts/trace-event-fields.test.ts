@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "select", "fade", "hover", "rule-builder", "polar-locks"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "select", "fade", "hover"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -141,14 +141,6 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.x).toBe("number");
     expect(typeof e.y).toBe("number");
     expect(typeof e.z).toBe("number");
-  });
-
-  it("polar-locks event has step, kind, polarLocks, selectedLockIndex", () => {
-    const e = events.find((ev) => ev.kind === "polar-locks")! as Record<string, unknown>;
-    expect(typeof e["step"]).toBe("number");
-    expect(e["kind"]).toBe("polar-locks");
-    expect(Array.isArray(e["polarLocks"])).toBe(true);
-    expect(typeof e["selectedLockIndex"]).toBe("number");
   });
 
 });

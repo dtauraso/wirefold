@@ -34,48 +34,31 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays
-const InputLayoutFingerprint = "v9 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,clearRule:6,deleteSelectedLock:7,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,lock updateAttrs=toggle,active,selected,author,preview authorActions=begin,latch,node,port,torus overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays"
+// INPUT_LAYOUT_FINGERPRINT: v10 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays
+const InputLayoutFingerprint = "v10 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays"
 
 // Record kind bytes (first byte of every record).
 const (
-	inKindResume             = 1  // play  — resume the clock gate
-	inKindPause              = 2  // pause — halt the clock gate
-	inKindResend             = 3  // resend — re-emit full geometry
-	inKindSave               = 4  // save  — Go persists its OWN scene state (bare command)
-	inKindFadeToggle         = 5  // fade  — toggle fade on the Go-owned current selection (bare command)
-	inKindClearRule          = 6  // clear — clear the in-progress polar equation (bare command)
-	inKindDeleteSelectedLock = 7  // delete the panel-focused committed polar-equation lock (bare command)
-	inKindRawInput           = 10 // raw pointer/wheel/home event
-	inKindEditCreate         = 20 // edit op=create (2 strings)
-	inKindEditDelete         = 21 // edit op=delete (2 strings)
-	inKindEditUpdate         = 22 // edit op=update (entity byte + attr byte + numeric payload)
+	inKindResume     = 1  // play  — resume the clock gate
+	inKindPause      = 2  // pause — halt the clock gate
+	inKindResend     = 3  // resend — re-emit full geometry
+	inKindSave       = 4  // save  — Go persists its OWN scene state (bare command)
+	inKindFadeToggle = 5  // fade  — toggle fade on the Go-owned current selection (bare command)
+	inKindRawInput   = 10 // raw pointer/wheel/home event
+	inKindEditCreate = 20 // edit op=create (2 strings)
+	inKindEditDelete = 21 // edit op=delete (2 strings)
+	inKindEditUpdate = 22 // edit op=update (entity byte + attr byte + numeric payload)
 )
 
 // Update attr indices (must match IN_UPDATE_ATTRS ordering in input-layout.ts).
 const (
 	inOverlayAttrToggle = 0
-	inLockAttrActive    = 1
-	inLockAttrSelected  = 2
-	inLockAttrAuthor    = 3
-	inLockAttrPreview   = 4
-)
-
-// Author action bytes (attr=="author" payload's first byte). Must match IN_AUTHOR_ACTIONS
-// ordering in input-layout.ts.
-const (
-	inAuthorBegin = 0
-	inAuthorLatch = 1
-	inAuthorNode  = 2
-	inAuthorPort  = 3
-	inAuthorTorus = 4
 )
 
 // Enum orderings (u8 index → string), shared with input-layout.ts.
 var inEventKinds = []string{"pointerdown", "pointermove", "pointerup", "wheel", "home"}
 var inHitKinds = []string{"port", "handhold", "node", "edge", "torus", "empty"}
-var inUpdateKinds = []string{"overlays", "lock"}
-var inAuthorActions = []string{"begin", "latch", "node", "port", "torus"}
+var inUpdateKinds = []string{"overlays"}
 
 // inOverlayFlags is the overlay FLAG order used by the overlays toggle binary records
 // (a flag's index here is its wire id). It is DERIVED from the
@@ -185,10 +168,6 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 		return stdinMsg{Type: "save"}, true
 	case inKindFadeToggle:
 		return stdinMsg{Type: "fade-toggle"}, true
-	case inKindClearRule:
-		return stdinMsg{Type: "clear-rule"}, true
-	case inKindDeleteSelectedLock:
-		return stdinMsg{Type: "delete-selected-lock"}, true
 	case inKindRawInput:
 		ev, ok := decodeRawInput(r)
 		if !ok {
@@ -211,36 +190,12 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 			stdinCRUDPayload: stdinCRUDPayload{Target: target, TargetHandle: handle},
 		}, true
 	case inKindEditUpdate:
-		// [entityKind][attr][numeric payload]. entity="overlays" (attr toggle, u8 flag-id) or
-		// entity="lock" (attr active/selected, i32 md.polarEqs index).
+		// [entityKind][attr][numeric payload]. entity="overlays" (attr toggle, u8 flag-id).
 		kindByte, err1 := r.u8()
 		if err1 != nil {
 			return stdinMsg{}, false
 		}
 		entity := enumAt(inUpdateKinds, kindByte)
-		if entity == "lock" {
-			attr, errA := r.u8()
-			if errA != nil {
-				return stdinMsg{}, false
-			}
-			switch attr {
-			case inLockAttrActive, inLockAttrSelected:
-				index, errI := r.i32()
-				if errI != nil {
-					return stdinMsg{}, false
-				}
-				attrName := "active"
-				if attr == inLockAttrSelected {
-					attrName = "selected"
-				}
-				return stdinMsg{Type: "edit", Op: "update", Kind: "lock", Attr: attrName, Index: int(index)}, true
-			case inLockAttrAuthor:
-				return decodeAuthor(r)
-			case inLockAttrPreview:
-				return decodePreview(r)
-			}
-			return stdinMsg{}, false
-		}
 		if entity != "overlays" {
 			return stdinMsg{}, false
 		}
@@ -326,81 +281,6 @@ func decodeRawInput(r *recReader) (rawInputMsg, bool) {
 	return ev, true
 }
 
-// decodeAuthor decodes an attr=="author" payload: [actionByte][action-specific fields]. See
-// input-layout.ts encodeAuthor* for the paired encoder and gesture.go's Author* methods for
-// the consumer.
-func decodeAuthor(r *recReader) (stdinMsg, bool) {
-	actionByte, err := r.u8()
-	if err != nil {
-		return stdinMsg{}, false
-	}
-	action := enumAt(inAuthorActions, actionByte)
-	msg := stdinMsg{Type: "edit", Op: "update", Kind: "lock", Attr: "author", authorPreviewPayload: authorPreviewPayload{Action: action}}
-	switch action {
-	case "begin":
-		k, err := r.u8()
-		if err != nil {
-			return stdinMsg{}, false
-		}
-		msg.EqKind = int(k)
-	case "node", "torus":
-		row, err := r.i32()
-		if err != nil {
-			return stdinMsg{}, false
-		}
-		msg.NodeRow = int(row)
-	case "latch":
-		comp, err1 := r.u8()
-		signByte, err2 := r.u8()
-		if err1 != nil || err2 != nil {
-			return stdinMsg{}, false
-		}
-		msg.Comp = int(comp)
-		msg.Sign = 1
-		if signByte != 0 {
-			msg.Sign = -1
-		}
-	case "port":
-		row, err1 := r.i32()
-		name, err2 := r.str()
-		isInput, err3 := r.boolByte()
-		if err1 != nil || err2 != nil || err3 != nil {
-			return stdinMsg{}, false
-		}
-		msg.NodeRow = int(row)
-		msg.PortName = name
-		msg.IsInput = isInput
-	default:
-		return stdinMsg{}, false
-	}
-	return msg, true
-}
-
-// decodePreview decodes an attr=="preview" payload: [previewKind: 0=port,1=node][nodeRow]
-// (+ [portName][isInput] when previewKind==port). See gesture.go's SetHoverPortByRow /
-// SetHoverNodeByRow for the consumer.
-func decodePreview(r *recReader) (stdinMsg, bool) {
-	previewKind, err := r.u8()
-	if err != nil {
-		return stdinMsg{}, false
-	}
-	row, err := r.i32()
-	if err != nil {
-		return stdinMsg{}, false
-	}
-	msg := stdinMsg{Type: "edit", Op: "update", Kind: "lock", Attr: "preview", authorPreviewPayload: authorPreviewPayload{NodeRow: int(row)}}
-	if previewKind == 0 { // port preview
-		name, errN := r.str()
-		isInput, errI := r.boolByte()
-		if errN != nil || errI != nil {
-			return stdinMsg{}, false
-		}
-		msg.PortName = name
-		msg.IsInput = isInput
-	}
-	return msg, true
-}
-
 // --- Encoder (used by Go unit tests; the production encoder is input-layout.ts) ------
 
 type recWriter struct{ b []byte }
@@ -448,103 +328,6 @@ func encodeOverlaysToggle(flag string) []byte {
 	w.u8(enumIndex(inUpdateKinds, "overlays"))
 	w.u8(inOverlayAttrToggle)
 	w.u8(enumIndex(inOverlayFlags, flag))
-	return w.b
-}
-
-// encodeLockUpdate builds a lock active/selected update record (test helper).
-func encodeLockUpdate(attr byte, index int32) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(attr)
-	w.i32(index)
-	return w.b
-}
-
-// encodeAuthorBegin builds an attr=="author" action="begin" record (test helper).
-func encodeAuthorBegin(kind eqKind) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrAuthor)
-	w.u8(inAuthorBegin)
-	w.u8(byte(kind))
-	return w.b
-}
-
-// encodeAuthorNode builds an attr=="author" action="node" record (test helper).
-func encodeAuthorNode(nodeRow int) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrAuthor)
-	w.u8(inAuthorNode)
-	w.i32(int32(nodeRow))
-	return w.b
-}
-
-// encodeAuthorLatch builds an attr=="author" action="latch" record (test helper). sign encodes
-// as 0=+1, 1=-1 (see decodeAuthor).
-func encodeAuthorLatch(comp polarComp, sign float64) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrAuthor)
-	w.u8(inAuthorLatch)
-	w.u8(byte(comp))
-	if sign < 0 {
-		w.u8(1)
-	} else {
-		w.u8(0)
-	}
-	return w.b
-}
-
-// encodeAuthorPort builds an attr=="author" action="port" record (test helper).
-func encodeAuthorPort(nodeRow int, portName string, isInput bool) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrAuthor)
-	w.u8(inAuthorPort)
-	w.i32(int32(nodeRow))
-	w.str(portName)
-	w.boolByte(isInput)
-	return w.b
-}
-
-// encodeAuthorTorus builds an attr=="author" action="torus" record (test helper).
-func encodeAuthorTorus(nodeRow int) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrAuthor)
-	w.u8(inAuthorTorus)
-	w.i32(int32(nodeRow))
-	return w.b
-}
-
-// encodePreviewNode builds an attr=="preview" node-preview record (test helper).
-func encodePreviewNode(nodeRow int) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrPreview)
-	w.u8(1) // previewKind=node
-	w.i32(int32(nodeRow))
-	return w.b
-}
-
-// encodePreviewPort builds an attr=="preview" port-preview record (test helper).
-func encodePreviewPort(nodeRow int, portName string, isInput bool) []byte {
-	w := &recWriter{}
-	w.u8(inKindEditUpdate)
-	w.u8(enumIndex(inUpdateKinds, "lock"))
-	w.u8(inLockAttrPreview)
-	w.u8(0) // previewKind=port
-	w.i32(int32(nodeRow))
-	w.str(portName)
-	w.boolByte(isInput)
 	return w.b
 }
 

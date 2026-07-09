@@ -79,32 +79,9 @@ type stdinMsg struct {
 	Kind string `json:"kind"`
 	Attr string `json:"attr"`
 	Flag string `json:"flag"`
-	// Index carries the md.polarEqs index for op=="update" kind=="lock" (attr active/selected;
-	// locks.go ToggleLockActive/SelectLock). Unused by every other message shape.
-	Index int `json:"index,omitempty"`
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg `json:"event,omitempty"`
 	stdinCRUDPayload
-	// authorPreviewPayload carries op=="update" kind=="lock" attr=="author"/"preview" fields —
-	// the keyboard-authoring channel (gesture.go's Author*/SetHover*ByRow). Already-resolved
-	// tokens only (see input_codec.go decodeInputRecord); no free-text parsing crosses here.
-	authorPreviewPayload
-}
-
-// authorPreviewPayload holds the keyboard-authoring channel's payload fields. Action names
-// (for attr=="author") the atomic builder step: "begin"|"center"|"term"|"port"|"torus".
-// EqKind (action=="begin") is the eqKind to build. NodeRow is the buffer NODE-ROW index
-// (resolved via md.nodeRows exactly like a raycast hit's NodeRow — see nodeFromHit).
-// Comp/Sign (action=="term") are the polarComp index and +1/-1 sign. PortName/IsInput
-// (action=="port", or attr=="preview" for a port preview) name the port on NodeRow.
-type authorPreviewPayload struct {
-	Action   string  `json:"action,omitempty"`
-	EqKind   int     `json:"eqKind,omitempty"`
-	NodeRow  int     `json:"nodeRow,omitempty"`
-	Comp     int     `json:"comp,omitempty"`
-	Sign     float64 `json:"sign,omitempty"`
-	PortName string  `json:"portName,omitempty"`
-	IsInput  bool    `json:"isInput,omitempty"`
 }
 
 // rawInputMsg carries the payload for a top-level type=="raw-input" message (Phase 6):
@@ -257,10 +234,6 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				handleSaveMsg(md)
 			case "fade-toggle":
 				handleFadeToggleMsg(md, tr)
-			case "clear-rule":
-				handleClearRuleMsg(md, tr)
-			case "delete-selected-lock":
-				handleDeleteSelectedLockMsg(md, tr)
 			}
 		}
 	}
@@ -298,15 +271,14 @@ func handleRawInputMsg(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr 
 	}
 }
 
-// handleSaveMsg persists Go's OWN authoritative scene state (overlay visibility,
-// polar-equation locks, and the scene sphere) in response to the bare "save" command.
-// The camera pose is already continuously flushed elsewhere (scene_camera_persist.go).
+// handleSaveMsg persists Go's OWN authoritative scene state (overlay visibility and the
+// scene sphere) in response to the bare "save" command. The camera pose is already
+// continuously flushed elsewhere (scene_camera_persist.go).
 func handleSaveMsg(md *MoveDispatch) {
 	if md == nil {
 		return
 	}
 	md.overlaysPersist.schedule(md.ov)
-	md.locksPersist.schedule(md.polarEqsSnap())
 	// Persist the scene sphere immediately (not debounced) so save reliably activates
 	// the polar-load path (scene_sphere_persist.go LoadSceneSphere) — until the sphere
 	// is in scene.json, reload stays on cartesian x/y/z.
@@ -319,23 +291,6 @@ func handleSaveMsg(md *MoveDispatch) {
 func handleFadeToggleMsg(md *MoveDispatch, tr *T.Trace) {
 	if md != nil {
 		md.ToggleFadeSelection(tr)
-	}
-}
-
-// handleClearRuleMsg discards the in-progress polar equation (pending term +
-// accumulated terms) the rule-builder is authoring. Go owns the state; it resets it and
-// re-emits the RuleBuilder block so the panel clears.
-func handleClearRuleMsg(md *MoveDispatch, tr *T.Trace) {
-	if md != nil {
-		md.clearRuleBuilding(tr)
-	}
-}
-
-// handleDeleteSelectedLockMsg deletes the panel-focused committed polar-equation lock
-// (selectedLocks). Go re-guards (only deletes when deactivated).
-func handleDeleteSelectedLockMsg(md *MoveDispatch, tr *T.Trace) {
-	if md != nil {
-		md.DeleteSelectedLock(tr)
 	}
 }
 
@@ -431,54 +386,12 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
 			// Flip the named flag — Go owns the state; TS just signals the flip.
 			if fn, ok := overlayToggles[msg.Flag]; ok {
 				fn(md, tr)
-				// Turning the rule-builder's overlay off ends the authoring session:
-				// clear any half-finished pending term / accumulated ruleTerms.
-				if msg.Flag == "selSpherePoles" && !md.ov.selSpherePolesVisible {
-					md.clearRuleBuilding(tr)
-				}
 			}
 		}
 		// Persist ON CHANGE (mirrors fade/camera): schedule a debounced write of the new
 		// overlay snapshot so toggles survive a reload without an explicit save. No-op until
 		// EnableEditPersist arms the writer (nil-receiver / empty-treeRoot guard in schedule).
 		md.overlaysPersist.schedule(md.ov)
-	case "lock":
-		if md == nil {
-			return
-		}
-		switch msg.Attr {
-		case "active":
-			md.ToggleLockActive(msg.Index, tr)
-		case "selected":
-			md.SelectLock(msg.Index, tr)
-		case "author":
-			// Keyboard-authoring channel: an already-resolved token drives the SAME builder
-			// the click path drives (gesture.go's Author* methods). Fire-and-forget.
-			switch msg.Action {
-			case "begin":
-				md.AuthorBegin(eqKind(msg.EqKind), tr)
-			case "node":
-				md.AuthorNode(msg.NodeRow, tr)
-			case "latch":
-				md.AuthorLatchHalfTerm(polarComp(msg.Comp), msg.Sign, tr)
-			case "port":
-				// The torus is ALWAYS the port's own node (never a free second-node choice —
-				// see MODEL.md); AuthorPort commits the `port ∈ torus` lock in one step.
-				md.AuthorPort(msg.NodeRow, msg.PortName, msg.IsInput, tr)
-			case "torus":
-				// Retained for wire-format/parity only: the torus is no longer a pickable
-				// second side of the lock (it's preset to the port's own node), so this
-				// action is now a no-op.
-			}
-		case "preview":
-			// Preview highlight for the keyboard-authoring channel: mirrors updateHover's
-			// pointer-hover write so a typed token's target highlights in the streamed buffer.
-			if msg.PortName != "" {
-				md.SetHoverPortByRow(msg.NodeRow, msg.PortName, msg.IsInput, tr)
-			} else {
-				md.SetHoverNodeByRow(msg.NodeRow, tr)
-			}
-		}
 	}
 	// EDIT_UPDATE_KINDS_END
 }

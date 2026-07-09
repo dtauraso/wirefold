@@ -489,7 +489,6 @@ func (b *buildCtx) buildMoveDispatch() {
 		md.sceneSphere = b.sphere
 	}
 
-	md.installLocked()
 	// Phase 3: the quantized layout is authoritative by default — md.quantizedOffsets was
 	// already resolved (stored offset, or snapped from the pre-quantized center) by
 	// computeQuantizedLayout, which also overwrote b.nodeGeoms so the nodeMovers newMoveDispatch

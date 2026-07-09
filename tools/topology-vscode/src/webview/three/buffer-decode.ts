@@ -4,7 +4,7 @@
 // returns DataView slices over each column block — zero-copy, no store writes.
 //
 // Layout (little-endian, packed):
-//   Header   40 bytes : [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][polarLockCount] (u32 each)
+//   Header   36 bytes : [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount] (u32 each)
 //   Bead     beadCount × BEAD_STRIDE bytes
 //   Node     nodeCount × NODE_STRIDE bytes
 //   Interior nodeCount × INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes
@@ -12,8 +12,6 @@
 //   Port     portCount × PORT_STRIDE bytes   (flattened over nodes in node-row order)
 //   Camera   CAMERA_STRIDE bytes   (always 1 row)
 //   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
-//   RuleBuilder RULE_BUILDER_STRIDE bytes (always 1 row)
-//   PolarLock polarLockCount × POLAR_LOCK_STRIDE bytes (committed polar-eq locks)
 //   Label    labelBytesCount bytes (node labels' UTF-8 bytes, node-row order)
 //   Event    eventCount × EVENT_STRIDE bytes (per-tick causal trace events; .probe log only)
 //   PortName portNameBytesCount bytes (port names' UTF-8 bytes, flattened port-row order)
@@ -28,8 +26,6 @@ import {
   PORT_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
-  RULE_BUILDER_STRIDE,
-  POLAR_LOCK_STRIDE,
   EVENT_STRIDE,
   readNodeLabelOff,
   readNodeLabelLen,
@@ -74,12 +70,6 @@ export interface DecodedSnapshot {
   cameraView: DataView;
   /** DataView over the single overlay row. */
   overlayView: DataView;
-  /** DataView over the single rule-builder row (in-progress polar-equation authoring). */
-  ruleBuilderView: DataView;
-  /** Number of committed polar-equation lock rows (md.polarEqs order). */
-  polarLockCount: number;
-  /** DataView over the PolarLock block; byteLength = polarLockCount × POLAR_LOCK_STRIDE. */
-  polarLockView: DataView;
   /** Total bytes in the trailing label section (self-sizing via the header labelBytesCount). */
   labelBytesCount: number;
   /** Uint8 view over the label-bytes section: every node's label UTF-8 bytes concatenated in
@@ -117,7 +107,6 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const eventCount          = hdr.getUint32(24, true);
   const portNameBytesCount  = hdr.getUint32(28, true);
   const edgeLabelBytesCount = hdr.getUint32(32, true);
-  const polarLockCount      = hdr.getUint32(36, true);
 
   const interiorCount = nodeCount * INTERIOR_SLOTS_PER_NODE;
 
@@ -126,11 +115,10 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const interiorBytes  = interiorCount * INTERIOR_STRIDE;
   const edgeBytes      = edgeCount * EDGE_STRIDE;
   const portBytes      = portCount * PORT_STRIDE;
-  const polarLockBytes = polarLockCount * POLAR_LOCK_STRIDE;
   const eventBytes     = eventCount * EVENT_STRIDE;
   const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
-                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE +
-                      polarLockBytes + labelBytesCount + eventBytes + portNameBytesCount + edgeLabelBytesCount;
+                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE +
+                      labelBytesCount + eventBytes + portNameBytesCount + edgeLabelBytesCount;
 
   if (buf.byteLength < expectedLen) return null;
 
@@ -157,12 +145,6 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const overlayView = new DataView(buf, off, OVERLAY_STRIDE);
   off += OVERLAY_STRIDE;
 
-  const ruleBuilderView = new DataView(buf, off, RULE_BUILDER_STRIDE);
-  off += RULE_BUILDER_STRIDE;
-
-  const polarLockView = new DataView(buf, off, polarLockBytes);
-  off += polarLockBytes;
-
   const labelBytes = new Uint8Array(buf, off, labelBytesCount);
   off += labelBytesCount;
 
@@ -176,8 +158,7 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
 
   return {
     tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount,
-    interiorView, edgeView, portView, cameraView, overlayView, ruleBuilderView,
-    polarLockCount, polarLockView, labelBytesCount,
+    interiorView, edgeView, portView, cameraView, overlayView, labelBytesCount,
     labelBytes, eventCount, eventView, portNameBytes, edgeLabelBytes,
   };
 }

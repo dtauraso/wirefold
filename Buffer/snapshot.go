@@ -11,7 +11,7 @@
 //
 // Snapshot layout (little-endian, packed):
 //
-//	Header   40 bytes: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][polarLockCount] (u32 each)
+//	Header   36 bytes: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount] (u32 each)
 //	Bead     beadCount × BufBeadStride bytes
 //	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags + label off/len)
 //	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
@@ -19,8 +19,6 @@
 //	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
-//	RuleBuilder BufRuleBuilderStride bytes     (always 1 row; in-progress polar-eq authoring)
-//	PolarLock polarLockCount × BufPolarLockStride bytes (committed polar-eq locks, md.polarEqs order)
 //	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
 //	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
@@ -82,16 +80,9 @@ type SnapshotState struct {
 	directlyFadedNodes map[string]bool
 	directlyFadedEdges map[string]bool
 
-	// Camera, overlay, and rule-builder singletons (always one row each in the snapshot).
-	camera      cameraSnapState
-	overlay     overlaySnapState
-	ruleBuilder ruleBuilderSnapState
-
-	// polarLocks/selectedLockIndex mirror the COMMITTED polar-equation locks (md.polarEqs)
-	// and the focused row index, from KindPolarLocks events (full-mirror, variable-length —
-	// like edges). Block row i == polarLocks[i] == md.polarEqs index i.
-	polarLocks        []polarLockSnapState
-	selectedLockIndex int
+	// Camera and overlay singletons (always one row each in the snapshot).
+	camera  cameraSnapState
+	overlay overlaySnapState
 
 	// tick is the monotonic snapshot sequence counter.
 	tick uint32
@@ -269,60 +260,6 @@ type overlaySnapState struct {
 	selMode uint8
 }
 
-// ruleBuilderTermSnap is one completed term's identity mirrored from the gesture FSM:
-// the node id and its packed (comp,sign) code (matches T.RuleTermPayload.Code — +θ=0,
-// +φ=1, −θ=2, −φ=3).
-type ruleBuilderTermSnap struct {
-	node string
-	code int
-}
-
-// ruleBuilderSnapState mirrors the rule-builder block (single row): the polar-equation
-// authoring session currently in progress under the selSpherePoles overlay (gesture.go
-// trySelectSphereRule). center/hasPending/pendingCode/terms are mirrored verbatim from
-// KindRuleBuilder events; node ids are resolved to buffer node-row indices at
-// buildSnapshot time (the same pattern edges' srcNode/dstNode use).
-type ruleBuilderSnapState struct {
-	center      string
-	hasPending  bool
-	pendingCode int
-	terms       []ruleBuilderTermSnap
-	// pendingPortNode/pendingPortName/pendingPortIsInput/pendingTorusNode mirror the
-	// in-progress `port ∈ torus` authoring capture (gesture.go hasPendingPort/
-	// hasPendingTorus), independent of hasPending/pendingCode/terms above. Empty
-	// pendingPortNode/pendingTorusNode = that side not yet picked; resolved to buffer rows
-	// at build time (same pattern as center/terms).
-	pendingPortNode    string
-	pendingPortName    string
-	pendingPortIsInput bool
-	pendingTorusNode   string
-}
-
-// polarLockSnapState is one committed polar-equation lock mirrored from a KindPolarLocks
-// event: node ids (resolved to buffer rows at build time, like edges' srcNode/dstNode) and
-// each term's packed (comp,sign) code, plus whether it is currently enforced.
-type polarLockSnapState struct {
-	center string
-	aNode  string
-	aCode  int
-	bNode  string
-	bCode  int
-	active bool
-	// kind discriminates the row: 0 = node/node (fields above), 1 = port∈torus (fields
-	// below). portNode/portName/portIsInput/torusNode are resolved to buffer rows at build
-	// time, same as center/aNode/bNode.
-	kind        int
-	portNode    string
-	portName    string
-	portIsInput bool
-	torusNode   string
-	// selected mirrors md.selectedLocks membership for this row's equation index.
-	selected bool
-	// owned reports whether this equation's owner (Center, or TorusNode for eqPortTorus) is
-	// the panel's current center (md.ruleCenter) — the equation panel shows Owned rows only.
-	owned bool
-}
-
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
 // to out. Pass nil for out to build snapshots without emitting them (useful in
 // tests that only inspect state).
@@ -397,49 +334,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot()
 	case T.KindOverlaysVis:
 		s.overlay.overlaysVis = boolU8(ev.Visible)
-		s.emitSnapshot()
-
-	case T.KindRuleBuilder:
-		// Mirror the FULL current rule-builder session state (same full-mirror pattern as
-		// KindFade): Go owns the gesture FSM's in-progress polar-equation authoring; the
-		// snapshot just reflects it. Node ids are resolved to buffer rows at build time.
-		terms := make([]ruleBuilderTermSnap, len(ev.RuleTerms))
-		for i, t := range ev.RuleTerms {
-			terms[i] = ruleBuilderTermSnap{node: t.Node, code: t.Code}
-		}
-		s.ruleBuilder = ruleBuilderSnapState{
-			center:             ev.RuleCenter,
-			hasPending:         ev.RuleHasPending,
-			pendingCode:        ev.RulePendingCode,
-			terms:              terms,
-			pendingPortNode:    ev.RulePendingPortNode,
-			pendingPortName:    ev.RulePendingPortName,
-			pendingPortIsInput: ev.RulePendingPortIsInput,
-			pendingTorusNode:   ev.RulePendingTorusNode,
-		}
-		s.emitSnapshot()
-
-	case T.KindPolarLocks:
-		// Mirror the FULL committed polar-equation lock list (same full-mirror pattern as
-		// KindRuleBuilder): node ids are resolved to buffer rows at build time.
-		locks := make([]polarLockSnapState, len(ev.PolarLocks))
-		for i, l := range ev.PolarLocks {
-			locks[i] = polarLockSnapState{
-				center: l.Center,
-				aNode:  l.ANode, aCode: l.ACode,
-				bNode: l.BNode, bCode: l.BCode,
-				active:      l.Active,
-				kind:        l.Kind,
-				portNode:    l.PortNode,
-				portName:    l.PortName,
-				portIsInput: l.PortIsInput,
-				torusNode:   l.TorusNode,
-				selected:    l.Selected,
-				owned:       l.Owned,
-			}
-		}
-		s.polarLocks = locks
-		s.selectedLockIndex = ev.SelectedLockIndex
 		s.emitSnapshot()
 
 	case T.KindPosition:
@@ -845,28 +739,6 @@ func (s *SnapshotState) nodeRowIndex(nodeID string) int {
 	return -1
 }
 
-// portRowIndex returns the buffer PORT-ROW index for a (node, port, isInput) identity, or -1
-// when unresolved (id empty or not (yet) a registered port). Used to resolve an eqPortTorus
-// lock's constrained port to a buffer row at build time — the same row a `port ∈ torus` lock's
-// PortRow column carries, letting the renderer resolve the port's human name via the Port
-// block's own PortNameOff/PortNameLen columns with no duplicated string storage. Linear scan:
-// the port table is small and this runs only for the (rare) committed polar-lock list.
-func (s *SnapshotState) portRowIndex(node, port string, isInput bool) int {
-	if node == "" || port == "" {
-		return -1
-	}
-	tbl := s.portTable.Load()
-	if tbl == nil {
-		return -1
-	}
-	for i, e := range *tbl {
-		if e.Node == node && e.Port == port && e.IsInput == isInput {
-			return i
-		}
-	}
-	return -1
-}
-
 // clearTransients resets all transient node event flags to 0 after snapshot emit.
 func (s *SnapshotState) clearTransients() {
 	for i := range s.nodes {
@@ -944,7 +816,6 @@ type snapshotBuild struct {
 	beadCount, nodeCount, edgeCount uint32
 	interiorCount, portCount        int
 	eventCount                      int
-	polarLockCount                  uint32
 
 	fadedNodes     map[string]bool
 	fadedEdges     map[string]bool
@@ -1066,7 +937,6 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 	b.edgeLabelBytesCount = len(b.edgeLabelBytes)
 
 	b.eventCount = len(s.pendingEvents)
-	b.polarLockCount = uint32(len(s.polarLocks))
 
 	b.size = BufHeaderSize +
 		int(b.beadCount)*BufBeadStride +
@@ -1076,8 +946,6 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 		b.portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
-		BufRuleBuilderStride +
-		int(b.polarLockCount)*BufPolarLockStride +
 		b.labelBytesCount +
 		b.eventCount*BufEventStride +
 		b.portNameBytesCount +
@@ -1086,10 +954,10 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 	return b
 }
 
-// writeHeader writes the fixed 40-byte header and increments s.tick. Returns the offset after
+// writeHeader writes the fixed 36-byte header and increments s.tick. Returns the offset after
 // the header.
 func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
-	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][polarLockCount]
+	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount]
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
 	off += 4
@@ -1108,8 +976,6 @@ func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
 	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portNameBytesCount))
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], uint32(b.edgeLabelBytesCount))
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], b.polarLockCount)
 	off += 4
 	s.tick++
 	return off
@@ -1220,61 +1086,6 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 	return off + BufOverlayStride
 }
 
-// writeRuleBuilderBlock writes the RuleBuilder block (always 1 row): the in-progress
-// polar-equation authoring session. PendingCode/T0Code/T1Code use 255 for "absent" (matches
-// the TS RULE_BUILDER_* decode sentinel); Row fields use -1 (matches every other row-index
-// column in the buffer).
-func (s *SnapshotState) writeRuleBuilderBlock(buf []byte, off int) int {
-	rb := s.ruleBuilder
-	centerRow := int32(s.nodeRowIndex(rb.center))
-	pendingCode := uint8(255)
-	if rb.hasPending {
-		pendingCode = uint8(rb.pendingCode)
-	}
-	t0Row, t0Code := int32(-1), uint8(255)
-	if len(rb.terms) > 0 {
-		t0Row = int32(s.nodeRowIndex(rb.terms[0].node))
-		t0Code = uint8(rb.terms[0].code)
-	}
-	t1Row, t1Code := int32(-1), uint8(255)
-	if len(rb.terms) > 1 {
-		t1Row = int32(s.nodeRowIndex(rb.terms[1].node))
-		t1Code = uint8(rb.terms[1].code)
-	}
-	pendingPortRow := int32(-1)
-	pendingPortIsInput := boolU8(false)
-	if rb.pendingPortNode != "" {
-		pendingPortRow = int32(s.portRowIndex(rb.pendingPortNode, rb.pendingPortName, rb.pendingPortIsInput))
-		pendingPortIsInput = boolU8(rb.pendingPortIsInput)
-	}
-	pendingTorusRow := int32(-1)
-	if rb.pendingTorusNode != "" {
-		pendingTorusRow = int32(s.nodeRowIndex(rb.pendingTorusNode))
-	}
-	SetRuleBuilderRow(buf[off:], centerRow, pendingCode, uint8(len(rb.terms)), t0Row, t0Code, t1Row, t1Code, int32(s.selectedLockIndex), pendingPortRow, pendingPortIsInput, pendingTorusRow)
-	return off + BufRuleBuilderStride
-}
-
-// writePolarLockBlock writes one row per committed polar-equation lock, IN ORDER (block row i
-// == md.polarEqs index i on the Go side). Node ids resolved to buffer rows at build time.
-func (s *SnapshotState) writePolarLockBlock(buf []byte, off int, b *snapshotBuild) int {
-	polarLockBuf := buf[off : off+int(b.polarLockCount)*BufPolarLockStride]
-	for i, l := range s.polarLocks {
-		SetPolarLockRow(polarLockBuf, i,
-			int32(s.nodeRowIndex(l.center)),
-			int32(s.nodeRowIndex(l.aNode)), uint8(l.aCode),
-			int32(s.nodeRowIndex(l.bNode)), uint8(l.bCode),
-			boolU8(l.active),
-			uint8(l.kind),
-			int32(s.portRowIndex(l.portNode, l.portName, l.portIsInput)),
-			boolU8(l.portIsInput),
-			int32(s.nodeRowIndex(l.torusNode)),
-			boolU8(l.selected),
-			boolU8(l.owned))
-	}
-	return off + int(b.polarLockCount)*BufPolarLockStride
-}
-
 // writeLabelBytesSection writes the Label bytes section (self-sizing via header
 // labelBytesCount): every node's label UTF-8 bytes concatenated in node-row order. Each
 // node's LabelOff/LabelLen columns slice into this section; the numeric node row carries its
@@ -1324,8 +1135,6 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	off = s.writePortBlock(buf, off, b)
 	off = s.writeCameraBlock(buf, off)
 	off = s.writeOverlayBlock(buf, off)
-	off = s.writeRuleBuilderBlock(buf, off)
-	off = s.writePolarLockBlock(buf, off, b)
 	off = s.writeLabelBytesSection(buf, off, b)
 	off = s.writeEventBlockSection(buf, off, b)
 	off = s.writePortNameBytesSection(buf, off, b)

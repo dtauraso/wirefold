@@ -20,13 +20,6 @@ import {
   encodeEditCreate,
   encodeEditDelete,
   encodeOverlaysToggle,
-  encodeAuthorBegin,
-  encodeAuthorNode,
-  encodeAuthorLatch,
-  encodeAuthorPort,
-  encodeAuthorTorus,
-  encodePreviewNode,
-  encodePreviewPort,
   decodeInputRecord,
   frameRecord,
 } from "../src/schema/input-layout";
@@ -84,74 +77,6 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
     expect(new Uint8Array(encodeOverlaysToggle("overlays"))[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("overlays"));
   });
 
-});
-
-describe("lock author/preview edit-update — round-trip", () => {
-  it("author begin/node/latch/port/torus", () => {
-    expect(decodeInputRecord(encodeAuthorBegin(1))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "author",
-      action: "begin",
-      eqKind: 1,
-    });
-    expect(decodeInputRecord(encodeAuthorNode(5))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "author",
-      action: "node",
-      nodeRow: 5,
-    });
-    expect(decodeInputRecord(encodeAuthorLatch(1, -1))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "author",
-      action: "latch",
-      comp: 1,
-      sign: -1,
-    });
-    expect(decodeInputRecord(encodeAuthorLatch(2, 1))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "author",
-      action: "latch",
-      comp: 2,
-      sign: 1,
-    });
-    expect(decodeInputRecord(encodeAuthorPort(1, "out", false))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "author",
-      action: "port",
-      nodeRow: 1,
-      portName: "out",
-      isInput: false,
-    });
-    expect(decodeInputRecord(encodeAuthorTorus(4))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "author",
-      action: "torus",
-      nodeRow: 4,
-    });
-  });
-
-  it("preview node/port", () => {
-    expect(decodeInputRecord(encodePreviewNode(6))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "preview",
-      nodeRow: 6,
-    });
-    expect(decodeInputRecord(encodePreviewPort(7, "in", true))).toEqual({
-      kind: "edit-update",
-      entity: "lock",
-      attr: "preview",
-      nodeRow: 7,
-      portName: "in",
-      isInput: true,
-    });
-  });
 });
 
 describe("fingerprint self-consistency", () => {
