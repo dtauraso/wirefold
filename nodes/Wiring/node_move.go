@@ -582,6 +582,15 @@ type MoveDispatch struct {
 	hoverNode  string
 	hoverPort  string
 	hoverInput bool
+	// quantizedLayout gates the PHASE 1 quantized hierarchical polar layout
+	// (quantized_layout.go) — default false. When false (always, currently — nothing
+	// sets it yet), nothing reads quantizedOffsets or calls composeQuantizedLayout from
+	// the live path; this is purely additive scaffolding under test.
+	quantizedLayout bool
+	// quantizedOffsets is the per-node quantized polar offset + resolved parent
+	// (quantized_layout.go quantizedOffset), keyed by node id. Nil/empty until
+	// authored — Phase 1 leaves it unpopulated in production.
+	quantizedOffsets map[string]quantizedOffset
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
