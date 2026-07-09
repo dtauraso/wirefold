@@ -63,55 +63,7 @@ type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
-  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
-  // lock: active/selected both carry an i32 md.polarEqs index payload (locks.go
-  // ToggleLockActive/SelectLock).
-  | { type: "edit"; op: "update"; kind: "lock"; attr: "active" | "selected"; index: number }
-  // lock attr="author": the keyboard-authoring channel drives the SAME builder the click
-  // path (gesture.go trySelectSphereRule) drives. nodeRow is an ALREADY-RESOLVED buffer
-  // NODE-ROW index (exactly like a raycast hit's nodeRow) — no free-text parsing crosses
-  // this seam. comp/sign only apply to action="term"; portName/isInput only to action="port".
-  | {
-      type: "edit";
-      op: "update";
-      kind: "lock";
-      attr: "author";
-      action: "begin";
-      eqKind: number;
-    }
-  | { type: "edit"; op: "update"; kind: "lock"; attr: "author"; action: "center"; nodeRow: number }
-  | {
-      type: "edit";
-      op: "update";
-      kind: "lock";
-      attr: "author";
-      action: "term";
-      nodeRow: number;
-      comp: number;
-      sign: number;
-    }
-  | {
-      type: "edit";
-      op: "update";
-      kind: "lock";
-      attr: "author";
-      action: "port";
-      nodeRow: number;
-      portName: string;
-      isInput: boolean;
-    }
-  | { type: "edit"; op: "update"; kind: "lock"; attr: "author"; action: "torus"; nodeRow: number }
-  // lock attr="preview": a keyboard-authoring preview highlight, mirroring pointer hover
-  // (gesture.go SetHoverPortByRow/SetHoverNodeByRow). portName present = port preview.
-  | {
-      type: "edit";
-      op: "update";
-      kind: "lock";
-      attr: "preview";
-      nodeRow: number;
-      portName?: string;
-      isInput?: boolean;
-    };
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag };
 // EDIT_MSG_END
 
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel
@@ -203,16 +155,6 @@ export type WebviewToHostMsg =
   // go-record). Toggles fade on Go's OWN current selection — no payload. Kept in this union
   // + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's "fade-toggle".
   | { type: "fade-toggle" }
-  // The bare CLEAR-RULE command (single kind byte in schema/input-layout.ts, sent via
-  // go-record). Clears the in-progress polar equation the rule-builder is authoring — no
-  // payload. Kept here + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
-  // "clear-rule".
-  | { type: "clear-rule" }
-  // The bare DELETE-SELECTED-LOCK command (single kind byte in schema/input-layout.ts, sent
-  // via go-record). Deletes the panel-focused committed polar-equation lock — no payload;
-  // Go re-guards (only deletes when deactivated). Kept here + WEBVIEW_TO_HOST_TYPES so
-  // message-kind-parity tracks stdin_reader.go's "delete-selected-lock".
-  | { type: "delete-selected-lock" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
@@ -282,7 +224,7 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "clear-rule", "delete-selected-lock", "raw-input", "go-record",
+  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

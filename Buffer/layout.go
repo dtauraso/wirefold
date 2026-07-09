@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 19
+const BufLayoutVersion = 20
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -233,74 +233,6 @@ type bufLayoutOverlay struct {
 	SelMode uint8 `buf:"u8"`
 }
 
-// bufLayoutRuleBuilder defines the polar rule-builder session column block (always 1 row).
-// Mirrors the in-progress polar-equation rule being authored by the gesture FSM's
-// selSpherePoles session (gesture.go trySelectSphereRule): the latched Center node, any
-// half-finished pending term (a clicked handhold awaiting a node), and the 0..2 completed
-// terms accumulated so far. Matched from KindRuleBuilder trace events. Rows are buffer
-// NODE-ROW indices (-1 = none); a term code packs (comp,sign) to a single u8 (matches
-// handholdTerm): +θ=0, +φ=1, −θ=2, −φ=3; 255 = no term at that slot.
-type bufLayoutRuleBuilder struct {
-	CenterRow   int32 `buf:"i32"` // selected Center node's buffer row (-1 = none)
-	PendingCode uint8 `buf:"u8"`  // half-finished pending term's (comp,sign) code; 255 = none
-	TermCount   uint8 `buf:"u8"`  // number of completed terms accumulated (0..2)
-	T0Row       int32 `buf:"i32"` // first completed term's node row (-1 = absent)
-	T0Code      uint8 `buf:"u8"`  // first completed term's code; 255 = absent
-	T1Row       int32 `buf:"i32"` // second completed term's node row (-1 = absent)
-	T1Code      uint8 `buf:"u8"`  // second completed term's code; 255 = absent
-	// SelectedLockIndex is the md.polarEqs index of the equation the user has clicked in
-	// the committed-equations list (PolarLock block below), or -1 = none focused. Go-owned
-	// (MoveDispatch.selectedLockIndex); the panel highlights this row and the Delete key
-	// targets it.
-	SelectedLockIndex int32 `buf:"i32"` // -1 = no lock row focused
-	// Pending `port ∈ torus` authoring capture (gesture.go trySelectSphereRule's
-	// hasPendingPort/hasPendingTorus): independent of the node/node pending term above, so
-	// both may be inert at once. -1 = that side not yet picked; the panel renders whichever
-	// side IS picked plus a placeholder for the other, mirroring the node/node pending-term
-	// preview.
-	PendingPortRow     int32 `buf:"i32"` // constrained port's buffer PORT-ROW index (-1 = none)
-	PendingPortIsInput uint8 `buf:"u8"`  // 1 = input port, 0 = output port (meaningful only if PendingPortRow != -1)
-	PendingTorusRow    int32 `buf:"i32"` // pending torus-owning node's buffer NODE-ROW index (-1 = none)
-}
-
-// bufLayoutPolarLock defines one row of the COMMITTED polar-equation locks column block.
-// One row per md.polarEqs entry, IN ORDER — block row i == md.polarEqs index i (the same
-// index the panel sends back on toggle/select/delete). Matched from KindPolarLocks trace
-// events (full-mirror, like Edge/RuleBuilder — no incremental diffing). CenterRow/ARow/BRow
-// are buffer NODE-ROW indices (-1 = node id not found); ACode/BCode pack each term's
-// (comp,sign) with the same code as RuleBuilder's term codes (+θ=0,+φ=1,−θ=2,−φ=3,r=4).
-//
-// Kind discriminates the row: 0 = node/node (CenterRow/ARow/ACode/BRow/BCode above),
-// 1 = port∈torus (PortRow/PortIsInput/TorusRow below; CenterRow/ARow/BRow are -1 and
-// ACode/BCode are 0 for that kind). A port∈torus row's human port NAME is NOT duplicated
-// here — the renderer resolves it via PortRow indexing the Port block's own
-// PortNameOff/PortNameLen columns (the port-name-bytes section already carries it).
-type bufLayoutPolarLock struct {
-	CenterRow int32 `buf:"i32"` // equation's Center node buffer row (-1 = unresolved)
-	ARow      int32 `buf:"i32"` // term A's node buffer row (-1 = unresolved)
-	ACode     uint8 `buf:"u8"`  // term A's (comp,sign) code
-	BRow      int32 `buf:"i32"` // term B's node buffer row (-1 = unresolved)
-	BCode     uint8 `buf:"u8"`  // term B's (comp,sign) code
-	Active    uint8 `buf:"u8"`  // 1 = equation currently enforced; 0 = deactivated
-	Kind      uint8 `buf:"u8"`  // 0 = node/node, 1 = port∈torus
-	// eqPortTorus fields (Kind==1). PortRow is the constrained port's buffer PORT-ROW index
-	// (-1 = unresolved); TorusRow is the owning node's buffer NODE-ROW index for the torus
-	// (-1 = unresolved). Inert this stage — no geometric effect, display only.
-	PortRow     int32 `buf:"i32"` // constrained port's buffer PORT-ROW index (-1 = unresolved)
-	PortIsInput uint8 `buf:"u8"`  // 1 = input port, 0 = output port (only meaningful for Kind==1)
-	TorusRow    int32 `buf:"i32"` // torus-owning node's buffer NODE-ROW index (-1 = unresolved)
-	// Selected mirrors md.selectedLocks membership for THIS row's equation index — 1 = this
-	// equation is one of (possibly several) currently-selected locks, 0 = not selected.
-	// Authoritative per-row selection state; the scalar RuleBuilder.SelectedLockIndex column
-	// is no longer used to drive per-row highlight (kept for wire-shape stability, set to -1).
-	Selected uint8 `buf:"u8"`
-	// Owned reports whether this equation's owner (Center for a node/node lock, TorusNode
-	// — the "owning node" — for a port∈torus lock) is the panel's current center
-	// (md.ruleCenter). The equation panel shows Owned rows only, replacing the old
-	// participation filter (center OR either term OR the port's node OR the torus).
-	Owned uint8 `buf:"u8"`
-}
-
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
 // the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
@@ -339,7 +271,5 @@ var _ = [...]any{
 	bufLayoutPort{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
-	bufLayoutRuleBuilder{},
-	bufLayoutPolarLock{},
 	bufLayoutEvent{},
 }

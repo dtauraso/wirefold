@@ -99,21 +99,6 @@ type gestureState struct {
 	// per-gesture render params captured from the raw events
 	fov  float64
 	rect gestureRect
-
-	// Polar rule-builder session state (active only while the selSpherePoles overlay is
-	// ON — see trySelectSphereRule / clearRuleBuilding). A handhold click latches a
-	// pending half-term (comp, sign); a subsequent node click completes it. Every
-	// consecutive PAIR of completed terms forms one polarEq about md.selected (the
-	// latched Center), appended to md.polarEqs.
-	hasPending  bool
-	pendingComp polarComp
-	pendingSign float64
-	ruleTerms   []polarTerm
-
-	// authoringKind names which equation KIND the keyboard-authoring channel (AuthorBegin) is
-	// currently building. Set by AuthorBegin; the click path never sets it (it infers kind
-	// implicitly from hit type). See gesture.go's "Keyboard-authoring channel" section.
-	authoringKind eqKind
 }
 
 type gestureRect struct{ left, top, width, height float64 }
@@ -215,12 +200,6 @@ func (md *MoveDispatch) gestPointerDown(ev rawInputMsg, tr *T.Trace) {
 				g.portMoveNode, g.portMovePort, g.portMoveInput = node, port, isInput
 				g.portMoveCenter = c
 			}
-			return
-		}
-		if md.ov.selSpherePolesVisible {
-			// Select mode: an UNCONNECTED port hit is `port ∈ torus` authoring on
-			// pointer-up (trySelectSphereRule), not a wiring-drag grab. Leave g.wireNode
-			// unset so gestPointerUp's gestPending fallthrough reaches trySelectSphereRule.
 			return
 		}
 		g.wireNode, g.wirePort, g.wireInput = node, port, isInput
@@ -506,209 +485,9 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 		// selection. md.selected is the authoritative selection; Select() emits it so the
 		// buffer snapshot marks the node's Selected column. g.secondary (two-finger tap)
 		// picks the "own" select mode; a primary click picks "surface".
-		if !md.trySelectSphereRule(ev, tr) {
-			md.applySelect(ev, tr, g.secondary)
-		}
+		md.applySelect(ev, tr, g.secondary)
 	}
 	g.reset()
-}
-
-// trySelectSphereRule handles a click while the selSpherePoles overlay is ON: node clicks
-// author a polar rule instead of changing selection. Returns true when it handled the
-// click (suppressing the normal click-select); false when the overlay is off or the hit
-// doesn't participate in rule-building (falls through to applySelect, e.g. to pick the
-// Center sphere itself).
-//
-//   - A handhold hit (Hit.Kind=="handhold", HandholdTerm>=0) latches a pending half-term
-//     decoded from the term-id (+θ=0, +φ=1, -θ=2, -φ=3, r=4; see decodeTermCode) WITHOUT
-//     touching md.selected.
-//   - A node hit while a half-term is pending completes the term {Node, comp, sign} and
-//     appends it to ruleTerms. Once two terms have accumulated (a full equation) and
-//     md.selected names a Center, they form one polarEq appended to md.polarEqs and the
-//     accumulator resets for the next equation (e.g. a mirror's θ-pair then φ-pair).
-func (md *MoveDispatch) trySelectSphereRule(ev rawInputMsg, tr *T.Trace) bool {
-	if !md.ov.selSpherePolesVisible {
-		return false
-	}
-	g := &md.gest
-	switch {
-	case ev.Hit.Kind == "handhold" && ev.Hit.HandholdTerm >= 0:
-		comp, sign := decodeTermCode(ev.Hit.HandholdTerm)
-		md.authorHalfTerm(comp, sign, tr)
-		return true
-	case ev.Hit.Kind == "node" && g.hasPending:
-		node, ok := md.nodeFromHit(ev.Hit)
-		if !ok {
-			g.hasPending = false
-			md.emitRuleBuilder(tr)
-			return true // suppress select even when the hit is unresolvable
-		}
-		md.authorNode(node, tr)
-		return true
-	case ev.Hit.Kind == "node":
-		// Select mode ON, no handhold pending: a plain node-body click does NOT highlight
-		// (highlighting is an applySelect/select-mode-OFF behavior only), but the equation
-		// panel must still show for the clicked node — set the sticky panel target
-		// (md.ruleCenter) and emit the RuleBuilder row without touching md.selected or any
-		// pending port/torus captures.
-		if node, ok := md.nodeFromHit(ev.Hit); ok {
-			md.authorNode(node, tr)
-		}
-		return true
-	case ev.Hit.Kind == "port":
-		node, port, isInput, ok := md.portFromHit(ev.Hit)
-		if !ok {
-			return true
-		}
-		// The torus is ALWAYS the port's own node (never a free second-node choice — see
-		// MODEL.md / addPortTorusLock). Authoring is one step: pick a port on the sticky
-		// Center node and the lock commits immediately.
-		if node != md.ruleCenter {
-			return true // port must belong to the sticky Center; ignore off-Center port hits
-		}
-		md.addPortTorusLock(node, port, isInput, tr)
-		return true
-	case ev.Hit.Kind == "torus":
-		// The torus ring is display-only (always the port's own node's ring); it is not a
-		// pickable second side of the lock. Fall through to normal handling (e.g. select).
-		return false
-	default:
-		return false
-	}
-}
-
-// authorHalfTerm latches a pending half-term (comp, sign) WITHOUT touching md.selected —
-// the shared body of trySelectSphereRule's handhold-hit case and AuthorLatchHalfTerm's typed
-// equivalent, so a click and a typed comp word drive the exact same builder state.
-func (md *MoveDispatch) authorHalfTerm(comp polarComp, sign float64, tr *T.Trace) {
-	g := &md.gest
-	g.pendingComp, g.pendingSign = comp, sign
-	g.hasPending = true
-	md.emitRuleBuilder(tr)
-}
-
-// authorNode resolves an already-identified node id against the current builder state,
-// exactly like trySelectSphereRule's node-hit cases: with a half-term pending it completes
-// the term (and commits the equation on the 2nd completed term); otherwise it latches the
-// node as the rule-builder's Center. Shared by the click path (trySelectSphereRule) and the
-// typed path (AuthorNode) so Go — not the caller — decides center-vs-term.
-func (md *MoveDispatch) authorNode(node string, tr *T.Trace) {
-	g := &md.gest
-	if g.hasPending {
-		g.hasPending = false
-		g.ruleTerms = append(g.ruleTerms, polarTerm{Node: node, Comp: g.pendingComp, Sign: g.pendingSign})
-		// Center is the rule-builder's authored center (md.ruleCenter — the node clicked
-		// as Center while authoring), NOT md.selected: in select mode a node-body click
-		// sets md.ruleCenter and never md.selected, so keying the Center off md.selected
-		// committed an empty Center whose links no-op'd (ensureEqLinks) and whose drag
-		// enforcement silently skipped (applyPolarEqs). Gate on ruleCenter for the same reason.
-		if len(g.ruleTerms) == 2 && md.ruleCenter != "" {
-			eq := polarEq{Center: md.ruleCenter, A: g.ruleTerms[0], B: g.ruleTerms[1], Active: true}
-			md.commitPolarEq(eq, tr)
-			if tr != nil {
-				tr.Breadcrumb("polar-rule-added", md.ruleCenter, node, "")
-			}
-			g.ruleTerms = nil
-		}
-		md.emitRuleBuilder(tr)
-		md.emitPolarLocks(tr)
-		return
-	}
-	// No half-term pending: a node hit while authoring sets the rule-builder's sticky
-	// Center (md.ruleCenter) without touching md.selected — mirrors the plain node-body
-	// click's select-mode behavior.
-	md.ruleCenter = node
-	md.pruneSelectionOffCenter(node, tr)
-	md.emitRuleBuilder(tr)
-	// Center changed → Owned bits are stale; re-emit so the panel tracks the new Center
-	// (pruneSelectionOffCenter only re-emits when it prunes). Same reason as applySelect.
-	md.emitPolarLocks(tr)
-}
-
-// commitPolarEq appends a fully-formed eqNodeNode polar equation and performs the FOUR steps
-// every completion path needs: append + auto-select the just-committed equation + guarantee
-// its Center↔term movement links + enforce it immediately (settle term A so its lock write
-// flows to term B) + schedule persistence. Both the click-driven builder
-// (trySelectSphereRule) and the keyboard-authoring builder (AuthorTerm) funnel through this
-// single commit point so the two paths cannot drift apart.
-func (md *MoveDispatch) commitPolarEq(eq polarEq, tr *T.Trace) {
-	md.appendPolarEq(eq)
-	// Auto-select JUST the just-committed equation (replacing any prior multi-selection) so
-	// it lands highlighted in the panel list AND draws its diagram guides immediately — both
-	// follow selectedLocks.
-	md.selectedLocks = []int{len(md.polarEqsSnap()) - 1}
-	// Enforce the equation IMMEDIATELY (don't wait for the next drag): settle term A in place
-	// so its lock write flows to term B — the just-set side snaps to satisfy the equation now.
-	// RootMove runs the full refresh→applyPolarEqs→fan pipeline.
-	if c, ok := md.centerOfNode(eq.A.Node); ok {
-		md.RootMove(eq.A.Node, c)
-	}
-	if md.locksPersist != nil {
-		md.locksPersist.schedule(md.polarEqsSnap())
-	}
-}
-
-// --- Keyboard-authoring channel ---------------------------------------------------------
-//
-// AuthorBegin/AuthorLatchHalfTerm/AuthorNode/AuthorPort/AuthorTorus drive the SAME polar-lock
-// builder state (gestureState's ruleCenter/ruleTerms/pendingPort*/pendingTorus* fields) the
-// click path (trySelectSphereRule) drives, so a typed/resolved token is the exact equivalent
-// of a click — AuthorLatchHalfTerm mirrors the handhold-hit case and AuthorNode mirrors the
-// node-hit cases (letting Go, not the caller, decide center-vs-term completion) via the same
-// authorHalfTerm/authorNode helpers trySelectSphereRule uses. They take already-resolved
-// arguments (a buffer NODE-ROW index, resolved via md.nodeRows exactly like a raycast hit's
-// NodeRow field — see nodeFromHit) rather than a raycast hit; there is no free-text parsing
-// here, the caller (stdin_reader.go applyUpdate) has already decoded the token into these
-// typed fields off the wire.
-
-// AuthorBegin starts (or restarts) a keyboard-authored equation of the given kind: it clears
-// any half-finished builder state (mirrors clearRuleBuilding, including its emit) and records
-// which kind is being built (authoringKind), so a later inspection of the builder state knows
-// what a completed pair should become.
-func (md *MoveDispatch) AuthorBegin(kind eqKind, tr *T.Trace) {
-	md.clearRuleBuilding(tr)
-	md.gest.authoringKind = kind
-}
-
-// AuthorLatchHalfTerm latches a pending half-term (comp, sign) — the typed equivalent of a
-// handhold click (trySelectSphereRule's handhold-hit case) — so the panel shows the same
-// `( _ , <chip> )` in-progress preview a click produces.
-func (md *MoveDispatch) AuthorLatchHalfTerm(comp polarComp, sign float64, tr *T.Trace) {
-	md.authorHalfTerm(comp, sign, tr)
-}
-
-// AuthorNode resolves nodeRow → node id and applies it to the builder EXACTLY like a node
-// click (trySelectSphereRule's node-hit cases, via the shared authorNode helper): with a
-// half-term pending it completes the term (committing the equation on the 2nd completed
-// term); otherwise it latches the node as the rule-builder's Center. This subsumes the old
-// AuthorCenter/AuthorTerm split — Go decides center-vs-term the same way for both input paths.
-func (md *MoveDispatch) AuthorNode(nodeRow int, tr *T.Trace) {
-	if md.nodeRows == nil {
-		return
-	}
-	node, ok := md.nodeRows.LookupNodeRow(nodeRow)
-	if !ok {
-		return
-	}
-	md.authorNode(node, tr)
-}
-
-// AuthorPort resolves nodeRow → node id and commits the `port ∈ torus` lock in one step,
-// mirroring trySelectSphereRule's "port" hit case: the torus is ALWAYS the port's own node
-// (the sticky Center — see MODEL.md), never a free second-node choice. The port must belong
-// to the sticky Center; off-Center port rows are ignored.
-func (md *MoveDispatch) AuthorPort(nodeRow int, portName string, isInput bool, tr *T.Trace) {
-	if md.nodeRows == nil {
-		return
-	}
-	node, ok := md.nodeRows.LookupNodeRow(nodeRow)
-	if !ok {
-		return
-	}
-	if node != md.ruleCenter {
-		return
-	}
-	md.addPortTorusLock(node, portName, isInput, tr)
 }
 
 // SetHoverPortByRow resolves nodeRow → node id and sets the SAME hover state updateHover
@@ -750,115 +529,16 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	}
 }
 
-// addPortTorusLock appends a `port ∈ torus` equation for the given port. The torus is ALWAYS
-// the port's own node (TorusNode forced equal to portNode) — a port∈torus lock is about a
-// SINGLE node, never a free second-node choice (see MODEL.md). STAGE 1: no ensureEqLinks call
-// (ensureEqLinks itself skips eqPortTorus) and no RootMove/solve — authoring the lock moves
-// nothing yet.
-func (md *MoveDispatch) addPortTorusLock(portNode, portName string, portIsInput bool, tr *T.Trace) {
-	eq := polarEq{
-		Kind:        eqPortTorus,
-		PortNode:    portNode,
-		PortName:    portName,
-		PortIsInput: portIsInput,
-		TorusNode:   portNode,
-		Active:      true,
-	}
-	md.appendPolarEq(eq)
-	if tr != nil {
-		tr.Breadcrumb("port-torus-lock-added", portNode, portNode, portName)
-	}
-	if md.locksPersist != nil {
-		md.locksPersist.schedule(md.polarEqsSnap())
-	}
-	md.emitPolarLocks(tr)
-	// The lock is active the instant it's authored — re-emit the constrained port's
-	// geometry now so it moves onto its node's border ring immediately (locks.go).
-	md.reemitPortTorusGeometry(portNode)
-	// The lock commits in one step (no pending port/torus capture) — re-emit the
-	// RuleBuilder block so the panel reflects the just-committed lock.
-	md.emitRuleBuilder(tr)
-}
-
-// ruleTermCode packs a completed/pending term's (comp, sign) to a single code — matches the
-// handhold hit's HandholdTerm encoding: +θ=0, +φ=1, −θ=2, −φ=3, r=4 (r is unsigned), i.e.
-// the angles use code = (sign<0 ? 2 : 0) + (comp==compPhi ? 1 : 0); r is the fixed code 4.
-func ruleTermCode(comp polarComp, sign float64) int {
-	if comp == compR {
-		return 4
-	}
-	code := 0
-	if sign < 0 {
-		code += 2
-	}
-	if comp == compPhi {
-		code++
-	}
-	return code
-}
-
-// decodeTermCode is the inverse of ruleTermCode: a handhold/term code → (comp, sign). Code 4
-// is r (unsigned, sign +1); codes 0..3 are the signed angles (comp = code&1, sign = code&2).
-func decodeTermCode(code int) (polarComp, float64) {
-	if code == 4 {
-		return compR, 1
-	}
-	sign := 1.0
-	if code&2 != 0 {
-		sign = -1
-	}
-	return polarComp(code & 1), sign
-}
-
-// emitRuleBuilder emits the FULL current rule-builder session state (KindRuleBuilder):
-// the latched Center (md.selected), any half-finished pending term, and the accumulated
-// completed terms. Called from every rule-builder state-change point (gesture.go +
-// clearRuleBuilding + applySelect) so the buffer snapshot's RuleBuilder block always
-// mirrors the session live. No-op when tr is nil (headless tests that don't wire Trace).
-func (md *MoveDispatch) emitRuleBuilder(tr *T.Trace) {
-	if tr == nil {
-		return
-	}
-	g := &md.gest
-	terms := make([]T.RuleTermPayload, len(g.ruleTerms))
-	for i, t := range g.ruleTerms {
-		terms[i] = T.RuleTermPayload{Node: t.Node, Code: ruleTermCode(t.Comp, t.Sign)}
-	}
-	pendingCode := 0
-	if g.hasPending {
-		pendingCode = ruleTermCode(g.pendingComp, g.pendingSign)
-	}
-	// `port ∈ torus` authoring is a one-step commit (no pending port/torus capture — the
-	// torus is always the port's own node, see addPortTorusLock), so these are always empty;
-	// the RuleBuilder wire shape is unchanged (bridge/schema stays the same).
-	tr.RuleBuilder(md.ruleCenter, g.hasPending, pendingCode, terms, "", "", false, "")
-}
-
-// clearRuleBuilding ends any in-progress polar rule-building session: half-finished
-// pending term + accumulated ruleTerms. Called when the selSpherePoles overlay turns OFF
-// (stdin_reader.go applyUpdate) so a stale pending/half-formed pair doesn't leak into the
-// next session. Emits the cleared state so the buffer's RuleBuilder block drops the stale
-// pending/terms immediately.
-func (md *MoveDispatch) clearRuleBuilding(tr *T.Trace) {
-	md.gest.hasPending = false
-	md.gest.ruleTerms = nil
-	md.emitRuleBuilder(tr)
-}
-
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is
 // single + EXCLUSIVE across nodes and edges: an EDGE hit selects that edge (clearing any
 // node selection); a node/port hit selects that node (clearing any edge selection); an
 // empty-space hit CLEARS the transient highlight (md.selected / md.selectedEdge) — this is
-// the original click-empty-clears behavior. The rule-builder panel's Center (md.ruleCenter)
-// is a SEPARATE, sticky piece of state: it is untouched by an empty-space click and only
-// changes when a different node is selected, so the equation panel stays on the last
-// selected node even after the highlight ring clears.
+// the original click-empty-clears behavior.
 func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	if ev.Hit.Kind == "empty" {
 		md.selected = ""
 		md.selectedEdge = ""
 		tr.Select("", own)
-		md.emitRuleBuilder(tr)
 		return
 	}
 	if ev.Hit.Kind == "edge" {
@@ -866,8 +546,6 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 			md.selectedEdge = label
 			md.selected = ""
 			tr.SelectEdge(label)
-			// Edge selection does not touch the sticky rule-builder Center; leave
-			// md.ruleCenter as-is so the panel keeps showing the last-selected node.
 			return
 		}
 		// Unresolvable edge hit → clear selection rather than leaving stale state.
@@ -886,19 +564,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	}
 	md.selected = node
 	md.selectedEdge = ""
-	md.ruleCenter = node
-	md.pruneSelectionOffCenter(node, tr)
 	tr.Select(node, own)
-	// A selection change always changes the rule-builder's latched sticky Center
-	// (md.ruleCenter), so mirror it unconditionally to keep the buffer's RuleBuilder block
-	// (CenterRow/centerLabel) tracking the panel. The in-progress builder UI itself stays
-	// gated on the selSpherePoles overlay in TS; this only keeps the data fresh underneath it.
-	md.emitRuleBuilder(tr)
-	// Each equation's Owned bit is (eqOwner == ruleCenter), so a Center change makes every
-	// bit stale — re-emit the polar-lock block so the panel (which shows owned rows only)
-	// reflects the new Center. pruneSelectionOffCenter above only re-emits when it prunes a
-	// selection, so this is required for the no-selection case.
-	md.emitPolarLocks(tr)
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

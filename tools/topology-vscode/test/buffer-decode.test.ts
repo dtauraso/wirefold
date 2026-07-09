@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { decodeSnapshot, nodeLabel, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 import {
   BUF_HEADER_SIZE,
-  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, RULE_BUILDER_STRIDE,
+  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
   PORT_COL_NODE_ROW, PORT_COL_DX, PORT_COL_DY, PORT_COL_DZ, PORT_COL_IS_INPUT,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
   readBeadX, readBeadY, readBeadZ, readBeadFrac, readBeadLive, readBeadBeadID,
@@ -45,7 +45,7 @@ function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number, p
   const interiorBytes = nodeCount  * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
   const edgeBytes     = edgeCount  * EDGE_STRIDE;
   const portBytes     = portCount  * PORT_STRIDE;
-  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE;
+  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
 
   const buf = new ArrayBuffer(totalBytes);
   const dv  = new DataView(buf);
@@ -85,7 +85,7 @@ describe("decodeSnapshot — null for bad input", () => {
 
   it("returns null when buffer is one byte short of expected size", () => {
     // 0 beads/nodes/edges → expected = header + camera + overlay
-    const expected = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE;
+    const expected = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE;
     const buf = new ArrayBuffer(expected - 1);
     expect(decodeSnapshot(buf)).toBeNull();
   });
@@ -326,13 +326,13 @@ describe("decodeSnapshot — label section", () => {
     const labelBytesCount = labels[0]!.length + labels[1]!.length; // 5 + 7 = 12
     const nodeBytes = 2 * NODE_STRIDE;
     const interiorBytes = 2 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE + labelBytesCount;
+    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount;
     const buf = new ArrayBuffer(total);
     const dv = new DataView(buf);
     dv.setUint32(8, 2, true);                // nodeCount
     dv.setUint32(20, labelBytesCount, true); // labelBytesCount
     const nodeOff = BUF_HEADER_SIZE;
-    const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE;
+    const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
     const labelView = new Uint8Array(buf, labelSecOff, labelBytesCount);
     let cursor = 0;
     labels.forEach((chunk, row) => {
@@ -353,7 +353,7 @@ describe("decodeSnapshot — label section", () => {
   it("decodes an unset label (len 0) as the empty string", () => {
     const nodeBytes = 1 * NODE_STRIDE;
     const interiorBytes = 1 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + RULE_BUILDER_STRIDE;
+    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
     const buf = new ArrayBuffer(total);
     new DataView(buf).setUint32(8, 1, true); // nodeCount=1, labelBytesCount=0
     const d = decodeSnapshot(buf)!;

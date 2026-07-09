@@ -37,9 +37,6 @@ import {
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
-  readRuleBuilderSelectedLockIndex,
-  readPolarLockCenterRow, readPolarLockARow, readPolarLockACode, readPolarLockBRow, readPolarLockBCode, readPolarLockActive,
-  readPolarLockKind, readPolarLockPortRow, readPolarLockTorusRow,
 } from "./schema/buffer-layout";
 
 /** KindId sentinel for an unknown node kind (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */
@@ -179,42 +176,6 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
         if (readEdgeFaded(d.edgeView, r) === 1) edges.push(edgeLabel(d, r));
       }
       return { kind, fadedNodes: nodes, fadedEdges: edges };
-    }
-    case "polar-locks": {
-      // Full-mirror (like fade above): reconstruct the committed polar-equation lock list +
-      // focused row from the PolarLock block + RuleBuilder's SelectedLockIndex column.
-      const v = d.polarLockView;
-      const polarLocks: Line[] = [];
-      for (let r = 0; r < d.polarLockCount; r++) {
-        const centerRow = readPolarLockCenterRow(v, r);
-        const aRow = readPolarLockARow(v, r);
-        const bRow = readPolarLockBRow(v, r);
-        const line: Line = {
-          center: centerRow >= 0 ? nodeLabel(d, centerRow) : "",
-          aNode: aRow >= 0 ? nodeLabel(d, aRow) : "",
-          aCode: readPolarLockACode(v, r),
-          bNode: bRow >= 0 ? nodeLabel(d, bRow) : "",
-          bCode: readPolarLockBCode(v, r),
-          active: readPolarLockActive(v, r) === 1,
-        };
-        // Stage-1 port∈torus lock (Kind==1): mirror Go's PolarLockPayload JSON marshal
-        // (Trace/Trace.go) exactly — the base node/node fields above resolve to empty
-        // (Center/A/B rows are -1) and are kept as-is, plus the port∈torus fields below.
-        // `kind` and `portIsInput` use Go's `omitempty` semantics: only present when
-        // non-zero/non-false, so match that here rather than always emitting them.
-        const lockKind = readPolarLockKind(v, r);
-        if (lockKind === 1) {
-          line.kind = 1;
-          const portRow = readPolarLockPortRow(v, r);
-          const torusRow = readPolarLockTorusRow(v, r);
-          line.portNode = portRow >= 0 ? nodeLabel(d, readPortNodeRow(d.portView, portRow)) : "";
-          line.portName = portRow >= 0 ? portName(d, portRow) : "";
-          if (portRow >= 0 && readPortIsInput(d.portView, portRow) === 1) line.portIsInput = true;
-          line.torusNode = torusRow >= 0 ? nodeLabel(d, torusRow) : "";
-        }
-        polarLocks.push(line);
-      }
-      return { kind, polarLocks, selectedLockIndex: readRuleBuilderSelectedLockIndex(d.ruleBuilderView) };
     }
     default:
       if (OVERLAY_KINDS.has(kind)) return { kind, visible: overlayFlag(d, kind) === 1 };

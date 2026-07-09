@@ -61,66 +61,6 @@ func TestDecodeEditUpdateOverlaysToggle(t *testing.T) {
 	}
 }
 
-func TestDecodeClearRuleAndDeleteSelectedLock(t *testing.T) {
-	msg, ok := decodeInputRecord(encodeControl(inKindClearRule))
-	if !ok || msg.Type != "clear-rule" {
-		t.Fatalf("clear-rule decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeControl(inKindDeleteSelectedLock))
-	if !ok || msg.Type != "delete-selected-lock" {
-		t.Fatalf("delete-selected-lock decode = %+v ok=%v", msg, ok)
-	}
-}
-
-func TestDecodeEditUpdateLock(t *testing.T) {
-	msg, ok := decodeInputRecord(encodeLockUpdate(inLockAttrActive, 3))
-	if !ok || msg.Type != "edit" || msg.Op != "update" || msg.Kind != "lock" || msg.Attr != "active" || msg.Index != 3 {
-		t.Fatalf("lock active decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeLockUpdate(inLockAttrSelected, 7))
-	if !ok || msg.Kind != "lock" || msg.Attr != "selected" || msg.Index != 7 {
-		t.Fatalf("lock selected decode = %+v ok=%v", msg, ok)
-	}
-}
-
-func TestDecodeEditUpdateLockAuthor(t *testing.T) {
-	msg, ok := decodeInputRecord(encodeAuthorBegin(eqPortTorus))
-	if !ok || msg.Type != "edit" || msg.Op != "update" || msg.Kind != "lock" || msg.Attr != "author" || msg.Action != "begin" || msg.EqKind != int(eqPortTorus) {
-		t.Fatalf("author begin decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeAuthorNode(5))
-	if !ok || msg.Action != "node" || msg.NodeRow != 5 {
-		t.Fatalf("author node decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeAuthorLatch(compPhi, -1))
-	if !ok || msg.Action != "latch" || msg.Comp != int(compPhi) || msg.Sign != -1 {
-		t.Fatalf("author latch decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeAuthorLatch(compR, 1))
-	if !ok || msg.Sign != 1 {
-		t.Fatalf("author latch (+sign) decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeAuthorPort(1, "out", false))
-	if !ok || msg.Action != "port" || msg.NodeRow != 1 || msg.PortName != "out" || msg.IsInput != false {
-		t.Fatalf("author port decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeAuthorTorus(4))
-	if !ok || msg.Action != "torus" || msg.NodeRow != 4 {
-		t.Fatalf("author torus decode = %+v ok=%v", msg, ok)
-	}
-}
-
-func TestDecodeEditUpdateLockPreview(t *testing.T) {
-	msg, ok := decodeInputRecord(encodePreviewNode(6))
-	if !ok || msg.Type != "edit" || msg.Op != "update" || msg.Kind != "lock" || msg.Attr != "preview" || msg.NodeRow != 6 || msg.PortName != "" {
-		t.Fatalf("preview node decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodePreviewPort(7, "in", true))
-	if !ok || msg.NodeRow != 7 || msg.PortName != "in" || msg.IsInput != true {
-		t.Fatalf("preview port decode = %+v ok=%v", msg, ok)
-	}
-}
-
 // TestOverlayFlagOrderMatchesFingerprint guards that the derived flag order equals the
 // fingerprint's overlayFlags list (self-check on parseOverlayFlags).
 func TestOverlayFlagOrderMatchesFingerprint(t *testing.T) {

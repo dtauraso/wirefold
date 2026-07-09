@@ -63,7 +63,7 @@ func TestEventBlockPopulate(t *testing.T) {
 		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
 		edgeCount*BufEdgeStride +
 		portCount*BufPortStride +
-		BufCameraStride + BufOverlayStride + BufRuleBuilderStride + labelBytesCount
+		BufCameraStride + BufOverlayStride + labelBytesCount
 
 	// Find the send row (kind == index of "send" in TraceEventKinds).
 	sendKind := -1
@@ -148,14 +148,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	// Toggle an overlay flag.
 	s.Update(T.Event{Kind: T.KindSceneTori, Visible: true})
 
-	// Latch a rule-builder session: Center=node-A, one completed term on node-B (+φ, code 1),
-	// and a pending half-term (−θ, code 2).
-	s.Update(T.Event{
-		Kind: T.KindRuleBuilder, RuleCenter: "node-A",
-		RuleHasPending: true, RulePendingCode: 2,
-		RuleTerms: []T.RuleTermPayload{{Node: "node-B", Code: 1}},
-	})
-
 	// Inject a send event to build the srcToDest mapping (so arrive can route EvArrive).
 	s.Update(T.Event{
 		Kind: T.KindSend, Node: "node-A", Port: "out", Value: 42,
@@ -209,7 +201,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride +
 		BufOverlayStride +
-		BufRuleBuilderStride +
 		int(eventCount)*BufEventStride +
 		int(portNameBytesCount) +
 		int(edgeLabelBytesCount)
@@ -326,29 +317,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		t.Errorf("overlay.ScenePoles: got %v, want 0", snap[ovOff+BufOverlayColScenePoles])
 	}
 
-	// ── RuleBuilder block ────────────────────────────────────────────────────
-	rbOff := ovOff + BufOverlayStride
-	if got := readI32(snap, rbOff+BufRuleBuilderColCenterRow); got != 0 {
-		t.Errorf("ruleBuilder.CenterRow: got %d, want 0 (node-A)", got)
-	}
-	if got := snap[rbOff+BufRuleBuilderColPendingCode]; got != 2 {
-		t.Errorf("ruleBuilder.PendingCode: got %d, want 2", got)
-	}
-	if got := snap[rbOff+BufRuleBuilderColTermCount]; got != 1 {
-		t.Errorf("ruleBuilder.TermCount: got %d, want 1", got)
-	}
-	if got := readI32(snap, rbOff+BufRuleBuilderColT0Row); got != 1 {
-		t.Errorf("ruleBuilder.T0Row: got %d, want 1 (node-B)", got)
-	}
-	if got := snap[rbOff+BufRuleBuilderColT0Code]; got != 1 {
-		t.Errorf("ruleBuilder.T0Code: got %d, want 1", got)
-	}
-	if got := readI32(snap, rbOff+BufRuleBuilderColT1Row); got != -1 {
-		t.Errorf("ruleBuilder.T1Row: got %d, want -1 (absent)", got)
-	}
-	if got := snap[rbOff+BufRuleBuilderColT1Code]; got != 255 {
-		t.Errorf("ruleBuilder.T1Code: got %d, want 255 (absent)", got)
-	}
 }
 
 // TestSnapshotPorts verifies the Port block: port rows are populated from the
@@ -642,7 +610,7 @@ func TestSnapshotFraming(t *testing.T) {
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
-		BufCameraStride + BufOverlayStride + BufRuleBuilderStride +
+		BufCameraStride + BufOverlayStride +
 		int(readU32(payload, 24))*BufEventStride + // event block
 		int(readU32(payload, 28)) + // port-name bytes
 		int(readU32(payload, 32)) // edge-label bytes
@@ -924,8 +892,7 @@ func TestSnapshotNodeLabels(t *testing.T) {
 		edgeCount*BufEdgeStride +
 		portCount*BufPortStride +
 		BufCameraStride +
-		BufOverlayStride +
-		BufRuleBuilderStride
+		BufOverlayStride
 	// The label section is followed by the EVENT block + port-name + edge-label sections, so
 	// its end is the start of the event block, not the snapshot end. Verify the full length.
 	eventCount := int(readU32(snap, 24))

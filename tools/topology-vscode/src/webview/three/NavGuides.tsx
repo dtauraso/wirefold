@@ -13,7 +13,6 @@ import { decodeSnapshot } from "./buffer-decode";
 import {
   type NavNode, decodeNavNodes, contentSphereFromCenters,
 } from "./buffer-nav";
-import { readRuleBuilderCenterRow } from "../../schema/buffer-layout";
 
 // HANDHOLD_TERM_TAG — userData key stamped on the octant angle handhold meshes and the
 // pole-crossing radius handholds with their term-id (+θ=0, +φ=1, -θ=2, -φ=3, r=4; see
@@ -373,25 +372,15 @@ export function NavGuides() {
   const [navTick, setNavTick] = useState(0);
   const bufNavRef = useRef<NavNode[]>([]);
   const bufSigRef = useRef("");
-  // Rule-builder center row (md.ruleCenter, streamed as RuleBuilder.CenterRow). In select
-  // mode Go routes a node click into ruleCenter rather than the Selected column (see
-  // gesture.go), so the sel-sphere octant frame below must key off THIS, not latchedSel,
-  // when select mode is on. Sampled alongside navNodes so it stays in the same tick.
-  const ruleCenterRowRef = useRef(-1);
   useFrame(() => {
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
     bufNavRef.current = decodeNavNodes(decoded);
-    const centerRow = readRuleBuilderCenterRow(decoded.ruleBuilderView);
-    // Fold centerRow into the change-detection signature — it can change (a rule-builder
-    // click) without any node position/selection changing, and navTick otherwise only
-    // bumps on navSignature changes.
-    const sig = `${navSignature(bufNavRef.current)}|rc:${centerRow}`;
+    const sig = navSignature(bufNavRef.current);
     if (sig !== bufSigRef.current) {
       bufSigRef.current = sig;
-      ruleCenterRowRef.current = centerRow;
       setNavTick((t) => t + 1);
     }
   });
@@ -400,11 +389,6 @@ export function NavGuides() {
   // recomputes only when the node data actually changes (navTick bumps on a real change).
   const navNodes = useMemo<NavNode[]>(
     () => bufNavRef.current,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [navTick],
-  );
-  const ruleCenterRow = useMemo(
-    () => ruleCenterRowRef.current,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [navTick],
   );
@@ -518,10 +502,7 @@ export function NavGuides() {
   // sphere to frame (persists through deselect), and we draw THAT node's own sphere pole
   // frame at full SPHERE scale (its Go-streamed sphereR). Every node has a sphere, so this
   // works for leaf nodes (3, 5) too — no parent remapping. Never selected ⇒ no frame.
-  // In select mode Go writes the clicked node into ruleCenter, not Selected (see gesture.go),
-  // so frame THAT node when present; fall back to the latched Selected-column pick otherwise.
-  const octantTargetRow = ruleCenterRow >= 0 ? ruleCenterRow : latchedSel;
-  const sphereCenters = octantTargetRow !== null ? navNodes.filter((n) => n.row === octantTargetRow) : [];
+  const sphereCenters = latchedSel !== null ? navNodes.filter((n) => n.row === latchedSel) : [];
 
   // WORLD-FIXED tori: the pole is the diagram's own top axis (world Y), so the horizontal torus
   // (geoB, normal world Y) is the diagram's equator — the polar frame is anchored to the
