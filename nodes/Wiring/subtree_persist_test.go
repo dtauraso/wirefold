@@ -21,7 +21,6 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 		t.Fatal("RootMove(dst) returned false")
 	}
 	md.posPersist.flush()
-	md.quantOffsetPersist.flush()
 
 	// dst's meta got a grid-snapped scene-polar; src is byte-for-byte unchanged.
 	dstRaw, err := os.ReadFile(filepath.Join(root, "nodes", "dst", "meta.json"))

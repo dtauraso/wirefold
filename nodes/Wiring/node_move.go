@@ -480,12 +480,8 @@ type MoveDispatch struct {
 	// quantizedOffsets is the per-node quantized polar offset + resolved parent
 	// (quantized_layout.go quantizedOffset), keyed by node id. Phase 3: populated by
 	// loader.go computeQuantizedLayout at load time and authoritative from then on —
-	// RootMove (drag) rewrites the dragged node's entry and recomposes the whole graph.
+	// RootMove (drag) remeasures the dragged node's triple; positions are individual.
 	quantizedOffsets map[string]quantizedOffset
-	// quantOffsetPersist is the debounced disk persister for a dragged node's quantized
-	// offset (quant_offset_persist.go), armed by EnableEditPersist. nil until armed (tests
-	// that never arm it, and the monolithic-topology.json form).
-	quantOffsetPersist *quantOffsetPersister
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -864,18 +860,13 @@ func (md *MoveDispatch) remeasureTriples(movedID string, movedPos vec3) {
 	for _, e := range md.heldEdges() {
 		edgeEP[e.Source+"->"+e.Target] = EdgeEndpoints{Source: e.Source, Target: e.Target}
 	}
-	newOffsets := snapQuantizedOffsets(centers, edgeEP)
-	for id, off := range newOffsets {
+	for id, off := range snapQuantizedOffsets(centers, edgeEP) {
 		md.quantizedOffsets[id] = off // keep every in-memory triple fresh
 	}
-	// Persist ONLY the dragged node's own triple (its own file) — individual snapping never
-	// writes another node's file. A node whose reference moved has its triple remeasured at
-	// load from the persisted positions, so it needs no write here.
-	if md.quantOffsetPersist != nil {
-		if off, ok := newOffsets[movedID]; ok && off.parent != "" {
-			md.quantOffsetPersist.schedule(movedID, off)
-		}
-	}
+	// The triple is NOT persisted: it is derived from the node's scenePolar (the position
+	// RootMove already persists), and computeQuantizedLayout remeasures it on load. Writing
+	// the triple here would race posPersist on the SAME meta.json (both do atomic
+	// temp-file+rename), which is the "rename ... no such file" failure.
 }
 
 // reachRFromPolar computes each node's sphere REACH radius (max distance from a node to any
@@ -959,7 +950,6 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
-	md.quantOffsetPersist = &quantOffsetPersister{root: root, debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the
