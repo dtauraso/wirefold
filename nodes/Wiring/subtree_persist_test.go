@@ -2,14 +2,14 @@ package Wiring
 
 import (
 	"encoding/json"
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-// Individual snapping: dragging a node moves and persists ONLY that node (grid-snapped
-// scene-polar), leaving every other node untouched — no subtree cascade.
+// Individual snapping: dragging a node moves and persists ONLY that node (its grid-snapped
+// scalar triple, quantITheta/quantIPhi/quantIR — the sole persisted position source under
+// the plain-polar model), leaving every other node untouched — no subtree cascade.
 func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -20,22 +20,27 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	if !md.RootMove("dst", vec3{X: 60, Y: 20, Z: -10}) {
 		t.Fatal("RootMove(dst) returned false")
 	}
-	md.posPersist.flush()
+	md.quantOffsetPersist.flush()
 
-	// dst's meta got a grid-snapped scene-polar; src is byte-for-byte unchanged.
+	// dst's meta got its grid-snapped scalar triple (integers, by construction); src is
+	// byte-for-byte unchanged.
 	dstRaw, err := os.ReadFile(filepath.Join(root, "nodes", "dst", "meta.json"))
 	if err != nil {
 		t.Fatalf("read dst meta: %v", err)
 	}
-	var dst map[string]float64
+	var dst map[string]json.RawMessage
 	_ = json.Unmarshal(dstRaw, &dst)
-	// θ must sit on the grid.
-	if th, ok := dst["scenePolarTheta"]; ok {
-		if r := th / stepTheta; math.Abs(r-math.Round(r)) > 1e-9 {
-			t.Fatalf("dst θ not grid-snapped: %v", th)
-		}
-	} else {
-		t.Fatalf("dst scenePolarTheta not persisted: %s", dstRaw)
+	if _, ok := dst["quantITheta"]; !ok {
+		t.Fatalf("dst quantITheta not persisted: %s", dstRaw)
+	}
+	if _, ok := dst["quantIPhi"]; !ok {
+		t.Fatalf("dst quantIPhi not persisted: %s", dstRaw)
+	}
+	if _, ok := dst["quantIR"]; !ok {
+		t.Fatalf("dst quantIR not persisted: %s", dstRaw)
+	}
+	if _, ok := dst["scenePolarTheta"]; ok {
+		t.Fatalf("dst scenePolarTheta should be deleted (scalars are the sole persisted position): %s", dstRaw)
 	}
 
 	srcAfter, _ := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))

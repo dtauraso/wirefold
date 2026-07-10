@@ -1,1 +1,1 @@
-{"id": "4", "type": "Pacer", "r": 90, "scenePolarR": 129.34103879926957, "scenePolarTheta": 2.2953871202728635, "scenePolarPhi": -3.1297456576357923, "reference": "1"}
+{"id": "4", "type": "Pacer", "r": 90, "reference": "1", "quantITheta": 11, "quantIPhi": 0, "quantIR": 6}

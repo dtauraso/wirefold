@@ -1,1 +1,1 @@
-{"id": "2", "r": 113.56330779235572, "scenePolarPhi": 2.024466424339757, "scenePolarR": 57.535762923946685, "scenePolarTheta": 0.3676092256381218, "type": "HoldNewSendOld", "reference": "1"}
+{"id": "2", "r": 113.56330779235572, "type": "HoldNewSendOld", "reference": "1", "quantITheta": 5, "quantIPhi": 1, "quantIR": 6}

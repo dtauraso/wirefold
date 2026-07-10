@@ -1,8 +1,8 @@
 package Wiring
 
 // scene_path_safety_test.go — verifies safeTreePathComponent rejects path-traversal
-// values and that the two write sinks (writeNodePosition, writePortAnchor) reject
-// unsafe ids/ports rather than escaping the tree root (see scene_node_pos_persist.go,
+// values and that the two write sinks (writeQuantOffset, writePortAnchor) reject
+// unsafe ids/ports rather than escaping the tree root (see quant_offset_persist.go,
 // scene_anchor_persist.go).
 
 import (
@@ -34,9 +34,9 @@ func TestSafeTreePathComponent(t *testing.T) {
 	}
 }
 
-func TestWriteNodePositionRejectsTraversalID(t *testing.T) {
+func TestWriteQuantOffsetRejectsTraversalID(t *testing.T) {
 	root := t.TempDir()
-	err := writeNodePosition(root, "../../evil", polar{})
+	err := writeQuantOffset(root, "../../evil", quantizedOffset{})
 	if err == nil {
 		t.Fatal("expected error for traversal node id, got nil")
 	}

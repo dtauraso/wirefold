@@ -1,1 +1,1 @@
-{"id": "6", "r": 132.78033244389852, "scenePolarPhi": -0.8512605185572115, "scenePolarR": 84.25001863579222, "scenePolarTheta": 1.172692961464089, "type": "Pulse", "reference": "2"}
+{"id": "6", "r": 132.78033244389852, "type": "Pulse", "reference": "2", "quantITheta": 7, "quantIPhi": -3, "quantIR": 5}

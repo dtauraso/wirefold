@@ -425,6 +425,11 @@ type MoveDispatch struct {
 	anchorPersist   *anchorPersister
 	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
+	// quantOffsetPersist is the debounced disk persister for a node's scalar triple
+	// (iTheta,iPhi,iR) + reference (quant_offset_persist.go) — the sole persisted position
+	// source under the plain-polar model. Armed by EnableEditPersist; scheduled from
+	// remeasureTriples for the dragged node and its direct children.
+	quantOffsetPersist *quantOffsetPersister
 	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
 	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanScene on every
 	// camera pan. nil until armed (tests that never arm).
@@ -848,10 +853,9 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromPolar(polars, edges)
 	md.fanCenters(emit, reach)
 
-	// Persist the dragged node's new scene-polar (debounced, fire-and-forget).
-	if md.posPersist != nil {
-		md.posPersist.schedule(nodeID, polars[nodeID])
-	}
+	// The scalar triple (iTheta,iPhi,iR about the node's reference) is the sole persisted
+	// position source under the plain-polar model — scene-polar is no longer persisted on
+	// drag (remeasureTriples below schedules the scalar write instead).
 
 	// Remeasure the scalar triples from the new positions: the dragged node's triple about
 	// its reference changed, and so did any node that references it. Persist the changed ones.
@@ -861,51 +865,54 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	return true
 }
 
-// snapToReference snaps the target to the scalar×constant grid ABOUT the reference: the
-// offset from the reference is measured in the reference's frame (referenceForward) and
-// rounded to (iTheta,iPhi,iR) integer cells, then reconstructed — so a dragged node always
-// lands at an integer polar offset from its reference (no off-grid angles). iTheta==0 is the
-// colinear special case; equal iR across a reference's children is the equidistant case.
-// Returns false for a root (no reference) — the caller snaps to the absolute scene grid.
+// snapToReference snaps the target to the scalar×constant grid ABOUT the reference: a
+// PLAIN local polar coordinate with the reference's current world center as the origin
+// (no forward-kinematics frame, no rotation carried between nodes — see the Model doc in
+// the task/spec that introduced this). Returns false for a root (no reference) — the
+// caller snaps to the absolute scene grid.
 func (md *MoveDispatch) snapToReference(nodeID string, target vec3) (vec3, bool) {
 	ref := md.references[nodeID]
 	if ref == "" {
 		return vec3{}, false
 	}
-	centers := md.heldCenters()
-	refPos, ok := centers[ref]
+	refPos, ok := md.heldCenters()[ref]
 	if !ok {
 		return vec3{}, false
 	}
-	forward := referenceForward(centers, md.references, ref)
-	delta := target.sub(refPos)
-	r := delta.length()
-	childDir := forward
-	if r > 0 {
-		dp := cart2polar(delta)
-		childDir = dir{Theta: dp.Theta, Phi: dp.Phi}
+	p := cart2polar(target.sub(refPos))
+	snapped := polar{
+		R:     math.Round(p.R/stepR) * stepR,
+		Theta: math.Round(p.Theta/stepTheta) * stepTheta,
+		Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
 	}
-	c, psi := azimuthFrom(forward, childDir)
-	iTheta := int(math.Round(c / stepTheta))
-	iPhi := int(math.Round(psi / stepPhi))
-	iR := int(math.Round(r / stepR))
-	snappedDir := fromAxisFrame(forward, float64(iTheta)*stepTheta, float64(iPhi)*stepPhi)
-	return refPos.add(cart(snappedDir).scale(float64(iR) * stepR)), true
+	return refPos.add(polar2cart(snapped)), true
 }
 
-// remeasureTriples recomputes every node's scalar triple (iTheta,iPhi,iR about its owned
-// REFERENCE — md.references, not a recomputed spanning tree) from the current positions with
-// movedID overridden to movedPos, and updates md.quantizedOffsets.
+// remeasureTriples re-measures the scalar triple (iTheta,iPhi,iR about the owned REFERENCE,
+// md.references) for the moved node AND its DIRECT CHILDREN (nodes whose reference is
+// movedID) from the current positions with movedID overridden to movedPos. A direct child's
+// WORLD position does not change on this drag — only its LOCAL polar coordinate about its
+// reference's new origin does — so re-measuring is the correct (and only) update; a child's
+// own children are unaffected (their reference's world center did not move) and are left
+// alone. Updates md.quantizedOffsets in memory and schedules a persist for every triple that
+// changed (the dragged node + each direct child).
 func (md *MoveDispatch) remeasureTriples(movedID string, movedPos vec3) {
 	centers := md.heldCenters()
 	centers[movedID] = movedPos
-	for id, off := range snapQuantizedOffsets(centers, md.references) {
-		md.quantizedOffsets[id] = off // keep every in-memory triple fresh
+
+	refs := map[string]string{movedID: md.references[movedID]}
+	for id, ref := range md.references {
+		if ref == movedID {
+			refs[id] = ref
+		}
 	}
-	// The triple is NOT persisted: it is derived from the node's scenePolar (the position
-	// RootMove already persists), and computeQuantizedLayout remeasures it on load. Writing
-	// the triple here would race posPersist on the SAME meta.json (both do atomic
-	// temp-file+rename), which is the "rename ... no such file" failure.
+
+	for id, off := range measureScalars(centers, refs, md.sceneSphere.Center) {
+		md.quantizedOffsets[id] = off
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(id, off, md.references[id])
+		}
+	}
 }
 
 // reachRFromPolar computes each node's sphere REACH radius (max distance from a node to any
@@ -989,6 +996,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.quantOffsetPersist = &quantOffsetPersister{root: root, debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

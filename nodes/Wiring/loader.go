@@ -364,13 +364,40 @@ func (b *buildCtx) computeQuantizedLayout() {
 	}
 	b.references = references
 
-	offsets := snapQuantizedOffsets(b.centers, references)
+	// The scalar triple is the STORED quantI* when a scene was saved under this model
+	// (all three present); otherwise it is MEASURED from the node's currently-loaded
+	// (pre-quantized, scenePolar-derived) center — the fallback for an un-migrated node.
+	measured := measureScalars(b.centers, references, b.sphere.Center)
+	offsets := make(map[string]quantizedOffset, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
-		if _, ok := offsets[n.ID]; !ok {
-			offsets[n.ID] = quantizedOffset{parent: references[n.ID]} // centerless → keep its reference
+		if n.QuantITheta != nil && n.QuantIPhi != nil && n.QuantIR != nil {
+			offsets[n.ID] = quantizedOffset{
+				iTheta: *n.QuantITheta,
+				iPhi:   *n.QuantIPhi,
+				iR:     *n.QuantIR,
+				parent: references[n.ID],
+			}
+			continue
 		}
+		if off, ok := measured[n.ID]; ok {
+			offsets[n.ID] = off
+			continue
+		}
+		offsets[n.ID] = quantizedOffset{parent: references[n.ID]} // centerless → keep its reference
 	}
 	b.quantizedOffsets = offsets
+
+	// Recompose every node's world center from the authoritative scalar triples
+	// (references-before-dependents), overwriting the raw loaded centers/geoms so every
+	// later phase operates on the composed result.
+	derived := deriveCenters(offsets, references, b.sphere.Center)
+	for id, pos := range derived {
+		b.centers[id] = pos
+		if g, ok := b.nodeGeoms[id]; ok {
+			setNodeWorld(&g, pos)
+			b.nodeGeoms[id] = g
+		}
+	}
 }
 
 // computeReachRadii computes each node's REACH radius (max distance from its

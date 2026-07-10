@@ -245,91 +245,92 @@ func cart(d dir) vec3 {
 	return polar2cart(polar{R: 1, Theta: d.Theta, Phi: d.Phi})
 }
 
-// snapQuantizedOffsets is PHASE 2: the INVERSE of composeQuantizedLayout — given each
-// node's current world center (heldCenters()) and the edge graph, derive the quantized
-// offset (iTheta, iPhi, iR, parent) that would reproduce that layout under
-// composeQuantizedLayout. It walks the same spanning tree (buildSpanningTree) top-down,
-// so a parent's SNAPPED forward (not its raw/unsnapped world forward) is always resolved
-// before its children are visited — this keeps compose∘snap self-consistent: composing
-// the offsets this function returns reproduces each child's direction using the exact
-// snapped angles, not the pre-snap continuous ones.
+// measureScalars is the plain-polar INVERSE measurement: given each node's current world
+// center (centers) and its OWNED reference (references[id], "" for a root), derive the
+// integer scalar triple (iTheta, iPhi, iR) that is the node's LOCAL POLAR coordinate about
+// its reference as the origin (or sceneCenter for a root) — the model this file implements
+// (see the package-level Model doc in node_move.go / CLAUDE.md). No forward-kinematics frame
+// is involved: this is a PLAIN polar measurement, origin = the reference's own current world
+// center (or sceneCenter for a root), no rotation/orientation carried between nodes.
 //
-// Roots get offset {0,0,0,""} — buildSpanningTree's convention is that a root's own
-// current center becomes the anchor (matching ComposeQuantizedLayout's md.sceneSphere.Center
-// role for callers that then compose from that same center) and rootForward is its fixed
-// forward, exactly as composeQuantizedLayout assigns on the way out.
-//
-// For a child C of processed parent P:
-//
-//	childDirWorld = cart2polar(centers[C] - centers[P])   // the one cartesian boundary
-//	(c, psi)      = azimuthFrom(P.snappedForward, childDirWorld)
-//	iTheta        = round(c / stepTheta)
-//	iPhi          = round(psi / stepPhi)
-//	iR            = round(|centers[C]-centers[P]| / stepR)
-//	C.snappedForward = fromAxisFrame(P.snappedForward, iTheta*stepTheta, iPhi*stepPhi)
-//
-// Nodes missing a center, or unreachable from a root whose center is known, are omitted
-// (nothing to snap against). Cycles are detected and skipped, mirroring
-// composeQuantizedLayout's visiting-guard.
-// snapQuantizedOffsets measures each node's quantized triple relative to its REFERENCE
-// (parent[id]) from the given centers. parent is the OWNED reference map (peer-to-peer:
-// each node holds its reference), seeded once from the spanning tree and thereafter passed
-// in — this no longer recomputes buildSpanningTree. parent[id] == "" marks a root.
-// referenceForward is the LOCAL frame a node's triple is measured in: the reference's own
-// INCOMING spatial direction — the unit direction from the reference's reference (the
-// grandparent) into the reference. A reference that is itself a root has no incoming edge,
-// so it uses rootForward. iTheta == 0 relative to this frame means the node continues that
-// incoming line straight, i.e. grandparent → reference → node are spatially colinear.
-func referenceForward(centers map[string]vec3, parent map[string]string, ref string) dir {
-	g := parent[ref]
-	if g == "" {
-		return rootForward
-	}
-	gPos, ok1 := centers[g]
-	rPos, ok2 := centers[ref]
-	if !ok1 || !ok2 {
-		return rootForward
-	}
-	fwd := rPos.sub(gPos)
-	if fwd.length() == 0 {
-		return rootForward
-	}
-	p := cart2polar(fwd)
-	return dir{Theta: p.Theta, Phi: p.Phi}
-}
-
-func snapQuantizedOffsets(centers map[string]vec3, parent map[string]string) map[string]quantizedOffset {
-	result := make(map[string]quantizedOffset, len(parent))
-	for id, p := range parent {
-		if p == "" {
-			result[id] = quantizedOffset{parent: ""}
+// Nodes missing a center, or whose reference is missing a center, are omitted (nothing to
+// measure against).
+func measureScalars(centers map[string]vec3, references map[string]string, sceneCenter vec3) map[string]quantizedOffset {
+	result := make(map[string]quantizedOffset, len(references))
+	for id, ref := range references {
+		origin := sceneCenter
+		if ref != "" {
+			c, ok := centers[ref]
+			if !ok {
+				continue
+			}
+			origin = c
+		}
+		pos, ok := centers[id]
+		if !ok {
 			continue
 		}
-		cPos, ok1 := centers[id]
-		pPos, ok2 := centers[p]
-		if !ok1 || !ok2 {
-			continue
-		}
-		forward := referenceForward(centers, parent, p)
-		delta := cPos.sub(pPos)
-		r := delta.length()
-		childDir := forward
-		if r > 0 {
-			dp := cart2polar(delta)
-			childDir = dir{Theta: dp.Theta, Phi: dp.Phi}
-		}
-		c, psi := azimuthFrom(forward, childDir)
+		p := cart2polar(pos.sub(origin))
 		result[id] = quantizedOffset{
-			iTheta: int(math.Round(c / stepTheta)),
-			iPhi:   int(math.Round(psi / stepPhi)),
-			iR:     int(math.Round(r / stepR)),
-			parent: p,
+			iTheta: int(math.Round(p.Theta / stepTheta)),
+			iPhi:   int(math.Round(p.Phi / stepPhi)),
+			iR:     int(math.Round(p.R / stepR)),
+			parent: ref,
 		}
 	}
 	return result
 }
 
-// SnapQuantizedOffsets fills md.quantizedOffsets from the movers' CURRENT held centers
-// (heldCenters()) and the current edge graph (heldEdges()). It is PHASE 2 scaffolding,
-// callable from tests only for now: nothing in the live move/render/persist path calls
-// this yet (md.quantizedLayout still gates ComposeQuantizedLayout, and nothing sets it).
+// deriveCenters is the plain-polar FORWARD computation: given each node's scalar triple
+// (scalars, from measureScalars or loaded meta.json quantI*) and its OWNED reference
+// (references), compute every reachable node's world center. References are resolved
+// BEFORE dependents (BFS from the roots — ref == ""), so a node's reference is always
+// already derived when the node itself is visited:
+//
+//	origin      = sceneCenter, or derived[ref] if ref != ""
+//	derived[id] = origin + polar2cart({R: iR*stepR, Theta: iTheta*stepTheta, Phi: iPhi*stepPhi})
+//
+// Nodes unreachable from any root (a dangling or cyclic reference) are left unset — the
+// walk terminates via a visited guard rather than looping forever on a cycle.
+func deriveCenters(scalars map[string]quantizedOffset, references map[string]string, sceneCenter vec3) map[string]vec3 {
+	children := map[string][]string{}
+	roots := []string{}
+	for id, ref := range references {
+		if ref == "" {
+			roots = append(roots, id)
+		} else {
+			children[ref] = append(children[ref], id)
+		}
+	}
+	sort.Strings(roots)
+
+	derived := map[string]vec3{}
+	visited := map[string]bool{}
+
+	var visit func(id string, origin vec3)
+	visit = func(id string, origin vec3) {
+		if visited[id] {
+			return
+		}
+		visited[id] = true
+		o, ok := scalars[id]
+		if !ok {
+			return
+		}
+		pos := origin.add(polar2cart(polar{
+			R:     float64(o.iR) * stepR,
+			Theta: float64(o.iTheta) * stepTheta,
+			Phi:   float64(o.iPhi) * stepPhi,
+		}))
+		derived[id] = pos
+		kids := append([]string(nil), children[id]...)
+		sort.Strings(kids)
+		for _, childID := range kids {
+			visit(childID, pos)
+		}
+	}
+	for _, id := range roots {
+		visit(id, sceneCenter)
+	}
+	return derived
+}

@@ -100,9 +100,13 @@ func TestDragSnapsToGridIndividually(t *testing.T) {
 }
 
 // TestLoadStoresTriplesFromReference: each node loads with a reference (spanning-tree
-// parent) and a stored scalar triple measured relative to it — while positions stay at the
-// loaded scenePolar (individual, not recomposed). Chain 0→1→2 makes 1's reference 0 and 2's
-// reference 1 (lowest-id-source spanning tree).
+// parent) and a stored scalar triple MEASURED relative to it (from the loaded scenePolar,
+// the un-migrated fallback path). Under the plain-polar model positions ARE recomposed from
+// those triples (deriveCenters, references-before-dependents), so a non-root node's final
+// world center is the reference's DERIVED center plus the node's quantized local-polar
+// offset — not necessarily its raw loaded scenePolar (which itself measures about the scene
+// center, not the reference). Chain 0→1→2 makes 1's reference 0 and 2's reference 1
+// (lowest-id-source spanning tree).
 func TestLoadStoresTriplesFromReference(t *testing.T) {
 	root := writeQuantTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -118,9 +122,27 @@ func TestLoadStoresTriplesFromReference(t *testing.T) {
 	if off := md.quantizedOffsets["2"]; off.parent != "1" {
 		t.Fatalf("node 2 reference = %q, want 1", off.parent)
 	}
-	// Positions are NOT recomposed: node 1 stays at its loaded scenePolar.
-	want := md.sceneSphere.Center.add(polar2cart(polar{R: 80, Theta: 1.0, Phi: 0.5}))
-	if c, _ := md.centerOfNode("1"); c.sub(want).length() > 1e-6 {
-		t.Fatalf("node 1 not at its loaded scenePolar: got %v want %v", c, want)
+
+	// Recompute the expected composed centers the same way computeQuantizedLayout does:
+	// measure each node's triple from its raw loaded scenePolar center, then derive world
+	// centers from those triples (references-before-dependents).
+	sceneCenter := md.sceneSphere.Center
+	rawCenters := map[string]vec3{
+		"0": sceneCenter.add(polar2cart(polar{R: 40, Theta: 1.2, Phi: 0.3})),
+		"1": sceneCenter.add(polar2cart(polar{R: 80, Theta: 1.0, Phi: 0.5})),
+		"2": sceneCenter.add(polar2cart(polar{R: 120, Theta: 0.8, Phi: -0.4})),
+	}
+	references := map[string]string{"0": "", "1": "0", "2": "1"}
+	scalars := measureScalars(rawCenters, references, sceneCenter)
+	want := deriveCenters(scalars, references, sceneCenter)
+
+	for _, id := range []string{"0", "1", "2"} {
+		c, ok := md.centerOfNode(id)
+		if !ok {
+			t.Fatalf("node %s has no center", id)
+		}
+		if c.sub(want[id]).length() > 1e-6 {
+			t.Fatalf("node %s composed center mismatch: got %v want %v", id, c, want[id])
+		}
 	}
 }

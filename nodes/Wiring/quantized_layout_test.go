@@ -233,24 +233,28 @@ func TestSpanningTreeMultipleComponents(t *testing.T) {
 	}
 }
 
-// A spatially-straight chain (grandparent → ref → node on one line) measures iTheta == 0
-// for the node, since the triple is taken about the reference's incoming direction.
-func TestSnapLocalStraightIsIThetaZero(t *testing.T) {
-	dirv := polar2cart(polar{R: 1, Theta: 1.1, Phi: 0.4})
-	centers := map[string]vec3{
-		"g": {X: 0, Y: 0, Z: 0},
-		"p": dirv.scale(50),  // g -> p along dirv
-		"c": dirv.scale(110), // p -> c continues the SAME line
+// measureScalars/deriveCenters round-trip: a node's world center, re-measured about its
+// reference (plain local polar, reference's current world center as the origin) and then
+// re-derived, reproduces the original center. There is no colinear/straight-line invariant
+// under the plain-polar model (that was the old rotational-nesting/referenceForward model) —
+// only the round-trip.
+func TestMeasureScalarsRoundTrips(t *testing.T) {
+	// Scalars chosen directly (exact integer cells) rather than measured from an arbitrary
+	// world center — measurement quantizes to the nearest cell, so round-tripping an
+	// off-grid center is lossy by design; the invariant under test is that
+	// measure(derive(scalars)) reproduces the SAME scalars (idempotent on-grid points).
+	references := map[string]string{"g": "", "p": "g", "c": "p"}
+	scalars := map[string]quantizedOffset{
+		"g": {parent: ""},
+		"p": {iTheta: 4, iPhi: 2, iR: 3, parent: "g"},
+		"c": {iTheta: 2, iPhi: -3, iR: 2, parent: "p"},
 	}
-	parent := map[string]string{"g": "", "p": "g", "c": "p"}
-	got := snapQuantizedOffsets(centers, parent)
-	if got["c"].iTheta != 0 {
-		t.Fatalf("straight continuation should be iTheta=0, got %+v", got["c"])
-	}
-	// A bent node off the line is not iTheta=0.
-	centers["c"] = centers["p"].add(polar2cart(polar{R: 60, Theta: 1.1 + 0.6, Phi: 0.4}))
-	if got := snapQuantizedOffsets(centers, parent); got["c"].iTheta == 0 {
-		t.Fatalf("bent node should not be iTheta=0, got %+v", got["c"])
+	derived := deriveCenters(scalars, references, vec3{})
+	remeasured := measureScalars(derived, references, vec3{})
+	for _, id := range []string{"g", "p", "c"} {
+		if remeasured[id] != scalars[id] {
+			t.Fatalf("%s: round-trip mismatch remeasured=%+v want=%+v", id, remeasured[id], scalars[id])
+		}
 	}
 }
 
@@ -277,19 +281,16 @@ func TestSnapToReferenceLandsOnGrid(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a reference snap for a non-root node")
 	}
-	// Re-measure the snapped offset about the reference: it must be exact integer cells.
+	// Re-measure the snapped offset about the reference: it must be exact integer cells,
+	// and re-deriving it must reproduce the snapped point exactly.
 	centers["c"] = snapped
-	rel := snapQuantizedOffsets(centers, md.references)["c"]
-	reconstructed := refReconstruct(centers, md.references, "p", rel)
+	rel := measureScalars(centers, md.references, md.sceneSphere.Center)["c"]
+	reconstructed := centers["p"].add(polar2cart(polar{
+		R:     float64(rel.iR) * stepR,
+		Theta: float64(rel.iTheta) * stepTheta,
+		Phi:   float64(rel.iPhi) * stepPhi,
+	}))
 	if reconstructed.sub(snapped).length() > 1e-6 {
 		t.Fatalf("snapped point is not on the integer grid about its reference: snapped=%v cells=%+v", snapped, rel)
 	}
-}
-
-// refReconstruct rebuilds a child's world position from its integer triple about ref's frame
-// — the inverse of the measurement, for test verification.
-func refReconstruct(centers map[string]vec3, parent map[string]string, ref string, rel quantizedOffset) vec3 {
-	forward := referenceForward(centers, parent, ref)
-	d := fromAxisFrame(forward, float64(rel.iTheta)*stepTheta, float64(rel.iPhi)*stepPhi)
-	return centers[ref].add(cart(d).scale(float64(rel.iR) * stepR))
 }
