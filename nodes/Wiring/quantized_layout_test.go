@@ -254,34 +254,42 @@ func TestSnapLocalStraightIsIThetaZero(t *testing.T) {
 	}
 }
 
-// snapToReference snaps ONLY the distance from the reference to a radius cell, keeping the
-// dragged direction. Two children of the same reference dragged to the same cell end up
-// equidistant from it, in different directions.
-func TestSnapToReferenceSnapsDistance(t *testing.T) {
-	pPos := vec3{X: 10, Y: -5, Z: 2}
+// snapToReference lands a dragged node on the scalar×constant grid ABOUT its reference: the
+// offset from the reference re-measures to integer (iTheta,iPhi,iR) cells — no off-grid
+// angles or distances.
+func TestSnapToReferenceLandsOnGrid(t *testing.T) {
+	centers := map[string]vec3{
+		"g": {X: 0, Y: 0, Z: 0},
+		"p": polar2cart(polar{R: 50, Theta: 1.0, Phi: 0.4}),
+	}
 	md := &MoveDispatch{
 		sceneSphere: sceneSphere{Center: vec3{}},
-		references:  map[string]string{"p": "", "a": "p", "b": "p"},
-		nodeMovers:  map[string]*nodeMover{"p": {id: "p"}, "a": {id: "a"}, "b": {id: "b"}},
+		references:  map[string]string{"g": "", "p": "g", "c": "p"},
+		nodeMovers:  map[string]*nodeMover{"g": {id: "g"}, "p": {id: "p"}, "c": {id: "c"}},
 	}
-	md.nodeMovers["p"].snap.Store(&centerSnap{c: pPos})
+	md.nodeMovers["g"].snap.Store(&centerSnap{c: centers["g"]})
+	md.nodeMovers["p"].snap.Store(&centerSnap{c: centers["p"]})
+	md.nodeMovers["c"].snap.Store(&centerSnap{c: centers["p"]})
 
-	// Drag a and b in different directions, each to a target ~3 radius cells out.
-	targetA := pPos.add(vec3{X: 3*stepR + 4, Y: 3, Z: 0})
-	targetB := pPos.add(vec3{X: 0, Y: 2, Z: 3*stepR - 5})
-	sa, ok1 := md.snapToReference("a", targetA)
-	sb, ok2 := md.snapToReference("b", targetB)
-	if !ok1 || !ok2 {
-		t.Fatal("expected reference snaps for non-root nodes")
+	// Arbitrary off-grid target.
+	target := centers["p"].add(vec3{X: 47, Y: -13, Z: 22})
+	snapped, ok := md.snapToReference("c", target)
+	if !ok {
+		t.Fatal("expected a reference snap for a non-root node")
 	}
-	da, db := sa.sub(pPos).length(), sb.sub(pPos).length()
-	if math.Abs(da-db) > 1e-6 {
-		t.Fatalf("children of one reference should be equidistant: da=%v db=%v", da, db)
+	// Re-measure the snapped offset about the reference: it must be exact integer cells.
+	centers["c"] = snapped
+	rel := snapQuantizedOffsets(centers, md.references)["c"]
+	reconstructed := refReconstruct(centers, md.references, "p", rel)
+	if reconstructed.sub(snapped).length() > 1e-6 {
+		t.Fatalf("snapped point is not on the integer grid about its reference: snapped=%v cells=%+v", snapped, rel)
 	}
-	if r := da / stepR; math.Abs(r-math.Round(r)) > 1e-6 {
-		t.Fatalf("distance not on the radius grid: %v", da)
-	}
-	if sa.sub(pPos).normalize().dot(sb.sub(pPos).normalize()) > 0.99 {
-		t.Fatal("directions should stay free (different), got nearly parallel")
-	}
+}
+
+// refReconstruct rebuilds a child's world position from its integer triple about ref's frame
+// — the inverse of the measurement, for test verification.
+func refReconstruct(centers map[string]vec3, parent map[string]string, ref string, rel quantizedOffset) vec3 {
+	forward := referenceForward(centers, parent, ref)
+	d := fromAxisFrame(forward, float64(rel.iTheta)*stepTheta, float64(rel.iPhi)*stepPhi)
+	return centers[ref].add(cart(d).scale(float64(rel.iR) * stepR))
 }
