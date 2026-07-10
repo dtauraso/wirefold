@@ -102,9 +102,11 @@ func TestDragSnapsToGridIndividually(t *testing.T) {
 	}
 }
 
-// TestLoadIsIndividualRoots: every node loads as its own root (no parent), positioned at
-// its scenePolar — no spanning tree, no chained compose.
-func TestLoadIsIndividualRoots(t *testing.T) {
+// TestLoadStoresTriplesFromReference: each node loads with a reference (spanning-tree
+// parent) and a stored scalar triple measured relative to it — while positions stay at the
+// loaded scenePolar (individual, not recomposed). Chain 0→1→2 makes 1's reference 0 and 2's
+// reference 1 (lowest-id-source spanning tree).
+func TestLoadStoresTriplesFromReference(t *testing.T) {
 	root := writeQuantTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -112,11 +114,14 @@ func TestLoadIsIndividualRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
-	for _, id := range []string{"0", "1", "2"} {
-		if off := md.quantizedOffsets[id]; off.parent != "" {
-			t.Fatalf("node %s has parent %q — individual snapping means all roots", id, off.parent)
-		}
+	// Non-root nodes have a reference and a stored triple.
+	if off := md.quantizedOffsets["1"]; off.parent != "0" {
+		t.Fatalf("node 1 reference = %q, want 0", off.parent)
 	}
+	if off := md.quantizedOffsets["2"]; off.parent != "1" {
+		t.Fatalf("node 2 reference = %q, want 1", off.parent)
+	}
+	// Positions are NOT recomposed: node 1 stays at its loaded scenePolar.
 	want := md.sceneSphere.Center.add(polar2cart(polar{R: 80, Theta: 1.0, Phi: 0.5}))
 	if c, _ := md.centerOfNode("1"); c.sub(want).length() > 1e-6 {
 		t.Fatalf("node 1 not at its loaded scenePolar: got %v want %v", c, want)

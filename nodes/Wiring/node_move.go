@@ -820,128 +820,60 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
-	if md.quantizedLayout {
-		return md.rootMoveQuantized(nodeID, target)
-	}
-	// Move ONLY the dragged node. There is no lock system and no central position store:
-	// node positions live in the movers' held geometry (geom.Center). Fan the new center
-	// so the node and the edges touching it re-emit their geometry. Movement constraints
-	// (the double-link locks) will be reintroduced here later.
 	edges := md.heldEdges()
-	emit := map[string]vec3{nodeID: target}
 
-	// pos reads the dragged node's TARGET (from emit) before falling back to the movers'
-	// Recompute every node's reach over the updated positions (pure polar) and fan all movers
-	// ONCE. The dragged node's NEW polar is derived from the pointer target at the INPUT boundary
-	// (the pointer hands in a cartesian world point) — this is the mirror of the emit boundary,
-	// the one place cartesian enters the polar model on the drag path.
-	polars := md.heldPolar()
-	for id, w := range emit {
-		polars[id] = cart2polar(w.sub(md.sceneSphere.Center))
-	}
-	reach := reachRFromPolar(polars, edges)
-	md.fanCenters(emit, reach)
-
-	// Persist the DRAGGED node's new center to disk. Debounced + fire-and-forget: a drag
-	// re-arms per pointermove and writes once it settles, off the hot path.
-	if md.posPersist != nil {
-		for id := range emit {
-			md.posPersist.schedule(id, polars[id])
-		}
-	}
-	return true
-}
-
-// rootMoveQuantized is the PHASE 3 quantized-layout drag path (quantized_layout.go):
-// the dragged node's free-form world target SNAPS to the nearest grid cell — there is no
-// per-axis gesture; the whole target vector is converted to one offset about the parent's
-// CURRENT composed forward frame and rounded to the nearest (iTheta,iPhi,iR). This is
-// authoritative: compose is the only position solver once quantizedLayout is on.
-//
-// A ROOT drag (no parent) is the exception: a root's own position is a free anchor, not a
-// quantized offset, so it just moves to the target directly (no grid snap) and every
-// descendant hanging off it recomposes/re-emits — "a root being dragged just moves its
-// anchor". A non-root drag snaps the target to the nearest grid cell about its parent, then
-// recomposes the whole graph and re-emits the dragged node AND every descendant (rotational
-// nesting: bending one node's angle re-aims everything hanging off it).
-func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
-	off, ok := md.quantizedOffsets[nodeID]
-	if !ok {
-		return false
-	}
-	parentID := off.parent
-
-	if parentID == "" {
-		// Individual snap: snap the dragged node's own (θ,φ,r) about the scene center to
-		// the grid and move ONLY this node (it is its own root; no subtree to re-aim).
+	// Individual snap: snap the dragged node's own (r,θ,φ) about the scene center to the
+	// grid and move ONLY that node. A node's REFERENCE (spanning-tree parent) sets its
+	// stored scalar triple, not its movement — dragging never re-aims anyone else.
+	newPos := target
+	if md.quantizedLayout {
 		p := cart2polar(target.sub(md.sceneSphere.Center))
-		snapped := polar{
+		newPos = md.sceneSphere.Center.add(polar2cart(polar{
 			R:     math.Round(p.R/stepR) * stepR,
 			Theta: math.Round(p.Theta/stepTheta) * stepTheta,
 			Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
-		}
-		newPos := md.sceneSphere.Center.add(polar2cart(snapped))
-		composed := md.composeAllWithAnchorOverride(nodeID, newPos)
-		subtree := collectSubtree(md.quantizedOffsets, nodeID)
-		md.applyComposedCenters(composed, subtree)
-		md.persistSubtree(subtree, composed)
-		return true
+		}))
 	}
 
-	// Non-root drag: convert the target to an offset about the parent's CURRENT composed
-	// forward direction (azimuthFrom/angularDistance — the same measurement
-	// snapQuantizedOffsets uses for one node), then round to the nearest grid cell.
-	composedNow := md.composeAll()
-	parentLayout, ok := composedNow[parentID]
-	if !ok {
-		return false
-	}
-	delta := target.sub(parentLayout.center)
-	r := delta.length()
-	childDir := dir{}
-	if r > 0 {
-		p := cart2polar(delta)
-		childDir = dir{Theta: p.Theta, Phi: p.Phi}
-	}
-	c, psi := azimuthFrom(parentLayout.forward, childDir)
-	newOff := quantizedOffset{
-		iTheta: int(math.Round(c / stepTheta)),
-		iPhi:   int(math.Round(psi / stepPhi)),
-		iR:     int(math.Round(r / stepR)),
-		parent: parentID,
-	}
-	md.quantizedOffsets[nodeID] = newOff
+	emit := map[string]vec3{nodeID: newPos}
+	polars := md.heldPolar()
+	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
+	reach := reachRFromPolar(polars, edges)
+	md.fanCenters(emit, reach)
 
-	composed := md.composeAll()
-	subtree := collectSubtree(md.quantizedOffsets, nodeID)
-	md.applyComposedCenters(composed, subtree)
+	// Persist the dragged node's new scene-polar (debounced, fire-and-forget).
+	if md.posPersist != nil {
+		md.posPersist.schedule(nodeID, polars[nodeID])
+	}
 
-	// Persist the WHOLE moved subtree: the dragged node's NEW offset plus every descendant
-	// (whose offset is unchanged but must be written so reload composes from stored offsets,
-	// not a re-snap of their now-stale scenePolar).
-	md.persistSubtree(subtree, composed)
+	// Remeasure the scalar triples from the new positions: the dragged node's triple about
+	// its reference changed, and so did any node that references it. Persist the changed ones.
+	if md.quantizedLayout {
+		md.remeasureTriples(nodeID, newPos)
+	}
 	return true
 }
 
-// persistSubtree debounced-persists every node the drag moved. A root node (offset.parent
-// == "") is saved as its absolute scene-polar anchor; every other node is saved as its
-// quantized offset. Called with the composed layout so a root's just-moved center is used.
-func (md *MoveDispatch) persistSubtree(ids []string, composed map[string]quantizedNodeLayout) {
-	for _, id := range ids {
-		off, ok := md.quantizedOffsets[id]
-		if !ok {
-			continue
-		}
-		if off.parent == "" {
-			if md.posPersist != nil {
-				if l, ok := composed[id]; ok {
-					md.posPersist.schedule(id, cart2polar(l.center.sub(md.sceneSphere.Center)))
-				}
-			}
-			continue
-		}
-		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(id, off)
+// remeasureTriples recomputes every node's scalar triple (iTheta,iPhi,iR about its
+// spanning-tree reference) from the current positions with movedID overridden to movedPos,
+// updates md.quantizedOffsets, and persists the non-root triples that changed.
+func (md *MoveDispatch) remeasureTriples(movedID string, movedPos vec3) {
+	centers := md.heldCenters()
+	centers[movedID] = movedPos
+	edgeEP := map[string]EdgeEndpoints{}
+	for _, e := range md.heldEdges() {
+		edgeEP[e.Source+"->"+e.Target] = EdgeEndpoints{Source: e.Source, Target: e.Target}
+	}
+	newOffsets := snapQuantizedOffsets(centers, edgeEP)
+	for id, off := range newOffsets {
+		md.quantizedOffsets[id] = off // keep every in-memory triple fresh
+	}
+	// Persist ONLY the dragged node's own triple (its own file) — individual snapping never
+	// writes another node's file. A node whose reference moved has its triple remeasured at
+	// load from the persisted positions, so it needs no write here.
+	if md.quantOffsetPersist != nil {
+		if off, ok := newOffsets[movedID]; ok && off.parent != "" {
+			md.quantOffsetPersist.schedule(movedID, off)
 		}
 	}
 }

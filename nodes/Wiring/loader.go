@@ -342,13 +342,20 @@ func (b *buildCtx) computeNodeGeometry() {
 // (which only walk the edge graph); they are folded in here as their own root with a
 // zero offset, so EVERY node in the spec ends up with an entry.
 func (b *buildCtx) computeQuantizedLayout() {
-	// Individual snapping: every node is its OWN root, anchored at the position it loaded
-	// with (computeNodeGeometry set b.centers/b.nodeGeoms from each node's scenePolar). No
-	// parent frames, no spanning tree, no chained compose — a drag moves only the dragged
-	// node. (Manually-picked references, which re-introduce a per-node parent, come next.)
-	offsets := make(map[string]quantizedOffset, len(b.spec.Nodes))
+	// Each node's REFERENCE is its spanning-tree parent; its scalar triple (iTheta,iPhi,iR)
+	// is MEASURED from its loaded position relative to that reference's frame
+	// (snapQuantizedOffsets). Positions are NOT recomposed — they stay exactly as loaded
+	// (individual snapping); the triple is stored bookkeeping, and colinear = iTheta 0.
+	edgeEP := map[string]EdgeEndpoints{}
+	for _, e := range b.spec.Edges {
+		edgeEP[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target, SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle}
+	}
+	offsets := snapQuantizedOffsets(b.centers, edgeEP)
+	parent, _ := buildSpanningTree(edgeEP)
 	for _, n := range b.spec.Nodes {
-		offsets[n.ID] = quantizedOffset{parent: ""}
+		if _, ok := offsets[n.ID]; !ok {
+			offsets[n.ID] = quantizedOffset{parent: parent[n.ID]} // isolated / centerless → its own root
+		}
 	}
 	b.quantizedOffsets = offsets
 }
