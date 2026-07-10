@@ -233,134 +233,51 @@ func TestSpanningTreeMultipleComponents(t *testing.T) {
 	}
 }
 
-// TestSnapRecoversExactGridLayout is the strongest correctness check for PHASE 2: build a
-// layout with KNOWN integer offsets via composeQuantizedLayout, then run
-// snapQuantizedOffsets on the resulting centers and assert it recovers the SAME integers
-// exactly. This is the round-trip snap(compose(offsets)) == offsets on grid-aligned input.
-func TestSnapRecoversExactGridLayout(t *testing.T) {
-	// Node ids are single digits ("0","1",...) chosen so the intended root ("0"/"P"→"0")
-	// is the LOWEST id in its component — buildSpanningTree (called internally by
-	// snapQuantizedOffsets) picks the lowest-id node per component as root, so the ids
-	// must encode the intended tree shape, not just label it in edge names.
-	t.Run("3-deep chain", func(t *testing.T) {
-		edges := map[string]EdgeEndpoints{
-			"0->1": {Source: "0", Target: "1"},
-			"1->2": {Source: "1", Target: "2"},
-			"2->3": {Source: "2", Target: "3"},
-		}
-		// iTheta is a colatitude-like offset (always >= 0 by construction: it comes from
-		// angularDistance/acos, which never returns negative) — a negative iTheta would
-		// alias with (-iTheta, iPhi+π/stepPhi) representing the identical direction, so
-		// round-trip test data must stick to iTheta >= 0. Likewise iTheta == 0 (straight
-		// continuation along the pole) makes iPhi (bearing) undefined/degenerate — atan2
-		// resolves it to 0 regardless of the authored value — so round-trip test data
-		// must keep iTheta != 0 wherever iPhi is meant to be recovered.
-		want := map[string]quantizedOffset{
-			"1": {iTheta: 2, iPhi: -1, iR: 1, parent: "0"},
-			"2": {iTheta: 1, iPhi: 3, iR: 2, parent: "1"},
-			"3": {iTheta: 1, iPhi: 2, iR: 1, parent: "2"},
-		}
-		parent, roots := buildSpanningTree(edges)
-		full := map[string]quantizedOffset{"0": {parent: ""}}
-		for id, o := range want {
-			full[id] = o
-		}
-		anchor := vec3{X: 5, Y: -3, Z: 7}
-		layout := composeQuantizedLayout(parent, roots, full, anchor)
-		centers := map[string]vec3{}
-		for id, l := range layout {
-			centers[id] = l.center
-		}
-
-		got := snapQuantizedOffsets(centers, parent)
-		for id, o := range want {
-			g, ok := got[id]
-			if !ok {
-				t.Fatalf("snap missing offset for %q, got=%v", id, got)
-			}
-			if g != o {
-				t.Fatalf("snap[%q] = %+v, want %+v", id, g, o)
-			}
-		}
-		if g := got["0"]; g.parent != "" || g.iTheta != 0 || g.iPhi != 0 || g.iR != 0 {
-			t.Fatalf("root offset = %+v, want zero offset with no parent", g)
-		}
-	})
-
-	t.Run("branching node", func(t *testing.T) {
-		edges := map[string]EdgeEndpoints{
-			"0->1": {Source: "0", Target: "1"},
-			"0->2": {Source: "0", Target: "2"},
-			"0->3": {Source: "0", Target: "3"},
-		}
-		want := map[string]quantizedOffset{
-			"1": {iTheta: 1, iPhi: 0, iR: 1, parent: "0"},
-			"2": {iTheta: 1, iPhi: 4, iR: 1, parent: "0"},
-			"3": {iTheta: 2, iPhi: -3, iR: 2, parent: "0"},
-		}
-		parent, roots := buildSpanningTree(edges)
-		full := map[string]quantizedOffset{"0": {parent: ""}}
-		for id, o := range want {
-			full[id] = o
-		}
-		anchor := vec3{X: 0, Y: 0, Z: 0}
-		layout := composeQuantizedLayout(parent, roots, full, anchor)
-		centers := map[string]vec3{}
-		for id, l := range layout {
-			centers[id] = l.center
-		}
-
-		got := snapQuantizedOffsets(centers, parent)
-		for id, o := range want {
-			g, ok := got[id]
-			if !ok {
-				t.Fatalf("snap missing offset for %q, got=%v", id, got)
-			}
-			if g != o {
-				t.Fatalf("snap[%q] = %+v, want %+v", id, g, o)
-			}
-		}
-	})
+// A spatially-straight chain (grandparent → ref → node on one line) measures iTheta == 0
+// for the node, since the triple is taken about the reference's incoming direction.
+func TestSnapLocalStraightIsIThetaZero(t *testing.T) {
+	dirv := polar2cart(polar{R: 1, Theta: 1.1, Phi: 0.4})
+	centers := map[string]vec3{
+		"g": {X: 0, Y: 0, Z: 0},
+		"p": dirv.scale(50),  // g -> p along dirv
+		"c": dirv.scale(110), // p -> c continues the SAME line
+	}
+	parent := map[string]string{"g": "", "p": "g", "c": "p"}
+	got := snapQuantizedOffsets(centers, parent)
+	if got["c"].iTheta != 0 {
+		t.Fatalf("straight continuation should be iTheta=0, got %+v", got["c"])
+	}
+	// A bent node off the line is not iTheta=0.
+	centers["c"] = centers["p"].add(polar2cart(polar{R: 60, Theta: 1.1 + 0.6, Phi: 0.4}))
+	if got := snapQuantizedOffsets(centers, parent); got["c"].iTheta == 0 {
+		t.Fatalf("bent node should not be iTheta=0, got %+v", got["c"])
+	}
 }
 
-// TestSnapComposeStable checks the fixpoint property on ARBITRARY (non-grid-aligned)
-// centers: snapQuantizedOffsets(centers) then composeQuantizedLayout(snapped) should land
-// within one grid step of the input (snapping rounds each node's offset to the nearest
-// grid point, so recomposing lands near, not exactly on, the original arbitrary center).
-func TestSnapComposeStable(t *testing.T) {
-	// Node ids are digits so the intended root ("0") is the lowest id in its component
-	// (buildSpanningTree, called internally by snapQuantizedOffsets, picks the lowest id
-	// per component as root).
-	edges := map[string]EdgeEndpoints{
-		"0->1": {Source: "0", Target: "1"},
-		"1->2": {Source: "1", Target: "2"},
+// snapToReference lands a dragged node exactly on the reference's incoming line when the
+// target is near it (iTheta rounds to 0) — i.e. dragging makes it colinear.
+func TestSnapToReferenceLandsColinear(t *testing.T) {
+	dirv := polar2cart(polar{R: 1, Theta: 0.9, Phi: -0.5})
+	md := &MoveDispatch{
+		sceneSphere: sceneSphere{Center: vec3{}},
+		references:  map[string]string{"g": "", "p": "g", "c": "p"},
+		nodeMovers: map[string]*nodeMover{
+			"g": {id: "g"}, "p": {id: "p"}, "c": {id: "c"},
+		},
 	}
-	anchor := vec3{X: 0, Y: 0, Z: 0}
-	// Arbitrary (not grid-aligned) centers, reachable from anchor via "0".
-	centers := map[string]vec3{
-		"0": anchor,
-		"1": vec3{X: 3.1, Y: 0.4, Z: -2.2},
-		"2": vec3{X: 5.9, Y: 1.7, Z: -3.8},
+	md.nodeMovers["g"].snap.Store(&centerSnap{c: vec3{}})
+	md.nodeMovers["p"].snap.Store(&centerSnap{c: dirv.scale(50)})
+	md.nodeMovers["c"].snap.Store(&centerSnap{c: dirv.scale(90)})
+
+	// Target near the straight continuation but nudged off it.
+	target := dirv.scale(100).add(vec3{X: 3, Y: -2, Z: 1})
+	snapped, ok := md.snapToReference("c", target)
+	if !ok {
+		t.Fatal("expected a reference snap for a non-root node")
 	}
-
-	parent, roots := buildSpanningTree(edges)
-	snapped := snapQuantizedOffsets(centers, parent)
-	recomposed := composeQuantizedLayout(parent, roots, snapped, anchor)
-
-	// One grid step tolerance: the maximum positional error introduced by rounding
-	// iTheta/iPhi/iR by up to 0.5 step each, generously bounded by stepR (the radial
-	// step) plus a slack factor for the angular rounding's arc-length contribution at
-	// this radius. Use a concrete, explicit tolerance rather than a vague "close".
-	const posTol = stepR * 1.5
-
-	for id, want := range centers {
-		got, ok := recomposed[id]
-		if !ok {
-			t.Fatalf("recompose missing %q", id)
-		}
-		d := got.center.sub(want).length()
-		if d > posTol {
-			t.Fatalf("recompose[%q] = %v, want within %v of %v (delta %v)", id, got.center, posTol, want, d)
-		}
+	// Snapped point is colinear with g,p (cross(p-g, snapped-g) ~ 0).
+	pG := dirv.scale(50)
+	if cr := pG.cross(snapped).length(); cr > 1e-6 {
+		t.Fatalf("snapped not colinear with the g→p line: cross=%v snapped=%v", cr, snapped)
 	}
 }

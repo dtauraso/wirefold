@@ -275,60 +275,55 @@ func cart(d dir) vec3 {
 // (parent[id]) from the given centers. parent is the OWNED reference map (peer-to-peer:
 // each node holds its reference), seeded once from the spanning tree and thereafter passed
 // in — this no longer recomputes buildSpanningTree. parent[id] == "" marks a root.
+// referenceForward is the LOCAL frame a node's triple is measured in: the reference's own
+// INCOMING spatial direction — the unit direction from the reference's reference (the
+// grandparent) into the reference. A reference that is itself a root has no incoming edge,
+// so it uses rootForward. iTheta == 0 relative to this frame means the node continues that
+// incoming line straight, i.e. grandparent → reference → node are spatially colinear.
+func referenceForward(centers map[string]vec3, parent map[string]string, ref string) dir {
+	g := parent[ref]
+	if g == "" {
+		return rootForward
+	}
+	gPos, ok1 := centers[g]
+	rPos, ok2 := centers[ref]
+	if !ok1 || !ok2 {
+		return rootForward
+	}
+	fwd := rPos.sub(gPos)
+	if fwd.length() == 0 {
+		return rootForward
+	}
+	p := cart2polar(fwd)
+	return dir{Theta: p.Theta, Phi: p.Phi}
+}
+
 func snapQuantizedOffsets(centers map[string]vec3, parent map[string]string) map[string]quantizedOffset {
-	children := map[string][]string{}
-	roots := map[string]bool{}
+	result := make(map[string]quantizedOffset, len(parent))
 	for id, p := range parent {
 		if p == "" {
-			roots[id] = true
+			result[id] = quantizedOffset{parent: ""}
 			continue
 		}
-		children[p] = append(children[p], id)
-	}
-
-	result := map[string]quantizedOffset{}
-	forwardOf := map[string]dir{}
-	visiting := map[string]bool{}
-
-	var visit func(id string, forward dir, offset quantizedOffset)
-	visit = func(id string, forward dir, offset quantizedOffset) {
-		if visiting[id] {
-			return // cycle guard: never revisit a node already on the current path
+		cPos, ok1 := centers[id]
+		pPos, ok2 := centers[p]
+		if !ok1 || !ok2 {
+			continue
 		}
-		if _, done := result[id]; done {
-			return
+		forward := referenceForward(centers, parent, p)
+		delta := cPos.sub(pPos)
+		r := delta.length()
+		childDir := forward
+		if r > 0 {
+			dp := cart2polar(delta)
+			childDir = dir{Theta: dp.Theta, Phi: dp.Phi}
 		}
-		if _, known := centers[id]; !known {
-			return // nothing to snap against
-		}
-		visiting[id] = true
-		forwardOf[id] = forward
-		result[id] = offset
-		for _, childID := range children[id] {
-			childCenter, ok := centers[childID]
-			if !ok {
-				continue
-			}
-			delta := childCenter.sub(centers[id])
-			r := delta.length()
-			childDirWorld := dir{}
-			if r > 0 {
-				p := cart2polar(delta)
-				childDirWorld = dir{Theta: p.Theta, Phi: p.Phi}
-			}
-			c, psi := azimuthFrom(forward, childDirWorld)
-			iTheta := int(math.Round(c / stepTheta))
-			iPhi := int(math.Round(psi / stepPhi))
-			iR := int(math.Round(r / stepR))
-			snappedForward := fromAxisFrame(forward, float64(iTheta)*stepTheta, float64(iPhi)*stepPhi)
-			visit(childID, snappedForward, quantizedOffset{iTheta: iTheta, iPhi: iPhi, iR: iR, parent: id})
-		}
-		visiting[id] = false
-	}
-
-	for id := range roots {
-		if _, known := centers[id]; known {
-			visit(id, rootForward, quantizedOffset{parent: ""})
+		c, psi := azimuthFrom(forward, childDir)
+		result[id] = quantizedOffset{
+			iTheta: int(math.Round(c / stepTheta)),
+			iPhi:   int(math.Round(psi / stepPhi)),
+			iR:     int(math.Round(r / stepR)),
+			parent: p,
 		}
 	}
 	return result

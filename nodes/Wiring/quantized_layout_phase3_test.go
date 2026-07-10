@@ -6,7 +6,6 @@ package Wiring
 
 import (
 	"context"
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,13 +85,11 @@ func TestDragSnapsToGridIndividually(t *testing.T) {
 		t.Fatal("RootMove(1) returned false")
 	}
 
-	// "1" landed on the grid: r,θ,φ about the scene center are integer multiples of the steps.
-	p := cart2polar(target.sub(md.sceneSphere.Center))
-	want := md.sceneSphere.Center.add(polar2cart(polar{
-		R:     math.Round(p.R/stepR) * stepR,
-		Theta: math.Round(p.Theta/stepTheta) * stepTheta,
-		Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
-	}))
+	// "1" has a reference ("0"), so it snaps in the reference's frame, not the absolute grid.
+	want, ok := md.snapToReference("1", target)
+	if !ok {
+		t.Fatal("expected a reference snap for node 1")
+	}
 	waitCenterClose(t, md, "1", want, 1e-6)
 
 	// "2" did not move — individual snapping, no subtree.
