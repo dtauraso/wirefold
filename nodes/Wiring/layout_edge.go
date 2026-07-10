@@ -10,6 +10,15 @@ type LayoutMsg struct {
 	Visited    map[string]bool
 	IR         int
 	FromCenter vec3
+	// Direct marks a DIRECT position set (SLICE 3: the drag origin's own new center,
+	// delivered by node_move.go RootMove/fanCenters via LayoutPort.InjectDirect) rather
+	// than a radius-cascade hop. A direct message is applied verbatim to THIS node
+	// (DirectCenter/DirectReach) — no polar-offset math, no visited-marking, no
+	// forwarding — and is handled on this node's own Update() goroutine, same as a
+	// cascade hop, so it is the single writer of this node's position on drag too.
+	Direct       bool
+	DirectCenter vec3
+	DirectReach  float64
 }
 
 // clone returns a shallow copy of msg with its own Visited map, so forwarding
@@ -48,19 +57,26 @@ type LayoutPort struct {
 	// isTimeNode marks a HoldNewSendOld node: only a time node forwards a
 	// cascade past itself (quantized_layout.go / layout-on-domain-network.md).
 	isTimeNode bool
-	// apply is called synchronously by Handle with this node's freshly computed
-	// new world center and updated iR. It performs the single write of this
-	// node's position: it hands the update to this node's OWN nodeMover via the
-	// existing sendMove/inbox channel (node_move.go) — the one place that
-	// already exclusively mutates that mover's held geom/snap — and schedules
-	// the iR persist. This node's Update() goroutine is the SOLE DECIDER of the
-	// new position (it computes newCenter/newIR here in Handle); routing the
-	// actual mutation through the mover's own channel keeps the existing
-	// single-writer invariant on nodeMover.geom intact (no second goroutine
-	// touches it directly), so there is no dual-writer race even though the
-	// decision now originates on a different goroutine per node. nil in tests
-	// built without a loader.
+	// apply is called synchronously by Handle (on THIS node's own Update()
+	// goroutine — see the type doc above) with this node's freshly computed new
+	// world center and updated iR, and schedules the iR persist. SLICE 3: apply
+	// now performs the position write itself (node_move.go MoveDispatch.
+	// applyLayoutCenter -> nodeMover.applyCenter), a plain in-process function
+	// call on the CALLER's goroutine — no channel hop through nodeMover's own
+	// goroutine, because nodeMover no longer runs one for centers. Since apply is
+	// only ever invoked from Handle/InjectDirect's consumer, both of which run on
+	// this node's own Update() goroutine, this node's own goroutine is the SOLE
+	// writer of its position (single-writer by construction, not by mutex). nil
+	// in tests built without a loader.
 	apply func(center vec3, iR int)
+	// applyDirect is called synchronously by Handle for a Direct message (the
+	// drag origin's own new center, delivered via InjectDirect) with the exact
+	// world center + reach RootMove computed on the stdin goroutine. Like apply,
+	// it performs the position write in-process on THIS node's own Update()
+	// goroutine — the drag-origin counterpart to the radius-cascade apply above,
+	// completing the single-writer invariant for both position sources (SLICE 3).
+	// nil in tests built without a loader.
+	applyDirect func(center vec3, reach float64)
 }
 
 // layoutPortBufferCap is the buffered capacity of a LayoutPort's inbound
@@ -115,6 +131,23 @@ func (p *LayoutPort) Inject(msg LayoutMsg) {
 	}
 }
 
+// InjectDirect places a DIRECT position-set message on this port's OWN inbound
+// channel, non-blocking: the drag origin's freshly computed world center + reach
+// (node_move.go RootMove/fanCenters), to be applied on THIS node's own Update()
+// goroutine when it next drains its layout port (Handle below). This is the
+// drag-origin counterpart to a radius-cascade hop landing via Inject/Handle —
+// together they are the two position sources that route to the node goroutine
+// (SLICE 3, layout-on-domain-network.md).
+func (p *LayoutPort) InjectDirect(center vec3, reach float64) {
+	if p == nil {
+		return
+	}
+	select {
+	case p.in <- LayoutMsg{Direct: true, DirectCenter: center, DirectReach: reach}:
+	default:
+	}
+}
+
 // Handle is the SLICE-2 radius-cascade behavior: if this node is already
 // marked visited in msg, the wave terminates here (breaks cycles). Otherwise
 // it computes this node's own new world center as a PLAIN local polar offset
@@ -128,6 +161,15 @@ func (p *LayoutPort) Inject(msg LayoutMsg) {
 // that branch.
 func (p *LayoutPort) Handle(msg LayoutMsg) {
 	if p == nil {
+		return
+	}
+	if msg.Direct {
+		// Drag-origin direct set (SLICE 3): apply verbatim, no cascade math, no
+		// visited-marking, no forwarding — this message never propagates past the
+		// dragged node itself.
+		if p.applyDirect != nil {
+			p.applyDirect(msg.DirectCenter, msg.DirectReach)
+		}
 		return
 	}
 	if msg.Visited == nil {

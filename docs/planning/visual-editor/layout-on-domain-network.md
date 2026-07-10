@@ -47,6 +47,21 @@ node's domain out-edges) is shared/injected generically by the loader — the sa
 `EmitGeometry` is injected today — so only the tiny select-case and a shared handler are
 added per kind, not duplicated logic.
 
+### Position ownership (decided): `Update()` is the sole writer
+
+`nodeMover`'s node-position role is **retired**. The node's own `Update()` goroutine owns
+its position: it holds the live geom, mutates it, publishes the cross-goroutine center
+snapshot, and emits — one goroutine per node truly owns both beads and position. Every
+node-center write (the drag seed for the dragged node AND the cascade for descendants)
+routes to the node goroutine; nothing else writes a node's center. `MoveDispatch`/edges
+become READERS of the node-owned snapshot. (`nodeMover` may persist only as the holder of
+that node-owned atomic snapshot and/or for edge/anchor concerns, but it no longer writes
+node positions.) This is the single-writer design — no dual-writer race by construction.
+
+Slice history: slice 1 = hidden layout plumbing; slice 2 = radius cascade with `Update()`
+DECIDING position but still routing the write through `nodeMover` (compromise, superseded);
+slice 3 = fully retire `nodeMover`'s position write so `Update()` writes directly.
+
 ## Deliberate override of the prior drift rule
 
 MODEL.md's drift rule keeps geometry/position logic out of the domain firing goroutines.

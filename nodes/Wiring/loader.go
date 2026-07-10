@@ -497,12 +497,13 @@ func (b *buildCtx) allocateWires() {
 // LayoutMsg instead of beads. buildNodes injects each node's port via
 // pb.layout, the same closure-injection mechanism EmitGeometry uses.
 //
-// Runs AFTER buildMoveDispatch so each port's apply closure can route a
-// cascade-computed position through THAT node's own nodeMover (md.sendMove)
-// — the single existing writer of nodeMover.geom/snap — and through the
-// (possibly still-unarmed) quantOffsetPersist. b.md may be nil in tests that
-// call buildLayoutEdges directly without building a MoveDispatch first; apply
-// is left nil in that case (Handle nil-guards it).
+// Runs AFTER buildMoveDispatch so each port's apply/applyDirect closures can call
+// straight into THAT node's own nodeMover.applyCenter (node_move.go, SLICE 3: an
+// in-process call, not a channel hop — this node's own Update() goroutine is the
+// sole writer of nm.geom's position fields) and through the (possibly
+// still-unarmed) quantOffsetPersist. b.md may be nil in tests that call
+// buildLayoutEdges directly without building a MoveDispatch first; apply/
+// applyDirect are left nil in that case (Handle nil-guards them).
 func (b *buildCtx) buildLayoutEdges() {
 	ports := make(map[string]*LayoutPort, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
@@ -519,6 +520,9 @@ func (b *buildCtx) buildLayoutEdges() {
 			md := b.md
 			p.apply = func(center vec3, iR int) {
 				md.applyLayoutCenter(id, center, iTheta, iPhi, iR, ref)
+			}
+			p.applyDirect = func(center vec3, reach float64) {
+				md.applyLayoutCenterDirect(id, center, reach)
 			}
 		}
 		ports[n.ID] = p
