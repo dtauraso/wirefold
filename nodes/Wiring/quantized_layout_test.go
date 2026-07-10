@@ -272,7 +272,7 @@ func TestSnapRecoversExactGridLayout(t *testing.T) {
 			centers[id] = l.center
 		}
 
-		got := snapQuantizedOffsets(centers, edges)
+		got := snapQuantizedOffsets(centers, parent)
 		for id, o := range want {
 			g, ok := got[id]
 			if !ok {
@@ -310,7 +310,7 @@ func TestSnapRecoversExactGridLayout(t *testing.T) {
 			centers[id] = l.center
 		}
 
-		got := snapQuantizedOffsets(centers, edges)
+		got := snapQuantizedOffsets(centers, parent)
 		for id, o := range want {
 			g, ok := got[id]
 			if !ok {
@@ -343,8 +343,8 @@ func TestSnapComposeStable(t *testing.T) {
 		"2": vec3{X: 5.9, Y: 1.7, Z: -3.8},
 	}
 
-	snapped := snapQuantizedOffsets(centers, edges)
 	parent, roots := buildSpanningTree(edges)
+	snapped := snapQuantizedOffsets(centers, parent)
 	recomposed := composeQuantizedLayout(parent, roots, snapped, anchor)
 
 	// One grid step tolerance: the maximum positional error introduced by rounding

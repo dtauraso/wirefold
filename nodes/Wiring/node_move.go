@@ -482,6 +482,10 @@ type MoveDispatch struct {
 	// loader.go computeQuantizedLayout at load time and authoritative from then on —
 	// RootMove (drag) remeasures the dragged node's triple; positions are individual.
 	quantizedOffsets map[string]quantizedOffset
+	// references is the owned per-node reference map (node id → reference id, "" for a
+	// root). Seeded from the spanning tree at load, then owned — remeasureTriples reads it
+	// instead of recomputing a spanning tree. Overridable per node (manual picking).
+	references map[string]string
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -850,17 +854,13 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	return true
 }
 
-// remeasureTriples recomputes every node's scalar triple (iTheta,iPhi,iR about its
-// spanning-tree reference) from the current positions with movedID overridden to movedPos,
-// updates md.quantizedOffsets, and persists the non-root triples that changed.
+// remeasureTriples recomputes every node's scalar triple (iTheta,iPhi,iR about its owned
+// REFERENCE — md.references, not a recomputed spanning tree) from the current positions with
+// movedID overridden to movedPos, and updates md.quantizedOffsets.
 func (md *MoveDispatch) remeasureTriples(movedID string, movedPos vec3) {
 	centers := md.heldCenters()
 	centers[movedID] = movedPos
-	edgeEP := map[string]EdgeEndpoints{}
-	for _, e := range md.heldEdges() {
-		edgeEP[e.Source+"->"+e.Target] = EdgeEndpoints{Source: e.Source, Target: e.Target}
-	}
-	for id, off := range snapQuantizedOffsets(centers, edgeEP) {
+	for id, off := range snapQuantizedOffsets(centers, md.references) {
 		md.quantizedOffsets[id] = off // keep every in-memory triple fresh
 	}
 	// The triple is NOT persisted: it is derived from the node's scenePolar (the position

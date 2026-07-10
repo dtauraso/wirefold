@@ -271,11 +271,16 @@ func cart(d dir) vec3 {
 // Nodes missing a center, or unreachable from a root whose center is known, are omitted
 // (nothing to snap against). Cycles are detected and skipped, mirroring
 // composeQuantizedLayout's visiting-guard.
-func snapQuantizedOffsets(centers map[string]vec3, edgeEndpoints map[string]EdgeEndpoints) map[string]quantizedOffset {
-	parent, roots := buildSpanningTree(edgeEndpoints)
+// snapQuantizedOffsets measures each node's quantized triple relative to its REFERENCE
+// (parent[id]) from the given centers. parent is the OWNED reference map (peer-to-peer:
+// each node holds its reference), seeded once from the spanning tree and thereafter passed
+// in — this no longer recomputes buildSpanningTree. parent[id] == "" marks a root.
+func snapQuantizedOffsets(centers map[string]vec3, parent map[string]string) map[string]quantizedOffset {
 	children := map[string][]string{}
+	roots := map[string]bool{}
 	for id, p := range parent {
 		if p == "" {
+			roots[id] = true
 			continue
 		}
 		children[p] = append(children[p], id)
@@ -333,11 +338,3 @@ func snapQuantizedOffsets(centers map[string]vec3, edgeEndpoints map[string]Edge
 // (heldCenters()) and the current edge graph (heldEdges()). It is PHASE 2 scaffolding,
 // callable from tests only for now: nothing in the live move/render/persist path calls
 // this yet (md.quantizedLayout still gates ComposeQuantizedLayout, and nothing sets it).
-func (md *MoveDispatch) SnapQuantizedOffsets() {
-	edges := map[string]EdgeEndpoints{}
-	for _, e := range md.heldEdges() {
-		key := e.Source + "->" + e.Target
-		edges[key] = EdgeEndpoints{Source: e.Source, Target: e.Target}
-	}
-	md.quantizedOffsets = snapQuantizedOffsets(md.heldCenters(), edges)
-}

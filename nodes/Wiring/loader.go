@@ -68,6 +68,10 @@ type specNode struct {
 	QuantITheta *int `json:"quantITheta,omitempty"`
 	QuantIPhi   *int `json:"quantIPhi,omitempty"`
 	QuantIR     *int `json:"quantIR,omitempty"`
+	// Reference is the node's OWNED reference (the peer whose frame its triple is measured
+	// in). nil ⇒ seed from the spanning tree; a stored value OVERRIDES the seed (manual
+	// reference picking). "" means the node is its own root.
+	Reference *string `json:"reference,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -255,6 +259,9 @@ type buildCtx struct {
 	// resolved BEFORE reach/wire/dispatch phases so every later phase computes from the
 	// COMPOSED (authoritative) centers, not the raw loaded ones.
 	quantizedOffsets map[string]quantizedOffset
+	// references is the owned per-node reference map (node id → reference id, "" for a
+	// root), seeded from the spanning tree and overridable per node (manual picking).
+	references map[string]string
 
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
@@ -350,11 +357,24 @@ func (b *buildCtx) computeQuantizedLayout() {
 	for _, e := range b.spec.Edges {
 		edgeEP[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target, SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle}
 	}
-	offsets := snapQuantizedOffsets(b.centers, edgeEP)
-	parent, _ := buildSpanningTree(edgeEP)
+	// Owned reference map (peer-to-peer): each node's reference is SEEDED from the spanning
+	// tree, but a node may OVERRIDE it with a stored `reference` (the hook for manual
+	// picking). buildSpanningTree is only a seed now — nothing recomputes it per drag.
+	seed, _ := buildSpanningTree(edgeEP)
+	references := make(map[string]string, len(b.spec.Nodes))
+	for _, n := range b.spec.Nodes {
+		if n.Reference != nil {
+			references[n.ID] = *n.Reference
+		} else {
+			references[n.ID] = seed[n.ID] // "" for a root / isolated node
+		}
+	}
+	b.references = references
+
+	offsets := snapQuantizedOffsets(b.centers, references)
 	for _, n := range b.spec.Nodes {
 		if _, ok := offsets[n.ID]; !ok {
-			offsets[n.ID] = quantizedOffset{parent: parent[n.ID]} // isolated / centerless → its own root
+			offsets[n.ID] = quantizedOffset{parent: references[n.ID]} // centerless → keep its reference
 		}
 	}
 	b.quantizedOffsets = offsets
@@ -467,6 +487,7 @@ func (b *buildCtx) buildMoveDispatch() {
 	// just built above are already seeded from the COMPOSED centers.
 	md.quantizedLayout = true
 	md.quantizedOffsets = b.quantizedOffsets
+	md.references = b.references
 	b.md = md
 }
 
