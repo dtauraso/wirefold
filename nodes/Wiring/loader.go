@@ -342,50 +342,15 @@ func (b *buildCtx) computeNodeGeometry() {
 // (which only walk the edge graph); they are folded in here as their own root with a
 // zero offset, so EVERY node in the spec ends up with an entry.
 func (b *buildCtx) computeQuantizedLayout() {
-	edgeEP := map[string]EdgeEndpoints{}
-	for _, e := range b.spec.Edges {
-		edgeEP[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target, SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle}
-	}
-	parent, roots := buildSpanningTree(edgeEP)
+	// Individual snapping: every node is its OWN root, anchored at the position it loaded
+	// with (computeNodeGeometry set b.centers/b.nodeGeoms from each node's scenePolar). No
+	// parent frames, no spanning tree, no chained compose — a drag moves only the dragged
+	// node. (Manually-picked references, which re-introduce a per-node parent, come next.)
+	offsets := make(map[string]quantizedOffset, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
-		if _, ok := parent[n.ID]; !ok {
-			parent[n.ID] = ""
-			roots[n.ID] = true
-		}
-	}
-
-	// Baseline: snap every reachable node's CURRENT center into an offset (deliverable 1's
-	// "old scene" fallback), applied up front to every node — stored offsets below then
-	// override the ones actually authored under this model.
-	offsets := snapQuantizedOffsets(b.centers, edgeEP)
-	for id, p := range parent {
-		if _, ok := offsets[id]; !ok {
-			offsets[id] = quantizedOffset{parent: p}
-		}
-	}
-	for _, n := range b.spec.Nodes {
-		if n.QuantITheta != nil && n.QuantIPhi != nil && n.QuantIR != nil {
-			offsets[n.ID] = quantizedOffset{iTheta: *n.QuantITheta, iPhi: *n.QuantIPhi, iR: *n.QuantIR, parent: parent[n.ID]}
-		}
+		offsets[n.ID] = quantizedOffset{parent: ""}
 	}
 	b.quantizedOffsets = offsets
-
-	anchors := map[string]vec3{}
-	for id := range roots {
-		if c, ok := b.centers[id]; ok {
-			anchors[id] = c
-		} else {
-			anchors[id] = b.sphere.Center
-		}
-	}
-	composed := composeQuantizedLayoutAnchored(parent, roots, offsets, anchors)
-	for id, layout := range composed {
-		g := b.nodeGeoms[id]
-		g.SceneCenter = b.sphere.Center
-		setNodeWorld(&g, layout.center)
-		b.nodeGeoms[id] = g
-		b.centers[id] = layout.center
-	}
 }
 
 // computeReachRadii computes each node's REACH radius (max distance from its

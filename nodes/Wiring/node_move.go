@@ -872,12 +872,18 @@ func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
 	parentID := off.parent
 
 	if parentID == "" {
-		// Root drag: the anchor moves to the target directly, no grid snap.
-		composed := md.composeAllWithAnchorOverride(nodeID, target)
+		// Individual snap: snap the dragged node's own (θ,φ,r) about the scene center to
+		// the grid and move ONLY this node (it is its own root; no subtree to re-aim).
+		p := cart2polar(target.sub(md.sceneSphere.Center))
+		snapped := polar{
+			R:     math.Round(p.R/stepR) * stepR,
+			Theta: math.Round(p.Theta/stepTheta) * stepTheta,
+			Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
+		}
+		newPos := md.sceneSphere.Center.add(polar2cart(snapped))
+		composed := md.composeAllWithAnchorOverride(nodeID, newPos)
 		subtree := collectSubtree(md.quantizedOffsets, nodeID)
 		md.applyComposedCenters(composed, subtree)
-		// Persist the WHOLE moved subtree, not just the dragged root: descendants re-aim
-		// with the root and must be saved or they drift back from stale scenePolar on reload.
 		md.persistSubtree(subtree, composed)
 		return true
 	}
