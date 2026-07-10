@@ -874,10 +874,11 @@ func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
 	if parentID == "" {
 		// Root drag: the anchor moves to the target directly, no grid snap.
 		composed := md.composeAllWithAnchorOverride(nodeID, target)
-		md.applyComposedCenters(composed, collectSubtree(md.quantizedOffsets, nodeID))
-		if md.posPersist != nil {
-			md.posPersist.schedule(nodeID, cart2polar(target.sub(md.sceneSphere.Center)))
-		}
+		subtree := collectSubtree(md.quantizedOffsets, nodeID)
+		md.applyComposedCenters(composed, subtree)
+		// Persist the WHOLE moved subtree, not just the dragged root: descendants re-aim
+		// with the root and must be saved or they drift back from stale scenePolar on reload.
+		md.persistSubtree(subtree, composed)
 		return true
 	}
 
@@ -906,12 +907,37 @@ func (md *MoveDispatch) rootMoveQuantized(nodeID string, target vec3) bool {
 	md.quantizedOffsets[nodeID] = newOff
 
 	composed := md.composeAll()
-	md.applyComposedCenters(composed, collectSubtree(md.quantizedOffsets, nodeID))
+	subtree := collectSubtree(md.quantizedOffsets, nodeID)
+	md.applyComposedCenters(composed, subtree)
 
-	if md.quantOffsetPersist != nil {
-		md.quantOffsetPersist.schedule(nodeID, newOff)
-	}
+	// Persist the WHOLE moved subtree: the dragged node's NEW offset plus every descendant
+	// (whose offset is unchanged but must be written so reload composes from stored offsets,
+	// not a re-snap of their now-stale scenePolar).
+	md.persistSubtree(subtree, composed)
 	return true
+}
+
+// persistSubtree debounced-persists every node the drag moved. A root node (offset.parent
+// == "") is saved as its absolute scene-polar anchor; every other node is saved as its
+// quantized offset. Called with the composed layout so a root's just-moved center is used.
+func (md *MoveDispatch) persistSubtree(ids []string, composed map[string]quantizedNodeLayout) {
+	for _, id := range ids {
+		off, ok := md.quantizedOffsets[id]
+		if !ok {
+			continue
+		}
+		if off.parent == "" {
+			if md.posPersist != nil {
+				if l, ok := composed[id]; ok {
+					md.posPersist.schedule(id, cart2polar(l.center.sub(md.sceneSphere.Center)))
+				}
+			}
+			continue
+		}
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(id, off)
+		}
+	}
 }
 
 // reachRFromPolar computes each node's sphere REACH radius (max distance from a node to any
