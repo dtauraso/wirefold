@@ -34,6 +34,19 @@ to be **redone from scratch** so position propagation is peer-to-peer too.
     non-time node on each branch. (Confirmed by David's example: editing 2→6 or 2→5 sets
     2→6, 2→5, 5→8, 5→7 when 2 and 5 are time nodes.)
 
+## Where layout handling lives (decided)
+
+**Inside each node's `Update()` firing loop.** One goroutine per node truly does both: its
+`Update()` select loop gains a case for the hidden layout in-channel alongside its bead
+channels. This is the most literal "same node" — the domain node goroutine IS the layout
+node goroutine. It edits every `nodes/<Kind>/node.go` Update loop. The separate `nodeMover`
+goroutine (and eventually `MoveDispatch`'s central solve) is retired as this lands.
+
+The per-node layout plumbing (hidden inbound channel + outbound channels mirroring the
+node's domain out-edges) is shared/injected generically by the loader — the same way
+`EmitGeometry` is injected today — so only the tiny select-case and a shared handler are
+added per kind, not duplicated logic.
+
 ## Deliberate override of the prior drift rule
 
 MODEL.md's drift rule keeps geometry/position logic out of the domain firing goroutines.
