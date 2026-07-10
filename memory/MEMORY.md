@@ -20,6 +20,8 @@ These rarely change; skim once per session and apply throughout.
 
 Each entry can drift; if it conflicts with current code, update or remove the memory rather than acting on it.
 
+- [project_node_color_vocab.md](project_node_color_vocab.md) — David's node-kind nicknames: "time nodes" = HoldNewSendOld, "and nodes" = WindowAndInhibit*Gate
+
 - [project_go_visual_vocabulary.md](project_go_visual_vocabulary.md) — Go visual vocabulary is chan→wire + per-node running indicator (with reloop); goroutine and select are not separate visual primitives
 - [project_industry_pattern_deferrals.md](project_industry_pattern_deferrals.md) — Deferred visual-editor gaps, re-scoped 2026-07-05 vs current buffer/Three.js arch: render-only items (edge labels S, hover tooltips XS) cheap; stateful items all L (no multi-select/undo/waypoints)
 - [project_local_clocks_beat_global_runner.md](project_local_clocks_beat_global_runner.md) — Per-instance clock locality helped the pause-freeze fix, but recency/surface/problem-shape/written contracts also did. Don't use ease-of-fix as a single-factor Go-layer signal.
