@@ -46,10 +46,10 @@ func writeQuantTree(t *testing.T) string {
 	// each exactly where it loaded until dragged).
 	mk("nodes/0/meta.json", `{"id":"0","type":"FanInSrc","scenePolarR":40,"scenePolarTheta":1.2,"scenePolarPhi":0.3}`)
 	mk("nodes/0/outputs/Out.json", `{"name":"Out"}`)
-	mk("nodes/1/meta.json", `{"id":"1","type":"AimedPacer","scenePolarR":80,"scenePolarTheta":1.0,"scenePolarPhi":0.5}`)
+	mk("nodes/1/meta.json", `{"id":"1","type":"AimedPacer","scenePolarR":80,"scenePolarTheta":1.0,"scenePolarPhi":0.5,"reference":"0"}`)
 	mk("nodes/1/inputs/FromSrc.json", `{"name":"FromSrc"}`)
 	mk("nodes/1/outputs/Feedback.json", `{"name":"Feedback"}`)
-	mk("nodes/2/meta.json", `{"id":"2","type":"FanInSink","scenePolarR":120,"scenePolarTheta":0.8,"scenePolarPhi":-0.4}`)
+	mk("nodes/2/meta.json", `{"id":"2","type":"FanInSink","scenePolarR":120,"scenePolarTheta":0.8,"scenePolarPhi":-0.4,"reference":"1"}`)
 	mk("nodes/2/inputs/In.json", `{"name":"In"}`)
 	if err := os.MkdirAll(filepath.Join(root, "edges"), 0o755); err != nil {
 		t.Fatal(err)

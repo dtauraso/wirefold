@@ -349,24 +349,17 @@ func (b *buildCtx) computeNodeGeometry() {
 // (which only walk the edge graph); they are folded in here as their own root with a
 // zero offset, so EVERY node in the spec ends up with an entry.
 func (b *buildCtx) computeQuantizedLayout() {
-	// Each node's REFERENCE is its spanning-tree parent; its scalar triple (iTheta,iPhi,iR)
-	// is MEASURED from its loaded position relative to that reference's frame
-	// (snapQuantizedOffsets). Positions are NOT recomposed — they stay exactly as loaded
-	// (individual snapping); the triple is stored bookkeeping, and colinear = iTheta 0.
-	edgeEP := map[string]EdgeEndpoints{}
-	for _, e := range b.spec.Edges {
-		edgeEP[e.Label] = EdgeEndpoints{Source: e.Source, Target: e.Target, SourceHandle: e.SourceHandle, TargetHandle: e.TargetHandle}
-	}
-	// Owned reference map (peer-to-peer): each node's reference is SEEDED from the spanning
-	// tree, but a node may OVERRIDE it with a stored `reference` (the hook for manual
-	// picking). buildSpanningTree is only a seed now — nothing recomputes it per drag.
-	seed, _ := buildSpanningTree(edgeEP)
+	// Owned reference map (peer-to-peer): each node's reference comes ONLY from its stored
+	// `reference` (manually chosen). No spanning-tree seed. A node with no stored reference
+	// is a root ("" — snaps to the scene sphere). The scalar triple (iTheta,iPhi,iR) is then
+	// MEASURED from the loaded position relative to that reference's frame; positions are not
+	// recomposed (individual), the triple is stored bookkeeping.
 	references := make(map[string]string, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
 		if n.Reference != nil {
 			references[n.ID] = *n.Reference
 		} else {
-			references[n.ID] = seed[n.ID] // "" for a root / isolated node
+			references[n.ID] = "" // no stored reference → a root
 		}
 	}
 	b.references = references
