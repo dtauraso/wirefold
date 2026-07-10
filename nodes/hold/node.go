@@ -19,7 +19,11 @@ type Node struct {
 	EmitGeometry func()
 	EmitHeldBead func(held int)
 	Held         int `wire:"data.state"`
-	In           *Wiring.In
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
+	In     *Wiring.In
 	// ToHoldNewSendOld is a declared output to a HoldNewSendOld node.
 	// Intentionally inert (no send logic) — see 7To5 edge task.
 	ToHoldNewSendOld *Wiring.Out
@@ -38,6 +42,12 @@ func (h *Node) Update(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if p := h.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
 
 		if value, ok := h.In.TryRecv(); ok {

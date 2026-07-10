@@ -54,6 +54,10 @@ type Node struct {
 	// FromRightGate is a declared input from a WindowAndInhibitRightGate node.
 	// Intentionally inert (no read logic) — see 10To6/10To8 edge task.
 	FromRightGate *Wiring.In
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 // driveOutput runs a continuous-drive goroutine on out, always emitting the
@@ -84,6 +88,11 @@ func (g *Node) Update(ctx context.Context) {
 	// MAIN loop: BLOCK on input. The instant a value arrives, show the bead and
 	// update held — the drive goroutine picks up the new held on its next pulse.
 	for {
+		if p := g.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
+		}
 		v, ok := g.FromInput.TryRecv()
 		if !ok {
 			return // ctx cancelled or input closed

@@ -18,6 +18,10 @@ type Node struct {
 	Held         int `wire:"data.state"`
 	FromInput    *Wiring.In
 	FeedbackOut  *Wiring.Out
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 func (p *Node) Update(ctx context.Context) {
@@ -33,6 +37,12 @@ func (p *Node) Update(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if lp := p.Layout; lp != nil {
+			if msg, ok := lp.TryRecv(); ok {
+				lp.Handle(msg)
+			}
 		}
 
 		if value, ok := p.FromInput.TryRecv(); ok {

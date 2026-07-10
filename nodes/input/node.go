@@ -20,7 +20,11 @@ type Node struct {
 	// It blocks for the slide duration (pause-aware). nil on test builds without
 	// injection — the caller then falls back to the instant refill. beads is the
 	// OLD backup contents that become the new working row.
-	EmitRefillSlide  func(beads []int)
+	EmitRefillSlide func(beads []int)
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout           *Wiring.LayoutPort
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
 	ToHoldNewSendOld *Wiring.Out
@@ -87,6 +91,12 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+
+		if p := n.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
 
 		// Guard: never peek an empty slice. Refill keeps working non-empty,
@@ -171,6 +181,11 @@ func (n *Node) Update(ctx context.Context) {
 	for n.Repeat || emitted < len(init) {
 		if ctx.Err() != nil {
 			return
+		}
+		if p := n.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
 		if n.Fire != nil {
 			n.Fire()

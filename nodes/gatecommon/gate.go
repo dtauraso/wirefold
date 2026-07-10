@@ -55,6 +55,10 @@ type GateNode struct {
 	FromLeft  *Wiring.In
 	FromRight *Wiring.In
 	ToPassed  *Wiring.Out
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; RunGate nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 // windowTicks is the fixed coincidence window as a tick count (WindowMs / MsPerTick).
@@ -263,6 +267,12 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if p := g.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
 
 		// Each side tracks the MOST-RECENT real bead: drain to the latest value

@@ -27,6 +27,10 @@ type Node struct {
 	// FromHold is a declared input from a Hold node. Intentionally inert
 	// (no read logic) — see 7To5 edge task.
 	FromHold *Wiring.In
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 // placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving
@@ -69,6 +73,12 @@ func (in *Node) Update(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if p := in.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
 
 		value, ok := in.FromPrevHoldNewSendOldNode.TryRecv()

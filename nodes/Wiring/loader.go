@@ -286,6 +286,12 @@ type buildCtx struct {
 	// Phase 8: built nodes + the paced-Out sink.
 	outSink map[string]*Out
 	nodes   []Node
+
+	// layoutPorts is the hidden layout graph: one *LayoutPort per node id,
+	// mirroring the domain edge set one-for-one (source -> target). Built by
+	// buildLayoutEdges and injected into each node struct's `Layout` field by
+	// buildNodes, the same way the shared clock is threaded through pb.
+	layoutPorts map[string]*LayoutPort
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
@@ -298,6 +304,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	b.computeQuantizedLayout()
 	b.computeReachRadii()
 	b.allocateWires()
+	b.buildLayoutEdges()
 	b.buildMoveDispatch()
 	b.buildTypeMaps()
 	b.buildEdgeMaps()
@@ -483,6 +490,31 @@ func (b *buildCtx) allocateWires() {
 	b.edgeSegments = edgeSegments
 }
 
+// buildLayoutEdges builds the hidden layout graph: one *LayoutPort per node id
+// (including isolated nodes with no edges), then mirrors every domain spec
+// edge (source -> target) onto it via connectTo. This is a parallel edge set
+// to the domain wires built by allocateWires — same connectivity, carrying
+// LayoutMsg instead of beads. buildNodes injects each node's port via
+// pb.layout, the same closure-injection mechanism EmitGeometry uses.
+func (b *buildCtx) buildLayoutEdges() {
+	ports := make(map[string]*LayoutPort, len(b.spec.Nodes))
+	for _, n := range b.spec.Nodes {
+		ports[n.ID] = NewLayoutPort(n.ID)
+	}
+	for _, e := range b.spec.Edges {
+		src, ok := ports[e.Source]
+		if !ok {
+			continue
+		}
+		dst, ok := ports[e.Target]
+		if !ok {
+			continue
+		}
+		src.connectTo(dst)
+	}
+	b.layoutPorts = ports
+}
+
 // buildMoveDispatch builds the MoveDispatch from initial geometry and edge
 // endpoints. It creates one nodeMover per node and one edgeMover per edge; each
 // owns its geometry and recomputes itself on a node-move (no central
@@ -592,7 +624,8 @@ func (b *buildCtx) buildNodes() error {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
 		pb.outSink = outSink
-		pb.clock = b.clk // shared clock for clock-paced interior animation (Input refill slide)
+		pb.clock = b.clk                // shared clock for clock-paced interior animation (Input refill slide)
+		pb.layout = b.layoutPorts[n.ID] // hidden layout-graph port mirroring this node's domain edges
 
 		for _, port := range bind.Ports {
 			switch port.Dir {
