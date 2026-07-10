@@ -828,8 +828,8 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	newPos := target
 	if md.quantizedLayout {
 		if snapped, ok := md.snapToReference(nodeID, target); ok {
-			// Node has a reference: snap in the reference's frame — iTheta cells about its
-			// incoming direction, so iTheta==0 lands the node colinear (straight continuation).
+			// Node has a reference: snap its DISTANCE from the reference to a radius cell
+			// (direction free) — equidistant, no angular/colinear snap.
 			newPos = snapped
 		} else {
 			// Root (no reference): snap to the absolute scene grid.
@@ -861,35 +861,27 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	return true
 }
 
-// snapToReference snaps target into the reference's local frame: it measures target's
-// offset from the reference about the reference's incoming direction (referenceForward),
-// rounds to (iTheta,iPhi,iR) cells, and reconstructs the position. iTheta==0 ⇒ the node
-// continues the reference's incoming line straight (colinear). Returns false when the node
-// has no reference (a root) — the caller then snaps to the absolute scene grid.
+// snapToReference snaps ONLY the DISTANCE from the reference to a radius cell (iR·stepR),
+// keeping the direction the user dragged toward. No angular/colinear snap. So a node lands
+// at a quantized distance from its reference, and all of a reference's children dragged to
+// the same cell end up equidistant. Returns false for a root (no reference) — the caller
+// then snaps to the absolute scene grid.
 func (md *MoveDispatch) snapToReference(nodeID string, target vec3) (vec3, bool) {
 	ref := md.references[nodeID]
 	if ref == "" {
 		return vec3{}, false
 	}
-	centers := md.heldCenters()
-	refPos, ok := centers[ref]
+	refPos, ok := md.heldCenters()[ref]
 	if !ok {
 		return vec3{}, false
 	}
-	forward := referenceForward(centers, md.references, ref)
 	delta := target.sub(refPos)
 	r := delta.length()
-	childDir := forward
-	if r > 0 {
-		dp := cart2polar(delta)
-		childDir = dir{Theta: dp.Theta, Phi: dp.Phi}
+	if r == 0 {
+		return refPos, true
 	}
-	c, psi := azimuthFrom(forward, childDir)
-	iTheta := int(math.Round(c / stepTheta))
-	iPhi := int(math.Round(psi / stepPhi))
-	iR := int(math.Round(r / stepR))
-	snappedDir := fromAxisFrame(forward, float64(iTheta)*stepTheta, float64(iPhi)*stepPhi)
-	return refPos.add(cart(snappedDir).scale(float64(iR) * stepR)), true
+	snappedR := math.Round(r/stepR) * stepR
+	return refPos.add(delta.normalize().scale(snappedR)), true
 }
 
 // remeasureTriples recomputes every node's scalar triple (iTheta,iPhi,iR about its owned

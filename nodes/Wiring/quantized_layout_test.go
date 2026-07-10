@@ -254,30 +254,34 @@ func TestSnapLocalStraightIsIThetaZero(t *testing.T) {
 	}
 }
 
-// snapToReference lands a dragged node exactly on the reference's incoming line when the
-// target is near it (iTheta rounds to 0) — i.e. dragging makes it colinear.
-func TestSnapToReferenceLandsColinear(t *testing.T) {
-	dirv := polar2cart(polar{R: 1, Theta: 0.9, Phi: -0.5})
+// snapToReference snaps ONLY the distance from the reference to a radius cell, keeping the
+// dragged direction. Two children of the same reference dragged to the same cell end up
+// equidistant from it, in different directions.
+func TestSnapToReferenceSnapsDistance(t *testing.T) {
+	pPos := vec3{X: 10, Y: -5, Z: 2}
 	md := &MoveDispatch{
 		sceneSphere: sceneSphere{Center: vec3{}},
-		references:  map[string]string{"g": "", "p": "g", "c": "p"},
-		nodeMovers: map[string]*nodeMover{
-			"g": {id: "g"}, "p": {id: "p"}, "c": {id: "c"},
-		},
+		references:  map[string]string{"p": "", "a": "p", "b": "p"},
+		nodeMovers:  map[string]*nodeMover{"p": {id: "p"}, "a": {id: "a"}, "b": {id: "b"}},
 	}
-	md.nodeMovers["g"].snap.Store(&centerSnap{c: vec3{}})
-	md.nodeMovers["p"].snap.Store(&centerSnap{c: dirv.scale(50)})
-	md.nodeMovers["c"].snap.Store(&centerSnap{c: dirv.scale(90)})
+	md.nodeMovers["p"].snap.Store(&centerSnap{c: pPos})
 
-	// Target near the straight continuation but nudged off it.
-	target := dirv.scale(100).add(vec3{X: 3, Y: -2, Z: 1})
-	snapped, ok := md.snapToReference("c", target)
-	if !ok {
-		t.Fatal("expected a reference snap for a non-root node")
+	// Drag a and b in different directions, each to a target ~3 radius cells out.
+	targetA := pPos.add(vec3{X: 3*stepR + 4, Y: 3, Z: 0})
+	targetB := pPos.add(vec3{X: 0, Y: 2, Z: 3*stepR - 5})
+	sa, ok1 := md.snapToReference("a", targetA)
+	sb, ok2 := md.snapToReference("b", targetB)
+	if !ok1 || !ok2 {
+		t.Fatal("expected reference snaps for non-root nodes")
 	}
-	// Snapped point is colinear with g,p (cross(p-g, snapped-g) ~ 0).
-	pG := dirv.scale(50)
-	if cr := pG.cross(snapped).length(); cr > 1e-6 {
-		t.Fatalf("snapped not colinear with the g→p line: cross=%v snapped=%v", cr, snapped)
+	da, db := sa.sub(pPos).length(), sb.sub(pPos).length()
+	if math.Abs(da-db) > 1e-6 {
+		t.Fatalf("children of one reference should be equidistant: da=%v db=%v", da, db)
+	}
+	if r := da / stepR; math.Abs(r-math.Round(r)) > 1e-6 {
+		t.Fatalf("distance not on the radius grid: %v", da)
+	}
+	if sa.sub(pPos).normalize().dot(sb.sub(pPos).normalize()) > 0.99 {
+		t.Fatal("directions should stay free (different), got nearly parallel")
 	}
 }
