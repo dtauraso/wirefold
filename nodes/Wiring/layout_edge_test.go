@@ -33,6 +33,10 @@ func TestLayoutPortChainPropagates(t *testing.T) {
 	a := NewLayoutPort("a")
 	b := NewLayoutPort("b")
 	c := NewLayoutPort("c")
+	// SLICE 2: Handle only forwards past a time node (HoldNewSendOld). This test is
+	// about the chain-propagation mechanics, not the time-node gate, so mark every
+	// node a time node directly (same-package field access).
+	a.isTimeNode, b.isTimeNode, c.isTimeNode = true, true, true
 	a.connectTo(b)
 	b.connectTo(c)
 
@@ -58,6 +62,9 @@ func TestLayoutPortCycleTerminates(t *testing.T) {
 	a := NewLayoutPort("a")
 	b := NewLayoutPort("b")
 	c := NewLayoutPort("c")
+	// SLICE 2: mark every node a time node so Handle forwards (see the chain test's
+	// comment above); this test is about cycle termination mechanics, not the gate.
+	a.isTimeNode, b.isTimeNode, c.isTimeNode = true, true, true
 	a.connectTo(b)
 	b.connectTo(c)
 	c.connectTo(a)
@@ -125,6 +132,10 @@ func TestBuildLayoutEdgesMirrorsSpecEdges(t *testing.T) {
 	if n1 == nil || n2 == nil || n3 == nil {
 		t.Fatalf("missing a layout port: n1=%v n2=%v n3=%v", n1, n2, n3)
 	}
+	// SLICE 2: n1's spec type ("Input") is not a time node, so Handle would not forward
+	// past it. This test is only about hidden-edge fan-out mirroring the domain edges,
+	// not the time-node gate, so mark it a time node directly (same-package access).
+	n1.isTimeNode = true
 	if len(n1.out) != 2 {
 		t.Fatalf("n1 should fan out on the hidden layout graph to both n2 and n3, got %d outbound edges", len(n1.out))
 	}

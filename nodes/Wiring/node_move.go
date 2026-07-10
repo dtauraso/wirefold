@@ -491,6 +491,10 @@ type MoveDispatch struct {
 	// root). Seeded from the spanning tree at load, then owned — remeasureTriples reads it
 	// instead of recomputing a spanning tree. Overridable per node (manual picking).
 	references map[string]string
+	// layoutPorts is the hidden layout graph (layout_edge.go), one *LayoutPort per node
+	// id, wired by loader.go buildLayoutEdges after this MoveDispatch exists. RootMove
+	// reads it to seed a radius cascade on a dragged node's reference (SeedLayoutCascade).
+	layoutPorts map[string]*LayoutPort
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -705,6 +709,54 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
+// applyLayoutCenter is the single write path a node's OWN Update() goroutine uses
+// (via LayoutPort.apply, layout_edge.go Handle) to publish a radius-cascade-computed
+// position: it routes the new center through THIS node's own nodeMover inbox — the
+// existing single writer of nodeMover.geom/snap (node_move.go handle/moveMsgKindCenter)
+// — so no second goroutine ever mutates that mover's held geom directly, and schedules
+// the updated iR (with the node's fixed iTheta/iPhi and its reference) for debounced
+// disk persistence. Read reachR off the node's own current snap so the cascade does not
+// clobber its sphere-reach ring.
+func (md *MoveDispatch) applyLayoutCenter(id string, center vec3, iTheta, iPhi, iR int, ref string) {
+	reach := 0.0
+	if nm, ok := md.nodeMovers[id]; ok {
+		if s := nm.snap.Load(); s != nil {
+			reach = s.reach
+		}
+	}
+	c := center
+	md.sendMove(id, moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &c, ReachR: reach})
+	if md.quantOffsetPersist != nil {
+		md.quantOffsetPersist.schedule(id, quantizedOffset{iTheta: iTheta, iPhi: iPhi, iR: iR, parent: ref}, ref)
+	}
+}
+
+// SeedLayoutCascade starts a radius (iR) propagation from a drag: if the dragged node
+// (nodeID) has a reference AND that reference is a time node (HoldNewSendOld), it pushes
+// LayoutMsg{IR: newIR, FromCenter: <reference's current world center>} onto the
+// reference's outgoing hidden layout edges (SeedForward) — reaching the dragged node and
+// its siblings, each of which computes its OWN new center as a plain local polar offset
+// about the reference (layout_edge.go Handle) and, if itself a time node, forwards
+// further. A root drag (no reference) or a non-time-node reference does not cascade.
+func (md *MoveDispatch) SeedLayoutCascade(nodeID string, newIR int) {
+	refID := md.references[nodeID]
+	if refID == "" {
+		return
+	}
+	if md.NodeKind(refID) != "HoldNewSendOld" {
+		return
+	}
+	refCenter, ok := md.centerOfNode(refID)
+	if !ok {
+		return
+	}
+	p := md.layoutPorts[refID]
+	if p == nil {
+		return
+	}
+	p.SeedForward(LayoutMsg{IR: newIR, FromCenter: refCenter, Visited: map[string]bool{}})
+}
+
 // heldCenters / heldEdges snapshot the movers' current geometry.
 // heldCenters reads the atomically-published snap (not the live geom) so it is
 // safe to call from the stdin goroutine while mover goroutines write their centers.
@@ -861,6 +913,12 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// its reference changed, and so did any node that references it. Persist the changed ones.
 	if md.quantizedLayout {
 		md.remeasureTriples(nodeID, newPos)
+		// Seed the radius (iR) cascade from the dragged node's reference (SLICE 2,
+		// docs/planning/visual-editor/layout-on-domain-network.md): if the reference is a
+		// time node, this reaches the dragged node's time-node-forwarded descendants.
+		if off, ok := md.quantizedOffsets[nodeID]; ok {
+			md.SeedLayoutCascade(nodeID, off.iR)
+		}
 	}
 	return true
 }

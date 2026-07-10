@@ -304,8 +304,8 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	b.computeQuantizedLayout()
 	b.computeReachRadii()
 	b.allocateWires()
-	b.buildLayoutEdges()
 	b.buildMoveDispatch()
+	b.buildLayoutEdges()
 	b.buildTypeMaps()
 	b.buildEdgeMaps()
 	if err := b.buildNodes(); err != nil {
@@ -496,10 +496,32 @@ func (b *buildCtx) allocateWires() {
 // to the domain wires built by allocateWires — same connectivity, carrying
 // LayoutMsg instead of beads. buildNodes injects each node's port via
 // pb.layout, the same closure-injection mechanism EmitGeometry uses.
+//
+// Runs AFTER buildMoveDispatch so each port's apply closure can route a
+// cascade-computed position through THAT node's own nodeMover (md.sendMove)
+// — the single existing writer of nodeMover.geom/snap — and through the
+// (possibly still-unarmed) quantOffsetPersist. b.md may be nil in tests that
+// call buildLayoutEdges directly without building a MoveDispatch first; apply
+// is left nil in that case (Handle nil-guards it).
 func (b *buildCtx) buildLayoutEdges() {
 	ports := make(map[string]*LayoutPort, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
-		ports[n.ID] = NewLayoutPort(n.ID)
+		p := NewLayoutPort(n.ID)
+		off := b.quantizedOffsets[n.ID]
+		p.iTheta = off.iTheta
+		p.iPhi = off.iPhi
+		p.iR = off.iR
+		p.isTimeNode = n.Type == "HoldNewSendOld"
+		if b.md != nil {
+			id := n.ID
+			ref := b.references[n.ID]
+			iTheta, iPhi := off.iTheta, off.iPhi
+			md := b.md
+			p.apply = func(center vec3, iR int) {
+				md.applyLayoutCenter(id, center, iTheta, iPhi, iR, ref)
+			}
+		}
+		ports[n.ID] = p
 	}
 	for _, e := range b.spec.Edges {
 		src, ok := ports[e.Source]
@@ -513,6 +535,9 @@ func (b *buildCtx) buildLayoutEdges() {
 		src.connectTo(dst)
 	}
 	b.layoutPorts = ports
+	if b.md != nil {
+		b.md.layoutPorts = ports
+	}
 }
 
 // buildMoveDispatch builds the MoveDispatch from initial geometry and edge
