@@ -2,6 +2,7 @@ package input
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -109,10 +110,15 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 		// the feedback-ring ordering (the TryRecv below still runs after).
 		n.fanOut(ctx, v)
 
-		// READ: block until HoldNewSendOld sends the step on FeedbackIn.
-		step, ok := n.FeedbackIn.TryRecv()
-		if !ok {
-			return
+		// READ: poll non-blocking until HoldNewSendOld sends the step on
+		// FeedbackIn, yielding between polls so this goroutine never parks.
+		step, ok := n.FeedbackIn.PollRecv()
+		for !ok {
+			if ctx.Err() != nil {
+				return
+			}
+			runtime.Gosched()
+			step, ok = n.FeedbackIn.PollRecv()
 		}
 		if step != 1 {
 			// Hold: buffer unchanged, send the same last bead next loop.

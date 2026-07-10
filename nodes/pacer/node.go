@@ -2,6 +2,7 @@ package pacer
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -35,7 +36,7 @@ func (p *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		if value, ok := p.FromInput.TryRecv(); ok {
+		if value, ok := p.FromInput.PollRecv(); ok {
 			if p.Fire != nil {
 				p.Fire()
 			}
@@ -56,6 +57,8 @@ func (p *Node) Update(ctx context.Context) {
 			items := []Wiring.DriveItem{p.FeedbackOut.PlaceDriven(step)}
 			p.Held = value
 			Wiring.DriveAll(ctx, items)
+		} else {
+			runtime.Gosched()
 		}
 	}
 }

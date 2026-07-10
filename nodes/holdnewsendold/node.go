@@ -2,6 +2,7 @@ package holdnewsendold
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -71,10 +72,11 @@ func (in *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		value, ok := in.FromPrevHoldNewSendOldNode.TryRecv()
+		value, ok := in.FromPrevHoldNewSendOldNode.PollRecv()
 		if !ok {
-			// chan mode: nothing queued yet → retry. paced mode: TryRecv blocks, so
-			// !ok means ctx was canceled → fall through to the top-of-loop ctx check.
+			// Nothing queued yet on either chan or paced mode (PollRecv never
+			// blocks) → yield and retry; the top-of-loop ctx check handles exit.
+			runtime.Gosched()
 			continue
 		}
 		if in.Fire != nil {

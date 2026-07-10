@@ -2,6 +2,7 @@ package hold
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -40,7 +41,7 @@ func (h *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		if value, ok := h.In.TryRecv(); ok {
+		if value, ok := h.In.PollRecv(); ok {
 			if h.Fire != nil {
 				h.Fire()
 			}
@@ -49,6 +50,8 @@ func (h *Node) Update(ctx context.Context) {
 			}
 			held = value
 			h.Held = value
+		} else {
+			runtime.Gosched()
 		}
 	}
 }
