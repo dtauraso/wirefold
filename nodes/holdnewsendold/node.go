@@ -2,6 +2,7 @@ package holdnewsendold
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -59,20 +60,82 @@ func (in *Node) Update(ctx context.Context) {
 		in.EmitHeldBead(held)
 	}
 
-	// The shared processing mechanism: it owns the per-input processing window —
-	// driving the output transit INDEPENDENTLY (its own goroutine) while observing
-	// this input port for same/different mid-processing arrivals, and emitting the
-	// torus-red/normal status. No output-occupied backpressure: input consumption is
-	// decoupled from output transit (the removed defect).
-	guard := &Wiring.ProcessingGuard{
-		In: in.FromPrevHoldNewSendOldNode,
+	clk := in.FromPrevHoldNewSendOldNode.Clock()
+	if clk == nil {
+		// chan mode (unit tests without a paced clock): keep the original
+		// blocking ProcessingGuard behavior — its own goroutine drives the
+		// output transit while a 1ms timer polls the input port for
+		// mid-processing arrivals.
+		guard := &Wiring.ProcessingGuard{In: in.FromPrevHoldNewSendOldNode}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if p := in.Layout; p != nil {
+				if msg, ok := p.TryRecv(); ok {
+					p.Handle(msg)
+				}
+			}
+
+			value, ok := in.FromPrevHoldNewSendOldNode.PollRecv()
+			if !ok {
+				// Nothing queued yet on either chan or paced mode (PollRecv never
+				// blocks) → yield and retry; the top-of-loop ctx check handles exit.
+				runtime.Gosched()
+				continue
+			}
+			if in.Fire != nil {
+				in.Fire()
+			}
+
+			// Interior held-value bead: emit only when the held value changes
+			// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking
+			// the received value; update it once here at recv time.
+			heldChanged := value != held
+			held = value
+			if heldChanged && in.EmitHeldBead != nil {
+				in.EmitHeldBead(value)
+			}
+
+			// Place the ToNext fan-out beads WITHOUT walkers. prevHeld is the OLD
+			// held value (captured before updating in.Held) so the ordering is
+			// explicit.
+			var items []Wiring.DriveItem
+			prevHeld := in.Held
+			items = placeHeld(in.ToNext, prevHeld, items)
+			in.Held = value
+
+			// Run the processing window: drive the placed beads to delivery on an
+			// independent goroutine while observing this input port for
+			// same/different arrivals. Returns when the output transit completes
+			// (window finishes).
+			guard.Process(ctx, value, items)
+		}
 	}
 
+	// Paced mode: single loop, one step per human-clock cycle. windowActive tracks
+	// whether the current cycle is inside a processing window — the span from
+	// consuming an input value until every placed ToNext bead has finished its
+	// transit. While a window is active, the input port is observed
+	// non-blockingly each cycle and any arrival (same or different value) is
+	// consumed and discarded per the ProcessingGuard rule (input consumption is
+	// decoupled from output transit; only the next window's PollRecv consumes a
+	// real input). The node is never parked across a traversal — it WaitTicks one
+	// human-clock cycle and StepOnces the in-flight ToNext beads exactly once per
+	// cycle, matching the canonical single-step shape (nodes/pacer, gatecommon.DriveHeld).
+	windowActive := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			return
 		}
 
 		if p := in.Layout; p != nil {
@@ -81,39 +144,71 @@ func (in *Node) Update(ctx context.Context) {
 			}
 		}
 
-		value, ok := in.FromPrevHoldNewSendOldNode.TryRecv()
-		if !ok {
-			// chan mode: nothing queued yet → retry. paced mode: TryRecv blocks, so
-			// !ok means ctx was canceled → fall through to the top-of-loop ctx check.
-			continue
-		}
-		if in.Fire != nil {
-			in.Fire()
+		if windowActive {
+			// Mid-window observe: drain and discard every bead delivered on the
+			// input port this cycle (same-color and different-color are both
+			// consumed silently; neither is processed — matches
+			// ProcessingGuard.Process).
+			for {
+				if _, ok := in.FromPrevHoldNewSendOldNode.PollRecv(); !ok {
+					break
+				}
+			}
+		} else {
+			value, ok := in.FromPrevHoldNewSendOldNode.PollRecv()
+			if ok {
+				if in.Fire != nil {
+					in.Fire()
+				}
+
+				// Interior held-value bead: emit only when the held value
+				// changes (-1 → 0 → 1 → 0 …). `held` is the running compare
+				// value tracking the received value; update it once here at
+				// recv time.
+				heldChanged := value != held
+				held = value
+				if heldChanged && in.EmitHeldBead != nil {
+					in.EmitHeldBead(value)
+				}
+
+				// Place the ToNext fan-out beads WITHOUT walkers. prevHeld is
+				// the OLD held value (captured before updating in.Held) so the
+				// ordering is explicit.
+				var items []Wiring.DriveItem
+				prevHeld := in.Held
+				items = placeHeld(in.ToNext, prevHeld, items)
+				in.Held = value
+
+				// No live bead placed (suppressed sentinel fan-out) ⇒ no real
+				// output transit ⇒ no processing window to observe — mirrors
+				// ProcessingGuard.Process's early return.
+				for _, di := range items {
+					if di.Live() {
+						windowActive = true
+						break
+					}
+				}
+			}
 		}
 
-		// Interior held-value bead: emit only when the held value changes
-		// (-1 → 0 → 1 → 0 …). `held` is the running compare value tracking the
-		// received value; update it once here at recv time.
-		heldChanged := value != held
-		held = value
-		if heldChanged && in.EmitHeldBead != nil {
-			in.EmitHeldBead(value)
+		// Single loop, one step per cycle: advance every in-flight ToNext output
+		// bead exactly one position-step (mirrors nodes/pacer and
+		// gatecommon.DriveHeld). A window ends once no ToNext bead remains
+		// in-flight after stepping.
+		anyInFlight := false
+		for _, o := range in.ToNext {
+			o.StepOnce(ctx)
+			if o.InFlight() {
+				anyInFlight = true
+			}
 		}
-
-		// Place the ToNext fan-out beads WITHOUT walkers. prevHeld is the OLD held
-		// value (captured before updating in.Held) so the ordering is explicit.
-		var items []Wiring.DriveItem
-		prevHeld := in.Held
-		items = placeHeld(in.ToNext, prevHeld, items)
-		in.Held = value
-
-		// Run the processing window: drive the placed beads to delivery on an
-		// independent goroutine while observing this input port for same/different
-		// arrivals. Returns when the output transit completes (window finishes).
-		guard.Process(ctx, value, items)
+		if windowActive && !anyInFlight {
+			windowActive = false
+		}
 	}
 }
 
 func init() {
 	Wiring.Register("HoldNewSendOld", func() any { return &Node{} })
+	Wiring.RegisterRadiusForwarder("HoldNewSendOld")
 }

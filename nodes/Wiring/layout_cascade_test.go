@@ -1,7 +1,7 @@
 // layout_cascade_test.go — SLICE 2 headless verification of the radius (iR) cascade
 // (docs/planning/visual-editor/layout-on-domain-network.md): drives the real loader +
 // running node goroutines (not mocks) and asserts the propagated iR/world-center reach
-// every time-node-forwarded descendant, a non-time node terminates its branch, cycles
+// every radius-forwarded descendant, a non-forwarding node terminates its branch, cycles
 // don't hang, and the new iR is persisted to disk (meta.json quantIR).
 
 package Wiring
@@ -20,12 +20,14 @@ import (
 // layoutTestNode is a minimal node kind exercising ONLY the layout-port poll every real
 // kind's Update loop performs (nodes/holdnewsendold/node.go, nodes/hold/node.go): a
 // select loop over ctx.Done() that also non-blockingly polls Layout and calls Handle.
-// Registered under BOTH "HoldNewSendOld" (a time node — buildLayoutEdges.isTimeNode
-// keys off this exact type string) and "Hold" (not a time node), so the loader's
-// time-node gate is exercised through the REAL loader/build path without importing the
-// real nodes/hold, nodes/holdnewsendold packages (which import this package — a real
-// import cycle; see aimed_ports_test.go / fanin_travel_time_test.go for the same
-// in-package synthetic-kind pattern).
+// Registered under test-only kind names "LayoutTestTime" (a radius-forwarding node, via
+// RegisterRadiusForwarder) and "LayoutTestPlain" (not a radius-forwarding node), so the loader's radius-forwarding
+// gate is exercised through the REAL loader/build path. The forwarding property is a registry
+// property, not a hard-coded kind string, so these names exercise the gate without
+// colliding with the real "HoldNewSendOld"/"Hold" registrations other test files in
+// this binary pull in — and without importing the real nodes/hold, nodes/holdnewsendold
+// packages (which import this package — a real import cycle; see aimed_ports_test.go /
+// fanin_travel_time_test.go for the same in-package synthetic-kind pattern).
 type layoutTestNode struct {
 	Layout *LayoutPort
 	In     *In
@@ -51,23 +53,30 @@ func (n *layoutTestNode) Update(ctx context.Context) {
 }
 
 func init() {
-	Register("HoldNewSendOld", func() any { return &layoutTestNode{} })
-	Register("Hold", func() any { return &layoutTestNode{} })
+	// Unique test-only kind names so they never collide with the real
+	// "HoldNewSendOld"/"Hold" registrations that other test files in this binary
+	// (e.g. nonblocking_traversal_test.go's external Wiring_test package) pull in
+	// via real node-package imports. The forwarding property is a registry property
+	// (RegisterRadiusForwarder), not a hard-coded kind string, so the loader's cascade
+	// gate is still exercised through the real build path.
+	Register("LayoutTestTime", func() any { return &layoutTestNode{} })
+	RegisterRadiusForwarder("LayoutTestTime")
+	Register("LayoutTestPlain", func() any { return &layoutTestNode{} })
 }
 
 // writeCascadeTree builds a small tree topology on disk:
 //
-//	2 (HoldNewSendOld, root, time node)
-//	└─ 5 (HoldNewSendOld, reference=2, time node)
-//	   ├─ 7 (Hold, reference=5, NON-time — cascade must stop here)
+//	2 (HoldNewSendOld, root, radius-forwarding node)
+//	└─ 5 (HoldNewSendOld, reference=2, radius-forwarding node)
+//	   ├─ 7 (Hold, reference=5, NON-forwarding — cascade must stop here)
 //	   │  └─ 10 (Hold, reference=7 — must NOT receive the cascade at all)
-//	   └─ 8 (HoldNewSendOld, reference=5, time node — cascade continues)
+//	   └─ 8 (HoldNewSendOld, reference=5, radius-forwarding node — cascade continues)
 //	      └─ 9 (Hold, reference=8 — must receive the cascade, forwarded via 8)
 //
 // Domain edges mirror 1:1 onto the hidden layout graph (loader.go buildLayoutEdges),
-// so dragging "5" (whose reference "2" is a time node) cascades a radius change to
-// 5's own reposition, then on to 7 and 8 (5 is a time node), then on to 9 (8 is a time
-// node) but NOT to 10 (7 is not a time node, so it does not forward).
+// so dragging "5" (whose reference "2" is a radius-forwarding node) cascades a radius change to
+// 5's own reposition, then on to 7 and 8 (5 is a radius-forwarding node), then on to 9 (8 is a radius-forwarding
+// node) but NOT to 10 (7 is not a radius-forwarding node, so it does not forward).
 func writeCascadeTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -81,27 +90,27 @@ func writeCascadeTree(t *testing.T) string {
 		}
 	}
 
-	mk("nodes/2/meta.json", `{"id":"2","type":"HoldNewSendOld","quantITheta":0,"quantIPhi":0,"quantIR":0}`)
+	mk("nodes/2/meta.json", `{"id":"2","type":"LayoutTestTime","quantITheta":0,"quantIPhi":0,"quantIR":0}`)
 	mk("nodes/2/inputs/In.json", `{"name":"In"}`)
 	mk("nodes/2/outputs/Out.json", `{"name":"Out"}`)
 
-	mk("nodes/5/meta.json", `{"id":"5","type":"HoldNewSendOld","reference":"2","quantITheta":1,"quantIPhi":0,"quantIR":1}`)
+	mk("nodes/5/meta.json", `{"id":"5","type":"LayoutTestTime","reference":"2","quantITheta":1,"quantIPhi":0,"quantIR":1}`)
 	mk("nodes/5/inputs/In.json", `{"name":"In"}`)
 	mk("nodes/5/outputs/Out0.json", `{"name":"Out0"}`)
 	mk("nodes/5/outputs/Out1.json", `{"name":"Out1"}`)
 
-	mk("nodes/7/meta.json", `{"id":"7","type":"Hold","reference":"5","quantITheta":0,"quantIPhi":1,"quantIR":1}`)
+	mk("nodes/7/meta.json", `{"id":"7","type":"LayoutTestPlain","reference":"5","quantITheta":0,"quantIPhi":1,"quantIR":1}`)
 	mk("nodes/7/inputs/In.json", `{"name":"In"}`)
 	mk("nodes/7/outputs/Out0.json", `{"name":"Out0"}`)
 
-	mk("nodes/10/meta.json", `{"id":"10","type":"Hold","reference":"7","quantITheta":0,"quantIPhi":0,"quantIR":1}`)
+	mk("nodes/10/meta.json", `{"id":"10","type":"LayoutTestPlain","reference":"7","quantITheta":0,"quantIPhi":0,"quantIR":1}`)
 	mk("nodes/10/inputs/In.json", `{"name":"In"}`)
 
-	mk("nodes/8/meta.json", `{"id":"8","type":"HoldNewSendOld","reference":"5","quantITheta":-1,"quantIPhi":0,"quantIR":1}`)
+	mk("nodes/8/meta.json", `{"id":"8","type":"LayoutTestTime","reference":"5","quantITheta":-1,"quantIPhi":0,"quantIR":1}`)
 	mk("nodes/8/inputs/In.json", `{"name":"In"}`)
 	mk("nodes/8/outputs/Out0.json", `{"name":"Out0"}`)
 
-	mk("nodes/9/meta.json", `{"id":"9","type":"Hold","reference":"8","quantITheta":0,"quantIPhi":0,"quantIR":1}`)
+	mk("nodes/9/meta.json", `{"id":"9","type":"LayoutTestPlain","reference":"8","quantITheta":0,"quantIPhi":0,"quantIR":1}`)
 	mk("nodes/9/inputs/In.json", `{"name":"In"}`)
 
 	if err := os.MkdirAll(filepath.Join(root, "edges"), 0o755); err != nil {
@@ -149,13 +158,13 @@ func readPersistedQuantIR(t *testing.T, root, id string, want int) {
 	t.Fatalf("node %s: meta.json quantIR never reached %d (last seen %d, readErr=%v)", id, want, last, lastErr)
 }
 
-// TestRadiusCascadePropagatesThroughTimeNodesOnly drives a live drag on node "5"
-// (whose reference "2" is a time node) and asserts: the cascade reaches 5, 7, 8, 9
-// (7 and 8 both children of 5; 9 a grandchild reached only because 8 is a time node),
+// TestRadiusCascadePropagatesThroughForwardersOnly drives a live drag on node "5"
+// (whose reference "2" is a radius-forwarding node) and asserts: the cascade reaches 5, 7, 8, 9
+// (7 and 8 both children of 5; 9 a grandchild reached only because 8 is a radius-forwarding node),
 // their world centers land where the plain-local-polar formula predicts, the new iR is
-// persisted to each reached node's meta.json, and node 10 (child of the non-time node 7)
+// persisted to each reached node's meta.json, and node 10 (child of the non-forwarding node 7)
 // never receives the cascade at all — its world center stays exactly where it loaded.
-func TestRadiusCascadePropagatesThroughTimeNodesOnly(t *testing.T) {
+func TestRadiusCascadePropagatesThroughForwardersOnly(t *testing.T) {
 	root := writeCascadeTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -208,7 +217,7 @@ func TestRadiusCascadePropagatesThroughTimeNodesOnly(t *testing.T) {
 	}
 	newIR := newOff.iR
 
-	// 7 and 8: children of 5, both reached because 5 is a time node. Each computes its
+	// 7 and 8: children of 5, both reached because 5 is a radius-forwarding node. Each computes its
 	// OWN new center as refCenter (5's new center) + polar2cart({R: newIR*stepR,
 	// Theta: its own iTheta*stepTheta, Phi: its own iPhi*stepPhi}) — the plain
 	// local-polar formula (layout_edge.go Handle), NOT the rotated forward-kinematics
@@ -220,17 +229,17 @@ func TestRadiusCascadePropagatesThroughTimeNodesOnly(t *testing.T) {
 	_ = got7
 	_ = got8
 
-	// 9: grandchild of 5 via 8 — reached ONLY because 8 (not 7) is a time node and
+	// 9: grandchild of 5 via 8 — reached ONLY because 8 (not 7) is a radius-forwarding node and
 	// forwards past itself.
 	want9 := want8.add(polar2cart(polar{R: float64(newIR) * stepR, Theta: 0, Phi: 0}))
 	waitCenterClose(t, md, "9", want9, 1e-6)
 
-	// 10: grandchild of 5 via 7 — 7 is NOT a time node, so it re-places itself but does
+	// 10: grandchild of 5 via 7 — 7 is NOT a radius-forwarding node, so it re-places itself but does
 	// not forward; 10 never receives any LayoutMsg at all and its center is unchanged.
 	time.Sleep(300 * time.Millisecond) // give any (unwanted) propagation a chance to land
 	tenAfter, _ := md.centerOfNode("10")
 	if tenAfter.sub(tenBefore).length() > 1e-9 {
-		t.Fatalf("10 moved even though its reference (7) is not a time node: before=%v after=%v", tenBefore, tenAfter)
+		t.Fatalf("10 moved even though its reference (7) is not a radius-forwarding node: before=%v after=%v", tenBefore, tenAfter)
 	}
 
 	// Persistence: the new iR lands on disk for every node the cascade actually

@@ -2,6 +2,7 @@ package pulse
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
@@ -88,14 +89,18 @@ func (g *Node) Update(ctx context.Context) {
 	// MAIN loop: BLOCK on input. The instant a value arrives, show the bead and
 	// update held — the drive goroutine picks up the new held on its next pulse.
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		if p := g.Layout; p != nil {
 			if msg, ok := p.TryRecv(); ok {
 				p.Handle(msg)
 			}
 		}
-		v, ok := g.FromInput.TryRecv()
+		v, ok := g.FromInput.PollRecv()
 		if !ok {
-			return // ctx cancelled or input closed
+			runtime.Gosched()
+			continue
 		}
 		if g.Fire != nil {
 			g.Fire()

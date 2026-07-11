@@ -18,6 +18,23 @@ type kindEntry struct {
 // kindRegistry maps spec kind name → kindEntry.
 var kindRegistry = map[string]kindEntry{}
 
+// radiusForwarders is the set of kinds that forward the layout radius (iR) cascade
+// to their descendants. Declared per kind (RegisterRadiusForwarder) so the property
+// is a registry fact, not a hard-coded kind string in the loader / move dispatch.
+var radiusForwarders = map[string]bool{}
+
+// RegisterRadiusForwarder marks kind as one that forwards the layout radius cascade.
+// Kept as a separate call from the node constructor registration so the code
+// generator's source scan for node-kind registrations is unaffected.
+func RegisterRadiusForwarder(kind string) {
+	radiusForwarders[kind] = true
+}
+
+// ForwardsRadius reports whether the kind forwards the layout radius cascade.
+func ForwardsRadius(kind string) bool {
+	return radiusForwarders[kind]
+}
+
 // Register adds kind to kindRegistry and Registry. Panics if kind is already registered.
 func Register(kind string, newNode func() any) {
 	if _, exists := kindRegistry[kind]; exists {

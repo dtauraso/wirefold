@@ -512,7 +512,7 @@ func (b *buildCtx) buildLayoutEdges() {
 		p.iTheta = off.iTheta
 		p.iPhi = off.iPhi
 		p.iR = off.iR
-		p.isTimeNode = n.Type == "HoldNewSendOld"
+		p.forwardsRadius = ForwardsRadius(n.Type)
 		if b.md != nil {
 			id := n.ID
 			ref := b.references[n.ID]

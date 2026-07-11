@@ -54,9 +54,9 @@ type LayoutPort struct {
 	// goroutine ever touches it (Handle runs exclusively on this node's own
 	// Update loop), so no lock is needed.
 	iR int
-	// isTimeNode marks a HoldNewSendOld node: only a time node forwards a
+	// forwardsRadius marks a HoldNewSendOld node: only a radius-forwarding node forwards a
 	// cascade past itself (quantized_layout.go / layout-on-domain-network.md).
-	isTimeNode bool
+	forwardsRadius bool
 	// apply is called synchronously by Handle (on THIS node's own Update()
 	// goroutine — see the type doc above) with this node's freshly computed new
 	// world center and updated iR, and schedules the iR persist. SLICE 3: apply
@@ -155,7 +155,7 @@ func (p *LayoutPort) InjectDirect(center vec3, reach float64) {
 // formula as snapToReference, NOT the rotated forward-kinematics compose path
 // in quantized_layout.go — adopts the propagated iR, applies the position
 // (geom write + snap publish + emit + persist, via p.apply), and then, ONLY
-// if this node is a time node (HoldNewSendOld), forwards a copy carrying its
+// if this node is a radius-forwarding node (HoldNewSendOld), forwards a copy carrying its
 // OWN new center and the same iR to every outgoing layout edge. A non-time
 // node re-places itself but does not forward — the cascade wave terminates on
 // that branch.
@@ -191,7 +191,7 @@ func (p *LayoutPort) Handle(msg LayoutMsg) {
 		p.apply(newCenter, newIR)
 	}
 
-	if !p.isTimeNode {
+	if !p.forwardsRadius {
 		return
 	}
 	for _, out := range p.out {

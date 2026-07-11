@@ -783,18 +783,18 @@ func (md *MoveDispatch) applyLayoutCenterDirect(id string, center vec3, reach fl
 }
 
 // SeedLayoutCascade starts a radius (iR) propagation from a drag: if the dragged node
-// (nodeID) has a reference AND that reference is a time node (HoldNewSendOld), it pushes
+// (nodeID) has a reference AND that reference is a radius-forwarding node (HoldNewSendOld), it pushes
 // LayoutMsg{IR: newIR, FromCenter: <reference's current world center>} onto the
 // reference's outgoing hidden layout edges (SeedForward) — reaching the dragged node and
 // its siblings, each of which computes its OWN new center as a plain local polar offset
-// about the reference (layout_edge.go Handle) and, if itself a time node, forwards
-// further. A root drag (no reference) or a non-time-node reference does not cascade.
+// about the reference (layout_edge.go Handle) and, if itself a radius-forwarding node, forwards
+// further. A root drag (no reference) or a non-radius-forwarding reference does not cascade.
 func (md *MoveDispatch) SeedLayoutCascade(nodeID string, newIR int) {
 	refID := md.references[nodeID]
 	if refID == "" {
 		return
 	}
-	if md.NodeKind(refID) != "HoldNewSendOld" {
+	if !ForwardsRadius(md.NodeKind(refID)) {
 		return
 	}
 	refCenter, ok := md.centerOfNode(refID)
@@ -969,7 +969,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 		md.remeasureTriples(nodeID, newPos)
 		// Seed the radius (iR) cascade from the dragged node's reference (SLICE 2,
 		// docs/planning/visual-editor/layout-on-domain-network.md): if the reference is a
-		// time node, this reaches the dragged node's time-node-forwarded descendants.
+		// radius-forwarding node, this reaches the dragged node's radius-forwarded descendants.
 		if off, ok := md.quantizedOffsets[nodeID]; ok {
 			md.SeedLayoutCascade(nodeID, off.iR)
 		}
