@@ -98,16 +98,15 @@ func (p *Node) Update(ctx context.Context) {
 			}
 			p.Held = value
 
-			di := p.FeedbackOut.PlaceDriven(step)
-			for di.Live() && p.FeedbackOut.InFlight() {
-				if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
-					return
-				}
-				p.FeedbackOut.StepOnce(ctx)
-			}
-		} else {
-			p.FeedbackOut.StepOnce(ctx)
+			p.FeedbackOut.PlaceDriven(step)
 		}
+
+		// Single loop, one step per cycle: advance any in-flight output bead
+		// exactly one position-step. The node is never parked across a
+		// traversal — it returns to the top and WaitTicks one cycle. (A new
+		// input arriving mid-traversal is not a case; there is no place/step
+		// collision to guard.)
+		p.FeedbackOut.StepOnce(ctx)
 	}
 }
 
