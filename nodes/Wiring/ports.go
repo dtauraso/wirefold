@@ -95,6 +95,27 @@ func (i *In) PollRecv() (int, bool) {
 	}
 }
 
+// PollRecvTick is PollRecv but also returns the tick the delivered bead
+// actually landed on (see PacedWire.PollRecvTick) — paced mode only. In chan
+// mode there is no wire clock to report, so it returns tick=0 alongside the
+// same ok as PollRecv.
+func (i *In) PollRecvTick() (int, int64, bool) {
+	if i == nil {
+		return 0, 0, false
+	}
+	if i.pw != nil {
+		v, tick, ok := i.pw.PollRecvTick()
+		if !ok {
+			return 0, 0, false
+		}
+		n, _ := v.(int)
+		i.trace.Recv(i.node, i.port, n)
+		return n, tick, true
+	}
+	n, ok := i.PollRecv()
+	return n, 0, ok
+}
+
 // Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
 // nil In (no wire, no clock). A future non-blocking node Update loop reads this
 // to pace itself off the same clock the wire times delivery on, without owning

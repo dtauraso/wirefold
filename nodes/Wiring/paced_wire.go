@@ -14,6 +14,17 @@ import (
 // to be read by Recv or PollRecv. Recv/PollRecv consume on read (no separate Done).
 type deliveredBead struct {
 	val int
+	// deliverTick is the PINNED tick the caller was actually stepping when this
+	// bead was moved from inflight to delivered (tryDeliverHeadLocked receives
+	// it as nowTick — StepOnceAt's caller-pinned tick for a fan-out cycle, or
+	// driveAdvanceItem's per-step target for the blocking path). It is the
+	// authoritative "what tick did this actually land on" answer. It is
+	// deliberately NOT a live read of pw.clock.Tick(): the shared clock can be
+	// advanced again by another goroutine between this wire's step and a
+	// sibling wire's step in the same fan-out cycle, so re-reading "now" from
+	// the clock at delivery time can record a LATER tick than the one the
+	// caller actually pinned and delivered against.
+	deliverTick int64
 }
 
 // PulseSpeedWuPerMs aliases CurveParamPulseSpeedWuPerMs. It is retained as the
@@ -385,7 +396,7 @@ func driveAdvanceItem(ctx context.Context, it driveItem, i int, nexts []float64,
 	}
 	if final || isFinal {
 		it.pw.mu.Lock()
-		if ai, ok := it.pw.deliverHeadLocked(ctx, it.gen); ok {
+		if ai, ok := it.pw.deliverHeadLocked(ctx, it.gen, int64(math.Round(target))); ok {
 			it.pw.emitArrive(ai)
 		}
 		done[i] = true
@@ -446,7 +457,7 @@ func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
 // before returning (matching the inline delivery window it replaced). Returns
 // ok=false — with the lock released — when the bead was torn down or already
 // dropped (no arrive emit), ok=true when it was delivered.
-func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arriveInfo, ok bool) {
+func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64, nowTick int64) (ai arriveInfo, ok bool) {
 	// stop is the canceller installed only when this bead must actually PARK behind an
 	// earlier FIFO head (j != 0). Without it a waiter would park on pw.cond forever if
 	// the head bead's driver exits on ctx cancellation without delivering — the
@@ -462,7 +473,7 @@ func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arri
 	}()
 	for {
 		var ready bool
-		ai, ok, ready = pw.tryDeliverHeadLocked(ctx, gen)
+		ai, ok, ready = pw.tryDeliverHeadLocked(ctx, gen, nowTick)
 		if ready {
 			return ai, ok
 		}
@@ -490,7 +501,7 @@ func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arri
 //
 // This is the shared core behind both deliverHeadLocked's parking loop (blocking
 // DriveBeadsToDelivery path) and StepOnce's non-blocking retry (never parks).
-func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64) (ai arriveInfo, ok bool, ready bool) {
+func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTick int64) (ai arriveInfo, ok bool, ready bool) {
 	if ctx.Err() != nil {
 		pw.mu.Unlock()
 		return arriveInfo{}, false, true
@@ -509,7 +520,7 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64) (ai a
 	}
 	db := pw.inflight[0]
 	pw.inflight = pw.inflight[1:]
-	pw.delivered = append(pw.delivered, deliveredBead{val: db.val})
+	pw.delivered = append(pw.delivered, deliveredBead{val: db.val, deliverTick: nowTick})
 	pw.cond.Broadcast()
 	ai = arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
 	pw.mu.Unlock()
@@ -615,7 +626,7 @@ func (pw *PacedWire) StepOnceAt(ctx context.Context, tick int64) {
 		// handoff. If it is not yet head, tryDeliverHeadLocked leaves it in-flight
 		// (still finalPending) for a later StepOnce call to retry.
 		pw.mu.Lock()
-		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen)
+		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen, tick)
 		if !ready {
 			pw.mu.Unlock()
 			continue
@@ -661,14 +672,26 @@ func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
 // delivered value if one is present, else (nil, false). Like Recv, PollRecv
 // CONSUMES on read.
 func (pw *PacedWire) PollRecv() (any, bool) {
+	v, _, ok := pw.PollRecvTick()
+	return v, ok
+}
+
+// PollRecvTick is PollRecv but also returns the tick the delivered bead
+// actually landed on (deliveredBead.deliverTick, captured under pw.mu at
+// delivery time by tryDeliverHeadLocked). Tests proving same-tick fan-out
+// delivery must use this instead of re-reading the shared clock after the
+// fact — the clock can be advanced again before the caller is scheduled,
+// which makes a caller-side re-read of "now" a different (later) tick than
+// the one the bead actually delivered on.
+func (pw *PacedWire) PollRecvTick() (any, int64, bool) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	if len(pw.delivered) > 0 {
 		b := pw.delivered[0]
 		pw.delivered = pw.delivered[1:]
-		return b.val, true
+		return b.val, b.deliverTick, true
 	}
-	return nil, false
+	return nil, 0, false
 }
 
 // ReviseInFlightGeometry re-derives EVERY in-flight bead's remaining travel after a

@@ -241,6 +241,20 @@ func TestEmptyInit(t *testing.T) {
 // arrive at the SAME clock tick, and Update is not parked across the
 // traversal — cancelling ctx mid-traversal (before the clock is advanced
 // through delivery) exits promptly instead of hanging.
+//
+// Arrival tick is read via PollRecvTick, which reports the tick captured
+// under the wire's own lock at the instant tryDeliverHeadLocked moved the
+// bead from inflight to delivered — NOT clk.Tick() re-read by this test's
+// polling goroutine after the fact. The two are not equivalent under
+// -race/GC-pause scheduling: fanOutStepOnce pins one tick and calls
+// StepOnceAt on both wires with it back-to-back, so both deliveries are
+// genuinely computed against the identical tick, but this test's own poll
+// loop advances the SHARED FakeClock every iteration; if the second wire's
+// delivery hasn't propagated to PollRecv yet when polled at iteration N, the
+// test moves on and advances the clock to N+1 before catching it, and a
+// clk.Tick()-based read would then wrongly record N+1 for a bead that
+// actually delivered at N. PollRecvTick removes that measurement race by
+// reading the tick from the delivery event itself.
 func TestPacedFanOutDeliversConcurrentlyAtSameTick(t *testing.T) {
 	const latMs = 160.0
 
@@ -279,20 +293,20 @@ func TestPacedFanOutDeliversConcurrentlyAtSameTick(t *testing.T) {
 		clk.AdvanceTicks(1)
 		time.Sleep(20 * time.Microsecond)
 		if !got1 {
-			if v, ok := obs1.PollRecv(); ok {
+			if v, tick, ok := obs1.PollRecvTick(); ok {
 				if v != 7 {
 					t.Fatalf("obs1: expected 7, got %d", v)
 				}
-				arrive1 = clk.Tick()
+				arrive1 = tick
 				got1 = true
 			}
 		}
 		if !got2 {
-			if v, ok := obs2.PollRecv(); ok {
+			if v, tick, ok := obs2.PollRecvTick(); ok {
 				if v != 7 {
 					t.Fatalf("obs2: expected 7, got %d", v)
 				}
-				arrive2 = clk.Tick()
+				arrive2 = tick
 				got2 = true
 			}
 		}
