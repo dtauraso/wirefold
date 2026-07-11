@@ -34,11 +34,40 @@ func (h *Node) Update(ctx context.Context) {
 		h.EmitHeldBead(held)
 	}
 
+	clk := h.In.Clock()
+	if clk == nil {
+		// chan mode (tests without a paced clock): keep the busy-poll fallback.
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if value, ok := h.In.PollRecv(); ok {
+				if h.Fire != nil {
+					h.Fire()
+				}
+				if value != held && h.EmitHeldBead != nil {
+					h.EmitHeldBead(value)
+				}
+				held = value
+				h.Held = value
+			} else {
+				runtime.Gosched()
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			return
 		}
 
 		if value, ok := h.In.PollRecv(); ok {
@@ -50,8 +79,6 @@ func (h *Node) Update(ctx context.Context) {
 			}
 			held = value
 			h.Held = value
-		} else {
-			runtime.Gosched()
 		}
 	}
 }
