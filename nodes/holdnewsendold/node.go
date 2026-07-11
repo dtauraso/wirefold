@@ -180,8 +180,9 @@ func (in *Node) Update(ctx context.Context) {
 		// gatecommon.DriveHeld). A window ends once no ToNext bead remains
 		// in-flight after stepping.
 		anyInFlight := false
+		tick := clk.Tick()
 		for _, o := range in.ToNext {
-			o.StepOnce(ctx)
+			o.StepOnceAt(ctx, tick)
 			if o.InFlight() {
 				anyInFlight = true
 			}

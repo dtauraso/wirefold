@@ -354,6 +354,16 @@ func (o *Out) StepOnce(ctx context.Context) {
 	o.pw.StepOnce(ctx)
 }
 
+// StepOnceAt is StepOnce with the current tick PINNED by the caller (see
+// PacedWire.StepOnceAt). Use when stepping several Outs in the same cycle
+// so they all observe the same tick. No-op in chan mode or for a nil Out.
+func (o *Out) StepOnceAt(ctx context.Context, tick int64) {
+	if o == nil || o.pw == nil {
+		return
+	}
+	o.pw.StepOnceAt(ctx, tick)
+}
+
 // DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
 // that drives several outbound edges on its OWN goroutine accumulates a set of
 // these (each carrying a SendWire trace already emitted at placement time) and

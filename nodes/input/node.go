@@ -93,14 +93,17 @@ func (n *Node) fanOutPlace(v int) bool {
 
 // fanOutStepOnce advances every wired fan-out output by one non-blocking
 // tick-step. Called once per WaitTick cycle so all fan-out beads advance
-// together in lockstep, one step per cycle — never a nested pump.
-func (n *Node) fanOutStepOnce(ctx context.Context) {
-	n.ToHoldNewSendOld.StepOnce(ctx)
+// together in lockstep, one step per cycle — never a nested pump. tick is
+// the PINNED current tick (snapshotted once by the caller right after
+// WaitTick) so every fan-out wire observes the same tick this cycle instead
+// of each independently re-reading the shared clock.
+func (n *Node) fanOutStepOnce(ctx context.Context, tick int64) {
+	n.ToHoldNewSendOld.StepOnceAt(ctx, tick)
 	if n.ToExcitatory.Wired() {
-		n.ToExcitatory.StepOnce(ctx)
+		n.ToExcitatory.StepOnceAt(ctx, tick)
 	}
 	if n.ToPacer.Wired() {
-		n.ToPacer.StepOnce(ctx)
+		n.ToPacer.StepOnceAt(ctx, tick)
 	}
 }
 
@@ -218,7 +221,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
 				return
 			}
-			n.fanOutStepOnce(ctx)
+			n.fanOutStepOnce(ctx, clk.Tick())
 			if s, ok := n.FeedbackIn.PollRecv(); ok {
 				step = s
 				break
@@ -330,7 +333,7 @@ func (n *Node) Update(ctx context.Context) {
 		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
 			return
 		}
-		n.fanOutStepOnce(ctx)
+		n.fanOutStepOnce(ctx, clk.Tick())
 	}
 }
 

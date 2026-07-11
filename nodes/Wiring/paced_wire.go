@@ -547,6 +547,20 @@ func (pw *PacedWire) StepOnce(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	pw.StepOnceAt(ctx, pw.clock.Tick())
+}
+
+// StepOnceAt is StepOnce but with the current tick PINNED by the caller
+// instead of read from the shared clock inside this call. Use this when
+// stepping more than one wire per logical cycle (fan-out/fan-in) so all
+// wires observe the SAME tick even if the shared clock advances between
+// individual StepOnce calls — snapshot clk.Tick() once per cycle and pass
+// it to every wire's StepOnceAt. Single-wire-per-cycle callers can keep
+// using plain StepOnce.
+func (pw *PacedWire) StepOnceAt(ctx context.Context, tick int64) {
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Snapshot the FIFO order of currently in-flight beads. Iterate that fixed
 	// order — head-first — so an earlier bead's delivery this same call can
@@ -559,7 +573,7 @@ func (pw *PacedWire) StepOnce(ctx context.Context) {
 	}
 	pw.mu.Unlock()
 
-	nowTick := float64(pw.clock.Tick())
+	nowTick := float64(tick)
 
 	for _, gen := range gens {
 		if ctx.Err() != nil {
