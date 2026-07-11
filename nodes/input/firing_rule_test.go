@@ -233,3 +233,129 @@ func TestEmptyInit(t *testing.T) {
 	default:
 	}
 }
+
+// TestPacedFanOutDeliversConcurrentlyAtSameTick proves the non-blocking
+// (place-all-then-StepOnce-per-cycle) fanOut rewrite preserves the old
+// blocking DriveAll's concurrent fan-out: two wired outputs
+// (ToHoldNewSendOld, ToExcitatory) fed the same value on the same cycle
+// arrive at the SAME clock tick, and Update is not parked across the
+// traversal — cancelling ctx mid-traversal (before the clock is advanced
+// through delivery) exits promptly instead of hanging.
+func TestPacedFanOutDeliversConcurrentlyAtSameTick(t *testing.T) {
+	const latMs = 160.0
+
+	clk := Wiring.NewFakeClock()
+	tr := T.New(0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pw1 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	pw1.SetClock(clk)
+	pw1.Trace = tr
+	pw2 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	pw2.SetClock(clk)
+	pw2.Trace = tr
+
+	node := &Node{
+		Fire: func() { tr.Fire("in") },
+		Init: []int{7},
+		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw1, ctx, "in", "ToHoldNewSendOld", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+		ToExcitatory: Wiring.NewPacedOutNoGeom(pw2, ctx, "in", "ToExcitatory", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+	}
+	obs1 := Wiring.NewInPaced(pw1, ctx, "obs1", "In", tr)
+	obs2 := Wiring.NewInPaced(pw2, ctx, "obs2", "In", tr)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+
+	var arrive1, arrive2 int64
+	got1, got2 := false, false
+	const maxTicks = 20000
+	var tick int64
+	for tick = 0; tick < maxTicks && !(got1 && got2); tick++ {
+		clk.AdvanceTicks(1)
+		time.Sleep(20 * time.Microsecond)
+		if !got1 {
+			if v, ok := obs1.PollRecv(); ok {
+				if v != 7 {
+					t.Fatalf("obs1: expected 7, got %d", v)
+				}
+				arrive1 = clk.Tick()
+				got1 = true
+			}
+		}
+		if !got2 {
+			if v, ok := obs2.PollRecv(); ok {
+				if v != 7 {
+					t.Fatalf("obs2: expected 7, got %d", v)
+				}
+				arrive2 = clk.Tick()
+				got2 = true
+			}
+		}
+	}
+	if !got1 || !got2 {
+		t.Fatalf("fan-out did not deliver to both outputs within %d ticks (got1=%v got2=%v)", maxTicks, got1, got2)
+	}
+	if arrive1 != arrive2 {
+		t.Errorf("fan-out not concurrent: ToHoldNewSendOld arrived at tick %d, ToExcitatory at tick %d", arrive1, arrive2)
+	}
+
+	// Update must exit once the single (non-Repeat) init value has been fully
+	// delivered on every fan-out output.
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Update did not exit after the sole init value was fully delivered on both outputs")
+	}
+}
+
+// TestPacedFanOutCancelExitsPromptly proves the non-blocking loop is never
+// parked inside a full traversal: cancelling ctx mid-traversal (before the
+// clock has advanced through delivery) makes Update exit promptly.
+func TestPacedFanOutCancelExitsPromptly(t *testing.T) {
+	const latMs = 160.0
+
+	clk := Wiring.NewFakeClock()
+	tr := T.New(0)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pw1 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	pw1.SetClock(clk)
+	pw1.Trace = tr
+	pw2 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	pw2.SetClock(clk)
+	pw2.Trace = tr
+
+	node := &Node{
+		Fire: func() { tr.Fire("in") },
+		Init: []int{7},
+		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw1, ctx, "in", "ToHoldNewSendOld", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+		ToExcitatory: Wiring.NewPacedOutNoGeom(pw2, ctx, "in", "ToExcitatory", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+
+	// Advance a couple ticks so the fan-out is placed and mid-traversal, well
+	// short of the 160ms delivery deadline.
+	clk.AdvanceTicks(2)
+	time.Sleep(5 * time.Millisecond)
+	cancel()
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Update did not exit promptly on ctx cancel (looks parked inside a full traversal)")
+	}
+}
