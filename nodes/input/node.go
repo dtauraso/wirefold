@@ -2,6 +2,7 @@ package input
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -42,7 +43,9 @@ type Node struct {
 }
 
 // fanOut places beads on all wired outputs and drives them concurrently via
-// DriveAll, so every traversal animates in lockstep on this goroutine.
+// DriveAll, so every traversal animates in lockstep on this goroutine. Used
+// only in the nil-clock (chan mode / unit test) fallback — the paced path
+// below places+steps each output non-blocking instead.
 func (n *Node) fanOut(ctx context.Context, v int) {
 	items := []Wiring.DriveItem{n.ToHoldNewSendOld.PlaceDriven(v)}
 	if n.ToExcitatory.Wired() {
@@ -52,6 +55,53 @@ func (n *Node) fanOut(ctx context.Context, v int) {
 		items = append(items, n.ToPacer.PlaceDriven(v))
 	}
 	Wiring.DriveAll(ctx, items)
+}
+
+// fanOutInFlight reports whether ANY wired fan-out output still has a bead
+// traversing its wire. Gates firing the next value: a new value is placed
+// only once every prior fan-out bead has been fully delivered, matching the
+// old blocking fanOut/DriveAll cadence (one pop per full traversal).
+func (n *Node) fanOutInFlight() bool {
+	if n.ToHoldNewSendOld.InFlight() {
+		return true
+	}
+	if n.ToExcitatory.Wired() && n.ToExcitatory.InFlight() {
+		return true
+	}
+	if n.ToPacer.Wired() && n.ToPacer.InFlight() {
+		return true
+	}
+	return false
+}
+
+// fanOutPlace places v on every wired fan-out output (same cycle — preserves
+// concurrent fan-out) without driving them. Returns false if any wired
+// placement failed (faded/torn-down wire), mirroring EmitOneDriven's
+// false-return-stops-the-goroutine convention.
+func (n *Node) fanOutPlace(v int) bool {
+	if !n.ToHoldNewSendOld.PlaceDriven(v).Live() {
+		return false
+	}
+	if n.ToExcitatory.Wired() && !n.ToExcitatory.PlaceDriven(v).Live() {
+		return false
+	}
+	if n.ToPacer.Wired() && !n.ToPacer.PlaceDriven(v).Live() {
+		return false
+	}
+	return true
+}
+
+// fanOutStepOnce advances every wired fan-out output by one non-blocking
+// tick-step. Called once per WaitTick cycle so all fan-out beads advance
+// together in lockstep, one step per cycle — never a nested pump.
+func (n *Node) fanOutStepOnce(ctx context.Context) {
+	n.ToHoldNewSendOld.StepOnce(ctx)
+	if n.ToExcitatory.Wired() {
+		n.ToExcitatory.StepOnce(ctx)
+	}
+	if n.ToPacer.Wired() {
+		n.ToPacer.StepOnce(ctx)
+	}
 }
 
 // popEnd reads and removes the END element of working, refilling from backup
@@ -84,6 +134,51 @@ func popEnd(working, backup *[]int, init []int) int {
 //	s == 1 -> POP the end (the "change the bead" action); refill on empty.
 //	s == 0 -> hold: do nothing, keep sending the same last bead next loop.
 func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func()) {
+	clk := n.ToHoldNewSendOld.Clock()
+	if clk == nil {
+		// chan mode (tests without a paced clock): keep the original blocking
+		// fanOut/DriveAll behavior.
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+
+			if len(*working) == 0 {
+				*working = *backup
+				*backup = append([]int(nil), init...)
+				emitBeads()
+			}
+
+			v := (*working)[len(*working)-1]
+			if n.Fire != nil {
+				n.Fire()
+			}
+			n.fanOut(ctx, v)
+
+			step, ok := n.FeedbackIn.PollRecv()
+			for !ok {
+				if ctx.Err() != nil {
+					return
+				}
+				runtime.Gosched()
+				step, ok = n.FeedbackIn.PollRecv()
+			}
+			if step != 1 {
+				continue
+			}
+
+			*working = (*working)[:len(*working)-1]
+			if len(*working) == 0 {
+				if n.EmitRefillSlide != nil {
+					n.EmitRefillSlide(*backup)
+				}
+				*working = *backup
+				*backup = append([]int(nil), init...)
+			}
+			emitBeads()
+		}
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -97,22 +192,37 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			emitBeads()
 		}
 
-		// PEEK the end (do NOT reslice) and SEND. Buffer unchanged.
+		// PEEK the end (do NOT reslice) and SEND. Buffer unchanged. Node 1
+		// places the same bead on every wired output the same cycle
+		// (fanOutPlace — preserves concurrent fan-out) so node 2
+		// (ToHoldNewSendOld) and node 6 (ToExcitatory) traverse in lockstep.
 		v := (*working)[len(*working)-1]
 		if n.Fire != nil {
 			n.Fire()
 		}
-		// Node 1 places the same bead on every wired output and drives them
-		// concurrently via DriveAll (place-all-then-drive) so node 2
-		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get it in lockstep. fanOut
-		// blocks until all traversals finish, keeping node 1 paced and preserving
-		// the feedback-ring ordering (the TryRecv below still runs after).
-		n.fanOut(ctx, v)
-
-		// READ: block until HoldNewSendOld sends the step on FeedbackIn.
-		step, ok := n.FeedbackIn.TryRecv()
-		if !ok {
+		if !n.fanOutPlace(v) {
 			return
+		}
+
+		// Single loop, one step per cycle: WaitTick, StepOnce every fan-out
+		// output, and poll FeedbackIn non-blocking, until HoldNewSendOld's
+		// step arrives. This node is never parked across the traversal — it
+		// returns to the top of this loop and WaitTicks one cycle at a time
+		// (same shape as pacer/gatecommon.DriveHeld), not a nested
+		// InFlight-pump.
+		var step int
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+				return
+			}
+			n.fanOutStepOnce(ctx)
+			if s, ok := n.FeedbackIn.PollRecv(); ok {
+				step = s
+				break
+			}
 		}
 		if step != 1 {
 			// Hold: buffer unchanged, send the same last bead next loop.
@@ -167,22 +277,60 @@ func (n *Node) Update(ctx context.Context) {
 	// Plain emit path (FeedbackIn not wired): pop the end every iteration,
 	// refilling on empty. With Repeat the buffer refills forever; without it,
 	// emit exactly len(init) values (one working drain) then stop.
+	clk := n.ToHoldNewSendOld.Clock()
+	if clk == nil {
+		// chan mode (tests without a paced clock): keep the original blocking
+		// fanOut/DriveAll behavior.
+		emitted := 0
+		for n.Repeat || emitted < len(init) {
+			if ctx.Err() != nil {
+				return
+			}
+			if n.Fire != nil {
+				n.Fire()
+			}
+			v := popEnd(&working, &backup, init)
+			emitBeads()
+			n.fanOut(ctx, v)
+			emitted++
+		}
+		return
+	}
+
+	// Single loop, one step per cycle: on fire, PLACE the bead on every
+	// wired fan-out output (place-all-then-drive — preserves concurrent
+	// fan-out, same cycle); every cycle StepOnce each fan-out output once.
+	// The next value is only popped once every prior fan-out bead has been
+	// fully delivered (fanOutInFlight), matching the old blocking fanOut
+	// cadence of one pop per full traversal. When there is nothing left to
+	// fire (Repeat false and drained) the loop keeps stepping until the last
+	// fan-out bead is delivered, then returns — it never abandons an
+	// in-flight bead.
 	emitted := 0
-	for n.Repeat || emitted < len(init) {
+	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if n.Fire != nil {
-			n.Fire()
+		stillToFire := n.Repeat || emitted < len(init)
+		inFlight := n.fanOutInFlight()
+		if !stillToFire && !inFlight {
+			return
 		}
-		v := popEnd(&working, &backup, init)
-		emitBeads() // array changed (pop, maybe refill) → restream interior
-		// Node 1 places the same bead on every wired output and drives them
-		// concurrently via DriveAll (place-all-then-drive) so node 2
-		// (ToHoldNewSendOld) and node 6 (ToExcitatory) get it in lockstep; fanOut
-		// blocks until all traversals finish, keeping node 1 paced before the next pop.
-		n.fanOut(ctx, v)
-		emitted++
+		if stillToFire && !inFlight {
+			if n.Fire != nil {
+				n.Fire()
+			}
+			v := popEnd(&working, &backup, init)
+			emitBeads() // array changed (pop, maybe refill) → restream interior
+			if !n.fanOutPlace(v) {
+				return
+			}
+			emitted++
+		}
+		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			return
+		}
+		n.fanOutStepOnce(ctx)
 	}
 }
 

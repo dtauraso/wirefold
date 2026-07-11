@@ -2,6 +2,7 @@ package holdflip
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
@@ -65,9 +66,13 @@ func (g *Node) Update(ctx context.Context) {
 	// only the LATEST. Then Done()/Fire()/update held/emit interior bead.
 	var lastDisplayed int64 = gatecommon.NoValue
 	for {
-		v, ok := g.In.TryRecv()
+		if ctx.Err() != nil {
+			return
+		}
+		v, ok := g.In.PollRecv()
 		if !ok {
-			return // ctx cancelled or input closed
+			runtime.Gosched()
+			continue
 		}
 		// Drain-to-latest: consume any additional queued beads, keeping the last
 		// REAL value. A stray NoValue sentinel must not overwrite v (storing -1 would

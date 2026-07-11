@@ -95,6 +95,17 @@ func (i *In) PollRecv() (int, bool) {
 	}
 }
 
+// Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
+// nil In (no wire, no clock). A future non-blocking node Update loop reads this
+// to pace itself off the same clock the wire times delivery on, without owning
+// a clock reference of its own.
+func (i *In) Clock() Clock {
+	if i == nil || i.pw == nil {
+		return nil
+	}
+	return i.pw.clock
+}
+
 // SimLatencyMs reports the input wire's traversal latency in milliseconds
 // (arcLength / pulseSpeed), or 0 in chan mode (no wire geometry). Windowed nodes
 // use this to derive their coincidence window W from current geometry.
@@ -247,6 +258,15 @@ func (o *Out) placementFrom(g outGeom) beadPlacement {
 	}
 }
 
+// Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
+// nil Out (no wire, no clock). Mirrors In.Clock(); see its doc.
+func (o *Out) Clock() Clock {
+	if o == nil || o.pw == nil {
+		return nil
+	}
+	return o.pw.clock
+}
+
 // Gated reports whether the source node should wait for consumption after a
 // successful send. Nil-safe; the zero value (empty Rule) is gated.
 func (o *Out) Gated() bool {
@@ -321,6 +341,19 @@ func (o *Out) InFlight() bool {
 	return o.pw.InFlight()
 }
 
+// StepOnce advances this Out's underlying wire by one non-blocking tick-step
+// (see PacedWire.StepOnce): any in-flight bead due at the current tick moves
+// one position-step, and FIFO-head delivery is attempted if ready. Returns
+// immediately; never parks. No-op in chan mode (o.pw == nil) or for a nil Out.
+// Exported so a node's own continuous-drive goroutine (gatecommon.DriveHeld)
+// can pace itself one tick at a time instead of blocking a full traversal.
+func (o *Out) StepOnce(ctx context.Context) {
+	if o == nil || o.pw == nil {
+		return
+	}
+	o.pw.StepOnce(ctx)
+}
+
 // DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
 // that drives several outbound edges on its OWN goroutine accumulates a set of
 // these (each carrying a SendWire trace already emitted at placement time) and
@@ -330,6 +363,15 @@ func (o *Out) InFlight() bool {
 type DriveItem struct {
 	item driveItem
 	live bool
+}
+
+// Live reports whether this DriveItem carries a bead actually placed on a
+// paced wire (i.e. PlaceDriven succeeded in paced-wire mode). False for a nil
+// Out, chan mode, or a failed placement (faded/torn-down wire) — callers that
+// need to detect placement failure (e.g. a continuous-drive loop mirroring
+// EmitOneDriven's false-return-stops-the-goroutine behavior) check this.
+func (di DriveItem) Live() bool {
+	return di.live
 }
 
 // PlaceDriven places one bead on this Out WITHOUT spawning a walker, emits the

@@ -325,6 +325,126 @@ func (r *pacedFlipRig) expectFlip(t *testing.T, want int) {
 	t.Fatalf("paced drive never delivered flipped value %d", want)
 }
 
+// newPacedFlipRigLat is newPacedFlipRig parameterized by the wire's simulated
+// latency (ms), so timing tests can pick a latency wide enough (in ticks) to
+// observe multi-tick spacing between consecutive pulses.
+func newPacedFlipRigLat(t *testing.T, latMs float64) *pacedFlipRig {
+	t.Helper()
+	clk := Wiring.NewFakeClock()
+	tr := T.New(0)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	inPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	inPw.SetClock(clk)
+	inPw.Trace = tr
+	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	outPw.SetClock(clk)
+	outPw.Trace = tr
+
+	node := &Node{
+		Fire: func() { tr.Fire("hf") },
+		In:   Wiring.NewInPaced(inPw, ctx, "hf", "In", tr),
+		Out: Wiring.NewPacedOutNoGeom(outPw, ctx, "hf", "Out", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+	}
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+
+	return &pacedFlipRig{clk: clk, inPw: inPw, observer: observer, cancel: cancel, wg: &wg, ctx: ctx}
+}
+
+// TestFlipPacedPulseSpacingConsistent proves the non-blocking (one-StepOnce-
+// per-tick) DriveHeld rewrite reproduces the SAME per-tick cadence the old
+// blocking DriveBeadToDelivery path did: with a fixed wire latency, the drive
+// goroutine places its next pulse bead the instant the previous one is
+// delivered, so consecutive same-value pulses are separated by a CONSTANT
+// number of ticks (the wire's fixed traversal-tick count, latMs/MsPerTick).
+// Advances the shared FakeClock ONE TICK AT A TIME (not in latency-sized
+// jumps) so this also exercises StepOnce being driven every tick, matching
+// how the goroutine actually paces itself in production.
+func TestFlipPacedPulseSpacingConsistent(t *testing.T) {
+	const latMs = 160.0 // latMs/MsPerTick(16) = 10 ticks between pulses
+	r := newPacedFlipRigLat(t, latMs)
+	defer r.close()
+
+	// held starts at NoValue -> DriveHeld emits the NoValue sentinel pulses
+	// until input arrives. Feed 0 so the flipped output settles to 1, then
+	// measure the tick-spacing between consecutive delivered "1" pulses.
+	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 0, 0) {
+		t.Fatal("PlaceAndDriveDeliverOnly returned false")
+	}
+
+	var arriveTicks []int64
+	const maxTicks = 20000
+	var tick int64
+	for tick = 0; tick < maxTicks && len(arriveTicks) < 4; tick++ {
+		r.clk.AdvanceTicks(1)
+		time.Sleep(20 * time.Microsecond) // let the woken drive goroutine run
+		for {
+			v, ok := r.observer.PollRecv()
+			if !ok {
+				break
+			}
+			if v == 1 {
+				arriveTicks = append(arriveTicks, r.clk.Tick())
+			}
+		}
+	}
+	if len(arriveTicks) < 4 {
+		t.Fatalf("expected at least 4 delivered '1' pulses within %d ticks, got %v", maxTicks, arriveTicks)
+	}
+
+	// Spacing between consecutive arrivals must be CONSTANT (steady-state
+	// cadence, once held has settled and the sentinel transient has passed —
+	// drop the first gap, which may include leftover sentinel pulses).
+	gaps := make([]int64, 0, len(arriveTicks)-2)
+	for i := 2; i < len(arriveTicks); i++ {
+		gaps = append(gaps, arriveTicks[i]-arriveTicks[i-1])
+	}
+	for i, g := range gaps {
+		if g != gaps[0] {
+			t.Fatalf("pulse spacing not constant: gaps=%v (arrivals=%v)", gaps, arriveTicks)
+		}
+		_ = i
+	}
+	if gaps[0] <= 0 {
+		t.Fatalf("non-positive pulse spacing: %v", gaps)
+	}
+}
+
+// TestFlipPacedCancelExitsPromptly proves the DRIVE goroutine is NOT parked
+// inside a full traversal: cancelling ctx makes it exit promptly even with NO
+// further clock advancement (a blocking multi-tick park would only unblock via
+// its own ctx watcher too, but this asserts the exit happens within a short
+// WALL-CLOCK bound, not requiring the test to drive the fake clock through an
+// entire traversal to observe it).
+func TestFlipPacedCancelExitsPromptly(t *testing.T) {
+	const latMs = 160.0
+	r := newPacedFlipRigLat(t, latMs)
+
+	// Get the drive goroutine into an in-flight (mid-traversal) state: place an
+	// input bead and advance a couple of ticks — not enough for a full 10-tick
+	// traversal to complete.
+	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 0, 0) {
+		t.Fatal("PlaceAndDriveDeliverOnly returned false")
+	}
+	r.clk.AdvanceTicks(2)
+	time.Sleep(5 * time.Millisecond)
+
+	r.cancel()
+	done := make(chan struct{})
+	go func() { r.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		// exited promptly, no further clock advancement needed.
+	case <-time.After(2 * time.Second):
+		t.Fatal("drive goroutine did not exit promptly on ctx cancel (appears parked)")
+	}
+}
+
 // TestFlipPacedPath drives the core flip behavior over real PacedWires + FakeClock:
 // input 0 -> output 1, then input 1 -> output 0 (1-held each time).
 func TestFlipPacedPath(t *testing.T) {
