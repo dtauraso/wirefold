@@ -73,6 +73,19 @@ func (r *pacedPacerRig) close() {
 // read directly from Fire() (the exact moment the Pacer receives its input
 // and calls PlaceDriven), isolating the FeedbackOut wire's own traversal from
 // the separate FromInput wire's delivery latency.
+//
+// The arrival tick is measured deterministically: after each AdvanceTicks(1)
+// the test SETTLES (bounded retry-poll, mirroring
+// Wiring.driveUntilAllDelivered) until the pacer's own goroutine has had a
+// chance to run its StepOnce for that tick, instead of a single
+// fixed-duration sleep. A single short sleep races the pacer goroutine's
+// scheduling (worse under -race, which slows every goroutine down non
+// uniformly): if the goroutine hasn't yet appended to PacedWire.delivered by
+// the time the sleep expires, the observation is deferred to the NEXT
+// AdvanceTicks call, which shifts the recorded arrival tick by +1 for
+// whichever of the two traversals loses that particular scheduling race —
+// producing the intermittent d1 != d2 (this was a TEST measurement race, not
+// a product bug in the pacer's per-cycle loop: case A).
 func TestPacerPacedArrivalTickMatchesTraversal(t *testing.T) {
 	const latMs = 160.0
 
@@ -85,27 +98,51 @@ func TestPacerPacedArrivalTickMatchesTraversal(t *testing.T) {
 
 	var placeTicks, arriveTicks []int64
 	const maxTicks = 20000
+	const settleWindow = 5 * time.Millisecond
+	const settlePoll = 50 * time.Microsecond
 	var tick int64
 	for tick = 0; tick < maxTicks && len(arriveTicks) < 2; tick++ {
 		r.clk.AdvanceTicks(1)
-		time.Sleep(20 * time.Microsecond)
+
+		// Drain any Fire() that landed on this tick.
 		select {
 		case pt := <-fireTicks:
 			placeTicks = append(placeTicks, pt)
 		default:
 		}
-		if v, ok := r.observer.PollRecv(); ok {
-			if len(arriveTicks) == 0 && v != 1 {
-				t.Fatalf("expected step=1 (first recv), got %d", v)
+
+		// Settle: give the pacer's own goroutine a bounded window to run its
+		// StepOnce for this tick and append to PacedWire.delivered before
+		// deciding "no arrival this tick" — a single fixed sleep races that
+		// goroutine's scheduling instead of deterministically observing it.
+		deadline := time.Now().Add(settleWindow)
+		for {
+			// A Fire() can also land during the settle window (the input
+			// wire's own delivery may be mid-flight relative to the tick
+			// loop) — keep draining it so placeTicks stays in step.
+			select {
+			case pt := <-fireTicks:
+				placeTicks = append(placeTicks, pt)
+			default:
 			}
-			arriveTicks = append(arriveTicks, r.clk.Tick())
-			if len(arriveTicks) == 1 {
-				// Feed a second, different value once the first is delivered
-				// so a second traversal starts.
-				if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 9, 0) {
-					t.Fatal("second PlaceAndDriveDeliverOnly returned false")
+			if v, ok := r.observer.PollRecv(); ok {
+				if len(arriveTicks) == 0 && v != 1 {
+					t.Fatalf("expected step=1 (first recv), got %d", v)
 				}
+				arriveTicks = append(arriveTicks, r.clk.Tick())
+				if len(arriveTicks) == 1 {
+					// Feed a second, different value once the first is
+					// delivered so a second traversal starts.
+					if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 9, 0) {
+						t.Fatal("second PlaceAndDriveDeliverOnly returned false")
+					}
+				}
+				break
 			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(settlePoll)
 		}
 	}
 	if len(placeTicks) < 2 {
