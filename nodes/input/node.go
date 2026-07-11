@@ -78,14 +78,23 @@ func (n *Node) fanOutInFlight() bool {
 // concurrent fan-out) without driving them. Returns false if any wired
 // placement failed (faded/torn-down wire), mirroring EmitOneDriven's
 // false-return-stops-the-goroutine convention.
-func (n *Node) fanOutPlace(v int) bool {
-	if !n.ToHoldNewSendOld.PlaceDriven(v).Live() {
+//
+// tick is snapshotted ONCE by the caller (clk.Tick(), read a single time)
+// and passed to every wired output's PlaceDrivenAt so all fan-out beads
+// stamp the SAME placementTick. Placing sequentially with each wire
+// independently re-reading the live shared clock (PlaceDriven) lets the
+// clock advance between placements — under concurrent AdvanceTicks the two
+// equal-latency siblings can land on either side of a tick boundary and get
+// different placementTicks, delivering a full cycle apart despite identical
+// latency.
+func (n *Node) fanOutPlace(v int, tick int64) bool {
+	if !n.ToHoldNewSendOld.PlaceDrivenAt(v, tick).Live() {
 		return false
 	}
-	if n.ToExcitatory.Wired() && !n.ToExcitatory.PlaceDriven(v).Live() {
+	if n.ToExcitatory.Wired() && !n.ToExcitatory.PlaceDrivenAt(v, tick).Live() {
 		return false
 	}
-	if n.ToPacer.Wired() && !n.ToPacer.PlaceDriven(v).Live() {
+	if n.ToPacer.Wired() && !n.ToPacer.PlaceDrivenAt(v, tick).Live() {
 		return false
 	}
 	return true
@@ -203,7 +212,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 		if n.Fire != nil {
 			n.Fire()
 		}
-		if !n.fanOutPlace(v) {
+		if !n.fanOutPlace(v, clk.Tick()) {
 			return
 		}
 
@@ -325,7 +334,7 @@ func (n *Node) Update(ctx context.Context) {
 			}
 			v := popEnd(&working, &backup, init)
 			emitBeads() // array changed (pop, maybe refill) → restream interior
-			if !n.fanOutPlace(v) {
+			if !n.fanOutPlace(v, clk.Tick()) {
 				return
 			}
 			emitted++

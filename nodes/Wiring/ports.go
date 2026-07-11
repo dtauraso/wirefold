@@ -312,6 +312,19 @@ func (o *Out) placeDrivenNoWalker(v int) (gen uint64, ok bool) {
 	return gen, true
 }
 
+// placeDrivenNoWalkerAt is placeDrivenNoWalker with the placement tick PINNED
+// by the caller (see PacedWire.placeBeadNoWalkerAt) instead of a live clock
+// read. Caller must have already checked o.pw != nil.
+func (o *Out) placeDrivenNoWalkerAt(v int, tick int64) (gen uint64, ok bool) {
+	g := o.Geom()
+	gen, ok = o.pw.placeBeadNoWalkerAt(v, o.placementFrom(g), tick)
+	if !ok {
+		return 0, false
+	}
+	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+	return gen, true
+}
+
 // EmitOneDriven places one bead WITHOUT spawning a walker goroutine, emits the
 // same SendWire trace as EmitOne, then drives the bead to delivery synchronously
 // on the caller's goroutine. Blocks until delivered or ctx is canceled.
@@ -428,6 +441,34 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 			o.trace.Send(o.node, o.port, v)
 		default:
 		}
+	}
+	return DriveItem{}
+}
+
+// PlaceDrivenAt is PlaceDriven with the placement tick PINNED by the caller
+// (see PacedWire.placeBeadNoWalkerAt) so multiple fan-out wires placed in the
+// same cycle all stamp the same placementTick instead of each independently
+// re-reading the live shared clock (which can advance mid-cycle and skew
+// equal-latency siblings apart by a tick). Chan mode is unaffected (no
+// placementTick concept there).
+func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
+	if o == nil {
+		return DriveItem{}
+	}
+	if o.pw != nil {
+		gen, ok := o.placeDrivenNoWalkerAt(v, tick)
+		if !ok {
+			return DriveItem{}
+		}
+		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
+	}
+	// chan mode (tests): no drive needed, send now and return inert.
+	if o.ch != nil {
+		select {
+		case o.ch <- v:
+			o.trace.Send(o.node, o.port, v)
+		default:
+		}
 		return DriveItem{}
 	}
 	return DriveItem{}
@@ -461,6 +502,21 @@ func (outs OutMulti) PlaceDrivenAll(v int, dst []DriveItem) []DriveItem {
 			continue
 		}
 		dst = append(dst, o.PlaceDriven(v))
+	}
+	return dst
+}
+
+// PlaceDrivenAllAt is PlaceDrivenAll with the placement tick PINNED by the
+// caller (see PacedWire.placeBeadNoWalkerAt / Out.PlaceDrivenAt) so every
+// element of this fan-out set stamps the SAME placementTick instead of each
+// independently re-reading the live shared clock across sequential
+// placements.
+func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []DriveItem {
+	for _, o := range outs {
+		if o == nil {
+			continue
+		}
+		dst = append(dst, o.PlaceDrivenAt(v, tick))
 	}
 	return dst
 }

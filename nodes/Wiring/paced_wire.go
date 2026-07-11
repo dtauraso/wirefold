@@ -228,6 +228,18 @@ const msToArcWu = PulseSpeedWuPerMs
 // returning the bead's gen so the caller can drive delivery synchronously.
 // Returns (0, false) when faded/deleted (nothing placed).
 func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64, ok bool) {
+	return pw.placeBeadNoWalkerAt(value, bp, pw.clock.Tick())
+}
+
+// placeBeadNoWalkerAt is placeBeadNoWalker with the current tick PINNED by the
+// caller instead of re-reading pw.clock.Tick() live. Use when placing several
+// beads across different wires in the same fan-out cycle: the shared clock
+// can advance mid-cycle between placements, so each wire must stamp
+// placementTick from ONE snapshot taken once per cycle, not one live read
+// per wire — otherwise fan-out siblings placed on either side of a tick
+// boundary get different placementTicks and deliver a cycle apart despite
+// equal latency.
+func (pw *PacedWire) placeBeadNoWalkerAt(value any, bp beadPlacement, tick int64) (gen uint64, ok bool) {
 	pw.mu.Lock()
 	if pw.faded || pw.deleted {
 		pw.mu.Unlock()
@@ -238,7 +250,7 @@ func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64,
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
 	}
-	nowTick := float64(pw.clock.Tick())
+	nowTick := float64(tick)
 	b := inflightBead{
 		val:           beadVal,
 		placementTick: nowTick,
