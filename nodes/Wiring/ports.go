@@ -95,6 +95,17 @@ func (i *In) PollRecv() (int, bool) {
 	}
 }
 
+// Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
+// nil In (no wire, no clock). A future non-blocking node Update loop reads this
+// to pace itself off the same clock the wire times delivery on, without owning
+// a clock reference of its own.
+func (i *In) Clock() Clock {
+	if i == nil || i.pw == nil {
+		return nil
+	}
+	return i.pw.clock
+}
+
 // SimLatencyMs reports the input wire's traversal latency in milliseconds
 // (arcLength / pulseSpeed), or 0 in chan mode (no wire geometry). Windowed nodes
 // use this to derive their coincidence window W from current geometry.
@@ -245,6 +256,15 @@ func (o *Out) placementFrom(g outGeom) beadPlacement {
 		Node:       o.node,
 		Port:       o.port,
 	}
+}
+
+// Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
+// nil Out (no wire, no clock). Mirrors In.Clock(); see its doc.
+func (o *Out) Clock() Clock {
+	if o == nil || o.pw == nil {
+		return nil
+	}
+	return o.pw.clock
 }
 
 // Gated reports whether the source node should wait for consumption after a

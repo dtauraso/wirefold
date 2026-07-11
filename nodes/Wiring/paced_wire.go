@@ -80,6 +80,12 @@ type inflightBead struct {
 	port    string      // source output port — the position/cancel routing key
 	streams bool        // whether this bead carries position-stream context
 	gen     uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
+	// finalPending is true once StepOnce has advanced this bead to its delivery
+	// deadline (target==deadline) but it was not yet at the FIFO head, so the
+	// move to `delivered` is still outstanding. Only StepOnce sets/reads this;
+	// the blocking DriveBeadsToDelivery path never sets it (deliverHeadLocked
+	// parks instead of leaving a bead in this state).
+	finalPending bool
 }
 
 // ticksToCross returns the tick count for a bead of the given arc length to cross
@@ -455,26 +461,51 @@ func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arri
 		}
 	}()
 	for {
-		if ctx.Err() != nil {
-			pw.mu.Unlock()
-			return arriveInfo{}, false
+		var ready bool
+		ai, ok, ready = pw.tryDeliverHeadLocked(ctx, gen)
+		if ready {
+			return ai, ok
 		}
-		if gen < pw.teardownGen {
-			pw.mu.Unlock()
-			return arriveInfo{}, false
-		}
-		j := pw.findInflightLocked(gen)
-		if j < 0 {
-			pw.mu.Unlock()
-			return arriveInfo{}, false
-		}
-		if j == 0 {
-			break
-		}
+		// tryDeliverHeadLocked left pw.mu HELD when it returns ready=false (bead is
+		// live but not yet at the FIFO head) — this loop parks on it below.
 		if stop == nil {
 			stop = broadcastOnCancel(ctx, &pw.mu, pw.cond)
 		}
 		pw.cond.Wait()
+	}
+}
+
+// tryDeliverHeadLocked attempts, ONE TIME (no parking/looping), to deliver the bead
+// identified by gen. Caller must hold pw.mu on entry.
+//
+// Three outcomes:
+//   - ready=true, ok=true: the bead was at the FIFO head and was moved to
+//     `delivered`; ai carries its source identity for the arrive trace. pw.mu is
+//     released.
+//   - ready=true, ok=false: the bead is gone (ctx canceled, torn down, or already
+//     dropped) — no delivery, nothing to wait for. pw.mu is released.
+//   - ready=false: the bead is still live but is NOT yet at the FIFO head (an
+//     earlier bead must deliver first). pw.mu is left HELD so a blocking caller
+//     can park on pw.cond, or a non-blocking caller can unlock and retry later.
+//
+// This is the shared core behind both deliverHeadLocked's parking loop (blocking
+// DriveBeadsToDelivery path) and StepOnce's non-blocking retry (never parks).
+func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64) (ai arriveInfo, ok bool, ready bool) {
+	if ctx.Err() != nil {
+		pw.mu.Unlock()
+		return arriveInfo{}, false, true
+	}
+	if gen < pw.teardownGen {
+		pw.mu.Unlock()
+		return arriveInfo{}, false, true
+	}
+	j := pw.findInflightLocked(gen)
+	if j < 0 {
+		pw.mu.Unlock()
+		return arriveInfo{}, false, true
+	}
+	if j != 0 {
+		return arriveInfo{}, false, false
 	}
 	db := pw.inflight[0]
 	pw.inflight = pw.inflight[1:]
@@ -482,7 +513,7 @@ func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arri
 	pw.cond.Broadcast()
 	ai = arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
 	pw.mu.Unlock()
-	return ai, true
+	return ai, true, true
 }
 
 // DriveBeadToDelivery runs the same per-frame loop the walker would run for
@@ -491,6 +522,94 @@ func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64) (ai arri
 // bead is delivered or ctx is canceled / the wire is torn down.
 func (pw *PacedWire) DriveBeadToDelivery(ctx context.Context, gen uint64) {
 	DriveBeadsToDelivery(ctx, []driveItem{{pw: pw, gen: gen}})
+}
+
+// StepOnce is the NON-BLOCKING one-tick step primitive (piece 1 of the
+// non-blocking-Update rewrite; not yet called by any node). It advances every
+// in-flight bead on this wire that is due at the CURRENT clock tick by exactly
+// one position-step, attempts any FIFO-head delivery that is now ready, and
+// RETURNS IMMEDIATELY — it never loops over future ticks and never parks
+// (no WaitTick, no cond.Wait) on a bead that is not yet due or not yet at the
+// FIFO head; such a bead simply stays in-flight for a future StepOnce call.
+//
+// Timing/FIFO equivalence to the blocking DriveBeadsToDelivery path: that path
+// advances every live item by exactly one positionStepTicks-interval (=1 tick)
+// per WaitTick wake, i.e. once per tick. StepOnce reuses the SAME per-tick
+// advance (advanceBeadLocked) and the SAME FIFO-head handoff (deliverHeadLocked's
+// core, tryDeliverHeadLocked) — it just does not loop or park internally. Calling
+// StepOnce exactly once per tick for N ticks reproduces the blocking path's
+// per-tick trajectory and delivers each bead at the identical tick.
+//
+// A bead that reaches its delivery deadline while not yet at the FIFO head is
+// marked finalPending so subsequent StepOnce calls retry ONLY the (cheap)
+// delivery handoff for it, without re-running the position-advance math.
+func (pw *PacedWire) StepOnce(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Snapshot the FIFO order of currently in-flight beads. Iterate that fixed
+	// order — head-first — so an earlier bead's delivery this same call can
+	// unblock a later bead's delivery within the same StepOnce (matches
+	// DriveBeadsToDelivery, which advances all live items every tick).
+	pw.mu.Lock()
+	gens := make([]uint64, len(pw.inflight))
+	for i, b := range pw.inflight {
+		gens[i] = b.gen
+	}
+	pw.mu.Unlock()
+
+	nowTick := float64(pw.clock.Tick())
+
+	for _, gen := range gens {
+		if ctx.Err() != nil {
+			return
+		}
+
+		pw.mu.Lock()
+		idx := pw.findInflightLocked(gen)
+		if idx < 0 {
+			pw.mu.Unlock()
+			continue
+		}
+		b := pw.inflight[idx]
+		alreadyFinal := b.finalPending
+		placementTick := b.placementTick
+		pw.mu.Unlock()
+
+		if !alreadyFinal {
+			if nowTick <= placementTick {
+				// Not due yet: no step this tick, no delivery attempt.
+				continue
+			}
+			pw.mu.Lock()
+			emit, posArgs, final := pw.advanceBeadLocked(gen, nowTick) // unlocks internally
+			if emit {
+				pw.Trace.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
+			}
+			if !final {
+				continue
+			}
+			pw.mu.Lock()
+			if fi := pw.findInflightLocked(gen); fi >= 0 {
+				pw.inflight[fi].finalPending = true
+			}
+			pw.mu.Unlock()
+		}
+
+		// Bead has reached its delivery deadline; try the non-blocking FIFO-head
+		// handoff. If it is not yet head, tryDeliverHeadLocked leaves it in-flight
+		// (still finalPending) for a later StepOnce call to retry.
+		pw.mu.Lock()
+		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen)
+		if !ready {
+			pw.mu.Unlock()
+			continue
+		}
+		if ok {
+			pw.emitArrive(ai)
+		}
+	}
 }
 
 // findInflightLocked returns the index of the bead with this gen, or -1.
