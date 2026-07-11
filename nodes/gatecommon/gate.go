@@ -174,7 +174,7 @@ func openWindowIfNeeded(g *GateNode, w *gateWindow, now func() int64) {
 // on first entry, and once the dwell has elapsed, fires the AND result and resets
 // the held/window/dwell state. Returns true if it fired (caller should `continue`
 // its loop iteration without also running the window-timeout check).
-func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() int64) bool {
+func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() int64, clk Wiring.Clock) bool {
 	if !(g.HasLeft && g.HasRight) {
 		return false
 	}
@@ -206,7 +206,17 @@ func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() 
 	w.t0Set = false
 	w.dwellSet = false
 	emitInputs(g)
-	g.ToPassed.EmitOneDriven(ctx, result)
+	if clk == nil {
+		// chan mode (unit tests without a paced clock): keep the original
+		// blocking drive-to-delivery behavior.
+		g.ToPassed.EmitOneDriven(ctx, result)
+	} else {
+		// Paced mode: place the fire result without walking it to delivery.
+		// The caller's per-cycle loop (RunGate) StepOnces it one position per
+		// human-clock cycle — the gate goroutine is never parked across the
+		// output traversal.
+		g.ToPassed.PlaceDriven(result)
+	}
 	return true
 }
 
@@ -255,6 +265,12 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		park = defaultPark()
 	}
 
+	// clk selects paced vs chan mode for the OUTPUT drive: paced mode places the
+	// fire result and StepOnces it one position per cycle below (never parking
+	// across the traversal); chan mode keeps the original blocking
+	// EmitOneDriven behavior inside tryFireOnDwell.
+	clk := g.ToPassed.Clock()
+
 	var w gateWindow
 	emitInputs(g) // initial empty interior
 
@@ -263,6 +279,21 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// Park BEFORE this cycle's observe/fire/step work (not after), so a
+		// StepOnce call below is always preceded by exactly one tick advance —
+		// never two StepOnce calls within the same tick and never a StepOnce
+		// skipped by a `continue`. PollIntervalTicks==1 today, so this is the
+		// same one-tick-per-cycle cadence as the canonical WaitTick(Tick()+1)
+		// shape (nodes/pacer, nodes/holdnewsendold); if PollIntervalTicks were
+		// ever raised above 1 for a coarser OBSERVE cadence, the output
+		// StepOnce below would still only run once per this (coarser) cycle —
+		// there is currently no place in this loop that steps the output on a
+		// finer grain than the poll interval, so raising PollIntervalTicks
+		// would slow output transit too; flagged, not hit today.
+		if park(ctx, now()+PollIntervalTicks) != nil {
+			return
 		}
 
 		// Each side tracks the MOST-RECENT real bead: drain to the latest value
@@ -277,21 +308,24 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 
 		openWindowIfNeeded(g, &w, now)
 
-		if tryFireOnDwell(ctx, g, &w, now) {
-			continue
-		}
+		fired := tryFireOnDwell(ctx, g, &w, now, clk)
 
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held
-		// we are committed to firing after the dwell.
-		if w.t0Set && !(g.HasLeft && g.HasRight) && now()-w.t0 > windowTicks {
+		// we are committed to firing after the dwell. Skipped on the cycle we
+		// just fired (mirrors the old `continue`).
+		if !fired && w.t0Set && !(g.HasLeft && g.HasRight) && now()-w.t0 > windowTicks {
 			clearWindow(g, &w)
 			emitInputs(g)
 		}
 
-		// Short park between polls (pause-aware: parks on the one clock, freezes on pause).
-		if park(ctx, now()+PollIntervalTicks) != nil {
-			return
+		if clk != nil {
+			// Paced mode: advance any in-flight ToPassed output bead exactly one
+			// position-step per cycle. The gate goroutine is never parked across
+			// the output traversal — StepOnce runs every cycle regardless of
+			// whether this cycle fired, so a bead placed on a previous fire keeps
+			// moving while the window/dwell logic above continues concurrently.
+			g.ToPassed.StepOnce(ctx)
 		}
 	}
 }
