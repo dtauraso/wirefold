@@ -30,7 +30,6 @@ package Wiring
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -217,7 +216,6 @@ func (m *nodeMover) applyCenter(center vec3, reach float64) {
 	m.geomMu.Unlock()
 	m.snap.Store(&centerSnap{c: center, p: scenePolar, reach: reach})
 	if m.tr != nil {
-		m.tr.Breadcrumb("applyCenter", m.id, "", fmt.Sprintf("c=%.1f,%.1f,%.1f", center.X, center.Y, center.Z))
 		m.emitGeometry()
 	}
 }
