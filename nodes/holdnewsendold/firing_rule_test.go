@@ -1,54 +1,26 @@
 package holdnewsendold
 
 import (
-	"context"
-	"sync"
 	"testing"
-	"time"
-
-	T "github.com/dtauraso/wirefold/Trace"
-	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
-
-func recv(t *testing.T, ch <-chan int) int {
-	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for output")
-		return 0
-	}
-}
 
 // On receive, emit Held to every ToNext entry, then store the new value.
 func TestFireOnReceive(t *testing.T) {
-	tr := T.New(0)
-	defer tr.Close()
-	fromPrev := make(chan int, 1)
-	out0 := make(chan int, 1)
-	out1 := make(chan int, 1)
+	const latMs = 40.0
+	r, _ := newPacedRig(t, latMs, 2)
 
-	node := &Node{
-		Fire:                       func() { tr.Fire("ci") },
-		Held:                       99,
-		FromPrevHoldNewSendOldNode: Wiring.NewIn(fromPrev, "ci", "FromPrevHoldNewSendOldNode", tr),
-		ToNext: Wiring.OutMulti{
-			Wiring.NewOut(out0, "ci", "ToNext", tr),
-			Wiring.NewOut(out1, "ci", "ToNext", tr),
-		},
+	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 7, 0) {
+		t.Fatal("PlaceAndDriveDeliverOnly returned false")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); node.Update(ctx) }()
-
-	fromPrev <- 7
-	got0 := recv(t, out0)
-	got1 := recv(t, out1)
-	cancel()
-	wg.Wait()
+	got0, ok0 := pollRecv(r, r.observers[0], 20000)
+	if !ok0 {
+		t.Fatal("timeout waiting for ToNext[0]")
+	}
+	got1, ok1 := pollRecv(r, r.observers[1], 20000)
+	if !ok1 {
+		t.Fatal("timeout waiting for ToNext[1]")
+	}
 
 	if got0 != 99 {
 		t.Errorf("ToNext[0]: expected 99, got %d", got0)
@@ -56,7 +28,9 @@ func TestFireOnReceive(t *testing.T) {
 	if got1 != 99 {
 		t.Errorf("ToNext[1]: expected 99, got %d", got1)
 	}
-	if node.Held != 7 {
-		t.Errorf("Held after fire: expected 7, got %d", node.Held)
+
+	r.close()
+	if r.node.Held != 7 {
+		t.Errorf("Held after fire: expected 7, got %d", r.node.Held)
 	}
 }

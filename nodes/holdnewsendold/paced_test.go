@@ -17,16 +17,34 @@ import (
 // output traversal duration, and mid-window input arrivals discarded without
 // producing a second output bead or updating Held.
 type pacedRig struct {
-	clk      *Wiring.FakeClock
-	inPw     *Wiring.PacedWire
-	observer *Wiring.In
-	node     *Node
-	cancel   context.CancelFunc
-	wg       *sync.WaitGroup
-	ctx      context.Context
+	clk       *Wiring.FakeClock
+	inPw      *Wiring.PacedWire
+	observer  *Wiring.In
+	observers []*Wiring.In
+	node      *Node
+	cancel    context.CancelFunc
+	wg        *sync.WaitGroup
+	ctx       context.Context
 }
 
-func newPacedRig(t *testing.T, latMs float64) (*pacedRig, <-chan int64) {
+// newPacedRig builds a HoldNewSendOld node wired over real PacedWires + a
+// FakeClock. By default it wires a single ToNext output (r.observer); pass an
+// explicit output count via nOuts to wire a fan-out of N ToNext outputs
+// (r.observers, one per output) — e.g. to prove the fan-out delivers to
+// EVERY entry, mirroring TestFireOnReceive's original chan-mode assertion.
+//
+// An optional configure func(*Node) may be appended after nOuts to mutate the
+// node (e.g. set Held or EmitHeldBead) BEFORE the Update goroutine starts —
+// callers must call newPacedRigConfig instead when they need this; nOuts-only
+// callers keep the plain two-arg form.
+func newPacedRig(t *testing.T, latMs float64, nOuts ...int) (*pacedRig, <-chan int64) {
+	t.Helper()
+	return newPacedRigConfig(t, latMs, nOutsOf(nOuts), nil)
+}
+
+// newPacedRigConfig is newPacedRig with an explicit output count and an
+// optional configure hook run on the node before its Update goroutine starts.
+func newPacedRigConfig(t *testing.T, latMs float64, n int, configure func(*Node)) (*pacedRig, <-chan int64) {
 	t.Helper()
 	clk := Wiring.NewFakeClock()
 	tr := T.New(0)
@@ -35,32 +53,62 @@ func newPacedRig(t *testing.T, latMs float64) (*pacedRig, <-chan int64) {
 	inPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	inPw.SetClock(clk)
 	inPw.Trace = tr
-	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	outPw.SetClock(clk)
-	outPw.Trace = tr
 
 	fireTicks := make(chan int64, 16)
+	var toNext Wiring.OutMulti
+	var observers []*Wiring.In
+	for i := 0; i < n; i++ {
+		outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+		outPw.SetClock(clk)
+		outPw.Trace = tr
+		toNext = append(toNext, Wiring.NewPacedOutNoGeom(outPw, ctx, "hnso", "ToNext", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""))
+		observers = append(observers, Wiring.NewInPaced(outPw, ctx, "obs", "In", tr))
+	}
+
 	node := &Node{
 		Fire:                       func() { fireTicks <- clk.Tick() },
 		Held:                       99,
 		FromPrevHoldNewSendOldNode: Wiring.NewInPaced(inPw, ctx, "hnso", "FromPrevHoldNewSendOldNode", tr),
-		ToNext: Wiring.OutMulti{
-			Wiring.NewPacedOutNoGeom(outPw, ctx, "hnso", "ToNext", tr,
-				Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
-		},
+		ToNext:                     toNext,
 	}
-	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
+	if configure != nil {
+		configure(node)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
-	return &pacedRig{clk: clk, inPw: inPw, observer: observer, node: node, cancel: cancel, wg: &wg, ctx: ctx}, fireTicks
+	return &pacedRig{clk: clk, inPw: inPw, observer: observers[0], observers: observers, node: node, cancel: cancel, wg: &wg, ctx: ctx}, fireTicks
+}
+
+// nOutsOf extracts the optional output-count arg (defaulting to 1) shared by
+// newPacedRig's variadic nOuts parameter.
+func nOutsOf(nOuts []int) int {
+	if len(nOuts) > 0 {
+		return nOuts[0]
+	}
+	return 1
 }
 
 func (r *pacedRig) close() {
 	r.cancel()
 	r.wg.Wait()
+}
+
+// pollRecv advances the FakeClock one tick at a time (with a short real-time
+// sleep so the node's WaitTick-paced goroutine gets scheduled) until obs
+// yields a value or maxTicks is exhausted.
+func pollRecv(r *pacedRig, obs *Wiring.In, maxTicks int) (int, bool) {
+	for i := 0; i < maxTicks; i++ {
+		r.clk.AdvanceTicks(1)
+		time.Sleep(200 * time.Microsecond)
+		if v, ok := obs.PollRecv(); ok {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
 // TestPacedArrivalTickMatchesTraversal proves the single-loop rewrite delivers
