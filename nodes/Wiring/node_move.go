@@ -650,6 +650,11 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 	for _, em := range md.edgeMovers {
 		go em.run(ctx)
 	}
+	// Each node's dedicated LAYOUT goroutine (split-layout-bead-goroutines.md):
+	// always-on position/drag handling, independent of the pausable bead loop.
+	for _, p := range md.layoutPorts {
+		go p.run(ctx)
+	}
 }
 
 // ResendGeometry re-emits the full current geometry from the movers' held

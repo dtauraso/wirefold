@@ -285,12 +285,6 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 			return
 		}
 
-		if p := g.Layout; p != nil {
-			if msg, ok := p.TryRecv(); ok {
-				p.Handle(msg)
-			}
-		}
-
 		// Each side tracks the MOST-RECENT real bead: drain to the latest value
 		// (discarding NoValue placeholders) and update the slot even if already
 		// held. NoValue never fills a slot.

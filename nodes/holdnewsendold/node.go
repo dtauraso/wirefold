@@ -83,12 +83,6 @@ func (in *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		if p := in.Layout; p != nil {
-			if msg, ok := p.TryRecv(); ok {
-				p.Handle(msg)
-			}
-		}
-
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

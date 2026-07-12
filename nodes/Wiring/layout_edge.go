@@ -1,5 +1,7 @@
 package Wiring
 
+import "context"
+
 // LayoutMsg is the payload carried on the hidden layout graph — a parallel
 // edge set that mirrors the domain graph one-for-one (source -> target),
 // carrying layout/drag messages instead of beads. SLICE 2 payload adds the
@@ -112,6 +114,31 @@ func (p *LayoutPort) TryRecv() (LayoutMsg, bool) {
 		return msg, true
 	default:
 		return LayoutMsg{}, false
+	}
+}
+
+// run is this node's dedicated LAYOUT goroutine: it blocks on the inbound
+// channel and applies each layout/drag message via Handle until ctx is done.
+// This is the ALWAYS-ON half of the two-goroutine node
+// (docs/planning/visual-editor/split-layout-bead-goroutines.md): position
+// handling lives here, NOT in the node's bead Update() loop, so play/pause —
+// which governs only the bead goroutine — never affects dragging. Because
+// Handle -> apply/applyDirect -> nodeMover.applyCenter runs on THIS goroutine
+// and nothing else writes the node's position, this goroutine is the SOLE
+// writer of the node's center (single-writer by construction). Launched once
+// per node by MoveDispatch.Start. A blocking receive (not a poll) means it
+// parks at zero cost until a drag arrives.
+func (p *LayoutPort) run(ctx context.Context) {
+	if p == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-p.in:
+			p.Handle(msg)
+		}
 	}
 }
 

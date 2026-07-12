@@ -127,24 +127,18 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 	clk := n.Clock
 
 	// ONE flat loop, identical in shape to the plain source path below: each
-	// cycle drains the Layout port, then does exactly one step of work. There
-	// is NO nested wait loop. The "waiting for node 2's feedback step" that used
-	// to be an inner loop is now the flat `awaiting` flag carried across cycles:
-	// when false we peek+send a fresh bead and arm the wait; when true we are
-	// mid-traversal and just step+poll. Because the single loop body ALWAYS
-	// reaches the Layout drain at the top, node 1 stays draggable in every state
-	// — including paused, where node 2 never fires and the old inner loop parked
-	// forever without ever draining Layout (the sphere-not-moving-on-drag bug).
+	// cycle does exactly one step of work, with NO nested wait loop. The
+	// "waiting for node 2's feedback step" that used to be an inner loop is now
+	// the flat `awaiting` flag carried across cycles: when false we peek+send a
+	// fresh bead and arm the wait; when true we are mid-traversal and just
+	// step+poll. Layout/drag handling is NOT here — it lives in the node's
+	// dedicated always-on layout goroutine (split-layout-bead-goroutines.md), so
+	// this bead loop is purely the pausable half and dragging is unaffected by
+	// whatever this loop is waiting on.
 	awaiting := false
 	for {
 		if ctx.Err() != nil {
 			return
-		}
-
-		if p := n.Layout; p != nil {
-			if msg, ok := p.TryRecv(); ok {
-				p.Handle(msg)
-			}
 		}
 
 		if !awaiting {
@@ -242,31 +236,24 @@ func (n *Node) Update(ctx context.Context) {
 	// CADENCE — a sleep timer of (one human cycle) × (the fan-out edge length) —
 	// before firing the next value. The bead is stepped one position per human
 	// cycle DURING that sleep, so it traverses the edge across the cadence; with
-	// equal-length output edges (assumed) both outputs stay in lockstep. The loop
-	// NEVER returns on its own (only ctx cancel / wire teardown): a source that
-	// exits can no longer be dragged, so it stays alive draining its layout port
-	// every cycle. With Repeat the buffer refills forever; without it, once the
-	// working buffer is drained it simply idles (no fire) but keeps cycling.
+	// equal-length output edges (assumed) both outputs stay in lockstep. With
+	// Repeat the buffer refills forever; without it, once the working buffer is
+	// drained it simply idles (no fire) but keeps cycling. Layout/drag handling
+	// is NOT here — the node's dedicated always-on layout goroutine owns it
+	// (split-layout-bead-goroutines.md), independent of this pausable bead loop.
 	clk := n.Clock
 	emitted := 0
 	// Fire cadence is measured in CLOCK TICKS, exactly like a gate's window/dwell
 	// (gatecommon/gate.go: fire when now()-dwellStart >= fireDwellTicks). Tick()
 	// freezes on Halt, so the cadence — and therefore emission — freezes on pause
-	// just like every other node kind; the loop still spins on SleepCycle so the
-	// layout port keeps draining (drags stay live while paused). The multiplication
-	// factor is the only Input-specific part: the cadence is one tick per unit of
-	// the fan-out edge length, recomputed each pass so a drag re-paces it.
+	// just like every other node kind. The multiplication factor is the only
+	// Input-specific part: the cadence is one tick per unit of the fan-out edge
+	// length, recomputed each pass so a drag re-paces it.
 	lastFireTick := clk.Tick() - int64(inputCadenceTicks(n)) // fire on the first pass
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if p := n.Layout; p != nil {
-			if msg, ok := p.TryRecv(); ok {
-				p.Handle(msg)
-			}
-		}
-
 		now := clk.Tick()
 		if (n.Repeat || emitted < len(init)) && now-lastFireTick >= int64(inputCadenceTicks(n)) {
 			if n.Fire != nil {
