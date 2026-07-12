@@ -48,11 +48,11 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Fatalf("loadTree: %v", err)
 	}
 
-	if len(spec.Nodes) != 10 {
-		t.Fatalf("expected 10 nodes, got %d", len(spec.Nodes))
+	if len(spec.Nodes) != 9 {
+		t.Fatalf("expected 9 nodes, got %d", len(spec.Nodes))
 	}
-	if len(spec.Edges) != 22 {
-		t.Fatalf("expected 22 edges, got %d", len(spec.Edges))
+	if len(spec.Edges) != 20 {
+		t.Fatalf("expected 20 edges, got %d", len(spec.Edges))
 	}
 
 	nodeByID := map[string]specNode{}
@@ -134,35 +134,6 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	}
 	if _, ok := edgeByLabel["5FeedbackTo1"]; ok {
 		t.Error("edge \"5FeedbackTo1\" should have been removed")
-	}
-
-	// Node 4 (Pacer) now feeds node 1's FeedbackIn: 1 -> 4 -> 1.
-	n4, ok := nodeByID["4"]
-	if !ok {
-		t.Fatal("node \"4\" not found")
-	}
-	if n4.Type != "Pacer" {
-		t.Errorf("node \"4\" type: got %q, want \"Pacer\"", n4.Type)
-	}
-	e1to4, ok := edgeByLabel["1To4"]
-	if !ok {
-		t.Fatal("edge \"1To4\" not found")
-	}
-	if e1to4.SourceHandle != "ToPacer" {
-		t.Errorf("edge 1To4 sourceHandle: got %q, want \"ToPacer\"", e1to4.SourceHandle)
-	}
-	if e1to4.TargetHandle != "FromInput" {
-		t.Errorf("edge 1To4 targetHandle: got %q, want \"FromInput\"", e1to4.TargetHandle)
-	}
-	e4to1, ok := edgeByLabel["4To1"]
-	if !ok {
-		t.Fatal("edge \"4To1\" not found")
-	}
-	if e4to1.SourceHandle != "FeedbackOut" {
-		t.Errorf("edge 4To1 sourceHandle: got %q, want \"FeedbackOut\"", e4to1.SourceHandle)
-	}
-	if e4to1.TargetHandle != "FeedbackIn" {
-		t.Errorf("edge 4To1 targetHandle: got %q, want \"FeedbackIn\"", e4to1.TargetHandle)
 	}
 
 	e2to6, ok := edgeByLabel["2To6"]

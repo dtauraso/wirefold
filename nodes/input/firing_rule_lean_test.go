@@ -12,7 +12,9 @@ import (
 // TestEmitsInitValuesLean covers input's core plain-emit contract on the one
 // real clock (no FeedbackIn wired): it end-pops the working array (a copy of
 // Init) each fire, so with Init=[10,20,30] and no Repeat exactly len(init)
-// values are emitted end-first: 30, 20, 10; Update then exits.
+// values are emitted end-first: 30, 20, 10. Input is a periodic source that
+// does NOT exit on its own (it idles once drained, staying draggable), so the
+// test stops it by cancelling ctx.
 func TestEmitsInitValuesLean(t *testing.T) {
 	const latMs = 10.0
 	tr := T.New(0)
@@ -56,10 +58,12 @@ func TestEmitsInitValuesLean(t *testing.T) {
 		}
 	}
 
-	// Update exits after all init values are fully delivered (no Repeat).
+	// Input is a periodic source: its loop does not exit on its own. Cancel ctx
+	// and confirm the goroutine stops promptly.
+	cancel()
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("input Node did not finish sending init values in time")
+		t.Fatal("input Node did not stop after ctx cancel")
 	}
 }

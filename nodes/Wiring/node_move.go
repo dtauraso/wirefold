@@ -30,6 +30,7 @@ package Wiring
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -216,6 +217,7 @@ func (m *nodeMover) applyCenter(center vec3, reach float64) {
 	m.geomMu.Unlock()
 	m.snap.Store(&centerSnap{c: center, p: scenePolar, reach: reach})
 	if m.tr != nil {
+		m.tr.Breadcrumb("applyCenter", m.id, "", fmt.Sprintf("c=%.1f,%.1f,%.1f", center.X, center.Y, center.Z))
 		m.emitGeometry()
 	}
 }
@@ -762,6 +764,21 @@ func (md *MoveDispatch) applyLayoutCenter(id string, center vec3, iTheta, iPhi, 
 		reach = s.reach
 	}
 	nm.applyCenter(center, reach)
+	// A cascade descendant must drag its incident edges along, exactly like the
+	// drag origin does through fanCenters. The drag origin's edge notify lives in
+	// fanCenters; a cascade hop instead lands HERE (on the descendant's own
+	// Update() goroutine via LayoutPort.apply), which had no companion edge
+	// sender — so its sphere re-emitted (applyCenter) while its edges stayed put.
+	// Notify each incident edge's inbox with the new endpoint so edgeMover
+	// recomputes/re-emits, mirroring fanCenters' per-edge loop.
+	for edgeID, em := range md.edgeMovers {
+		if em.srcID != id && em.dstID != id {
+			continue
+		}
+		if ch, ok := md.dispatch[edgeID]; ok {
+			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: map[string]vec3{id: center}}
+		}
+	}
 	if md.quantOffsetPersist != nil {
 		md.quantOffsetPersist.schedule(id, quantizedOffset{iTheta: iTheta, iPhi: iPhi, iR: iR, parent: ref}, ref)
 	}
