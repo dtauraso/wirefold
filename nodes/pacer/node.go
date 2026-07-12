@@ -76,7 +76,7 @@ func (p *Node) Update(ctx context.Context) {
 
 		// Single loop, one step per cycle: advance any in-flight output bead
 		// exactly one position-step. The node is never parked across a
-		// traversal — it returns to the top and WaitTicks one cycle. (A new
+		// traversal — it returns to the top and sleeps one cycle. (A new
 		// input arriving mid-traversal is not a case; there is no place/step
 		// collision to guard.)
 		p.FeedbackOut.StepOnce(ctx)

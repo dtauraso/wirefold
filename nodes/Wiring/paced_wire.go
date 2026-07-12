@@ -109,12 +109,14 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 // Done step).
 //
 // Clock-driven delivery: the wire times its own delivery on the one human-speed
-// clock (MODEL.md). When a bead is placed, the wire records the placement tick;
-// the driven loop calls clock.WaitTick(placementTick + ticksToCross). When that
-// pause-aware target tick is reached, the driven loop moves the bead from `inflight`
-// to `delivered`. There is no TS "delivered" signal and no central scheduler — every
-// wire reads the same clock independently. Pause freezes the tick (WaitTick does not
-// advance while halted); Reset/Delete bump teardownGen so the driven loop drops the bead.
+// clock (MODEL.md), sleep-only — the driven loop paces itself with
+// clock.SleepCycle rather than blocking on a target tick. When a bead is placed,
+// the wire records the placement tick; the driven loop sleeps cycle by cycle
+// until placementTick + ticksToCross is reached, then moves the bead from
+// `inflight` to `delivered`. There is no TS "delivered" signal and no central
+// scheduler — every wire reads the same clock independently. Pause freezes the
+// tick (the clock does not advance while halted); Reset/Delete bump teardownGen
+// so the driven loop drops the bead.
 type PacedWire struct {
 	mu   sync.Mutex
 	cond *sync.Cond

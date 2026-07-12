@@ -200,8 +200,8 @@ type WireRegistry map[string]*PacedWire
 // its own recompute).
 //
 // clk is the single monotonic clock injected into every PacedWire so each wire
-// times its own delivery on it (MODEL.md: exactly one clock). Production passes a
-// RealClock; tests pass a FakeClock they advance deterministically.
+// times its own delivery on it (MODEL.md: exactly one clock). Production and
+// tests alike pass a RealClock — the model is sleep-only.
 func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, error) {
 	spec, err := parseSpec(jsonPath)
 	if err != nil {

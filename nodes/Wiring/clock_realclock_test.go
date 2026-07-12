@@ -1,7 +1,6 @@
 package Wiring
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -53,41 +52,5 @@ func TestRealClockHaltFreezesResumeContinues(t *testing.T) {
 	// time consumed by the test.
 	if afterResume > frozen+4 {
 		t.Fatalf("Resume appears to have caught up on paused wall time: frozen=%d afterResume=%d", frozen, afterResume)
-	}
-}
-
-// TestRealClockWaitTickReached: WaitTick returns nil once a small real target tick
-// is reached.
-func TestRealClockWaitTickReached(t *testing.T) {
-	c := NewRealClock()
-	done := make(chan error, 1)
-	go func() { done <- c.WaitTick(context.Background(), 1) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("WaitTick to a reached target: got err %v, want nil", err)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("WaitTick did not return after the target tick was reached")
-	}
-}
-
-// TestRealClockWaitTickCancelledCtx: WaitTick with an already-cancelled ctx returns
-// ctx.Err() immediately (never waits on an unreachable target).
-func TestRealClockWaitTickCancelledCtx(t *testing.T) {
-	c := NewRealClock()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel before the call
-
-	done := make(chan error, 1)
-	// Target is far in the future; only cancellation can make this return.
-	go func() { done <- c.WaitTick(ctx, 1<<40) }()
-	select {
-	case err := <-done:
-		if err != context.Canceled {
-			t.Fatalf("WaitTick with cancelled ctx: got %v, want context.Canceled", err)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("WaitTick did not return on an already-cancelled ctx")
 	}
 }

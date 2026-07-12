@@ -71,7 +71,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, slotReg, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, slotReg, md, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestResendGeometry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -345,12 +345,12 @@ func TestResendGeometryEmitsFullBufferSnapshot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 
-	// The sim is IDLE: a FakeClock that never ticks and no node ran, so there are zero
+	// The sim is IDLE: no node ran, so there are zero
 	// KindPosition events — the ONLY snapshots come from geometry emits. Whatever startup
 	// burst preceded this, the resend re-emits held geometry, and we assert on the FINAL
 	// frame, whose full-state contents are exactly what a freshly mounted webview receives.
@@ -431,7 +431,7 @@ func TestMoverCenterRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestOutGeomRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

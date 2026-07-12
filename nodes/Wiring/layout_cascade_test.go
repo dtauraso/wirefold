@@ -169,7 +169,7 @@ func TestRadiusCascadePropagatesThroughForwardersOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nodes, _, md, err := LoadTopology(ctx, root, T.New(1024), NewFakeClock())
+	nodes, _, md, err := LoadTopology(ctx, root, T.New(1024), NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

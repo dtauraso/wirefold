@@ -69,7 +69,7 @@ func TestDragSnapsToGridIndividually(t *testing.T) {
 	root := writeQuantTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	nodes, _, md, err := LoadTopology(ctx, root, T.New(256), NewFakeClock())
+	nodes, _, md, err := LoadTopology(ctx, root, T.New(256), NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestLoadStoresTriplesFromReference(t *testing.T) {
 	root := writeQuantTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, _, md, err := LoadTopology(ctx, root, T.New(64), NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, root, T.New(64), NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

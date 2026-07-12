@@ -30,7 +30,7 @@ type Node struct {
 	// from ToHoldNewSendOld/ToExcitatory/ToPacer was fragile: whichever port
 	// happened to be wired first controlled pacing). nil on test builds
 	// without a loader; tests that exercise the paced path must set it
-	// (e.g. Wiring.NewFakeClock()).
+	// (e.g. Wiring.NewRealClock()).
 	Clock            Wiring.Clock
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
@@ -78,7 +78,7 @@ func (n *Node) fanOutInFlight() bool {
 // and passed to every wired output's PlaceDrivenAt so all fan-out beads
 // stamp the SAME placementTick. Placing sequentially with each wire
 // independently re-reading the live shared clock (PlaceDriven) lets the
-// clock advance between placements — under concurrent AdvanceTicks the two
+// clock advance between placements — under a concurrently advancing clock the two
 // equal-latency siblings can land on either side of a tick boundary and get
 // different placementTicks, delivering a full cycle apart despite identical
 // latency.
