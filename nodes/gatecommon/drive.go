@@ -3,6 +3,7 @@ package gatecommon
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -15,34 +16,29 @@ import (
 // held each pulse means when held changes, the next pulse carries the new
 // value.
 //
-// Paced-wire mode (out.Clock() != nil): the goroutine paces itself ONE TICK
-// AT A TIME via out.StepOnce — it never parks inside a full traversal. Each
-// cycle: if no bead is currently in flight on out's wire, place the next
-// pulse bead (reading held fresh) at the CURRENT tick — this is the same
-// instant the previous pulse's blocking drive used to return and place the
-// next one, so pulse cadence/spacing is unchanged; then wait for the next
-// tick and StepOnce the wire once. Repeating StepOnce once per tick
-// reproduces the same per-tick trajectory (and therefore the same delivery
-// tick) as the old blocking DriveBeadToDelivery path — see PacedWire.StepOnce.
-// Stops when ctx is cancelled or a placement fails (wire faded/torn down).
+// The goroutine paces itself ONE CYCLE AT A TIME via out.StepOnce — it never
+// parks inside a full traversal. Each cycle: if no bead is currently in
+// flight on out's wire, place the next pulse bead (reading held fresh); then
+// sleep one cycle and StepOnce the wire once. Stops when ctx is cancelled or
+// a placement fails (wire faded/torn down).
 //
-// Chan mode (out.Clock() == nil, unit tests): there is no wire clock to pace
-// against, so this falls back to the previous synchronous EmitOneDriven loop
-// (EmitOneDriven's chan-mode branch is already a non-blocking select).
+// Paced-wire mode (out.Clock() != nil) sleeps on the shared clock's
+// SleepCycle so it freezes on pause. Chan mode (out.Clock() == nil, unit
+// tests) has no shared clock to sleep on, so it falls back to a wall-clock
+// sleep of the same duration.
 func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int) {
 	go func() {
 		clk := out.Clock()
-		if clk == nil {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if !out.EmitOneDriven(ctx, transform(held.Load())) {
-					return
-				}
+		sleep := func(ctx context.Context) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(Wiring.MsPerTick * time.Millisecond):
+				return nil
 			}
+		}
+		if clk != nil {
+			sleep = clk.SleepCycle
 		}
 
 		for {
@@ -54,7 +50,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 					return
 				}
 			}
-			if err := clk.SleepCycle(ctx); err != nil {
+			if err := sleep(ctx); err != nil {
 				return
 			}
 			out.StepOnce(ctx)

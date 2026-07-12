@@ -18,11 +18,12 @@ import (
 //   - The MAIN loop runs one activity cycle per human clock tick: it does a
 //     non-blocking input check (PollRecv), and on a new value emits the new
 //     held-bead and stores the new held, then sleeps one human clock cycle
-//     (clk.WaitTick) — parking the CPU instead of spinning while idle.
+//     (clk.SleepCycle) — parking the CPU instead of spinning while idle.
 //   - A DRIVE goroutine continuously pulses the CURRENT held value to the
-//     output. EmitOneDriven is synchronous (blocks for the wire traversal), so
-//     this goroutine self-paces at the wire rate and re-reads held each pulse —
-//     when held changes the next pulse carries the new value.
+//     output via gatecommon.DriveHeld (PlaceDriven + per-cycle StepOnce,
+//     sleeping one cycle between steps), so this goroutine self-paces at the
+//     wire rate and re-reads held each pulse — when held changes the next
+//     pulse carries the new value.
 //
 // held is shared via sync/atomic so the two goroutines don't race.
 //

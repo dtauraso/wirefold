@@ -220,7 +220,7 @@ func collectPorts(t reflect.Type) []PortSpec {
 // injectFunc sets the named func-typed field on v to fn, but only when the field
 // exists, is settable, and has exactly the expected type `want`. This is the one
 // shape every closure injection in reflectBuild shares (Fire, EmitGeometry, the
-// Emit* bead closures, Tick, WaitTick); structs lacking the field are left
+// Emit* bead closures, Tick); structs lacking the field are left
 // untouched. Returns whether the field was set.
 func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 	f := v.FieldByName(name)
@@ -251,7 +251,7 @@ func injectValue(v reflect.Value, name string, want reflect.Type, val any) bool 
 // The three concerns are split into named helpers, each called in the same
 // order the original monolithic function performed them (behavior unchanged):
 //   - injectClosures: Fire/EmitGeometry/EmitNodeBeads/EmitHeldBead/EmitInputBeads/
-//     EmitRefillSlide/Tick/WaitTick closure injection.
+//     EmitRefillSlide/Tick closure injection.
 //   - wirePorts: tag-driven (struct-shape-driven) port wiring — In/Out/OutMulti
 //     fields set from pb's resolved bindings.
 //   - populateData: wire:"data.<key>" / wire:"data.state" tag-driven data
@@ -274,7 +274,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 
 // injectClosures injects every func-typed closure field reflectBuild supports
 // (Fire, EmitGeometry, the Emit* interior-bead closures, and — when a shared
-// clock is present — EmitRefillSlide/Tick/WaitTick). Each injection is a no-op
+// clock is present — EmitRefillSlide/Tick). Each injection is a no-op
 // when the struct lacks the matching field (injectFunc's contract). Returns the
 // sourceOuts slice that EmitGeometry's closure reads for per-edge segments;
 // wirePorts appends to it as it resolves each Out/OutMulti binding, and the
@@ -355,12 +355,6 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		// Tick func() int64: current tick (pause-aware) off the shared human-speed
 		// clock, so a node timing a window/dwell in ticks freezes on pause.
 		injectFunc(v, "Tick", tTickFunc, func() int64 { return clk.Tick() })
-		// WaitTick func(context.Context, int64) error: park on the shared clock so
-		// poll loops freeze on pause instead of advancing on wall-clock time.
-		tWaitFunc := reflect.TypeFor[func(context.Context, int64) error]()
-		injectFunc(v, "WaitTick", tWaitFunc, func(ctx context.Context, k int64) error {
-			return clk.WaitTick(ctx, k)
-		})
 		// Clock Wiring.Clock: the shared node-level clock, injected directly so a
 		// node's paced Update loop does not have to derive its clock from a
 		// specific wired output port (fragile — the port that happens to carry
@@ -665,8 +659,8 @@ func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 //
 // Geometry: each bead animates from its row-0 slot offset to its row-1 slot offset
 // — a downward translation of rowPitch = row0.y − row1.y in local y. Duration at
-// human speed = rowPitch / PulseSpeedWuPerTick ticks. The clock loops from t=0 to
-// t=1 one tick per step via WaitTick (pause-aware). Each frame:
+// human speed = rowPitch / PulseSpeedWuPerTick ticks. The loop steps t=0 to t=1
+// one cycle per SleepCycle (pause-aware — Tick() freezes under Halt). Each frame:
 //   - row 1, every col: present, value = beads[col], offset = lerp(row0,row1,t)
 //     (keyed to the DESTINATION bottom slot, sliding down from the top position).
 //   - row 0, every col: present=false (the top row is empty during the slide).
@@ -698,8 +692,8 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	}
 
 	emitFrame(0) // initial frame: beads at the top, top row cleared
-	for target := int64(1); ; target++ {
-		if err := clk.WaitTick(ctx, start+target); err != nil {
+	for {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 		t := float64(clk.Tick()-start) / durationTicks

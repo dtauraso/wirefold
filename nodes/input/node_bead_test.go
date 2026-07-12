@@ -16,6 +16,22 @@ type beadSnapshot struct {
 	backup  []int
 }
 
+// pacedRecv advances clk one tick at a time (with a small real-time settle
+// pause) until obs delivers a value, or fails the test on timeout.
+func pacedRecv(t *testing.T, obs *Wiring.In, clk *Wiring.FakeClock) int {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		clk.AdvanceTicks(1)
+		time.Sleep(time.Millisecond)
+		if v, ok := obs.PollRecv(); ok {
+			return v
+		}
+	}
+	t.Fatal("timeout waiting for output")
+	return 0
+}
+
 // TestNodeBeadSnapshotsTrackArray drives the plain-emit path and asserts that
 // EmitNodeBeads is called with the LIVE working/backup arrays on the initial
 // state and after every pop/refill, so the emitted set always reflects the buffer:

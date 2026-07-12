@@ -1,6 +1,7 @@
 package Wiring
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -39,9 +40,12 @@ func approxEq(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 // TestPositionStreamGoldenSequence is the Phase 2 golden parity verifier.
 //
 // ticksToCross = 50, one emit per tick ⇒ positions at ticks 1,2,…,50, with the
-// tick-50 emit clamped to t==1 (the delivery tick). A single AdvanceTicks(50)
-// drives the whole walk: the goroutine wakes at each tick in order (WaitTick
-// returns as soon as Tick() >= target), emitting every position before delivery.
+// tick-50 emit clamped to t==1 (the delivery tick). StepOnce advances a bead to
+// whatever the CURRENT tick is (no internal per-tick replay), so — unlike the
+// old blocking walker, which self-paced one tick at a time regardless of how the
+// clock was advanced — reproducing a one-emit-per-tick cadence under a FakeClock
+// requires the caller to advance the clock and StepOnce ONE TICK AT A TIME, the
+// same shape production code runs (SleepCycle, then StepOnce, once per real tick).
 func TestPositionStreamGoldenSequence(t *testing.T) {
 	const inFlightMs = 50.0
 
@@ -62,24 +66,22 @@ func TestPositionStreamGoldenSequence(t *testing.T) {
 		Node: "src", Port: "out",
 	}
 
-	// Place the bead (non-blocking placement; fresh wire so it is accepted).
-	if !placeAndDrive(pw, 7, bp) {
-		t.Fatal("placeAndDrive: expected the fresh wire to accept the bead")
+	// Place the bead directly (no background auto-driver — this test drives
+	// StepOnce itself, one tick at a time, so it controls the exact cadence).
+	if _, ok := pw.placeBeadNoWalker(7, bp); !ok {
+		t.Fatal("placeBeadNoWalker: expected the fresh wire to accept the bead")
 	}
 
-	// Drive the whole in-flight walk past the deadline in one advance. The
-	// delivery goroutine emits each tick's position in order, then delivers at t==1.
-	clk.AdvanceTicks(int64(inFlightMs))
+	// Drive the walk one tick at a time: each AdvanceTicks(1) + StepOnce pair
+	// reproduces the old walker's one-emit-per-tick cadence.
+	ctx := context.Background()
+	for i := 0; i < int(inFlightMs) && pw.InFlight(); i++ {
+		clk.AdvanceTicks(1)
+		pw.StepOnce(ctx)
+	}
 
-	// Wait (with a guard, no assertion-relevant sleep) for the goroutine to finish
-	// delivering — once inFlight clears, every position (incl. the final) has been
-	// sent to the trace channel.
-	deadline := time.Now().Add(2 * time.Second)
-	for pw.InFlight() {
-		if time.Now().After(deadline) {
-			t.Fatal("position stream did not deliver the bead after Advance past inFlightTime")
-		}
-		time.Sleep(time.Millisecond)
+	if pw.InFlight() {
+		t.Fatal("position stream did not deliver the bead after ticking past inFlightTime")
 	}
 
 	// Drain the trace and pull the position events in order.
@@ -165,17 +167,18 @@ func TestPositionStreamCadence(t *testing.T) {
 	seg := wireSegment{Start: vec3{0, 0, 0}, End: vec3{80, 40, 0}}
 	bp := beadPlacement{InFlightMs: inFlightMs, Start: seg.Start, End: seg.End, Node: "a", Port: "o"}
 
-	if !placeAndDrive(pw, 3, bp) {
-		t.Fatal("placeAndDrive rejected on fresh wire")
+	if _, ok := pw.placeBeadNoWalker(3, bp); !ok {
+		t.Fatal("placeBeadNoWalker rejected on fresh wire")
 	}
-	clk.AdvanceTicks(int64(inFlightMs))
 
-	deadline := time.Now().Add(2 * time.Second)
-	for pw.InFlight() {
-		if time.Now().After(deadline) {
-			t.Fatal("cadence test: bead not delivered after Advance")
-		}
-		time.Sleep(time.Millisecond)
+	ctx := context.Background()
+	for i := 0; i < int(inFlightMs) && pw.InFlight(); i++ {
+		clk.AdvanceTicks(1)
+		pw.StepOnce(ctx)
+	}
+
+	if pw.InFlight() {
+		t.Fatal("cadence test: bead not delivered after ticking")
 	}
 	tr.Close()
 	positions := posEvents(tr.Events())
