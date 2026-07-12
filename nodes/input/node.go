@@ -126,6 +126,16 @@ func popEnd(working, backup *[]int, init []int) int {
 func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func()) {
 	clk := n.Clock
 
+	// ONE flat loop, identical in shape to the plain source path below: each
+	// cycle drains the Layout port, then does exactly one step of work. There
+	// is NO nested wait loop. The "waiting for node 2's feedback step" that used
+	// to be an inner loop is now the flat `awaiting` flag carried across cycles:
+	// when false we peek+send a fresh bead and arm the wait; when true we are
+	// mid-traversal and just step+poll. Because the single loop body ALWAYS
+	// reaches the Layout drain at the top, node 1 stays draggable in every state
+	// — including paused, where node 2 never fires and the old inner loop parked
+	// forever without ever draining Layout (the sphere-not-moving-on-drag bug).
+	awaiting := false
 	for {
 		if ctx.Err() != nil {
 			return
@@ -137,48 +147,48 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			}
 		}
 
-		// Guard: never peek an empty slice. Refill keeps working non-empty,
-		// but be safe.
-		if len(*working) == 0 {
-			*working = *backup
-			*backup = append([]int(nil), init...)
-			emitBeads()
+		if !awaiting {
+			// Guard: never peek an empty slice. Refill keeps working non-empty,
+			// but be safe.
+			if len(*working) == 0 {
+				*working = *backup
+				*backup = append([]int(nil), init...)
+				emitBeads()
+			}
+
+			// PEEK the end (do NOT reslice) and SEND. Buffer unchanged. Node 1
+			// places the same bead on every wired output the same cycle
+			// (fanOutPlace — preserves concurrent fan-out) so node 2
+			// (ToHoldNewSendOld) and node 6 (ToExcitatory) traverse in lockstep.
+			v := (*working)[len(*working)-1]
+			if n.Fire != nil {
+				n.Fire()
+			}
+			if !n.fanOutPlace(v, clk.Tick()) {
+				return
+			}
+			awaiting = true
 		}
 
-		// PEEK the end (do NOT reslice) and SEND. Buffer unchanged. Node 1
-		// places the same bead on every wired output the same cycle
-		// (fanOutPlace — preserves concurrent fan-out) so node 2
-		// (ToHoldNewSendOld) and node 6 (ToExcitatory) traverse in lockstep.
-		v := (*working)[len(*working)-1]
-		if n.Fire != nil {
-			n.Fire()
-		}
-		if !n.fanOutPlace(v, clk.Tick()) {
+		// One step per cycle: sleep, StepOnce every fan-out output, and poll
+		// FeedbackIn non-blocking. Same one-step-per-cycle cadence as
+		// pacer/gatecommon.DriveHeld and the plain source path; the node is
+		// never parked across the traversal.
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
+		n.fanOutStepOnce(ctx, clk.Tick())
 
-		// Single loop, one step per cycle: WaitTick, StepOnce every fan-out
-		// output, and poll FeedbackIn non-blocking, until HoldNewSendOld's
-		// step arrives. This node is never parked across the traversal — it
-		// returns to the top of this loop and WaitTicks one cycle at a time
-		// (same shape as pacer/gatecommon.DriveHeld), not a nested
-		// InFlight-pump.
-		var step int
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-			if err := clk.SleepCycle(ctx); err != nil {
-				return
-			}
-			n.fanOutStepOnce(ctx, clk.Tick())
-			if s, ok := n.FeedbackIn.PollRecv(); ok {
-				step = s
-				break
-			}
+		s, ok := n.FeedbackIn.PollRecv()
+		if !ok {
+			// HoldNewSendOld's step has not arrived yet — keep cycling (drains
+			// Layout again next pass). Still awaiting.
+			continue
 		}
-		if step != 1 {
-			// Hold: buffer unchanged, send the same last bead next loop.
+		// Feedback arrived: re-arm the next peek+send regardless of hold/pop.
+		awaiting = false
+		if s != 1 {
+			// Hold: buffer unchanged, send the same last bead next cycle.
 			continue
 		}
 
