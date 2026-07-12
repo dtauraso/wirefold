@@ -21,12 +21,16 @@ type Node struct {
 	// injection — the caller then falls back to the instant refill. beads is the
 	// OLD backup contents that become the new working row.
 	EmitRefillSlide func(beads []int)
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 	// Clock is the shared node-level clock, injected by Wiring.reflectBuild
 	// directly (not derived from any specific wired output port — deriving it
 	// from ToHoldNewSendOld/ToExcitatory/ToPacer was fragile: whichever port
 	// happened to be wired first controlled pacing). nil on test builds
 	// without a loader; tests that exercise the paced path must set it
-	// (e.g. Wiring.NewFakeClock()).
+	// (e.g. Wiring.NewRealClock()).
 	Clock            Wiring.Clock
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
@@ -48,23 +52,6 @@ type Node struct {
 	FromPulse *Wiring.In
 }
 
-// fanOutInFlight reports whether ANY wired fan-out output still has a bead
-// traversing its wire. Gates firing the next value: a new value is placed
-// only once every prior fan-out bead has been fully delivered, matching the
-// old blocking fanOut/DriveAll cadence (one pop per full traversal).
-func (n *Node) fanOutInFlight() bool {
-	if n.ToHoldNewSendOld.InFlight() {
-		return true
-	}
-	if n.ToExcitatory.Wired() && n.ToExcitatory.InFlight() {
-		return true
-	}
-	if n.ToPacer.Wired() && n.ToPacer.InFlight() {
-		return true
-	}
-	return false
-}
-
 // fanOutPlace places v on every wired fan-out output (same cycle — preserves
 // concurrent fan-out) without driving them. Returns false if any wired
 // placement failed (faded/torn-down wire), mirroring EmitOneDriven's
@@ -74,7 +61,7 @@ func (n *Node) fanOutInFlight() bool {
 // and passed to every wired output's PlaceDrivenAt so all fan-out beads
 // stamp the SAME placementTick. Placing sequentially with each wire
 // independently re-reading the live shared clock (PlaceDriven) lets the
-// clock advance between placements — under concurrent AdvanceTicks the two
+// clock advance between placements — under a concurrently advancing clock the two
 // equal-latency siblings can land on either side of a tick boundary and get
 // different placementTicks, delivering a full cycle apart despite identical
 // latency.
@@ -144,6 +131,12 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			return
 		}
 
+		if p := n.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
+		}
+
 		// Guard: never peek an empty slice. Refill keeps working non-empty,
 		// but be safe.
 		if len(*working) == 0 {
@@ -175,7 +168,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			if ctx.Err() != nil {
 				return
 			}
-			if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			if err := clk.SleepCycle(ctx); err != nil {
 				return
 			}
 			n.fanOutStepOnce(ctx, clk.Tick())
@@ -234,46 +227,68 @@ func (n *Node) Update(ctx context.Context) {
 		return
 	}
 
-	// Plain emit path (FeedbackIn not wired): pop the end every iteration,
-	// refilling on empty. With Repeat the buffer refills forever; without it,
-	// emit exactly len(init) values (one working drain) then stop.
+	// Plain emit path (FeedbackIn not wired): Input is a periodic SOURCE. It pops
+	// the end and fans the value to every wired output (2 and 3), then sleeps ONE
+	// CADENCE — a sleep timer of (one human cycle) × (the fan-out edge length) —
+	// before firing the next value. The bead is stepped one position per human
+	// cycle DURING that sleep, so it traverses the edge across the cadence; with
+	// equal-length output edges (assumed) both outputs stay in lockstep. The loop
+	// NEVER returns on its own (only ctx cancel / wire teardown): a source that
+	// exits can no longer be dragged, so it stays alive draining its layout port
+	// every cycle. With Repeat the buffer refills forever; without it, once the
+	// working buffer is drained it simply idles (no fire) but keeps cycling.
 	clk := n.Clock
-
-	// Single loop, one step per cycle: on fire, PLACE the bead on every
-	// wired fan-out output (place-all-then-drive — preserves concurrent
-	// fan-out, same cycle); every cycle StepOnce each fan-out output once.
-	// The next value is only popped once every prior fan-out bead has been
-	// fully delivered (fanOutInFlight), matching the old blocking fanOut
-	// cadence of one pop per full traversal. When there is nothing left to
-	// fire (Repeat false and drained) the loop keeps stepping until the last
-	// fan-out bead is delivered, then returns — it never abandons an
-	// in-flight bead.
 	emitted := 0
+	// Fire cadence is measured in CLOCK TICKS, exactly like a gate's window/dwell
+	// (gatecommon/gate.go: fire when now()-dwellStart >= fireDwellTicks). Tick()
+	// freezes on Halt, so the cadence — and therefore emission — freezes on pause
+	// just like every other node kind; the loop still spins on SleepCycle so the
+	// layout port keeps draining (drags stay live while paused). The multiplication
+	// factor is the only Input-specific part: the cadence is one tick per unit of
+	// the fan-out edge length, recomputed each pass so a drag re-paces it.
+	lastFireTick := clk.Tick() - int64(inputCadenceTicks(n)) // fire on the first pass
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		stillToFire := n.Repeat || emitted < len(init)
-		inFlight := n.fanOutInFlight()
-		if !stillToFire && !inFlight {
-			return
+		if p := n.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
-		if stillToFire && !inFlight {
+
+		now := clk.Tick()
+		if (n.Repeat || emitted < len(init)) && now-lastFireTick >= int64(inputCadenceTicks(n)) {
 			if n.Fire != nil {
 				n.Fire()
 			}
 			v := popEnd(&working, &backup, init)
 			emitBeads() // array changed (pop, maybe refill) → restream interior
-			if !n.fanOutPlace(v, clk.Tick()) {
+			if !n.fanOutPlace(v, now) {
 				return
 			}
+			lastFireTick = now
 			emitted++
 		}
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 		n.fanOutStepOnce(ctx, clk.Tick())
 	}
+}
+
+// inputCadenceTicks is Input's fire cadence in clock ticks: the CROSSING TIME of
+// the primary fan-out edge, ArcLength / PulseSpeedWuPerTick (= ticksToCross), so
+// exactly one bead crosses the edge per cadence — no overlap. Measured in ticks,
+// so it freezes on pause with Tick(). Recomputed live so a drag that changes the
+// edge length re-paces emission.
+func inputCadenceTicks(n *Node) int64 {
+	c := int64(n.ToHoldNewSendOld.Geom().ArcLength / Wiring.PulseSpeedWuPerTick)
+	if c < 1 {
+		return 1
+	}
+	return c
 }
 
 func init() {

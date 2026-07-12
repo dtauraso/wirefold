@@ -17,19 +17,42 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// faninSrc is a minimal source kind with one paced Out.
+// faninSrc is a minimal source kind with one paced Out. Layout polls the hidden
+// layout port (SLICE 3, layout-on-domain-network.md): this node's own Update()
+// goroutine is the sole writer of its position, so a test that drags it must have
+// this loop running to drain the write.
 type faninSrc struct {
-	Out *Out
+	Out    *Out
+	Layout *LayoutPort
 }
 
-func (n *faninSrc) Update(ctx context.Context) {}
+func (n *faninSrc) Update(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-n.Layout.in:
+			n.Layout.Handle(msg)
+		}
+	}
+}
 
-// faninSink is a minimal sink kind with one paced In.
+// faninSink is a minimal sink kind with one paced In. See faninSrc's Layout doc.
 type faninSink struct {
-	In *In
+	In     *In
+	Layout *LayoutPort
 }
 
-func (n *faninSink) Update(ctx context.Context) {}
+func (n *faninSink) Update(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-n.Layout.in:
+			n.Layout.Handle(msg)
+		}
+	}
+}
 
 func init() {
 	Register("FanInSrc", func() any { return &faninSrc{} })
@@ -60,7 +83,7 @@ func TestFanInPerEdgeTravelTime(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, slotReg, nmr, err := LoadTopology(ctx, path, T.New(16), NewFakeClock())
+	_, slotReg, nmr, err := LoadTopology(ctx, path, T.New(16), NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

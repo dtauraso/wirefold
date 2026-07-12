@@ -65,6 +65,11 @@ type PortBindings struct {
 	// (the Input node's refill slide). Test builds without a loader leave it nil,
 	// and such nodes fall back to an instant refill.
 	clock Clock
+	// layout is this node's hidden-layout-graph plumbing (layout_edge.go),
+	// injected into any node struct with a `Layout *LayoutPort` field the same
+	// way clock/EmitGeometry are injected. Test builds without a loader leave it
+	// nil; nodes nil-guard their poll.
+	layout *LayoutPort
 }
 
 // singleBinding is the resolved paced binding for one single port. For an INPUT
@@ -159,6 +164,7 @@ var (
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
 	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
 	tTickFunc           = reflect.TypeFor[func() int64]()
+	tLayoutPortPtr      = reflect.TypeFor[*LayoutPort]()
 )
 
 // reflectStateKeys returns the data.state map keys required by sample's
@@ -214,7 +220,7 @@ func collectPorts(t reflect.Type) []PortSpec {
 // injectFunc sets the named func-typed field on v to fn, but only when the field
 // exists, is settable, and has exactly the expected type `want`. This is the one
 // shape every closure injection in reflectBuild shares (Fire, EmitGeometry, the
-// Emit* bead closures, Tick, WaitTick); structs lacking the field are left
+// Emit* bead closures, Tick); structs lacking the field are left
 // untouched. Returns whether the field was set.
 func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 	f := v.FieldByName(name)
@@ -225,6 +231,19 @@ func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 	return true
 }
 
+// injectValue sets the named field on v to val, but only when the field
+// exists, is settable, and has exactly the expected type `want`. Same
+// contract as injectFunc, for non-func-typed injections (the *LayoutPort
+// field).
+func injectValue(v reflect.Value, name string, want reflect.Type, val any) bool {
+	f := v.FieldByName(name)
+	if !f.IsValid() || !f.CanSet() || f.Type() != want {
+		return false
+	}
+	f.Set(reflect.ValueOf(val))
+	return true
+}
+
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node. ctx is required when pb contains PacedWire
 // bindings (paced mode); it is passed into the In/Out wrappers.
@@ -232,7 +251,7 @@ func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 // The three concerns are split into named helpers, each called in the same
 // order the original monolithic function performed them (behavior unchanged):
 //   - injectClosures: Fire/EmitGeometry/EmitNodeBeads/EmitHeldBead/EmitInputBeads/
-//     EmitRefillSlide/Tick/WaitTick closure injection.
+//     EmitRefillSlide/Tick closure injection.
 //   - wirePorts: tag-driven (struct-shape-driven) port wiring — In/Out/OutMulti
 //     fields set from pb's resolved bindings.
 //   - populateData: wire:"data.<key>" / wire:"data.state" tag-driven data
@@ -255,7 +274,7 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 
 // injectClosures injects every func-typed closure field reflectBuild supports
 // (Fire, EmitGeometry, the Emit* interior-bead closures, and — when a shared
-// clock is present — EmitRefillSlide/Tick/WaitTick). Each injection is a no-op
+// clock is present — EmitRefillSlide/Tick). Each injection is a no-op
 // when the struct lacks the matching field (injectFunc's contract). Returns the
 // sourceOuts slice that EmitGeometry's closure reads for per-edge segments;
 // wirePorts appends to it as it resolves each Out/OutMulti binding, and the
@@ -268,6 +287,13 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// captures the node name so the node calls n.Fire() with no arguments and
 	// cannot mis-name itself in the trace.
 	injectFunc(v, "Fire", tFireFunc, func() { tr.Fire(name) })
+
+	// Inject the hidden-layout-graph port if the struct has a `Layout
+	// *LayoutPort` field. pb.layout is built by the loader (buildLayoutEdges)
+	// and mirrors this node's domain out-edges one-for-one; test builds without
+	// a loader leave pb.layout nil and the field is set to a typed nil, which
+	// every accessor (TryRecv/Handle/Inject) nil-guards.
+	injectValue(v, "Layout", tLayoutPortPtr, pb.layout)
 
 	// Inject EmitGeometry closure if the struct has an `EmitGeometry func()` field.
 	// The closure emits the node's authoritative center + per-port world
@@ -329,12 +355,6 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		// Tick func() int64: current tick (pause-aware) off the shared human-speed
 		// clock, so a node timing a window/dwell in ticks freezes on pause.
 		injectFunc(v, "Tick", tTickFunc, func() int64 { return clk.Tick() })
-		// WaitTick func(context.Context, int64) error: park on the shared clock so
-		// poll loops freeze on pause instead of advancing on wall-clock time.
-		tWaitFunc := reflect.TypeFor[func(context.Context, int64) error]()
-		injectFunc(v, "WaitTick", tWaitFunc, func(ctx context.Context, k int64) error {
-			return clk.WaitTick(ctx, k)
-		})
 		// Clock Wiring.Clock: the shared node-level clock, injected directly so a
 		// node's paced Update loop does not have to derive its clock from a
 		// specific wired output port (fragile — the port that happens to carry
@@ -639,8 +659,8 @@ func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 //
 // Geometry: each bead animates from its row-0 slot offset to its row-1 slot offset
 // — a downward translation of rowPitch = row0.y − row1.y in local y. Duration at
-// human speed = rowPitch / PulseSpeedWuPerTick ticks. The clock loops from t=0 to
-// t=1 one tick per step via WaitTick (pause-aware). Each frame:
+// human speed = rowPitch / PulseSpeedWuPerTick ticks. The loop steps t=0 to t=1
+// one cycle per SleepCycle (pause-aware — Tick() freezes under Halt). Each frame:
 //   - row 1, every col: present, value = beads[col], offset = lerp(row0,row1,t)
 //     (keyed to the DESTINATION bottom slot, sliding down from the top position).
 //   - row 0, every col: present=false (the top row is empty during the slide).
@@ -672,8 +692,8 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 	}
 
 	emitFrame(0) // initial frame: beads at the top, top row cleared
-	for target := int64(1); ; target++ {
-		if err := clk.WaitTick(ctx, start+target); err != nil {
+	for {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 		t := float64(clk.Tick()-start) / durationTicks

@@ -31,6 +31,7 @@ package Wiring
 import (
 	"context"
 	"math"
+	"sync"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -116,6 +117,15 @@ type nodeMover struct {
 	geom  nodeGeom
 	inbox chan moveMsg
 	tr    *T.Trace
+	// geomMu guards m.geom against the two remaining goroutines that touch it
+	// concurrently since SLICE 3: this node's OWN Update() goroutine (applyCenter,
+	// the sole writer of position fields) and nodeMover's own inbox-drain goroutine
+	// (handle's anchor/resend/default cases, the sole writer of port-anchor fields
+	// and the reader for every re-emit). Position is still single-writer by
+	// construction (only applyCenter ever writes it); this mutex exists purely so
+	// emitGeometry's full-struct read on one goroutine never races a concurrent
+	// field write on the other — it is NOT a second position-writer.
+	geomMu sync.Mutex
 	// snap is an atomically-published immutable snapshot of this node's current
 	// center+reachR. Written only by the mover's own goroutine after every center
 	// update; read by any goroutine (stdin reader) to observe the current position
@@ -151,7 +161,10 @@ func (m *nodeMover) handle(msg moveMsg) {
 	if msg.Kind == moveMsgKindAnchor {
 		// Per-port anchor update: snap to ring-anchor index, mutate this node's held
 		// port AnchorId, and re-emit node-geometry so the renderer redraws the port.
-		if !setPortAnchorId(&m.geom, msg.Port, msg.IsInput, msg.AnchorId) {
+		m.geomMu.Lock()
+		ok := setPortAnchorId(&m.geom, msg.Port, msg.IsInput, msg.AnchorId)
+		m.geomMu.Unlock()
+		if !ok {
 			return
 		}
 		if m.tr != nil {
@@ -160,19 +173,14 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// Polar re-propagation: the re-propagated WORLD center arrives at this input
-		// boundary; the mover holds it as polar (setNodeWorld → ScenePolar about its
-		// SceneCenter), then re-emits node-geometry.
-		if msg.Center != nil {
-			setNodeWorld(&m.geom, *msg.Center)
-		}
-		m.geom.ReachR = msg.ReachR
-		// Publish the new center atomically so readers on other goroutines
-		// (stdin reader: centerOfNode, heldCenters, fanCenters)
-		// observe it without touching our live geom.
-		if msg.Center != nil {
-			m.snap.Store(&centerSnap{c: *msg.Center, p: m.geom.ScenePolar, reach: msg.ReachR})
-		}
+		// SLICE 3: nodeMover no longer WRITES a node's center — that write now
+		// happens on the node's own Update() goroutine (applyCenter below, called
+		// from LayoutPort.apply/applyDirect). A moveMsgKindCenter can still arrive
+		// here from fanCenters' PARTNER re-emit (an aimed-port neighbor whose OWN
+		// center is unchanged, only asked to re-emit so its port direction picks up
+		// the moved partner's fresh center via m.partnerCenter at emit time) — that
+		// case does not mutate this node's geom/snap, so falling through to the
+		// unconditional re-emit below is correct and sufficient.
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -191,11 +199,37 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 }
 
+// applyCenter is the SOLE WRITE of this node's center/reach (SLICE 3,
+// layout-on-domain-network.md "Position ownership: Update() is the sole writer").
+// It is a plain in-process method — no channel, no inbox — called ONLY from the
+// node's own Update() goroutine (via LayoutPort.apply for a radius-cascade hop, or
+// LayoutPort.applyDirect for the drag origin's own new center), which is what makes
+// that one goroutine the exclusive writer of m.geom/m.snap. It sets the held polar
+// position, publishes the atomic snapshot readers observe cross-goroutine (stdin
+// reader: centerOfNode/heldCenters/heldPolar/fanCenters' partner lookup, edgeMover's
+// partnerCenter), and re-emits this node's live geometry.
+func (m *nodeMover) applyCenter(center vec3, reach float64) {
+	m.geomMu.Lock()
+	setNodeWorld(&m.geom, center)
+	m.geom.ReachR = reach
+	scenePolar := m.geom.ScenePolar
+	m.geomMu.Unlock()
+	m.snap.Store(&centerSnap{c: center, p: scenePolar, reach: reach})
+	if m.tr != nil {
+		m.emitGeometry()
+	}
+}
+
 // emitGeometry re-emits this node's authoritative geometry. A CONNECTED port marker is
 // AIMED at its partner's current center (m.partnerCenter, atomic-snapshot-backed); an
 // edgeless port falls back to its own polar-torus ring-anchor placement (portWorldPos).
+// geomMu-guarded: takes a local copy of m.geom under the lock so the actual emit (which
+// can be slow — trace serialization) does not hold the lock against the other writer.
 func (m *nodeMover) emitGeometry() {
-	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
+	m.geomMu.Lock()
+	geom := m.geom
+	m.geomMu.Unlock()
+	emitNodeGeometryLocked(m.tr, m.id, geom, m.partnerCenter)
 }
 
 // run is the node's per-goroutine move loop: drain the inbox until ctx is done.
@@ -491,6 +525,10 @@ type MoveDispatch struct {
 	// root). Seeded from the spanning tree at load, then owned — remeasureTriples reads it
 	// instead of recomputing a spanning tree. Overridable per node (manual picking).
 	references map[string]string
+	// layoutPorts is the hidden layout graph (layout_edge.go), one *LayoutPort per node
+	// id, wired by loader.go buildLayoutEdges after this MoveDispatch exists. RootMove
+	// reads it to seed a radius cascade on a dragged node's reference (SeedLayoutCascade).
+	layoutPorts map[string]*LayoutPort
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -705,6 +743,86 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
+// applyLayoutCenter is the single write path a node's OWN Update() goroutine uses
+// (via LayoutPort.apply, layout_edge.go Handle) to publish a radius-cascade-computed
+// position. SLICE 3: it calls nm.applyCenter directly — a plain in-process function
+// call on the CALLER's goroutine, no channel/inbox hop — which is exactly this node's
+// own Update() goroutine (LayoutPort.Handle only ever runs there, per layout_edge.go's
+// doc comment), making that goroutine the sole writer of nm.geom's position fields. It
+// also schedules the updated iR (with the node's fixed iTheta/iPhi and its reference)
+// for debounced disk persistence. Read reachR off the node's own current snap so the
+// cascade does not clobber its sphere-reach ring.
+func (md *MoveDispatch) applyLayoutCenter(id string, center vec3, iTheta, iPhi, iR int, ref string) {
+	nm, ok := md.nodeMovers[id]
+	if !ok {
+		return
+	}
+	reach := 0.0
+	if s := nm.snap.Load(); s != nil {
+		reach = s.reach
+	}
+	nm.applyCenter(center, reach)
+	// A cascade descendant must drag its incident edges along, exactly like the
+	// drag origin does through fanCenters. The drag origin's edge notify lives in
+	// fanCenters; a cascade hop instead lands HERE (on the descendant's own
+	// Update() goroutine via LayoutPort.apply), which had no companion edge
+	// sender — so its sphere re-emitted (applyCenter) while its edges stayed put.
+	// Notify each incident edge's inbox with the new endpoint so edgeMover
+	// recomputes/re-emits, mirroring fanCenters' per-edge loop.
+	for edgeID, em := range md.edgeMovers {
+		if em.srcID != id && em.dstID != id {
+			continue
+		}
+		if ch, ok := md.dispatch[edgeID]; ok {
+			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: map[string]vec3{id: center}}
+		}
+	}
+	if md.quantOffsetPersist != nil {
+		md.quantOffsetPersist.schedule(id, quantizedOffset{iTheta: iTheta, iPhi: iPhi, iR: iR, parent: ref}, ref)
+	}
+}
+
+// applyLayoutCenterDirect is the single write path the DRAG ORIGIN's own Update()
+// goroutine uses (via LayoutPort.applyDirect, layout_edge.go Handle's Direct branch) to
+// publish RootMove's freshly computed world center + reach for the dragged node itself.
+// SLICE 3 counterpart to applyLayoutCenter for the drag source (rather than a cascade
+// hop): a plain in-process call to nm.applyCenter on the caller's goroutine, which — via
+// InjectDirect's channel hop from fanCenters — is the dragged node's own Update()
+// goroutine, not the stdin reader's. No separate persist here: RootMove's
+// remeasureTriples already schedules the dragged node's (and its direct children's)
+// quantized-offset persist independently of this position write.
+func (md *MoveDispatch) applyLayoutCenterDirect(id string, center vec3, reach float64) {
+	if nm, ok := md.nodeMovers[id]; ok {
+		nm.applyCenter(center, reach)
+	}
+}
+
+// SeedLayoutCascade starts a radius (iR) propagation from a drag: if the dragged node
+// (nodeID) has a reference AND that reference is a radius-forwarding node (HoldNewSendOld), it pushes
+// LayoutMsg{IR: newIR, FromCenter: <reference's current world center>} onto the
+// reference's outgoing hidden layout edges (SeedForward) — reaching the dragged node and
+// its siblings, each of which computes its OWN new center as a plain local polar offset
+// about the reference (layout_edge.go Handle) and, if itself a radius-forwarding node, forwards
+// further. A root drag (no reference) or a non-radius-forwarding reference does not cascade.
+func (md *MoveDispatch) SeedLayoutCascade(nodeID string, newIR int) {
+	refID := md.references[nodeID]
+	if refID == "" {
+		return
+	}
+	if !ForwardsRadius(md.NodeKind(refID)) {
+		return
+	}
+	refCenter, ok := md.centerOfNode(refID)
+	if !ok {
+		return
+	}
+	p := md.layoutPorts[refID]
+	if p == nil {
+		return
+	}
+	p.SeedForward(LayoutMsg{IR: newIR, FromCenter: refCenter, Visited: map[string]bool{}})
+}
+
 // heldCenters / heldEdges snapshot the movers' current geometry.
 // heldCenters reads the atomically-published snap (not the live geom) so it is
 // safe to call from the stdin goroutine while mover goroutines write their centers.
@@ -750,11 +868,14 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 // so they re-emit with the fresh target center (which the target mover just wrote
 // to its geom; the aimer reads via centerOfNode at emit time).
 func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]float64) {
-	// Per-node center messages (carry ReachR for sphereR streaming). One per moved node.
+	// Per-node DIRECT position writes (SLICE 3): route each moved node's own new
+	// center through its own LayoutPort.InjectDirect rather than its nodeMover's
+	// inbox, so the write lands on that node's own Update() goroutine (the sole
+	// writer of its position — layout-on-domain-network.md) instead of nodeMover's
+	// retired center-writing role. One per moved node.
 	for id, c := range newCenters {
-		cc := c
-		if ch, ok := md.dispatch[id]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: reach[id]}
+		if p, ok := md.layoutPorts[id]; ok {
+			p.InjectDirect(c, reach[id])
 		}
 	}
 
@@ -861,6 +982,12 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// its reference changed, and so did any node that references it. Persist the changed ones.
 	if md.quantizedLayout {
 		md.remeasureTriples(nodeID, newPos)
+		// Seed the radius (iR) cascade from the dragged node's reference (SLICE 2,
+		// docs/planning/visual-editor/layout-on-domain-network.md): if the reference is a
+		// radius-forwarding node, this reaches the dragged node's radius-forwarded descendants.
+		if off, ok := md.quantizedOffsets[nodeID]; ok {
+			md.SeedLayoutCascade(nodeID, off.iR)
+		}
 	}
 	return true
 }

@@ -19,10 +19,11 @@ import (
 //     non-blocking via PollRecv to keep only the LATEST value. It calls
 //     g.In.Done(), g.Fire(), updates the atomic held, and emits the interior
 //     bead when held changes.
-//   - A DRIVE goroutine continuously pulses 1-held to the output.
-//     EmitOneDriven is synchronous (blocks for the wire traversal), so this
-//     self-paces at the wire rate and re-reads held each pulse — when held
-//     changes the next pulse carries the flipped new value.
+//   - A DRIVE goroutine continuously pulses 1-held to the output via
+//     gatecommon.DriveHeld (PlaceDriven + per-cycle StepOnce, sleeping one
+//     cycle between steps), so it self-paces at the wire rate and re-reads
+//     held each pulse — when held changes the next pulse carries the
+//     flipped new value.
 //
 // held is shared via sync/atomic so the two goroutines don't race.
 type Node struct {
@@ -35,6 +36,10 @@ type Node struct {
 	EmitHeldBead func(held int)
 	In           *Wiring.In
 	Out          *Wiring.Out
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 func (g *Node) Update(ctx context.Context) {
@@ -49,8 +54,8 @@ func (g *Node) Update(ctx context.Context) {
 
 	// DRIVE goroutine: continuously pulse the FLIPPED current held value to Out.
 	// Delegates to gatecommon.DriveHeld (shared with Pulse's identical-shaped
-	// drive goroutine); EmitOneDriven is synchronous (blocks for the full wire
-	// traversal), so this self-paces at the wire rate. Reading held each
+	// drive goroutine; PlaceDriven + per-cycle StepOnce, sleeping one cycle
+	// between steps), so this self-paces at the wire rate. Reading held each
 	// iteration means the next pulse after an input update carries the new
 	// flipped value. Stops on ctx cancel.
 	gatecommon.DriveHeld(ctx, g.Out, &held, func(h int64) int {
@@ -101,8 +106,13 @@ func (g *Node) Update(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if p := g.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
+		}
 		consume()
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 	}

@@ -18,6 +18,10 @@ type Node struct {
 	Held         int `wire:"data.state"`
 	FromInput    *Wiring.In
 	FeedbackOut  *Wiring.Out
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 func (p *Node) Update(ctx context.Context) {
@@ -37,7 +41,13 @@ func (p *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+		if lp := p.Layout; lp != nil {
+			if msg, ok := lp.TryRecv(); ok {
+				lp.Handle(msg)
+			}
+		}
+
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 
@@ -66,7 +76,7 @@ func (p *Node) Update(ctx context.Context) {
 
 		// Single loop, one step per cycle: advance any in-flight output bead
 		// exactly one position-step. The node is never parked across a
-		// traversal — it returns to the top and WaitTicks one cycle. (A new
+		// traversal — it returns to the top and sleeps one cycle. (A new
 		// input arriving mid-traversal is not a case; there is no place/step
 		// collision to guard.)
 		p.FeedbackOut.StepOnce(ctx)

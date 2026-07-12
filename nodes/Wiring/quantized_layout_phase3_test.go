@@ -69,11 +69,17 @@ func TestDragSnapsToGridIndividually(t *testing.T) {
 	root := writeQuantTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, _, md, err := LoadTopology(ctx, root, T.New(256), NewFakeClock())
+	nodes, _, md, err := LoadTopology(ctx, root, T.New(256), NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 	md.Start(ctx)
+	// Launch every node's own Update() goroutine: SLICE 3 (layout-on-domain-network.md)
+	// routes a drag's position write through the dragged node's own LayoutPort, drained
+	// only inside its Update() loop — without this, RootMove's write never lands.
+	for _, n := range nodes {
+		go n.Update(ctx)
+	}
 
 	twoBefore, ok := md.centerOfNode("2")
 	if !ok {
@@ -111,7 +117,7 @@ func TestLoadStoresTriplesFromReference(t *testing.T) {
 	root := writeQuantTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, _, md, err := LoadTopology(ctx, root, T.New(64), NewFakeClock())
+	_, _, md, err := LoadTopology(ctx, root, T.New(64), NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

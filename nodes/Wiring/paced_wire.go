@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -44,12 +43,6 @@ const PulseSpeedWuPerTick = PulseSpeedWuPerMs * MsPerTick
 
 // ErrCanceled is returned by Send or Recv when the context is canceled.
 var ErrCanceled = errors.New("paced wire: context canceled")
-
-// positionStepTicks is the position-stream cadence: one position step per tick
-// (MODEL.md: "the tick IS the animation clock" — there is no separate render
-// cadence). The driver advances each in-flight bead one tick and emits its
-// position each iteration.
-const positionStepTicks = 1
 
 // beadPlacement bundles everything one placement needs. The in-flight time times
 // delivery; the segment endpoints + source identity drive the per-frame position
@@ -93,9 +86,8 @@ type inflightBead struct {
 	gen     uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
 	// finalPending is true once StepOnce has advanced this bead to its delivery
 	// deadline (target==deadline) but it was not yet at the FIFO head, so the
-	// move to `delivered` is still outstanding. Only StepOnce sets/reads this;
-	// the blocking DriveBeadsToDelivery path never sets it (deliverHeadLocked
-	// parks instead of leaving a bead in this state).
+	// move to `delivered` is still outstanding. StepOnce retries only the
+	// (cheap) delivery handoff for such a bead on subsequent calls.
 	finalPending bool
 }
 
@@ -110,19 +102,21 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 }
 
 // PacedWire is a multi-bead FIFO transport. Beads are placed via placeBeadNoWalker
-// and delivered by the owning node's goroutine driving DriveBeadsToDelivery — no
+// and delivered by the owning node's goroutine driving per-cycle StepOnce — no
 // per-bead goroutine. The source never waits on the destination; each bead is placed
 // immediately and driven to the `delivered` FIFO on the caller's goroutine at its own
 // deadline. Recv pops `delivered` in send order and CONSUMES on read (no separate
 // Done step).
 //
 // Clock-driven delivery: the wire times its own delivery on the one human-speed
-// clock (MODEL.md). When a bead is placed, the wire records the placement tick;
-// the driven loop calls clock.WaitTick(placementTick + ticksToCross). When that
-// pause-aware target tick is reached, the driven loop moves the bead from `inflight`
-// to `delivered`. There is no TS "delivered" signal and no central scheduler — every
-// wire reads the same clock independently. Pause freezes the tick (WaitTick does not
-// advance while halted); Reset/Delete bump teardownGen so the driven loop drops the bead.
+// clock (MODEL.md), sleep-only — the driven loop paces itself with
+// clock.SleepCycle rather than blocking on a target tick. When a bead is placed,
+// the wire records the placement tick; the driven loop sleeps cycle by cycle
+// until placementTick + ticksToCross is reached, then moves the bead from
+// `inflight` to `delivered`. There is no TS "delivered" signal and no central
+// scheduler — every wire reads the same clock independently. Pause freezes the
+// tick (the clock does not advance while halted); Reset/Delete bump teardownGen
+// so the driven loop drops the bead.
 type PacedWire struct {
 	mu   sync.Mutex
 	cond *sync.Cond
@@ -198,24 +192,14 @@ func (pw *PacedWire) SetFaded(v bool) {
 	pw.mu.Unlock()
 }
 
-// PlaceAndDrive places a bead and drives it to delivery on a new goroutine.
-// Returns false if the wire is faded/deleted (nothing placed). This is the
-// public entry point used by cross-package tests and by placeAndDrive in the
-// Wiring-internal test helper.
-func (pw *PacedWire) PlaceAndDrive(ctx context.Context, value any, bp beadPlacement) bool {
-	gen, ok := pw.placeBeadNoWalker(value, bp)
-	if !ok {
-		return false
-	}
-	go pw.DriveBeadToDelivery(ctx, gen)
-	return true
-}
-
-// PlaceAndDriveDeliverOnly places a delivery-only bead (no position stream) and
-// drives it on a background goroutine. Equivalent to the deleted SendDeliverOnly
-// for cross-package tests that only exercise delivery timing.
-func (pw *PacedWire) PlaceAndDriveDeliverOnly(ctx context.Context, value any, inFlightMs float64) bool {
-	return pw.PlaceAndDrive(ctx, value, beadPlacement{InFlightMs: inFlightMs})
+// PlaceDeliverOnly places a delivery-only bead (no position stream) WITHOUT
+// spawning a walker goroutine. Delivery is driven by the caller's subsequent
+// per-cycle StepOnce/StepOnceAt calls. Returns false if the wire is
+// faded/deleted (nothing placed). Cross-package tests that only exercise
+// delivery timing use this (see gatetesthelper.Send).
+func (pw *PacedWire) PlaceDeliverOnly(value any, inFlightMs float64) bool {
+	_, ok := pw.placeBeadNoWalker(value, beadPlacement{InFlightMs: inFlightMs})
+	return ok
 }
 
 // msToArcWu names the ms→world-units conversion used to reconstruct a bead's
@@ -272,232 +256,6 @@ func (pw *PacedWire) placeBeadNoWalkerAt(value any, bp beadPlacement, tick int64
 	return gen, true
 }
 
-// driveItem carries one bead's context for DriveBeadsToDelivery.
-type driveItem struct {
-	pw  *PacedWire
-	gen uint64
-}
-
-// driveNextsInit computes the first step tick for each item, anchored to its
-// placement tick, and marks items with no live inflight bead as already done.
-// Mutates done in place and returns the initial nexts slice and the count of
-// items still live (remaining).
-func driveNextsInit(items []driveItem, done []bool) (nexts []float64, remaining int) {
-	const interval = float64(positionStepTicks) // one position step per tick
-	nexts = make([]float64, len(items))
-	remaining = len(items)
-	for i, it := range items {
-		if done[i] {
-			continue
-		}
-		it.pw.mu.Lock()
-		idx := it.pw.findInflightLocked(it.gen)
-		var placementTick, startedTick float64
-		if idx >= 0 {
-			placementTick = it.pw.inflight[idx].placementTick
-			startedTick = it.pw.inflight[idx].startedTick
-		}
-		it.pw.mu.Unlock()
-
-		if idx < 0 {
-			done[i] = true
-			remaining--
-			continue
-		}
-		// Anchor the first step to startedTick (= clock tick at placement). This
-		// ensures intermediate position steps are emitted even when the driver
-		// goroutine starts late (after the test advances the clock past the deadline).
-		next := placementTick + interval
-		if next <= startedTick {
-			steps := math.Floor((startedTick-placementTick)/interval) + 1
-			next = placementTick + steps*interval
-		}
-		nexts[i] = next
-	}
-	return nexts, remaining
-}
-
-// driveClockOf returns the clock owned by the first not-done item (all items in a
-// DriveBeadsToDelivery call share the same clock), or nil if none is live.
-func driveClockOf(items []driveItem, done []bool) Clock {
-	for i, it := range items {
-		if !done[i] {
-			return it.pw.clock
-		}
-	}
-	return nil
-}
-
-// driveMinNextTick caps each live item's next-step tick at its bead's own delivery
-// tick (so WaitTick never parks past the point where final=true would be set),
-// mutating nexts in place, and returns the minimum next-step tick across all live
-// items — the tick DriveBeadsToDelivery's WaitTick should park until.
-func driveMinNextTick(items []driveItem, done []bool, nexts []float64) float64 {
-	var minNext float64
-	first := true
-	for i, it := range items {
-		if done[i] {
-			continue
-		}
-		// Cap nexts[i] at the bead's delivery tick so WaitTick never parks
-		// past the point where final=true would be set.
-		it.pw.mu.Lock()
-		idx := it.pw.findInflightLocked(it.gen)
-		if idx >= 0 {
-			b := it.pw.inflight[idx]
-			dl := b.placementTick + it.pw.ticksToCross(b.arc)
-			if nexts[i] > dl {
-				nexts[i] = dl
-			}
-		}
-		it.pw.mu.Unlock()
-		if first || nexts[i] < minNext {
-			minNext = nexts[i]
-			first = false
-		}
-	}
-	return minNext
-}
-
-// driveAdvanceItem advances one item's bead to (at most) minNext if its next step
-// is due, delivering it when it reaches its deadline. It marks done[i] and
-// decrements remaining when the item finishes (delivered or torn down), and
-// otherwise bumps nexts[i] by one step interval. Lock semantics are preserved
-// EXACTLY as in the original inline body: pw.mu is acquired/released manually
-// around each phase (advanceBeadLocked releases the lock itself) — no defer, no
-// change in acquire/release ordering or timing.
-func driveAdvanceItem(ctx context.Context, it driveItem, i int, nexts []float64, minNext float64, done []bool, remaining *int) {
-	const interval = float64(positionStepTicks) // one position step per tick
-	if done[i] || nexts[i] > minNext {
-		return
-	}
-
-	it.pw.mu.Lock()
-	if it.gen < it.pw.teardownGen {
-		it.pw.mu.Unlock()
-		done[i] = true
-		*remaining--
-		return
-	}
-	idx := it.pw.findInflightLocked(it.gen)
-	if idx < 0 {
-		it.pw.mu.Unlock()
-		done[i] = true
-		*remaining--
-		return
-	}
-	b := it.pw.inflight[idx]
-	arc := b.arc
-	placementTick := b.placementTick
-	it.pw.mu.Unlock()
-
-	deadline := placementTick + it.pw.ticksToCross(arc)
-
-	target := nexts[i]
-	final := false
-	if target >= deadline {
-		target = deadline
-		final = true
-	}
-
-	it.pw.mu.Lock()
-	emit, posArgs, isFinal := it.pw.advanceBeadLocked(it.gen, target)
-	// advanceBeadLocked released the lock.
-	if emit {
-		it.pw.Trace.Position(posArgs.node, posArgs.port, posArgs.val, posArgs.x, posArgs.y, posArgs.z, posArgs.t, posArgs.gen)
-	}
-	if final || isFinal {
-		it.pw.mu.Lock()
-		if ai, ok := it.pw.deliverHeadLocked(ctx, it.gen, int64(math.Round(target))); ok {
-			it.pw.emitArrive(ai)
-		}
-		done[i] = true
-		*remaining--
-		return
-	}
-	nexts[i] += interval
-}
-
-// DriveBeadsToDelivery drives multiple beads on different PacedWires in lockstep
-// on the calling goroutine — no additional goroutines. Each tick it advances
-// every not-yet-final bead one position, emits position traces, and marks
-// delivered items done. Blocks until all items are delivered or ctx is canceled.
-// All quantities are ticks on the shared human-speed clock (MODEL.md).
-func DriveBeadsToDelivery(ctx context.Context, items []driveItem) {
-	if len(items) == 0 {
-		return
-	}
-
-	// Per-item state: done marks items that have finished delivery.
-	done := make([]bool, len(items))
-
-	// Compute the first step tick for each item anchored to its placement tick.
-	nexts, remaining := driveNextsInit(items, done)
-
-	// Use the clock from the first live item (all items share the same clock).
-	clk := driveClockOf(items, done)
-	if clk == nil || remaining == 0 {
-		return
-	}
-
-	for remaining > 0 {
-		if ctx.Err() != nil {
-			return
-		}
-
-		// Find the minimum next step across live items, capping each item's next
-		// at its bead's delivery tick so we never park past the delivery point.
-		minNext := driveMinNextTick(items, done, nexts)
-
-		// WaitTick resumes when the tick reaches the target; ceil so we wait for
-		// the integer tick at or past the (possibly fractional) delivery tick.
-		if err := clk.WaitTick(ctx, int64(math.Ceil(minNext))); err != nil {
-			return
-		}
-
-		// Advance all items whose next step is at or before minNext.
-		for i, it := range items {
-			driveAdvanceItem(ctx, it, i, nexts, minNext, done, &remaining)
-		}
-	}
-}
-
-// deliverHeadLocked completes a bead's final delivery: it waits (parking on
-// pw.cond) until the bead identified by gen is at the FIFO head, then moves it
-// from inflight to delivered and returns its source identity for the arrive
-// trace. The caller MUST hold pw.mu on entry; this method always releases it
-// before returning (matching the inline delivery window it replaced). Returns
-// ok=false — with the lock released — when the bead was torn down or already
-// dropped (no arrive emit), ok=true when it was delivered.
-func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64, nowTick int64) (ai arriveInfo, ok bool) {
-	// stop is the canceller installed only when this bead must actually PARK behind an
-	// earlier FIFO head (j != 0). Without it a waiter would park on pw.cond forever if
-	// the head bead's driver exits on ctx cancellation without delivering — the
-	// cond.Wait has no ctx wakeup of its own. broadcastOnCancel wakes it on ctx.Done
-	// (same mechanism Recv uses); the loop re-checks ctx.Err() and returns ok=false
-	// (no delivery). The common single-bead fast path (j == 0) never parks, so it
-	// spawns nothing and behavior is unchanged.
-	var stop chan struct{}
-	defer func() {
-		if stop != nil {
-			close(stop)
-		}
-	}()
-	for {
-		var ready bool
-		ai, ok, ready = pw.tryDeliverHeadLocked(ctx, gen, nowTick)
-		if ready {
-			return ai, ok
-		}
-		// tryDeliverHeadLocked left pw.mu HELD when it returns ready=false (bead is
-		// live but not yet at the FIFO head) — this loop parks on it below.
-		if stop == nil {
-			stop = broadcastOnCancel(ctx, &pw.mu, pw.cond)
-		}
-		pw.cond.Wait()
-	}
-}
-
 // tryDeliverHeadLocked attempts, ONE TIME (no parking/looping), to deliver the bead
 // identified by gen. Caller must hold pw.mu on entry.
 //
@@ -511,8 +269,8 @@ func (pw *PacedWire) deliverHeadLocked(ctx context.Context, gen uint64, nowTick 
 //     earlier bead must deliver first). pw.mu is left HELD so a blocking caller
 //     can park on pw.cond, or a non-blocking caller can unlock and retry later.
 //
-// This is the shared core behind both deliverHeadLocked's parking loop (blocking
-// DriveBeadsToDelivery path) and StepOnce's non-blocking retry (never parks).
+// This is the (never-parking) core StepOnce retries every cycle for a bead that
+// is not yet at the FIFO head.
 func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTick int64) (ai arriveInfo, ok bool, ready bool) {
 	if ctx.Err() != nil {
 		pw.mu.Unlock()
@@ -539,29 +297,16 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTi
 	return ai, true, true
 }
 
-// DriveBeadToDelivery runs the same per-frame loop the walker would run for
-// the bead identified by gen, but SYNCHRONOUSLY on the caller's goroutine.
-// ctx is the caller's context (canceled by node teardown). Blocks until the
-// bead is delivered or ctx is canceled / the wire is torn down.
-func (pw *PacedWire) DriveBeadToDelivery(ctx context.Context, gen uint64) {
-	DriveBeadsToDelivery(ctx, []driveItem{{pw: pw, gen: gen}})
-}
-
-// StepOnce is the NON-BLOCKING one-tick step primitive (piece 1 of the
-// non-blocking-Update rewrite; not yet called by any node). It advances every
-// in-flight bead on this wire that is due at the CURRENT clock tick by exactly
-// one position-step, attempts any FIFO-head delivery that is now ready, and
+// StepOnce is the NON-BLOCKING one-tick step primitive: the only delivery path
+// (MODEL.md "one clock, sleep-only pacing"). It advances every in-flight bead
+// on this wire that is due at the CURRENT clock tick by exactly one
+// position-step, attempts any FIFO-head delivery that is now ready, and
 // RETURNS IMMEDIATELY — it never loops over future ticks and never parks
-// (no WaitTick, no cond.Wait) on a bead that is not yet due or not yet at the
-// FIFO head; such a bead simply stays in-flight for a future StepOnce call.
+// (no cond.Wait) on a bead that is not yet due or not yet at the FIFO head;
+// such a bead simply stays in-flight for a future StepOnce call.
 //
-// Timing/FIFO equivalence to the blocking DriveBeadsToDelivery path: that path
-// advances every live item by exactly one positionStepTicks-interval (=1 tick)
-// per WaitTick wake, i.e. once per tick. StepOnce reuses the SAME per-tick
-// advance (advanceBeadLocked) and the SAME FIFO-head handoff (deliverHeadLocked's
-// core, tryDeliverHeadLocked) — it just does not loop or park internally. Calling
-// StepOnce exactly once per tick for N ticks reproduces the blocking path's
-// per-tick trajectory and delivers each bead at the identical tick.
+// Calling StepOnce exactly once per tick (paced by the caller's SleepCycle)
+// for N ticks delivers each bead on the tick its deadline is reached.
 //
 // A bead that reaches its delivery deadline while not yet at the FIFO head is
 // marked finalPending so subsequent StepOnce calls retry ONLY the (cheap)
@@ -587,8 +332,7 @@ func (pw *PacedWire) StepOnceAt(ctx context.Context, tick int64) {
 
 	// Snapshot the FIFO order of currently in-flight beads. Iterate that fixed
 	// order — head-first — so an earlier bead's delivery this same call can
-	// unblock a later bead's delivery within the same StepOnce (matches
-	// DriveBeadsToDelivery, which advances all live items every tick).
+	// unblock a later bead's delivery within the same StepOnce.
 	pw.mu.Lock()
 	gens := make([]uint64, len(pw.inflight))
 	for i, b := range pw.inflight {
@@ -842,7 +586,7 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, 
 // returns the per-bead source identities for any in-flight beads so the caller can
 // emit one PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors
 // the bead's streams flag — delivery-only beads carry no sprite and emit nothing,
-// matching deliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
+// matching tryDeliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
 func (pw *PacedWire) teardownLocked() []arriveInfo {
 	var cancelled []arriveInfo
 	for i := range pw.inflight {

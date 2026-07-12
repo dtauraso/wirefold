@@ -47,7 +47,6 @@ type GateNode struct {
 	// and resume on resume — never timing out mid-pause. If unset (unit tests with
 	// no loader), it falls back to a wall-clock-derived tick so timing progresses.
 	Tick      func() int64
-	WaitTick  func(ctx context.Context, k int64) error // pause-aware park; nil → wall-clock fallback
 	Left      int
 	HasLeft   bool
 	Right     int
@@ -55,6 +54,10 @@ type GateNode struct {
 	FromLeft  *Wiring.In
 	FromRight *Wiring.In
 	ToPassed  *Wiring.Out
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; RunGate nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 // windowTicks is the fixed coincidence window as a tick count (WindowMs / MsPerTick).
@@ -174,7 +177,7 @@ func openWindowIfNeeded(g *GateNode, w *gateWindow, now func() int64) {
 // on first entry, and once the dwell has elapsed, fires the AND result and resets
 // the held/window/dwell state. Returns true if it fired (caller should `continue`
 // its loop iteration without also running the window-timeout check).
-func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() int64, clk Wiring.Clock) bool {
+func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64) bool {
 	if !(g.HasLeft && g.HasRight) {
 		return false
 	}
@@ -206,17 +209,11 @@ func tryFireOnDwell(ctx context.Context, g *GateNode, w *gateWindow, now func() 
 	w.t0Set = false
 	w.dwellSet = false
 	emitInputs(g)
-	if clk == nil {
-		// chan mode (unit tests without a paced clock): keep the original
-		// blocking drive-to-delivery behavior.
-		g.ToPassed.EmitOneDriven(ctx, result)
-	} else {
-		// Paced mode: place the fire result without walking it to delivery.
-		// The caller's per-cycle loop (RunGate) StepOnces it one position per
-		// human-clock cycle — the gate goroutine is never parked across the
-		// output traversal.
-		g.ToPassed.PlaceDriven(result)
-	}
+	// Place the fire result without walking it to delivery. The caller's
+	// per-cycle loop (RunGate) StepOnces it one position per human-clock
+	// cycle (or chan-mode sends immediately) — the gate goroutine is never
+	// parked across the output traversal.
+	g.ToPassed.PlaceDriven(result)
 	return true
 }
 
@@ -234,10 +231,11 @@ func defaultTick() func() int64 {
 	return func() int64 { return int64(time.Since(start) / tickDuration(1)) }
 }
 
-// defaultPark returns a wall-clock park function for use when GateNode.WaitTick is
-// unset (unit tests with no loader).
-func defaultPark() func(ctx context.Context, _ int64) error {
-	return func(ctx context.Context, _ int64) error {
+// defaultSleep returns a wall-clock sleep function for use when the gate's
+// output has no shared clock (unit tests with no loader): one PollIntervalTicks
+// worth of wall-clock time, ctx-aware.
+func defaultSleep() func(ctx context.Context) error {
+	return func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -260,16 +258,14 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		now = defaultTick()
 	}
 
-	park := g.WaitTick
-	if park == nil {
-		park = defaultPark()
-	}
-
-	// clk selects paced vs chan mode for the OUTPUT drive: paced mode places the
-	// fire result and StepOnces it one position per cycle below (never parking
-	// across the traversal); chan mode keeps the original blocking
-	// EmitOneDriven behavior inside tryFireOnDwell.
+	// clk selects paced vs chan mode: paced mode sleeps one cycle on the shared
+	// clock and StepOnces the output below (never parking across the output
+	// traversal); chan mode falls back to a wall-clock sleep.
 	clk := g.ToPassed.Clock()
+	sleep := defaultSleep()
+	if clk != nil {
+		sleep = clk.SleepCycle
+	}
 
 	var w gateWindow
 	emitInputs(g) // initial empty interior
@@ -281,19 +277,18 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		default:
 		}
 
-		// Park BEFORE this cycle's observe/fire/step work (not after), so a
-		// StepOnce call below is always preceded by exactly one tick advance —
-		// never two StepOnce calls within the same tick and never a StepOnce
-		// skipped by a `continue`. PollIntervalTicks==1 today, so this is the
-		// same one-tick-per-cycle cadence as the canonical WaitTick(Tick()+1)
-		// shape (nodes/pacer, nodes/holdnewsendold); if PollIntervalTicks were
-		// ever raised above 1 for a coarser OBSERVE cadence, the output
-		// StepOnce below would still only run once per this (coarser) cycle —
-		// there is currently no place in this loop that steps the output on a
-		// finer grain than the poll interval, so raising PollIntervalTicks
-		// would slow output transit too; flagged, not hit today.
-		if park(ctx, now()+PollIntervalTicks) != nil {
+		// Sleep BEFORE this cycle's observe/fire/step work (not after), so a
+		// StepOnce call below is always preceded by exactly one cycle's sleep —
+		// never two StepOnce calls within the same cycle and never a StepOnce
+		// skipped by a `continue`.
+		if sleep(ctx) != nil {
 			return
+		}
+
+		if p := g.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
 		}
 
 		// Each side tracks the MOST-RECENT real bead: drain to the latest value
@@ -308,7 +303,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 
 		openWindowIfNeeded(g, &w, now)
 
-		fired := tryFireOnDwell(ctx, g, &w, now, clk)
+		fired := tryFireOnDwell(g, &w, now)
 
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held

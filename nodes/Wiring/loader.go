@@ -200,8 +200,8 @@ type WireRegistry map[string]*PacedWire
 // its own recompute).
 //
 // clk is the single monotonic clock injected into every PacedWire so each wire
-// times its own delivery on it (MODEL.md: exactly one clock). Production passes a
-// RealClock; tests pass a FakeClock they advance deterministically.
+// times its own delivery on it (MODEL.md: exactly one clock). Production and
+// tests alike pass a RealClock — the model is sleep-only.
 func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, error) {
 	spec, err := parseSpec(jsonPath)
 	if err != nil {
@@ -286,6 +286,12 @@ type buildCtx struct {
 	// Phase 8: built nodes + the paced-Out sink.
 	outSink map[string]*Out
 	nodes   []Node
+
+	// layoutPorts is the hidden layout graph: one *LayoutPort per node id,
+	// mirroring the domain edge set one-for-one (source -> target). Built by
+	// buildLayoutEdges and injected into each node struct's `Layout` field by
+	// buildNodes, the same way the shared clock is threaded through pb.
+	layoutPorts map[string]*LayoutPort
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
@@ -299,6 +305,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	b.computeReachRadii()
 	b.allocateWires()
 	b.buildMoveDispatch()
+	b.buildLayoutEdges()
 	b.buildTypeMaps()
 	b.buildEdgeMaps()
 	if err := b.buildNodes(); err != nil {
@@ -483,6 +490,60 @@ func (b *buildCtx) allocateWires() {
 	b.edgeSegments = edgeSegments
 }
 
+// buildLayoutEdges builds the hidden layout graph: one *LayoutPort per node id
+// (including isolated nodes with no edges), then mirrors every domain spec
+// edge (source -> target) onto it via connectTo. This is a parallel edge set
+// to the domain wires built by allocateWires — same connectivity, carrying
+// LayoutMsg instead of beads. buildNodes injects each node's port via
+// pb.layout, the same closure-injection mechanism EmitGeometry uses.
+//
+// Runs AFTER buildMoveDispatch so each port's apply/applyDirect closures can call
+// straight into THAT node's own nodeMover.applyCenter (node_move.go, SLICE 3: an
+// in-process call, not a channel hop — this node's own Update() goroutine is the
+// sole writer of nm.geom's position fields) and through the (possibly
+// still-unarmed) quantOffsetPersist. b.md may be nil in tests that call
+// buildLayoutEdges directly without building a MoveDispatch first; apply/
+// applyDirect are left nil in that case (Handle nil-guards them).
+func (b *buildCtx) buildLayoutEdges() {
+	ports := make(map[string]*LayoutPort, len(b.spec.Nodes))
+	for _, n := range b.spec.Nodes {
+		p := NewLayoutPort(n.ID)
+		off := b.quantizedOffsets[n.ID]
+		p.iTheta = off.iTheta
+		p.iPhi = off.iPhi
+		p.iR = off.iR
+		p.forwardsRadius = ForwardsRadius(n.Type)
+		if b.md != nil {
+			id := n.ID
+			ref := b.references[n.ID]
+			iTheta, iPhi := off.iTheta, off.iPhi
+			md := b.md
+			p.apply = func(center vec3, iR int) {
+				md.applyLayoutCenter(id, center, iTheta, iPhi, iR, ref)
+			}
+			p.applyDirect = func(center vec3, reach float64) {
+				md.applyLayoutCenterDirect(id, center, reach)
+			}
+		}
+		ports[n.ID] = p
+	}
+	for _, e := range b.spec.Edges {
+		src, ok := ports[e.Source]
+		if !ok {
+			continue
+		}
+		dst, ok := ports[e.Target]
+		if !ok {
+			continue
+		}
+		src.connectTo(dst)
+	}
+	b.layoutPorts = ports
+	if b.md != nil {
+		b.md.layoutPorts = ports
+	}
+}
+
 // buildMoveDispatch builds the MoveDispatch from initial geometry and edge
 // endpoints. It creates one nodeMover per node and one edgeMover per edge; each
 // owns its geometry and recomputes itself on a node-move (no central
@@ -592,7 +653,8 @@ func (b *buildCtx) buildNodes() error {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
 		pb.outSink = outSink
-		pb.clock = b.clk // shared clock for clock-paced interior animation (Input refill slide)
+		pb.clock = b.clk                // shared clock for clock-paced interior animation (Input refill slide)
+		pb.layout = b.layoutPorts[n.ID] // hidden layout-graph port mirroring this node's domain edges
 
 		for _, port := range bind.Ports {
 			switch port.Dir {

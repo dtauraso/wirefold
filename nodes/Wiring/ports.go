@@ -195,7 +195,7 @@ func ParseSendRule(s string) (SendRule, error) {
 // outGeom is an immutable snapshot of an Out's per-edge geometry, published by the
 // owning edgeMover goroutine (recomputeGeometry) via atomic.Pointer and LOADED by
 // cross-goroutine readers on the source node goroutine (placement / PlaceDriven /
-// EmitOneDriven / the EmitGeometry closure). Writes happen only on the owning
+// the EmitGeometry closure). Writes happen only on the owning
 // goroutine, reads via atomic load — no lock, no coordinator. This mirrors the
 // nodeMover.snap / centerSnap publish/observe pattern (MODEL.md: per-goroutine
 // ownership, cross-goroutine reads via atomic snapshots).
@@ -298,10 +298,9 @@ func (o *Out) Gated() bool {
 }
 
 // placeDrivenNoWalker places one bead on the paced wire WITHOUT spawning a
-// walker goroutine, emitting the SendWire trace at placement time. Shared by
-// PlaceDriven and EmitOneDriven, which differ only in when/how the placed
-// bead is subsequently driven to delivery. Caller must have already checked
-// o.pw != nil.
+// walker goroutine, emitting the SendWire trace at placement time. The placed
+// bead is subsequently driven to delivery by per-cycle StepOnce. Caller must
+// have already checked o.pw != nil.
 func (o *Out) placeDrivenNoWalker(v int) (gen uint64, ok bool) {
 	g := o.Geom()
 	gen, ok = o.pw.placeBeadNoWalker(v, o.placementFrom(g))
@@ -323,35 +322,6 @@ func (o *Out) placeDrivenNoWalkerAt(v int, tick int64) (gen uint64, ok bool) {
 	}
 	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 	return gen, true
-}
-
-// EmitOneDriven places one bead WITHOUT spawning a walker goroutine, emits the
-// same SendWire trace as EmitOne, then drives the bead to delivery synchronously
-// on the caller's goroutine. Blocks until delivered or ctx is canceled.
-// Use this when the node drives its own outbound edge (no walker goroutine).
-func (o *Out) EmitOneDriven(ctx context.Context, v int) bool {
-	if o == nil {
-		return false
-	}
-	if o.pw != nil {
-		gen, ok := o.placeDrivenNoWalker(v)
-		if !ok {
-			return false
-		}
-		o.pw.DriveBeadToDelivery(ctx, gen)
-		return true
-	}
-	// chan mode (tests): fall back to EmitOne behavior (no drive needed).
-	if o.ch == nil {
-		return false
-	}
-	select {
-	case o.ch <- v:
-		o.trace.Send(o.node, o.port, v)
-		return true
-	default:
-		return false
-	}
 }
 
 // Wired reports whether this Out port is bound to a real edge (paced-wire
@@ -398,29 +368,26 @@ func (o *Out) StepOnceAt(ctx context.Context, tick int64) {
 	o.pw.StepOnceAt(ctx, tick)
 }
 
-// DriveItem is an exported handle to one placed-but-not-yet-driven bead. A node
-// that drives several outbound edges on its OWN goroutine accumulates a set of
-// these (each carrying a SendWire trace already emitted at placement time) and
-// then drives them ALL concurrently in one DriveAll call, so the beads animate in
-// parallel rather than one blocking emit at a time. The zero value (placement
-// failed / chan mode) is inert and DriveAll skips it.
+// DriveItem is an exported handle to one placed bead. Delivery is driven by
+// per-cycle StepOnce on the underlying wire, not by the caller directly — this
+// type only reports whether the placement succeeded (Live).
 type DriveItem struct {
-	item driveItem
 	live bool
 }
 
 // Live reports whether this DriveItem carries a bead actually placed on a
 // paced wire (i.e. PlaceDriven succeeded in paced-wire mode). False for a nil
 // Out, chan mode, or a failed placement (faded/torn-down wire) — callers that
-// need to detect placement failure (e.g. a continuous-drive loop mirroring
-// EmitOneDriven's false-return-stops-the-goroutine behavior) check this.
+// need to detect placement failure check this.
 func (di DriveItem) Live() bool {
 	return di.live
 }
 
 // PlaceDriven places one bead on this Out WITHOUT spawning a walker, emits the
-// SendWire trace, and returns a DriveItem the caller drives later via DriveAll.
-// In chan mode (tests) it sends immediately on the raw channel and returns an inert item,
+// SendWire trace, and returns a DriveItem reporting whether the placement
+// succeeded. Delivery is driven by the caller's per-cycle StepOnce/StepOnceAt
+// on this Out (or the underlying wire) each subsequent cycle. In chan mode
+// (tests) it sends immediately on the raw channel and returns an inert item,
 // so unit tests keep their synchronous chan semantics. A nil Out, or a failed
 // placement (faded/deleted), returns an inert item.
 func (o *Out) PlaceDriven(v int) DriveItem {
@@ -428,11 +395,10 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 		return DriveItem{}
 	}
 	if o.pw != nil {
-		gen, ok := o.placeDrivenNoWalker(v)
-		if !ok {
+		if _, ok := o.placeDrivenNoWalker(v); !ok {
 			return DriveItem{}
 		}
-		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
+		return DriveItem{live: true}
 	}
 	// chan mode (tests): no drive needed, send now and return inert.
 	if o.ch != nil {
@@ -456,11 +422,10 @@ func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
 		return DriveItem{}
 	}
 	if o.pw != nil {
-		gen, ok := o.placeDrivenNoWalkerAt(v, tick)
-		if !ok {
+		if _, ok := o.placeDrivenNoWalkerAt(v, tick); !ok {
 			return DriveItem{}
 		}
-		return DriveItem{item: driveItem{pw: o.pw, gen: gen}, live: true}
+		return DriveItem{live: true}
 	}
 	// chan mode (tests): no drive needed, send now and return inert.
 	if o.ch != nil {
@@ -474,28 +439,14 @@ func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
 	return DriveItem{}
 }
 
-// DriveAll drives every live DriveItem to delivery in lockstep on the calling
-// goroutine — no extra goroutines, beads animate concurrently — and blocks until
-// all are delivered or ctx is canceled. Inert items (chan mode / failed placement)
-// are skipped. With an empty/all-inert set it returns immediately.
-func DriveAll(ctx context.Context, items []DriveItem) {
-	var live []driveItem
-	for _, di := range items {
-		if di.live {
-			live = append(live, di.item)
-		}
-	}
-	DriveBeadsToDelivery(ctx, live)
-}
-
 // OutMulti is a fanout port: a slice of Outs sharing one logical name.
 type OutMulti []*Out
 
 // PlaceDrivenAll places value v (no walker) on EVERY Out in the set, emitting the
-// SendWire trace for each, and appends a DriveItem per Out to dst. The caller
-// combines these with other ports' items and drives them together via DriveAll so
-// the whole fan-out animates concurrently. Chan-mode Outs send immediately and
-// contribute inert items.
+// SendWire trace for each, and appends a DriveItem per Out to dst. Delivery is
+// driven by the caller's per-cycle StepOnce on each wire, so the whole fan-out
+// animates concurrently. Chan-mode Outs send immediately and contribute inert
+// items.
 func (outs OutMulti) PlaceDrivenAll(v int, dst []DriveItem) []DriveItem {
 	for _, o := range outs {
 		if o == nil {
@@ -521,15 +472,6 @@ func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []Driv
 	return dst
 }
 
-// EmitManyDriven places one bead on EVERY Out in the set WITHOUT spawning walker
-// goroutines, emits the SendWire trace for each, then drives ALL beads to delivery
-// in lockstep on the calling goroutine and waits until every bead is delivered or
-// ctx is canceled. In chan mode (tests), falls back to EmitOne on each Out.
-// If the set is empty or all placements fail, returns immediately.
-func (outs OutMulti) EmitManyDriven(ctx context.Context, v int) {
-	DriveAll(ctx, outs.PlaceDrivenAll(v, nil))
-}
-
 // NewIn / NewOut are exported for tests that construct nodes directly
 // without going through reflectBuild. Uses chan mode.
 func NewIn(ch <-chan int, node, port string, tr *T.Trace) *In {
@@ -548,8 +490,8 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 // NewPacedOutNoGeom builds a paced Out with a zero wire segment. Node packages
 // outside Wiring cannot name the unexported wireSegment, so they cannot call
 // NewOutPaced directly — this is the supported entry point for tests that need to
-// exercise the paced OUTPUT drive (EmitOneDriven → DriveBeadToDelivery) under a
-// FakeClock. Only bead timing is exercised; the zero segment means position
+// exercise the paced OUTPUT drive (PlaceDriven → StepOnce) under a
+// RealClock. Only bead timing is exercised; the zero segment means position
 // traces carry no geometry. Production paced Outs are built by the loader/builders
 // with real segments, not through this.
 func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string) *Out {

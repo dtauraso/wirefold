@@ -18,11 +18,12 @@ import (
 //   - The MAIN loop runs one activity cycle per human clock tick: it does a
 //     non-blocking input check (PollRecv), and on a new value emits the new
 //     held-bead and stores the new held, then sleeps one human clock cycle
-//     (clk.WaitTick) — parking the CPU instead of spinning while idle.
+//     (clk.SleepCycle) — parking the CPU instead of spinning while idle.
 //   - A DRIVE goroutine continuously pulses the CURRENT held value to the
-//     output. EmitOneDriven is synchronous (blocks for the wire traversal), so
-//     this goroutine self-paces at the wire rate and re-reads held each pulse —
-//     when held changes the next pulse carries the new value.
+//     output via gatecommon.DriveHeld (PlaceDriven + per-cycle StepOnce,
+//     sleeping one cycle between steps), so this goroutine self-paces at the
+//     wire rate and re-reads held each pulse — when held changes the next
+//     pulse carries the new value.
 //
 // held is shared via sync/atomic so the two goroutines don't race.
 //
@@ -54,6 +55,10 @@ type Node struct {
 	// FromRightGate is a declared input from a WindowAndInhibitRightGate node.
 	// Intentionally inert (no read logic) — see 10To6/10To8 edge task.
 	FromRightGate *Wiring.In
+	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
+	// injected by the loader the same way EmitGeometry is. nil on builds
+	// without a loader; Update nil-guards its poll.
+	Layout *Wiring.LayoutPort
 }
 
 // driveOutput runs a continuous-drive goroutine on out, always emitting the
@@ -107,8 +112,13 @@ func (g *Node) Update(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if p := g.Layout; p != nil {
+			if msg, ok := p.TryRecv(); ok {
+				p.Handle(msg)
+			}
+		}
 		consume()
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 	}
