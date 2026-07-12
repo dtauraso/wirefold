@@ -2,7 +2,6 @@ package hold
 
 import (
 	"context"
-	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -39,35 +38,6 @@ func (h *Node) Update(ctx context.Context) {
 	}
 
 	clk := h.In.Clock()
-	if clk == nil {
-		// chan mode (tests without a paced clock): keep the busy-poll fallback.
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			if p := h.Layout; p != nil {
-				if msg, ok := p.TryRecv(); ok {
-					p.Handle(msg)
-				}
-			}
-
-			if value, ok := h.In.PollRecv(); ok {
-				if h.Fire != nil {
-					h.Fire()
-				}
-				if value != held && h.EmitHeldBead != nil {
-					h.EmitHeldBead(value)
-				}
-				held = value
-				h.Held = value
-			} else {
-				runtime.Gosched()
-			}
-		}
-	}
 
 	for {
 		select {
@@ -76,14 +46,14 @@ func (h *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
-			return
-		}
-
 		if p := h.Layout; p != nil {
 			if msg, ok := p.TryRecv(); ok {
 				p.Handle(msg)
 			}
+		}
+
+		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			return
 		}
 
 		if value, ok := h.In.PollRecv(); ok {

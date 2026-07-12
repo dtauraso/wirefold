@@ -2,7 +2,6 @@ package pacer
 
 import (
 	"context"
-	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -34,48 +33,6 @@ func (p *Node) Update(ctx context.Context) {
 	}
 
 	clk := p.FromInput.Clock()
-	if clk == nil {
-		// chan mode (tests without a paced clock): keep the original blocking
-		// behavior.
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			if lp := p.Layout; lp != nil {
-				if msg, ok := lp.TryRecv(); ok {
-					lp.Handle(msg)
-				}
-			}
-
-			if value, ok := p.FromInput.PollRecv(); ok {
-				if p.Fire != nil {
-					p.Fire()
-				}
-
-				heldChanged := value != held
-				held = value
-				if heldChanged && p.EmitHeldBead != nil {
-					p.EmitHeldBead(value)
-				}
-
-				// Change-step feedback: 1 when the value changed (or first
-				// recv), 0 when it repeats. Placed fire-and-forget on
-				// FeedbackOut (no consume acknowledgment, per MODEL.md).
-				step := 0
-				if heldChanged {
-					step = 1
-				}
-				items := []Wiring.DriveItem{p.FeedbackOut.PlaceDriven(step)}
-				p.Held = value
-				Wiring.DriveAll(ctx, items)
-			} else {
-				runtime.Gosched()
-			}
-		}
-	}
 
 	for {
 		select {
@@ -84,14 +41,14 @@ func (p *Node) Update(ctx context.Context) {
 		default:
 		}
 
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
-			return
-		}
-
 		if lp := p.Layout; lp != nil {
 			if msg, ok := lp.TryRecv(); ok {
 				lp.Handle(msg)
 			}
+		}
+
+		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			return
 		}
 
 		if value, ok := p.FromInput.PollRecv(); ok {

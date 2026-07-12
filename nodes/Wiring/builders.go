@@ -361,6 +361,13 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		injectFunc(v, "WaitTick", tWaitFunc, func(ctx context.Context, k int64) error {
 			return clk.WaitTick(ctx, k)
 		})
+		// Clock Wiring.Clock: the shared node-level clock, injected directly so a
+		// node's paced Update loop does not have to derive its clock from a
+		// specific wired output port (fragile — the port that happens to carry
+		// the clock varies by topology). Only fields typed exactly Wiring.Clock
+		// (e.g. input.Node.Clock) receive this; other nodes are unaffected.
+		tClockType := reflect.TypeFor[Clock]()
+		injectFunc(v, "Clock", tClockType, clk)
 	}
 }
 
