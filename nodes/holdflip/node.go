@@ -2,7 +2,6 @@ package holdflip
 
 import (
 	"context"
-	"runtime"
 	"sync/atomic"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
@@ -61,18 +60,16 @@ func (g *Node) Update(ctx context.Context) {
 		return 1 - int(h)
 	})
 
-	// MAIN loop: BLOCK on input (TryRecv parks in paced mode). Once a value
-	// arrives, drain any additional queued beads non-blocking (PollRecv) to keep
-	// only the LATEST. Then Done()/Fire()/update held/emit interior bead.
+	// MAIN loop frame: do activities (non-blocking input check, drain-to-latest,
+	// Fire/update held/emit interior bead), then sleep one human clock cycle,
+	// repeat. Sleeping one cycle per iteration (paced mode) keeps the loop off
+	// the CPU 99% of the time instead of spinning millions of times per human
+	// tick while there is nothing to receive.
 	var lastDisplayed int64 = gatecommon.NoValue
-	for {
-		if ctx.Err() != nil {
-			return
-		}
+	consume := func() {
 		v, ok := g.In.PollRecv()
 		if !ok {
-			runtime.Gosched()
-			continue
+			return
 		}
 		// Drain-to-latest: consume any additional queued beads, keeping the last
 		// REAL value. A stray NoValue sentinel must not overwrite v (storing -1 would
@@ -95,6 +92,19 @@ func (g *Node) Update(ctx context.Context) {
 			g.EmitHeldBead(v)
 		}
 		lastDisplayed = newHeld
+	}
+
+	clk := g.In.Clock()
+
+	// Paced mode: do activities, sleep one human clock cycle, repeat.
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		consume()
+		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			return
+		}
 	}
 }
 

@@ -8,226 +8,84 @@ import (
 
 	T "github.com/dtauraso/wirefold/Trace"
 	"github.com/dtauraso/wirefold/nodes/Wiring"
+	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
-
-// testHangGuard bounds how long a test waits for an async node output. It is a
-// HANG GUARD, not a timing assertion: the node always eventually emits, so the
-// test succeeds the instant the awaited event arrives. The value is large so that
-// the success path never depends on a wall-clock window — under `-race` with many
-// parallel runs, wire pacing slows and a tight deadline (the old 200ms) flaked.
-const testHangGuard = 10 * time.Second
-
-// outBufTestCap sizes the chan-mode out buffer generously. The node's drive
-// goroutine spins emitting startup sentinels with no pacing in chan mode and EXITS
-// the moment the buffer is full (EmitOneDriven returns false). A small buffer can
-// fill before the main loop sets held — under `-race` the drainer goroutine can be
-// scheduled late — so the drive dies before any real value flows. A large buffer
-// guarantees the main loop wins the race (sets held within a handful of iterations)
-// long before the drive could fill the buffer, keeping the drive alive until a real
-// value is emitted. Paced production never spins, so this is a chan-mode-only knob.
-const outBufTestCap = 4096
-
-// drainForFirstReal continuously receives from out and reports the first
-// non-sentinel value on the returned channel. The dedicated drainer matters in
-// CHAN MODE (these tests): there Out.EmitOneDriven is non-blocking and the node's
-// drive goroutine EXITS the instant the out buffer is full (EmitOneDriven returns
-// false). A select-based reader that interleaves other work can starve the drainer
-// under `-race`, let the buffer fill with startup sentinels, and kill the drive
-// before any real value flows — a permanent hang. A goroutine that does nothing but
-// `<-out` keeps the buffer drained so the drive stays alive until held is set.
-// (Production uses paced mode, where EmitOneDriven blocks per wire traversal and
-// self-paces, so this busy-fill-and-die shape never occurs.)
-func drainForFirstReal(ctx context.Context, out <-chan int) <-chan int {
-	res := make(chan int, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case v := <-out:
-				if v == -1 {
-					continue // sentinel: no value held yet
-				}
-				select {
-				case res <- v:
-				default:
-				}
-			}
-		}
-	}()
-	return res
-}
-
-// firstFlip sends value into a node and returns the first non-sentinel output
-// (i.e., the first output after input arrives, which should be 1-value).
-// The DRIVE goroutine emits -1 sentinel until held is set; we skip those.
-func firstFlip(value int) (int, error) {
-	tr := T.New(0)
-	defer tr.Close()
-	in := make(chan int, 1)
-	out := make(chan int, outBufTestCap)
-	node := &Node{
-		Fire: func() { tr.Fire("hf") },
-		In:   Wiring.NewIn(in, "hf", "In", tr),
-		Out:  Wiring.NewOut(out, "hf", "Out", tr),
-	}
-	// Pre-load input BEFORE launching Update. In chan mode (this test) In.TryRecv is
-	// non-blocking, so if the main loop runs before the send it sees an empty channel
-	// and returns immediately — held never gets set and only sentinels stream (the
-	// flake: -1 returned after the deadline). Production uses paced mode where TryRecv
-	// blocks, so this race is test-construction only; the buffered (cap 1) channel
-	// makes the pre-load safe. Matches the other tests, which already pre-load.
-	in <- value
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); node.Update(ctx) }()
-	res := drainForFirstReal(ctx, out)
-	select {
-	case v := <-res:
-		cancel()
-		wg.Wait()
-		return v, nil
-	case <-time.After(testHangGuard):
-		cancel()
-		wg.Wait()
-		return -1, nil
-	}
-}
 
 // value=1 → output should be 1-1=0.
 func TestFlipOneToZero(t *testing.T) {
-	got, _ := firstFlip(1)
-	if got != 0 {
-		t.Fatalf("expected 0, got %d", got)
-	}
+	r := newPacedFlipRig(t)
+	defer r.close()
+	r.feed(t, 1)
+	r.expectFlip(t, 0)
 }
 
 // value=0 → output should be 1-0=1.
 func TestFlipZeroToOne(t *testing.T) {
-	got, _ := firstFlip(0)
-	if got != 1 {
-		t.Fatalf("expected 1, got %d", got)
-	}
+	r := newPacedFlipRig(t)
+	defer r.close()
+	r.feed(t, 0)
+	r.expectFlip(t, 1)
 }
 
-// TestDrainToLatest verifies that when multiple values are queued (simulating a
-// Pulse flood), HoldFlip acts on the LATEST value. Queue: 0,0,0,1 → latest is 1
-// → output should be 1-1=0, not 1-0=1. Also verifies the interior bead reflects
-// the latest input value.
+// TestDrainToLatest verifies that when multiple values arrive in quick succession
+// (simulating a Pulse flood), HoldFlip acts on the LATEST value. Feed: 0,0,0,1 →
+// latest is 1 → output should settle on 1-1=0, not 1-0=1. Also verifies the
+// interior bead reflects the latest input value.
 func TestDrainToLatest(t *testing.T) {
-	tr := T.New(0)
-	defer tr.Close()
-	// Buffer large enough to pre-load the backlog before the node reads.
-	in := make(chan int, 8)
-	out := make(chan int, outBufTestCap)
-	heldVals := []int{}
-	var mu sync.Mutex
-	node := &Node{
-		Fire: func() { tr.Fire("hf") },
-		In:   Wiring.NewIn(in, "hf", "In", tr),
-		Out:  Wiring.NewOut(out, "hf", "Out", tr),
-		EmitHeldBead: func(v int) {
-			mu.Lock()
-			heldVals = append(heldVals, v)
-			mu.Unlock()
-		},
-	}
-	// Pre-load the backlog: stale 0s followed by the current value 1.
-	in <- 0
-	in <- 0
-	in <- 0
-	in <- 1
+	r := newPacedFlipRigWithBead(t)
+	defer r.close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); node.Update(ctx) }()
+	// Feed the backlog: stale 0s followed by the current value 1, each delivered
+	// with 0 latency on the very next clock advance so they queue faster than the
+	// paced main loop's own tick cadence.
+	r.feed(t, 0)
+	r.feed(t, 0)
+	r.feed(t, 0)
+	r.feed(t, 1)
 
-	// Expect the first non-sentinel output to be 0 (1-1, because latest input is 1).
-	res := drainForFirstReal(ctx, out)
-	var firstReal int
-	select {
-	case firstReal = <-res:
-	case <-time.After(testHangGuard):
-		cancel()
-		wg.Wait()
-		t.Fatal("timed out waiting for output")
-	}
-	cancel()
-	wg.Wait()
-
-	if firstReal != 0 {
-		t.Fatalf("expected output 0 (latest input was 1, flip → 0), got %d", firstReal)
-	}
+	// Expect the flipped output to settle on 0 (1-1, because latest input is 1).
+	r.expectFlip(t, 0)
 
 	// Held display should reflect the latest input value (1), not any stale value.
-	mu.Lock()
-	defer mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	lastHeld := -1
-	for _, v := range heldVals {
-		if v != -1 {
+	for _, v := range r.heldVals {
+		if v != gatecommon.NoValue {
 			lastHeld = v
 		}
 	}
 	if lastHeld != 1 {
-		t.Fatalf("expected held display to show 1 (latest input), got %d (full sequence: %v)", lastHeld, heldVals)
+		t.Fatalf("expected held display to show 1 (latest input), got %d (full sequence: %v)", lastHeld, r.heldVals)
 	}
 }
 
 // TestInteriorBeadUpdatesOnInput verifies that the interior bead (EmitHeldBead)
-// updates to the input value when input arrives. The startup sentinel (-1) is
-// emitted first; after input arrives, the bead should reflect the input value.
-// This is the key property of the two-goroutine split: MAIN updates the display
-// the instant input arrives, independent of the DRIVE output cycle.
+// updates to the input value when input arrives. The startup sentinel is emitted
+// first; after input arrives, the bead should reflect the input value. This is
+// the key property of the two-goroutine split: MAIN updates the display the
+// instant input arrives, independent of the DRIVE output cycle.
 func TestInteriorBeadUpdatesOnInput(t *testing.T) {
-	tr := T.New(0)
-	defer tr.Close()
-	in := make(chan int, 1)
-	out := make(chan int, outBufTestCap)
-	beadCh := make(chan int, 8)
-	node := &Node{
-		Fire: func() { tr.Fire("hf") },
-		In:   Wiring.NewIn(in, "hf", "In", tr),
-		Out:  Wiring.NewOut(out, "hf", "Out", tr),
-		EmitHeldBead: func(v int) {
-			beadCh <- v
-		},
-	}
-	// Pre-load input before starting so TryRecv (non-blocking in chan mode) finds it.
-	in <- 1
+	r := newPacedFlipRigWithBead(t)
+	defer r.close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); node.Update(ctx) }()
+	r.feed(t, 1)
+	r.expectFlip(t, 0) // 1-1=0 confirms held was set and drive picked it up.
 
-	// Collect bead updates: expect startup sentinel (-1) then input value (1).
-	var beads []int
-	deadline := time.After(testHangGuard)
-loop:
-	for len(beads) < 2 {
-		select {
-		case v := <-beadCh:
-			beads = append(beads, v)
-		case <-deadline:
-			break loop
-		}
-	}
-	cancel()
-	wg.Wait()
+	r.mu.Lock()
+	beads := append([]int(nil), r.heldVals...)
+	r.mu.Unlock()
 
 	if len(beads) < 2 {
 		t.Fatalf("expected at least 2 bead updates (sentinel + input), got %v", beads)
 	}
-	if beads[0] != -1 {
-		t.Fatalf("expected first bead to be sentinel -1, got %d", beads[0])
+	if beads[0] != gatecommon.NoValue {
+		t.Fatalf("expected first bead to be sentinel %d, got %d", gatecommon.NoValue, beads[0])
 	}
 	// Find the first non-sentinel bead — should be the input value 1.
 	last := -1
 	for _, v := range beads {
-		if v != -1 {
+		if v != gatecommon.NoValue {
 			last = v
 			break
 		}
@@ -255,6 +113,10 @@ type pacedFlipRig struct {
 	cancel   context.CancelFunc
 	wg       *sync.WaitGroup
 	ctx      context.Context
+	// heldVals/mu are populated only by newPacedFlipRigWithBead, which wires
+	// EmitHeldBead to record every interior-bead update for assertions.
+	heldVals []int
+	mu       sync.Mutex
 }
 
 func newPacedFlipRig(t *testing.T) *pacedFlipRig {
@@ -285,6 +147,48 @@ func newPacedFlipRig(t *testing.T) *pacedFlipRig {
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
 	return &pacedFlipRig{clk: clk, inPw: inPw, observer: observer, cancel: cancel, wg: &wg, ctx: ctx}
+}
+
+// newPacedFlipRigWithBead is newPacedFlipRig plus an EmitHeldBead hook that
+// records every interior-bead update into the returned rig's heldVals (guarded
+// by its mu), for tests that assert on the interior bead sequence.
+func newPacedFlipRigWithBead(t *testing.T) *pacedFlipRig {
+	t.Helper()
+	const latMs = 10.0
+	clk := Wiring.NewFakeClock()
+	tr := T.New(0)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	inPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	inPw.SetClock(clk)
+	inPw.Trace = tr
+	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	outPw.SetClock(clk)
+	outPw.Trace = tr
+
+	r := &pacedFlipRig{clk: clk, cancel: cancel, ctx: ctx}
+
+	node := &Node{
+		Fire: func() { tr.Fire("hf") },
+		In:   Wiring.NewInPaced(inPw, ctx, "hf", "In", tr),
+		Out: Wiring.NewPacedOutNoGeom(outPw, ctx, "hf", "Out", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+		EmitHeldBead: func(v int) {
+			r.mu.Lock()
+			r.heldVals = append(r.heldVals, v)
+			r.mu.Unlock()
+		},
+	}
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); node.Update(ctx) }()
+
+	r.inPw = inPw
+	r.observer = observer
+	r.wg = &wg
+	return r
 }
 
 func (r *pacedFlipRig) close() { r.cancel(); r.wg.Wait() }
