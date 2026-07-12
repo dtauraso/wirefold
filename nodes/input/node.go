@@ -278,11 +278,13 @@ func (n *Node) Update(ctx context.Context) {
 	}
 }
 
-// inputCadenceTicks is Input's fire cadence in clock ticks: one tick per unit of
-// the primary fan-out edge's length (sleep timer = 1 human cycle × edge length).
-// Recomputed live so a drag that changes the edge length re-paces emission.
+// inputCadenceTicks is Input's fire cadence in clock ticks: the CROSSING TIME of
+// the primary fan-out edge, ArcLength / PulseSpeedWuPerTick (= ticksToCross), so
+// exactly one bead crosses the edge per cadence — no overlap. Measured in ticks,
+// so it freezes on pause with Tick(). Recomputed live so a drag that changes the
+// edge length re-paces emission.
 func inputCadenceTicks(n *Node) int64 {
-	c := int64(n.ToHoldNewSendOld.Geom().ArcLength)
+	c := int64(n.ToHoldNewSendOld.Geom().ArcLength / Wiring.PulseSpeedWuPerTick)
 	if c < 1 {
 		return 1
 	}
