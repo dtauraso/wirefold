@@ -89,7 +89,7 @@ func (in *Node) Update(ctx context.Context) {
 			}
 		}
 
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 

@@ -117,7 +117,7 @@ func (g *Node) Update(ctx context.Context) {
 			}
 		}
 		consume()
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 	}

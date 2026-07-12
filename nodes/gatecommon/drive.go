@@ -54,7 +54,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 					return
 				}
 			}
-			if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			if err := clk.SleepCycle(ctx); err != nil {
 				return
 			}
 			out.StepOnce(ctx)

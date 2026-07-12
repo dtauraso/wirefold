@@ -59,6 +59,11 @@ type Clock interface {
 	// otherwise. Waking is edge-triggered: Resume() and (for the fake)
 	// AdvanceTicks()/SetTick() re-evaluate every waiter.
 	WaitTick(ctx context.Context, k int64) error
+	// SleepCycle blocks for exactly one clock cycle (or until ctx is done).
+	// It is the primitive for one-cycle pacing loops that previously spelled
+	// WaitTick(ctx, Tick()+1); unlike that spelling it does not re-read Tick(),
+	// so it is immune to a tick advancing between the read and the wait.
+	SleepCycle(ctx context.Context) error
 	// Halt pauses the clock: the tick stops advancing until Resume.
 	Halt()
 	// Resume un-pauses the clock: the tick advances again from where it stopped
@@ -182,6 +187,18 @@ func (c *RealClock) WaitTick(ctx context.Context, k int64) error {
 	}
 }
 
+// SleepCycle blocks for one tickPeriod, or until ctx is done. Plain timer, no
+// lock, no cond, no halt check — the real clock has no pause-aware notion of
+// "one cycle" the way WaitTick does; that gap is closed in a later pass.
+func (c *RealClock) SleepCycle(ctx context.Context) error {
+	select {
+	case <-time.After(tickPeriod):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // watchCtx broadcasts on c.cond when ctx is done so a parked WaitTick wakes to
 // observe cancellation. The caller closes the returned channel to stop the watcher.
 func (c *RealClock) watchCtx(ctx context.Context) chan struct{} {
@@ -291,6 +308,26 @@ func (c *FakeClock) WaitTick(ctx context.Context, k int64) error {
 	}
 	// Target met: prefer target-success over a simultaneous ctx cancellation,
 	// matching RealClock.WaitTick (which returns nil directly on tick >= k).
+	return nil
+}
+
+// SleepCycle blocks until the fake tick advances by exactly one from its
+// current value when the call starts, or until ctx is done. Reuses the same
+// cond-wait/watchCtx wakeup pattern as WaitTick so AdvanceTicks-driven tests
+// stay deterministic.
+func (c *FakeClock) SleepCycle(ctx context.Context) error {
+	stop := c.watchCtx(ctx)
+	defer close(stop)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	target := c.tick + 1
+	for c.tick < target {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c.cond.Wait()
+	}
 	return nil
 }
 

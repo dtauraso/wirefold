@@ -185,7 +185,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			if ctx.Err() != nil {
 				return
 			}
-			if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+			if err := clk.SleepCycle(ctx); err != nil {
 				return
 			}
 			n.fanOutStepOnce(ctx, clk.Tick())
@@ -284,7 +284,7 @@ func (n *Node) Update(ctx context.Context) {
 			}
 			emitted++
 		}
-		if err := clk.WaitTick(ctx, clk.Tick()+1); err != nil {
+		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
 		n.fanOutStepOnce(ctx, clk.Tick())
