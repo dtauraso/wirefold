@@ -112,11 +112,6 @@ func (g *Node) Update(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if p := g.Layout; p != nil {
-			if msg, ok := p.TryRecv(); ok {
-				p.Handle(msg)
-			}
-		}
 		consume()
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
