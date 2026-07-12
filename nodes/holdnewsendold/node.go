@@ -66,9 +66,9 @@ func (in *Node) Update(ctx context.Context) {
 	// consuming an input value until every placed ToNext bead has finished its
 	// transit. While a window is active, the input port is observed
 	// non-blockingly each cycle and any arrival (same or different value) is
-	// consumed and discarded per the ProcessingGuard rule (input consumption is
-	// decoupled from output transit; only the next window's PollRecv consumes a
-	// real input). The node is never parked across a traversal — it WaitTicks one
+	// consumed and discarded (input consumption is decoupled from output
+	// transit; only the next window's PollRecv consumes a real input). The node
+	// is never parked across a traversal — it WaitTicks one
 	// human-clock cycle and StepOnces the in-flight ToNext beads exactly once per
 	// cycle, matching the canonical single-step shape (nodes/pacer, gatecommon.DriveHeld).
 	windowActive := false
@@ -86,8 +86,7 @@ func (in *Node) Update(ctx context.Context) {
 		if windowActive {
 			// Mid-window observe: drain and discard every bead delivered on the
 			// input port this cycle (same-color and different-color are both
-			// consumed silently; neither is processed — matches
-			// ProcessingGuard.Process).
+			// consumed silently; neither is processed).
 			for {
 				if _, ok := in.FromPrevHoldNewSendOldNode.PollRecv(); !ok {
 					break
@@ -119,8 +118,7 @@ func (in *Node) Update(ctx context.Context) {
 				in.Held = value
 
 				// No live bead placed (suppressed sentinel fan-out) ⇒ no real
-				// output transit ⇒ no processing window to observe — mirrors
-				// ProcessingGuard.Process's early return.
+				// output transit ⇒ no processing window to observe.
 				for _, di := range items {
 					if di.Live() {
 						windowActive = true

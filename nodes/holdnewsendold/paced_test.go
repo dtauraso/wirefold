@@ -12,10 +12,9 @@ import (
 
 // pacedRig wires a HoldNewSendOld node over real PacedWires + a FakeClock, so
 // timing tests can prove the non-blocking (single-loop, WaitTick-paced) Update
-// rewrite reproduces the same processing-window semantics the old
-// ProcessingGuard (drive goroutine + 1ms observe timer) path enforced: fixed
-// output traversal duration, and mid-window input arrivals discarded without
-// producing a second output bead or updating Held.
+// loop enforces the processing-window semantics: fixed output traversal
+// duration, and mid-window input arrivals discarded without producing a second
+// output bead or updating Held.
 type pacedRig struct {
 	clk       *Wiring.FakeClock
 	inPw      *Wiring.PacedWire
@@ -175,8 +174,8 @@ func TestPacedArrivalTickMatchesTraversal(t *testing.T) {
 	}
 }
 
-// TestPacedMidWindowArrivalDiscarded proves the per-tick observe rule
-// reproduces ProcessingGuard's mid-processing-window behavior: a bead
+// TestPacedMidWindowArrivalDiscarded proves the per-tick observe rule's
+// mid-processing-window behavior: a bead
 // arriving on FromPrevHoldNewSendOldNode WHILE a ToNext traversal is still in
 // flight is consumed and discarded — it does not update Held and does not
 // produce a second ToNext bead. Only ONE ToNext bead is ever delivered for the
