@@ -21,6 +21,7 @@ These rarely change; skim once per session and apply throughout.
 Each entry can drift; if it conflicts with current code, update or remove the memory rather than acting on it.
 
 - [project_node_color_vocab.md](project_node_color_vocab.md) — David's node-kind nicknames: "time nodes" = HoldNewSendOld, "and nodes" = WindowAndInhibit*Gate
+- [project_two_goroutine_node_split.md](project_two_goroutine_node_split.md) — Each node = always-on layout goroutine + pausable bead loop; pause governs only beads; drag-cascade upstream leak deferred
 
 - [project_go_visual_vocabulary.md](project_go_visual_vocabulary.md) — Go visual vocabulary is chan→wire + per-node running indicator (with reloop); goroutine and select are not separate visual primitives
 - [project_industry_pattern_deferrals.md](project_industry_pattern_deferrals.md) — Deferred visual-editor gaps, re-scoped 2026-07-05 vs current buffer/Three.js arch: render-only items (edge labels S, hover tooltips XS) cheap; stateful items all L (no multi-select/undo/waypoints)
