@@ -10,15 +10,23 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-func recv(t *testing.T, ch <-chan int) int {
+// pacedRecv advances clk one tick at a time (with a small real-time settle
+// pause) until obs delivers a value, or fails the test on timeout. Mirrors
+// the polling shape of TestPacedFanOutDeliversConcurrentlyAtSameTick's
+// arrival loop, generalized into a single-value helper for tests that only
+// care about the sequence of values delivered, not concurrent-arrival ticks.
+func pacedRecv(t *testing.T, obs *Wiring.In, clk *Wiring.FakeClock) int {
 	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for output")
-		return 0
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		clk.AdvanceTicks(1)
+		time.Sleep(time.Millisecond)
+		if v, ok := obs.PollRecv(); ok {
+			return v
+		}
 	}
+	t.Fatal("timeout waiting for output")
+	return 0
 }
 
 // Plain path (no feedback): pops the END of working each iteration, so the
@@ -27,35 +35,53 @@ func recv(t *testing.T, ch <-chan int) int {
 func TestEmitsInitValues(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
-	toRG := make(chan int, 3)
-	node := &Node{
-		Fire:             func() { tr.Fire("in") },
-		Init:             []int{10, 20, 30},
-		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
-	}
 
+	const latMs = 10.0
+	clk := Wiring.NewFakeClock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	pw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	pw.SetClock(clk)
+	pw.Trace = tr
+
+	node := &Node{
+		Fire:  func() { tr.Fire("in") },
+		Init:  []int{10, 20, 30},
+		Clock: clk,
+		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw, ctx, "in", "ToHoldNewSendOld", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+	}
+	obs := Wiring.NewInPaced(pw, ctx, "obs", "In", tr)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
-	// Update exits after all init values are sent, so wg.Wait suffices.
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("InputNode did not finish sending init values in time")
-	}
-
 	// End-pop of [10,20,30]: 30, then 20, then 10.
 	want := []int{30, 20, 10}
 	for i, w := range want {
-		got := recv(t, toRG)
+		got := pacedRecv(t, obs, clk)
 		if got != w {
 			t.Errorf("value[%d]: expected %d, got %d", i, w, got)
 		}
+	}
+
+	// Update exits after all init values are fully delivered.
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("InputNode did not finish sending init values in time")
+		}
+		clk.AdvanceTicks(1)
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -91,7 +117,9 @@ func feedbackSender(t *testing.T, pw *Wiring.PacedWire) func(v int) {
 func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
-	toRG := make(chan int, 16)
+
+	const latMs = 10.0
+	clk := Wiring.NewFakeClock()
 
 	fbPW := Wiring.NewPacedWire(8, Wiring.PulseSpeedWuPerMs)
 	fbPW.Target = "in"
@@ -100,25 +128,33 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	outPW := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	outPW.SetClock(clk)
+	outPW.Trace = tr
+
 	node := &Node{
-		Fire:             func() { tr.Fire("in") },
-		Init:             []int{1, 0},
-		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
-		FeedbackIn:       Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
+		Fire:  func() { tr.Fire("in") },
+		Init:  []int{1, 0},
+		Clock: clk,
+		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(outPW, ctx, "in", "ToHoldNewSendOld", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
 	}
+	obs := Wiring.NewInPaced(outPW, ctx, "obs", "In", tr)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
 
-	// Each feedback step is a DISTINCT signal; the sender steps the one clock past
+	// Each feedback step is a DISTINCT signal; the sender steps its own clock past
 	// the Recv refractory window between steps so the gate accepts each as its own
 	// fire (instead of collapsing the sequence into one train).
 	send := feedbackSender(t, fbPW)
 
 	// First loop body: peek the end of [1,0] = 0 and send (no pop, no seed).
-	if got := recv(t, toRG); got != 0 {
+	if got := pacedRecv(t, obs, clk); got != 0 {
 		t.Fatalf("first send: expected peek 0, got %d", got)
 	}
 
@@ -128,7 +164,7 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	want := []int{1, 0, 1, 0}
 	for i, w := range want {
 		send(1)
-		if got := recv(t, toRG); got != w {
+		if got := pacedRecv(t, obs, clk); got != w {
 			t.Errorf("after 1-step %d: expected send %d, got %d", i, w, got)
 		}
 	}
@@ -138,7 +174,7 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 	// the value after those four pops. Sending peeks, so a send still happens,
 	// but the value must equal the prior peek (no advance).
 	send(0)
-	if got := recv(t, toRG); got != want[len(want)-1] {
+	if got := pacedRecv(t, obs, clk); got != want[len(want)-1] {
 		t.Errorf("hold step: expected same bead %d resent, got %d", want[len(want)-1], got)
 	}
 }
@@ -149,10 +185,12 @@ func TestFeedbackPeekSendPopAndHold(t *testing.T) {
 func TestFeedbackSendDoesNotDeplete(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
-	toRG := make(chan int, 16)
 
 	var mu sync.Mutex
 	var snaps []beadSnapshot
+
+	const latMs = 10.0
+	clk := Wiring.NewFakeClock()
 
 	fbPW := Wiring.NewPacedWire(8, Wiring.PulseSpeedWuPerMs)
 	fbPW.Target = "in"
@@ -161,11 +199,18 @@ func TestFeedbackSendDoesNotDeplete(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	outPW := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	outPW.SetClock(clk)
+	outPW.Trace = tr
+
 	node := &Node{
-		Fire:             func() { tr.Fire("in") },
-		Init:             []int{1, 0},
-		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
-		FeedbackIn:       Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
+		Fire:  func() { tr.Fire("in") },
+		Init:  []int{1, 0},
+		Clock: clk,
+		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(outPW, ctx, "in", "ToHoldNewSendOld", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+		FeedbackIn: Wiring.NewInPaced(fbPW, ctx, "in", "FeedbackIn", tr),
 		EmitNodeBeads: func(working, backup []int) {
 			mu.Lock()
 			snaps = append(snaps, beadSnapshot{
@@ -175,6 +220,7 @@ func TestFeedbackSendDoesNotDeplete(t *testing.T) {
 			mu.Unlock()
 		},
 	}
+	obs := Wiring.NewInPaced(outPW, ctx, "obs", "In", tr)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -183,12 +229,16 @@ func TestFeedbackSendDoesNotDeplete(t *testing.T) {
 
 	// First send happens (peek 0). No feedback is delivered, so the node blocks
 	// on the feedback read — no pop occurs.
-	if got := recv(t, toRG); got != 0 {
+	if got := pacedRecv(t, obs, clk); got != 0 {
 		t.Fatalf("first send: expected peek 0, got %d", got)
 	}
 
-	// Give the blocked read time to (not) do anything.
-	time.Sleep(50 * time.Millisecond)
+	// Give the blocked read time to (not) do anything, ticking the clock so any
+	// stray pacing loop would have a chance to run if it were mistakenly popping.
+	for i := 0; i < 20; i++ {
+		clk.AdvanceTicks(1)
+		time.Sleep(time.Millisecond)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -271,8 +321,9 @@ func TestPacedFanOutDeliversConcurrentlyAtSameTick(t *testing.T) {
 	pw2.Trace = tr
 
 	node := &Node{
-		Fire: func() { tr.Fire("in") },
-		Init: []int{7},
+		Fire:  func() { tr.Fire("in") },
+		Init:  []int{7},
+		Clock: clk,
 		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw1, ctx, "in", "ToHoldNewSendOld", tr,
 			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 		ToExcitatory: Wiring.NewPacedOutNoGeom(pw2, ctx, "in", "ToExcitatory", tr,
@@ -347,8 +398,9 @@ func TestPacedFanOutCancelExitsPromptly(t *testing.T) {
 	pw2.Trace = tr
 
 	node := &Node{
-		Fire: func() { tr.Fire("in") },
-		Init: []int{7},
+		Fire:  func() { tr.Fire("in") },
+		Init:  []int{7},
+		Clock: clk,
 		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw1, ctx, "in", "ToHoldNewSendOld", tr,
 			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 		ToExcitatory: Wiring.NewPacedOutNoGeom(pw2, ctx, "in", "ToExcitatory", tr,

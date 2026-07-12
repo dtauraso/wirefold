@@ -20,15 +20,17 @@ type pacedPacerRig struct {
 	cancel   context.CancelFunc
 	wg       *sync.WaitGroup
 	ctx      context.Context
+	node     *Node
 }
 
-// newPacedPacerRigLat wires a Pacer over real PacedWires + a FakeClock. The
+// newPacedPacerRig wires a Pacer over real PacedWires + a FakeClock, optionally
+// wiring emitHeldBead so held-bead tests can observe EmitHeldBead calls. The
 // fireTicks channel records clk.Tick() at the moment Fire() runs (i.e. the
 // tick the Pacer receives its input and places the FeedbackOut bead), so
 // timing tests can anchor expected arrival ticks to that placement tick
 // instead of an independently-driven reference wire (which would double-count
 // the separate FromInput wire's own delivery latency).
-func newPacedPacerRigLat(t *testing.T, latMs float64) (*pacedPacerRig, <-chan int64) {
+func newPacedPacerRig(t *testing.T, latMs float64, emitHeldBead func(int)) (*pacedPacerRig, <-chan int64) {
 	t.Helper()
 	clk := Wiring.NewFakeClock()
 	tr := T.New(0)
@@ -43,8 +45,9 @@ func newPacedPacerRigLat(t *testing.T, latMs float64) (*pacedPacerRig, <-chan in
 
 	fireTicks := make(chan int64, 16)
 	node := &Node{
-		Fire:      func() { fireTicks <- clk.Tick() },
-		FromInput: Wiring.NewInPaced(inPw, ctx, "pacer", "FromInput", tr),
+		Fire:         func() { fireTicks <- clk.Tick() },
+		EmitHeldBead: emitHeldBead,
+		FromInput:    Wiring.NewInPaced(inPw, ctx, "pacer", "FromInput", tr),
 		FeedbackOut: Wiring.NewPacedOutNoGeom(outPw, ctx, "pacer", "FeedbackOut", tr,
 			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 	}
@@ -54,7 +57,40 @@ func newPacedPacerRigLat(t *testing.T, latMs float64) (*pacedPacerRig, <-chan in
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
-	return &pacedPacerRig{clk: clk, inPw: inPw, observer: observer, cancel: cancel, wg: &wg, ctx: ctx}, fireTicks
+	return &pacedPacerRig{clk: clk, inPw: inPw, observer: observer, cancel: cancel, wg: &wg, ctx: ctx, node: node}, fireTicks
+}
+
+// newPacedPacerRigLat is newPacedPacerRig without a held-bead hook, used by
+// the traversal-timing tests below that don't observe EmitHeldBead.
+func newPacedPacerRigLat(t *testing.T, latMs float64) (*pacedPacerRig, <-chan int64) {
+	t.Helper()
+	return newPacedPacerRig(t, latMs, nil)
+}
+
+// advanceUntilArrival advances the rig's FakeClock tick-by-tick, settle-polling
+// the observer after each tick (mirroring the settle logic in
+// TestPacerPacedArrivalTickMatchesTraversal) until a FeedbackOut bead is
+// delivered, returning its value.
+func advanceUntilArrival(t *testing.T, r *pacedPacerRig) int {
+	t.Helper()
+	const maxTicks = 20000
+	const settleWindow = 5 * time.Millisecond
+	const settlePoll = 50 * time.Microsecond
+	for tick := 0; tick < maxTicks; tick++ {
+		r.clk.AdvanceTicks(1)
+		deadline := time.Now().Add(settleWindow)
+		for {
+			if v, ok := r.observer.PollRecv(); ok {
+				return v
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(settlePoll)
+		}
+	}
+	t.Fatal("bead did not arrive within maxTicks")
+	return 0
 }
 
 func (r *pacedPacerRig) close() {
@@ -203,87 +239,77 @@ func recv(t *testing.T, ch <-chan int) int {
 // step on FeedbackOut (fire-and-forget), and updates Held. FeedbackOut never
 // carries Held — only the step (0 or 1).
 func TestPacerChangeStepFeedback(t *testing.T) {
-	tr := T.New(0)
-	defer tr.Close()
-	in := make(chan int, 8)
-	fb := make(chan int, 8)
+	const latMs = 20.0
+	r, _ := newPacedPacerRigLat(t, latMs)
+	defer r.close()
 
-	node := &Node{
-		Fire:        func() {},
-		FromInput:   Wiring.NewIn(in, "pacer", "FromInput", tr),
-		FeedbackOut: Wiring.NewOut(fb, "pacer", "FeedbackOut", tr),
-	}
 	// Sequence: 5 (first recv → step 1), 5 (repeat → step 0), 8 (change → step 1).
-	in <- 5
-	in <- 5
-	in <- 8
+	feedAndRecv := func(v int) int {
+		if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, v, 0) {
+			t.Fatalf("PlaceAndDriveDeliverOnly(%d) returned false", v)
+		}
+		return advanceUntilArrival(t, r)
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); node.Update(ctx) }()
-
-	if got := recv(t, fb); got != 1 {
+	if got := feedAndRecv(5); got != 1 {
 		t.Errorf("first recv (5): expected step 1, got %d", got)
 	}
-	if got := recv(t, fb); got != 0 {
+	if got := feedAndRecv(5); got != 0 {
 		t.Errorf("repeat (5): expected step 0, got %d", got)
 	}
-	if got := recv(t, fb); got != 1 {
+	if got := feedAndRecv(8); got != 1 {
 		t.Errorf("change (8): expected step 1, got %d", got)
 	}
 
-	cancel()
-	wg.Wait()
-
-	if node.Held != 8 {
-		t.Errorf("Held after last recv: expected 8, got %d", node.Held)
+	if r.node.Held != 8 {
+		t.Errorf("Held after last recv: expected 8, got %d", r.node.Held)
 	}
 }
 
 // The held bead is emitted on startup (sentinel) and re-emitted only when the
 // held value changes — a repeated value must not re-emit.
 func TestPacerHeldBeadOnChangeOnly(t *testing.T) {
-	tr := T.New(0)
-	defer tr.Close()
-	in := make(chan int, 8)
-	fb := make(chan int, 8)
+	const latMs = 20.0
 	beadCh := make(chan int, 16)
+	r, _ := newPacedPacerRig(t, latMs, func(v int) { beadCh <- v })
+	defer r.close()
 
-	node := &Node{
-		Fire:         func() {},
-		FromInput:    Wiring.NewIn(in, "pacer", "FromInput", tr),
-		FeedbackOut:  Wiring.NewOut(fb, "pacer", "FeedbackOut", tr),
-		EmitHeldBead: func(v int) { beadCh <- v },
-	}
-	in <- 3
-	in <- 3
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); node.Update(ctx) }()
-
-	// Drain feedback so the loop makes progress.
+	// Drain FeedbackOut continuously so the paced wire is never back-pressured
+	// while this test only cares about held-bead emission timing, and keep the
+	// FakeClock advancing so PlaceAndDriveDeliverOnly's self-driven delivery
+	// (and the pacer's own WaitTick-paced cycle) can actually make progress.
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-r.ctx.Done():
 				return
-			case <-fb:
+			default:
 			}
+			r.observer.PollRecv()
+			r.clk.AdvanceTicks(1)
+			time.Sleep(time.Millisecond)
 		}
 	}()
 
 	if got := recv(t, beadCh); got != noValue {
 		t.Fatalf("startup bead: expected sentinel %d, got %d", noValue, got)
 	}
+
+	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 3, 0) {
+		t.Fatal("PlaceAndDriveDeliverOnly(3) returned false")
+	}
 	if got := recv(t, beadCh); got != 3 {
 		t.Fatalf("held bead after change: expected 3, got %d", got)
 	}
+
+	if !r.inPw.PlaceAndDriveDeliverOnly(r.ctx, 3, 0) {
+		t.Fatal("PlaceAndDriveDeliverOnly(3) repeat returned false")
+	}
+
+	// Give the pacer's paced loop (clock advanced by the drain goroutine
+	// above) time to process the repeat value; the held bead must not
+	// re-emit for a repeat.
 	time.Sleep(50 * time.Millisecond)
-	cancel()
-	wg.Wait()
 
 	select {
 	case v := <-beadCh:

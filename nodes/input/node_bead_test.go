@@ -24,16 +24,26 @@ type beadSnapshot struct {
 func TestNodeBeadSnapshotsTrackArray(t *testing.T) {
 	tr := T.New(0)
 	defer tr.Close()
-	toRG := make(chan int, 16)
 
 	var mu sync.Mutex
 	var snaps []beadSnapshot
 
+	const latMs = 10.0
+	clk := Wiring.NewFakeClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	pw.SetClock(clk)
+	pw.Trace = tr
+
 	node := &Node{
-		Fire:             func() { tr.Fire("in") },
-		Init:             []int{1, 0},
-		Repeat:           false, // one working drain: 2 pops then exit
-		ToHoldNewSendOld: Wiring.NewOut(toRG, "in", "ToHoldNewSendOld", tr),
+		Fire:   func() { tr.Fire("in") },
+		Init:   []int{1, 0},
+		Repeat: false, // one working drain: 2 pops then exit
+		Clock:  clk,
+		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw, ctx, "in", "ToHoldNewSendOld", tr,
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 		EmitNodeBeads: func(working, backup []int) {
 			mu.Lock()
 			snaps = append(snaps, beadSnapshot{
@@ -43,19 +53,35 @@ func TestNodeBeadSnapshotsTrackArray(t *testing.T) {
 			mu.Unlock()
 		},
 	}
+	obs := Wiring.NewInPaced(pw, ctx, "obs", "In", tr)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); node.Update(ctx) }()
 
+	// Drain both emitted values (draining is what unblocks fanOutInFlight so
+	// Update can pop the next value and eventually exit).
+	_ = pacedRecv(t, obs, clk)
+	_ = pacedRecv(t, obs, clk)
+
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Update did not finish")
+	deadline := time.Now().Add(2 * time.Second)
+	finished := false
+	for !finished {
+		select {
+		case <-done:
+			finished = true
+		default:
+		}
+		if finished {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Update did not finish")
+		}
+		clk.AdvanceTicks(1)
+		time.Sleep(time.Millisecond)
 	}
 
 	mu.Lock()

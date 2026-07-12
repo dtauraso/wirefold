@@ -2,7 +2,6 @@ package input
 
 import (
 	"context"
-	"runtime"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
@@ -21,7 +20,14 @@ type Node struct {
 	// It blocks for the slide duration (pause-aware). nil on test builds without
 	// injection — the caller then falls back to the instant refill. beads is the
 	// OLD backup contents that become the new working row.
-	EmitRefillSlide  func(beads []int)
+	EmitRefillSlide func(beads []int)
+	// Clock is the shared node-level clock, injected by Wiring.reflectBuild
+	// directly (not derived from any specific wired output port — deriving it
+	// from ToHoldNewSendOld/ToExcitatory/ToPacer was fragile: whichever port
+	// happened to be wired first controlled pacing). nil on test builds
+	// without a loader; tests that exercise the paced path must set it
+	// (e.g. Wiring.NewFakeClock()).
+	Clock            Wiring.Clock
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
 	ToHoldNewSendOld *Wiring.Out
@@ -40,21 +46,6 @@ type Node struct {
 	// FromPulse is a declared feedback input from a Pulse node's ToInput
 	// output. Intentionally inert (no read logic) — see 3To1 edge task.
 	FromPulse *Wiring.In
-}
-
-// fanOut places beads on all wired outputs and drives them concurrently via
-// DriveAll, so every traversal animates in lockstep on this goroutine. Used
-// only in the nil-clock (chan mode / unit test) fallback — the paced path
-// below places+steps each output non-blocking instead.
-func (n *Node) fanOut(ctx context.Context, v int) {
-	items := []Wiring.DriveItem{n.ToHoldNewSendOld.PlaceDriven(v)}
-	if n.ToExcitatory.Wired() {
-		items = append(items, n.ToExcitatory.PlaceDriven(v))
-	}
-	if n.ToPacer.Wired() {
-		items = append(items, n.ToPacer.PlaceDriven(v))
-	}
-	Wiring.DriveAll(ctx, items)
 }
 
 // fanOutInFlight reports whether ANY wired fan-out output still has a bead
@@ -88,7 +79,7 @@ func (n *Node) fanOutInFlight() bool {
 // different placementTicks, delivering a full cycle apart despite identical
 // latency.
 func (n *Node) fanOutPlace(v int, tick int64) bool {
-	if !n.ToHoldNewSendOld.PlaceDrivenAt(v, tick).Live() {
+	if n.ToHoldNewSendOld.Wired() && !n.ToHoldNewSendOld.PlaceDrivenAt(v, tick).Live() {
 		return false
 	}
 	if n.ToExcitatory.Wired() && !n.ToExcitatory.PlaceDrivenAt(v, tick).Live() {
@@ -146,50 +137,7 @@ func popEnd(working, backup *[]int, init []int) int {
 //	s == 1 -> POP the end (the "change the bead" action); refill on empty.
 //	s == 0 -> hold: do nothing, keep sending the same last bead next loop.
 func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func()) {
-	clk := n.ToHoldNewSendOld.Clock()
-	if clk == nil {
-		// chan mode (tests without a paced clock): keep the original blocking
-		// fanOut/DriveAll behavior.
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-
-			if len(*working) == 0 {
-				*working = *backup
-				*backup = append([]int(nil), init...)
-				emitBeads()
-			}
-
-			v := (*working)[len(*working)-1]
-			if n.Fire != nil {
-				n.Fire()
-			}
-			n.fanOut(ctx, v)
-
-			step, ok := n.FeedbackIn.PollRecv()
-			for !ok {
-				if ctx.Err() != nil {
-					return
-				}
-				runtime.Gosched()
-				step, ok = n.FeedbackIn.PollRecv()
-			}
-			if step != 1 {
-				continue
-			}
-
-			*working = (*working)[:len(*working)-1]
-			if len(*working) == 0 {
-				if n.EmitRefillSlide != nil {
-					n.EmitRefillSlide(*backup)
-				}
-				*working = *backup
-				*backup = append([]int(nil), init...)
-			}
-			emitBeads()
-		}
-	}
+	clk := n.Clock
 
 	for {
 		if ctx.Err() != nil {
@@ -289,25 +237,7 @@ func (n *Node) Update(ctx context.Context) {
 	// Plain emit path (FeedbackIn not wired): pop the end every iteration,
 	// refilling on empty. With Repeat the buffer refills forever; without it,
 	// emit exactly len(init) values (one working drain) then stop.
-	clk := n.ToHoldNewSendOld.Clock()
-	if clk == nil {
-		// chan mode (tests without a paced clock): keep the original blocking
-		// fanOut/DriveAll behavior.
-		emitted := 0
-		for n.Repeat || emitted < len(init) {
-			if ctx.Err() != nil {
-				return
-			}
-			if n.Fire != nil {
-				n.Fire()
-			}
-			v := popEnd(&working, &backup, init)
-			emitBeads()
-			n.fanOut(ctx, v)
-			emitted++
-		}
-		return
-	}
+	clk := n.Clock
 
 	// Single loop, one step per cycle: on fire, PLACE the bead on every
 	// wired fan-out output (place-all-then-drive — preserves concurrent
