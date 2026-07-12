@@ -37,11 +37,15 @@ type Node struct {
 // value in the caller. The caller drives these together with the feedback bead in ONE
 // Wiring.DriveAll so every outbound bead animates concurrently and the node
 // goroutine blocks once (for the fan-out flight) rather than once per edge.
-func placeHeld(outs Wiring.OutMulti, held int, items []Wiring.DriveItem) []Wiring.DriveItem {
+// tick is the PINNED current tick (snapshotted once by the caller) so every
+// element of the ToNext fan-out stamps the same placementTick instead of
+// each independently re-reading the live shared clock — see
+// Wiring.OutMulti.PlaceDrivenAllAt.
+func placeHeld(outs Wiring.OutMulti, held int, tick int64, items []Wiring.DriveItem) []Wiring.DriveItem {
 	if held == gatecommon.NoValue {
 		return items
 	}
-	return outs.PlaceDrivenAll(held, items)
+	return outs.PlaceDrivenAllAt(held, tick, items)
 }
 
 func (in *Node) Update(ctx context.Context) {
@@ -95,7 +99,7 @@ func (in *Node) Update(ctx context.Context) {
 			// explicit.
 			var items []Wiring.DriveItem
 			prevHeld := in.Held
-			items = placeHeld(in.ToNext, prevHeld, items)
+			items = placeHeld(in.ToNext, prevHeld, 0, items)
 			in.Held = value
 
 			// Run the processing window: drive the placed beads to delivery on an
@@ -160,7 +164,7 @@ func (in *Node) Update(ctx context.Context) {
 				// ordering is explicit.
 				var items []Wiring.DriveItem
 				prevHeld := in.Held
-				items = placeHeld(in.ToNext, prevHeld, items)
+				items = placeHeld(in.ToNext, prevHeld, clk.Tick(), items)
 				in.Held = value
 
 				// No live bead placed (suppressed sentinel fan-out) ⇒ no real
@@ -180,8 +184,9 @@ func (in *Node) Update(ctx context.Context) {
 		// gatecommon.DriveHeld). A window ends once no ToNext bead remains
 		// in-flight after stepping.
 		anyInFlight := false
+		tick := clk.Tick()
 		for _, o := range in.ToNext {
-			o.StepOnce(ctx)
+			o.StepOnceAt(ctx, tick)
 			if o.InFlight() {
 				anyInFlight = true
 			}
