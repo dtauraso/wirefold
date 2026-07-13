@@ -519,6 +519,12 @@ type MoveDispatch struct {
 	// loader.go computeQuantizedLayout at load time and authoritative from then on —
 	// RootMove (drag) remeasures the dragged node's own triple.
 	quantizedOffsets map[string]quantizedOffset
+	// layoutHolders resolves a node id to the *LayoutHolder embedded in that node's
+	// built struct (reflection-attached by buildNodes the same way LocalPolars
+	// itself is attached — see loader.go). This is the ONLY route from the drag
+	// path (RootMove) to each node's own LayoutHolder; MoveDispatch does not own
+	// or copy LocalPolars itself, it just routes the update to the owning node.
+	layoutHolders map[string]*LayoutHolder
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -571,6 +577,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		ov:                 defaultOverlayState(),
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
+		layoutHolders:      map[string]*LayoutHolder{},
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -846,10 +853,14 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
 // is positioned independently about the scene sphere center — there is no reference/
-// parent concept, so dragging moves ONLY the dragged node (no cascade). The world-space
-// target snaps to the integer (iTheta,iPhi,iR) grid about the scene center, that node's
-// center is fanned out (re-emitting its own + incident edges' geometry, with the fresh
-// reach radius), and its own scalar triple is remeasured + persisted. Returns false for
+// parent concept, so dragging moves ONLY the dragged node (no cascade). The dragged
+// node's new world position is the drag target itself — CONTINUOUS, not snapped to any
+// grid (double-link local-polar model: the node's position is free; only each
+// neighbor's DISTANCE to it is quantized, each on that neighbor's own small grid — see
+// requantizeLocalPolars). The node's center is fanned out (re-emitting its own +
+// incident edges' geometry, with the fresh reach radius), its scene-center scalar
+// triple is remeasured + persisted (still the reload/render position source), and every
+// affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
@@ -857,20 +868,11 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	}
 	edges := md.heldEdges()
 
-	// Snap the dragged node's own (r,θ,φ) about the scene center to the absolute scene
-	// grid and move ONLY that node — every node is a root under the flat model.
+	// The dragged node's new world position is the drag target — continuous, no
+	// scene-grid snap. Only the scene-center scalar triple (remeasured below) and
+	// each neighbor's local polar (requantizeLocalPolars) are quantized; the
+	// position itself never is.
 	newPos := target
-	if md.quantizedLayout {
-		// Snap using THIS node's own effective step constants (falls back to the
-		// global defaults when unset) — not the globals directly.
-		t, ph, r := md.quantizedOffsets[nodeID].effectiveSteps()
-		p := cart2polar(target.sub(md.sceneSphere.Center))
-		newPos = md.sceneSphere.Center.add(polar2cart(polar{
-			R:     math.Round(p.R/r) * r,
-			Theta: math.Round(p.Theta/t) * t,
-			Phi:   math.Round(p.Phi/ph) * ph,
-		}))
-	}
 
 	emit := map[string]vec3{nodeID: newPos}
 	polars := md.heldPolar()
@@ -889,7 +891,81 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 			md.quantOffsetPersist.schedule(nodeID, off)
 		}
 	}
+
+	md.requantizeLocalPolars(nodeID, newPos)
 	return true
+}
+
+// requantizeLocalPolars implements the double-link local-polar model on a drag: the
+// dragged node X's new position gives each of its domain neighbors M a NEW distance to
+// it. That distance is quantized to a whole tick on THAT neighbor's own small grid
+// (layout_holder.go localStepTheta/localStepPhi/localStepR, or M's stored per-neighbor
+// step constants) — and likewise X's own local polar TO M is requantized on X's own
+// grid. The two ends' quantized values are independent and never reconciled or
+// reconstructed from one another (MODEL.md "no blow-up, by construction" — this is the
+// local-polar analogue: nothing rebuilds X's position from a local polar). Both ends'
+// LayoutHolders are updated in memory and persisted.
+func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
+	lhX, okX := md.layoutHolders[nodeID]
+	if !okX {
+		return
+	}
+	neighbors := map[string]bool{}
+	for _, em := range md.edgeMovers {
+		if em.srcID == nodeID {
+			neighbors[em.dstID] = true
+		} else if em.dstID == nodeID {
+			neighbors[em.srcID] = true
+		}
+	}
+	if len(neighbors) == 0 {
+		return
+	}
+	root := ""
+	if md.quantOffsetPersist != nil {
+		root = md.quantOffsetPersist.root
+	}
+	xChanged := false
+	for m := range neighbors {
+		lhM, okM := md.layoutHolders[m]
+		if !okM {
+			continue
+		}
+		cM, ok := md.centerOfNode(m)
+		if !ok {
+			continue
+		}
+		xChanged = true
+
+		// X's local polar TO M, on X's own effective step constants.
+		tX, pX, rX := lhX.localPolarSteps(m)
+		polXtoM := cart2polar(cM.sub(newPos))
+		lhX.SetLocalPolar(m,
+			int(math.Round(polXtoM.Theta/tX)),
+			int(math.Round(polXtoM.Phi/pX)),
+			int(math.Round(polXtoM.R/rX)),
+			tX, pX, rX)
+
+		// M's local polar TO X, on M's own effective step constants.
+		tM, pM, rM := lhM.localPolarSteps(nodeID)
+		polMtoX := cart2polar(newPos.sub(cM))
+		lhM.SetLocalPolar(nodeID,
+			int(math.Round(polMtoX.Theta/tM)),
+			int(math.Round(polMtoX.Phi/pM)),
+			int(math.Round(polMtoX.R/rM)),
+			tM, pM, rM)
+
+		if root != "" {
+			if err := WriteLocalPolars(root, m, lhM.LocalPolarsSnapshot()); err != nil {
+				logPersistErr("local_polar_persist", m, err)
+			}
+		}
+	}
+	if xChanged && root != "" {
+		if err := WriteLocalPolars(root, nodeID, lhX.LocalPolarsSnapshot()); err != nil {
+			logPersistErr("local_polar_persist", nodeID, err)
+		}
+	}
 }
 
 // reachRFromPolar computes each node's sphere REACH radius (max distance from a node to any

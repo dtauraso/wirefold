@@ -137,6 +137,17 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}()
 	}
 
+	// Each node also runs a pause-INDEPENDENT layout-update goroutine (owns its
+	// LocalPolars list, layout_holder.go) — NOT gated by the play/pause clock, so
+	// it stays live while beads are paused. Same WaitGroup accounting as Update.
+	wg.Add(len(nodes))
+	for _, node := range nodes {
+		go func() {
+			defer wg.Done()
+			node.UpdateLayout(ctx)
+		}()
+	}
+
 	// Bounded poll (not a fixed sleep) on the atomically-published node-row table —
 	// concurrency-safe (NodeRowCount), gives up after 500ms so a load never hangs.
 	for i := 0; i < 500 && snapState.NodeRowCount() < len(nodes); i++ {

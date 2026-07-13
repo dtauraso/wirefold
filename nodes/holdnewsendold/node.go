@@ -8,6 +8,7 @@ import (
 )
 
 type Node struct {
+	Wiring.LayoutHolder
 	Fire                       func()
 	EmitGeometry               func()
 	EmitHeldBead               func(held int)

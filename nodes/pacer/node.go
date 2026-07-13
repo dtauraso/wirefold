@@ -12,6 +12,7 @@ import (
 const noValue = gatecommon.NoValue
 
 type Node struct {
+	Wiring.LayoutHolder
 	Fire         func()
 	EmitGeometry func()
 	EmitHeldBead func(held int)

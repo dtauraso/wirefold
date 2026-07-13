@@ -104,5 +104,42 @@ func writeQuantOffset(root, id string, off quantizedOffset) error {
 		delete(obj, "scenePolarR")
 		delete(obj, "scenePolarTheta")
 		delete(obj, "scenePolarPhi")
+		// localPolars (layout_holder.go) is untouched here — entityReadModifyWrite only
+		// overwrites the keys this mutation sets, so any localPolars already on disk
+		// survives a position-drag write unchanged.
+	})
+}
+
+// WriteLocalPolars sets the node's localPolars list (layout_holder.go LocalPolar,
+// one per domain-edge neighbor, measured with this node as center) in
+// <root>/nodes/<id>/meta.json, preserving every other field — the same
+// read-modify-write contract as writeQuantOffset. Exported so a one-off
+// migration/stamp tool (or a future save path) can persist a computed list
+// without duplicating the read-modify-write plumbing.
+func WriteLocalPolars(root, id string, lps []LocalPolar) error {
+	if !safeTreePathComponent(id) {
+		return fmt.Errorf("unsafe node id %q", id)
+	}
+	path := filepath.Join(root, "nodes", id, "meta.json")
+	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
+		type localPolarJSON struct {
+			To          string  `json:"to"`
+			QuantITheta int     `json:"quantITheta"`
+			QuantIPhi   int     `json:"quantIPhi"`
+			QuantIR     int     `json:"quantIR"`
+			StepTheta   float64 `json:"stepTheta"`
+			StepPhi     float64 `json:"stepPhi"`
+			StepR       float64 `json:"stepR"`
+		}
+		out := make([]localPolarJSON, 0, len(lps))
+		for _, lp := range lps {
+			t, p, r := lp.effectiveSteps()
+			out = append(out, localPolarJSON{
+				To: lp.To, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+				StepTheta: t, StepPhi: p, StepR: r,
+			})
+		}
+		b, _ := json.Marshal(out)
+		obj["localPolars"] = b
 	})
 }

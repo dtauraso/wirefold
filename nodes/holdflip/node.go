@@ -27,6 +27,7 @@ import (
 //
 // held is shared via sync/atomic so the two goroutines don't race.
 type Node struct {
+	Wiring.LayoutHolder
 	Fire         func()
 	EmitGeometry func()
 	// EmitHeldBead, injected by Wiring.reflectBuild, streams the held INPUT value

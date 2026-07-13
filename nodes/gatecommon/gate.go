@@ -38,6 +38,7 @@ const NoValue = -1
 // GateNode holds all the fields shared between the two gate node kinds.
 // Each kind embeds GateNode so its init/Update can delegate here.
 type GateNode struct {
+	Wiring.LayoutHolder
 	Fire           func()
 	EmitGeometry   func()
 	EmitInputBeads func(left, right int)
