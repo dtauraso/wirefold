@@ -523,3 +523,123 @@ func TestOutGeomRace(t *testing.T) {
 	wg.Wait()
 	tr.Close()
 }
+
+// TestRootMoveContinuousPositionLocalPolarRequantize verifies the double-link
+// local-polar drag model (CLAUDE.md task/double-link-local-polar): (a) the dragged
+// node's world center is the raw drag target — NOT snapped to the scene-sphere grid —
+// and (b) for each neighbor, the dragged node's local polar to that neighbor lands on
+// a WHOLE tick of the neighbor-specific small grid, on BOTH ends of the double link.
+func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 100, "y": 0, "z": 0},
+	    "dst": {"x": 0,   "y": 0, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(4096)
+	defer tr.Close()
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx) // launch mover goroutines so fanCenters' center messages are drained
+
+	// A target deliberately off any scene-grid cell.
+	target := vec3{X: 37.3, Y: 12.1, Z: -5.7}
+	if !md.RootMove("src", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	// (a) The dragged node's world center is the continuous target, unsnapped.
+	// The nodeMover applies the center on its own goroutine; poll centerOfNode's
+	// atomic snapshot briefly rather than assuming synchronous delivery.
+	const eps = 1e-9
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c, ok := md.centerOfNode("src")
+		if ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dragged node center never converged to unsnapped target %+v (last seen %+v, ok=%v)", target, c, ok)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// (b) src's local polar to dst reconstructs the distance to a whole tick of the
+	// LOCAL-POLAR grid (localStepR/localStepTheta/localStepPhi — small, uniform cells,
+	// distinct from the coarser scene-center stepR/stepTheta/stepPhi).
+	lhSrc, ok := md.layoutHolders["src"]
+	if !ok {
+		t.Fatal("no LayoutHolder registered for src")
+	}
+	dstCenter, ok := md.centerOfNode("dst")
+	if !ok {
+		t.Fatal("centerOfNode(dst) missing")
+	}
+	wantPol := cart2polar(dstCenter.sub(target))
+	tStep, pStep, rStep := LocalPolar{}.effectiveSteps()
+	if tStep != localStepTheta || pStep != localStepPhi || rStep != localStepR {
+		t.Fatalf("local-polar default steps = (%v,%v,%v), want (%v,%v,%v)", tStep, pStep, rStep, localStepTheta, localStepPhi, localStepR)
+	}
+	wantIR := math.Round(wantPol.R / rStep)
+
+	var found *LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			cp := lp
+			found = &cp
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("src has no local polar entry for dst after RootMove")
+	}
+	if float64(found.QuantIR) != wantIR {
+		t.Fatalf("src.localPolar[dst].QuantIR = %d, want round(%v/%v) = %v", found.QuantIR, wantPol.R, rStep, wantIR)
+	}
+	// The reconstructed distance is within half a cell of the raw measured distance —
+	// i.e. it landed on a WHOLE tick, not a fraction.
+	gotR := float64(found.QuantIR) * rStep
+	if math.Abs(gotR-wantPol.R) > rStep/2+eps {
+		t.Fatalf("src.localPolar[dst] R = %v (iR=%d*step=%v), want within half a cell of measured %v", gotR, found.QuantIR, rStep, wantPol.R)
+	}
+
+	// Both ends updated: dst also carries a fresh local polar back to src.
+	lhDst, ok := md.layoutHolders["dst"]
+	if !ok {
+		t.Fatal("no LayoutHolder registered for dst")
+	}
+	var foundBack *LocalPolar
+	for _, lp := range lhDst.LocalPolarsSnapshot() {
+		if lp.To == "src" {
+			cp := lp
+			foundBack = &cp
+			break
+		}
+	}
+	if foundBack == nil {
+		t.Fatal("dst has no local polar entry for src after RootMove")
+	}
+	wantPolBack := cart2polar(target.sub(dstCenter))
+	wantIRBack := math.Round(wantPolBack.R / rStep)
+	if float64(foundBack.QuantIR) != wantIRBack {
+		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
+	}
+}

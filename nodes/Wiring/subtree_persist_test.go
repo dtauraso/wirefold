@@ -43,8 +43,28 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 		t.Fatalf("dst scenePolarTheta should be deleted (scalars are the sole persisted position): %s", dstRaw)
 	}
 
-	srcAfter, _ := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
-	if string(srcBefore) != string(srcAfter) {
-		t.Fatalf("src changed on a drag of dst (individual snap violated):\nbefore=%s\nafter=%s", srcBefore, srcAfter)
+	// src's SCALAR TRIPLE (scene-center position) must be individually-snap
+	// unaffected by a drag of dst — no reference/parent concept, every node is a
+	// root for its scene-center position. src's localPolars entry to dst IS
+	// expected to change (task/double-link-local-polar: each end of a double
+	// link re-quantizes its own local polar to the moved neighbor), so compare
+	// everything EXCEPT localPolars.
+	srcAfter, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
+	if err != nil {
+		t.Fatalf("read src meta: %v", err)
+	}
+	var srcB, srcA map[string]json.RawMessage
+	if err := json.Unmarshal(srcBefore, &srcB); err != nil {
+		t.Fatalf("unmarshal src before: %v", err)
+	}
+	if err := json.Unmarshal(srcAfter, &srcA); err != nil {
+		t.Fatalf("unmarshal src after: %v", err)
+	}
+	delete(srcB, "localPolars")
+	delete(srcA, "localPolars")
+	bJSON, _ := json.Marshal(srcB)
+	aJSON, _ := json.Marshal(srcA)
+	if string(bJSON) != string(aJSON) {
+		t.Fatalf("src's scalar triple changed on a drag of dst (individual snap violated):\nbefore=%s\nafter=%s", bJSON, aJSON)
 	}
 }

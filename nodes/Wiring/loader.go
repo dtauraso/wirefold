@@ -492,9 +492,12 @@ func (b *buildCtx) computeLocalPolars() {
 		}
 		sort.Strings(ids) // deterministic order
 
-		ownOffset := b.quantizedOffsets[n.ID]
 		ownCenter, hasOwn := b.centers[n.ID]
-		t, p, r := ownOffset.effectiveSteps()
+		// Local-polar quantization uses its OWN small, uniform cells (layout_holder.go
+		// localStepTheta/localStepPhi/localStepR) — NOT the scene-center triple's
+		// coarser stepTheta/stepPhi/stepR (the point of the double-link model: every
+		// distance lands on a whole tick of a small grid).
+		t, p, r := LocalPolar{}.effectiveSteps()
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {
@@ -771,10 +774,19 @@ func (b *buildCtx) buildNodes() error {
 		// way port/data injection works — by reflection over the promoted field
 		// every kind gets via the embedded Wiring.LayoutHolder — so the node's
 		// layout goroutine owns it without per-kind wiring.
-		if lps, ok := b.localPolars[n.ID]; ok {
-			if v := reflect.ValueOf(nd).Elem(); v.Kind() == reflect.Struct {
+		if v := reflect.ValueOf(nd).Elem(); v.Kind() == reflect.Struct {
+			if lps, ok := b.localPolars[n.ID]; ok {
 				if f := v.FieldByName("LocalPolars"); f.IsValid() && f.CanSet() {
 					f.Set(reflect.ValueOf(lps))
+				}
+			}
+			// Register this node's embedded *Wiring.LayoutHolder with the move
+			// dispatcher so a later drag (RootMove) can route a local-polar
+			// re-quantize to the OWNING node's own holder — MoveDispatch never
+			// copies or owns LocalPolars itself.
+			if lhField := v.FieldByName("LayoutHolder"); lhField.IsValid() && lhField.CanAddr() {
+				if lh, ok := lhField.Addr().Interface().(*LayoutHolder); ok {
+					b.md.layoutHolders[n.ID] = lh
 				}
 			}
 		}
