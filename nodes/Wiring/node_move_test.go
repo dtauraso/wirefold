@@ -644,14 +644,14 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	}
 }
 
-// mockPulseSink is a minimal single-In kind used only to exercise RootMove's
-// StartHoldNewSendOld equalize (isPulseOrTimeKind neighbor filter). Its Update is a
-// no-op like faninSrc/faninSink in fanin_travel_time_test.go — no bead traffic is
-// driven by this test. "Hold" and "HoldNewSendOld" are already registered by their
-// real node packages (imported by other _test.go files sharing this test binary via
-// nonblocking_traversal_test.go / gate_nonblocking_traversal_test.go), so this test
-// reuses those real kinds' port field names instead of re-registering mocks (Register
-// panics on a duplicate kind).
+// mockPulseSink is a minimal single-In kind registering the "Pulse" kind for the
+// Wiring test binary (loader_scene_polar_test.go / loader_tree_test.go load "Pulse"
+// nodes and need it registered). Its Update is a no-op like faninSrc/faninSink in
+// fanin_travel_time_test.go — no bead traffic is driven by it. "Hold" and
+// "HoldNewSendOld" are already registered by their real node packages (imported by
+// other _test.go files sharing this test binary via nonblocking_traversal_test.go /
+// gate_nonblocking_traversal_test.go), so tests reuse those real kinds instead of
+// re-registering mocks (Register panics on a duplicate kind).
 type mockPulseSink struct {
 	LayoutHolder
 	In *In
@@ -659,157 +659,24 @@ type mockPulseSink struct {
 
 func (n *mockPulseSink) Update(ctx context.Context) { <-ctx.Done() }
 
-// mockStartHold is a minimal three-Out source standing in for StartHoldNewSendOld —
-// only its registered kind name ("StartHoldNewSendOld") matters to RootMove, which
-// switches on md.kindOfNode(nodeID).
-type mockStartHold struct {
-	LayoutHolder
-	OutT *Out
-	OutP *Out
-	OutO *Out
-}
-
-func (n *mockStartHold) Update(ctx context.Context) { <-ctx.Done() }
-
 func init() {
 	Register("Pulse", func() any { return &mockPulseSink{} })
-	Register("StartHoldNewSendOld", func() any { return &mockStartHold{} })
 }
 
-// TestRootMoveStartHoldNewSendOldEqualizesPulseTimeOnly verifies the
-// StartHoldNewSendOld drag rule in RootMove (node_move.go): dragging a
-// StartHoldNewSendOld node equalizes its double-link distance to every OTHER
-// Pulse/time (HoldNewSendOld family) neighbor to its distance to its connected
-// time neighbor (the equalize source) — while non-pulse/time neighbors (e.g. a
-// Hold node) are left completely untouched. This is the pulseTimeOnly=true path,
-// distinct from node 5's legacy pulseTimeOnly=false (every peer moves) behavior.
-func TestRootMoveStartHoldNewSendOldEqualizesPulseTimeOnly(t *testing.T) {
-	const topo = `{
-	  "nodes": [
-	    {"id":"s","type":"StartHoldNewSendOld","outputs":[{"name":"OutT"},{"name":"OutP"},{"name":"OutO"}]},
-	    {"id":"t","type":"HoldNewSendOld","data":{"state":{"held":-1}},"inputs":[{"name":"FromPrevHoldNewSendOldNode"}]},
-	    {"id":"p","type":"Pulse","inputs":[{"name":"In"}]},
-	    {"id":"o","type":"Hold","data":{"state":{"held":-1}},"inputs":[{"name":"In"}]}
-	  ],
-	  "edges": [
-	    {"label":"eT","kind":"data","source":"s","sourceHandle":"OutT","target":"t","targetHandle":"FromPrevHoldNewSendOldNode"},
-	    {"label":"eP","kind":"data","source":"s","sourceHandle":"OutP","target":"p","targetHandle":"In"},
-	    {"label":"eO","kind":"data","source":"s","sourceHandle":"OutO","target":"o","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "s": {"x": 0,  "y": 0,  "z": 0},
-	    "t": {"x": 10, "y": 0,  "z": 0},
-	    "p": {"x": 0,  "y": 10, "z": 0},
-	    "o": {"x": 0,  "y": 0,  "z": 10}
-	  }}
-	}`
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "topo.json")
-	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tr := T.New(4096)
-	defer tr.Close()
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
-	if err != nil {
-		t.Fatalf("LoadTopology: %v", err)
-	}
-	md.Start(ctx)
-
-	tCenter, ok := md.centerOfNode("t")
-	if !ok {
-		t.Fatal("centerOfNode(t) missing before move")
-	}
-	pCenterBefore, ok := md.centerOfNode("p")
-	if !ok {
-		t.Fatal("centerOfNode(p) missing before move")
-	}
-	oCenterBefore, ok := md.centerOfNode("o")
-	if !ok {
-		t.Fatal("centerOfNode(o) missing before move")
-	}
-
-	target := vec3{X: 5, Y: 5, Z: 5}
-	if !md.RootMove("s", target) {
-		t.Fatal("RootMove returned false for known node")
-	}
-
-	const eps = 1e-9
-	deadline := time.Now().Add(2 * time.Second)
-	converged := func() bool {
-		c, ok := md.centerOfNode("s")
-		return ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps
-	}
-	for !converged() {
-		if time.Now().After(deadline) {
-			t.Fatal("dragged node 's' center never converged to target")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	// Give the peer equalize moves (t stays put; p/o may be re-fanned) a moment to
-	// settle onto their own mover goroutines' atomically-published snaps.
-	time.Sleep(20 * time.Millisecond)
-
-	// The time neighbor (equalize source) is left untouched.
-	tCenterAfter, ok := md.centerOfNode("t")
-	if !ok {
-		t.Fatal("centerOfNode(t) missing after move")
-	}
-	if tCenterAfter != tCenter {
-		t.Fatalf("time neighbor 't' moved: got %+v, want unchanged %+v", tCenterAfter, tCenter)
-	}
-
-	// The non-pulse/time neighbor ('o', kind Hold) is left untouched — the
-	// pulseTimeOnly filter excludes it from the repositioned peer set.
-	oCenterAfter, ok := md.centerOfNode("o")
-	if !ok {
-		t.Fatal("centerOfNode(o) missing after move")
-	}
-	if oCenterAfter != oCenterBefore {
-		t.Fatalf("non-pulse/time neighbor 'o' moved: got %+v, want unchanged %+v", oCenterAfter, oCenterBefore)
-	}
-
-	// The Pulse neighbor 'p' is repositioned so its double-link distance to the
-	// dragged node equals the dragged node's distance to the time neighbor 't' —
-	// the equalize — while its bearing from the dragged node is preserved.
-	pCenterAfter, ok := md.centerOfNode("p")
-	if !ok {
-		t.Fatal("centerOfNode(p) missing after move")
-	}
-	if pCenterAfter == pCenterBefore {
-		t.Fatal("pulse neighbor 'p' did not move at all")
-	}
-	wantDist := cart2polar(tCenterAfter.sub(target)).R
-	gotDist := cart2polar(pCenterAfter.sub(target)).R
-	if math.Abs(gotDist-wantDist) > eps {
-		t.Fatalf("dist(s,p) after equalize = %v, want dist(s,t) = %v", gotDist, wantDist)
-	}
-	wantBearing := cart2polar(pCenterBefore.sub(target))
-	gotBearing := cart2polar(pCenterAfter.sub(target))
-	if math.Abs(gotBearing.Theta-wantBearing.Theta) > eps || math.Abs(gotBearing.Phi-wantBearing.Phi) > eps {
-		t.Fatalf("p's bearing from s changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
-			gotBearing.Theta, gotBearing.Phi, wantBearing.Theta, wantBearing.Phi)
-	}
-}
-
-// TestRootMoveStartHoldNewSendOldCascadesToSource verifies the drag cascade added to
-// RootMove: dragging a StartHoldNewSendOld node "2" whose time neighbor is node "5"
-// must, after equalizing 2's own Pulse/time neighbors, make node 5 "act like it was
-// dragged" too — re-running node 5's OWN hardcoded nodeID=="5" equalize (source "2")
-// at 5's current (unchanged) position, so 5's other peers ("7","8", node 5's legacy
-// double-link equalize target set) reposition to the NEW 2<->5 distance. Node ids are
-// literally "2"/"5"/"7"/"8" so the existing nodeID=="5" / source="2" hardcode in
-// RootMove drives node 5's equalize during the cascade. Built via newMoveDispatch
-// directly (mirroring TestNode5DragEqualizesNeighborDistances in
+// TestRootMoveNode2CascadesToSource verifies the drag cascade in RootMove: dragging
+// node "2" (a HoldNewSendOld node, same kind as node 5) whose source is node "5" must,
+// after equalizing 2's own peers, make node 5 "act like it was dragged" too —
+// re-running node 5's OWN hardcoded nodeID=="5" equalize (source "2") at 5's current
+// (unchanged) position, so 5's other peers ("7","8", node 5's double-link equalize
+// target set) reposition to the NEW 2<->5 distance. Node ids are literally
+// "2"/"5"/"7"/"8" so the nodeID=="2" (source "5") and nodeID=="5" (source "2")
+// hardcodes in RootMove drive the equalize and its one-level cascade. Built via
+// newMoveDispatch directly (mirroring TestNode5DragEqualizesNeighborDistances in
 // node5_equalize_test.go), NOT via LoadTopology's quantized-layout JSON round trip,
 // which would requantize the hand-picked view coordinates onto a coarse grid.
-func TestRootMoveStartHoldNewSendOldCascadesToSource(t *testing.T) {
+func TestRootMoveNode2CascadesToSource(t *testing.T) {
 	geoms := map[string]nodeGeom{
-		"2": {Kind: "StartHoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "outT"}}},
+		"2": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "outT"}}},
 		"5": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{40, 0, 0}), Inputs: []portGeom{{Name: "inT"}}, Outputs: []portGeom{{Name: "out7"}, {Name: "out8"}}},
 		"7": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{0, 30, 20}), Inputs: []portGeom{{Name: "in"}}},
 		"8": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{-25, -10, 15}), Inputs: []portGeom{{Name: "in"}}},

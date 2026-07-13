@@ -31,7 +31,6 @@ package Wiring
 import (
 	"context"
 	"math"
-	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -731,53 +730,6 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 	return vec3{}, false
 }
 
-// kindOfNode returns a node's registered kind (its spec "type", carried on the mover's
-// nodeGeom) by id. Used by the drag-time equalize to decide (a) whether the dragged node
-// runs the equalize at all and (b) which neighbors are Pulse/time nodes.
-func (md *MoveDispatch) kindOfNode(id string) (string, bool) {
-	if nm, ok := md.nodeMovers[id]; ok {
-		return nm.geom.Kind, true
-	}
-	return "", false
-}
-
-// isPulseOrTimeKind reports whether kind is a Pulse or a time (HoldNewSendOld family,
-// including StartHoldNewSendOld) node — the neighbor set the StartHoldNewSendOld drag
-// equalize applies its move-distance update to.
-func isPulseOrTimeKind(kind string) bool {
-	switch kind {
-	case "Pulse", "HoldNewSendOld", "StartHoldNewSendOld":
-		return true
-	}
-	return false
-}
-
-// timeNeighbor returns the connected time (HoldNewSendOld family) neighbor of node id —
-// the source/reference for the StartHoldNewSendOld drag equalize. Neighbors are scanned in
-// sorted id order so the pick is deterministic when more than one time node connects.
-func (md *MoveDispatch) timeNeighbor(id string) (string, bool) {
-	neighbors := map[string]bool{}
-	for _, em := range md.edgeMovers {
-		switch id {
-		case em.srcID:
-			neighbors[em.dstID] = true
-		case em.dstID:
-			neighbors[em.srcID] = true
-		}
-	}
-	ids := make([]string, 0, len(neighbors))
-	for n := range neighbors {
-		ids = append(ids, n)
-	}
-	sort.Strings(ids)
-	for _, n := range ids {
-		if k, ok := md.kindOfNode(n); ok && (k == "HoldNewSendOld" || k == "StartHoldNewSendOld") {
-			return n, true
-		}
-	}
-	return "", false
-}
-
 // sendMove routes one moveMsg to another node's (or edge's) inbox by id, if known.
 // Used by the decentralized lock-propagation cascade so a nodeMover can re-broadcast
 // to its own lock-neighbors without any central worklist — the dispatch map is the
@@ -892,7 +844,7 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 			// re-emit, not a position write. Sending a non-nil Center rebuilt from
 			// nm.snap.Load() here would re-apply partnerID's OWN current snapshot to
 			// itself — normally an idempotent no-op, but a genuine hazard when a
-			// second, concurrently-in-flight fanCenters call (e.g. the StartHoldNewSendOld
+			// second, concurrently-in-flight fanCenters call (e.g. the node-2→5
 			// drag-equalize cascade) has ALREADY queued partnerID's real new-position
 			// message on this same inbox: a stale non-nil re-read here would queue
 			// BEHIND the real update and clobber it back to the pre-move position on
@@ -921,14 +873,12 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 
 // rootMove is RootMove's internal implementation, parameterized by:
 //
-//   - cascadeToSource: when true and nodeID is a StartHoldNewSendOld node, after
-//     equalizing nodeID's OWN Pulse/time neighbors, rootMove also re-runs the
-//     equalize on nodeID's source time-neighbor S at S's CURRENT (unchanged)
-//     position — "S acts like it was dragged" so S's own peer distances (e.g.
-//     node 5's 5↔7 / 5↔8) recompute against the NEW nodeID↔S distance. The
-//     cascade call passes cascadeToSource=false so a StartHoldNewSendOld source
-//     (if ever chained) does not itself cascade further — one level only, no
-//     infinite recursion.
+//   - cascadeToSource: when true and nodeID is node "2", after equalizing node 2's
+//     OWN peers, rootMove also re-runs the equalize on its source node "5" at 5's
+//     CURRENT (unchanged) position — "5 acts like it was dragged" so 5's own peer
+//     distances (5↔7 / 5↔8) recompute against the NEW 2↔5 distance. The cascade
+//     call passes cascadeToSource=false so node 5's own equalize does not itself
+//     cascade back — one level only, no infinite recursion.
 //   - sourceCenterOverride: when non-nil, equalizeNeighborDistances uses this
 //     value as the equalize SOURCE's center instead of reading it back off
 //     md.centerOfNode(source). This matters ONLY for the cascade call: fanCenters
@@ -975,31 +925,27 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, cascadeToSource boo
 
 	md.requantizeLocalPolars(nodeID, newPos)
 
-	// Scoped to node 5 by request: a peer-frame local-polar-radial equalization, NOT a
-	// parent/child cascade. Node 5's double-link distances to its other peers (7, 8) are
-	// set equal to its double-link distance to peer 2 (all measured in node 5's own
-	// frame, node 5 as center); peer 2 stays put. pulseTimeOnly=false: every peer moves.
-	if nodeID == "5" {
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, false, sourceCenterOverride)
-	} else if kind, ok := md.kindOfNode(nodeID); ok && kind == "StartHoldNewSendOld" {
-		// StartHoldNewSendOld: the same peer-frame equalization, but the reference
-		// (source) is the connected time (HoldNewSendOld family) neighbor and the move-
-		// distance update applies ONLY to Pulse and time neighbors (pulseTimeOnly=true).
-		// For node 2 this makes node 5 the source and applies to node 6.
-		if src, ok := md.timeNeighbor(nodeID); ok {
-			md.equalizeNeighborDistancesWithSourceCenter(nodeID, src, newPos, true, sourceCenterOverride)
-			// Cascade: have the source time-neighbor S act like it was dragged too,
-			// so ITS other peer distances (node 5's 5↔7 / 5↔8) recompute against the
-			// new nodeID↔S distance. Re-run S's own rootMove at S's CURRENT (unchanged)
-			// position, passing nodeID's just-computed newPos as the sourceCenterOverride
-			// so S's nested equalize reads the FRESH nodeID center rather than racing
-			// fanCenters' async publication (see rootMove's doc comment). One level only
-			// (cascadeToSource=false on the nested call).
-			if cascadeToSource {
-				if srcCenter, ok := md.centerOfNode(src); ok {
-					fresh := newPos
-					md.rootMove(src, srcCenter, false, &fresh)
-				}
+	// Scoped to nodes 5 and 2 by request: a peer-frame local-polar-radial equalization,
+	// NOT a parent/child cascade. The dragged node's double-link distances to its other
+	// peers are set equal to its double-link distance to the named source peer (all
+	// measured in the dragged node's own frame, dragged node as center); the source peer
+	// stays put. Nodes 5 and 2 are mirror sources for each other (5's source is 2, 2's
+	// source is 5) and both are HoldNewSendOld — same kind, same all-peers rule.
+	switch nodeID {
+	case "5":
+		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
+	case "2":
+		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "5", newPos, sourceCenterOverride)
+		// Cascade: have the source node 5 act like it was dragged too, so ITS other peer
+		// distances (5↔7 / 5↔8) recompute against the new 2↔5 distance. Re-run node 5's
+		// own rootMove at 5's CURRENT (unchanged) position, passing node 2's just-computed
+		// newPos as the sourceCenterOverride so 5's nested equalize reads the FRESH node-2
+		// center rather than racing fanCenters' async publication (see rootMove's doc
+		// comment). One level only (cascadeToSource=false on the nested call).
+		if cascadeToSource {
+			if srcCenter, ok := md.centerOfNode("5"); ok {
+				fresh := newPos
+				md.rootMove("5", srcCenter, false, &fresh)
 			}
 		}
 	}
@@ -1015,14 +961,11 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, cascadeToSource boo
 // RootMove applies the dragged node's own move: fanCenters (recompute reach over the
 // affected set), the scalar-triple remeasure + quantOffsetPersist schedule, and
 // requantizeLocalPolars for that peer.
-// pulseTimeOnly restricts the repositioned peer set to Pulse and time (HoldNewSendOld
-// family) neighbors — the StartHoldNewSendOld rule. When false, every peer moves (node 5's
-// legacy behavior).
 // sourceCenterOverride, when non-nil, is used as the source peer's center INSTEAD of reading
 // md.centerOfNode(source). See rootMove's doc comment for why this matters — it lets the
-// one-level StartHoldNewSendOld cascade hand the source's equalize a just-computed fresh
-// center instead of racing fanCenters' async inbox publication.
-func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, source string, newPos vec3, pulseTimeOnly bool, sourceCenterOverride *vec3) {
+// one-level node-2→5 cascade hand the source's equalize a just-computed fresh center instead
+// of racing fanCenters' async inbox publication.
+func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, source string, newPos vec3, sourceCenterOverride *vec3) {
 	var sourceCenter vec3
 	if sourceCenterOverride != nil {
 		sourceCenter = *sourceCenterOverride
@@ -1048,11 +991,6 @@ func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, sourc
 		}
 		if other == "" || other == source {
 			continue
-		}
-		if pulseTimeOnly {
-			if k, ok := md.kindOfNode(other); !ok || !isPulseOrTimeKind(k) {
-				continue
-			}
 		}
 		peers[other] = true
 	}

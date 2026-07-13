@@ -26,12 +26,6 @@ export interface PacerData {
   };
 }
 
-export interface StartHoldNewSendOldData {
-  state: {
-    held: number;
-  };
-}
-
 // parseNodeData validates node.data for known kinds. Unknown kinds pass through.
 // Throws ParseError if the data shape does not match the Go struct.
 export function parseNodeData(kind: string, data: unknown, path: string): unknown {
@@ -66,12 +60,6 @@ export function parseNodeData(kind: string, data: unknown, path: string): unknow
     }
     case "Pulse":
       return data; // no wire:"data.*" fields on the Go struct
-    case "StartHoldNewSendOld": {
-      if (typeof data !== "object" || Array.isArray(data)) throw new ParseError(path+".data: expected object");
-      const d = data as Record<string, unknown>;
-    { const p = d["state"] as Record<string, unknown>|undefined; if (!p || typeof p !== "object") throw new ParseError(path+".data.state: expected object"); if (typeof p["held"] !== "number") throw new ParseError(path+".data.state.held: expected number"); }
-      return data;
-    }
     case "WindowAndInhibitLeftGate":
       return data; // no wire:"data.*" fields on the Go struct
     case "WindowAndInhibitRightGate":
