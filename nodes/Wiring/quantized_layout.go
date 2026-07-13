@@ -10,9 +10,10 @@ import (
 // concept; every node is a "root"). Three GLOBAL step constants (same for every node in
 // the graph) turn the integers into a world offset.
 
-// Global quantization step constants — same for every node/edge in the graph. Offsets
-// are always integer multiples of these: offset = (iTheta*stepTheta, iPhi*stepPhi,
-// iR*stepR).
+// Default quantization step constants — used for any node that has no stored per-node
+// step constants (quantizedOffset.cTheta/cPhi/cR == 0). Offsets are always integer
+// multiples of a node's EFFECTIVE constants (its own, or these defaults):
+// offset = (iTheta*cTheta, iPhi*cPhi, iR*cR).
 const (
 	stepTheta = math.Pi / 12
 	stepPhi   = math.Pi / 12
@@ -24,12 +25,37 @@ const (
 )
 
 // quantizedOffset is a node's quantized polar offset (iTheta,iPhi,iR) about the ONE
-// scene-sphere center. iTheta/iPhi/iR default to zero (at the scene center) until
-// authored.
+// scene-sphere center, PLUS that node's own step constants (cTheta,cPhi,cR). iTheta/
+// iPhi/iR default to zero (at the scene center) until authored. cTheta/cPhi/cR default
+// to zero, meaning "unset" — effectiveSteps falls back to the global defaults
+// (stepTheta/stepPhi/stepR) for any unset component, so an all-zero quantizedOffset
+// reproduces today's global-constant behavior exactly.
 type quantizedOffset struct {
 	iTheta int
 	iPhi   int
 	iR     int
+
+	cTheta float64
+	cPhi   float64
+	cR     float64
+}
+
+// effectiveSteps returns this node's own step constants, falling back to the global
+// defaults for any component that is unset (zero). Every site that turns a scalar
+// triple into (or out of) a world offset MUST go through this — it is the one place
+// "per-node step, default fallback" is implemented.
+func (o quantizedOffset) effectiveSteps() (t, p, r float64) {
+	t, p, r = o.cTheta, o.cPhi, o.cR
+	if t == 0 {
+		t = stepTheta
+	}
+	if p == 0 {
+		p = stepPhi
+	}
+	if r == 0 {
+		r = stepR
+	}
+	return
 }
 
 // measureScalars is the flat-polar INVERSE measurement: given each node's current world
@@ -40,18 +66,29 @@ type quantizedOffset struct {
 //
 // ids selects which node ids to measure (so callers can measure a subset without
 // building a throwaway map); a node missing a center is omitted (nothing to measure).
-func measureScalars(centers map[string]vec3, ids map[string]bool, sceneCenter vec3) map[string]quantizedOffset {
+//
+// prior carries each node's PRIOR quantizedOffset (e.g. md.quantizedOffsets before a
+// drag, or the loaded/measured offsets so far) so its stored step constants
+// (cTheta/cPhi/cR) can be PRESERVED into the result — a node's constants never change
+// on drag/remeasure, only its integer scalars do. prior may be nil (constants default
+// to unset → global defaults).
+func measureScalars(centers map[string]vec3, ids map[string]bool, sceneCenter vec3, prior map[string]quantizedOffset) map[string]quantizedOffset {
 	result := make(map[string]quantizedOffset, len(ids))
 	for id := range ids {
 		pos, ok := centers[id]
 		if !ok {
 			continue
 		}
+		carried := prior[id] // zero value if absent — constants default to unset
+		t, p_, r := carried.effectiveSteps()
 		p := cart2polar(pos.sub(sceneCenter))
 		result[id] = quantizedOffset{
-			iTheta: int(math.Round(p.Theta / stepTheta)),
-			iPhi:   int(math.Round(p.Phi / stepPhi)),
-			iR:     int(math.Round(p.R / stepR)),
+			iTheta: int(math.Round(p.Theta / t)),
+			iPhi:   int(math.Round(p.Phi / p_)),
+			iR:     int(math.Round(p.R / r)),
+			cTheta: carried.cTheta,
+			cPhi:   carried.cPhi,
+			cR:     carried.cR,
 		}
 	}
 	return result
@@ -62,14 +99,18 @@ func measureScalars(centers map[string]vec3, ids map[string]bool, sceneCenter ve
 // center directly about the ONE scene center — every node is independent (no reference/
 // parent to resolve first):
 //
-//	derived[id] = sceneCenter + polar2cart({R: iR*stepR, Theta: iTheta*stepTheta, Phi: iPhi*stepPhi})
+//	derived[id] = sceneCenter + polar2cart({R: iR*cR, Theta: iTheta*cTheta, Phi: iPhi*cPhi})
+//
+// using each node's OWN effective step constants (o.effectiveSteps()), falling back to
+// the global defaults for any unset component.
 func deriveCenters(scalars map[string]quantizedOffset, sceneCenter vec3) map[string]vec3 {
 	derived := make(map[string]vec3, len(scalars))
 	for id, o := range scalars {
+		t, p, r := o.effectiveSteps()
 		derived[id] = sceneCenter.add(polar2cart(polar{
-			R:     float64(o.iR) * stepR,
-			Theta: float64(o.iTheta) * stepTheta,
-			Phi:   float64(o.iPhi) * stepPhi,
+			R:     float64(o.iR) * r,
+			Theta: float64(o.iTheta) * t,
+			Phi:   float64(o.iPhi) * p,
 		}))
 	}
 	return derived

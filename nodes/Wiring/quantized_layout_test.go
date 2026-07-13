@@ -19,7 +19,7 @@ func TestMeasureScalarsRoundTrips(t *testing.T) {
 	}
 	derived := deriveCenters(scalars, sceneCenter)
 	ids := map[string]bool{"g": true, "p": true, "c": true}
-	remeasured := measureScalars(derived, ids, sceneCenter)
+	remeasured := measureScalars(derived, ids, sceneCenter, scalars)
 	for _, id := range []string{"g", "p", "c"} {
 		if remeasured[id] != scalars[id] {
 			t.Fatalf("%s: round-trip mismatch remeasured=%+v want=%+v", id, remeasured[id], scalars[id])
@@ -37,7 +37,7 @@ func TestMeasureScalarsMeasuresEveryNodeAboutSceneCenter(t *testing.T) {
 		"b": sceneCenter.add(vec3{X: 0, Y: 0, Z: 60}),
 	}
 	ids := map[string]bool{"a": true, "b": true}
-	offs := measureScalars(centers, ids, sceneCenter)
+	offs := measureScalars(centers, ids, sceneCenter, nil)
 	if _, ok := offs["a"]; !ok {
 		t.Fatal("expected an offset for a")
 	}

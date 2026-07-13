@@ -43,6 +43,10 @@ type jsonMeta struct {
 	QuantITheta *int `json:"quantITheta,omitempty"`
 	QuantIPhi   *int `json:"quantIPhi,omitempty"`
 	QuantIR     *int `json:"quantIR,omitempty"`
+	// Per-node step constants — see specNode's field doc (loader.go).
+	StepTheta *float64 `json:"stepTheta,omitempty"`
+	StepPhi   *float64 `json:"stepPhi,omitempty"`
+	StepR     *float64 `json:"stepR,omitempty"`
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -82,6 +86,9 @@ func loadTree(root string) (topoSpec, error) {
 			QuantITheta:     meta.QuantITheta,
 			QuantIPhi:       meta.QuantIPhi,
 			QuantIR:         meta.QuantIR,
+			StepTheta:       meta.StepTheta,
+			StepPhi:         meta.StepPhi,
+			StepR:           meta.StepR,
 		}
 
 		// data.json — optional

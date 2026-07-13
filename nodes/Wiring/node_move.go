@@ -861,11 +861,14 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// grid and move ONLY that node — every node is a root under the flat model.
 	newPos := target
 	if md.quantizedLayout {
+		// Snap using THIS node's own effective step constants (falls back to the
+		// global defaults when unset) — not the globals directly.
+		t, ph, r := md.quantizedOffsets[nodeID].effectiveSteps()
 		p := cart2polar(target.sub(md.sceneSphere.Center))
 		newPos = md.sceneSphere.Center.add(polar2cart(polar{
-			R:     math.Round(p.R/stepR) * stepR,
-			Theta: math.Round(p.Theta/stepTheta) * stepTheta,
-			Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
+			R:     math.Round(p.R/r) * r,
+			Theta: math.Round(p.Theta/t) * t,
+			Phi:   math.Round(p.Phi/ph) * ph,
 		}))
 	}
 
@@ -880,7 +883,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// triple from its new position and persist it — no other node's triple changes,
 	// since there is no reference relationship to propagate through.
 	if md.quantizedLayout {
-		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center)[nodeID]
+		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nodeID]
 		md.quantizedOffsets[nodeID] = off
 		if md.quantOffsetPersist != nil {
 			md.quantOffsetPersist.schedule(nodeID, off)
