@@ -15,6 +15,7 @@ const noValue = gatecommon.NoValue
 // holds/displays it, and produces NO output. On each received value it fires,
 // updates Held, and re-emits the held bead when the value changes.
 type Node struct {
+	Wiring.LayoutHolder
 	Fire         func()
 	EmitGeometry func()
 	EmitHeldBead func(held int)

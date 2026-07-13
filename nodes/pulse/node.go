@@ -30,6 +30,7 @@ import (
 // The output is NOT precondition-gated: Pulse self-emits noValue from the start
 // (like the Input bootstrap), it is not inert until fed.
 type Node struct {
+	Wiring.LayoutHolder
 	Fire         func()
 	EmitGeometry func()
 	// EmitHeldBead, injected by Wiring.reflectBuild, streams the held value as a
