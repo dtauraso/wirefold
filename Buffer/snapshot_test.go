@@ -820,9 +820,8 @@ func TestNodeKindIDRoundTrip(t *testing.T) {
 		"Input":                     3,
 		"Pacer":                     4,
 		"Pulse":                     5,
-		"StartHoldNewSendOld":       6,
-		"WindowAndInhibitLeftGate":  7,
-		"WindowAndInhibitRightGate": 8,
+		"WindowAndInhibitLeftGate":  6,
+		"WindowAndInhibitRightGate": 7,
 	}
 	for kind, wantID := range want {
 		if got := NodeKindID(kind); got != wantID {
