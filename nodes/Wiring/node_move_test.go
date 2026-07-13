@@ -643,3 +643,155 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
 	}
 }
+
+// mockPulseSink is a minimal single-In kind used only to exercise RootMove's
+// StartHoldNewSendOld equalize (isPulseOrTimeKind neighbor filter). Its Update is a
+// no-op like faninSrc/faninSink in fanin_travel_time_test.go — no bead traffic is
+// driven by this test. "Hold" and "HoldNewSendOld" are already registered by their
+// real node packages (imported by other _test.go files sharing this test binary via
+// nonblocking_traversal_test.go / gate_nonblocking_traversal_test.go), so this test
+// reuses those real kinds' port field names instead of re-registering mocks (Register
+// panics on a duplicate kind).
+type mockPulseSink struct {
+	LayoutHolder
+	In *In
+}
+
+func (n *mockPulseSink) Update(ctx context.Context) { <-ctx.Done() }
+
+// mockStartHold is a minimal three-Out source standing in for StartHoldNewSendOld —
+// only its registered kind name ("StartHoldNewSendOld") matters to RootMove, which
+// switches on md.kindOfNode(nodeID).
+type mockStartHold struct {
+	LayoutHolder
+	OutT *Out
+	OutP *Out
+	OutO *Out
+}
+
+func (n *mockStartHold) Update(ctx context.Context) { <-ctx.Done() }
+
+func init() {
+	Register("Pulse", func() any { return &mockPulseSink{} })
+	Register("StartHoldNewSendOld", func() any { return &mockStartHold{} })
+}
+
+// TestRootMoveStartHoldNewSendOldEqualizesPulseTimeOnly verifies the
+// StartHoldNewSendOld drag rule in RootMove (node_move.go): dragging a
+// StartHoldNewSendOld node equalizes its double-link distance to every OTHER
+// Pulse/time (HoldNewSendOld family) neighbor to its distance to its connected
+// time neighbor (the equalize source) — while non-pulse/time neighbors (e.g. a
+// Hold node) are left completely untouched. This is the pulseTimeOnly=true path,
+// distinct from node 5's legacy pulseTimeOnly=false (every peer moves) behavior.
+func TestRootMoveStartHoldNewSendOldEqualizesPulseTimeOnly(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"s","type":"StartHoldNewSendOld","outputs":[{"name":"OutT"},{"name":"OutP"},{"name":"OutO"}]},
+	    {"id":"t","type":"HoldNewSendOld","data":{"state":{"held":-1}},"inputs":[{"name":"FromPrevHoldNewSendOldNode"}]},
+	    {"id":"p","type":"Pulse","inputs":[{"name":"In"}]},
+	    {"id":"o","type":"Hold","data":{"state":{"held":-1}},"inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"eT","kind":"data","source":"s","sourceHandle":"OutT","target":"t","targetHandle":"FromPrevHoldNewSendOldNode"},
+	    {"label":"eP","kind":"data","source":"s","sourceHandle":"OutP","target":"p","targetHandle":"In"},
+	    {"label":"eO","kind":"data","source":"s","sourceHandle":"OutO","target":"o","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "s": {"x": 0,  "y": 0,  "z": 0},
+	    "t": {"x": 10, "y": 0,  "z": 0},
+	    "p": {"x": 0,  "y": 10, "z": 0},
+	    "o": {"x": 0,  "y": 0,  "z": 10}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(4096)
+	defer tr.Close()
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx)
+
+	tCenter, ok := md.centerOfNode("t")
+	if !ok {
+		t.Fatal("centerOfNode(t) missing before move")
+	}
+	pCenterBefore, ok := md.centerOfNode("p")
+	if !ok {
+		t.Fatal("centerOfNode(p) missing before move")
+	}
+	oCenterBefore, ok := md.centerOfNode("o")
+	if !ok {
+		t.Fatal("centerOfNode(o) missing before move")
+	}
+
+	target := vec3{X: 5, Y: 5, Z: 5}
+	if !md.RootMove("s", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	const eps = 1e-9
+	deadline := time.Now().Add(2 * time.Second)
+	converged := func() bool {
+		c, ok := md.centerOfNode("s")
+		return ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps
+	}
+	for !converged() {
+		if time.Now().After(deadline) {
+			t.Fatal("dragged node 's' center never converged to target")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Give the peer equalize moves (t stays put; p/o may be re-fanned) a moment to
+	// settle onto their own mover goroutines' atomically-published snaps.
+	time.Sleep(20 * time.Millisecond)
+
+	// The time neighbor (equalize source) is left untouched.
+	tCenterAfter, ok := md.centerOfNode("t")
+	if !ok {
+		t.Fatal("centerOfNode(t) missing after move")
+	}
+	if tCenterAfter != tCenter {
+		t.Fatalf("time neighbor 't' moved: got %+v, want unchanged %+v", tCenterAfter, tCenter)
+	}
+
+	// The non-pulse/time neighbor ('o', kind Hold) is left untouched — the
+	// pulseTimeOnly filter excludes it from the repositioned peer set.
+	oCenterAfter, ok := md.centerOfNode("o")
+	if !ok {
+		t.Fatal("centerOfNode(o) missing after move")
+	}
+	if oCenterAfter != oCenterBefore {
+		t.Fatalf("non-pulse/time neighbor 'o' moved: got %+v, want unchanged %+v", oCenterAfter, oCenterBefore)
+	}
+
+	// The Pulse neighbor 'p' is repositioned so its double-link distance to the
+	// dragged node equals the dragged node's distance to the time neighbor 't' —
+	// the equalize — while its bearing from the dragged node is preserved.
+	pCenterAfter, ok := md.centerOfNode("p")
+	if !ok {
+		t.Fatal("centerOfNode(p) missing after move")
+	}
+	if pCenterAfter == pCenterBefore {
+		t.Fatal("pulse neighbor 'p' did not move at all")
+	}
+	wantDist := cart2polar(tCenterAfter.sub(target)).R
+	gotDist := cart2polar(pCenterAfter.sub(target)).R
+	if math.Abs(gotDist-wantDist) > eps {
+		t.Fatalf("dist(s,p) after equalize = %v, want dist(s,t) = %v", gotDist, wantDist)
+	}
+	wantBearing := cart2polar(pCenterBefore.sub(target))
+	gotBearing := cart2polar(pCenterAfter.sub(target))
+	if math.Abs(gotBearing.Theta-wantBearing.Theta) > eps || math.Abs(gotBearing.Phi-wantBearing.Phi) > eps {
+		t.Fatalf("p's bearing from s changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
+			gotBearing.Theta, gotBearing.Phi, wantBearing.Theta, wantBearing.Phi)
+	}
+}
