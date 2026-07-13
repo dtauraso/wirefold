@@ -132,10 +132,10 @@ func TestBuildLayoutEdgesMirrorsSpecEdges(t *testing.T) {
 	if n1 == nil || n2 == nil || n3 == nil {
 		t.Fatalf("missing a layout port: n1=%v n2=%v n3=%v", n1, n2, n3)
 	}
-	// SLICE 2: n1's spec type ("Input") is not a radius-forwarding node, so Handle would not forward
-	// past it. This test is only about hidden-edge fan-out mirroring the domain edges,
-	// not the radius-forwarder gate, so mark it a radius-forwarding node directly (same-package access).
-	n1.forwardsRadius = true
+	// This test is only about hidden-edge fan-out mirroring the domain edges, not
+	// the propagation gate. Handle forwards only when the node's kind equals the
+	// message's PropagatingKind, so inject below with PropagatingKind == n1's kind
+	// ("Input") to make n1 eligible to forward.
 	if len(n1.out) != 2 {
 		t.Fatalf("n1 should fan out on the hidden layout graph to both n2 and n3, got %d outbound edges", len(n1.out))
 	}
@@ -145,7 +145,7 @@ func TestBuildLayoutEdgesMirrorsSpecEdges(t *testing.T) {
 
 	// Inject at n1 and verify BOTH n2 and n3 receive it (mirrors the domain
 	// fan-out one-for-one).
-	n1.Inject(LayoutMsg{Visited: map[string]bool{}})
+	n1.Inject(LayoutMsg{PropagatingKind: "Input", Visited: map[string]bool{}})
 	drainLayoutPort(t, n1)
 
 	if _, ok := n2.TryRecv(); !ok {

@@ -12,12 +12,12 @@ type LayoutMsg struct {
 	Visited    map[string]bool
 	IR         int
 	FromCenter vec3
-	// Kind is the node-kind name of the node propagating this cascade (the
-	// dragged time node at the seed, and each forwarding node thereafter). Added
-	// to the message so downstream propagation can key off the propagator's kind;
-	// carried through forwarding unchanged for now — it does not yet alter how the
-	// message is propagated or applied.
-	Kind string
+	// PropagatingKind names the node kind ALLOWED TO PROPAGATE (forward) this
+	// cascade — it is about who may SEND the message onward, NOT about who updates
+	// their position (every receiver still applies). Set once by the seed to the
+	// dragged node's kind and carried unchanged through forwarding; a receiving
+	// node forwards only if its own kind equals this.
+	PropagatingKind string
 	// Direct marks a DIRECT position set (SLICE 3: the drag origin's own new center,
 	// delivered by node_move.go RootMove/fanCenters via LayoutPort.InjectDirect) rather
 	// than a radius-cascade hop. A direct message is applied verbatim to THIS node
@@ -37,7 +37,7 @@ func (msg LayoutMsg) clone() LayoutMsg {
 	for k, val := range msg.Visited {
 		v[k] = val
 	}
-	return LayoutMsg{Visited: v, IR: msg.IR, FromCenter: msg.FromCenter, Kind: msg.Kind}
+	return LayoutMsg{Visited: v, IR: msg.IR, FromCenter: msg.FromCenter, PropagatingKind: msg.PropagatingKind}
 }
 
 // LayoutPort is the per-node hidden-layout-graph plumbing: one inbound channel
@@ -63,8 +63,8 @@ type LayoutPort struct {
 	// Update loop), so no lock is needed.
 	iR int
 	// kind is this node's kind name (e.g. "HoldNewSendOld"), loaded at build time.
-	// Stamped into a forwarded LayoutMsg's Kind field so the message carries the
-	// propagating node's kind.
+	// A node forwards a cascade only when its kind equals the message's
+	// PropagatingKind (Handle's propagation gate).
 	kind string
 	// forwardsRadius marks a HoldNewSendOld node: only a radius-forwarding node forwards a
 	// cascade past itself (quantized_layout.go / layout-on-domain-network.md).
@@ -228,14 +228,20 @@ func (p *LayoutPort) Handle(msg LayoutMsg) {
 		p.apply(newCenter, newIR)
 	}
 
-	if !p.forwardsRadius {
+	// Propagation is gated by PropagatingKind: only a node whose OWN kind matches
+	// the message's PropagatingKind is allowed to forward this cascade further.
+	// This gates who may SEND, not who updates — every receiver above still
+	// applied. The allowed kind is set once by the seed (the dragged node's kind)
+	// and carried unchanged through forwarding. So when 2 sends to {1,6,5}, all
+	// three receive/apply, but only 5 (kind == PropagatingKind == HoldNewSendOld)
+	// forwards; 1 (Input) and 6 (Pulse) do not.
+	if p.kind != msg.PropagatingKind {
 		return
 	}
 	for _, out := range p.out {
 		fwd := msg.clone()
 		fwd.IR = newIR
 		fwd.FromCenter = newCenter
-		fwd.Kind = p.kind
 		select {
 		case out <- fwd:
 		default:
