@@ -24,13 +24,14 @@ const EXPECTED_ORDER = [
   "Input",
   "Pacer",
   "Pulse",
+  "StartHoldNewSendOld",
   "WindowAndInhibitLeftGate",
   "WindowAndInhibitRightGate",
 ] as const;
 
 describe("NODE_DEFS_ARRAY order parity with Go kindIDMap", () => {
-  it("has 8 entries", () => {
-    expect(NODE_DEFS_ARRAY.length).toBe(8);
+  it("has 9 entries", () => {
+    expect(NODE_DEFS_ARRAY.length).toBe(9);
   });
 
   it("entries are in alphabetical Go-kind order matching kindIDMap", () => {
