@@ -880,20 +880,113 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromPolar(polars, edges)
 	md.fanCenters(emit, reach)
 
-	// The scalar triple (iTheta,iPhi,iR about the scene center) is the sole persisted
-	// position source under the flat polar model. Remeasure the dragged node's own
-	// triple from its new position and persist it — no other node's triple changes,
-	// since there is no reference relationship to propagate through.
+	// Persist the dragged node: the EXACT scene-polar position is the lossless source of
+	// truth (loaded verbatim on reload); the quantized triple rides along as a cache.
 	if md.quantizedLayout {
 		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nodeID]
 		md.quantizedOffsets[nodeID] = off
 		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(nodeID, off)
+			md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
 		}
 	}
 
 	md.requantizeLocalPolars(nodeID, newPos)
+
+	// Scoped to node 5 by request: a peer-frame local-polar-radial equalization, NOT a
+	// parent/child cascade. Node 5's double-link distances to its other peers (7, 8) are
+	// set equal to its double-link distance to peer 2 (all measured in node 5's own
+	// frame, node 5 as center); peer 2 stays put.
+	if nodeID == "5" {
+		md.equalizeNeighborDistances(nodeID, "2", newPos)
+	}
 	return true
+}
+
+// equalizeNeighborDistances sets the dragged node's double-link distance to every OTHER
+// domain peer (derived from md.edgeMovers, excluding source) equal to its double-link
+// distance to the named source peer — a peer operation in the dragged node's own local-
+// polar frame, not a parent/child cascade. Each other peer repositions to that distance
+// along its CURRENT bearing from the dragged node (direction preserved, radius changed);
+// the source peer is left untouched. Each repositioned peer's move is applied exactly as
+// RootMove applies the dragged node's own move: fanCenters (recompute reach over the
+// affected set), the scalar-triple remeasure + quantOffsetPersist schedule, and
+// requantizeLocalPolars for that peer.
+func (md *MoveDispatch) equalizeNeighborDistances(dragged, source string, newPos vec3) {
+	sourceCenter, ok := md.centerOfNode(source)
+	if !ok {
+		return
+	}
+	dist := cart2polar(sourceCenter.sub(newPos)).R
+
+	peers := map[string]bool{}
+	for _, em := range md.edgeMovers {
+		var other string
+		switch dragged {
+		case em.srcID:
+			other = em.dstID
+		case em.dstID:
+			other = em.srcID
+		default:
+			continue
+		}
+		if other != "" && other != source {
+			peers[other] = true
+		}
+	}
+	if len(peers) == 0 {
+		return
+	}
+
+	moved := map[string]vec3{dragged: newPos}
+	for p := range peers {
+		center, ok := md.centerOfNode(p)
+		if !ok {
+			continue
+		}
+		delta := center.sub(newPos)
+		if delta.length() == 0 {
+			continue
+		}
+		dir := delta.normalize()
+		moved[p] = newPos.add(dir.scale(dist))
+	}
+	if len(moved) <= 1 {
+		return
+	}
+
+	edges := md.heldEdges()
+	polars := md.heldPolar()
+	for id, c := range moved {
+		polars[id] = cart2polar(c.sub(md.sceneSphere.Center))
+	}
+	reach := reachRFromPolar(polars, edges)
+	md.fanCenters(moved, reach)
+
+	if md.quantizedLayout {
+		ids := map[string]bool{}
+		for id := range moved {
+			if id == dragged {
+				continue
+			}
+			ids[id] = true
+		}
+		if len(ids) > 0 {
+			offs := measureScalars(moved, ids, md.sceneSphere.Center, md.quantizedOffsets)
+			for id, off := range offs {
+				md.quantizedOffsets[id] = off
+				if md.quantOffsetPersist != nil {
+					md.quantOffsetPersist.schedule(id, off, cart2polar(moved[id].sub(md.sceneSphere.Center)))
+				}
+			}
+		}
+	}
+
+	for id, c := range moved {
+		if id == dragged {
+			continue
+		}
+		md.requantizeLocalPolars(id, c)
+	}
 }
 
 // requantizeLocalPolars implements the double-link local-polar model on a drag: the

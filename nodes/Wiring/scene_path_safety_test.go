@@ -36,7 +36,7 @@ func TestSafeTreePathComponent(t *testing.T) {
 
 func TestWriteQuantOffsetRejectsTraversalID(t *testing.T) {
 	root := t.TempDir()
-	err := writeQuantOffset(root, "../../evil", quantizedOffset{})
+	err := writeQuantOffset(root, "../../evil", quantizedOffset{}, polar{})
 	if err == nil {
 		t.Fatal("expected error for traversal node id, got nil")
 	}
