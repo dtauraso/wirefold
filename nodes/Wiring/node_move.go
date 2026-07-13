@@ -529,6 +529,13 @@ type MoveDispatch struct {
 	// id, wired by loader.go buildLayoutEdges after this MoveDispatch exists. RootMove
 	// reads it to seed a radius cascade on a dragged node's reference (SeedLayoutCascade).
 	layoutPorts map[string]*LayoutPort
+	// timerKind / updateKinds are the cascade participation kinds a drag seed stamps onto
+	// its LayoutMsg: timerKind is the ONE kind allowed to propagate (forward); updateKinds
+	// is the SET allowed to reposition. Defaulted to the real kinds (cascadeTimerKind /
+	// cascadeUpdateKinds) by newMoveDispatch; overridable so synthetic-kind tests can drive
+	// the cascade with their own (collision-free) kind names.
+	timerKind   string
+	updateKinds map[string]bool
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -581,6 +588,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		ov:                 defaultOverlayState(),
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
+		timerKind:          cascadeTimerKind,
+		updateKinds:        cascadeUpdateKinds(),
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -750,18 +759,32 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 
 // applyLayoutCenter is the single write path a node's OWN Update() goroutine uses
 // (via LayoutPort.apply, layout_edge.go Handle) to publish a radius-cascade-computed
-// position. SLICE 3: it calls nm.applyCenter directly — a plain in-process function
-// call on the CALLER's goroutine, no channel/inbox hop — which is exactly this node's
-// own Update() goroutine (LayoutPort.Handle only ever runs there, per layout_edge.go's
-// doc comment), making that goroutine the sole writer of nm.geom's position fields. It
-// also schedules the updated iR (with the node's fixed iTheta/iPhi and its reference)
-// for debounced disk persistence. Read reachR off the node's own current snap so the
-// cascade does not clobber its sphere-reach ring.
-func (md *MoveDispatch) applyLayoutCenter(id string, center vec3, iTheta, iPhi, iR int, ref string) {
+// position. This is where the cascade's transport/geometry decoupling lands: the
+// message that reached Handle carried only a new radius (iR); THIS function computes
+// the node's world center as a plain local polar offset about ITS OWN REFERENCE
+// (never about any sender-provided center) and writes it via nm.applyCenter — a plain
+// in-process function call on the CALLER's goroutine, no channel/inbox hop — which is
+// exactly this node's own Update() goroutine (LayoutPort.Handle only ever runs there,
+// per layout_edge.go's doc comment), making that goroutine the sole writer of
+// nm.geom's position fields. It also schedules the updated iR (with the node's fixed
+// iTheta/iPhi and its reference) for debounced disk persistence. Read reachR off the
+// node's own current snap so the cascade does not clobber its sphere-reach ring. If
+// this node's reference has no known center yet, the write is skipped (nothing to
+// anchor to).
+func (md *MoveDispatch) applyLayoutCenter(id string, iTheta, iPhi, iR int, ref string) {
 	nm, ok := md.nodeMovers[id]
 	if !ok {
 		return
 	}
+	refCenter, ok := md.centerOfNode(ref)
+	if !ok {
+		return
+	}
+	center := refCenter.add(polar2cart(polar{
+		R:     float64(iR) * stepR,
+		Theta: float64(iTheta) * stepTheta,
+		Phi:   float64(iPhi) * stepPhi,
+	}))
 	reach := 0.0
 	if s := nm.snap.Load(); s != nil {
 		reach = s.reach
@@ -802,30 +825,27 @@ func (md *MoveDispatch) applyLayoutCenterDirect(id string, center vec3, reach fl
 	}
 }
 
-// SeedLayoutCascade starts a radius (iR) propagation from a drag: if the dragged node
-// (nodeID) has a reference AND that reference is a radius-forwarding node (HoldNewSendOld), it pushes
-// LayoutMsg{IR: newIR, FromCenter: <reference's current world center>} onto the
-// reference's outgoing hidden layout edges (SeedForward) — reaching the dragged node and
-// its siblings, each of which computes its OWN new center as a plain local polar offset
-// about the reference (layout_edge.go Handle) and, if itself a radius-forwarding node, forwards
-// further. A root drag (no reference) or a non-radius-forwarding reference does not cascade.
+// SeedLayoutCascade starts a radius (iR) propagation from a drag: it pushes
+// LayoutMsg{IR: newIR} onto EVERY outgoing hidden layout edge of the DRAGGED node
+// itself (not its reference) — the message carries only the new radius value, no
+// world center, no visited marking. Each node that receives it computes its OWN new
+// center as a plain local polar offset about ITS OWN REFERENCE (layout_edge.go
+// Handle -> applyLayoutCenter), and only a node whose kind is the fixed cascade timer
+// kind (cascadeTimerKind) forwards further. This call does not set the dragged node's
+// own iR — that is applied separately via the drag's own Direct message
+// (InjectDirect).
 func (md *MoveDispatch) SeedLayoutCascade(nodeID string, newIR int) {
-	refID := md.references[nodeID]
-	if refID == "" {
-		return
-	}
-	if !ForwardsRadius(md.NodeKind(refID)) {
-		return
-	}
-	refCenter, ok := md.centerOfNode(refID)
-	if !ok {
-		return
-	}
-	p := md.layoutPorts[refID]
+	p := md.layoutPorts[nodeID]
 	if p == nil {
 		return
 	}
-	p.SeedForward(LayoutMsg{IR: newIR, FromCenter: refCenter, PropagatingKind: md.NodeKind(nodeID), UpdateKinds: timerUpdateKinds(md.NodeKind(nodeID)), Visited: map[string]bool{}})
+	msg := LayoutMsg{IR: newIR, PropagatingKind: md.timerKind, UpdateKinds: md.updateKinds}
+	for _, out := range p.out {
+		select {
+		case out <- msg:
+		default:
+		}
+	}
 }
 
 // heldCenters / heldEdges snapshot the movers' current geometry.

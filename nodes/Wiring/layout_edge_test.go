@@ -33,14 +33,14 @@ func TestLayoutPortChainPropagates(t *testing.T) {
 	a := NewLayoutPort("a")
 	b := NewLayoutPort("b")
 	c := NewLayoutPort("c")
-	// SLICE 2: Handle only forwards past a radius-forwarding node (HoldNewSendOld). This test is
-	// about the chain-propagation mechanics, not the radius-forwarder gate, so mark every
-	// node a radius-forwarding node directly (same-package field access).
-	a.forwardsRadius, b.forwardsRadius, c.forwardsRadius = true, true, true
+	// Handle only forwards past a node whose OWN kind matches the message's
+	// PropagatingKind. This test is about the chain-propagation mechanics, not the
+	// kind gate, so give every node the same kind and propagate that kind.
+	a.kind, b.kind, c.kind = "HoldNewSendOld", "HoldNewSendOld", "HoldNewSendOld"
 	a.connectTo(b)
 	b.connectTo(c)
 
-	a.Inject(LayoutMsg{Visited: map[string]bool{}})
+	a.Inject(LayoutMsg{IR: 1, PropagatingKind: "HoldNewSendOld", UpdateKinds: cascadeUpdateKinds()})
 
 	drainLayoutPort(t, a) // a handles + forwards to b
 	drainLayoutPort(t, b) // b handles + forwards to c
@@ -49,46 +49,47 @@ func TestLayoutPortChainPropagates(t *testing.T) {
 	if !ok {
 		t.Fatal("c never received the propagated message")
 	}
-	if !msg.Visited["a"] || !msg.Visited["b"] {
-		t.Fatalf("expected a and b marked visited by the time c receives it, got %+v", msg.Visited)
+	if msg.IR != 1 {
+		t.Fatalf("expected the propagated radius (1) to reach c unchanged, got %d", msg.IR)
 	}
 }
 
 // TestLayoutPortCycleTerminates builds a 3-node cycle (a -> b -> c -> a) and
-// verifies propagation visits each node exactly once and does not hang: after
-// c forwards back to a, a's Handle sees itself already visited and stops
-// (no further forward), so the wave drains to quiescence.
+// verifies propagation does not hang: once a node is already at the propagated
+// radius, Handle's fixpoint check stops it (no further forward), so the wave
+// drains to quiescence.
 func TestLayoutPortCycleTerminates(t *testing.T) {
 	a := NewLayoutPort("a")
 	b := NewLayoutPort("b")
 	c := NewLayoutPort("c")
-	// SLICE 2: mark every node a radius-forwarding node so Handle forwards (see the chain test's
-	// comment above); this test is about cycle termination mechanics, not the gate.
-	a.forwardsRadius, b.forwardsRadius, c.forwardsRadius = true, true, true
+	// Same kind gate note as the chain test above; this test is about cycle
+	// termination mechanics, not the kind gate.
+	a.kind, b.kind, c.kind = "HoldNewSendOld", "HoldNewSendOld", "HoldNewSendOld"
 	a.connectTo(b)
 	b.connectTo(c)
 	c.connectTo(a)
 
-	a.Inject(LayoutMsg{Visited: map[string]bool{}})
+	a.Inject(LayoutMsg{IR: 1, PropagatingKind: "HoldNewSendOld", UpdateKinds: cascadeUpdateKinds()})
 
-	drainLayoutPort(t, a) // a: visited={a}, forwards to b
-	drainLayoutPort(t, b) // b: visited={a,b}, forwards to c
+	drainLayoutPort(t, a) // a: iR 0->1, forwards to b
+	drainLayoutPort(t, b) // b: iR 0->1, forwards to c
 
 	msg, ok := c.TryRecv()
 	if !ok {
 		t.Fatal("c never received the propagated message")
 	}
-	c.Handle(msg) // c: visited={a,b,c}, forwards to a (already-visited a terminates)
+	c.Handle(msg) // c: iR 0->1, forwards to a
 
-	// a receives the cycle-closing message and terminates it (does not re-forward).
+	// a receives the cycle-closing message; a.iR is already 1, so the fixpoint
+	// check terminates it (does not re-forward).
 	msg2, ok := a.TryRecv()
 	if !ok {
 		t.Fatal("a never received the cycle-closing message")
 	}
-	a.Handle(msg2)
-	if !msg2.Visited["a"] || !msg2.Visited["b"] || !msg2.Visited["c"] {
-		t.Fatalf("expected all three nodes marked visited by the time the cycle closes, got %+v", msg2.Visited)
+	if msg2.IR != 1 {
+		t.Fatalf("expected the cycle-closing message to carry radius 1, got %d", msg2.IR)
 	}
+	a.Handle(msg2)
 
 	// No further messages appear anywhere: the wave drained to quiescence.
 	if _, ok := a.TryRecv(); ok {
@@ -145,7 +146,11 @@ func TestBuildLayoutEdgesMirrorsSpecEdges(t *testing.T) {
 
 	// Inject at n1 and verify BOTH n2 and n3 receive it (mirrors the domain
 	// fan-out one-for-one).
-	n1.Inject(LayoutMsg{PropagatingKind: "Input", Visited: map[string]bool{}})
+	// A node forwards only after it passes the update gate, so the propagator kind
+	// must be in UpdateKinds (as it always is in the real model — the timer kind is
+	// both the PropagatingKind and a member of UpdateKinds). Inject with n1's kind
+	// ("Input") in both so n1 updates and then forwards over the mirrored edges.
+	n1.Inject(LayoutMsg{IR: 1, PropagatingKind: "Input", UpdateKinds: map[string]bool{"Input": true}})
 	drainLayoutPort(t, n1)
 
 	if _, ok := n2.TryRecv(); !ok {
