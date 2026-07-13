@@ -20,6 +20,7 @@ import (
 // faninSrc is a minimal source kind with one paced Out. Position writes route through
 // nodeMover's own goroutine (node_move.go), so no layout plumbing is needed here.
 type faninSrc struct {
+	LayoutHolder
 	Out *Out
 }
 
@@ -29,6 +30,7 @@ func (n *faninSrc) Update(ctx context.Context) {
 
 // faninSink is a minimal sink kind with one paced In.
 type faninSink struct {
+	LayoutHolder
 	In *In
 }
 

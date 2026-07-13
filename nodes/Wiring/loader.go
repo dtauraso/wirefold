@@ -22,7 +22,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"reflect"
+	"sort"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -74,6 +77,22 @@ type specNode struct {
 	StepTheta *float64 `json:"stepTheta,omitempty"`
 	StepPhi   *float64 `json:"stepPhi,omitempty"`
 	StepR     *float64 `json:"stepR,omitempty"`
+	// LocalPolars is this node's list of per-neighbor local polars (layout_holder.go
+	// LocalPolar) — one per domain double-link this node is an endpoint of, measured
+	// with ITSELF as center. Absent (nil) → computed fresh at load (computeLocalPolars).
+	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
+}
+
+// specLocalPolar mirrors one entry of a node's persisted localPolars list
+// (loader_tree.go jsonMeta.LocalPolars carries the same shape).
+type specLocalPolar struct {
+	To          string  `json:"to"`
+	QuantITheta int     `json:"quantITheta"`
+	QuantIPhi   int     `json:"quantIPhi"`
+	QuantIR     int     `json:"quantIR"`
+	StepTheta   float64 `json:"stepTheta,omitempty"`
+	StepPhi     float64 `json:"stepPhi,omitempty"`
+	StepR       float64 `json:"stepR,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -263,6 +282,14 @@ type buildCtx struct {
 	// measured about the scene center — no reference/parent concept.
 	quantizedOffsets map[string]quantizedOffset
 
+	// Phase 1c: double-link LOCAL POLAR data (layout_holder.go) — every domain
+	// double-link (bidirectional edge pair) gives each endpoint its own local
+	// polar to the other, measured with ITSELF as center. Computed AFTER the
+	// quantized layout so it reads the composed (authoritative) centers, and
+	// injected into each built node's LocalPolars field (buildNodes) — additive,
+	// does not feed back into position (quantizedOffsets stays authoritative).
+	localPolars map[string][]LocalPolar
+
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
 	edgeWire      WireRegistry
@@ -296,6 +323,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 
 	b.computeNodeGeometry()
 	b.computeQuantizedLayout()
+	b.computeLocalPolars()
 	b.computeReachRadii()
 	b.allocateWires()
 	b.buildMoveDispatch()
@@ -411,6 +439,90 @@ func (b *buildCtx) computeQuantizedLayout() {
 			b.nodeGeoms[id] = g
 		}
 	}
+}
+
+// computeLocalPolars resolves each node's LocalPolars list (layout_holder.go
+// LocalPolar) — additive, double-link local-polar DATA layered on top of the
+// authoritative absolute quantized layout computed just above.
+//
+// A node's neighbors are every node it shares a domain edge with (either
+// direction), deduplicated — 2To5 and 5To2 give node 2 a single neighbor 5, and
+// node 5 a single neighbor 2. Each is resolved from the STORED spec value when
+// present (a migrated node's meta.json localPolars entry for that neighbor),
+// otherwise MEASURED fresh from the composed world centers (b.centers, already
+// overwritten by computeQuantizedLayout) using this node's own effective step
+// constants: iTheta=round(theta/stepTheta), iPhi=round(phi/stepPhi),
+// iR=round(R/stepR) — the same snap contract as measureScalars, but with the
+// NEIGHBOR (not the scene center) as the polar origin, and THIS node's steps
+// (not the neighbor's).
+func (b *buildCtx) computeLocalPolars() {
+	neighbors := map[string]map[string]bool{}
+	for _, e := range b.spec.Edges {
+		if neighbors[e.Source] == nil {
+			neighbors[e.Source] = map[string]bool{}
+		}
+		if neighbors[e.Target] == nil {
+			neighbors[e.Target] = map[string]bool{}
+		}
+		neighbors[e.Source][e.Target] = true
+		neighbors[e.Target][e.Source] = true
+	}
+
+	stored := map[string]map[string]specLocalPolar{}
+	for _, n := range b.spec.Nodes {
+		if len(n.LocalPolars) == 0 {
+			continue
+		}
+		m := make(map[string]specLocalPolar, len(n.LocalPolars))
+		for _, lp := range n.LocalPolars {
+			m[lp.To] = lp
+		}
+		stored[n.ID] = m
+	}
+
+	result := map[string][]LocalPolar{}
+	for _, n := range b.spec.Nodes {
+		nbrs := neighbors[n.ID]
+		if len(nbrs) == 0 {
+			continue
+		}
+		ids := make([]string, 0, len(nbrs))
+		for id := range nbrs {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids) // deterministic order
+
+		ownOffset := b.quantizedOffsets[n.ID]
+		ownCenter, hasOwn := b.centers[n.ID]
+		t, p, r := ownOffset.effectiveSteps()
+
+		list := make([]LocalPolar, 0, len(ids))
+		for _, mid := range ids {
+			if sm, ok := stored[n.ID]; ok {
+				if lp, ok2 := sm[mid]; ok2 {
+					list = append(list, LocalPolar{
+						To: mid, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+						StepTheta: lp.StepTheta, StepPhi: lp.StepPhi, StepR: lp.StepR,
+					})
+					continue
+				}
+			}
+			mCenter, ok := b.centers[mid]
+			if !hasOwn || !ok {
+				list = append(list, LocalPolar{To: mid}) // centerless → zero offset, nothing to measure
+				continue
+			}
+			pol := cart2polar(mCenter.sub(ownCenter))
+			list = append(list, LocalPolar{
+				To:          mid,
+				QuantITheta: int(math.Round(pol.Theta / t)),
+				QuantIPhi:   int(math.Round(pol.Phi / p)),
+				QuantIR:     int(math.Round(pol.R / r)),
+			})
+		}
+		result[n.ID] = list
+	}
+	b.localPolars = result
 }
 
 // computeReachRadii computes each node's REACH radius (max distance from its
@@ -654,6 +766,17 @@ func (b *buildCtx) buildNodes() error {
 		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], pc)
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
+		}
+		// Attach this node's computed LocalPolars list (layout_holder.go) the same
+		// way port/data injection works — by reflection over the promoted field
+		// every kind gets via the embedded Wiring.LayoutHolder — so the node's
+		// layout goroutine owns it without per-kind wiring.
+		if lps, ok := b.localPolars[n.ID]; ok {
+			if v := reflect.ValueOf(nd).Elem(); v.Kind() == reflect.Struct {
+				if f := v.FieldByName("LocalPolars"); f.IsValid() && f.CanSet() {
+					f.Set(reflect.ValueOf(lps))
+				}
+			}
 		}
 		nodes = append(nodes, nd)
 	}
