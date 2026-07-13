@@ -116,9 +116,16 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 			got := edgeArcPolar(c.src, c.tgt, c.srcH, c.tgtH)
 			srcPort := portWorldPosAimed(c.src, c.srcH, false, nodeWorldPos(c.tgt), true)
 			tgtPort := portWorldPosAimed(c.tgt, c.tgtH, true, nodeWorldPos(c.src), true)
-			want := refChordLength(srcPort, tgtPort)
-			if !almostEqual(got, want, 1e-9) {
-				t.Fatalf("edgeArcPolar = %v, want chord %v", got, want)
+			rawWant := refChordLength(srcPort, tgtPort)
+			want := math.Round(rawWant/edgeLengthCellWu) * edgeLengthCellWu
+			if want < CurveParamMinArcLength {
+				want = CurveParamMinArcLength
+			}
+			// edgeArcPolar quantizes its return to edgeLengthCellWu so that
+			// equal-nominal edges are bit-identical; assert exact equality to
+			// the quantized reference, not the raw chord.
+			if got != want {
+				t.Fatalf("edgeArcPolar = %v, want quantized chord %v (raw %v)", got, want, rawWant)
 			}
 		})
 	}

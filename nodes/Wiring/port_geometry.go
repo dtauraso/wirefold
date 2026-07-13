@@ -353,5 +353,10 @@ func edgeArcPolar(src, tgt nodeGeom, srcPort, dstPort string) float64 {
 	seg := edgeSegment(src, tgt, srcPort, dstPort)
 	startPolar := cart2polar(seg.Start.sub(src.SceneCenter))
 	endPolar := cart2polar(seg.End.sub(src.SceneCenter))
-	return polarDist(startPolar, endPolar)
+	raw := polarDist(startPolar, endPolar)
+	quantized := math.Round(raw/edgeLengthCellWu) * edgeLengthCellWu
+	if quantized < CurveParamMinArcLength {
+		return CurveParamMinArcLength
+	}
+	return quantized
 }
