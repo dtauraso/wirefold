@@ -9,6 +9,7 @@ import (
 	_ "github.com/dtauraso/wirefold/nodes/input"
 	_ "github.com/dtauraso/wirefold/nodes/pacer"
 	_ "github.com/dtauraso/wirefold/nodes/pulse"
+	_ "github.com/dtauraso/wirefold/nodes/startholdnewsendold"
 	_ "github.com/dtauraso/wirefold/nodes/windowandinhibitleftgate"
 	_ "github.com/dtauraso/wirefold/nodes/windowandinhibitrightgate"
 )

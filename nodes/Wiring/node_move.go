@@ -31,6 +31,7 @@ package Wiring
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -730,6 +731,53 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 	return vec3{}, false
 }
 
+// kindOfNode returns a node's registered kind (its spec "type", carried on the mover's
+// nodeGeom) by id. Used by the drag-time equalize to decide (a) whether the dragged node
+// runs the equalize at all and (b) which neighbors are Pulse/time nodes.
+func (md *MoveDispatch) kindOfNode(id string) (string, bool) {
+	if nm, ok := md.nodeMovers[id]; ok {
+		return nm.geom.Kind, true
+	}
+	return "", false
+}
+
+// isPulseOrTimeKind reports whether kind is a Pulse or a time (HoldNewSendOld family,
+// including StartHoldNewSendOld) node — the neighbor set the StartHoldNewSendOld drag
+// equalize applies its move-distance update to.
+func isPulseOrTimeKind(kind string) bool {
+	switch kind {
+	case "Pulse", "HoldNewSendOld", "StartHoldNewSendOld":
+		return true
+	}
+	return false
+}
+
+// timeNeighbor returns the connected time (HoldNewSendOld family) neighbor of node id —
+// the source/reference for the StartHoldNewSendOld drag equalize. Neighbors are scanned in
+// sorted id order so the pick is deterministic when more than one time node connects.
+func (md *MoveDispatch) timeNeighbor(id string) (string, bool) {
+	neighbors := map[string]bool{}
+	for _, em := range md.edgeMovers {
+		switch id {
+		case em.srcID:
+			neighbors[em.dstID] = true
+		case em.dstID:
+			neighbors[em.srcID] = true
+		}
+	}
+	ids := make([]string, 0, len(neighbors))
+	for n := range neighbors {
+		ids = append(ids, n)
+	}
+	sort.Strings(ids)
+	for _, n := range ids {
+		if k, ok := md.kindOfNode(n); ok && (k == "HoldNewSendOld" || k == "StartHoldNewSendOld") {
+			return n, true
+		}
+	}
+	return "", false
+}
+
 // sendMove routes one moveMsg to another node's (or edge's) inbox by id, if known.
 // Used by the decentralized lock-propagation cascade so a nodeMover can re-broadcast
 // to its own lock-neighbors without any central worklist — the dispatch map is the
@@ -895,9 +943,17 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	// Scoped to node 5 by request: a peer-frame local-polar-radial equalization, NOT a
 	// parent/child cascade. Node 5's double-link distances to its other peers (7, 8) are
 	// set equal to its double-link distance to peer 2 (all measured in node 5's own
-	// frame, node 5 as center); peer 2 stays put.
+	// frame, node 5 as center); peer 2 stays put. pulseTimeOnly=false: every peer moves.
 	if nodeID == "5" {
-		md.equalizeNeighborDistances(nodeID, "2", newPos)
+		md.equalizeNeighborDistances(nodeID, "2", newPos, false)
+	} else if kind, ok := md.kindOfNode(nodeID); ok && kind == "StartHoldNewSendOld" {
+		// StartHoldNewSendOld: the same peer-frame equalization, but the reference
+		// (source) is the connected time (HoldNewSendOld family) neighbor and the move-
+		// distance update applies ONLY to Pulse and time neighbors (pulseTimeOnly=true).
+		// For node 2 this makes node 5 the source and applies to node 6.
+		if src, ok := md.timeNeighbor(nodeID); ok {
+			md.equalizeNeighborDistances(nodeID, src, newPos, true)
+		}
 	}
 	return true
 }
@@ -911,7 +967,10 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 // RootMove applies the dragged node's own move: fanCenters (recompute reach over the
 // affected set), the scalar-triple remeasure + quantOffsetPersist schedule, and
 // requantizeLocalPolars for that peer.
-func (md *MoveDispatch) equalizeNeighborDistances(dragged, source string, newPos vec3) {
+// pulseTimeOnly restricts the repositioned peer set to Pulse and time (HoldNewSendOld
+// family) neighbors — the StartHoldNewSendOld rule. When false, every peer moves (node 5's
+// legacy behavior).
+func (md *MoveDispatch) equalizeNeighborDistances(dragged, source string, newPos vec3, pulseTimeOnly bool) {
 	sourceCenter, ok := md.centerOfNode(source)
 	if !ok {
 		return
@@ -929,9 +988,15 @@ func (md *MoveDispatch) equalizeNeighborDistances(dragged, source string, newPos
 		default:
 			continue
 		}
-		if other != "" && other != source {
-			peers[other] = true
+		if other == "" || other == source {
+			continue
 		}
+		if pulseTimeOnly {
+			if k, ok := md.kindOfNode(other); !ok || !isPulseOrTimeKind(k) {
+				continue
+			}
+		}
+		peers[other] = true
 	}
 	if len(peers) == 0 {
 		return
