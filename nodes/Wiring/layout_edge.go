@@ -53,10 +53,10 @@ func (msg LayoutMsg) clone() LayoutMsg {
 }
 
 // timerUpdateKinds is the set of node kinds a timer (HoldNewSendOld) node marks
-// as allowed to UPDATE on its cascade: the timer kind itself plus Pulse. Constant
-// set, one place to change what a timer cascade repositions.
+// as allowed to UPDATE on its cascade: the timer kind itself plus Pulse and Hold.
+// Constant set, one place to change what a timer cascade repositions.
 func timerUpdateKinds(timerKind string) map[string]bool {
-	return map[string]bool{timerKind: true, "Pulse": true}
+	return map[string]bool{timerKind: true, "Pulse": true, "Hold": true}
 }
 
 // LayoutPort is the per-node hidden-layout-graph plumbing: one inbound channel
