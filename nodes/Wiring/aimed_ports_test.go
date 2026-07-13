@@ -3,59 +3,33 @@ package Wiring
 import "context"
 
 // aimedSrc / aimedSink / aimedPacer are minimal node kinds used as fixtures by other tests
-// (the lock cascade). The aimed-port registry itself is gone (edges run node-to-node), so
-// these are just plain kinds now.
+// (the lock cascade). The aimed-port registry itself is gone (edges run node-to-node), and
+// position writes route through nodeMover's own goroutine (node_move.go), so these are just
+// plain kinds now — no layout plumbing to drain.
 type aimedSrc struct {
 	Out        *Out
 	FeedbackIn *In
-	Layout     *LayoutPort
 }
 
-// Update polls only the hidden layout port (SLICE 3, layout-on-domain-network.md):
-// this node's own Update() goroutine is the sole writer of its position, so a test
-// that drags this node must have this loop running to drain the write.
 func (n *aimedSrc) Update(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-n.Layout.in:
-			n.Layout.Handle(msg)
-		}
-	}
+	<-ctx.Done()
 }
 
 type aimedSink struct {
-	In     *In
-	Layout *LayoutPort
+	In *In
 }
 
 func (n *aimedSink) Update(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-n.Layout.in:
-			n.Layout.Handle(msg)
-		}
-	}
+	<-ctx.Done()
 }
 
 type aimedPacer struct {
 	FromSrc  *In
 	Feedback *Out
-	Layout   *LayoutPort
 }
 
 func (n *aimedPacer) Update(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-n.Layout.in:
-			n.Layout.Handle(msg)
-		}
-	}
+	<-ctx.Done()
 }
 
 func init() {

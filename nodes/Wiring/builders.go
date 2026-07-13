@@ -65,11 +65,6 @@ type PortBindings struct {
 	// (the Input node's refill slide). Test builds without a loader leave it nil,
 	// and such nodes fall back to an instant refill.
 	clock Clock
-	// layout is this node's hidden-layout-graph plumbing (layout_edge.go),
-	// injected into any node struct with a `Layout *LayoutPort` field the same
-	// way clock/EmitGeometry are injected. Test builds without a loader leave it
-	// nil; nodes nil-guard their poll.
-	layout *LayoutPort
 }
 
 // singleBinding is the resolved paced binding for one single port. For an INPUT
@@ -164,7 +159,6 @@ var (
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
 	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
 	tTickFunc           = reflect.TypeFor[func() int64]()
-	tLayoutPortPtr      = reflect.TypeFor[*LayoutPort]()
 )
 
 // reflectStateKeys returns the data.state map keys required by sample's
@@ -231,19 +225,6 @@ func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 	return true
 }
 
-// injectValue sets the named field on v to val, but only when the field
-// exists, is settable, and has exactly the expected type `want`. Same
-// contract as injectFunc, for non-func-typed injections (the *LayoutPort
-// field).
-func injectValue(v reflect.Value, name string, want reflect.Type, val any) bool {
-	f := v.FieldByName(name)
-	if !f.IsValid() || !f.CanSet() || f.Type() != want {
-		return false
-	}
-	f.Set(reflect.ValueOf(val))
-	return true
-}
-
 // reflectBuild wires pb into the struct pointed to by nodePtr via reflection,
 // then returns it cast to Node. ctx is required when pb contains PacedWire
 // bindings (paced mode); it is passed into the In/Out wrappers.
@@ -287,13 +268,6 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// captures the node name so the node calls n.Fire() with no arguments and
 	// cannot mis-name itself in the trace.
 	injectFunc(v, "Fire", tFireFunc, func() { tr.Fire(name) })
-
-	// Inject the hidden-layout-graph port if the struct has a `Layout
-	// *LayoutPort` field. pb.layout is built by the loader (buildLayoutEdges)
-	// and mirrors this node's domain out-edges one-for-one; test builds without
-	// a loader leave pb.layout nil and the field is set to a typed nil, which
-	// every accessor (TryRecv/Handle/Inject) nil-guards.
-	injectValue(v, "Layout", tLayoutPortPtr, pb.layout)
 
 	// Inject EmitGeometry closure if the struct has an `EmitGeometry func()` field.
 	// The closure emits the node's authoritative center + per-port world

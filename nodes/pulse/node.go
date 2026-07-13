@@ -55,10 +55,6 @@ type Node struct {
 	// FromRightGate is a declared input from a WindowAndInhibitRightGate node.
 	// Intentionally inert (no read logic) — see 10To6/10To8 edge task.
 	FromRightGate *Wiring.In
-	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
-	// injected by the loader the same way EmitGeometry is. nil on builds
-	// without a loader; Update nil-guards its poll.
-	Layout *Wiring.LayoutPort
 }
 
 // driveOutput runs a continuous-drive goroutine on out, always emitting the

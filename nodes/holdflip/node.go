@@ -36,10 +36,6 @@ type Node struct {
 	EmitHeldBead func(held int)
 	In           *Wiring.In
 	Out          *Wiring.Out
-	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
-	// injected by the loader the same way EmitGeometry is. nil on builds
-	// without a loader; Update nil-guards its poll.
-	Layout *Wiring.LayoutPort
 }
 
 func (g *Node) Update(ctx context.Context) {

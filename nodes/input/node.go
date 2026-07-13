@@ -21,10 +21,6 @@ type Node struct {
 	// injection — the caller then falls back to the instant refill. beads is the
 	// OLD backup contents that become the new working row.
 	EmitRefillSlide func(beads []int)
-	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
-	// injected by the loader the same way EmitGeometry is. nil on builds
-	// without a loader; Update nil-guards its poll.
-	Layout *Wiring.LayoutPort
 	// Clock is the shared node-level clock, injected by Wiring.reflectBuild
 	// directly (not derived from any specific wired output port — deriving it
 	// from ToHoldNewSendOld/ToExcitatory/ToPacer was fragile: whichever port
