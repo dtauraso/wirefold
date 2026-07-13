@@ -148,5 +148,4 @@ func (in *Node) Update(ctx context.Context) {
 
 func init() {
 	Wiring.Register("HoldNewSendOld", func() any { return &Node{} })
-	Wiring.RegisterRadiusForwarder("HoldNewSendOld")
 }
