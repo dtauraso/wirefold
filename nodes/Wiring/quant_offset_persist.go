@@ -86,9 +86,19 @@ func writeQuantOffset(root, id string, off quantizedOffset) error {
 			b, _ := json.Marshal(v)
 			obj[key] = b
 		}
+		setFloat := func(key string, v float64) {
+			b, _ := json.Marshal(v)
+			obj[key] = b
+		}
 		setInt("quantITheta", off.iTheta)
 		setInt("quantIPhi", off.iPhi)
 		setInt("quantIR", off.iR)
+		// Write the EFFECTIVE step constants (falling back to the global defaults) so
+		// the file is self-describing — a node's own constants, always present.
+		t, p, r := off.effectiveSteps()
+		setFloat("stepTheta", t)
+		setFloat("stepPhi", p)
+		setFloat("stepR", r)
 		delete(obj, "reference")
 		// Scene polar is no longer a stored source of truth — drop any legacy fields.
 		delete(obj, "scenePolarR")

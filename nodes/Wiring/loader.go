@@ -68,6 +68,12 @@ type specNode struct {
 	QuantITheta *int `json:"quantITheta,omitempty"`
 	QuantIPhi   *int `json:"quantIPhi,omitempty"`
 	QuantIR     *int `json:"quantIR,omitempty"`
+	// Per-node step constants (quantized_layout.go quantizedOffset.cTheta/cPhi/cR): this
+	// node's OWN quantization step, turning its integer scalars into a world offset. nil
+	// (unset) falls back to the global default (stepTheta/stepPhi/stepR).
+	StepTheta *float64 `json:"stepTheta,omitempty"`
+	StepPhi   *float64 `json:"stepPhi,omitempty"`
+	StepR     *float64 `json:"stepR,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -348,22 +354,50 @@ func (b *buildCtx) computeQuantizedLayout() {
 	// The scalar triple is the STORED quantI* when a scene was saved under this model
 	// (all three present); otherwise it is MEASURED from the node's currently-loaded
 	// (pre-quantized, scenePolar-derived) center — the fallback for an un-migrated node.
-	measured := measureScalars(b.centers, ids, b.sphere.Center)
+	// prior carries each node's stored per-node step constants (when present in the
+	// spec) so measureScalars preserves them into the fallback-measured offset instead
+	// of defaulting to global constants for a node that DOES have its own.
+	prior := make(map[string]quantizedOffset, len(b.spec.Nodes))
+	for _, n := range b.spec.Nodes {
+		o := quantizedOffset{}
+		if n.StepTheta != nil {
+			o.cTheta = *n.StepTheta
+		}
+		if n.StepPhi != nil {
+			o.cPhi = *n.StepPhi
+		}
+		if n.StepR != nil {
+			o.cR = *n.StepR
+		}
+		prior[n.ID] = o
+	}
+
+	measured := measureScalars(b.centers, ids, b.sphere.Center, prior)
 	offsets := make(map[string]quantizedOffset, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
 		if n.QuantITheta != nil && n.QuantIPhi != nil && n.QuantIR != nil {
-			offsets[n.ID] = quantizedOffset{
+			o := quantizedOffset{
 				iTheta: *n.QuantITheta,
 				iPhi:   *n.QuantIPhi,
 				iR:     *n.QuantIR,
 			}
+			if n.StepTheta != nil {
+				o.cTheta = *n.StepTheta
+			}
+			if n.StepPhi != nil {
+				o.cPhi = *n.StepPhi
+			}
+			if n.StepR != nil {
+				o.cR = *n.StepR
+			}
+			offsets[n.ID] = o
 			continue
 		}
 		if off, ok := measured[n.ID]; ok {
 			offsets[n.ID] = off
 			continue
 		}
-		offsets[n.ID] = quantizedOffset{} // centerless → default to the scene center
+		offsets[n.ID] = prior[n.ID] // centerless → default to the scene center, keep any stored constants
 	}
 	b.quantizedOffsets = offsets
 
