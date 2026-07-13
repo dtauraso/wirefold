@@ -1,1 +1,1 @@
-{"id": "1", "type": "Input", "r": 127.5692655057132, "quantITheta": 5, "quantIPhi": -12, "quantIR": 6}
+{"id": "1", "type": "Input", "r": 127.5692655057132, "quantITheta": 5, "quantIPhi": -12, "quantIR": 6, "stepTheta": 0.26179938779914946, "stepPhi": 0.26179938779914946, "stepR": 20.0}
