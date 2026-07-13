@@ -795,3 +795,115 @@ func TestRootMoveStartHoldNewSendOldEqualizesPulseTimeOnly(t *testing.T) {
 			gotBearing.Theta, gotBearing.Phi, wantBearing.Theta, wantBearing.Phi)
 	}
 }
+
+// TestRootMoveStartHoldNewSendOldCascadesToSource verifies the drag cascade added to
+// RootMove: dragging a StartHoldNewSendOld node "2" whose time neighbor is node "5"
+// must, after equalizing 2's own Pulse/time neighbors, make node 5 "act like it was
+// dragged" too — re-running node 5's OWN hardcoded nodeID=="5" equalize (source "2")
+// at 5's current (unchanged) position, so 5's other peers ("7","8", node 5's legacy
+// double-link equalize target set) reposition to the NEW 2<->5 distance. Node ids are
+// literally "2"/"5"/"7"/"8" so the existing nodeID=="5" / source="2" hardcode in
+// RootMove drives node 5's equalize during the cascade. Built via newMoveDispatch
+// directly (mirroring TestNode5DragEqualizesNeighborDistances in
+// node5_equalize_test.go), NOT via LoadTopology's quantized-layout JSON round trip,
+// which would requantize the hand-picked view coordinates onto a coarse grid.
+func TestRootMoveStartHoldNewSendOldCascadesToSource(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"2": {Kind: "StartHoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "outT"}}},
+		"5": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{40, 0, 0}), Inputs: []portGeom{{Name: "inT"}}, Outputs: []portGeom{{Name: "out7"}, {Name: "out8"}}},
+		"7": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{0, 30, 20}), Inputs: []portGeom{{Name: "in"}}},
+		"8": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{-25, -10, 15}), Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"2To5": {Source: "2", Target: "5", SourceHandle: "outT", TargetHandle: "inT"},
+		"5To7": {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in"},
+		"5To8": {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.layoutHolders = map[string]*LayoutHolder{
+		"2": {}, "5": {}, "7": {}, "8": {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	fiveCenter, ok := md.centerOfNode("5")
+	if !ok {
+		t.Fatal("centerOfNode(5) missing before move")
+	}
+	sevenCenterBefore, ok := md.centerOfNode("7")
+	if !ok {
+		t.Fatal("centerOfNode(7) missing before move")
+	}
+	eightCenterBefore, ok := md.centerOfNode("8")
+	if !ok {
+		t.Fatal("centerOfNode(8) missing before move")
+	}
+
+	target := vec3{X: 5, Y: 5, Z: 5}
+	if !md.RootMove("2", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	converged := func() bool {
+		c, ok := md.centerOfNode("2")
+		if !ok || math.Abs(c.X-target.X) > eps || math.Abs(c.Y-target.Y) > eps || math.Abs(c.Z-target.Z) > eps {
+			return false
+		}
+		c7, ok7 := md.centerOfNode("7")
+		c8, ok8 := md.centerOfNode("8")
+		return ok7 && ok8 && c7 != sevenCenterBefore && c8 != eightCenterBefore
+	}
+	for !converged() {
+		if time.Now().After(deadline) {
+			t.Fatal("drag + cascade never converged")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Give any trailing re-emit messages a moment to settle.
+	time.Sleep(20 * time.Millisecond)
+
+	// Node 5 (the time neighbor / cascade target) itself stays put — only its OTHER
+	// peers (7, 8) reposition.
+	fiveCenterAfter, ok := md.centerOfNode("5")
+	if !ok {
+		t.Fatal("centerOfNode(5) missing after move")
+	}
+	if fiveCenterAfter != fiveCenter {
+		t.Fatalf("time neighbor '5' moved: got %+v, want unchanged %+v", fiveCenterAfter, fiveCenter)
+	}
+
+	wantDist := cart2polar(fiveCenterAfter.sub(target)).R
+
+	sevenCenterAfter, ok := md.centerOfNode("7")
+	if !ok {
+		t.Fatal("centerOfNode(7) missing after move")
+	}
+	gotDist7 := cart2polar(sevenCenterAfter.sub(fiveCenterAfter)).R
+	if math.Abs(gotDist7-wantDist) > eps {
+		t.Fatalf("dist(5,7) after cascade = %v, want dist(2,5) = %v", gotDist7, wantDist)
+	}
+	wantBearing7 := cart2polar(sevenCenterBefore.sub(fiveCenter))
+	gotBearing7 := cart2polar(sevenCenterAfter.sub(fiveCenterAfter))
+	if math.Abs(gotBearing7.Theta-wantBearing7.Theta) > eps || math.Abs(gotBearing7.Phi-wantBearing7.Phi) > eps {
+		t.Fatalf("7's bearing from 5 changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
+			gotBearing7.Theta, gotBearing7.Phi, wantBearing7.Theta, wantBearing7.Phi)
+	}
+
+	eightCenterAfter, ok := md.centerOfNode("8")
+	if !ok {
+		t.Fatal("centerOfNode(8) missing after move")
+	}
+	gotDist8 := cart2polar(eightCenterAfter.sub(fiveCenterAfter)).R
+	if math.Abs(gotDist8-wantDist) > eps {
+		t.Fatalf("dist(5,8) after cascade = %v, want dist(2,5) = %v", gotDist8, wantDist)
+	}
+	wantBearing8 := cart2polar(eightCenterBefore.sub(fiveCenter))
+	gotBearing8 := cart2polar(eightCenterAfter.sub(fiveCenterAfter))
+	if math.Abs(gotBearing8.Theta-wantBearing8.Theta) > eps || math.Abs(gotBearing8.Phi-wantBearing8.Phi) > eps {
+		t.Fatalf("8's bearing from 5 changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
+			gotBearing8.Theta, gotBearing8.Phi, wantBearing8.Theta, wantBearing8.Phi)
+	}
+}
