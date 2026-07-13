@@ -60,18 +60,14 @@ type specNode struct {
 	ScenePolarR     *float64 `json:"scenePolarR,omitempty"`
 	ScenePolarTheta *float64 `json:"scenePolarTheta,omitempty"`
 	ScenePolarPhi   *float64 `json:"scenePolarPhi,omitempty"`
-	// Quantized polar offset (quantized_layout.go, PHASE 3): the node's (iTheta,iPhi,iR)
-	// integer offset about its spanning-tree parent's forward direction. All three MUST be
-	// present together (all-or-nothing) for the stored offset to be adopted; a node with any
-	// of these absent (an "old scene") is snapped from its scenePolar-derived world center
-	// instead (loader.go computeQuantizedLayout / quantized_layout.go snapQuantizedOffsets).
+	// Quantized polar offset (quantized_layout.go): the node's (iTheta,iPhi,iR) integer
+	// offset about the ONE scene sphere center — every node is independent (no reference/
+	// parent). All three MUST be present together (all-or-nothing) for the stored offset
+	// to be adopted; a node with any of these absent (an "old scene") is measured from its
+	// scenePolar-derived world center instead (loader.go computeQuantizedLayout).
 	QuantITheta *int `json:"quantITheta,omitempty"`
 	QuantIPhi   *int `json:"quantIPhi,omitempty"`
 	QuantIR     *int `json:"quantIR,omitempty"`
-	// Reference is the node's OWNED reference (the peer whose frame its triple is measured
-	// in). nil ⇒ seed from the spanning tree; a stored value OVERRIDES the seed (manual
-	// reference picking). "" means the node is its own root.
-	Reference *string `json:"reference,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -255,13 +251,11 @@ type buildCtx struct {
 	nodeGeoms map[string]nodeGeom
 	centers   map[string]vec3
 
-	// Phase 1b: quantized hierarchical polar layout (quantized_layout.go, PHASE 3) —
+	// Phase 1b: quantized flat absolute scene-polar layout (quantized_layout.go) —
 	// resolved BEFORE reach/wire/dispatch phases so every later phase computes from the
-	// COMPOSED (authoritative) centers, not the raw loaded ones.
+	// COMPOSED (authoritative) centers, not the raw loaded ones. Every node is a root
+	// measured about the scene center — no reference/parent concept.
 	quantizedOffsets map[string]quantizedOffset
-	// references is the owned per-node reference map (node id → reference id, "" for a
-	// root), seeded from the spanning tree and overridable per node (manual picking).
-	references map[string]string
 
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
@@ -286,12 +280,6 @@ type buildCtx struct {
 	// Phase 8: built nodes + the paced-Out sink.
 	outSink map[string]*Out
 	nodes   []Node
-
-	// layoutPorts is the hidden layout graph: one *LayoutPort per node id,
-	// mirroring the domain edge set one-for-one (source -> target). Built by
-	// buildLayoutEdges and injected into each node struct's `Layout` field by
-	// buildNodes, the same way the shared clock is threaded through pb.
-	layoutPorts map[string]*LayoutPort
 }
 
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
@@ -305,7 +293,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	b.computeReachRadii()
 	b.allocateWires()
 	b.buildMoveDispatch()
-	b.buildLayoutEdges()
 	b.buildTypeMaps()
 	b.buildEdgeMaps()
 	if err := b.buildNodes(); err != nil {
@@ -341,40 +328,27 @@ func (b *buildCtx) computeNodeGeometry() {
 	b.centers = centers
 }
 
-// computeQuantizedLayout is PHASE 3: makes the quantized hierarchical polar layout
+// computeQuantizedLayout makes the quantized flat absolute scene-polar layout
 // (quantized_layout.go) AUTHORITATIVE for every node's world center. It resolves each
 // node's quantizedOffset — the stored quantITheta/quantIPhi/quantIR when ALL THREE are
-// present (a scene saved under this model), otherwise the offset SNAPPED from the node's
-// current (pre-quantized) scenePolar-derived center (an old scene, or a node whose
-// scenePolar was hand-authored) — then recomposes every node's world center from those
-// offsets and overwrites b.nodeGeoms/b.centers with the composed result. Every later phase
-// (reach radii, per-edge arc/segment, the movers seeded in buildMoveDispatch) therefore
-// operates on the COMPOSED centers, and md.quantizedLayout defaults to true (buildMoveDispatch)
-// so the live drag path (RootMove) treats this same offset model as authoritative too.
-//
-// Isolated nodes (no edges at all) are not covered by buildSpanningTree/snapQuantizedOffsets
-// (which only walk the edge graph); they are folded in here as their own root with a
-// zero offset, so EVERY node in the spec ends up with an entry.
+// present (a scene saved under this model), otherwise the offset MEASURED from the
+// node's current (pre-quantized) scenePolar-derived center (an old scene, or a node
+// whose scenePolar was hand-authored) — then recomputes every node's world center
+// directly about the scene center (every node independent — no reference/parent) and
+// overwrites b.nodeGeoms/b.centers with the result. Every later phase (reach radii,
+// per-edge arc/segment, the movers seeded in buildMoveDispatch) therefore operates on
+// the composed centers, and md.quantizedLayout defaults to true (buildMoveDispatch) so
+// the live drag path (RootMove) treats this same offset model as authoritative too.
 func (b *buildCtx) computeQuantizedLayout() {
-	// Owned reference map (peer-to-peer): each node's reference comes ONLY from its stored
-	// `reference` (manually chosen). No spanning-tree seed. A node with no stored reference
-	// is a root ("" — snaps to the scene sphere). The scalar triple (iTheta,iPhi,iR) is then
-	// MEASURED from the loaded position relative to that reference's frame; positions are not
-	// recomposed (individual), the triple is stored bookkeeping.
-	references := make(map[string]string, len(b.spec.Nodes))
+	ids := make(map[string]bool, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
-		if n.Reference != nil {
-			references[n.ID] = *n.Reference
-		} else {
-			references[n.ID] = "" // no stored reference → a root
-		}
+		ids[n.ID] = true
 	}
-	b.references = references
 
 	// The scalar triple is the STORED quantI* when a scene was saved under this model
 	// (all three present); otherwise it is MEASURED from the node's currently-loaded
 	// (pre-quantized, scenePolar-derived) center — the fallback for an un-migrated node.
-	measured := measureScalars(b.centers, references, b.sphere.Center)
+	measured := measureScalars(b.centers, ids, b.sphere.Center)
 	offsets := make(map[string]quantizedOffset, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
 		if n.QuantITheta != nil && n.QuantIPhi != nil && n.QuantIR != nil {
@@ -382,7 +356,6 @@ func (b *buildCtx) computeQuantizedLayout() {
 				iTheta: *n.QuantITheta,
 				iPhi:   *n.QuantIPhi,
 				iR:     *n.QuantIR,
-				parent: references[n.ID],
 			}
 			continue
 		}
@@ -390,14 +363,13 @@ func (b *buildCtx) computeQuantizedLayout() {
 			offsets[n.ID] = off
 			continue
 		}
-		offsets[n.ID] = quantizedOffset{parent: references[n.ID]} // centerless → keep its reference
+		offsets[n.ID] = quantizedOffset{} // centerless → default to the scene center
 	}
 	b.quantizedOffsets = offsets
 
-	// Recompose every node's world center from the authoritative scalar triples
-	// (references-before-dependents), overwriting the raw loaded centers/geoms so every
-	// later phase operates on the composed result.
-	derived := deriveCenters(offsets, references, b.sphere.Center)
+	// Recompute every node's world center directly about the scene center, overwriting
+	// the raw loaded centers/geoms so every later phase operates on the composed result.
+	derived := deriveCenters(offsets, b.sphere.Center)
 	for id, pos := range derived {
 		b.centers[id] = pos
 		if g, ok := b.nodeGeoms[id]; ok {
@@ -490,60 +462,6 @@ func (b *buildCtx) allocateWires() {
 	b.edgeSegments = edgeSegments
 }
 
-// buildLayoutEdges builds the hidden layout graph: one *LayoutPort per node id
-// (including isolated nodes with no edges), then mirrors every domain spec
-// edge (source -> target) onto it via connectTo. This is a parallel edge set
-// to the domain wires built by allocateWires — same connectivity, carrying
-// LayoutMsg instead of beads. buildNodes injects each node's port via
-// pb.layout, the same closure-injection mechanism EmitGeometry uses.
-//
-// Runs AFTER buildMoveDispatch so each port's apply/applyDirect closures can call
-// straight into THAT node's own nodeMover.applyCenter (node_move.go, SLICE 3: an
-// in-process call, not a channel hop — this node's own Update() goroutine is the
-// sole writer of nm.geom's position fields) and through the (possibly
-// still-unarmed) quantOffsetPersist. b.md may be nil in tests that call
-// buildLayoutEdges directly without building a MoveDispatch first; apply/
-// applyDirect are left nil in that case (Handle nil-guards them).
-func (b *buildCtx) buildLayoutEdges() {
-	ports := make(map[string]*LayoutPort, len(b.spec.Nodes))
-	for _, n := range b.spec.Nodes {
-		p := NewLayoutPort(n.ID)
-		off := b.quantizedOffsets[n.ID]
-		p.iTheta = off.iTheta
-		p.iPhi = off.iPhi
-		p.iR = off.iR
-		p.kind = n.Type
-		if b.md != nil {
-			id := n.ID
-			ref := b.references[n.ID]
-			iTheta, iPhi := off.iTheta, off.iPhi
-			md := b.md
-			p.apply = func(iR int) {
-				md.applyLayoutCenter(id, iTheta, iPhi, iR, ref)
-			}
-			p.applyDirect = func(center vec3, reach float64) {
-				md.applyLayoutCenterDirect(id, center, reach)
-			}
-		}
-		ports[n.ID] = p
-	}
-	for _, e := range b.spec.Edges {
-		src, ok := ports[e.Source]
-		if !ok {
-			continue
-		}
-		dst, ok := ports[e.Target]
-		if !ok {
-			continue
-		}
-		src.connectTo(dst)
-	}
-	b.layoutPorts = ports
-	if b.md != nil {
-		b.md.layoutPorts = ports
-	}
-}
-
 // buildMoveDispatch builds the MoveDispatch from initial geometry and edge
 // endpoints. It creates one nodeMover per node and one edgeMover per edge; each
 // owns its geometry and recomputes itself on a node-move (no central
@@ -562,13 +480,12 @@ func (b *buildCtx) buildMoveDispatch() {
 		md.sceneSphere = b.sphere
 	}
 
-	// Phase 3: the quantized layout is authoritative by default — md.quantizedOffsets was
-	// already resolved (stored offset, or snapped from the pre-quantized center) by
+	// The quantized layout is authoritative by default — md.quantizedOffsets was already
+	// resolved (stored offset, or measured from the pre-quantized center) by
 	// computeQuantizedLayout, which also overwrote b.nodeGeoms so the nodeMovers newMoveDispatch
-	// just built above are already seeded from the COMPOSED centers.
+	// just built above are already seeded from the composed centers.
 	md.quantizedLayout = true
 	md.quantizedOffsets = b.quantizedOffsets
-	md.references = b.references
 	b.md = md
 }
 
@@ -653,8 +570,7 @@ func (b *buildCtx) buildNodes() error {
 		bind := Registry[n.Type]
 		pb := newPortBindings()
 		pb.outSink = outSink
-		pb.clock = b.clk                // shared clock for clock-paced interior animation (Input refill slide)
-		pb.layout = b.layoutPorts[n.ID] // hidden layout-graph port mirroring this node's domain edges
+		pb.clock = b.clk // shared clock for clock-paced interior animation (Input refill slide)
 
 		for _, port := range bind.Ports {
 			switch port.Dir {

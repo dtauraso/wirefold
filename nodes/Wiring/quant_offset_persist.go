@@ -1,17 +1,18 @@
 package Wiring
 
 // quant_offset_persist.go — the WRITE side of the quantized scalar triple (a,b,c) =
-// (iTheta,iPhi,iR) as file data, plus the owned reference.
+// (iTheta,iPhi,iR) as file data.
 //
-// Under the plain-polar model (quantized_layout.go measureScalars/deriveCenters,
-// node_move.go snapToReference/remeasureTriples) a node's PERSISTED position is its
-// integer scalar triple about its reference — NOT a cartesian or scene-polar center.
-// This is the debounced read-modify-write mirror: RootMove / remeasureTriples call
-// schedule() for the dragged node and every direct child whose triple changed; this
-// persister coalesces rapid updates (a drag) into one write per node after motion
-// settles, and writes quantITheta/quantIPhi/quantIR + reference to
-// `<root>/nodes/<id>/meta.json`, preserving every other field and DELETING the legacy
-// scenePolarR/Theta/Phi fields (scalars are now the sole persisted position source).
+// Under the flat absolute scene-polar model (quantized_layout.go measureScalars/
+// deriveCenters, node_move.go RootMove) a node's PERSISTED position is its integer
+// scalar triple about the scene center — every node is a root; there is no reference/
+// parent concept. This is the debounced read-modify-write mirror: RootMove calls
+// schedule() for the dragged node; this persister coalesces rapid updates (a drag)
+// into one write per node after motion settles, and writes
+// quantITheta/quantIPhi/quantIR to `<root>/nodes/<id>/meta.json`, preserving every
+// other field and DELETING the legacy scenePolarR/Theta/Phi fields (scalars are now
+// the sole persisted position source) and any leftover `reference` field from the
+// removed reference-tree model.
 //
 // Go owns persistence (MODEL.md): fire-and-forget, runs on the debounce timer's own
 // goroutine, logs on error, never blocks the gesture. Only the directory-tree form has
@@ -34,15 +35,11 @@ type quantOffsetPersister struct {
 	debouncedPersister[map[string]quantizedOffset]
 }
 
-// schedule records the latest scalar triple + reference for a node and (re)arms the
-// debounce timer. off.parent is overwritten with ref so the persisted `reference` field
-// always matches the caller's authoritative md.references entry even if off was built
-// before a reference change.
-func (p *quantOffsetPersister) schedule(id string, off quantizedOffset, ref string) {
+// schedule records the latest scalar triple for a node and (re)arms the debounce timer.
+func (p *quantOffsetPersister) schedule(id string, off quantizedOffset) {
 	if p == nil || p.root == "" {
 		return
 	}
-	off.parent = ref
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.pending == nil {
@@ -73,10 +70,12 @@ func (p *quantOffsetPersister) flush() {
 	p.recordWrite()
 }
 
-// writeQuantOffset sets the node's quantized scalar triple (iTheta,iPhi,iR) and its
-// reference in <root>/nodes/<id>/meta.json, preserving every other field and DELETING
-// the legacy scenePolarR/Theta/Phi fields (the scalar triple is now the sole persisted
-// position source — see the package doc comment above). The file must already exist.
+// writeQuantOffset sets the node's quantized scalar triple (iTheta,iPhi,iR) in
+// <root>/nodes/<id>/meta.json, preserving every other field and DELETING the legacy
+// scenePolarR/Theta/Phi fields and any leftover `reference` field from the removed
+// reference-tree model (the scalar triple about the scene center is now the sole
+// persisted position source — see the package doc comment above). The file must
+// already exist.
 func writeQuantOffset(root, id string, off quantizedOffset) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
@@ -90,12 +89,7 @@ func writeQuantOffset(root, id string, off quantizedOffset) error {
 		setInt("quantITheta", off.iTheta)
 		setInt("quantIPhi", off.iPhi)
 		setInt("quantIR", off.iR)
-		if off.parent == "" {
-			delete(obj, "reference")
-		} else {
-			b, _ := json.Marshal(off.parent)
-			obj["reference"] = b
-		}
+		delete(obj, "reference")
 		// Scene polar is no longer a stored source of truth — drop any legacy fields.
 		delete(obj, "scenePolarR")
 		delete(obj, "scenePolarTheta")

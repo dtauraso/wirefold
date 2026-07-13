@@ -1,256 +1,25 @@
 package Wiring
 
 import (
-	"math"
 	"testing"
 )
 
-const quantEps = 1e-9
-
-// parallel checks whether two vec3s point the same direction (allowing different
-// magnitudes but not opposite sign) within eps, using the normalized-dot-product test.
-func parallel(t *testing.T, a, b vec3, msg string) {
-	t.Helper()
-	al, bl := a.length(), b.length()
-	if al < quantEps || bl < quantEps {
-		t.Fatalf("%s: degenerate vector(s) a=%v (len %v) b=%v (len %v)", msg, a, al, b, bl)
-	}
-	d := a.normalize().dot(b.normalize())
-	if math.Abs(d-1) > quantEps {
-		t.Fatalf("%s: not parallel (dot=%v), a=%v b=%v", msg, d, a, b)
-	}
-}
-
-func TestComposeStraightChainColinear(t *testing.T) {
-	// Parent/roots built EXPLICITLY (bypassing buildSpanningTree) so this test's intended
-	// root (R) doesn't depend on buildSpanningTree's lowest-id-per-component rule — this
-	// test is about the compose forward-kinematics math, not tree-building.
-	parent := map[string]string{"R": "", "A": "R", "B": "A"}
-	roots := map[string]bool{"R": true}
-	offsets := map[string]quantizedOffset{
-		"A": {iTheta: 0, iPhi: 0, iR: 1},
-		"B": {iTheta: 0, iPhi: 0, iR: 1},
-	}
-	anchor := vec3{X: 0, Y: 0, Z: 0}
-	layout := composeQuantizedLayout(parent, roots, offsets, anchor)
-
-	r, a, b := layout["R"], layout["A"], layout["B"]
-	if r.center != anchor {
-		t.Fatalf("root center = %v, want anchor %v", r.center, anchor)
-	}
-	vAminusR := a.center.sub(r.center)
-	vBminusA := b.center.sub(a.center)
-	parallel(t, vAminusR, vBminusA, "straight chain: B-A should be parallel to A-R")
-}
-
-func TestComposeSiblingsSameOffsetColinear(t *testing.T) {
-	// Parent/roots built explicitly (see TestComposeStraightChainColinear).
-	parent := map[string]string{"P": "", "X": "P", "Y": "P"}
-	roots := map[string]bool{"P": true}
-	offsets := map[string]quantizedOffset{
-		"X": {iTheta: 1, iPhi: 1, iR: 1},
-		"Y": {iTheta: 1, iPhi: 1, iR: 2}, // different radial step, same angular offset
-	}
-	anchor := vec3{X: 10, Y: 20, Z: 30}
-	layout := composeQuantizedLayout(parent, roots, offsets, anchor)
-
-	p, x, y := layout["P"], layout["X"], layout["Y"]
-	vPX := x.center.sub(p.center)
-	vPY := y.center.sub(p.center)
-	parallel(t, vPX, vPY, "siblings with same angular offset should lie on one ray from P")
-}
-
-func TestComposeRotationalNesting(t *testing.T) {
-	// Parent/roots built explicitly (see TestComposeStraightChainColinear).
-	parent := map[string]string{"R": "", "A": "R", "B": "A"}
-	roots := map[string]bool{"R": true}
-	offsets := map[string]quantizedOffset{
-		"A": {iTheta: 1, iPhi: 0, iR: 1}, // A bends off R's forward
-		"B": {iTheta: 0, iPhi: 0, iR: 1}, // B continues straight along A's (bent) forward
-	}
-	anchor := vec3{X: 0, Y: 0, Z: 0}
-	layout := composeQuantizedLayout(parent, roots, offsets, anchor)
-
-	r, a, b := layout["R"], layout["A"], layout["B"]
-
-	if a.forward == r.forward {
-		t.Fatalf("A's forward should differ from R's forward (iTheta=1 bends it), got equal %v", a.forward)
-	}
-
-	// B's position minus A's position should be parallel to A's forward direction.
-	vAB := b.center.sub(a.center)
-	aFwdCart := cart(a.forward)
-	parallel(t, vAB, aFwdCart, "B-A should be parallel to A's (bent) forward direction")
-
-	_ = r
-}
-
-// TestSpanningTreeRootIsLowestIdPerComponent asserts the NEW buildSpanningTree rule: per
-// weakly-connected component, the root is the lowest-id node (string sort), parents are
-// assigned by BFS from that root, the result is acyclic, and every node in the component
-// is reachable.
-func TestSpanningTreeRootIsLowestIdPerComponent(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"b->c": {Source: "b", Target: "c"},
-		"a->c": {Source: "a", Target: "c"},
-		"d->e": {Source: "d", Target: "e"},
-	}
-	parent, roots := buildSpanningTree(edges)
-
-	// One component {a,b,c}: lowest id "a" is the root.
-	if !roots["a"] {
-		t.Fatalf("expected a (lowest id) to be a root, roots=%v", roots)
-	}
-	if roots["b"] || roots["c"] {
-		t.Fatalf("only the lowest id per component should be a root, roots=%v", roots)
-	}
-	// Another component {d,e}: lowest id "d" is the root.
-	if !roots["d"] {
-		t.Fatalf("expected d (lowest id) to be a root, roots=%v", roots)
-	}
-	if roots["e"] {
-		t.Fatalf("e should not be a root, roots=%v", roots)
-	}
-
-	// Every node reachable / covered.
-	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		if _, ok := parent[id]; !ok {
-			t.Fatalf("node %q missing from parent map, parent=%v", id, parent)
-		}
-	}
-
-	// Acyclic: walking parent pointers from any node terminates at a root without
-	// revisiting a node.
-	for _, start := range []string{"a", "b", "c", "d", "e"} {
-		seen := map[string]bool{}
-		cur := start
-		for cur != "" {
-			if seen[cur] {
-				t.Fatalf("cycle detected in parent chain starting at %q", start)
-			}
-			seen[cur] = true
-			cur = parent[cur]
-		}
-	}
-}
-
-func TestMoveDispatchComposeQuantizedLayoutGuarded(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"R->A": {Source: "R", Target: "A"},
-	}
-	parent, _ := buildSpanningTree(edges)
-	offsets := quantizedOffsetsFromParents(parent)
-	aOff := offsets["A"]
-	aOff.iR = 1
-	offsets["A"] = aOff
-
-	md := &MoveDispatch{sceneSphere: sceneSphere{Center: vec3{X: 1, Y: 2, Z: 3}}}
-	md.quantizedOffsets = offsets
-
-	// Guard off by default: nothing composed.
-	if got := md.ComposeQuantizedLayout(); got != nil {
-		t.Fatalf("expected nil while quantizedLayout guard is off, got %v", got)
-	}
-
-	md.quantizedLayout = true
-	got := md.ComposeQuantizedLayout()
-	if got["R"].center != md.sceneSphere.Center {
-		t.Fatalf("root center = %v, want scene sphere center %v", got["R"].center, md.sceneSphere.Center)
-	}
-}
-
-// TestSpanningTreeFullyBidirectionalHasRoot is the regression test for the bug this fix
-// addresses: a FULLY bidirectional graph (every edge present both directions, so no node
-// has zero in-degree under the old directed rule) must still produce exactly one root
-// (the lowest id), every other node must have a parent, the parent chain must be acyclic,
-// and composeQuantizedLayout must return a center for EVERY node (not empty) — this is
-// the exact condition that froze dragging.
-func TestSpanningTreeFullyBidirectionalHasRoot(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"1->2": {Source: "1", Target: "2"},
-		"2->1": {Source: "2", Target: "1"},
-		"2->3": {Source: "2", Target: "3"},
-		"3->2": {Source: "3", Target: "2"},
-		"1->3": {Source: "1", Target: "3"},
-		"3->1": {Source: "3", Target: "1"},
-	}
-	parent, roots := buildSpanningTree(edges)
-
-	if len(roots) != 1 {
-		t.Fatalf("expected exactly one root, got roots=%v", roots)
-	}
-	if !roots["1"] {
-		t.Fatalf("expected root to be lowest id %q, roots=%v", "1", roots)
-	}
-	for _, id := range []string{"2", "3"} {
-		if parent[id] == "" {
-			t.Fatalf("expected node %q to have a non-root parent, parent=%v", id, parent)
-		}
-	}
-
-	// Acyclic parent chain.
-	for _, start := range []string{"1", "2", "3"} {
-		seen := map[string]bool{}
-		cur := start
-		for cur != "" {
-			if seen[cur] {
-				t.Fatalf("cycle detected in parent chain starting at %q", start)
-			}
-			seen[cur] = true
-			cur = parent[cur]
-		}
-	}
-
-	offsets := quantizedOffsetsFromParents(parent)
-	composed := composeQuantizedLayout(parent, roots, offsets, vec3{})
-	for _, id := range []string{"1", "2", "3"} {
-		if _, ok := composed[id]; !ok {
-			t.Fatalf("composeQuantizedLayout missing center for %q, composed=%v", id, composed)
-		}
-	}
-}
-
-// TestSpanningTreeMultipleComponents: two disconnected bidirectional clusters produce two
-// roots, each the lowest id within its own cluster.
-func TestSpanningTreeMultipleComponents(t *testing.T) {
-	edges := map[string]EdgeEndpoints{
-		"a->b": {Source: "a", Target: "b"},
-		"b->a": {Source: "b", Target: "a"},
-		"x->y": {Source: "x", Target: "y"},
-		"y->x": {Source: "y", Target: "x"},
-	}
-	_, roots := buildSpanningTree(edges)
-	want := map[string]bool{"a": true, "x": true}
-	for id := range want {
-		if !roots[id] {
-			t.Fatalf("expected %q to be a root, roots=%v", id, roots)
-		}
-	}
-	for id := range roots {
-		if !want[id] {
-			t.Fatalf("unexpected root %q, roots=%v", id, roots)
-		}
-	}
-}
-
-// measureScalars/deriveCenters round-trip: a node's world center, re-measured about its
-// reference (plain local polar, reference's current world center as the origin) and then
-// re-derived, reproduces the original center. There is no colinear/straight-line invariant
-// under the plain-polar model (that was the old rotational-nesting/referenceForward model) —
-// only the round-trip.
+// measureScalars/deriveCenters round-trip: a node's world center, re-measured about the
+// scene center (flat absolute scene-polar — every node independent) and then re-derived,
+// reproduces the original center. Scalars are chosen directly (exact integer cells) rather
+// than measured from an arbitrary world center — measurement quantizes to the nearest
+// cell, so round-tripping an off-grid center is lossy by design; the invariant under test
+// is that measure(derive(scalars)) reproduces the SAME scalars (idempotent on-grid points).
 func TestMeasureScalarsRoundTrips(t *testing.T) {
-	// Scalars chosen directly (exact integer cells) rather than measured from an arbitrary
-	// world center — measurement quantizes to the nearest cell, so round-tripping an
-	// off-grid center is lossy by design; the invariant under test is that
-	// measure(derive(scalars)) reproduces the SAME scalars (idempotent on-grid points).
-	references := map[string]string{"g": "", "p": "g", "c": "p"}
+	sceneCenter := vec3{}
 	scalars := map[string]quantizedOffset{
-		"g": {parent: ""},
-		"p": {iTheta: 4, iPhi: 2, iR: 3, parent: "g"},
-		"c": {iTheta: 2, iPhi: -3, iR: 2, parent: "p"},
+		"g": {},
+		"p": {iTheta: 4, iPhi: 2, iR: 3},
+		"c": {iTheta: 2, iPhi: -3, iR: 2},
 	}
-	derived := deriveCenters(scalars, references, vec3{})
-	remeasured := measureScalars(derived, references, vec3{})
+	derived := deriveCenters(scalars, sceneCenter)
+	ids := map[string]bool{"g": true, "p": true, "c": true}
+	remeasured := measureScalars(derived, ids, sceneCenter)
 	for _, id := range []string{"g", "p", "c"} {
 		if remeasured[id] != scalars[id] {
 			t.Fatalf("%s: round-trip mismatch remeasured=%+v want=%+v", id, remeasured[id], scalars[id])
@@ -258,39 +27,31 @@ func TestMeasureScalarsRoundTrips(t *testing.T) {
 	}
 }
 
-// snapToReference lands a dragged node on the scalar×constant grid ABOUT its reference: the
-// offset from the reference re-measures to integer (iTheta,iPhi,iR) cells — no off-grid
-// angles or distances.
-func TestSnapToReferenceLandsOnGrid(t *testing.T) {
+// TestMeasureScalarsMeasuresEveryNodeAboutSceneCenter asserts every node is measured
+// independently about the ONE scene center — there is no reference/parent origin, so a
+// node's offset never depends on another node's position.
+func TestMeasureScalarsMeasuresEveryNodeAboutSceneCenter(t *testing.T) {
+	sceneCenter := vec3{X: 10, Y: 20, Z: 30}
 	centers := map[string]vec3{
-		"g": {X: 0, Y: 0, Z: 0},
-		"p": polar2cart(polar{R: 50, Theta: 1.0, Phi: 0.4}),
+		"a": sceneCenter.add(vec3{X: 40, Y: 0, Z: 0}),
+		"b": sceneCenter.add(vec3{X: 0, Y: 0, Z: 60}),
 	}
-	md := &MoveDispatch{
-		sceneSphere: sceneSphere{Center: vec3{}},
-		references:  map[string]string{"g": "", "p": "g", "c": "p"},
-		nodeMovers:  map[string]*nodeMover{"g": {id: "g"}, "p": {id: "p"}, "c": {id: "c"}},
+	ids := map[string]bool{"a": true, "b": true}
+	offs := measureScalars(centers, ids, sceneCenter)
+	if _, ok := offs["a"]; !ok {
+		t.Fatal("expected an offset for a")
 	}
-	md.nodeMovers["g"].snap.Store(&centerSnap{c: centers["g"]})
-	md.nodeMovers["p"].snap.Store(&centerSnap{c: centers["p"]})
-	md.nodeMovers["c"].snap.Store(&centerSnap{c: centers["p"]})
+	if _, ok := offs["b"]; !ok {
+		t.Fatal("expected an offset for b")
+	}
 
-	// Arbitrary off-grid target.
-	target := centers["p"].add(vec3{X: 47, Y: -13, Z: 22})
-	snapped, ok := md.snapToReference("c", target)
-	if !ok {
-		t.Fatal("expected a reference snap for a non-root node")
+	// Re-derive: each node's center comes straight back from the scene center, with no
+	// dependency on the other node's offset.
+	derived := deriveCenters(offs, sceneCenter)
+	if d := derived["a"].sub(centers["a"]).length(); d > 1e-6 {
+		t.Fatalf("a: derived center drifted by %v", d)
 	}
-	// Re-measure the snapped offset about the reference: it must be exact integer cells,
-	// and re-deriving it must reproduce the snapped point exactly.
-	centers["c"] = snapped
-	rel := measureScalars(centers, md.references, md.sceneSphere.Center)["c"]
-	reconstructed := centers["p"].add(polar2cart(polar{
-		R:     float64(rel.iR) * stepR,
-		Theta: float64(rel.iTheta) * stepTheta,
-		Phi:   float64(rel.iPhi) * stepPhi,
-	}))
-	if reconstructed.sub(snapped).length() > 1e-6 {
-		t.Fatalf("snapped point is not on the integer grid about its reference: snapped=%v cells=%+v", snapped, rel)
+	if d := derived["b"].sub(centers["b"]).length(); d > 1e-6 {
+		t.Fatalf("b: derived center drifted by %v", d)
 	}
 }

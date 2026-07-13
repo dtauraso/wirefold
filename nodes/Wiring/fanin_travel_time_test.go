@@ -17,41 +17,23 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// faninSrc is a minimal source kind with one paced Out. Layout polls the hidden
-// layout port (SLICE 3, layout-on-domain-network.md): this node's own Update()
-// goroutine is the sole writer of its position, so a test that drags it must have
-// this loop running to drain the write.
+// faninSrc is a minimal source kind with one paced Out. Position writes route through
+// nodeMover's own goroutine (node_move.go), so no layout plumbing is needed here.
 type faninSrc struct {
-	Out    *Out
-	Layout *LayoutPort
+	Out *Out
 }
 
 func (n *faninSrc) Update(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-n.Layout.in:
-			n.Layout.Handle(msg)
-		}
-	}
+	<-ctx.Done()
 }
 
-// faninSink is a minimal sink kind with one paced In. See faninSrc's Layout doc.
+// faninSink is a minimal sink kind with one paced In.
 type faninSink struct {
-	In     *In
-	Layout *LayoutPort
+	In *In
 }
 
 func (n *faninSink) Update(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-n.Layout.in:
-			n.Layout.Handle(msg)
-		}
-	}
+	<-ctx.Done()
 }
 
 func init() {

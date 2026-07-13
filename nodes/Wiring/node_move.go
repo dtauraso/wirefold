@@ -173,14 +173,17 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindCenter {
-		// SLICE 3: nodeMover no longer WRITES a node's center — that write now
-		// happens on the node's own Update() goroutine (applyCenter below, called
-		// from LayoutPort.apply/applyDirect). A moveMsgKindCenter can still arrive
-		// here from fanCenters' PARTNER re-emit (an aimed-port neighbor whose OWN
-		// center is unchanged, only asked to re-emit so its port direction picks up
-		// the moved partner's fresh center via m.partnerCenter at emit time) — that
-		// case does not mutate this node's geom/snap, so falling through to the
-		// unconditional re-emit below is correct and sufficient.
+		// nodeMover is the SOLE writer of its own position (single-writer by
+		// construction — this is the only path that mutates it). A Center payload is
+		// the flat absolute-scene-polar drag write from fanCenters: apply it via
+		// applyCenter, which also re-emits. A nil Center is fanCenters' PARTNER
+		// re-emit (an aimed-port neighbor whose OWN center is unchanged, only asked
+		// to re-emit so its port direction picks up the moved partner's fresh center
+		// via m.partnerCenter at emit time) — no mutation, just re-emit.
+		if msg.Center != nil {
+			m.applyCenter(*msg.Center, msg.ReachR)
+			return
+		}
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -199,15 +202,12 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 }
 
-// applyCenter is the SOLE WRITE of this node's center/reach (SLICE 3,
-// layout-on-domain-network.md "Position ownership: Update() is the sole writer").
-// It is a plain in-process method — no channel, no inbox — called ONLY from the
-// node's own Update() goroutine (via LayoutPort.apply for a radius-cascade hop, or
-// LayoutPort.applyDirect for the drag origin's own new center), which is what makes
-// that one goroutine the exclusive writer of m.geom/m.snap. It sets the held polar
-// position, publishes the atomic snapshot readers observe cross-goroutine (stdin
-// reader: centerOfNode/heldCenters/heldPolar/fanCenters' partner lookup, edgeMover's
-// partnerCenter), and re-emits this node's live geometry.
+// applyCenter is the SOLE WRITE of this node's center/reach. It is called ONLY from
+// this nodeMover's own inbox-drain goroutine (handle's moveMsgKindCenter case, driven
+// by fanCenters below), which is what makes that one goroutine the exclusive writer of
+// m.geom/m.snap. It sets the held polar position, publishes the atomic snapshot readers
+// observe cross-goroutine (stdin reader: centerOfNode/heldCenters/heldPolar/fanCenters'
+// partner lookup, edgeMover's partnerCenter), and re-emits this node's live geometry.
 func (m *nodeMover) applyCenter(center vec3, reach float64) {
 	m.geomMu.Lock()
 	setNodeWorld(&m.geom, center)
@@ -460,9 +460,9 @@ type MoveDispatch struct {
 	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
 	// quantOffsetPersist is the debounced disk persister for a node's scalar triple
-	// (iTheta,iPhi,iR) + reference (quant_offset_persist.go) — the sole persisted position
-	// source under the plain-polar model. Armed by EnableEditPersist; scheduled from
-	// remeasureTriples for the dragged node and its direct children.
+	// (iTheta,iPhi,iR) about the scene center (quant_offset_persist.go) — the sole
+	// persisted position source under the flat polar model. Armed by EnableEditPersist;
+	// scheduled from RootMove for the dragged node.
 	quantOffsetPersist *quantOffsetPersister
 	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
 	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanScene on every
@@ -511,31 +511,14 @@ type MoveDispatch struct {
 	hoverNode  string
 	hoverPort  string
 	hoverInput bool
-	// quantizedLayout gates the PHASE 1 quantized hierarchical polar layout
-	// (quantized_layout.go) — default false. When false (always, currently — nothing
-	// sets it yet), nothing reads quantizedOffsets or calls composeQuantizedLayout from
-	// the live path; this is purely additive scaffolding under test.
+	// quantizedLayout gates the quantized absolute-scene-polar snap (quantized_layout.go)
+	// — every node is a root, measured/derived about the scene center only.
 	quantizedLayout bool
-	// quantizedOffsets is the per-node quantized polar offset + resolved parent
-	// (quantized_layout.go quantizedOffset), keyed by node id. Phase 3: populated by
+	// quantizedOffsets is the per-node quantized polar offset about the scene center
+	// (quantized_layout.go quantizedOffset), keyed by node id. Populated by
 	// loader.go computeQuantizedLayout at load time and authoritative from then on —
-	// RootMove (drag) remeasures the dragged node's triple; positions are individual.
+	// RootMove (drag) remeasures the dragged node's own triple.
 	quantizedOffsets map[string]quantizedOffset
-	// references is the owned per-node reference map (node id → reference id, "" for a
-	// root). Seeded from the spanning tree at load, then owned — remeasureTriples reads it
-	// instead of recomputing a spanning tree. Overridable per node (manual picking).
-	references map[string]string
-	// layoutPorts is the hidden layout graph (layout_edge.go), one *LayoutPort per node
-	// id, wired by loader.go buildLayoutEdges after this MoveDispatch exists. RootMove
-	// reads it to seed a radius cascade on a dragged node's reference (SeedLayoutCascade).
-	layoutPorts map[string]*LayoutPort
-	// timerKind / updateKinds are the cascade participation kinds a drag seed stamps onto
-	// its LayoutMsg: timerKind is the ONE kind allowed to propagate (forward); updateKinds
-	// is the SET allowed to reposition. Defaulted to the real kinds (cascadeTimerKind /
-	// cascadeUpdateKinds) by newMoveDispatch; overridable so synthetic-kind tests can drive
-	// the cascade with their own (collision-free) kind names.
-	timerKind   string
-	updateKinds map[string]bool
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -588,8 +571,6 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		ov:                 defaultOverlayState(),
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
-		timerKind:          cascadeTimerKind,
-		updateKinds:        cascadeUpdateKinds(),
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
@@ -658,11 +639,6 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 	}
 	for _, em := range md.edgeMovers {
 		go em.run(ctx)
-	}
-	// Each node's dedicated LAYOUT goroutine (split-layout-bead-goroutines.md):
-	// always-on position/drag handling, independent of the pausable bead loop.
-	for _, p := range md.layoutPorts {
-		go p.run(ctx)
 	}
 }
 
@@ -757,97 +733,6 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
-// applyLayoutCenter is the single write path a node's OWN Update() goroutine uses
-// (via LayoutPort.apply, layout_edge.go Handle) to publish a radius-cascade-computed
-// position. This is where the cascade's transport/geometry decoupling lands: the
-// message that reached Handle carried only a new radius (iR); THIS function computes
-// the node's world center as a plain local polar offset about ITS OWN REFERENCE
-// (never about any sender-provided center) and writes it via nm.applyCenter — a plain
-// in-process function call on the CALLER's goroutine, no channel/inbox hop — which is
-// exactly this node's own Update() goroutine (LayoutPort.Handle only ever runs there,
-// per layout_edge.go's doc comment), making that goroutine the sole writer of
-// nm.geom's position fields. It also schedules the updated iR (with the node's fixed
-// iTheta/iPhi and its reference) for debounced disk persistence. Read reachR off the
-// node's own current snap so the cascade does not clobber its sphere-reach ring. If
-// this node's reference has no known center yet, the write is skipped (nothing to
-// anchor to).
-func (md *MoveDispatch) applyLayoutCenter(id string, iTheta, iPhi, iR int, ref string) {
-	nm, ok := md.nodeMovers[id]
-	if !ok {
-		return
-	}
-	refCenter, ok := md.centerOfNode(ref)
-	if !ok {
-		return
-	}
-	center := refCenter.add(polar2cart(polar{
-		R:     float64(iR) * stepR,
-		Theta: float64(iTheta) * stepTheta,
-		Phi:   float64(iPhi) * stepPhi,
-	}))
-	reach := 0.0
-	if s := nm.snap.Load(); s != nil {
-		reach = s.reach
-	}
-	nm.applyCenter(center, reach)
-	// A cascade descendant must drag its incident edges along, exactly like the
-	// drag origin does through fanCenters. The drag origin's edge notify lives in
-	// fanCenters; a cascade hop instead lands HERE (on the descendant's own
-	// Update() goroutine via LayoutPort.apply), which had no companion edge
-	// sender — so its sphere re-emitted (applyCenter) while its edges stayed put.
-	// Notify each incident edge's inbox with the new endpoint so edgeMover
-	// recomputes/re-emits, mirroring fanCenters' per-edge loop.
-	for edgeID, em := range md.edgeMovers {
-		if em.srcID != id && em.dstID != id {
-			continue
-		}
-		if ch, ok := md.dispatch[edgeID]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: map[string]vec3{id: center}}
-		}
-	}
-	if md.quantOffsetPersist != nil {
-		md.quantOffsetPersist.schedule(id, quantizedOffset{iTheta: iTheta, iPhi: iPhi, iR: iR, parent: ref}, ref)
-	}
-}
-
-// applyLayoutCenterDirect is the single write path the DRAG ORIGIN's own Update()
-// goroutine uses (via LayoutPort.applyDirect, layout_edge.go Handle's Direct branch) to
-// publish RootMove's freshly computed world center + reach for the dragged node itself.
-// SLICE 3 counterpart to applyLayoutCenter for the drag source (rather than a cascade
-// hop): a plain in-process call to nm.applyCenter on the caller's goroutine, which — via
-// InjectDirect's channel hop from fanCenters — is the dragged node's own Update()
-// goroutine, not the stdin reader's. No separate persist here: RootMove's
-// remeasureTriples already schedules the dragged node's (and its direct children's)
-// quantized-offset persist independently of this position write.
-func (md *MoveDispatch) applyLayoutCenterDirect(id string, center vec3, reach float64) {
-	if nm, ok := md.nodeMovers[id]; ok {
-		nm.applyCenter(center, reach)
-	}
-}
-
-// SeedLayoutCascade starts a radius (iR) propagation from a drag: it pushes
-// LayoutMsg{IR: newIR} onto EVERY outgoing hidden layout edge of the DRAGGED node
-// itself (not its reference) — the message carries only the new radius value, no
-// world center, no visited marking. Each node that receives it computes its OWN new
-// center as a plain local polar offset about ITS OWN REFERENCE (layout_edge.go
-// Handle -> applyLayoutCenter), and only a node whose kind is the fixed cascade timer
-// kind (cascadeTimerKind) forwards further. This call does not set the dragged node's
-// own iR — that is applied separately via the drag's own Direct message
-// (InjectDirect).
-func (md *MoveDispatch) SeedLayoutCascade(nodeID string, newIR int) {
-	p := md.layoutPorts[nodeID]
-	if p == nil {
-		return
-	}
-	msg := LayoutMsg{IR: newIR, PropagatingKind: md.timerKind, UpdateKinds: md.updateKinds}
-	for _, out := range p.out {
-		select {
-		case out <- msg:
-		default:
-		}
-	}
-}
-
 // heldCenters / heldEdges snapshot the movers' current geometry.
 // heldCenters reads the atomically-published snap (not the live geom) so it is
 // safe to call from the stdin goroutine while mover goroutines write their centers.
@@ -893,14 +778,14 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 // so they re-emit with the fresh target center (which the target mover just wrote
 // to its geom; the aimer reads via centerOfNode at emit time).
 func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]float64) {
-	// Per-node DIRECT position writes (SLICE 3): route each moved node's own new
-	// center through its own LayoutPort.InjectDirect rather than its nodeMover's
-	// inbox, so the write lands on that node's own Update() goroutine (the sole
-	// writer of its position — layout-on-domain-network.md) instead of nodeMover's
-	// retired center-writing role. One per moved node.
+	// Per-node DIRECT position writes: route each moved node's own new center to its
+	// own nodeMover inbox as a moveMsgKindCenter message carrying Center — nodeMover's
+	// handle applies it via applyCenter, making that node's own mover goroutine the
+	// sole writer of its position. One per moved node.
 	for id, c := range newCenters {
-		if p, ok := md.layoutPorts[id]; ok {
-			p.InjectDirect(c, reach[id])
+		if ch, ok := md.dispatch[id]; ok {
+			cc := c
+			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: reach[id]}
 		}
 	}
 
@@ -959,38 +844,29 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	}
 }
 
-// RootMove handles a node-drag under the polar layout
-// (docs/planning/visual-editor/polar-coordinate-model.md): the dragged node's
-// OUTER POLAR ROOT is the single authority. The world-space target converts to a
-// root (about the container origin); only THAT node's root + center change (soft
-// membership — no other node moves). Every center the node sits on recomputes its
-// reach radius on the fresh positions so its ring grows around the node, and those
-// centers are re-emitted (center unchanged, ReachR updated). Returns false for an
-// unknown node.
+// RootMove handles a node-drag under the flat absolute scene-polar layout: every node
+// is positioned independently about the scene sphere center — there is no reference/
+// parent concept, so dragging moves ONLY the dragged node (no cascade). The world-space
+// target snaps to the integer (iTheta,iPhi,iR) grid about the scene center, that node's
+// center is fanned out (re-emitting its own + incident edges' geometry, with the fresh
+// reach radius), and its own scalar triple is remeasured + persisted. Returns false for
+// an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
 	edges := md.heldEdges()
 
-	// Individual snap: snap the dragged node's own (r,θ,φ) about the scene center to the
-	// grid and move ONLY that node. A node's REFERENCE (spanning-tree parent) sets its
-	// stored scalar triple, not its movement — dragging never re-aims anyone else.
+	// Snap the dragged node's own (r,θ,φ) about the scene center to the absolute scene
+	// grid and move ONLY that node — every node is a root under the flat model.
 	newPos := target
 	if md.quantizedLayout {
-		if snapped, ok := md.snapToReference(nodeID, target); ok {
-			// Node has a reference: snap to integer (iTheta,iPhi,iR) cells about it, so the
-			// position always fits the scalar×constant grid (no off-grid angles).
-			newPos = snapped
-		} else {
-			// Root (no reference): snap to the absolute scene grid.
-			p := cart2polar(target.sub(md.sceneSphere.Center))
-			newPos = md.sceneSphere.Center.add(polar2cart(polar{
-				R:     math.Round(p.R/stepR) * stepR,
-				Theta: math.Round(p.Theta/stepTheta) * stepTheta,
-				Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
-			}))
-		}
+		p := cart2polar(target.sub(md.sceneSphere.Center))
+		newPos = md.sceneSphere.Center.add(polar2cart(polar{
+			R:     math.Round(p.R/stepR) * stepR,
+			Theta: math.Round(p.Theta/stepTheta) * stepTheta,
+			Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
+		}))
 	}
 
 	emit := map[string]vec3{nodeID: newPos}
@@ -999,72 +875,18 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromPolar(polars, edges)
 	md.fanCenters(emit, reach)
 
-	// The scalar triple (iTheta,iPhi,iR about the node's reference) is the sole persisted
-	// position source under the plain-polar model — scene-polar is no longer persisted on
-	// drag (remeasureTriples below schedules the scalar write instead).
-
-	// Remeasure the scalar triples from the new positions: the dragged node's triple about
-	// its reference changed, and so did any node that references it. Persist the changed ones.
+	// The scalar triple (iTheta,iPhi,iR about the scene center) is the sole persisted
+	// position source under the flat polar model. Remeasure the dragged node's own
+	// triple from its new position and persist it — no other node's triple changes,
+	// since there is no reference relationship to propagate through.
 	if md.quantizedLayout {
-		md.remeasureTriples(nodeID, newPos)
-		// Seed the radius (iR) cascade from the dragged node's reference (SLICE 2,
-		// docs/planning/visual-editor/layout-on-domain-network.md): if the reference is a
-		// radius-forwarding node, this reaches the dragged node's radius-forwarded descendants.
-		if off, ok := md.quantizedOffsets[nodeID]; ok {
-			md.SeedLayoutCascade(nodeID, off.iR)
+		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center)[nodeID]
+		md.quantizedOffsets[nodeID] = off
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(nodeID, off)
 		}
 	}
 	return true
-}
-
-// snapToReference snaps the target to the scalar×constant grid ABOUT the reference: a
-// PLAIN local polar coordinate with the reference's current world center as the origin
-// (no forward-kinematics frame, no rotation carried between nodes — see the Model doc in
-// the task/spec that introduced this). Returns false for a root (no reference) — the
-// caller snaps to the absolute scene grid.
-func (md *MoveDispatch) snapToReference(nodeID string, target vec3) (vec3, bool) {
-	ref := md.references[nodeID]
-	if ref == "" {
-		return vec3{}, false
-	}
-	refPos, ok := md.heldCenters()[ref]
-	if !ok {
-		return vec3{}, false
-	}
-	p := cart2polar(target.sub(refPos))
-	snapped := polar{
-		R:     math.Round(p.R/stepR) * stepR,
-		Theta: math.Round(p.Theta/stepTheta) * stepTheta,
-		Phi:   math.Round(p.Phi/stepPhi) * stepPhi,
-	}
-	return refPos.add(polar2cart(snapped)), true
-}
-
-// remeasureTriples re-measures the scalar triple (iTheta,iPhi,iR about the owned REFERENCE,
-// md.references) for the moved node AND its DIRECT CHILDREN (nodes whose reference is
-// movedID) from the current positions with movedID overridden to movedPos. A direct child's
-// WORLD position does not change on this drag — only its LOCAL polar coordinate about its
-// reference's new origin does — so re-measuring is the correct (and only) update; a child's
-// own children are unaffected (their reference's world center did not move) and are left
-// alone. Updates md.quantizedOffsets in memory and schedules a persist for every triple that
-// changed (the dragged node + each direct child).
-func (md *MoveDispatch) remeasureTriples(movedID string, movedPos vec3) {
-	centers := md.heldCenters()
-	centers[movedID] = movedPos
-
-	refs := map[string]string{movedID: md.references[movedID]}
-	for id, ref := range md.references {
-		if ref == movedID {
-			refs[id] = ref
-		}
-	}
-
-	for id, off := range measureScalars(centers, refs, md.sceneSphere.Center) {
-		md.quantizedOffsets[id] = off
-		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(id, off, md.references[id])
-		}
-	}
 }
 
 // reachRFromPolar computes each node's sphere REACH radius (max distance from a node to any

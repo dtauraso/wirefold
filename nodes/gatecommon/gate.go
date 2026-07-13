@@ -54,10 +54,6 @@ type GateNode struct {
 	FromLeft  *Wiring.In
 	FromRight *Wiring.In
 	ToPassed  *Wiring.Out
-	// Layout is the hidden-layout-graph port (nodes/Wiring/layout_edge.go),
-	// injected by the loader the same way EmitGeometry is. nil on builds
-	// without a loader; RunGate nil-guards its poll.
-	Layout *Wiring.LayoutPort
 }
 
 // windowTicks is the fixed coincidence window as a tick count (WindowMs / MsPerTick).

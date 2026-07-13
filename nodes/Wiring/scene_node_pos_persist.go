@@ -4,10 +4,11 @@ package Wiring
 // EnableEditPersist / scene-path tests can assert which topology form (directory-tree vs
 // monolithic) a MoveDispatch was loaded from ("" == monolithic, no per-node meta.json).
 //
-// The scene-polar WRITE path this persister used to own is gone: under the plain-polar
-// model (node_move.go remeasureTriples, quant_offset_persist.go) a node's persisted
-// position is its integer scalar triple (iTheta,iPhi,iR) about its reference, not a
-// scene-polar center, so scene-polar is no longer scheduled for write on drag.
+// The scene-polar WRITE path this persister used to own is gone: under the flat
+// absolute scene-polar model (node_move.go RootMove, quant_offset_persist.go) a node's
+// persisted position is its integer scalar triple (iTheta,iPhi,iR) about the scene
+// center — every node independent — not a scene-polar center, so scene-polar is no
+// longer scheduled for write on drag.
 
 import "time"
 
