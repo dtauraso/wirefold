@@ -717,34 +717,6 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
 }
 
-// NodeCenter returns the current world center for a node id as three floats —
-// the exported form of centerOfNode for external tooling (e.g. the one-off
-// local-polar re-stamp migration) that has no access to the unexported vec3
-// type. ok is false for an unknown node.
-func (md *MoveDispatch) NodeCenter(id string) (x, y, z float64, ok bool) {
-	c, ok := md.centerOfNode(id)
-	return c.X, c.Y, c.Z, ok
-}
-
-// EdgeEndpointsList returns every loaded edge as a [source, target] id pair —
-// the exported form of heldEdges for external tooling that has no access to
-// the unexported sphereEdge type.
-func (md *MoveDispatch) EdgeEndpointsList() [][2]string {
-	edges := md.heldEdges()
-	out := make([][2]string, len(edges))
-	for i, e := range edges {
-		out[i] = [2]string{e.Source, e.Target}
-	}
-	return out
-}
-
-// LayoutHolderFor returns the *LayoutHolder registered for a node id (nil if
-// unknown), so external tooling can read/update a node's LocalPolars via the
-// same owning-node route RootMove uses (requantizeLocalPolars).
-func (md *MoveDispatch) LayoutHolderFor(id string) *LayoutHolder {
-	return md.layoutHolders[id]
-}
-
 // centerOfNode returns the current world center for a node id by loading the
 // nodeMover's atomically-published snapshot. Safe to call from any goroutine
 // without synchronization — the snap is published via atomic.Pointer after each

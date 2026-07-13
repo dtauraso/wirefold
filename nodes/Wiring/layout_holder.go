@@ -41,25 +41,6 @@ const (
 	localStepR     = 2.0           // world units
 )
 
-// Exported aliases of the local-polar default step constants, for external
-// tooling (e.g. the one-off local-polar re-stamp migration) that needs the
-// same cells RootMove's requantizeLocalPolars uses but cannot see the
-// unexported constants directly.
-const (
-	LocalStepTheta = localStepTheta
-	LocalStepPhi   = localStepPhi
-	LocalStepR     = localStepR
-)
-
-// Cart2PolarOffset computes the (r,theta,phi) local-polar offset FROM one world
-// point TO another, using the same polar math node_move.go's requantizeLocalPolars
-// uses (cart2polar) — exported so external tooling (no access to the unexported
-// vec3/polar types) can compute it without duplicating the conversion.
-func Cart2PolarOffset(fromX, fromY, fromZ, toX, toY, toZ float64) (r, theta, phi float64) {
-	p := cart2polar(vec3{X: toX - fromX, Y: toY - fromY, Z: toZ - fromZ})
-	return p.R, p.Theta, p.Phi
-}
-
 // LocalPolar is one node's local-polar offset to a neighbor it shares a domain
 // edge with, measured with the OWNING node as center, in the same integer-scalar
 // form as quantizedOffset (quantized_layout.go).
